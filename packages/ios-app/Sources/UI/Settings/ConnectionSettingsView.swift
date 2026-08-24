@@ -58,6 +58,23 @@ struct ConnectionsSettingsView: View {
         return model.profiles.profiles
     }
 
+    private var pushStatus: (icon: String, title: String, detail: String) {
+        switch model.pushNotificationReadiness {
+        case .ready:
+            return ("bell.badge.fill", "Ready", "Agent alerts can reach this iPhone.")
+        case .permissionRequired:
+            return ("bell", "Permission required", "Allow notifications to receive agent alerts.")
+        case .denied:
+            return ("bell.slash.fill", "Disabled", "Enable notifications in iOS Settings to receive alerts.")
+        case .registering:
+            return ("bell.and.waves.left.and.right", "Registering", "Securing this iPhone for agent alerts.")
+        case .pending:
+            return ("clock.arrow.circlepath", "Pending", "Registration will retry without interrupting chat.")
+        case .unavailable:
+            return ("bell.slash", "Unavailable", "Pair a Mac with a push-enabled Tron build.")
+        }
+    }
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
@@ -86,6 +103,19 @@ struct ConnectionsSettingsView: View {
                             .accessibilityHint("Shows connection status, gateway information, and server actions")
                         }
                     }
+                }
+
+                TronSettingsGroup(
+                    "Push Notifications",
+                    detail: "Private agent alerts for this iPhone.",
+                    accent: .tronBlue
+                ) {
+                    TronValueRow(
+                        icon: pushStatus.icon,
+                        title: pushStatus.title,
+                        detail: pushStatus.detail,
+                        accent: .tronBlue
+                    )
                 }
 
                 TronSettingsGroup(

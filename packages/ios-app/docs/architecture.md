@@ -769,11 +769,18 @@ implies aborting an accepted run.
 
 ## Security
 
-Current Tron builds do not register for local or remote notifications and do not
-compute an icon badge from session state. On launch and foreground activation,
-the app writes a zero badge only to clear SpringBoard state left by the retired
-APNs implementation under the unchanged production bundle identifier. This
-one-way cleanup does not request notification permission or restore push delivery.
+Tron registers for remote alert notifications only after a Gateway profile exists.
+The user permission decision is authoritative and denial never blocks pairing or
+chat. The app obtains an opaque APNs token, proves the official Beta or production
+application identity to the fixed Tron Push origin with App Attest, and transfers
+only the returned endpoint-scoped installation grant to the authenticated Gateway.
+App Attest keys, APNs token bytes, and grants use a Keychain namespace separate from
+Gateway bearer credentials. Registration reconciles on connection, foreground,
+profile, permission, and APNs-token changes; Worker failure leaves push pending.
+The app accepts no relay URL or private push credential from settings. Remote alerts
+have no badge, inbox, background content fetch, or notification actions. On launch
+and foreground activation the app still writes a zero badge to remove state left by
+the retired badge implementation.
 
 Pairing accepts only `tron://pair` invitations containing a host, port, and
 8–32-character one-time code; missing values and every duplicate query key fail closed.

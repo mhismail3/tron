@@ -698,6 +698,31 @@ controls remain tappable, and light/dark modes retain the same gradual
 transition. Immersive camera and image-preview sheets intentionally have no
 added backdrop.
 
+## Push notification release configuration
+
+The checked-in build contains no push credential and no user-configurable relay.
+Official Beta and production builds set the public `TRON_PUSH_SERVICE_ORIGIN` in
+maintainer-owned `Configuration/Local.xcconfig`; `Info.plist` embeds that exact
+HTTPS origin. The source default is empty, so development builds fail closed and
+show push as unavailable. The Worker admits the application environment through
+App Attest and maps Beta to APNs sandbox and production to APNs production; iOS
+cannot select an arbitrary topic or environment.
+
+`TronMobileBeta.entitlements` carries development APNs and App Attest environments;
+`TronMobileProd.entitlements` carries production values. Before shipping either
+identity, validate its provisioning profile contains both capabilities, pair a
+physical device, rotate its APNs token through reinstall/update, and verify revoke
+and offline retry behavior. Simulator tests use injected notification, App Attest,
+HTTP, and credential seams and are not proof of APNs delivery.
+
+Focused contract validation:
+
+```bash
+xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/PushNotificationCoordinatorTests
+```
+
 ## Manual iOS release validation and delivery
 
 The repository does not archive or upload production iOS artifacts. A maintainer

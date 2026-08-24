@@ -2,9 +2,11 @@ import SwiftUI
 
 @main
 struct TronMobileApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()
     @State private var appearance = AppearanceSettings.shared
     @State private var backgroundCheckpoints = AppBackgroundCheckpointCoordinator()
+    @State private var pushNotifications = PushNotificationCoordinator()
     @Environment(\.scenePhase) private var scenePhase
     private let pendingShares = UserDefaultsPendingShareStore()
 
@@ -15,8 +17,19 @@ struct TronMobileApp: App {
                 .tronPresentation()
                 .preferredColorScheme(appearance.mode.colorScheme)
                 .task {
+                    configurePushNotifications()
                     await RetiredNotificationBadge.clear()
                     await model.start()
+                    await reconcilePushNotifications()
+                }
+                .onChange(of: model.connectionState) { _, _ in
+                    Task { await reconcilePushNotifications() }
+                }
+                .onChange(of: model.profileRevision) { _, _ in
+                    Task { await reconcilePushNotifications() }
+                }
+                .onChange(of: pushNotifications.readiness) { _, readiness in
+                    model.pushNotificationReadiness = readiness
                 }
                 .onOpenURL { url in
                     if let invitation = PairingInvitationParser.parse(url) {
@@ -42,7 +55,10 @@ struct TronMobileApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
-                        Task { await RetiredNotificationBadge.clear() }
+                        Task {
+                            await RetiredNotificationBadge.clear()
+                            await reconcilePushNotifications()
+                        }
                         model.becameActive()
                     } else if phase == .inactive {
                         model.becameInactive()
@@ -51,6 +67,29 @@ struct TronMobileApp: App {
                     }
                 }
         }
+    }
+
+    @MainActor
+    private func configurePushNotifications() {
+        appDelegate.onDeviceToken = { token in
+            pushNotifications.receiveDeviceToken(token)
+        }
+        appDelegate.onRegistrationFailure = {
+            pushNotifications.receiveRegistrationFailure()
+        }
+        // The initial alert contract contains no navigation data. A future
+        // deep-link route must pass PushNotificationTap admission first.
+        appDelegate.onNotificationTap = { _ in }
+    }
+
+    @MainActor
+    private func reconcilePushNotifications() async {
+        await pushNotifications.reconcile(
+            profile: model.profiles.selected,
+            connected: model.connectionState == .connected,
+            client: model.client
+        )
+        model.pushNotificationReadiness = pushNotifications.readiness
     }
 
 }

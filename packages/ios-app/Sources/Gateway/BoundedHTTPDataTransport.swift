@@ -14,6 +14,16 @@ struct BoundedHTTPDataTransport: Sendable {
     static let urlSession = BoundedHTTPDataTransport { request, maximumBytes in
         try await BoundedURLSessionDataLoader.load(request, maximumBytes: maximumBytes)
     }
+
+    /// Product-service requests carry endpoint-scoped capability material and
+    /// must never follow a redirect to another origin.
+    static let pushService = BoundedHTTPDataTransport { request, maximumBytes in
+        try await BoundedURLSessionDataLoader.load(
+            request,
+            maximumBytes: maximumBytes,
+            allowsRedirects: false
+        )
+    }
 }
 
 struct BoundedHTTPUploadTransport: Sendable {
@@ -74,21 +84,29 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
     private var cancellationRequested = false
     private var terminalResult: Result<(Data, HTTPURLResponse), Error>?
     private let configuration: URLSessionConfiguration
+    private let allowsRedirects: Bool
 
-    private init(maximumBytes: Int, configuration: URLSessionConfiguration) {
+    private init(
+        maximumBytes: Int,
+        configuration: URLSessionConfiguration,
+        allowsRedirects: Bool
+    ) {
         accumulator = BoundedHTTPBodyAccumulator(maximumBytes: maximumBytes)
         self.configuration = configuration
+        self.allowsRedirects = allowsRedirects
     }
 
     static func load(
         _ request: URLRequest,
         uploadFileURL: URL? = nil,
         maximumBytes: Int,
-        configuration: URLSessionConfiguration = .ephemeral
+        configuration: URLSessionConfiguration = .ephemeral,
+        allowsRedirects: Bool = true
     ) async throws -> (Data, HTTPURLResponse) {
         let loader = BoundedURLSessionDataLoader(
             maximumBytes: maximumBytes,
-            configuration: configuration
+            configuration: configuration,
+            allowsRedirects: allowsRedirects
         )
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -142,6 +160,16 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
             return
         }
         task.cancel()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection newRequest: URLRequest,
+        newResponse: HTTPURLResponse,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(allowsRedirects ? newRequest : nil)
     }
 
     func urlSession(
