@@ -72,14 +72,13 @@ struct ChatViewportModeTests {
         #expect(mode == .pinned)
     }
 
-    @Test("mode is the complete native binding state; no release state exists")
+    @Test("mode remains the complete native binding state; no release state exists")
     func nativeBindingStateFollowsModeWithoutReleaseCommand() {
         var mode = ChatViewportMode.pinned
-        #expect(mode.sizeChangeAnchorIsBottom)
         mode.reduce(.userTookOver)
-        #expect(!mode.sizeChangeAnchorIsBottom)
+        #expect(mode == .anchored)
         mode.reduce(.catchUpRequested)
-        #expect(mode.sizeChangeAnchorIsBottom)
+        #expect(mode == .pinned)
     }
 
     @Test("direct takeover wins over submission and prepend intents")

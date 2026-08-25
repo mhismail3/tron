@@ -993,14 +993,15 @@ struct ChatScrollCoordinatorTests {
         #expect(recorder.values == [.discarded])
     }
 
-    @Test("pinned streamed growth is smooth through native size-change anchoring")
+    @Test("pinned streamed growth stays on the persistent position without a command")
     func streamedGrowthIsSmooth() {
         let coordinator = ChatScrollCoordinator()
         coordinator.geometryChanged(
             previous: bottom,
             current: ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_160, containerHeight: 400)
         )
-        #expect(coordinator.viewportMode.sizeChangeAnchorIsBottom)
+        #expect(coordinator.viewportMode == .pinned)
+        #expect(coordinator.canInstallPersistentBottomPosition)
         #expect(coordinator.command == nil)
         #expect(ChatScrollCoordinator.liveGrowthAnimationDuration == 0.16)
     }

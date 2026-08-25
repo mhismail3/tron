@@ -88,10 +88,9 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             isReady && scrollCoordinator.viewportMode == .pinned ? .bottom : .top,
             for: .alignment
         )
-        .defaultScrollAnchor(
-            scrollCoordinator.viewportMode.sizeChangeAnchorIsBottom ? .bottom : .top,
-            for: .sizeChanges
-        )
+        // The persistent ScrollPosition is the sole owner of pinned content and
+        // viewport size changes. A sizeChanges anchor would apply the same inset
+        // delta a second time; an unpositioned user binding remains native-owned.
         .scrollPosition($scrollPosition)
         .tronScrollEdgeChrome()
         .onChange(of: scrollPosition.isPositionedByUser) { _, positionedByUser in

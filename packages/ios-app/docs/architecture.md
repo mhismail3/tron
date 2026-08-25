@@ -507,8 +507,9 @@ pre-Gateway principles of a non-render-path measurement/projection owner and coa
 stream updates without reviving the retired Engine, local event reconstruction, or scroll
 proxy architecture. Explicit scroll commands keep their exact target until their opening, catch-up,
 semantic-restore, prepend, or pinned-growth settlement evidence arrives, then release only that token on the next presented frame; submission retires a still-applied app target
-before changing layout. Native bottom size-change anchoring owns continuous streaming, keyboard, and
-composer growth. A newly inserted prompt/activity row receives one exact nonanimated tail lease so a
+before changing layout. The persistent bottom `ScrollPosition` solely owns continuous streaming,
+keyboard, and composer growth; no size-change anchor competes for the same viewport delta. A newly
+inserted prompt/activity row receives one exact nonanimated tail lease so a
 physically pinned reader remains at the latest content even when lazy-row and safe-area updates arrive; a retained presentation reconciles its first native geometry sample so a view physically at the tail regains pinned authority while a genuinely displaced reader remains anchored
 in an order native anchoring cannot retain; anchored readers receive no automatic follow. Compact
 measured prompts may use one clipped composer-to-row morph; long prompts fail over to the row-local
@@ -574,9 +575,9 @@ separate opaque groups, and the UI never inspects package names or extension-own
 interactions, lease/focus, capabilities/diagnostics, and ephemeral semantic values.
 Native safe-area layout pushes the transcript exactly once and reverses naturally when
 the keyboard or composer contracts. `ChatViewportMode` has only two states: `.pinned` holds
-the persistent `ScrollPosition` at the bottom edge and uses a bottom size-change anchor, while
-`.anchored` uses a top size-change anchor without issuing app offset writes. Transcript growth,
-keyboard frames, and composer measurements are not mode inputs. Consequently pinned content
+the persistent `ScrollPosition` at the bottom edge as the sole physical size/inset owner, while
+`.anchored` clears the app target so direct native ownership preserves the reader's position.
+Transcript growth, keyboard frames, and composer measurements are not mode inputs. Consequently pinned content
 and inset growth require zero app offset writes, and detached growth cannot pull the reader.
 Short and empty transcripts retain top alignment.
 

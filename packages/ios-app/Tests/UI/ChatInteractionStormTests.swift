@@ -48,7 +48,6 @@ struct ChatInteractionStormTests {
         mode.reduce(.prependBegan)
         mode.reduce(.prependEnded)
         #expect(mode == .anchored)
-        #expect(!mode.sizeChangeAnchorIsBottom)
     }
 
     @Test("background suspension cancels disposable work but preserves the admitted send boundary")

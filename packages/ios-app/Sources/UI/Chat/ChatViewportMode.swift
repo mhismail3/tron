@@ -25,6 +25,4 @@ enum ChatViewportMode: Equatable, Sendable {
             if !retainingViewport { self = .pinned }
         }
     }
-
-    var sizeChangeAnchorIsBottom: Bool { self == .pinned }
 }

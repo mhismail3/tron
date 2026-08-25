@@ -26,6 +26,32 @@ struct ChatViewScrollHarnessTests {
         ))
     }
 
+    @Test("pinned keyboard-sized viewport changes preserve the physical tail")
+    func pinnedKeyboardViewportChangesPreserveTail() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 1_208) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.observation.visibleRowIDs.contains(harness.lastTranscriptID)
+                        && (try? harness.nativeTranscriptDistanceFromTail()) ?? .infinity <= 2
+                }
+                let initialHeight = ready.observation.geometry.containerHeight
+
+                harness.resize(height: 620)
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.geometry.containerHeight < initialHeight - 100
+                }
+                #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
+
+                harness.resize(height: 844)
+                _ = try await harness.recorder.waitUntil {
+                    abs($0.observation.geometry.containerHeight - initialHeight) <= 2
+                }
+                #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
+            }
+        }
+    }
+
     @Test("multiline composer growth does not reevaluate installed history")
     func multilineComposerGrowthKeepsHistoryStable() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {

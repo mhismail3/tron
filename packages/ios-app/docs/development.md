@@ -471,8 +471,8 @@ retain intrinsic cards capped at the user-prompt bound, full-shape whole-card in
 leading-toolbar removal, an explicit legacy lock, and Tron surfaces instead of stock forms.
 Native bottom evidence compares `ScrollGeometry.visibleRect.maxY` with the physical
 content edge (`contentSize.height + contentInsets.bottom`); the harness no longer substitutes
-a hard-coded settled distance. Pinned structural shrink is handled by the persistent native bottom
-edge, while anchored readers remain inert. Explicit command targets remain installed
+a hard-coded settled distance. Pinned structural shrink is handled solely by the persistent native
+bottom position without a competing size-change anchor, while anchored readers remain inert. Explicit command targets remain installed
 until exact opening/catch-up/semantic settlement and are released on the next frame only by the applied token; no deferred
 unqualified ScrollPosition reset may run across a send or keyboard transaction. A send
 retires a still-applied app target before its first layout mutation. Ready/pinned underflow
