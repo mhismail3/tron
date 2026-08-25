@@ -1,29 +1,54 @@
 import SwiftUI
 
-/// The composer is one permanently mounted inset owner. Every measured height
-/// installs atomically so the structural safe-area inset never interpolates
-/// through stale viewport sizes. Child-local visual transitions remain scoped
-/// inside the already-installed composer space.
+/// The composer is one permanently mounted inset owner. Editor-only height
+/// changes remain atomic for UIKit caret ownership. Accessory insertion and
+/// removal receives one value-scoped smooth transition through that same owner.
+struct ChatComposerAccessoryLayoutIdentity: Equatable {
+    let attachmentIDs: [String]
+    let selectedSkillID: String?
+    let resourcePickerKind: ComposerResourceEntry.Kind?
+    let resourceResultIDs: [String]
+}
+
 enum ChatComposerStructuralTransitionPolicy {
     static let heightEpsilon: CGFloat = 0.5
+    static let accessoryDuration: TimeInterval = 0.24
 
     static func admitsHeightChange(current: CGFloat?, measured: CGFloat) -> Bool {
         measured.isFinite
             && measured > 0
             && current.map { abs($0 - measured) > heightEpsilon } != false
     }
+
+    static func animatesAccessoryHeight(
+        current: CGFloat?,
+        installedIdentity: ChatComposerAccessoryLayoutIdentity?,
+        identity: ChatComposerAccessoryLayoutIdentity,
+        reduceMotion: Bool
+    ) -> Bool {
+        current != nil
+            && installedIdentity != identity
+            && !reduceMotion
+    }
 }
 
 struct ChatComposerStructuralHost<Content: View>: View {
+    let accessoryIdentity: ChatComposerAccessoryLayoutIdentity
+    let reduceMotion: Bool
     let onHeightChange: ((CGFloat) -> Void)?
     @ViewBuilder let content: () -> Content
 
     @State private var presentedHeight: CGFloat?
+    @State private var installedAccessoryIdentity: ChatComposerAccessoryLayoutIdentity?
 
     init(
+        accessoryIdentity: ChatComposerAccessoryLayoutIdentity,
+        reduceMotion: Bool,
         onHeightChange: ((CGFloat) -> Void)? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
+        self.accessoryIdentity = accessoryIdentity
+        self.reduceMotion = reduceMotion
         self.onHeightChange = onHeightChange
         self.content = content
     }
@@ -38,9 +63,24 @@ struct ChatComposerStructuralHost<Content: View>: View {
                     current: presentedHeight,
                     measured: height
                 ) else { return }
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { presentedHeight = height }
+                let animatesAccessory = ChatComposerStructuralTransitionPolicy.animatesAccessoryHeight(
+                    current: presentedHeight,
+                    installedIdentity: installedAccessoryIdentity,
+                    identity: accessoryIdentity,
+                    reduceMotion: reduceMotion
+                )
+                installedAccessoryIdentity = accessoryIdentity
+                if animatesAccessory {
+                    withAnimation(.smooth(
+                        duration: ChatComposerStructuralTransitionPolicy.accessoryDuration
+                    )) {
+                        presentedHeight = height
+                    }
+                } else {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) { presentedHeight = height }
+                }
             }
             .frame(height: presentedHeight, alignment: .bottom)
             .onGeometryChange(for: CGFloat.self) { geometry in

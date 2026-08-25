@@ -44,8 +44,8 @@ struct ChatPrependPage: Equatable, Sendable {
 }
 
 /// Owns explicit viewport intent plus opening, catch-up, semantic restore, and
-/// prepend commands. Ordinary pinned growth is physically owned by one
-/// persistent bottom ScrollPosition and never creates a command stream.
+/// prepend commands. Ordinary pinned growth is physically owned by the native
+/// size-change anchor and never creates a command stream.
 @Observable
 @MainActor
 final class ChatScrollCoordinator {
@@ -208,6 +208,11 @@ final class ChatScrollCoordinator {
 
     var shouldShowCatchUpButton: Bool { viewportMode == .anchored }
     var latestGeometry: ChatTranscriptGeometry { geometry }
+    var usesBottomSizeChangeAnchor: Bool {
+        viewportMode == .pinned
+            && geometry.isValid
+            && geometry.contentHeight + geometry.bottomInset > geometry.containerHeight + 2
+    }
     var shouldTrackUnreadResponse: Bool { viewportMode == .anchored || catchUpPhase != .none }
     var isWaitingForPrependSemanticFrame: Bool {
         prepend?.readyForMeasurement == true && prepend?.correctionCommandToken == nil
@@ -515,8 +520,8 @@ final class ChatScrollCoordinator {
     }
 
     func installedLifecycleChanged(_ installed: InstalledChatTranscript) {
-        // The persistent bottom position owns growth. Pinned lifecycle growth
-        // is absorbed by that held edge; anchored readers receive no command.
+        // Native size-change anchoring owns pinned growth; anchored readers
+        // receive no command.
     }
 
     func installedTranscriptChanged(_ installed: InstalledChatTranscript?) {
@@ -538,7 +543,7 @@ final class ChatScrollCoordinator {
     }
 
     func discreteContentInserted(renderedID: String) {
-        // The installed persistent bottom position absorbs discrete row growth.
+        // The native size-change anchor absorbs discrete pinned row growth.
         // This callback intentionally owns no physical write.
     }
 

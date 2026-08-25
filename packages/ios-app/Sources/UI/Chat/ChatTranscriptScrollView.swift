@@ -83,10 +83,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             .accessibilityHidden(!isReady)
             .allowsHitTesting(isReady)
         }
-        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.top, for: .initialOffset)
         .defaultScrollAnchor(.top, for: .alignment)
         .defaultScrollAnchor(
-            isReady && scrollCoordinator.viewportMode == .pinned ? .bottom : .top,
+            isReady && scrollCoordinator.usesBottomSizeChangeAnchor ? .bottom : .top,
             for: .sizeChanges
         )
         // Native size-change anchoring owns ordinary pinned layout changes.

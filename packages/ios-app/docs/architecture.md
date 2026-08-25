@@ -229,12 +229,13 @@ after transcript and queue rows. Rows remain fully realizable beneath that opaqu
 an opacity-zero lazy stack is never used as a layout gate. Only then does the cover fade
 while the positioned transcript rises eight points (opacity only under Reduce Motion).
 The first-ready performance interval closes after the next display-link frame proves
-that ready state was presented. Opening uses an exact-ID `ScrollPosition` command when
-the marker is not yet realized, rejects native overflow overshoot as a bottom boundary,
-and retains the position binding through animation completion plus two unchanged
-presented frames before releasing it to a persistent `transcript-bottom` ID target at
-anchor `.bottom`. Detached readers remain unpositioned. Short-content alignment is
-always top-owned, so keyboard contraction cannot bodily translate the transcript.
+that ready state was presented. Opening uses one leased bottom-edge `ScrollPosition`
+command when the marker is not yet realized, rejects native overflow overshoot as a
+bottom boundary, and retains that command through animation completion plus two
+unchanged presented frames before releasing the binding. Ordinary pinned resizing then
+belongs to the native size-change anchor; detached readers remain unpositioned.
+Short-content alignment is always top-owned, so keyboard contraction cannot bodily
+translate the transcript.
 Test builds can admit one synthetic authoritative
 snapshot through the same read gate and skip only the network opening handshake.
 The hosted harness still mounts the production chat, lazy transcript, composer
@@ -401,7 +402,7 @@ the transport-only `skill:` prefix, while leading `/` completion excludes skills
 text. The one staged skill is captured separately from user-visible text, replaced atomically by a newer selection,
 restored only after a definitive send rejection, and cleared if the authoritative catalog no longer contains the exact
 entry. Skill and leading slash-command choices are mutually exclusive, and a staged skill still requires prompt text or an attachment so every lifecycle has visible content. The Gateway receives its raw name as bounded prompt metadata and owns Pi invocation expansion, keeping optimistic,
-queued, edited-queue, and canonical text identical. The inline glass picker remains inside the sole composer safe-area owner, below attachments and the skill chip but immediately above the input row. One permanently mounted, bottom-aligned measured host installs every composer height—including resource-picker insertion and removal—in one animation-disabled transaction, so the structural safe-area inset never interpolates through stale viewport sizes. Command and skill panels may retain child-local visual transitions, but those transitions issue no scroll command and add no root geometry feedback. While the keyboard and picker are both visible, the picker keeps its existing internal scroll owner but caps itself to three rows and the native editor to four visible lines, preventing the panel from displacing the input below the keyboard without changing transcript geometry ownership. Multiline measurement remains direct, UIKit owns keyboard motion plus the one responder, and UTF-16 selection and caret geometry stay native. The active lease is the immutable session/presentation generation plus lifecycle generation.
+queued, edited-queue, and canonical text identical. The inline glass picker remains inside the sole composer safe-area owner, below attachments and the skill chip but immediately above the input row. One permanently mounted, bottom-aligned measured host keeps editor-only height changes animation-disabled for UIKit caret ownership. Attachment chips, selected skills, and command/skill result panels use one value-scoped 240 ms smooth host-height transition, so the transcript and sole safe-area inset move continuously without adding a scroll command or root geometry feedback. While the keyboard and picker are both visible, the picker keeps its existing internal scroll owner but caps itself to three rows and the native editor to four visible lines, preventing the panel from displacing the input below the keyboard without changing transcript geometry ownership. Multiline measurement remains direct, UIKit owns keyboard motion plus the one responder, and UTF-16 selection and caret geometry stay native. The active lease is the immutable session/presentation generation plus lifecycle generation.
 Unsent attachment bytes and metadata belong to draft scope, while prepared previews, concurrent upload admissions, editor requests, submission snapshots, and handoffs remain exact-presentation scoped. Revocation cancels upload work and discards disposable Gateway upload IDs without erasing the scoped strip. A newly admitted mount restores chips only for that exact profile/session target, rebuilds bounded thumbnails through the existing off-main preparation seam, and reacquires every Gateway upload ID before enabling submission. Restore never auto-sends; transient re-upload failure retains the payload and chip for a later mount/retry. In-flight bytes remain recoverable through a definitive rejection, while transport acceptance or authoritative queue/canonical settlement removes the captured submission from the durable draft without disturbing newer edits. Completed plus active uploads are admitted against one 10-item/25 MiB draft budget before network work; each image chip uses
 an orientation-correct 192-pixel PNG preview with 1 MiB decoded/encoded ceilings, so normal composer rendering
 never decodes the full attachment. The original bounded payload remains scope-owned for persistence and the existing
@@ -510,13 +511,15 @@ pre-Gateway principles of a non-render-path measurement/projection owner and coa
 stream updates without reviving the retired Engine, local event reconstruction, or scroll
 proxy architecture. Explicit scroll commands keep their exact target until their opening, catch-up,
 semantic-restore, or prepend settlement evidence arrives, then release only that token on the next presented frame; submission retires a still-applied app target
-before changing layout. The persistent exact `transcript-bottom` `ScrollPosition` target at anchor `.bottom` solely owns continuous streaming,
-keyboard, composer, and discrete row growth; no size-change anchor or insertion callback competes
-for the same viewport delta. `discreteContentInserted` therefore emits no physical write. A retained presentation reconciles its first native geometry sample so a view physically at the tail regains pinned authority while a genuinely displaced reader remains anchored
+before changing layout. One mode-qualified native size-change anchor solely owns
+continuous streaming, keyboard, composer, and discrete pinned growth; no persistent
+`ScrollPosition` target or insertion callback competes for the same viewport delta.
+`discreteContentInserted` therefore emits no physical write. A retained presentation reconciles its first native geometry sample so a view physically at the tail regains pinned authority while a genuinely displaced reader remains anchored
 in an order native anchoring cannot retain; anchored readers receive no automatic follow. Compact
 measured prompts may use one clipped composer-to-row morph; long prompts fail over to the row-local
-fade/slide entrance, and attachment/skill/resource surfaces animate only inside the composer's
-atomically installed height. A mounted
+fade/slide entrance. Attachment, skill, and resource accessories animate through one
+value-scoped composer-height transition, while editor-only height changes remain atomic
+for UIKit caret ownership. A mounted
 reconnect is live only after its exact authoritative subscription is restored; retained snapshots stay
 readable during retry but never authorize prompt, upload, abort, or queue mutations. Foreground entrance
 suppression advances only after the mounted aggregate succeeds, so a failed reconciliation cannot consume
@@ -576,9 +579,10 @@ editor, tool, message, and entry surfaces remain deferred. Unknown or ambiguous 
 separate opaque groups, and the UI never inspects package names or extension-owned keys. Offline cache strips all surfaces,
 interactions, lease/focus, capabilities/diagnostics, and ephemeral semantic values.
 Native safe-area layout pushes the transcript exactly once and reverses naturally when
-the keyboard or composer contracts. `ChatViewportMode` has only two states: `.pinned` holds
-the persistent exact `transcript-bottom` target at anchor `.bottom` as the sole physical size/inset owner,
-while `.anchored` clears the app target so direct native ownership preserves the reader's position.
+the keyboard or composer contracts. `ChatViewportMode` has only two states: `.pinned`
+selects the native bottom size-change anchor as the sole physical size/inset owner, while
+`.anchored` selects top retention and keeps the `ScrollPosition` target-free so direct
+native ownership preserves the reader's position.
 Transcript growth, keyboard frames, and composer measurements are not mode inputs. Consequently pinned content
 and inset growth require zero app offset writes, and detached growth cannot pull the reader.
 Short and empty transcripts retain top alignment.
@@ -591,9 +595,10 @@ unread state, and four bounded command purposes only: exact opening-tail realiza
 semantic-anchor correction, and prepend correction. Automatic growth follow, tail-correction arbitration, and callback-order compatibility flags no longer exist.
 
 Opening still keeps the opaque surface until the exact physical marker after transcript and
-queue rows is positioned. It permits bounded exact-ID realization and a 750-millisecond
-best-effort deadline, then keeps settlement through the reveal's stable frames before restoring
-the exact semantic bottom target. Direct interaction abandons opening immediately. Catch-up retains its
+queue rows is positioned. It permits one bounded bottom-edge realization command and a
+750-millisecond best-effort deadline, then keeps that lease through the reveal's stable
+frames before releasing to native size-change anchoring. Direct interaction abandons
+opening immediately. Catch-up retains its
 staged long-distance approach and unread ownership until physical settlement; interruption
 restores anchored/unread state. An installed projection captured while anchored advances an
 exact layout epoch and restores a surviving semantic anchor within one point, with at most two
@@ -1055,12 +1060,12 @@ in their geometry observation, allowing an installed replacement to re-emit exac
 invalidating every realized row. Visible/pinned discrete rows fade with a small non-layout transform
 exactly once, realized offscreen rows become visible without replay, and direct interaction discards
 unresolved candidates. `ChatScrollCoordinator` records admitted discrete insertion semantics but emits no physical
-viewport write; the persistent exact `transcript-bottom` target absorbs the installed row's growth. Its bounded
+viewport write; native pinned size-change anchoring absorbs the installed row's growth. Its bounded
 rendered-ID entitlement is intersected only on actual installed transitions, so a surviving tool/group
 row retains the same one-shot entrance through completion while replacement removes it.
 Continuity-preserved assistant/tool rows do not manufacture a new entrance. A newly admitted visible
 agent row owns only its local reveal. Continuous Markdown growth remains display-frame-coalesced while
-the persistent exact `transcript-bottom` target holds pinned readers at the tail. Detached readers receive no writes and
+the native bottom size-change anchor holds pinned readers at the tail. Detached readers receive no writes and
 Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
 the same capsule primitives while retaining left alignment, immutable routes, and detail sheets.
 
@@ -1237,7 +1242,7 @@ regrouping cannot lose that visible semantic anchor. Exact detached-reader ordin
 page installs advance a layout/projection epoch, and the row geometry transform includes that epoch
 so an exact post-install sample is emitted even when its numeric frame is unchanged. Ordinary
 installs reuse the same bounded semantic correction contract for detached readers; pinned readers remain
-held solely by the persistent exact `transcript-bottom` target through continuous and discrete growth, with no app write.
+held solely by native bottom size-change anchoring through continuous and discrete growth, with no app write.
 Detached semantic settlement waits passively for that exact sample; after each disabled-animation correction the
 owner requires both a strictly newer sample of the same semantic frame and a newer scroll-geometry
 revision, accepts either callback order, permits at most one late correction, and succeeds only within

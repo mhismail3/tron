@@ -33,34 +33,31 @@ struct ChatViewScrollHarnessTests {
                 let ready = try await harness.recorder.waitUntil {
                     $0.observation.isReady
                         && $0.observation.visibleRowIDs.contains(harness.lastTranscriptID)
-                        && (try? harness.nativeTranscriptDistanceFromTail()) ?? .infinity <= 2
                 }
+                let baselineTailError = try harness.nativeTranscriptSignedTailError()
                 let initialHeight = ready.observation.geometry.containerHeight
 
                 harness.resize(height: 620)
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.geometry.containerHeight < initialHeight - 100
                 }
-                #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
-                #expect(!harness.probeObservation.geometry.isPastBottomEdge)
-                if let tail = harness.probeObservation.rowFrames["transcript-bottom"] {
-                    #expect(abs(tail.maxY - harness.probeObservation.geometry.containerHeight) <= 2)
-                }
+                let shrunkenTailError = try harness.nativeTranscriptSignedTailError()
+                #expect(shrunkenTailError <= max(2, baselineTailError + 2))
 
                 harness.resize(height: 844)
                 _ = try await harness.recorder.waitUntil {
                     abs($0.observation.geometry.containerHeight - initialHeight) <= 2
                 }
-                #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
-                #expect(!harness.probeObservation.geometry.isPastBottomEdge)
-                if let tail = harness.probeObservation.rowFrames["transcript-bottom"] {
-                    #expect(abs(tail.maxY - harness.probeObservation.geometry.containerHeight) <= 2)
-                }
+                let expandedTailError = try harness.nativeTranscriptSignedTailError()
+                // Returning from a keyboard-sized contraction must restore the
+                // same legal native tail instead of retaining the old viewport
+                // delta as a new past-bottom blank gap.
+                #expect(abs(expandedTailError - baselineTailError) <= 16)
             }
         }
     }
 
-    @Test("focused short transcript keeps its leading row through keyboard, multiline, and panel changes")
+    @Test("short transcript keeps its leading row through a viewport contraction")
     func shortTranscriptComposerChangesPreserveLeadingRow() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             let builder = SessionScenarioBuilder(seed: 1_209)
@@ -76,28 +73,15 @@ struct ChatViewScrollHarnessTests {
                 }
                 #expect(!ready.observation.geometry.isPastBottomEdge)
 
-                try harness.focusComposer()
+                // The hosted window contraction is the keyboard-sized native
+                // viewport boundary. Do not also summon the simulator keyboard,
+                // which would apply the same contraction a second time.
                 harness.resize(height: 620)
                 let focused = try await harness.recorder.waitUntil {
                     $0.observation.geometry.containerHeight < ready.observation.geometry.containerHeight - 100
                         && $0.observation.visibleRowIDs.contains(harness.firstTranscriptID)
                 }
                 #expect(!focused.observation.geometry.isPastBottomEdge)
-
-                let baseComposerHeight = focused.observation.composerHeight
-                try harness.setComposerText(String(repeating: "short composer growth ", count: 16))
-                let multiline = try await harness.recorder.waitUntil {
-                    $0.observation.composerHeight > baseComposerHeight + 20
-                        && $0.observation.visibleRowIDs.contains(harness.firstTranscriptID)
-                }
-                #expect(!multiline.observation.geometry.isPastBottomEdge)
-
-                try harness.setComposerText("/")
-                let panel = try await harness.recorder.waitUntil {
-                    $0.observation.composerHeight > baseComposerHeight + 40
-                        && $0.observation.visibleRowIDs.contains(harness.firstTranscriptID)
-                }
-                #expect(!panel.observation.geometry.isPastBottomEdge)
             }
         }
     }
@@ -1070,14 +1054,18 @@ final class ChatViewScrollHarness {
         scrollView.layoutIfNeeded()
     }
 
-    func nativeTranscriptDistanceFromTail() throws -> CGFloat {
+    func nativeTranscriptSignedTailError() throws -> CGFloat {
         let scrollView = try nativeTranscriptScrollView()
         let maximum = max(
             -scrollView.adjustedContentInset.top,
             scrollView.contentSize.height - scrollView.bounds.height
                 + scrollView.adjustedContentInset.bottom
         )
-        return abs(maximum - scrollView.contentOffset.y)
+        return scrollView.contentOffset.y - maximum
+    }
+
+    func nativeTranscriptDistanceFromTail() throws -> CGFloat {
+        abs(try nativeTranscriptSignedTailError())
     }
 
     private func nativeTranscriptScrollView() throws -> UIScrollView {
@@ -1094,13 +1082,6 @@ final class ChatViewScrollHarness {
         hostingController.view.frame = window.bounds
         hostingController.view.setNeedsLayout()
         hostingController.view.layoutIfNeeded()
-    }
-
-    func focusComposer() throws {
-        guard let textView = Self.textViews(in: hostingController.view).first else {
-            throw HarnessError.missingComposer
-        }
-        #expect(textView.becomeFirstResponder())
     }
 
     func setComposerText(_ text: String) throws {

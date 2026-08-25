@@ -91,7 +91,7 @@ struct ChatContentTransitionTests {
         #expect(centered.offsetX == 0)
     }
 
-    @Test("composer structure is atomic while child motion remains local")
+    @Test("composer accessories animate through one structural owner")
     func composerChildMotion() {
         #expect(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: false)
             != ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: true))
@@ -109,6 +109,43 @@ struct ChatContentTransitionTests {
         #expect(!ChatComposerStructuralTransitionPolicy.admitsHeightChange(
             current: 44,
             measured: .infinity
+        ))
+
+        let empty = ChatComposerAccessoryLayoutIdentity(
+            attachmentIDs: [],
+            selectedSkillID: nil,
+            resourcePickerKind: nil,
+            resourceResultIDs: []
+        )
+        let attachment = ChatComposerAccessoryLayoutIdentity(
+            attachmentIDs: ["photo"],
+            selectedSkillID: nil,
+            resourcePickerKind: nil,
+            resourceResultIDs: []
+        )
+        #expect(ChatComposerStructuralTransitionPolicy.animatesAccessoryHeight(
+            current: 44,
+            installedIdentity: empty,
+            identity: attachment,
+            reduceMotion: false
+        ))
+        #expect(!ChatComposerStructuralTransitionPolicy.animatesAccessoryHeight(
+            current: 44,
+            installedIdentity: attachment,
+            identity: attachment,
+            reduceMotion: false
+        ))
+        #expect(!ChatComposerStructuralTransitionPolicy.animatesAccessoryHeight(
+            current: nil,
+            installedIdentity: empty,
+            identity: attachment,
+            reduceMotion: false
+        ))
+        #expect(!ChatComposerStructuralTransitionPolicy.animatesAccessoryHeight(
+            current: 44,
+            installedIdentity: empty,
+            identity: attachment,
+            reduceMotion: true
         ))
     }
 

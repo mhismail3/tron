@@ -64,7 +64,23 @@ struct ChatScrollCoordinatorTests {
 
     // MARK: Group B replacements — deleted command-arbitration mechanisms
 
-    @Test("persistent pinned position absorbs discrete and streaming growth without commands")
+    @Test("size-change anchoring is bottom-only for overflowing pinned content")
+    func sizeChangeAnchorRole() {
+        let coordinator = ChatScrollCoordinator()
+        let underflow = ChatTranscriptGeometry(
+            offsetY: 0, contentHeight: 240, containerHeight: 400
+        )
+        coordinator.geometryChanged(previous: .zero, current: underflow)
+        #expect(!coordinator.usesBottomSizeChangeAnchor)
+
+        coordinator.geometryChanged(previous: underflow, current: bottom)
+        #expect(coordinator.usesBottomSizeChangeAnchor)
+
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        #expect(!coordinator.usesBottomSizeChangeAnchor)
+    }
+
+    @Test("native pinned size anchoring absorbs discrete and streaming growth without commands")
     func pinnedNativeEdgeEliminatesFollowCommandStream() throws {
         let coordinator = ChatScrollCoordinator()
         coordinator.geometryChanged(previous: .zero, current: bottom)

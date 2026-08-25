@@ -151,7 +151,7 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   updates, live-to-canonical settlement, thinking-height measurement, and tool status changes
   inherit no stack-wide animation. The stable transcript transaction admits only explicit entrance/tool-chip markers and continuous native-control transactions; thinking height/tail motion is row-local downstream of that boundary. Authority-only changes whose bounded transcript/stream/tool/queue/runtime layout identity is unchanged take a synchronous metadata path and cannot arm settlement. The sole composer inset exposes one bottom-aligned measured height; a generation captured before structural mutation keeps pinned tail coupling nonanimated, preserves a detached semantic locus with zero tail commands, coalesces retargets, and yields immediately to direct interaction. Reduce Motion removes spatial transitions. Tool status text
   updates inside its stable row. Ordinary pinned growth, shrink, and discrete insertion remain
-  coupled by one persistent exact-ID `ScrollPosition` targeting `transcript-bottom` at anchor `.bottom` and create no automatic command stream. Native
+  coupled by one mode-qualified native bottom size-change anchor and create no automatic command stream. Native
   bottom distance is bounded for display only: a visible rect beyond the physical content edge is
   not tail settlement. A deliberately detached reader retains the same viewport authority;
 - structure/context/resource invalidations reload an already-presented History,
@@ -187,12 +187,12 @@ generation is carried through delayed projection work and consumed once at insta
 so a fast network completion cannot reclassify the same suspended rows as fresh later.
 After the authoritative two-phase handshake completes, the projection remains behind
 the opaque opening surface until the exact physical marker after transcript and queue rows intersects
-a plausible native bottom viewport. An exact-ID command realizes a missing lazy tail; submitted commands,
+a plausible native bottom viewport. One leased bottom-edge command realizes a missing lazy tail; submitted commands,
 clamped negative bottom distance, auxiliary rows, transient boundary geometry, and overflow overshoot are
 not settlement evidence. The native geometry observation identity includes the opening epoch and phase, so
 entering positioning replays current geometry even when SwiftUI would coalesce equal numeric fields. Exact-ID
 realization can proceed without a geometry sample. If physical proof still cannot settle within 750 milliseconds, the
-bounded exact-ID binding remains owned and the authoritative transcript is revealed best-effort instead of failing
+bounded bottom-edge binding remains owned and the authoritative transcript is revealed best-effort instead of failing
 conversation availability. The positioned transcript then fades/rises into view while the tail binding remains
 owned through animation completion and two unchanged display frames; best-effort positioning releases after those frames even when no later geometry arrives. Direct user or accessibility interaction
 cancels that arm. The composer
@@ -200,10 +200,11 @@ remains visible throughout opening, while sending stays disabled until readiness
 positioning and post-reveal settlement are owned by the coordinator's mutually exclusive opening
 phase; ordinary pinned growth, shrink, and discrete insertion create no command ownership. Explicit
 opening, catch-up, semantic restore, and prepend remain command owners; after they release, pinned mode
-installs one persistent `transcript-bottom` ID target at anchor `.bottom` with no recurring command stream.
-Short-content alignment remains top-owned, and every composer/panel structural height installs with
-animations disabled. Presentation reset and retained foreground resume reconstruct that semantic target
-even when the logical enum is unchanged, while direct user ownership and anchored mode remain unpositioned.
+keeps `ScrollPosition` target-free and uses the native bottom size-change anchor with no recurring command stream.
+Short-content alignment remains top-owned. Editor-only composer height changes install atomically;
+attachment, selected-skill, and resource-result identity changes use one value-scoped 240 ms smooth
+host-height transition, disabled under Reduce Motion. Direct user ownership and anchored mode select
+top retention and remain target-free.
 Session subscription ownership is token-scoped end to end. The open response remains
 provisional until sync acknowledgement and exact route-intent revalidation; both sync and subscription
 credentials must be nonempty, printable UTF-8 tokens no larger than 200 bytes. Baseline plus its
