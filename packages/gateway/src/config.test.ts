@@ -50,11 +50,13 @@ describe("gateway configuration", () => {
 
   it("does not admit a runtime or user push-origin override", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-config-push-"));
-    const config = await loadConfig([], {
-      TRON_DATA_DIR: root,
+    const canonical = await loadConfig([], { TRON_DATA_DIR: join(root, "canonical") });
+    const attemptedOverride = await loadConfig([], {
+      TRON_DATA_DIR: join(root, "override"),
       TRON_PUSH_SERVICE_ORIGIN: "https://attacker.example.test",
     });
-    expect(config.pushServiceOrigin).toBeUndefined();
+    expect(canonical.pushServiceOrigin).toBeDefined();
+    expect(attemptedOverride.pushServiceOrigin).toBe(canonical.pushServiceOrigin);
   });
 
   it("persists one bounded identity and reloads it without rekeying", async () => {
