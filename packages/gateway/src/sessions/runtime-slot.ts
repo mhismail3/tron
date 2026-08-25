@@ -4,7 +4,7 @@ import { existsSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { copyFile, mkdtemp, open, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
 import {
   AgentSessionRuntime,
@@ -58,7 +58,7 @@ import {
 } from "./projection.js";
 import type { RunMarkerEvidence, RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, extensionOwnerFor } from "../extensions/owner-attribution.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionLifecycleArtifact, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasStructuredExtensionRunActivity, normalizeExtensionArtifact, projectExtensionRunActivity } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionLifecycleArtifact, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasStructuredExtensionRunActivity, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import type { ExtensionActivityHistoryPage } from "./extension-activity-history.js";
@@ -86,6 +86,12 @@ type CanonicalExtensionRunFact = {
   ambiguous: boolean;
 };
 
+type ExtensionArtifactDirectoryIdentity = { dev: number; ino: number };
+type OpenedExtensionArtifact = {
+  handle: Awaited<ReturnType<typeof open>>;
+  directory: ExtensionArtifactDirectoryIdentity;
+};
+
 type PendingManualCompaction = {
   instructions?: string;
   resolve: () => void;
@@ -108,6 +114,8 @@ const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
 const STREAMING_PROGRESS_FLUSH_MS = 150;
 const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
+const MAX_EXTENSION_EVENT_TAIL_BYTES = 64 * 1_024;
+const MAX_EXTENSION_EVENT_LINES = 256;
 
 function boundedSummaryText(value: string, maximumBytes = 1_024): string {
   const encoded = Buffer.from(value);
@@ -1421,7 +1429,7 @@ export class RuntimeSlot {
   private extensionArtifactPathAllowed(asyncPath: string): boolean {
     if (!isAbsolute(asyncPath)) return false;
     // Do not normalize away traversal before applying the allowlist. The only
-    // accepted inputs are the run directory or its direct status file.
+    // accepted inputs are the run directory or its direct status/events file.
     const lexicalParts = asyncPath.split(/[\\/]/u).filter(Boolean);
     if (lexicalParts.some((part) => part === "." || part === "..")) return false;
     const canonicalRoot = (value: string): string => {
@@ -1436,7 +1444,7 @@ export class RuntimeSlot {
         && temporaryParts.length >= 3
         && temporaryParts.length <= 4
         && temporaryParts[2] !== ""
-        && (temporaryParts.length === 3 || temporaryParts[3] === "status.json");
+        && (temporaryParts.length === 3 || temporaryParts[3] === "status.json" || temporaryParts[3] === "events.jsonl");
       if (temporaryRun) return true;
 
       const projectParts = relative(projectRoot, value)
@@ -1444,7 +1452,7 @@ export class RuntimeSlot {
       return projectParts.length >= 1
         && projectParts.length <= 2
         && projectParts[0] !== ""
-        && (projectParts.length === 1 || projectParts[1] === "status.json");
+        && (projectParts.length === 1 || projectParts[1] === "status.json" || projectParts[1] === "events.jsonl");
     };
     const candidate = resolve(asyncPath);
     // Validate the canonical target. The lexical segment check above rejects
@@ -1471,19 +1479,121 @@ export class RuntimeSlot {
     return { source: "pi-subagents" };
   }
 
+  private async openOwnedExtensionArtifact(
+    asyncDir: string,
+    name: "status.json" | "events.jsonl",
+    expectedDirectory?: ExtensionArtifactDirectoryIdentity,
+  ): Promise<OpenedExtensionArtifact | undefined> {
+    const canonicalAsyncDir = realpathSync(asyncDir);
+    if (canonicalAsyncDir !== asyncDir || !this.extensionArtifactPathAllowed(canonicalAsyncDir)) return undefined;
+    const directory = await stat(canonicalAsyncDir);
+    if (!directory.isDirectory()
+      || expectedDirectory && (directory.dev !== expectedDirectory.dev || directory.ino !== expectedDirectory.ino)) return undefined;
+    const lexicalPath = join(canonicalAsyncDir, name);
+    const canonicalPath = realpathSync(lexicalPath);
+    if (dirname(canonicalPath) !== canonicalAsyncDir || !this.extensionArtifactPathAllowed(canonicalPath)) return undefined;
+    const handle = await open(lexicalPath, "r");
+    try {
+      const [opened, observed, observedDirectory] = await Promise.all([
+        handle.stat(), stat(canonicalPath), stat(canonicalAsyncDir),
+      ]);
+      if (!opened.isFile() || !observed.isFile() || !observedDirectory.isDirectory()
+        || realpathSync(lexicalPath) !== canonicalPath
+        || opened.dev !== observed.dev || opened.ino !== observed.ino
+        || directory.dev !== observedDirectory.dev || directory.ino !== observedDirectory.ino) {
+        await handle.close();
+        return undefined;
+      }
+      return { handle, directory: { dev: directory.dev, ino: directory.ino } };
+    } catch (error) {
+      await handle.close();
+      throw error;
+    }
+  }
+
   private async readExtensionStatusArtifact(asyncDir: string): Promise<Record<string, unknown> | undefined> {
     if (!this.extensionArtifactPathAllowed(asyncDir)) return undefined;
-    const statusPath = realpathSync(join(asyncDir, "status.json"));
-    if (!this.extensionArtifactPathAllowed(statusPath)) return undefined;
-    const handle = await open(statusPath, "r");
+    const opened = await this.openOwnedExtensionArtifact(asyncDir, "status.json");
+    if (!opened) return undefined;
     try {
       const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
-      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-      if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) return undefined;
+      const { bytesRead } = await opened.handle.read(buffer, 0, buffer.length, 0);
+      if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) {
+        return this.readOversizedTerminalExtensionArtifact(
+          asyncDir,
+          buffer.subarray(0, MAX_EXTENSION_ARTIFACT_BYTES),
+          opened.directory,
+        );
+      }
       const parsed: unknown = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
       return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
     } finally {
-      await handle.close();
+      await opened.handle.close();
+    }
+  }
+
+  /** A workflow status can exceed the projection byte cap because producer
+   * step details are retained after completion. For an exact directory, admit
+   * only its small top-level header plus a matching terminal event from the
+   * bounded events tail; never parse or project the oversized step payload. */
+  private async readOversizedTerminalExtensionArtifact(
+    asyncDir: string,
+    headerBytes: Buffer,
+    directoryIdentity: ExtensionArtifactDirectoryIdentity,
+  ): Promise<Record<string, unknown> | undefined> {
+    const headerText = headerBytes.toString("utf8");
+    const steps = /,\s*"steps"\s*:/u.exec(headerText);
+    if (!steps) return undefined;
+    let header: unknown;
+    try {
+      header = JSON.parse(`${headerText.slice(0, steps.index)}\n}`);
+    } catch {
+      return undefined;
+    }
+    if (!header || typeof header !== "object" || Array.isArray(header)) return undefined;
+    const candidate = header as Record<string, unknown>;
+    const runId = typeof candidate.runId === "string" ? candidate.runId : undefined;
+    const headerState = extensionLifecycleState(candidate.state ?? candidate.status);
+    if (!runId || !terminalLifecycleStates.has(headerState)) return undefined;
+
+    const openedEvents = await this.openOwnedExtensionArtifact(asyncDir, "events.jsonl", directoryIdentity);
+    if (!openedEvents) return undefined;
+    try {
+      const metadata = await openedEvents.handle.stat();
+      if (!metadata.isFile()) return undefined;
+      const length = Math.min(metadata.size, MAX_EXTENSION_EVENT_TAIL_BYTES);
+      const offset = Math.max(0, metadata.size - length);
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await openedEvents.handle.read(buffer, 0, length, offset);
+      let text = buffer.subarray(0, bytesRead).toString("utf8");
+      if (offset > 0) {
+        const firstNewline = text.indexOf("\n");
+        if (firstNewline < 0) return undefined;
+        text = text.slice(firstNewline + 1);
+      }
+      const lines = text.split("\n").filter(Boolean).slice(-MAX_EXTENSION_EVENT_LINES);
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const line = lines[index]!;
+        if (Buffer.byteLength(line) > MAX_EXTENSION_EVENT_TAIL_BYTES) continue;
+        let event: unknown;
+        try { event = JSON.parse(line); } catch { continue; }
+        if (!event || typeof event !== "object" || Array.isArray(event)) continue;
+        const value = event as Record<string, unknown>;
+        if (value.runId !== runId || !Number.isSafeInteger(value.ts) || (value.ts as number) < 0) continue;
+        const recognizedTerminalEvent = value.type === "subagent.workflow.completed"
+          || value.type === "subagent.run.completed" || value.type === "subagent.run.stopped";
+        if (!recognizedTerminalEvent) continue;
+        const eventState = value.type === "subagent.workflow.completed"
+          ? extensionLifecycleState(value.state)
+          : value.type === "subagent.run.completed"
+            ? extensionLifecycleState(value.status)
+            : "stopped";
+        if (eventState !== headerState || !terminalLifecycleStates.has(eventState)) return undefined;
+        return { ...candidate, state: eventState, endedAt: value.ts };
+      }
+      return undefined;
+    } finally {
+      await openedEvents.handle.close();
     }
   }
 

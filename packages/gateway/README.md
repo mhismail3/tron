@@ -720,9 +720,12 @@ already been proven, and never perform global scans. Pure artifact state and tim
 normalization is shared by discovery and watcher refresh, while their admission,
 ownership, receipt, and fail-closed policies remain slot-owned. A producer's logical
 `endedAt` may precede the final persistence `lastUpdate`; both must follow `startedAt`,
-but persistence after completion is valid terminal evidence. Administrative drain
-also refreshes exact-owned artifacts directly on a bounded interval, so terminal work
-does not depend on watcher delivery or ambient scan scheduling. Shared recency scheduling
+but persistence after completion is valid terminal evidence. Oversized status files
+remain outside the projection byte cap; an exact-owned run may recover only its bounded
+top-level lifecycle header when a matching terminal record is also present in the bounded
+`events.jsonl` tail, without parsing or projecting oversized step data. Administrative
+drain also refreshes exact-owned artifacts directly on a bounded interval, so terminal
+work does not depend on watcher delivery or ambient scan scheduling. Shared recency scheduling
 removes only the disposable ambient projection at its wall-clock deadline,
 while canonical history remains available. Detached nonterminal work protects
 its session lane from idle eviction and administrative drain.

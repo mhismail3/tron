@@ -1539,6 +1539,96 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }]);
   });
 
+  it("reconciles an exact-owned oversized terminal artifact from bounded event evidence", async () => {
+    const fixture = await coldFixture("oversized-terminal-drain");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const runId = "oversized-terminal-run";
+    const toolCallId = "oversized-terminal-tool";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
+    await mkdir(asyncDir, { recursive: true });
+    const started = Date.now() - 5_000;
+    const ended = Date.now() - 1_000;
+    const startedAt = new Date(started).toISOString();
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
+    };
+    internal.extensionActivities.set(toolCallId, {
+      id: toolCallId,
+      activityId: "oversized-terminal-activity",
+      runId,
+      toolCallId,
+      source: { source: "pi-subagents" },
+      title: "Pi Subagents",
+      status: "running",
+      startedAt,
+      updatedAt: startedAt,
+      children: [],
+      lifecycle: {
+        version: 1,
+        state: "running",
+        attention: "none",
+        sequence: 1,
+        observedAt: startedAt,
+      },
+    });
+    internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    const status = JSON.stringify({
+      runId,
+      state: "complete",
+      startedAt: started,
+      lastUpdate: ended + 1,
+      steps: [{ output: "x".repeat(300 * 1_024) }],
+      endedAt: ended,
+    });
+    const completedEvent = JSON.stringify({
+      ts: ended + 2,
+      runId,
+      type: "subagent.workflow.completed",
+      state: "complete",
+    });
+    const foreignDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "foreign-oversized-run");
+    await mkdir(foreignDir);
+    await writeFile(join(foreignDir, "status.json"), status);
+    await symlink(join(foreignDir, "status.json"), join(asyncDir, "status.json"));
+    await writeFile(join(asyncDir, "events.jsonl"), `${completedEvent}\n`);
+
+    await slot.discoverExtensionArtifact(asyncDir);
+    expect(slot.isDrainBusy).toBe(true);
+
+    await rm(join(asyncDir, "status.json"));
+    await writeFile(join(asyncDir, "status.json"), status);
+    await writeFile(join(foreignDir, "events.jsonl"), `${completedEvent}\n`);
+    await rm(join(asyncDir, "events.jsonl"));
+    await symlink(join(foreignDir, "events.jsonl"), join(asyncDir, "events.jsonl"));
+    await slot.discoverExtensionArtifact(asyncDir);
+    expect(slot.isDrainBusy).toBe(true);
+
+    await rm(join(asyncDir, "events.jsonl"));
+    await writeFile(join(asyncDir, "events.jsonl"), `${completedEvent}\n${JSON.stringify({
+      ts: ended + 3,
+      runId,
+      type: "subagent.workflow.completed",
+      state: "failed",
+    })}\n`);
+    await slot.discoverExtensionArtifact(asyncDir);
+    expect(slot.isDrainBusy).toBe(true);
+
+    await writeFile(join(asyncDir, "events.jsonl"), `${JSON.stringify({
+      ts: ended + 4,
+      runId,
+      type: "subagent.workflow.completed",
+      state: "complete",
+    })}\n`);
+    await fixture.registry.waitUntilIdle();
+    expect(slot.isDrainBusy).toBe(false);
+    expect(slot.snapshot().extensionActivities).toMatchObject([{
+      toolCallId,
+      status: "completed",
+      lifecycle: { state: "completed" },
+    }]);
+  });
+
   it("scans beyond the selected prefix before prioritizing an active artifact", async () => {
     const fixture = await coldFixture("artifact-priority-scan");
     const runId = "late-active-run";
