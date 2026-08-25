@@ -150,12 +150,10 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   unanimated failsafe reveals any row whose geometry admission never arrives. Installed-row
   updates, live-to-canonical settlement, thinking-height measurement, and tool status changes
   inherit no stack-wide animation. The stable transcript transaction admits only explicit entrance/tool-chip markers and continuous native-control transactions; thinking height/tail motion is row-local downstream of that boundary. Authority-only changes whose bounded transcript/stream/tool/queue/runtime layout identity is unchanged take a synchronous metadata path and cannot arm settlement. The sole composer inset exposes one bottom-aligned measured height; a generation captured before structural mutation keeps pinned tail coupling nonanimated, preserves a detached semantic locus with zero tail commands, coalesces retargets, and yields immediately to direct interaction. Reduce Motion removes spatial transitions. Tool status text
-  updates inside its stable row, and short smooth pinned-tail commands remain
-  owned until fresh native geometry acknowledges them, so a second unrelated growth sample cannot replace a pending scroll write. Native bottom distance is bounded for display only:
-  a visible rect beyond the physical content edge is not tail settlement. If reconciliation,
-  compaction, or live row replacement shortens a pinned transcript beneath its released offset,
-  the scroll owner issues one frame-gated physical-tail correction; a deliberately detached
-  reader retains the same viewport authority;
+  updates inside its stable row. Ordinary pinned growth, shrink, and discrete insertion remain
+  coupled by one persistent bottom `ScrollPosition` and create no automatic command stream. Native
+  bottom distance is bounded for display only: a visible rect beyond the physical content edge is
+  not tail settlement. A deliberately detached reader retains the same viewport authority;
 - structure/context/resource invalidations reload an already-presented History,
   Manage Session, Agent Context, or Project Resources surface from the runtime. Context,
   tree, and resource reads each carry a subscription-scoped request generation, so an older
@@ -200,10 +198,10 @@ owned through animation completion and two unchanged display frames; best-effort
 cancels that arm. The composer
 remains visible throughout opening, while sending stays disabled until readiness. Opening tail
 positioning and post-reveal settlement are owned by the coordinator's mutually exclusive opening
-phase; ordinary follow and correction events do not compete until that phase is idle. Once stronger
-opening, catch-up, semantic, prepend, or discrete command ownership releases, pinned mode installs one
-persistent bottom `ScrollPosition`; streaming/content/inset contraction is then native-owned with no
-recurring command. Presentation reset and retained foreground resume reapply that physical position
+phase; ordinary pinned growth, shrink, and discrete insertion create no command ownership. Explicit
+opening, catch-up, semantic restore, and prepend remain command owners; after they release, pinned mode
+installs one persistent bottom `ScrollPosition` with no recurring command stream. Presentation reset
+and retained foreground resume reapply that physical position
 even when the logical enum is unchanged, while direct user ownership and anchored mode remain unpositioned.
 Session subscription ownership is token-scoped end to end. The open response remains
 provisional until sync acknowledgement and exact route-intent revalidation; both sync and subscription

@@ -368,6 +368,8 @@ final class PushNotificationCoordinator {
     private var context: Context?
     private var registrationTask: Task<Void, Never>?
     private var registrationGeneration = 0
+    private var admissionGeneration = 0
+    private var registrationAdmitted = false
 
     private(set) var readiness: PushReadiness = .unavailable
     private(set) var diagnostic: PushRegistrationDiagnostic = .idle
@@ -408,47 +410,62 @@ final class PushNotificationCoordinator {
     }
 
     func reconcile(profile: GatewayProfile?, connected: Bool, client: GatewayClient) async {
+        admissionGeneration &+= 1
+        let reconciliationAdmission = admissionGeneration
         guard let profile else {
-            registrationGeneration &+= 1
-            registrationTask?.cancel()
-            registrationTask = nil
+            invalidateRegistration(admission: false)
             context = nil
             readiness = .unavailable
             diagnostic = .idle
             return
         }
         if context?.profile.id != profile.id {
-            registrationGeneration &+= 1
-            registrationTask?.cancel()
-            registrationTask = nil
+            invalidateRegistration(admission: false)
         }
         context = Context(profile: profile, client: client)
         guard !credentialLoadFailed, worker != nil, appAttest.isSupported() else {
+            invalidateRegistration(admission: false)
             readiness = .unavailable
             diagnostic = .stoppedUnavailable
             return
         }
 
         var status = await notifications.authorization()
+        guard admissionGeneration == reconciliationAdmission,
+              context?.profile.id == profile.id else { return }
         if status == .notDetermined {
+            invalidateRegistration(admission: false)
             readiness = .permissionRequired
             do {
                 status = try await notifications.requestAuthorization() ? .allowed : .denied
             } catch {
+                guard admissionGeneration == reconciliationAdmission,
+                      context?.profile.id == profile.id else { return }
                 readiness = .pending
                 return
             }
+            guard admissionGeneration == reconciliationAdmission,
+                  context?.profile.id == profile.id else { return }
         }
         guard status == .allowed else {
+            // Denial first retires proof and transfer ownership. Revocation may
+            // suspend, but no continuation from the retired generation can
+            // persist or publish registration state afterward.
+            invalidateRegistration(admission: false)
+            let denialGeneration = registrationGeneration
             readiness = .denied
             diagnostic = .idle
-            if connected { await removeRegistration(for: profile, client: client) }
+            if connected {
+                await removeRegistration(
+                    for: profile,
+                    client: client,
+                    generation: denialGeneration
+                )
+            }
             return
         }
 
-        if let grant = document.grants[profile.id], connected {
-            readiness = await transfer(grant, client: client) ? .ready : .pending
-        }
+        registrationAdmitted = true
         notifications.registerForRemoteNotifications()
         guard document.apnsToken != nil else {
             if document.grants[profile.id] == nil { readiness = .registering }
@@ -479,12 +496,16 @@ final class PushNotificationCoordinator {
     }
 
     func receiveRegistrationFailure() {
+        guard registrationAdmitted else { return }
         readiness = .pending
         diagnostic = .stoppedUnavailable
     }
 
     private func scheduleRegistration() {
-        guard registrationTask == nil, context != nil, document.apnsToken != nil else { return }
+        guard registrationAdmitted,
+              registrationTask == nil,
+              context != nil,
+              document.apnsToken != nil else { return }
         readiness = .registering
         registrationGeneration &+= 1
         let generation = registrationGeneration
@@ -496,9 +517,11 @@ final class PushNotificationCoordinator {
             do { try await self.registerCurrent(generation: generation) }
             catch is CancellationError { return }
             catch let error as PushRegistrationError {
+                guard self.registrationIsValid(generation: generation) else { return }
                 self.readiness = .pending
                 self.diagnostic = Self.diagnostic(for: error)
             } catch {
+                guard self.registrationIsValid(generation: generation) else { return }
                 self.readiness = .pending
                 self.diagnostic = .stoppedUnavailable
             }
@@ -518,8 +541,20 @@ final class PushNotificationCoordinator {
         let tokenHash = Self.hash("tron-apns-token-v1\0" + token)
         if let grant = document.grants[admittedContext.profile.id], grant.tokenHash == tokenHash {
             diagnostic = .transferringGrant
-            readiness = await transfer(grant, client: admittedContext.client) ? .ready : .pending
-            diagnostic = readiness == .ready ? .complete : .stoppedUnavailable
+            let transferred = try await transfer(
+                grant,
+                client: admittedContext.client,
+                generation: generation,
+                profileID: admittedContext.profile.id,
+                token: token
+            )
+            try validateRegistration(
+                generation: generation,
+                profileID: admittedContext.profile.id,
+                token: token
+            )
+            readiness = transferred ? .ready : .pending
+            diagnostic = transferred ? .complete : .stoppedUnavailable
             return
         }
 
@@ -611,9 +646,23 @@ final class PushNotificationCoordinator {
                     catch { throw PushRegistrationError.persistence }
                     document = updated
                     diagnostic = .transferringGrant
-                    readiness = await transfer(grant, client: admittedContext.client) ? .ready : .pending
-                    diagnostic = readiness == .ready ? .complete : .stoppedUnavailable
+                    let transferred = try await transfer(
+                        grant,
+                        client: admittedContext.client,
+                        generation: generation,
+                        profileID: admittedContext.profile.id,
+                        token: token
+                    )
+                    try validateRegistration(
+                        generation: generation,
+                        profileID: admittedContext.profile.id,
+                        token: token
+                    )
+                    readiness = transferred ? .ready : .pending
+                    diagnostic = transferred ? .complete : .stoppedUnavailable
                     return
+                } catch is CancellationError {
+                    throw CancellationError()
                 } catch PushRegistrationError.rejected(401) {
                     guard mode == .assertion, !recoveredInvalidKey else {
                         if mode == .attestation { try markCurrentKeyRejected() }
@@ -654,9 +703,30 @@ final class PushNotificationCoordinator {
 
     private func validateRegistration(generation: Int, profileID: String, token: String) throws {
         try Task.checkCancellation()
-        guard registrationGeneration == generation,
-              context?.profile.id == profileID,
-              document.apnsToken == token else { throw CancellationError() }
+        guard registrationIsValid(
+            generation: generation,
+            profileID: profileID,
+            token: token
+        ) else { throw CancellationError() }
+    }
+
+    private func registrationIsValid(
+        generation: Int,
+        profileID: String? = nil,
+        token: String? = nil
+    ) -> Bool {
+        guard registrationAdmitted,
+              registrationGeneration == generation else { return false }
+        if let profileID, context?.profile.id != profileID { return false }
+        if let token, document.apnsToken != token { return false }
+        return true
+    }
+
+    private func invalidateRegistration(admission: Bool) {
+        registrationAdmitted = admission
+        registrationGeneration &+= 1
+        registrationTask?.cancel()
+        registrationTask = nil
     }
 
     private func rotateInvalidKey() throws {
@@ -701,7 +771,14 @@ final class PushNotificationCoordinator {
         }
     }
 
-    private func transfer(_ grant: PushGrant, client: GatewayClient) async -> Bool {
+    private func transfer(
+        _ grant: PushGrant,
+        client: GatewayClient,
+        generation: Int,
+        profileID: String,
+        token: String
+    ) async throws -> Bool {
+        try validateRegistration(generation: generation, profileID: profileID, token: token)
         do {
             let status: PushRegistrationStatus = try await client.request(
                 "push.registration.upsert",
@@ -714,13 +791,24 @@ final class PushNotificationCoordinator {
                 ),
                 timeout: .seconds(8)
             )
+            try validateRegistration(generation: generation, profileID: profileID, token: token)
             return status.available && status.registered && status.deviceRegistered && status.enabledDeviceCount > 0
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
+            // GatewayClient cancellation and transport failures do not share an
+            // error type. Revalidate after every suspension before converting a
+            // current failure into pending readiness.
+            try validateRegistration(generation: generation, profileID: profileID, token: token)
             return false
         }
     }
 
-    private func removeRegistration(for profile: GatewayProfile, client: GatewayClient) async {
+    private func removeRegistration(
+        for profile: GatewayProfile,
+        client: GatewayClient,
+        generation: Int
+    ) async {
         guard document.grants[profile.id] != nil else { return }
         do {
             let result: PushRegistrationRemovalResult = try await client.request(
@@ -728,9 +816,14 @@ final class PushNotificationCoordinator {
                 PushRegistrationRemoval(commandId: uuid().uuidString),
                 timeout: .seconds(8)
             )
+            guard registrationGeneration == generation,
+                  !registrationAdmitted,
+                  context?.profile.id == profile.id else { return }
             _ = result.removed // false is an idempotent already-absent acknowledgement.
-            document.grants.removeValue(forKey: profile.id)
-            try credentials.save(document)
+            var updated = document
+            updated.grants.removeValue(forKey: profile.id)
+            try credentials.save(updated)
+            document = updated
             readiness = .denied
         } catch {
             // Permission denial remains authoritative locally. The next connected

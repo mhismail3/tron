@@ -100,6 +100,139 @@ struct PushNotificationCoordinatorTests {
     }
 
     @MainActor
+    @Test("permission denial invalidates a late proof before grant persistence")
+    func denialRacingLateProof() async throws {
+        let authorization = PushAuthorizationController(.allowed)
+        let proof = LatePushProofTransport()
+        let original = PushCredentialDocument(appAttestKeyID: "key", apnsToken: "01", grants: [:])
+        let store = MemoryPushCredentialStore(initial: original)
+        let coordinator = PushNotificationCoordinator(
+            credentials: store,
+            notifications: authorization.system,
+            appAttest: PushAttestRecorder().client,
+            configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!),
+            transport: BoundedHTTPDataTransport { request, maximumBytes in
+                try await proof.handle(request, maximumBytes: maximumBytes)
+            }
+        )
+        let (client, socket) = try await connectedGateway(for: profile)
+        defer { Task { await client.close() } }
+        let gatewayBaseline = await socket.sentFrames().count
+
+        await coordinator.reconcile(profile: profile, connected: true, client: client)
+        await proof.waitUntilInstallationStarted()
+        await authorization.set(.denied)
+        await coordinator.reconcile(profile: profile, connected: true, client: client)
+        await proof.releaseInstallation()
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(coordinator.readiness == .denied)
+        #expect(coordinator.diagnostic == .idle)
+        #expect(store.value == original)
+        #expect(await socket.sentFrames().count == gatewayBaseline)
+    }
+
+    @MainActor
+    @Test("profile replacement during Gateway transfer cannot publish stale readiness")
+    func profileReplacementDuringTransfer() async throws {
+        let grant = matchingGrant(profileID: profile.id, token: "01")
+        let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
+            appAttestKeyID: "key", apnsToken: "01", grants: [profile.id: grant]
+        ))
+        let challenge = SuspendedPushChallengeTransport()
+        let coordinator = PushNotificationCoordinator(
+            credentials: store,
+            notifications: allowedNotifications,
+            appAttest: PushAttestRecorder().client,
+            configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!),
+            transport: BoundedHTTPDataTransport { request, maximumBytes in
+                try await challenge.handle(request, maximumBytes: maximumBytes)
+            }
+        )
+        let (client, socket) = try await connectedGateway(for: profile)
+        defer { Task { await client.close() } }
+
+        await coordinator.reconcile(profile: profile, connected: true, client: client)
+        try await socket.waitUntilSent(count: 2)
+        let replacement = GatewayProfile(
+            id: "profile-2", label: "Other Mac", host: "other.test", port: 9_847,
+            machineId: "machine-2", deviceId: "device-2"
+        )
+        await coordinator.reconcile(profile: replacement, connected: false, client: GatewayClient())
+        await challenge.waitUntilStarted()
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(coordinator.readiness == .registering)
+        #expect(coordinator.diagnostic == .requestingChallenge)
+        #expect(store.value?.grants[profile.id] == grant)
+        await coordinator.reconcile(profile: nil, connected: false, client: GatewayClient())
+    }
+
+    @MainActor
+    @Test("newly proved grant transfer cannot publish after profile teardown")
+    func newGrantTransferDuringProfileTeardown() async throws {
+        let script = ScriptedPushTransport(installations: [.status(201)])
+        let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
+            appAttestKeyID: "key", apnsToken: "01", grants: [:]
+        ))
+        let coordinator = PushNotificationCoordinator(
+            credentials: store,
+            notifications: allowedNotifications,
+            appAttest: PushAttestRecorder().client,
+            configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!),
+            transport: BoundedHTTPDataTransport { request, maximumBytes in
+                try await script.handle(request, maximumBytes: maximumBytes)
+            }
+        )
+        let (client, socket) = try await connectedGateway(for: profile)
+        defer { Task { await client.close() } }
+
+        await coordinator.reconcile(profile: profile, connected: true, client: client)
+        try await socket.waitUntilSent(count: 2)
+        let provedGrant = try #require(store.value?.grants[profile.id])
+        await coordinator.reconcile(profile: nil, connected: false, client: GatewayClient())
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(coordinator.readiness == .unavailable)
+        #expect(coordinator.diagnostic == .idle)
+        #expect(store.value?.grants[profile.id] == provedGrant)
+        #expect(store.value?.appAttestKeyRejected != true)
+    }
+
+    @MainActor
+    @Test("APNs replacement during Gateway transfer cannot publish old-token readiness")
+    func tokenReplacementDuringTransfer() async throws {
+        let grant = matchingGrant(profileID: profile.id, token: "01")
+        let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
+            appAttestKeyID: "key", apnsToken: "01", grants: [profile.id: grant]
+        ))
+        let challenge = SuspendedPushChallengeTransport()
+        let coordinator = PushNotificationCoordinator(
+            credentials: store,
+            notifications: allowedNotifications,
+            appAttest: PushAttestRecorder().client,
+            configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!),
+            transport: BoundedHTTPDataTransport { request, maximumBytes in
+                try await challenge.handle(request, maximumBytes: maximumBytes)
+            }
+        )
+        let (client, socket) = try await connectedGateway(for: profile)
+        defer { Task { await client.close() } }
+
+        await coordinator.reconcile(profile: profile, connected: true, client: client)
+        try await socket.waitUntilSent(count: 2)
+        coordinator.receiveDeviceToken(Data([0x02]))
+        await challenge.waitUntilStarted()
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(coordinator.readiness == .registering)
+        #expect(coordinator.diagnostic == .requestingChallenge)
+        #expect(store.value?.apnsToken == "02")
+        #expect(store.value?.grants[profile.id] == grant)
+        await coordinator.reconcile(profile: nil, connected: false, client: GatewayClient())
+    }
+
+    @MainActor
     @Test("APNs token is attested and grant is persisted before Gateway transfer")
     func registrationFlow() async throws {
         let store = MemoryPushCredentialStore()
@@ -406,6 +539,28 @@ struct PushNotificationCoordinatorTests {
     )
 
     private var profile: GatewayProfile { Self.profile }
+
+    private func matchingGrant(profileID: String, token: String) -> PushGrant {
+        PushGrant(
+            profileID: profileID,
+            installationID: "installation_existing",
+            grantID: "grant_existing",
+            grantSecret: String(repeating: "s", count: 32),
+            tokenHash: SHA256.hash(data: Data("tron-apns-token-v1\0\(token)".utf8))
+                .map { String(format: "%02x", $0) }.joined()
+        )
+    }
+
+    private func connectedGateway(
+        for profile: GatewayProfile
+    ) async throws -> (GatewayClient, ScriptedGatewaySocket) {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"0.84.1","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine-1","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+        _ = try await client.connect(profile: profile, token: "token")
+        return (client, socket)
+    }
+
     private var supportedAttest: PushAppAttestClient {
         PushAppAttestClient(
             isSupported: { true },
@@ -413,6 +568,99 @@ struct PushNotificationCoordinatorTests {
             attest: { _, _ in Data() },
             assert: { _, _ in Data() }
         )
+    }
+}
+
+private actor PushAuthorizationController {
+    private var value: PushAuthorization
+
+    init(_ value: PushAuthorization) { self.value = value }
+
+    nonisolated var system: PushNotificationSystem {
+        PushNotificationSystem(
+            authorization: { await self.authorization() },
+            requestAuthorization: { await self.authorization() == .allowed },
+            registerForRemoteNotifications: {}
+        )
+    }
+
+    func set(_ value: PushAuthorization) { self.value = value }
+    private func authorization() -> PushAuthorization { value }
+}
+
+private actor LatePushProofTransport {
+    private var installationStarted = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var installationContinuation: CheckedContinuation<Void, Never>?
+
+    func handle(
+        _ request: URLRequest,
+        maximumBytes: Int
+    ) async throws -> (Data, HTTPURLResponse) {
+        #expect(maximumBytes == 16 * 1024)
+        if request.url?.path == "/v3/attestation/challenge" {
+            return response(
+                request,
+                status: 200,
+                body: #"{"challengeId":"challenge-late","challenge":"nonce-late","expiresAt":"2026-08-24T06:00:00Z"}"#
+            )
+        }
+        installationStarted = true
+        let pending = startWaiters
+        startWaiters.removeAll()
+        pending.forEach { $0.resume() }
+        await withCheckedContinuation { installationContinuation = $0 }
+        return response(
+            request,
+            status: 201,
+            body: #"{"version":1,"installationId":"installation_late","grantId":"grant_late","grantSecret":"0123456789abcdef0123456789abcdef","route":"beta"}"#
+        )
+    }
+
+    func waitUntilInstallationStarted() async {
+        if installationStarted { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    func releaseInstallation() {
+        installationContinuation?.resume()
+        installationContinuation = nil
+    }
+
+    private func response(
+        _ request: URLRequest,
+        status: Int,
+        body: String
+    ) -> (Data, HTTPURLResponse) {
+        (
+            Data(body.utf8),
+            HTTPURLResponse(
+                url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil
+            )!
+        )
+    }
+}
+
+private actor SuspendedPushChallengeTransport {
+    private var started = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func handle(
+        _ request: URLRequest,
+        maximumBytes: Int
+    ) async throws -> (Data, HTTPURLResponse) {
+        #expect(maximumBytes == 16 * 1024)
+        started = true
+        let pending = waiters
+        waiters.removeAll()
+        pending.forEach { $0.resume() }
+        try await Task.sleep(for: .seconds(30))
+        throw CancellationError()
+    }
+
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { waiters.append($0) }
     }
 }
 
