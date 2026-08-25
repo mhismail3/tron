@@ -99,8 +99,11 @@ describe("v3 Worker boundary", () => {
     expect(await second.json()).toEqual({ status: "accepted_by_apns", apnsId: "provider-id" });
     expect(providerFetch).toHaveBeenCalledTimes(1);
     const providerRequest = providerFetch.mock.calls[0][0] as string;
+    const providerInit = providerFetch.mock.calls[0][1];
     expect(providerRequest).toContain("api.sandbox.push.apple.com/3/device/");
     expect(providerRequest).not.toContain(testGrant.grantId);
+    expect(providerInit?.redirect).toBeUndefined();
+    expect(providerInit?.signal).toBeInstanceOf(AbortSignal);
   });
 
   test("rejects request-ID reuse with a different authenticated body", async () => {

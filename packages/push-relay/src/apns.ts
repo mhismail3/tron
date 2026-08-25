@@ -19,26 +19,38 @@ export async function sendToApns(
   if (utf8(payload).byteLength > MAX_APNS_PAYLOAD_BYTES) {
     return { status: "permanent_failure", reason: "payload_too_large" };
   }
-  const token = await providerToken(env);
+  let token: string;
+  try {
+    token = await providerToken(env);
+  } catch {
+    return { status: "retryable", reason: "provider_token_error", retryAfterSeconds: 30 };
+  }
   const host = target.environment === "sandbox" ? "api.sandbox.push.apple.com" : "api.push.apple.com";
   const apnsId = await stableProviderId(request.requestId);
   const expiration = Math.max(0, Math.floor(Date.parse(request.expiresAt) / 1000));
-  const response = await fetch(`https://${host}/3/device/${target.deviceToken}`, {
-    method: "POST",
-    redirect: "error",
-    signal: AbortSignal.timeout(15_000),
-    headers: {
-      authorization: `bearer ${token}`,
-      "apns-id": apnsId,
-      "apns-topic": target.topic,
-      "apns-push-type": "alert",
-      "apns-priority": "10",
-      "apns-expiration": String(expiration),
-      "apns-collapse-id": request.requestId.slice(0, 64),
-      "content-type": "application/json",
-    },
-    body: payload,
-  });
+  let response: Response;
+  try {
+    // Keep the platform-default redirect mode. Deployed Workers reject this
+    // APNs egress before any provider response when redirect is forced to
+    // `error`; the host and path remain closed product-owned projections.
+    response = await fetch(`https://${host}/3/device/${target.deviceToken}`, {
+      method: "POST",
+      signal: AbortSignal.timeout(15_000),
+      headers: {
+        authorization: `bearer ${token}`,
+        "apns-id": apnsId,
+        "apns-topic": target.topic,
+        "apns-push-type": "alert",
+        "apns-priority": "10",
+        "apns-expiration": String(expiration),
+        "apns-collapse-id": request.requestId.slice(0, 64),
+        "content-type": "application/json",
+      },
+      body: payload,
+    });
+  } catch {
+    return { status: "retryable", reason: "apns_transport_error", retryAfterSeconds: 30 };
+  }
   const responseApnsId = response.headers.get("apns-id") ?? apnsId;
   if (response.ok) return { status: "accepted_by_apns", apnsId: responseApnsId };
   const reason = await sanitizedApnsReason(response);

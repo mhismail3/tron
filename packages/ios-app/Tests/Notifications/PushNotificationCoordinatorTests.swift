@@ -6,6 +6,17 @@ import Testing
 private final class PushFixtureBundleMarker {}
 @testable import TronMobile
 
+private func appAttestKey(_ label: String) -> String {
+    Data(SHA256.hash(data: Data(label.utf8))).base64EncodedString()
+}
+
+private func canonicalAppAttestKey(_ label: String) -> String {
+    appAttestKey(label)
+        .replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_")
+        .replacingOccurrences(of: "=", with: "")
+}
+
 @Suite("Push notification registration")
 struct PushNotificationCoordinatorTests {
     @Test("product origin admits only one exact HTTPS origin")
@@ -104,7 +115,7 @@ struct PushNotificationCoordinatorTests {
     func denialRacingLateProof() async throws {
         let authorization = PushAuthorizationController(.allowed)
         let proof = LatePushProofTransport()
-        let original = PushCredentialDocument(appAttestKeyID: "key", apnsToken: "01", grants: [:])
+        let original = PushCredentialDocument(appAttestKeyID: appAttestKey("key"), apnsToken: "01", grants: [:])
         let store = MemoryPushCredentialStore(initial: original)
         let coordinator = PushNotificationCoordinator(
             credentials: store,
@@ -137,7 +148,7 @@ struct PushNotificationCoordinatorTests {
     func profileReplacementDuringTransfer() async throws {
         let grant = matchingGrant(profileID: profile.id, token: "01")
         let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
-            appAttestKeyID: "key", apnsToken: "01", grants: [profile.id: grant]
+            appAttestKeyID: appAttestKey("key"), apnsToken: "01", grants: [profile.id: grant]
         ))
         let challenge = SuspendedPushChallengeTransport()
         let coordinator = PushNotificationCoordinator(
@@ -173,7 +184,7 @@ struct PushNotificationCoordinatorTests {
     func newGrantTransferDuringProfileTeardown() async throws {
         let script = ScriptedPushTransport(installations: [.status(201)])
         let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
-            appAttestKeyID: "key", apnsToken: "01", grants: [:]
+            appAttestKeyID: appAttestKey("key"), apnsToken: "01", grants: [:]
         ))
         let coordinator = PushNotificationCoordinator(
             credentials: store,
@@ -204,7 +215,7 @@ struct PushNotificationCoordinatorTests {
     func tokenReplacementDuringTransfer() async throws {
         let grant = matchingGrant(profileID: profile.id, token: "01")
         let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
-            appAttestKeyID: "key", apnsToken: "01", grants: [profile.id: grant]
+            appAttestKeyID: appAttestKey("key"), apnsToken: "01", grants: [profile.id: grant]
         ))
         let challenge = SuspendedPushChallengeTransport()
         let coordinator = PushNotificationCoordinator(
@@ -256,12 +267,14 @@ struct PushNotificationCoordinatorTests {
             requestAuthorization: { true },
             registerForRemoteNotifications: {}
         )
+        let rawKeyID = appAttestKey("key_1")
+        let proofHashes = PushProofHashRecorder()
         let attest = PushAppAttestClient(
             isSupported: { true },
-            generateKey: { "key_1" },
+            generateKey: { rawKeyID },
             attest: { key, hash in
-                #expect(key == "key_1")
-                #expect(hash.count == 32)
+                #expect(key == rawKeyID)
+                await proofHashes.append(hash)
                 return Data("attestation".utf8)
             },
             assert: { _, _ in
@@ -296,6 +309,22 @@ struct PushNotificationCoordinatorTests {
         let registration = try #require(JSONSerialization.jsonObject(with: registrationBody) as? [String: Any])
         #expect(registration["proof"] as? String == "attestation")
         #expect(registration["route"] as? String == "beta")
+        #expect(registration["keyId"] as? String == canonicalAppAttestKey("key_1"))
+        #expect(registration["keyId"] as? String != rawKeyID)
+        #expect(store.value?.appAttestKeyID == rawKeyID)
+        let wireRouteValue = try #require(registration["route"] as? String)
+        let wireRoute = try #require(PushRoute(rawValue: wireRouteValue))
+        let wirePayload = PushWorkerClient.RegistrationPayload(
+            version: try #require(registration["version"] as? Int),
+            challengeId: try #require(registration["challengeId"] as? String),
+            challenge: try #require(registration["challenge"] as? String),
+            keyId: try #require(registration["keyId"] as? String),
+            apnsToken: try #require(registration["apnsToken"] as? String),
+            route: wireRoute,
+            bindingHash: try #require(registration["bindingHash"] as? String)
+        )
+        let expectedProofHash = Data(SHA256.hash(data: try PushWorkerClient.canonicalData(wirePayload)))
+        #expect(await proofHashes.values == [expectedProofHash])
         #expect(registration["attestationObject"] as? String != nil)
         #expect(registration["payload"] == nil)
         #expect(requests.allSatisfy { $0.url?.host == "push.example.test" })
@@ -304,12 +333,34 @@ struct PushNotificationCoordinatorTests {
     }
 
     @MainActor
+    @Test("malformed App Attest credential IDs fail closed before proof or installation")
+    func malformedAppAttestCredentialID() async throws {
+        for malformedKeyID in ["not-base64!", Data([0x01]).base64EncodedString()] {
+            let script = ScriptedPushTransport(installations: [.status(201)])
+            let attest = PushAttestRecorder()
+            let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
+                appAttestKeyID: malformedKeyID, apnsToken: "01", grants: [:]
+            ))
+            let coordinator = makeCoordinator(store: store, script: script, attest: attest)
+
+            await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+            try await waitUntil { coordinator.diagnostic == .stoppedInvalidResponse }
+
+            #expect(await script.challengeCount == 1)
+            #expect(await script.submittedModes.isEmpty)
+            #expect(await attest.assertionKeys.isEmpty)
+            #expect(store.value?.appAttestKeyID == malformedKeyID)
+            #expect(store.value?.grants.isEmpty == true)
+        }
+    }
+
+    @MainActor
     @Test("timeout retries with a fresh challenge and persisted-key assertion")
     func timeoutThenAssertionSuccess() async throws {
         let script = ScriptedPushTransport(installations: [.timeout, .status(201)])
         let attest = PushAttestRecorder(assertionResults: [.success(Data("one".utf8)), .success(Data("two".utf8))])
         let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
-            appAttestKeyID: "persisted-key", apnsToken: "01", grants: [:]
+            appAttestKeyID: appAttestKey("persisted-key"), apnsToken: "01", grants: [:]
         ))
         let retries = PushRetryRecorder()
         let coordinator = makeCoordinator(store: store, script: script, attest: attest, retries: retries)
@@ -320,22 +371,23 @@ struct PushNotificationCoordinatorTests {
         #expect(await script.challengeCount == 2)
         #expect(await script.submittedModes == ["assertion", "assertion"])
         #expect(await script.submittedChallenges == ["challenge-1", "challenge-2"])
-        #expect(await attest.assertionKeys == ["persisted-key", "persisted-key"])
+        #expect(await attest.assertionKeys == [appAttestKey("persisted-key"), appAttestKey("persisted-key")])
+        #expect(await script.submittedKeyIDs == [canonicalAppAttestKey("persisted-key"), canonicalAppAttestKey("persisted-key")])
         #expect(await retries.values == [.milliseconds(250)])
-        #expect(store.value?.appAttestKeyID == "persisted-key")
+        #expect(store.value?.appAttestKeyID == appAttestKey("persisted-key"))
     }
 
     @MainActor
     @Test("assertion 401 rotates only the key and permits one fresh attestation")
     func assertion401ThenFreshAttestation() async throws {
         let script = ScriptedPushTransport(installations: [.status(401), .status(201)])
-        let attest = PushAttestRecorder(generatedKeys: ["fresh-key"])
+        let attest = PushAttestRecorder(generatedKeys: [appAttestKey("fresh-key")])
         let originalGrant = PushGrant(
             profileID: "other", installationID: "install_other", grantID: "grant_other",
             grantSecret: String(repeating: "s", count: 32), tokenHash: "hash"
         )
         let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
-            appAttestKeyID: "invalid-key", apnsToken: "01", grants: ["other": originalGrant]
+            appAttestKeyID: appAttestKey("invalid-key"), apnsToken: "01", grants: ["other": originalGrant]
         ))
         let coordinator = makeCoordinator(store: store, script: script, attest: attest)
 
@@ -344,7 +396,7 @@ struct PushNotificationCoordinatorTests {
 
         #expect(await script.submittedModes == ["assertion", "attestation"])
         #expect(await attest.generatedCount == 1)
-        #expect(store.value?.appAttestKeyID == "fresh-key")
+        #expect(store.value?.appAttestKeyID == appAttestKey("fresh-key"))
         #expect(store.value?.grants["other"] == originalGrant)
         #expect(store.value?.apnsToken == "01")
     }
@@ -358,11 +410,11 @@ struct PushNotificationCoordinatorTests {
         )
         let script = ScriptedPushTransport(installations: [.status(201)])
         let attest = PushAttestRecorder(
-            generatedKeys: ["replacement-key"],
+            generatedKeys: [appAttestKey("replacement-key")],
             assertionResults: [.failure(typedInvalidKey)]
         )
         let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
-            appAttestKeyID: "reinstalled-key", apnsToken: "01", grants: [:]
+            appAttestKeyID: appAttestKey("reinstalled-key"), apnsToken: "01", grants: [:]
         ))
         let coordinator = makeCoordinator(store: store, script: script, attest: attest)
 
@@ -372,16 +424,16 @@ struct PushNotificationCoordinatorTests {
         #expect(await script.submittedModes == ["attestation"])
         #expect(await script.challengeCount == 2)
         #expect(await attest.generatedCount == 1)
-        #expect(store.value?.appAttestKeyID == "replacement-key")
+        #expect(store.value?.appAttestKeyID == appAttestKey("replacement-key"))
     }
 
     @MainActor
     @Test("fresh attestation rejection is persisted and repeated reconcile does not churn")
     func repeatedAttestation401Stops() async throws {
         let script = ScriptedPushTransport(installations: [.status(401), .status(401)])
-        let attest = PushAttestRecorder(generatedKeys: ["fresh-key", "must-not-generate"])
+        let attest = PushAttestRecorder(generatedKeys: [appAttestKey("fresh-key"), appAttestKey("must-not-generate")])
         let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
-            appAttestKeyID: "old-key", apnsToken: "01", grants: [:]
+            appAttestKeyID: appAttestKey("old-key"), apnsToken: "01", grants: [:]
         ))
         let coordinator = makeCoordinator(store: store, script: script, attest: attest)
 
@@ -389,7 +441,7 @@ struct PushNotificationCoordinatorTests {
         try await waitUntil { coordinator.diagnostic == .stoppedRejected }
         #expect(await script.submittedModes == ["assertion", "attestation"])
         #expect(await attest.generatedCount == 1)
-        #expect(store.value?.appAttestKeyID == "fresh-key")
+        #expect(store.value?.appAttestKeyID == appAttestKey("fresh-key"))
         #expect(store.value?.appAttestKeyRejected == true)
 
         await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
@@ -404,7 +456,7 @@ struct PushNotificationCoordinatorTests {
         let script = ScriptedPushTransport(installations: [.status(503), .status(503), .status(503)])
         let attest = PushAttestRecorder()
         let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
-            appAttestKeyID: "key", apnsToken: "01", grants: [:]
+            appAttestKeyID: appAttestKey("key"), apnsToken: "01", grants: [:]
         ))
         let retries = PushRetryRecorder()
         let coordinator = makeCoordinator(store: store, script: script, attest: attest, retries: retries)
@@ -415,7 +467,7 @@ struct PushNotificationCoordinatorTests {
         #expect(await script.challengeCount == 3)
         #expect(await script.submittedModes == ["assertion", "assertion", "assertion"])
         #expect(await retries.values == [.milliseconds(250), .milliseconds(750)])
-        #expect(store.value?.appAttestKeyID == "key")
+        #expect(store.value?.appAttestKeyID == appAttestKey("key"))
         #expect(store.value?.apnsToken == "01")
     }
 
@@ -431,7 +483,7 @@ struct PushNotificationCoordinatorTests {
                 HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             )
         }
-        let original = PushCredentialDocument(appAttestKeyID: "key", apnsToken: "01", grants: [:])
+        let original = PushCredentialDocument(appAttestKeyID: appAttestKey("key"), apnsToken: "01", grants: [:])
         let store = MemoryPushCredentialStore(initial: original)
         let coordinator = PushNotificationCoordinator(
             credentials: store,
@@ -456,7 +508,7 @@ struct PushNotificationCoordinatorTests {
         let script = ScriptedPushTransport(installations: [.status(422)])
         let attest = PushAttestRecorder()
         let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
-            appAttestKeyID: "key", apnsToken: "01", grants: [:]
+            appAttestKeyID: appAttestKey("key"), apnsToken: "01", grants: [:]
         ))
         let retries = PushRetryRecorder()
         let coordinator = makeCoordinator(store: store, script: script, attest: attest, retries: retries)
@@ -465,7 +517,7 @@ struct PushNotificationCoordinatorTests {
         try await waitUntil { coordinator.diagnostic == .stoppedRejected }
         #expect(await retries.values.isEmpty)
         #expect(await script.submittedModes == ["assertion"])
-        #expect(store.value?.appAttestKeyID == "key")
+        #expect(store.value?.appAttestKeyID == appAttestKey("key"))
     }
 
     @Test("diagnostics are fixed privacy-safe stage text")
@@ -564,7 +616,7 @@ struct PushNotificationCoordinatorTests {
     private var supportedAttest: PushAppAttestClient {
         PushAppAttestClient(
             isSupported: { true },
-            generateKey: { "unused" },
+            generateKey: { appAttestKey("unused") },
             attest: { _, _ in Data() },
             assert: { _, _ in Data() }
         )
@@ -683,6 +735,7 @@ private actor ScriptedPushTransport {
     private(set) var challengeCount = 0
     private(set) var submittedModes: [String] = []
     private(set) var submittedChallenges: [String] = []
+    private(set) var submittedKeyIDs: [String] = []
 
     init(installations: [InstallationResult]) { self.installations = installations }
 
@@ -699,6 +752,7 @@ private actor ScriptedPushTransport {
         let object = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
         submittedModes.append(try #require(object["proof"] as? String))
         submittedChallenges.append(try #require(object["challengeId"] as? String))
+        submittedKeyIDs.append(try #require(object["keyId"] as? String))
         let next = installations.isEmpty ? .status(500) : installations.removeFirst()
         switch next {
         case .timeout:
@@ -732,7 +786,7 @@ private actor PushAttestRecorder {
     private(set) var assertionKeys: [String] = []
 
     init(
-        generatedKeys: [String] = ["generated-key"],
+        generatedKeys: [String] = [appAttestKey("generated-key")],
         assertionResults: [Result<Data, NSError>] = []
     ) {
         self.generatedKeys = generatedKeys
@@ -764,6 +818,11 @@ private actor PushAttestRecorder {
 private actor PushRetryRecorder {
     private(set) var values: [Duration] = []
     func append(_ duration: Duration) { values.append(duration) }
+}
+
+private actor PushProofHashRecorder {
+    private(set) var values: [Data] = []
+    func append(_ value: Data) { values.append(value) }
 }
 
 private actor PushCancellationProbe {

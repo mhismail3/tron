@@ -121,8 +121,13 @@ Each grant admits at most 30 new requests per hour and 200 per UTC day; each
 installation admits at most 50 per hour and 300 per day across its grants. One
 installation may own at most eight grants, and global installation/grant tables
 are transactionally bounded. Retries of an admitted request do not consume
-another quota unit. APNs invalid-token responses disable the installation and
-all of its grants.
+another quota unit. Provider-token construction and APNs transport exceptions
+remain retryable but use separate fixed outcome reasons, without projecting
+credentials, provider responses, or exception text. The closed APNs request
+retains a 15-second abort bound and the platform-default redirect mode; forcing
+`redirect: "error"` makes deployed Workers reject APNs egress before a provider
+response. APNs invalid-token responses disable the installation and all of its
+grants.
 
 `accepted_by_apns` means only that APNs accepted the provider request. It is not
 proof of presentation or human receipt.

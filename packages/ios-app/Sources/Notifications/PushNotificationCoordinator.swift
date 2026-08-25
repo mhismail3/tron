@@ -594,7 +594,7 @@ final class PushNotificationCoordinator {
                     version: 1,
                     challengeId: challenge.challengeId,
                     challenge: challenge.challenge,
-                    keyId: keyID,
+                    keyId: try Self.canonicalAppAttestCredentialID(keyID),
                     apnsToken: token,
                     route: .current,
                     bindingHash: bindingHash
@@ -829,6 +829,13 @@ final class PushNotificationCoordinator {
             // Permission denial remains authoritative locally. The next connected
             // reconciliation retries removal without blocking chat or pairing.
         }
+    }
+
+    private static func canonicalAppAttestCredentialID(_ keyID: String) throws -> String {
+        guard let credentialID = Data(base64Encoded: keyID), credentialID.count == 32 else {
+            throw PushRegistrationError.invalidCredentialState
+        }
+        return credentialID.base64URLEncodedString()
     }
 
     private static func hash(_ value: String) -> String {

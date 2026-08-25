@@ -714,7 +714,12 @@ reject an empty origin. The Worker admits the signed application environment
 through App Attest: `com.tron.mobile.beta` development and `com.tron.mobile`
 development (`Tron Fast`/`ProdDebug`) use APNs sandbox, while
 `com.tron.mobile` production uses APNs production. iOS cannot select an
-arbitrary topic or environment. Challenge requests retain a short network deadline; the non-blocking App Attest
+arbitrary topic or environment. The App Attest key identifier returned by Apple
+remains verbatim in Keychain and is passed verbatim back to `DCAppAttestService`.
+Only the Worker registration projection decodes its exact 32-byte credential ID
+and re-encodes it as canonical unpadded base64url before computing the client-data
+hash and sending the request; malformed or non-32-byte identifiers fail closed
+before proof generation or relay admission. Challenge requests retain a short network deadline; the non-blocking App Attest
 installation uses a 60-second deadline so a cold mobile/Worker verification path
 does not become a false registration failure. A registration operation retries only
 ambiguous timeout or retryable 5xx twice, with bounded 250/750 ms backoff and a fresh
