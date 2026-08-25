@@ -612,7 +612,7 @@ test("Stable kickstart is fixed and fails closed outside supervised Stable", asy
   }, environment, "darwin", 501), /launchctl refused/);
 });
 
-test("replacement waits for coherent new process and kickstarts only after natural grace", async () => {
+test("replacement waits for coherent new process and kickstarts only with an explicit recovery grace", async () => {
   const oldProcess = { pid: 10, startIdentity: "old" };
   const nextProcess = { pid: 11, startIdentity: "new" };
   const expected = { payloadFingerprint: "a".repeat(64), sourceRevision: "revision", runtimeEpoch: "new-epoch" };
@@ -628,7 +628,22 @@ test("replacement waits for coherent new process and kickstarts only after natur
   assert.deepEqual(natural, { process: nextProcess, health });
   assert.equal(launches, 0);
 
-  let now = 0; let launched = false;
+  // A launchd-owned process can take longer than the old 1.5-second grace to
+  // bind its listener. Default promotion must wait rather than kickstarting
+  // and killing that unobserved startup process.
+  let now = 0;
+  const delayedNatural = await waitForReplacement({
+    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 5_000,
+    readListener: async () => now < 3_000 ? undefined : nextProcess,
+    readHealth: async () => health,
+    launchSupervisor: async () => { launches += 1; },
+    now: () => now,
+    sleep: async (milliseconds) => { now += milliseconds; },
+  });
+  assert.deepEqual(delayedNatural, { process: nextProcess, health });
+  assert.equal(launches, 0);
+
+  now = 0; let launched = false;
   const kicked = await waitForReplacement({
     oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 2_000, naturalGraceMs: 500,
     readListener: async () => launched ? nextProcess : undefined,

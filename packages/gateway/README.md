@@ -159,11 +159,12 @@ build or promotion success; asynchronous helper failures are reported in update 
 planned restart publishes a distinct `draining` phase and may wait without a startup deadline
 for already-accepted runs; only after the exact captured old PID/start identity disappears or
 changes does the bounded startup deadline begin. Readiness requires one different PID/start
-identity stable across an authenticated exact fingerprint/revision/epoch probe. Stable gets a
-short natural relaunch grace, then the supervised helper may issue one fixed launchd kickstart.
-Candidate startup uses the launcher's atomic attempt/commit marker. Recovery restores and
-revalidates the prior selection under that marker's lock, then kickstarts and verifies the restored
-payload directly; it never depends on RPC to the failed Gateway.
+identity stable across an authenticated exact fingerprint/revision/epoch probe. Normal candidate
+startup belongs exclusively to launchd; listener absence cannot authorize a kickstart because a
+live startup process may not have bound yet. Candidate startup uses the launcher's atomic
+attempt/commit marker. After the candidate deadline, recovery restores and revalidates the prior
+selection under that marker's lock, then conditionally kickstarts and verifies the restored payload
+directly; it never depends on RPC to the failed Gateway.
 Debug handoff is exposed as Debug
 origin only when its bounded provenance (candidate version/fingerprint, tested Debug fingerprint,
 source revision, tested runtime epoch, and candidate runtime epoch) matches the verified Stable

@@ -1178,7 +1178,11 @@ export async function waitForReplacement({
   oldEpoch,
   requireEpochChange = true,
   timeoutMs,
-  naturalGraceMs = 1_500,
+  // launchd owns the normal candidate relaunch. A process can be alive but not
+  // listening during startup, so listener absence must never trigger a normal
+  // promotion kickstart. Recovery explicitly opts into its own replacement
+  // boundary after restoring the prior selection.
+  naturalGraceMs = Number.POSITIVE_INFINITY,
   readListener,
   readHealth,
   launchSupervisor,

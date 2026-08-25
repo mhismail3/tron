@@ -149,12 +149,12 @@ scripts/gateway-payload-deploy.mjs rollback --channel stable --command-id <uniqu
 Promotion is serialized per channel, verifies the complete payload fingerprint,
 uses authenticated drain-aware `gateway.restart`, waits without a deadline for the
 exact old PID/start to disappear, and proves one different stable PID/start plus the
-exact candidate health identity. Stable allows a short natural relaunch grace before
-one fixed supervisor kickstart, and never kickstarts over a listener that is already
-starting. On failure it restores and revalidates the prior selection. If the launcher
+exact candidate health identity. Normal candidate startup belongs exclusively to launchd;
+listener absence cannot authorize a kickstart because a live startup process may not have
+bound yet. On failure it restores and revalidates the prior selection. If the launcher
 already restored the exact healthy payload, recovery accepts it without another kill;
-otherwise it kickstarts only an absent or exact captured failed listener and fails closed
-on an unknown listener. Recovery never calls the failed Gateway. The iOS update button invokes
+otherwise, after the candidate deadline, it kickstarts only an absent or exact
+captured failed listener and fails closed on an unknown listener. Recovery never calls the failed Gateway. The iOS update button invokes
 only the LaunchAgent-owned helper; verified artifact promotion is wired, and source
 builds read only the validated `gateway/update-config.json` projection. Source mode uses
 the repository's local TypeScript compiler with a private temporary output directory,
@@ -271,10 +271,12 @@ exit or be replaced, and only then starts bounded exact-candidate health checks.
 Health absence alone is never accepted as a drain transition. Local listener ownership
 uses bounded `lsof` terse PID output plus a separate process-start identity probe; field
 mode is intentionally excluded because macOS always emits an extra file-descriptor record.
-After a short natural relaunch grace, supervised Stable promotion may use one fixed kickstart only when no
-listener exists. On failure it restores and revalidates the prior selection, accepts an
-already-running exact restored payload, or kickstarts only an absent/exact captured
-failed listener; unknown listeners fail closed. Recovery never issues RPC to the failed Gateway. The Mac menu Restart seam uses
+Normal promotion never kickstarts from listener absence: launchd owns candidate relaunch,
+and a live startup process may not have bound its listener yet. On failure the helper
+restores and revalidates the prior selection, accepts an already-running exact restored
+payload, or uses one fixed recovery kickstart only after the candidate deadline and only
+for an absent/exact captured failed listener; unknown listeners fail closed.
+Recovery never issues RPC to the failed Gateway. The Mac menu Restart seam uses
 authenticated `gateway.restart` instead of `launchctl kickstart`. Never automate
 copying into `/Applications`, release deployment, or launchd registration.
 

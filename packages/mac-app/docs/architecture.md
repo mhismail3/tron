@@ -161,10 +161,11 @@ canonical Tron home.
 `promote` records expected identity, atomically publishes `current.json` while
 retaining `previous.json`, and invokes authenticated `gateway.restart`. It waits
 without a deadline for the exact old PID/start to disappear, then requires a different
-PID/start stable across the exact candidate health probe. After a short natural relaunch
-grace, Stable deployment recovery may use only the fixed `com.tron.server` kickstart and
-only when no replacement listener exists. Failure restores and revalidates the prior
-selection, accepts an already-running exact restored payload, or replaces only an absent
+PID/start stable across the exact candidate health probe. Normal candidate startup belongs
+to launchd; listener absence cannot authorize a kickstart while an unbound startup process
+may be live. After the candidate deadline, Stable recovery may use only the fixed
+`com.tron.server` kickstart. Failure restores and revalidates the prior selection, accepts
+an already-running exact restored payload, or replaces only an absent
 or exact captured failed listener. Unknown listeners fail closed. Recovery verifies the
 exact identity without RPC to the failed Gateway; explicit rollback uses the same boundary.
 Stable and dev have independent locks, selections, and payload directories and
