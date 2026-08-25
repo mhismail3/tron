@@ -1,6 +1,8 @@
-import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+import { mkdir, open, rename, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { atomicWriteJson, readJson } from "../util/json.js";
+import { readJson } from "../util/json.js";
 
 const VERSION = 1;
 const MAXIMUM_BYTES = 2 * 1_048_576;
@@ -45,13 +47,13 @@ interface SessionAttentionStoreOptions {
 export class SessionAttentionStore {
   private readonly path: string;
   private readonly mutex = new AsyncMutex();
-  private readonly write: (path: string, value: unknown) => Promise<void>;
+  private readonly write: ((path: string, value: unknown) => Promise<void>) | undefined;
   private readonly now: () => Date;
   private document: SessionAttentionDocument;
 
   constructor(tronHome: string, options: SessionAttentionStoreOptions = {}) {
     this.path = join(tronHome, "gateway", "session-attention.json");
-    this.write = options.write ?? atomicWriteJson;
+    this.write = options.write;
     this.now = options.now ?? (() => new Date());
     // Read-only projections are safe before initialize() in catalog-only test
     // and diagnostic paths. Production mutation remains initialize-gated by the
@@ -187,15 +189,45 @@ export class SessionAttentionStore {
   }
 
   private async commit(document: SessionAttentionDocument): Promise<void> {
-    if (Buffer.byteLength(JSON.stringify(document)) > MAXIMUM_BYTES) {
+    const persisted = `${JSON.stringify(document, null, 2)}\n`;
+    if (Buffer.byteLength(persisted) > MAXIMUM_BYTES) {
       throw new Error("Session attention document exceeds its byte limit");
     }
-    await this.write(this.path, document);
+    if (this.write) await this.write(this.path, document);
+    else await durableWriteAttention(this.path, persisted);
     this.document = document;
   }
 
   private requireDocument(): SessionAttentionDocument {
     return this.document;
+  }
+}
+
+async function durableWriteAttention(path: string, encoded: string): Promise<void> {
+  const directory = dirname(path);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const temporary = `${path}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`;
+  let temporaryExists = false;
+  try {
+    const handle = await open(temporary, "wx", 0o600);
+    temporaryExists = true;
+    try {
+      await handle.writeFile(encoded, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, path);
+    temporaryExists = false;
+    const directoryHandle = await open(directory, "r");
+    try {
+      await directoryHandle.sync();
+    } finally {
+      await directoryHandle.close();
+    }
+  } catch (error) {
+    if (temporaryExists) await rm(temporary, { force: true }).catch(() => {});
+    throw error;
   }
 }
 

@@ -1,7 +1,7 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, open, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RunMarkerStore } from "./run-markers.js";
 
 describe("RunMarkerStore", () => {
@@ -26,6 +26,64 @@ describe("RunMarkerStore", () => {
     expect(await store.interruptedSessionIds()).toEqual(new Set(["session"]));
     await store.clear("session", "operation");
     expect(await store.interruptedSessionIds()).toEqual(new Set());
+  });
+
+  it("syncs marker files and their directory for accepted and exact completion evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-markers-durable-"));
+    const events: string[] = [];
+    const fileSystem = {
+      mkdir,
+      rename: async (...arguments_: Parameters<typeof rename>) => {
+        events.push("rename");
+        await rename(...arguments_);
+      },
+      rm,
+      open: async (...arguments_: Parameters<typeof open>) => {
+        const handle = await open(...arguments_);
+        const isDirectory = arguments_[1] === "r";
+        events.push(isDirectory ? "directory-open" : "temporary-open");
+        return new Proxy(handle, {
+          get(target, property) {
+            if (property === "sync") {
+              return async () => {
+                events.push(isDirectory ? "directory-sync" : "file-sync");
+                await target.sync();
+              };
+            }
+            const value = Reflect.get(target, property, target) as unknown;
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+      },
+    };
+    const store = new RunMarkerStore(root, { fileSystem: fileSystem as never });
+    await store.mark("session", "operation");
+    await store.markAssistantCompletion("session", "operation", "completion", "2026-01-01T00:00:00.000Z");
+    expect(events).toEqual([
+      "temporary-open", "file-sync", "rename", "directory-open", "directory-sync",
+      "temporary-open", "file-sync", "rename", "directory-open", "directory-sync",
+    ]);
+  });
+
+  it("removes an uncommitted temporary marker after a sync failure", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-markers-failure-"));
+    const remove = vi.fn(async () => {});
+    const close = vi.fn(async () => {});
+    const store = new RunMarkerStore(root, {
+      fileSystem: {
+        mkdir: vi.fn(async () => undefined),
+        open: vi.fn(async () => ({
+          writeFile: vi.fn(async () => {}),
+          sync: vi.fn(async () => { throw new Error("injected marker sync failure"); }),
+          close,
+        })),
+        rename: vi.fn(async () => {}),
+        rm: remove,
+      } as never,
+    });
+    await expect(store.mark("session", "operation")).rejects.toThrow("injected marker sync failure");
+    expect(close).toHaveBeenCalledOnce();
+    expect(remove).toHaveBeenCalledWith(expect.stringMatching(/\.tmp$/u), { force: true });
   });
 
   it("cleans lanes after sequential operations across many sessions", async () => {

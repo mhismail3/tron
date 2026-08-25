@@ -227,6 +227,20 @@ struct GatewayProtocolContractTests {
         #expect(!rolling.isUnread)
     }
 
+    @Test("dashboard attention revisions reject negative wire values")
+    func negativeAttentionRevisionsReject() throws {
+        let summaryBase = #"{"id":"session-1","cwd":"/workspace","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:01Z","messageCount":2,"firstMessage":"hello","phase":"idle""#
+        let updateBase = #"{"sessionId":"session-1","summaryRevision":7,"phase":"idle","updatedAt":"2026-01-01T00:00:01Z","messageCount":2,"firstMessage":"hello""#
+        for suffix in [#", "completionRevision":-1,"attentionRevision":0}"#, #", "completionRevision":0,"attentionRevision":-1}"#] {
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder.gateway.decode(SessionSummary.self, from: Data((summaryBase + suffix).utf8))
+            }
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder.gateway.decode(SessionSummaryUpdate.self, from: Data((updateBase + suffix).utf8))
+            }
+        }
+    }
+
     @Test("flat session-tree projection decodes")
     func treeDecodes() throws {
         let data = Data(#"[{"id":"entry","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","preview":"hello","role":"user","depth":0,"childCount":1,"isCurrentPath":true}]"#.utf8)

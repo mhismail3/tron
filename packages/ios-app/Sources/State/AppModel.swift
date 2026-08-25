@@ -117,6 +117,12 @@ final class AppModel {
         let sessions: [SessionSummary]
     }
 
+    private struct DashboardMutationOwner: Sendable {
+        let profileID: String
+        let lifecycleGeneration: Int
+        let connectionID: Int
+    }
+
     private let lifecycle: GatewayLifecycleCoordinator
     var client: GatewayClient { lifecycle.client }
     var profiles: GatewayProfileStore { lifecycle.profiles }
@@ -1518,16 +1524,12 @@ final class AppModel {
     }
 
     func navigationRoute(for session: SessionSummary) async throws -> SessionNavigationRoute {
-        let profileID = session.gatewayProfileID ?? profiles.selected?.id
-        try await activateDashboardProfile(profileID)
-        guard let profileID,
-              let admission = lifecycle.generationAdmission,
-              lifecycle.selectedProfileID == profileID else { throw CancellationError() }
+        let owner = try await activateDashboardProfile(session.gatewayProfileID ?? profiles.selected?.id)
         return SessionNavigationRoute(
             sessionID: session.id,
             editorText: nil,
-            gatewayProfileID: profileID,
-            gatewayLifecycleGeneration: admission.generation
+            gatewayProfileID: owner.profileID,
+            gatewayLifecycleGeneration: owner.lifecycleGeneration
         )
     }
 
@@ -1535,11 +1537,20 @@ final class AppModel {
         _ session: SessionSummary,
         operation: @escaping @MainActor () async throws -> Value
     ) async throws -> Value {
-        try await activateDashboardProfile(session.gatewayProfileID ?? profiles.selected?.id)
-        return try await operation()
+        let owner = try await activateDashboardProfile(session.gatewayProfileID ?? profiles.selected?.id)
+        guard session.gatewayProfileID == nil || session.gatewayProfileID == owner.profileID else {
+            throw CancellationError()
+        }
+        let value = try await operation()
+        guard profiles.selected?.id == owner.profileID,
+              gatewayConnectionID == owner.connectionID,
+              lifecycle.admits(.init(generation: owner.lifecycleGeneration, connectionID: owner.connectionID)) else {
+            throw CancellationError()
+        }
+        return value
     }
 
-    private func activateDashboardProfile(_ profileID: String?) async throws {
+    private func activateDashboardProfile(_ profileID: String?) async throws -> DashboardMutationOwner {
         guard let profileID,
               let profile = profiles.profiles.first(where: { $0.id == profileID }),
               profiles.token(for: profile) != nil else { throw CancellationError() }
@@ -1547,7 +1558,14 @@ final class AppModel {
             await switchGateway(profile)
         }
         guard profiles.selected?.id == profileID,
-              connectionState == .connected else { throw CancellationError() }
+              connectionState == .connected,
+              let admission = lifecycle.generationAdmission,
+              let connectionID = gatewayConnectionID else { throw CancellationError() }
+        return DashboardMutationOwner(
+            profileID: profileID,
+            lifecycleGeneration: admission.generation,
+            connectionID: connectionID
+        )
     }
 
     func createSession(cwd: String) async throws -> SessionNavigationRoute {

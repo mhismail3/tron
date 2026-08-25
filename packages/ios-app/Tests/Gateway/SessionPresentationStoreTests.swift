@@ -1407,6 +1407,65 @@ struct SessionPresentationStoreTests {
         }
     }
 
+    @Test("a terminal suffix racing fresh mount installs atomically while attention keeps the open revision")
+    func terminalSuffixRacingFreshMount() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847, machineId: "machine", deviceId: "device")
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            var baseline = try SessionScenarioBuilder(seed: 8_906).openingTail(targetEncodedBytes: 4_096)
+            baseline.phase = .running
+            baseline.eventSequence = 20
+            var terminal = baseline
+            terminal.phase = .idle
+            terminal.eventSequence = 21
+            terminal.revision += 1
+            terminal.operation = nil
+            let store = SessionPresentationStore(client: client, performanceSignposts: SystemPerformanceSignposts.shared)
+            let opening = Task { try await store.open(baseline.sessionId) }
+            try await socket.waitUntilSent(count: 2)
+            var request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[1])
+            let openID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(openID), "ok": .bool(true),
+                "result": .object([
+                    "session": try JSONValue.encode(baseline), "syncToken": .string("sync"),
+                    "subscriptionToken": .string("subscription"), "completionRevision": .number(7),
+                ]),
+            ])))
+            try await socket.waitUntilSent(count: 3)
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[2])
+            let syncID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(syncID), "ok": .bool(true),
+                "result": .object(["synchronized": .bool(true)]),
+            ])))
+            await store.admit(GatewayEvent(
+                type: "event",
+                topic: "session.snapshot",
+                sessionId: baseline.sessionId,
+                payload: try JSONValue.encode(terminal)
+            ))
+            let attention = try await nextAttentionRead(socket, startingAt: 3)
+            #expect(attention.request.objectValue?["params"]?.objectValue?["throughCompletionRevision"] == .number(7))
+            #expect(store.mountedTarget?.sessionID == baseline.sessionId)
+            #expect(store.snapshot?.eventSequence == 21)
+            #expect(store.snapshot?.phase == .idle)
+            let attentionID = try #require(attention.request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(attentionID), "ok": .bool(true),
+                "result": .object(["isUnread": .bool(false)]),
+            ])))
+            _ = try await opening.value
+            await client.close()
+        }
+    }
+
     @Test("active fresh open publishes a sparse fitted tail without mandatory history catch-up")
     func freshOpenPublishesSparseActiveTailImmediately() async throws {
         try await withTestWatchdog { @MainActor in
@@ -1522,8 +1581,11 @@ struct SessionPresentationStoreTests {
         }
     }
 
-    @Test("an older Gateway without attention acknowledgement does not block open")
-    func unsupportedAttentionReadIsNoop() async throws {
+    @Test(
+        "an older Gateway without attention acknowledgement does not block open",
+        arguments: ["unsupported", "not_found", "method_not_found"]
+    )
+    func unsupportedAttentionReadIsNoop(code: String) async throws {
         try await withTestWatchdog { @MainActor in
             let socket = ScriptedGatewaySocket()
             let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
@@ -1553,7 +1615,7 @@ struct SessionPresentationStoreTests {
             let attentionID = try #require(request.objectValue?["id"]?.stringValue)
             await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("response"), "id": .string(attentionID), "ok": .bool(false),
-                "error": .object(["code": .string("not_found"), "message": .string("older gateway"), "retryable": .bool(false)]),
+                "error": .object(["code": .string(code), "message": .string("older gateway"), "retryable": .bool(false)]),
             ])))
             _ = try await opening.value
             #expect(await socket.sentFrames().count == attention.index + 1)

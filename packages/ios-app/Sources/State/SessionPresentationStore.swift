@@ -351,31 +351,12 @@ final class SessionPresentationStore {
            let failure = terminalSynchronizationFailures.removeValue(forKey: requested) {
             throw failure
         }
-        guard pendingTarget == requested,
-              synchronized,
+        guard synchronized,
+              owns(requested),
               subscribedSessionID == sessionID,
-              let installedTarget = subscriptionTarget,
-              installedTarget.sessionID == sessionID else {
+              subscriptionTarget == requested else {
             throw GatewayFailure(code: "sync_failed", message: "Tron could not synchronize this session.", retryable: true, details: nil)
         }
-        // A lifecycle reconnect may have become the synchronization leader just
-        // before this visible route began opening. Transfer that completed
-        // subscription to the pending presentation instead of issuing a second
-        // session.open or treating the ownership handoff as unavailable.
-        if installedTarget != requested {
-            guard installedTarget == target, isAuthoritative else {
-                throw GatewayFailure(code: "sync_failed", message: "Tron could not synchronize this session.", retryable: true, details: nil)
-            }
-            subscriptionTarget = requested
-        }
-        mount(requested)
-        isAuthoritative = true
-        // Composer presentation authority must mount before deferred editor
-        // effects publish for this exact fresh presentation.
-        delegate?.sessionPresentationStoreDidOpen(requested)
-        if let snapshot { delegate?.sessionPresentationStoreDidPublishSnapshot(snapshot, target: requested) }
-        publish(deferredEffectsByTarget.removeValue(forKey: requested) ?? [], target: requested)
-        schedulePendingAttentionRead(targetOverride: requested)
         didOpen = true
         result = .success
         return requested.generation
@@ -1229,10 +1210,6 @@ final class SessionPresentationStore {
                 retriesInvalidResponse: attempt < 2
             ) {
             case .success:
-                synchronization.complete(lease, outcome: true)
-                if case .reconnect = lease.intent, pendingTarget?.sessionID != sessionID {
-                    schedulePendingAttentionRead()
-                }
                 delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope)
                 delegate?.sessionPresentationStoreCheckpointCache()
                 return true
@@ -1481,7 +1458,7 @@ final class SessionPresentationStore {
                 result = .discarded
                 return .retry
             }
-            guard let installedTarget = synchronizationTarget(
+            guard let synchronizationTarget = synchronizationTarget(
                 for: lease.intent,
                 sessionID: sessionID
             ), ownsSynchronizationAttempt(
@@ -1497,6 +1474,15 @@ final class SessionPresentationStore {
                 result = .discarded
                 return .failed(showCatchUpNotice: false)
             }
+            let handoffTarget: SessionPresentationIdentity? = if case .reconnect = lease.intent,
+                                                                 let pendingTarget,
+                                                                 pendingTarget.sessionID == sessionID,
+                                                                 owns(pendingTarget) {
+                pendingTarget
+            } else {
+                nil
+            }
+            let installedTarget = handoffTarget ?? synchronizationTarget
             _ = prepareSecondaryProjectionForRuntimeInstallation(installed)
             mountedTranscriptWindow = if case .freshPresentation = mode {
                 nil
@@ -1524,10 +1510,33 @@ final class SessionPresentationStore {
             )
             switch lease.intent {
             case .presentation:
-                deferredEffectsByTarget[installedTarget, default: []].append(contentsOf: replayEffects)
-            case .reconnect:
+                // Final admission, authority installation, fresh mount, and
+                // lease release are one MainActor turn. No event can escape the
+                // quarantine between these ownership transitions.
+                mount(installedTarget)
+                isAuthoritative = true
+                delegate?.sessionPresentationStoreDidOpen(installedTarget)
+                delegate?.sessionPresentationStoreDidPublishSnapshot(installed, target: installedTarget)
                 publish(replayEffects, target: installedTarget)
+                schedulePendingAttentionRead(targetOverride: installedTarget)
+            case .reconnect:
+                if handoffTarget != nil {
+                    // A visible open joined this reconnect while its quarantine
+                    // was active. Transfer the admitted cut before releasing the
+                    // shared lease so no replay effect can escape under the old
+                    // presentation owner.
+                    mount(installedTarget)
+                    isAuthoritative = true
+                    delegate?.sessionPresentationStoreDidOpen(installedTarget)
+                    delegate?.sessionPresentationStoreDidPublishSnapshot(installed, target: installedTarget)
+                    publish(replayEffects, target: installedTarget)
+                    schedulePendingAttentionRead(targetOverride: installedTarget)
+                } else {
+                    publish(replayEffects, target: installedTarget)
+                    if pendingTarget?.sessionID != sessionID { schedulePendingAttentionRead() }
+                }
             }
+            synchronization.complete(lease, outcome: true)
             provisionalToken = nil
             result = .success
             metrics = PerformanceMetrics(itemCount: replay.count)

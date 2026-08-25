@@ -72,11 +72,26 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // successful terminal leaf committed after the persisted reconciliation
     // cursor, but attention admission/marker cleanup did not.
     const markerStore = (fixture.registry as unknown as {
-      markers: { mark: (sessionId: string, operationId: string) => Promise<void> };
+      markers: {
+        mark: (sessionId: string, operationId: string) => Promise<void>;
+        markAssistantCompletion: (
+          sessionId: string,
+          operationId: string,
+          completionId: string,
+          completedAt: string,
+        ) => Promise<void>;
+      };
     }).markers;
-    await markerStore.mark(fixture.manager.getSessionId(), "crashed-operation");
-    await new Promise((resolve) => setTimeout(resolve, 2));
+    const sessionId = fixture.manager.getSessionId();
+    await markerStore.mark(sessionId, "crashed-operation");
     fixture.manager.appendMessage(fauxAssistantMessage("completed immediately before crash"));
+    const completion = fixture.manager.getLeafEntry()!;
+    await markerStore.markAssistantCompletion(
+      sessionId,
+      "crashed-operation",
+      completion.id,
+      completion.timestamp,
+    );
     await fixture.registry.dispose();
 
     const restarted = new RuntimeRegistry({
@@ -95,6 +110,87 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       .toMatchObject({ completionRevision: 1, isUnread: true });
     expect((await restarted.catalog("all")).sessions.find((row) => row.id === fixture.manager.getSessionId()))
       .toMatchObject({ phase: "idle", isUnread: true });
+  });
+
+  it("does not infer a completion from an unstamped accepted marker after restart", async () => {
+    const fixture = await coldFixture("attention-unstamped-marker");
+    const sessionId = fixture.manager.getSessionId();
+    const markerStore = (fixture.registry as unknown as {
+      markers: { mark: (sessionId: string, operationId: string) => Promise<void> };
+    }).markers;
+    await markerStore.mark(sessionId, "accepted-without-stamp");
+    fixture.manager.appendMessage(fauxAssistantMessage("unowned successful leaf"));
+    await fixture.registry.dispose();
+
+    const restarted = new RuntimeRegistry({
+      agentDir: fixture.agentDir,
+      tronHome: join(fixture.root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(fixture.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(restarted);
+    await restarted.initialize();
+    expect(restarted.attentionProjection(sessionId)).toEqual({
+      completionRevision: 0,
+      attentionRevision: 0,
+      isUnread: false,
+    });
+  });
+
+  it("recovers the exact stamped completion off-leaf and never infers later markerless completions", async () => {
+    const fixture = await coldFixture("attention-exact-marker");
+    const sessionId = fixture.manager.getSessionId();
+    const markerStore = (fixture.registry as unknown as {
+      markers: {
+        mark: (sessionId: string, operationId: string) => Promise<void>;
+        markAssistantCompletion: (
+          sessionId: string,
+          operationId: string,
+          completionId: string,
+          completedAt: string,
+        ) => Promise<void>;
+      };
+    }).markers;
+    await markerStore.mark(sessionId, "stamped-operation");
+    fixture.manager.appendMessage(fauxAssistantMessage("owned completion"));
+    const owned = fixture.manager.getLeafEntry()!;
+    await markerStore.markAssistantCompletion(sessionId, "stamped-operation", owned.id, owned.timestamp);
+    fixture.manager.appendMessage(fauxAssistantMessage("newer markerless completion"));
+    await fixture.registry.dispose();
+
+    const restarted = new RuntimeRegistry({
+      agentDir: fixture.agentDir,
+      tronHome: join(fixture.root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(fixture.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(restarted);
+    await restarted.initialize();
+    expect(restarted.attentionProjection(sessionId)).toMatchObject({ completionRevision: 1, isUnread: true });
+
+    await restarted.dispose();
+    fixture.manager.appendMessage(fauxAssistantMessage("still markerless"));
+    const secondRestart = new RuntimeRegistry({
+      agentDir: fixture.agentDir,
+      tronHome: join(fixture.root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(fixture.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(secondRestart);
+    await secondRestart.initialize();
+    expect(secondRestart.attentionProjection(sessionId).completionRevision).toBe(1);
   });
 
   it("merges a suspended attention write into latest summary facts and cannot race deletion", async () => {
@@ -138,6 +234,38 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       isUnread: false,
     });
     expect((await fixture.registry.catalog("all")).sessions.find((row) => row.id === sessionId)).toBeUndefined();
+  });
+
+  it("never holds the attention lane while deletion waits for the slot lane", async () => {
+    const fixture = await coldFixture("attention-delete-rekey-order");
+    const sessionId = fixture.manager.getSessionId();
+    const slot = await fixture.registry.acquire(sessionId);
+    const originalDispose = slot.dispose.bind(slot);
+    let enteredDispose!: () => void;
+    let releaseDispose!: () => void;
+    const disposeEntered = new Promise<void>((resolve) => { enteredDispose = resolve; });
+    const disposeBarrier = new Promise<void>((resolve) => { releaseDispose = resolve; });
+    vi.spyOn(slot, "dispose").mockImplementation(async () => {
+      enteredDispose();
+      await disposeBarrier;
+      return originalDispose();
+    });
+
+    const deleting = fixture.registry.delete(sessionId);
+    await disposeEntered;
+    const hooks = (fixture.registry as unknown as { hooks: () => {
+      rekey: (
+        previousId: string,
+        nextId: string,
+        slot: typeof slot,
+        disposition: "preserve",
+        commit: () => void,
+      ) => Promise<void>;
+    } }).hooks();
+    await expect(hooks.rekey(sessionId, "replacement", slot, "preserve", () => {}))
+      .rejects.toMatchObject({ code: "busy" });
+    releaseDispose();
+    await deleting;
   });
 
   it("projects empty live sessions until deletion, persistence, eviction, or restart", async () => {
@@ -1778,7 +1906,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(slot.snapshot().extensionPresentation.hostEpoch).not.toBe(thirdEpoch);
   });
 
-  it("does not let an older settlement hide an extension-triggered continuation", async () => {
+  it("serializes extension continuation ownership through a transient attention failure", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-settlement-overlap-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -1831,6 +1959,13 @@ export default function (pi) {
     expect(slot.sessionFile?.startsWith(join(agentDir, "sessions"))).toBe(true);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
+    const attention = (registry as unknown as {
+      attention: { complete: (sessionId: string, completionId: string) => Promise<unknown> };
+    }).attention;
+    const originalComplete = attention.complete.bind(attention);
+    const complete = vi.spyOn(attention, "complete")
+      .mockRejectedValueOnce(new Error("injected overlapping attention failure"))
+      .mockImplementation(originalComplete);
     await slot.prompt("start");
 
     await waitUntil(() => faux.state.callCount === 2);
@@ -1840,6 +1975,11 @@ export default function (pi) {
     expect(snapshots.slice(continuationSnapshotIndex).every((snapshot) => snapshot.phase === "running" && snapshot.operation)).toBe(true);
     await waitUntil(() => !slot.isBusy);
     expect(slot.snapshot()).toMatchObject({ phase: "idle" });
+    expect(registry.attentionProjection(slot.id).completionRevision).toBe(2);
+    const completionIds = complete.mock.calls.map(([, completionId]) => completionId);
+    expect(completionIds).toHaveLength(3);
+    expect(completionIds[0]).toBe(completionIds[1]);
+    expect(completionIds[2]).not.toBe(completionIds[1]);
     expect(snapshots.some((snapshot) => snapshot.phase === "running" && snapshot.operation)).toBe(true);
   });
 
@@ -2406,6 +2546,53 @@ export default function (pi) {
     await waitUntil(() => !slot.isBusy);
     expect(slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
     expect(registry.activeSessionIds()).not.toContain(slot.id);
+  });
+
+  it("retains one exact completion intent across repeated persistence failure and rejects a second prompt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-attention-settlement-failure-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const faux = fauxProvider({ provider: "tron-attention-failure", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      fauxAssistantMessage("first completion"),
+      fauxAssistantMessage("must not be admitted"),
+    ]);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => {
+        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+        runtime.registerNativeProvider(faux.provider);
+        return runtime;
+      },
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const attention = (registry as unknown as {
+      attention: { complete: (sessionId: string, completionId: string) => Promise<unknown> };
+    }).attention;
+    const complete = vi.spyOn(attention, "complete").mockRejectedValue(new Error("attention persistence failed"));
+
+    await slot.prompt("first");
+    await waitUntil(() => slot.snapshot().phase === "interrupted");
+    expect(complete).toHaveBeenCalledTimes(3);
+    await expect(slot.prompt("second")).rejects.toMatchObject({ code: "busy", retryable: true });
+    expect(complete.mock.calls.map(([, completionId]) => completionId))
+      .toEqual(Array(3).fill(complete.mock.calls[0]![1]));
+
+    complete.mockRestore();
+    await slot.reconcileAttention();
+    expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 1, isUnread: true });
+    expect(slot.snapshot().phase).toBe("idle");
   });
 
   it("cleans up queued manual compaction state when canonical compaction fails", async () => {
@@ -3360,7 +3547,10 @@ export default function (pi) {
       broadcast: () => {},
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
-      sessionRekeyed: (previousId, nextId) => rekeys.push([previousId, nextId]),
+      sessionRekeyed: (previousId, nextId) => {
+        rekeys.push([previousId, nextId]);
+        throw new Error("injected post-commit observer failure");
+      },
     });
     registries.push(registry);
     await registry.initialize();
@@ -3373,6 +3563,22 @@ export default function (pi) {
     expect(registry.attentionProjection(original).isUnread).toBe(true);
     const userEntry = slot.snapshot().transcript.find((item) => item.role === "user");
     expect(userEntry).toBeDefined();
+    registry.subscribe("fork-subscriber", original);
+    const internals = registry as unknown as {
+      attention: { assertAbsent: (sessionId: string) => Promise<void> };
+      slots: Map<string, typeof slot>;
+      latestSummaries: Map<string, SessionSummaryUpdate>;
+    };
+    const assertAbsent = vi.spyOn(internals.attention, "assertAbsent")
+      .mockRejectedValueOnce(new Error("injected attention prepare failure"));
+    await expect(slot.fork(userEntry!.id, "at")).rejects.toThrow("injected attention prepare failure");
+    expect(slot.id).toBe(original);
+    expect(internals.slots.get(original)).toBe(slot);
+    expect([...internals.slots.values()].filter((candidate) => candidate === slot)).toHaveLength(1);
+    expect(registry.isSubscribed("fork-subscriber", original)).toBe(true);
+    expect(internals.latestSummaries.get(original)?.sessionId).toBe(original);
+    expect(registry.attentionProjection(original).isUnread).toBe(true);
+    assertAbsent.mockRestore();
 
     const fork = await slot.fork(userEntry!.id, "at");
     expect(fork.sessionId).not.toBe(original);

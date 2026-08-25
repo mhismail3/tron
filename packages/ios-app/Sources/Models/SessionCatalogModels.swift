@@ -70,8 +70,16 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         firstMessage = try container.decode(String.self, forKey: .firstMessage)
         phase = try container.decode(SessionPhase.self, forKey: .phase)
         summaryRevision = try container.decodeIfPresent(Int.self, forKey: .summaryRevision)
-        completionRevision = try container.decodeIfPresent(Int.self, forKey: .completionRevision) ?? 0
-        attentionRevision = try container.decodeIfPresent(Int.self, forKey: .attentionRevision) ?? 0
+        let decodedCompletionRevision = try container.decodeIfPresent(Int.self, forKey: .completionRevision) ?? 0
+        let decodedAttentionRevision = try container.decodeIfPresent(Int.self, forKey: .attentionRevision) ?? 0
+        guard decodedCompletionRevision >= 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .completionRevision, in: container, debugDescription: "Invalid completion revision")
+        }
+        guard decodedAttentionRevision >= 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .attentionRevision, in: container, debugDescription: "Invalid attention revision")
+        }
+        completionRevision = decodedCompletionRevision
+        attentionRevision = decodedAttentionRevision
         isUnread = try container.decodeIfPresent(Bool.self, forKey: .isUnread) ?? false
         gatewayProfileID = nil
         gatewayProfileLabel = nil
@@ -164,8 +172,16 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
         updatedAt = try container.decode(String.self, forKey: .updatedAt)
         messageCount = try container.decode(Int.self, forKey: .messageCount)
         firstMessage = try container.decode(String.self, forKey: .firstMessage)
-        completionRevision = try container.decodeIfPresent(Int.self, forKey: .completionRevision) ?? 0
-        attentionRevision = try container.decodeIfPresent(Int.self, forKey: .attentionRevision) ?? 0
+        let decodedCompletionRevision = try container.decodeIfPresent(Int.self, forKey: .completionRevision) ?? 0
+        let decodedAttentionRevision = try container.decodeIfPresent(Int.self, forKey: .attentionRevision) ?? 0
+        guard decodedCompletionRevision >= 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .completionRevision, in: container, debugDescription: "Invalid completion revision")
+        }
+        guard decodedAttentionRevision >= 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .attentionRevision, in: container, debugDescription: "Invalid attention revision")
+        }
+        completionRevision = decodedCompletionRevision
+        attentionRevision = decodedAttentionRevision
         isUnread = try container.decodeIfPresent(Bool.self, forKey: .isUnread) ?? false
     }
 }

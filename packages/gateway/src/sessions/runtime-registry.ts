@@ -14,7 +14,7 @@ import { BlobStore } from "./blob-store.js";
 import { RunMarkerStore, type RunMarkerEvidence } from "./run-markers.js";
 import {
   RuntimeSlot,
-  successfulAssistantCompletion,
+  completionOwnedByMarker,
   type CanonicalAssistantCompletion,
   type SessionAttentionRebindDisposition,
   type SessionBroadcast,
@@ -119,6 +119,7 @@ export class RuntimeRegistry {
   private readonly summaryRevisions = new Map<string, number>();
   private readonly latestSummaries = new Map<string, SessionSummaryUpdate>();
   private readonly pendingAttentionRemovals = new Set<string>();
+  private readonly deletingSessionIds = new Set<string>();
   private ambiguousSessionIds = new Set<string>();
   private readonly trustReloadProjects = new Set<string>();
   private revision = 0;
@@ -189,28 +190,20 @@ export class RuntimeRegistry {
   }
 
   private async reconcileCanonicalAttention(markerEvidence: ReadonlyMap<string, RunMarkerEvidence>): Promise<void> {
-    const cursor = this.attention.reconciliationCursor();
     const scanBoundary = new Date().toISOString();
-    // Recovery uses a bounded SDK file listing without publishing or warming the
-    // Gateway catalog acquisition cache. Catalog semantics and first-list costs
-    // therefore remain unchanged.
+    // Canonical JSONL alone never creates unread state. Recovery considers only
+    // exact durable run-marker ownership and does not warm the catalog cache.
     const infos = await this.sessionInfos();
     const retainedIDs = new Set(infos.map((info) => info.id));
     await this.attention.prune(retainedIDs);
     for (const info of infos) {
       const marker = markerEvidence.get(info.id);
-      if (info.modified.toISOString() <= cursor && marker?.assistantCompletionId === undefined) continue;
+      if (!marker) continue;
       const manager = SessionManager.open(info.path);
-      // Recovery admits only a successful terminal leaf. A prior successful
-      // response followed by a newer user/tool/maintenance entry cannot settle
-      // the newer run marker.
-      const completion = successfulAssistantCompletion(manager.getLeafEntry());
-      if (!completion || completion.completedAt <= cursor) continue;
+      const completion = completionOwnedByMarker(manager, marker);
+      if (!completion) continue;
       await this.attention.complete(info.id, completion.id);
-      const markerOwnsCompletion = marker?.assistantCompletionId === completion.id
-        || (marker?.assistantCompletionId === undefined && marker !== undefined
-          && marker.acceptedAt <= completion.completedAt);
-      if (marker && markerOwnsCompletion) await this.markers.clear(info.id, marker.operationId);
+      await this.markers.clear(info.id, marker.operationId);
     }
     await this.attention.advanceReconciliationCursor(scanBoundary);
   }
@@ -230,9 +223,8 @@ export class RuntimeRegistry {
       assistantResponseCompleted: async (
         sessionId: string,
         completion: CanonicalAssistantCompletion,
-        recovery: boolean,
+        _recovery: boolean,
       ) => this.attentionLane.run(async () => {
-        if (recovery && completion.completedAt <= this.attention.reconciliationCursor()) return;
         const result = await this.attention.complete(sessionId, completion.id);
         if (result.changed) await this.publishAttentionSummary(sessionId, result.projection);
       }),
@@ -270,15 +262,20 @@ export class RuntimeRegistry {
         nextId: string,
         slot: RuntimeSlot,
         disposition: SessionAttentionRebindDisposition,
+        commitIdentity: () => void,
       ) => this.attentionLane.run(async () => {
         await this.flushPendingAttentionRemovals();
+        if (this.deletingSessionIds.has(previousId) || this.deletingSessionIds.has(nextId)) {
+          throw new GatewayError("busy", "Session identity is being deleted", true);
+        }
         const existing = this.slots.get(nextId);
         if (existing && existing !== slot) throw new GatewayError("conflict", "Replacement session is already active");
-        // Persist the fallible attention disposition before changing runtime
-        // ownership. A failed write leaves the old identity wholly authoritative.
+        // Complete every fallible attention write while the slot and registry
+        // still own previousId, then commit both in one synchronous turn.
         if (disposition === "migrate") await this.attention.rekey(previousId, nextId);
         if (disposition === "reset" || disposition === "discard") await this.attention.assertAbsent(nextId);
         if (disposition === "discard") await this.attention.remove(previousId);
+        commitIdentity();
         if (this.slots.get(previousId) === slot) this.slots.delete(previousId);
         this.slots.set(nextId, slot);
         if (disposition === "migrate" || disposition === "discard") {
@@ -303,7 +300,9 @@ export class RuntimeRegistry {
             this.subscribers.set(nextId, subscribers);
           }
         }
-        this.options.sessionRekeyed?.(previousId, nextId);
+        // Identity and map ownership are already committed. Observers are
+        // notification-only and cannot trigger the slot's pre-commit rollback.
+        try { this.options.sessionRekeyed?.(previousId, nextId); } catch {}
         this.invalidateCatalogAcquisition();
         this.revision += 1;
         this.options.sessionListChanged();
@@ -350,6 +349,9 @@ export class RuntimeRegistry {
   async setAttention(sessionId: string, unread: boolean, throughCompletionRevision?: number): Promise<SessionAttentionProjection> {
     return this.attentionLane.run(async () => {
       await this.flushPendingAttentionRemovals();
+      if (this.deletingSessionIds.has(sessionId)) {
+        throw new GatewayError("not_found", "Tron session was not found");
+      }
       const catalog = await this.catalog("all");
       const summary = catalog.sessions.find((session) => session.id === sessionId);
       if (!summary) throw new GatewayError("not_found", "Tron session was not found");
@@ -1494,48 +1496,63 @@ export class RuntimeRegistry {
   }
 
   async delete(sessionId: string): Promise<void> {
-    await this.mutex.run(() => this.attentionLane.run(async () => {
-      const catalog = await this.catalogSnapshot("all");
-      this.requireUnambiguousSessionId(sessionId);
-      const summary = catalog.sessions.find((session) => session.id === sessionId);
-      if (!summary) throw new GatewayError("not_found", "Tron session was not found");
-      if (await this.projectTrustReloading(summary.cwd)) {
-        throw new GatewayError("busy", "Project trust is being reconfigured", true);
-      }
-      const slot = this.slots.get(sessionId);
-      if (slot?.isBusy) throw new GatewayError("busy", "Stop the active session before deleting it");
-      if (summary.kind === "subagent") {
-        throw new GatewayError("conflict", "Delete the originating user session instead of mutating its runtime-owned subagent session");
-      }
-      const info = catalog.infos.find((candidate) => candidate.id === sessionId);
-      if (!info && (!slot || slot.persistedSessionFile !== undefined)) {
-        throw new GatewayError("not_found", "Tron session was removed before it could be deleted");
-      }
-      this.cancelIdleEviction(sessionId, slot);
-      if (slot) await slot.dispose();
-      this.slots.delete(sessionId);
-      this.subscribers.delete(sessionId);
-      this.summaryRevisions.delete(sessionId);
-      this.latestSummaries.delete(sessionId);
-      this.interrupted.delete(sessionId);
-      await this.markers.clear(sessionId);
-      if (info) {
-        // Canonical deletion commits before projection cleanup. If cleanup fails,
-        // restart reconciliation prunes the now-unowned record; it can never
-        // resurrect catalog membership or publish a summary.
-        await rm(info.path, { force: true });
-        if (!(await this.removeIndexedCatalogFile(info.path))) this.invalidateCatalogAcquisition();
-      } else {
-        this.invalidateCatalogAdmission();
-      }
-      this.revision += 1;
-      this.options.sessionListChanged();
-      try {
-        await this.attention.remove(sessionId);
-      } catch {
-        this.pendingAttentionRemovals.add(sessionId);
-      }
-    }));
+    await this.attentionLane.run(async () => {
+      await this.flushPendingAttentionRemovals();
+      if (this.deletingSessionIds.has(sessionId)) throw new GatewayError("busy", "Session deletion is already in progress", true);
+      this.deletingSessionIds.add(sessionId);
+    });
+    let deleted = false;
+    try {
+      await this.mutex.run(async () => {
+        const catalog = await this.catalogSnapshot("all");
+        this.requireUnambiguousSessionId(sessionId);
+        const summary = catalog.sessions.find((session) => session.id === sessionId);
+        if (!summary) throw new GatewayError("not_found", "Tron session was not found");
+        if (await this.projectTrustReloading(summary.cwd)) {
+          throw new GatewayError("busy", "Project trust is being reconfigured", true);
+        }
+        const slot = this.slots.get(sessionId);
+        if (slot?.isBusy) throw new GatewayError("busy", "Stop the active session before deleting it");
+        if (summary.kind === "subagent") {
+          throw new GatewayError("conflict", "Delete the originating user session instead of mutating its runtime-owned subagent session");
+        }
+        const info = catalog.infos.find((candidate) => candidate.id === sessionId);
+        if (!info && (!slot || slot.persistedSessionFile !== undefined)) {
+          throw new GatewayError("not_found", "Tron session was removed before it could be deleted");
+        }
+        this.cancelIdleEviction(sessionId, slot);
+        if (slot) await slot.dispose();
+        this.slots.delete(sessionId);
+        this.subscribers.delete(sessionId);
+        this.summaryRevisions.delete(sessionId);
+        this.latestSummaries.delete(sessionId);
+        this.interrupted.delete(sessionId);
+        await this.markers.clear(sessionId);
+        if (info) {
+          // Canonical deletion commits before projection cleanup. If cleanup fails,
+          // restart reconciliation prunes the now-unowned record; it can never
+          // resurrect catalog membership or publish a summary.
+          await rm(info.path, { force: true });
+          if (!(await this.removeIndexedCatalogFile(info.path))) this.invalidateCatalogAcquisition();
+        } else {
+          this.invalidateCatalogAdmission();
+        }
+        this.revision += 1;
+        this.options.sessionListChanged();
+        deleted = true;
+      });
+    } finally {
+      await this.attentionLane.run(async () => {
+        if (deleted) {
+          try {
+            await this.attention.remove(sessionId);
+          } catch {
+            this.pendingAttentionRemovals.add(sessionId);
+          }
+        }
+        this.deletingSessionIds.delete(sessionId);
+      });
+    }
   }
 
   private requireLiveSlotCapacity(): void {

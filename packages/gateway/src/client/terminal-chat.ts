@@ -7,7 +7,7 @@ import type { ContentPart, JsonValue, SessionSnapshot, TranscriptItem } from "..
 import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
 import { readLocalCredential } from "./local-credential.js";
 
-interface SnapshotEnvelope { session: SessionSnapshot; syncToken: string; subscriptionToken: string; completionRevision?: number }
+export interface SnapshotEnvelope { session: SessionSnapshot; syncToken: string; subscriptionToken: string; completionRevision?: number }
 interface SessionMutationEnvelope { sessionId: string }
 interface SessionListEnvelope { sessions: Array<{ id: string; name?: string; firstMessage: string; cwd: string }>; nextCursor?: string; listRevision: number }
 
@@ -65,18 +65,36 @@ export async function connectResilient(client: GatewayProtocolClient): Promise<v
   }
 }
 
-async function synchronize(client: GatewayProtocolClient, sessionId: string): Promise<SnapshotEnvelope> {
+async function acknowledgeTerminalAttention(
+  client: Pick<GatewayProtocolClient, "request">,
+  sessionId: string,
+  completionRevision: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await client.request("session.attention.read", {
+        sessionId,
+        throughCompletionRevision: completionRevision,
+      }, 8_000);
+      return;
+    } catch (error) {
+      if (error instanceof GatewayClientError
+        && ["unsupported", "not_found", "method_not_found"].includes(error.code)) return;
+      if (!(error instanceof GatewayClientError) || !error.retryable || attempt === 2) return;
+    }
+  }
+}
+
+/** Install and render the synchronized cut before best-effort attention I/O. */
+export async function synchronizeTerminalSession(
+  client: Pick<GatewayProtocolClient, "request">,
+  sessionId: string,
+  install: (baseline: SnapshotEnvelope) => void,
+): Promise<SnapshotEnvelope> {
   const baseline = await client.request("session.open", { sessionId }) as unknown as SnapshotEnvelope;
   await client.request("session.sync", { sessionId, syncToken: baseline.syncToken });
-  try {
-    await client.request("session.attention.read", {
-      sessionId,
-      throughCompletionRevision: baseline.completionRevision ?? 0,
-    });
-  } catch (error) {
-    if (!(error instanceof GatewayClientError)
-      || !["unsupported", "not_found", "method_not_found"].includes(error.code)) throw error;
-  }
+  install(baseline);
+  void acknowledgeTerminalAttention(client, sessionId, baseline.completionRevision ?? 0);
   return baseline;
 }
 
@@ -182,16 +200,22 @@ export async function runTerminalChat(): Promise<void> {
     }
   }
 
-  let baseline = await synchronize(client, sessionId);
-  let snapshot = baseline.session;
-  let subscriptionToken = baseline.subscriptionToken;
-  let rendered = assistantText(snapshot);
-  let cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
+  let snapshot!: SessionSnapshot;
+  let subscriptionToken!: string;
+  let rendered = "";
+  let cursor!: { runtimeGeneration: string; eventSequence: number };
   let awaitingOperation: string | undefined;
   let reconciledSettledOperation: string | undefined;
   let pendingCommand: { method: string; commandId: string } | undefined;
   let settledResolve: (() => void) | undefined;
-  process.stdout.write(`Attached to Tron session ${snapshot.sessionId} (${snapshot.cwd})\n`);
+  await synchronizeTerminalSession(client, sessionId, (installed) => {
+    snapshot = installed.session;
+    subscriptionToken = installed.subscriptionToken;
+    rendered = assistantText(snapshot);
+    cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
+    process.stdout.write(`Attached to Tron session ${snapshot.sessionId} (${snapshot.cwd})\n`);
+    if (rendered) process.stdout.write(rendered);
+  });
 
   let unsubscribers: Array<() => void> = [];
   let reconnecting: Promise<void> | undefined;
@@ -247,14 +271,15 @@ export async function runTerminalChat(): Promise<void> {
         client = new GatewayProtocolClient(socketURL, await readLocalCredential(tronHome));
         try {
           await connectResilient(client);
-          baseline = await synchronize(client, sessionId);
-          snapshot = baseline.session;
-          subscriptionToken = baseline.subscriptionToken;
-          cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
-          const current = assistantText(snapshot);
-          const delta = renderDelta(rendered, current);
-          if (awaitingOperation && delta) process.stdout.write(delta);
-          rendered = current;
+          await synchronizeTerminalSession(client, sessionId, (installed) => {
+            snapshot = installed.session;
+            subscriptionToken = installed.subscriptionToken;
+            cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
+            const current = assistantText(snapshot);
+            const delta = renderDelta(rendered, current);
+            if (awaitingOperation && delta) process.stdout.write(delta);
+            rendered = current;
+          });
           attachListeners();
           process.stderr.write("[Tron synchronized]\n");
           if (pendingCommand) {

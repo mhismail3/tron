@@ -1,10 +1,10 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { atomicWriteJson } from "../util/json.js";
 import { SessionAttentionStore } from "./session-attention-store.js";
-import { latestSuccessfulAssistantCompletion, successfulAssistantCompletion } from "./runtime-slot.js";
+import { completionOwnedByMarker, latestSuccessfulAssistantCompletion, successfulAssistantCompletion } from "./runtime-slot.js";
 
 describe("session attention completion admission", () => {
   it("admits only stop and length assistant terminals, including non-text outcomes", () => {
@@ -27,6 +27,25 @@ describe("session attention completion admission", () => {
     expect(successfulAssistantCompletion(entry("tool", "toolUse"))).toBeUndefined();
     expect(successfulAssistantCompletion(entry("aborted", "aborted"))).toBeUndefined();
     expect(successfulAssistantCompletion(entry("terminal", "stop"))?.id).toBe("terminal");
+
+    const entries = [entry("exact", "stop"), entry("newer", "stop")];
+    const manager = {
+      getEntry: (id: string) => entries.find((candidate) => candidate.id === id),
+      getLeafEntry: () => entries.at(-1),
+    };
+    expect(completionOwnedByMarker(manager, {
+      version: 1,
+      sessionId: "session",
+      operationId: "operation",
+      acceptedAt: "2026-01-01T00:00:09.000Z",
+      assistantCompletionId: "exact",
+    })?.id).toBe("exact");
+    expect(completionOwnedByMarker(manager, {
+      version: 1,
+      sessionId: "session",
+      operationId: "legacy-too-new",
+      acceptedAt: "2026-01-01T00:00:09.000Z",
+    })).toBeUndefined();
   });
 });
 
@@ -138,6 +157,44 @@ describe("SessionAttentionStore", () => {
     await restarted.initialize();
     expect(restarted.reconciliationCursor()).toBe("2026-01-02T00:00:00.000Z");
     expect(restarted.projection("s")).toMatchObject({ completionRevision: 1, isUnread: true });
+  });
+
+  it("admits an exact near-capacity file across restart and rejects persisted-byte overflow", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-attention-capacity-"));
+    const gateway = join(home, "gateway");
+    const path = join(gateway, "session-attention.json");
+    await mkdir(gateway, { recursive: true });
+    const document = (count: number) => ({
+      version: 1,
+      reconciledThrough: "2026-01-01T00:00:00.000Z",
+      sessions: Object.fromEntries(Array.from({ length: count }, (_, index) => [`s${index}`, {
+        completionRevision: 0,
+        readThroughRevision: 0,
+        manualUnread: false,
+        recentCompletionIds: [],
+        attentionRevision: 0,
+      }])),
+    });
+    let lower = 0;
+    let upper = 50_000;
+    while (lower < upper) {
+      const middle = Math.ceil((lower + upper) / 2);
+      const bytes = Buffer.byteLength(`${JSON.stringify(document(middle), null, 2)}\n`);
+      if (bytes <= 2 * 1_048_576) lower = middle;
+      else upper = middle - 1;
+    }
+    const encoded = `${JSON.stringify(document(lower), null, 2)}\n`;
+    expect(Buffer.byteLength(encoded)).toBeLessThanOrEqual(2 * 1_048_576);
+    await writeFile(path, encoded);
+
+    const store = new SessionAttentionStore(home);
+    await store.initialize();
+    const before = await readFile(path, "utf8");
+    await expect(store.complete("s0", "x".repeat(240))).rejects.toThrow("byte limit");
+    expect(await readFile(path, "utf8")).toBe(before);
+    const restarted = new SessionAttentionStore(home);
+    await restarted.initialize();
+    expect(restarted.projection("s0").completionRevision).toBe(0);
   });
 
   it("fails closed on malformed and oversized state", async () => {
