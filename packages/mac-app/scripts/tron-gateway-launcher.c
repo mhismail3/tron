@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <fcntl.h>
 #include <mach-o/dyld.h>
 #include <dirent.h>
@@ -12,6 +13,7 @@
 #include <CommonCrypto/CommonDigest.h>
 
 #define MAX_MANIFEST_BYTES (64 * 1024)
+#define MAX_PUSH_CONFIG_BYTES (4 * 1024)
 #define MAX_COMPONENT_BYTES 128
 
 typedef struct {
@@ -404,6 +406,71 @@ static int read_payload_manifest(const char *root, PayloadIdentity *identity) {
     return 0;
 }
 
+static int valid_public_push_host(const char *host) {
+    size_t length = strlen(host);
+    if (length == 0 || length > 253 || host[0] == '.' || host[length - 1] == '.' || strchr(host, '.') == NULL || strstr(host, "..") != NULL) return 0;
+    int onlyNumbersAndDots = 1;
+    const char *label = host;
+    for (size_t index = 0; index <= length; ++index) {
+        unsigned char character = (unsigned char)host[index];
+        if (character != '\0' && character != '.' && !((character >= 'a' && character <= 'z') ||
+            (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || character == '-')) return 0;
+        if (character != '\0' && character != '.' && !(character >= '0' && character <= '9')) onlyNumbersAndDots = 0;
+        if (character == '.' || character == '\0') {
+            size_t labelLength = (size_t)(&host[index] - label);
+            if (labelLength == 0 || labelLength > 63 || label[0] == '-' || label[labelLength - 1] == '-') return 0;
+            label = &host[index + 1];
+        }
+    }
+    if (onlyNumbersAndDots) return 0;
+    char lower[254];
+    for (size_t index = 0; index <= length; ++index) lower[index] = (char)tolower((unsigned char)host[index]);
+    size_t lowerLength = strlen(lower);
+    const char *blocked[] = {"localhost", ".localhost", ".local", ".internal"};
+    if (strcmp(lower, blocked[0]) == 0) return 0;
+    for (size_t index = 1; index < sizeof(blocked) / sizeof(blocked[0]); ++index) {
+        size_t suffixLength = strlen(blocked[index]);
+        if (lowerLength >= suffixLength && strcmp(lower + lowerLength - suffixLength, blocked[index]) == 0) return 0;
+    }
+    return 1;
+}
+
+static int validate_push_config(const char *root, const char *channel) {
+    char path[PATH_MAX], text[MAX_PUSH_CONFIG_BYTES + 1];
+    if (snprintf(path, sizeof(path), "%s/app/PushService.xcconfig", root) >= (int)sizeof(path) ||
+        bounded_file(path, text, sizeof(text)) != 0) return -1;
+    const char *key = "TRON_PUSH_SERVICE_ORIGIN";
+    const size_t keyLength = strlen(key);
+    char origin[512] = {0};
+    int assignments = 0;
+    char *cursor = text;
+    while (*cursor != '\0') {
+        char *end = strchr(cursor, '\n');
+        if (end == NULL) end = cursor + strlen(cursor);
+        char *start = cursor;
+        while (start < end && (*start == ' ' || *start == '\t')) start++;
+        if ((size_t)(end - start) >= keyLength && strncmp(start, key, keyLength) == 0) {
+            char *value = start + keyLength;
+            while (value < end && (*value == ' ' || *value == '\t')) value++;
+            if (value < end && *value == '=') {
+                value++;
+                while (value < end && (*value == ' ' || *value == '\t')) value++;
+                char *valueEnd = end;
+                while (valueEnd > value && (valueEnd[-1] == ' ' || valueEnd[-1] == '\t' || valueEnd[-1] == '\r')) valueEnd--;
+                size_t valueLength = (size_t)(valueEnd - value);
+                if (++assignments > 1 || valueLength >= sizeof(origin)) return -1;
+                memcpy(origin, value, valueLength);
+                origin[valueLength] = '\0';
+            }
+        }
+        cursor = *end == '\0' ? end : end + 1;
+    }
+    if (assignments != 1) return -1;
+    if (origin[0] == '\0') return strcmp(channel, "dev") == 0 ? 0 : -1;
+    const char *prefix = "https:/$()/";
+    return strncmp(origin, prefix, strlen(prefix)) == 0 && valid_public_push_host(origin + strlen(prefix)) ? 0 : -1;
+}
+
 static int validate_payload(const char *payload, const char *expectedChannel, const char *expectedVersion,
                             const char *expectedFingerprint, char *node, char *entrypoint, char *helper,
                             PayloadIdentity *selectedIdentity) {
@@ -424,6 +491,8 @@ static int validate_payload(const char *payload, const char *expectedChannel, co
     if (required_path(root, "app/dist/index.js", entrypoint, PATH_MAX, 0, 1024, 0) != 0 ||
         required_path(root, "app/package.json", node, PATH_MAX, 0, 1, 0) != 0 ||
         required_path(root, "app/package-lock.json", node, PATH_MAX, 0, 1, 0) != 0 ||
+        required_path(root, "app/PushService.xcconfig", node, PATH_MAX, 0, 1, 0) != 0 ||
+        validate_push_config(root, identity.channel) != 0 ||
         required_path(root, "app/scripts/ensure-node-pty-helper.mjs", node, PATH_MAX, 0, 1, 0) != 0 ||
         required_path(root, "app/scripts/gateway-payload-deploy.mjs", helper, PATH_MAX, 0, 1, 0) != 0 ||
         required_path(root, "app/node_modules", node, PATH_MAX, 0, 0, 1) != 0) return -1;
@@ -556,6 +625,7 @@ static int recover_pending_attempt(const char *channelRoot, const char *channel)
     if (snprintf(markerPath, sizeof(markerPath), "%s/pending-attempt.json", channelRoot) >= (int)sizeof(markerPath)
         || access(markerPath, F_OK) != 0
         || snprintf(lockPath, sizeof(lockPath), "%s.lock", markerPath) >= (int)sizeof(lockPath)) return 0;
+    int observedFreshLock = 0;
     for (int attempt = 0; attempt < 200; ++attempt) {
         if (mkdir(lockPath, 0700) == 0) {
             int result = recover_pending_attempt_unlocked(channelRoot, channel);
@@ -564,9 +634,14 @@ static int recover_pending_attempt(const char *channelRoot, const char *channel)
         }
         if (errno != EEXIST) return -1;
         struct stat info;
-        if (stat(lockPath, &info) == 0 && time(NULL) - info.st_mtime > 30) {
-            (void)rmdir(lockPath);
-            continue;
+        if (stat(lockPath, &info) == 0) {
+            if (!observedFreshLock && time(NULL) - info.st_mtime > 30) {
+                (void)rmdir(lockPath);
+                continue;
+            }
+            // A lock observed fresh on entry never becomes removable by this
+            // waiter merely because a loaded host stretches the bounded loop.
+            observedFreshLock = 1;
         }
         struct timespec delay = { .tv_sec = 0, .tv_nsec = 25000000 };
         (void)nanosleep(&delay, NULL);
@@ -627,12 +702,13 @@ int main(int argc, char **argv) {
     // Build verification compiles this source afresh and uses this mode rather
     // than trusting the staged helper. It validates the bounded manifest,
     // immutable payload tree, required entries, and canonical fingerprint.
-    if (argc == 6 && strcmp(argv[1], "--verify-payload") == 0) {
+    if (argc == 7 && strcmp(argv[1], "--verify-payload") == 0 &&
+        (strcmp(argv[3], "stable") == 0 || strcmp(argv[3], "dev") == 0)) {
         PayloadIdentity identity;
         char node[PATH_MAX], entrypoint[PATH_MAX], helper[PATH_MAX];
-        if (validate_payload(argv[2], "stable", NULL, NULL, node, entrypoint, helper, &identity) != 0 ||
-            strcmp(identity.nodeVersion, argv[3]) != 0 || strcmp(identity.gatewayVersion, argv[4]) != 0 ||
-            strcmp(identity.version, argv[4]) != 0 || strcmp(identity.sourceRevision, argv[5]) != 0) {
+        if (validate_payload(argv[2], argv[3], NULL, NULL, node, entrypoint, helper, &identity) != 0 ||
+            strcmp(identity.nodeVersion, argv[4]) != 0 || strcmp(identity.gatewayVersion, argv[5]) != 0 ||
+            strcmp(identity.version, argv[5]) != 0 || strcmp(identity.sourceRevision, argv[6]) != 0) {
             fputs("Tron Gateway payload verification failed.\n", stderr);
             return 78;
         }

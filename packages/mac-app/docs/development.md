@@ -28,10 +28,17 @@ not consult this toolchain.
 
 `config/PushService.xcconfig` is the one maintainer-owned public Push service
 origin consumed by both iOS and this bundled Gateway. Development may stage an
-unconfigured payload with `--allow-unconfigured-push`; push then remains
-unavailable. Direct official staging and Mac Release builds fail closed while
+unconfigured **dev-channel** payload with `--allow-unconfigured-push`; push then
+remains unavailable. Every payload carries a regular, fingerprinted
+`app/PushService.xcconfig`. Stable staging, selection, source update, rollback,
+launcher admission, and packaging require exactly one non-empty public HTTPS
+origin and reject missing, empty, malformed, or symlinked projections. A Stable
+source update preserves the validated active payload's product configuration;
+it never reads an environment override or substitutes the source checkout's
+configuration. Direct official staging and Mac Release builds fail closed while
 the origin is empty. This is release configuration, never end-user setup, and
-contains no credential.
+contains no credential. Notification grants and pending delivery state remain
+under the Tron home outside immutable payload directories and survive updates.
 
 The script:
 
@@ -136,7 +143,7 @@ can stage and then explicitly promote a complete payload:
 ```bash
 scripts/gateway-payload-deploy.mjs stage --channel stable --source <payload>
 scripts/gateway-payload-deploy.mjs promote --channel stable --version <version>
-scripts/gateway-payload-deploy.mjs rollback --channel stable
+scripts/gateway-payload-deploy.mjs rollback --channel stable --command-id <unique-command-id>
 ```
 
 Promotion is serialized per channel, verifies the complete payload fingerprint,

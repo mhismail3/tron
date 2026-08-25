@@ -22,6 +22,7 @@ make_payload() {
   chmod 755 "$root/app/dist/index.js"
   printf '{"name":"fixture"}\n' > "$root/app/package.json"
   printf '{"name":"fixture","lockfileVersion":3}\n' > "$root/app/package-lock.json"
+  printf '%s\n' 'TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test' > "$root/app/PushService.xcconfig"
   printf '%s\n' '// fixture helper' > "$root/app/scripts/ensure-node-pty-helper.mjs"
   printf '%s\n' '// fixture updater' > "$root/app/scripts/gateway-payload-deploy.mjs"
   printf '%s\n' '#!/bin/sh' 'printf "%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"' 'exit 0' > "$root/runtime/node-arm64"
@@ -40,9 +41,24 @@ expected_bundle_fingerprint="$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*
 [[ "$("$HELPER" --fingerprint "$BUNDLE")" == "$expected_bundle_fingerprint" ]] || {
   echo "launcher fingerprint mode diverged from the canonical shell hash" >&2; exit 1;
 }
-"$HELPER" --verify-payload "$BUNDLE" fixture fixture 0123456789abcdef0123456789abcdef01234567 || {
+"$HELPER" --verify-payload "$BUNDLE" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 || {
   echo "launcher payload verification mode rejected the valid fixture" >&2; exit 1;
 }
+for invalid_kind in missing empty malformed symlink; do
+  INVALID="$TMP/invalid-$invalid_kind"
+  cp -R "$BUNDLE" "$INVALID"
+  chmod -R u+w "$INVALID"
+  case "$invalid_kind" in
+    missing) rm "$INVALID/app/PushService.xcconfig" ;;
+    empty) printf '%s\n' 'TRON_PUSH_SERVICE_ORIGIN =' > "$INVALID/app/PushService.xcconfig" ;;
+    malformed) printf '%s\n' 'TRON_PUSH_SERVICE_ORIGIN = http:/$()/push.example.test' > "$INVALID/app/PushService.xcconfig" ;;
+    symlink) rm "$INVALID/app/PushService.xcconfig"; ln -s package.json "$INVALID/app/PushService.xcconfig" ;;
+  esac
+  chmod -R a-w "$INVALID"
+  if "$HELPER" --verify-payload "$INVALID" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; then
+    echo "launcher admitted $invalid_kind stable PushService.xcconfig" >&2; exit 1
+  fi
+done
 EXTERNAL="$TMP/home/.tron/gateway/payloads/stable/versions/v2"
 make_payload "$EXTERNAL" v2 external
 mkdir -p "$(dirname "$EXTERNAL")"

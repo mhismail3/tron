@@ -144,11 +144,18 @@ an inactive candidate. The agent-manageable command remains explicit:
 ```text
 scripts/gateway-payload-deploy.mjs stage --channel stable --source <payload>
 scripts/gateway-payload-deploy.mjs promote --channel stable --version <version>
-scripts/gateway-payload-deploy.mjs rollback --channel stable
+scripts/gateway-payload-deploy.mjs rollback --channel stable --command-id <unique-command-id>
 ```
 
 `stage` copies into a new immutable version directory, verifies required files
 and the complete SHA-256 fingerprint, and never mutates the active version.
+Every payload includes a regular fingerprinted `app/PushService.xcconfig`.
+Stable staging, promotion, rollback, launcher selection, Swift validation, and
+packaging require its one exact non-empty public HTTPS origin; dev may carry one
+explicit empty assignment. Stable source builds preserve this validated file
+from the active immutable payload and never accept a source-tree or environment
+replacement. Notification state remains outside payload versions under the
+canonical Tron home.
 `promote` records expected identity, atomically publishes `current.json` while
 retaining `previous.json`, invokes authenticated `gateway.restart` (the
 Gateway remains the drain-aware supervisor), and waits for health identity and

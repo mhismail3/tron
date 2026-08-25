@@ -45,6 +45,7 @@ const WebSocket = requireForDependencies("ws");
 const lockfile = requireForDependencies("proper-lockfile");
 
 const MAX_MANIFEST_BYTES = 64 * 1024;
+const MAX_PUSH_CONFIG_BYTES = 4 * 1024;
 const SCHEMA = 1;
 const KIND = "tron-gateway-payload";
 const SELECTION_KIND = "tron-gateway-selection";
@@ -55,6 +56,7 @@ const REQUIREMENTS = [
   ["app/dist/index.js", 1_024, false],
   ["app/package.json", 1, false],
   ["app/package-lock.json", 1, false],
+  ["app/PushService.xcconfig", 1, false],
   ["app/scripts/ensure-node-pty-helper.mjs", 1, false],
   ["app/scripts/gateway-payload-deploy.mjs", 1, false],
   ["app/node_modules", 0, true],
@@ -312,9 +314,53 @@ function payloadManifest(value, expected = {}) {
   return value;
 }
 
+function validPublicPushHost(host) {
+  if (Buffer.byteLength(host) > 253 || !host.includes(".") || host.startsWith(".") || host.endsWith(".")
+    || host.includes("..") || !/^[A-Za-z0-9.-]+$/u.test(host) || /^[0-9.]+$/u.test(host)) return false;
+  const lower = host.toLowerCase();
+  if (lower === "localhost" || lower.endsWith(".localhost") || lower.endsWith(".local") || lower.endsWith(".internal")) return false;
+  return host.split(".").every((label) => label.length <= 63 && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/u.test(label));
+}
+
+export function validatePushServiceConfigurationText(text, channel) {
+  if (typeof text !== "string" || Buffer.byteLength(text) === 0 || Buffer.byteLength(text) > MAX_PUSH_CONFIG_BYTES) {
+    throw new Error("payload PushService.xcconfig is empty or oversized");
+  }
+  const assignments = [];
+  for (const line of text.split(/\r?\n/u)) {
+    const match = /^\s*TRON_PUSH_SERVICE_ORIGIN\s*=\s*(.*?)\s*$/u.exec(line);
+    if (match) assignments.push(match[1]);
+  }
+  if (assignments.length !== 1) throw new Error("payload PushService.xcconfig must contain exactly one origin assignment");
+  const origin = assignments[0];
+  if (origin === "") {
+    if (channel === "dev") return "";
+    throw new Error("stable payload PushService.xcconfig requires a non-empty origin");
+  }
+  const prefix = "https:/$()/";
+  if (!origin.startsWith(prefix) || !validPublicPushHost(origin.slice(prefix.length))) {
+    throw new Error("payload PushService.xcconfig origin is not one exact public HTTPS origin");
+  }
+  return origin;
+}
+
+async function validatePayloadPushConfiguration(root, channel) {
+  const path = join(root, "app", "PushService.xcconfig");
+  const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+    .catch(() => { throw new Error("payload PushService.xcconfig is missing or unsafe"); });
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size <= 0 || info.size > MAX_PUSH_CONFIG_BYTES) {
+      throw new Error("payload PushService.xcconfig is missing, empty, or oversized");
+    }
+    return validatePushServiceConfigurationText((await handle.readFile()).toString("utf8"), channel);
+  } finally { await handle.close(); }
+}
+
 export async function validatePayload(root, expected = {}, checkFingerprint = true) {
   await completePayload(root);
   const manifest = payloadManifest(await json(join(root, "manifest.json")), expected);
+  await validatePayloadPushConfiguration(root, manifest.channel);
   if (checkFingerprint) {
     const actual = await payloadFingerprint(root);
     if (actual !== manifest.payloadFingerprint) throw new Error("payload fingerprint does not match staged files");
@@ -1452,6 +1498,10 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
       "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput,
     ], { cwd: gatewayRoot, timeoutMs });
     const sourcePackage = JSON.parse(await readFile(join(gatewayRoot, "package.json"), "utf8"));
+    // Source updates inherit the exact validated product configuration from
+    // the selected immutable payload. The source checkout and environment are
+    // never alternate configuration owners.
+    const activePushConfiguration = await validatePayloadPushConfiguration(active.root, paths.channel);
     const version = candidateVersion ?? `${sourcePackage.version}-source-${Date.now()}`;
     if (!validComponent(version, 128)) throw new Error("source build produced an invalid candidate version");
     const target = join(paths.versionsRoot, version);
@@ -1470,6 +1520,9 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
       await cp(compilerOutput, join(temporary, "app", "dist"), { recursive: true, errorOnExist: true, force: false });
       await cp(join(gatewayRoot, "package.json"), join(temporary, "app", "package.json"));
       await cp(join(gatewayRoot, "package-lock.json"), join(temporary, "app", "package-lock.json"));
+      if (await validatePayloadPushConfiguration(temporary, paths.channel) !== activePushConfiguration) {
+        throw new Error("source update changed the active product PushService.xcconfig");
+      }
       // The updater and helper are part of the trusted source revision, not
       // stale files inherited from whichever payload happened to be active.
       await copyTrustedSourceScripts(config.sourceRoot, temporary);

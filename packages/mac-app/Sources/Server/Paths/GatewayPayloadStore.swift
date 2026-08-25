@@ -10,6 +10,7 @@ import Darwin
 struct GatewayPayloadStore {
     static let schema = 1
     static let maxManifestBytes = 64 * 1024
+    static let maxPushConfigurationBytes = 4 * 1024
     static let channelComponentLimit = 64
     static let versionComponentLimit = 128
     static let gatewayVersionByteLimit = 127
@@ -231,6 +232,11 @@ enum GatewayPayloadValidator {
             return .failure(.identityMismatch("payload fingerprint"))
         }
 
+        guard let pushConfiguration = containedRegularURL("app/PushService.xcconfig", under: root, directory: false),
+              validatePushConfiguration(pushConfiguration, channel: manifest.channel, fileManager: fileManager) else {
+            return .failure(.incomplete("app/PushService.xcconfig"))
+        }
+
         let requiredFiles: [(String, Int64)] = [
             ("app/dist/index.js", minimumEntrypointBytes),
             ("app/package.json", 1),
@@ -343,6 +349,42 @@ enum GatewayPayloadValidator {
             expectedFingerprint: selection.payloadFingerprint,
             fileManager: fileManager
         )
+    }
+
+    private static func validatePushConfiguration(_ url: URL, channel: String, fileManager: FileManager) -> Bool {
+        var info = stat()
+        guard lstat(url.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG,
+              info.st_size > 0, info.st_size <= Int64(GatewayPayloadStore.maxPushConfigurationBytes),
+              let data = try? Data(contentsOf: url), let text = String(data: data, encoding: .utf8) else { return false }
+        let key = "TRON_PUSH_SERVICE_ORIGIN"
+        let assignments = text.split(whereSeparator: \Character.isNewline).compactMap { raw -> String? in
+            let line = String(raw)
+            guard let separator = line.firstIndex(of: "=") else { return nil }
+            let lhs = line[..<separator].trimmingCharacters(in: .whitespaces)
+            guard lhs == key else { return nil }
+            return line[line.index(after: separator)...].trimmingCharacters(in: .whitespaces)
+        }
+        guard assignments.count == 1 else { return false }
+        let origin = assignments[0]
+        if origin.isEmpty { return channel == "dev" }
+        let prefix = "https:/$()/"
+        guard origin.hasPrefix(prefix) else { return false }
+        let host = String(origin.dropFirst(prefix.count))
+        guard host.utf8.count <= 253, host.contains("."), !host.hasPrefix("."), !host.hasSuffix("."),
+              !host.contains(".."), host.utf8.allSatisfy({
+                  ($0 >= 0x41 && $0 <= 0x5a) || ($0 >= 0x61 && $0 <= 0x7a)
+                      || ($0 >= 0x30 && $0 <= 0x39) || $0 == 0x2e || $0 == 0x2d
+              }), !host.utf8.allSatisfy({ ($0 >= 0x30 && $0 <= 0x39) || $0 == 0x2e }) else { return false }
+        let lower = host.lowercased()
+        guard lower != "localhost", !lower.hasSuffix(".localhost"), !lower.hasSuffix(".local"), !lower.hasSuffix(".internal") else { return false }
+        return host.split(separator: ".", omittingEmptySubsequences: false).allSatisfy { label in
+            guard !label.isEmpty, label.utf8.count <= 63,
+                  let first = label.utf8.first, let last = label.utf8.last else { return false }
+            func alphaNumeric(_ byte: UInt8) -> Bool {
+                (byte >= 0x41 && byte <= 0x5a) || (byte >= 0x61 && byte <= 0x7a) || (byte >= 0x30 && byte <= 0x39)
+            }
+            return alphaNumeric(first) && alphaNumeric(last) && label.utf8.allSatisfy { alphaNumeric($0) || $0 == 0x2d }
+        }
     }
 
     private static func boundedData(at url: URL, fileManager: FileManager) -> Data? {

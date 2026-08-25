@@ -19,6 +19,8 @@ import {
   sourceBuildCommands,
   resolveNpmCommand,
   validateUpdateConfigDocument,
+  validatePushServiceConfigurationText,
+  validatePayload,
   payloadFingerprint,
   buildSourcePayload,
   preflightPayload,
@@ -197,6 +199,7 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
     await writeFile(join(versionRoot, "app", "dist", "index.js"), `${"x".repeat(1_024)}\n`);
     await writeFile(join(versionRoot, "app", "package.json"), "{}\n");
     await writeFile(join(versionRoot, "app", "package-lock.json"), "{}\n");
+    await writeFile(join(versionRoot, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
     await writeFile(join(versionRoot, "app", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
     await writeFile(join(versionRoot, "app", "scripts", "gateway-payload-deploy.mjs"), "// updater\n");
     await writeFile(join(versionRoot, "runtime", "node-arm64"), "n".repeat(1_048_576));
@@ -252,6 +255,7 @@ test("source build failure leaves active selection and deployment state unchange
     await writeFile(join(versionRoot, "app", "dist", "index.js"), `${"x".repeat(1_024)}\n`);
     await writeFile(join(versionRoot, "app", "package.json"), "{}\n");
     await writeFile(join(versionRoot, "app", "package-lock.json"), "{}\n");
+    await writeFile(join(versionRoot, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
     await writeFile(join(versionRoot, "app", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
     await writeFile(join(versionRoot, "app", "scripts", "gateway-payload-deploy.mjs"), "// updater\n");
     await writeFile(join(versionRoot, "runtime", "node-arm64"), "n".repeat(1_048_576));
@@ -299,6 +303,7 @@ test("source builds compile privately and leave the trusted source tree unchange
     await writeFile(join(versionRoot, "app", "dist", "index.js"), `${"x".repeat(1_024)}\n`);
     await writeFile(join(versionRoot, "app", "package.json"), "{}\n");
     await writeFile(join(versionRoot, "app", "package-lock.json"), "{}\n");
+    await writeFile(join(versionRoot, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
     await writeFile(join(versionRoot, "app", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
     await writeFile(join(versionRoot, "app", "scripts", "gateway-payload-deploy.mjs"), "// updater\n");
     await writeFile(join(versionRoot, "runtime", "node-arm64"), "n".repeat(1_048_576));
@@ -329,6 +334,10 @@ test("source builds compile privately and leave the trusted source tree unchange
     for (const [path, content] of before) assert.deepEqual(await readFile(join(gatewayRoot, path)), content);
     assert.equal(await readFile(join(result.root, "app", "scripts", "gateway-payload-deploy.mjs"), "utf8"), "// trusted updater\n");
     assert.equal(await readFile(join(result.root, "app", "scripts", "ensure-node-pty-helper.mjs"), "utf8"), "// trusted helper\n");
+    assert.equal(
+      await readFile(join(result.root, "app", "PushService.xcconfig"), "utf8"),
+      "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n",
+    );
     for (const directory of [
       join(store.versionsRoot, "candidate"), join(store.versionsRoot, "candidate", "app"),
       join(store.versionsRoot, "candidate", "app", "dist"), join(store.versionsRoot, "candidate", "app", "scripts"),
@@ -347,6 +356,7 @@ async function makePreflightFixture(root) {
   await writeFile(join(payload, "app", "dist", "version.js"), "export const PROTOCOL_VERSION = 3; export const MIN_PROTOCOL_VERSION = 3;\n");
   await writeFile(join(payload, "app", "package.json"), "{}\n");
   await writeFile(join(payload, "app", "package-lock.json"), "{}\n");
+  await writeFile(join(payload, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
   await writeFile(join(payload, "app", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
   await writeFile(join(payload, "app", "scripts", "gateway-payload-deploy.mjs"), "// updater\n");
   await writeFile(join(payload, "runtime", "node-arm64"), "n".repeat(1_048_576));
@@ -361,6 +371,46 @@ async function makePreflightFixture(root) {
   }));
   return payload;
 }
+
+test("stable payload push configuration rejects missing empty malformed and symlinked files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-push-payload-policy-"));
+  try {
+    assert.equal(validatePushServiceConfigurationText("TRON_PUSH_SERVICE_ORIGIN =\n", "dev"), "");
+    assert.throws(() => validatePushServiceConfigurationText("TRON_PUSH_SERVICE_ORIGIN =\n", "stable"), /non-empty/);
+    assert.throws(() => validatePushServiceConfigurationText("TRON_PUSH_SERVICE_ORIGIN = http:\/$()\/push.example.test\n", "stable"), /public HTTPS/);
+
+    for (const kind of ["missing", "empty", "malformed", "symlink"]) {
+      const payload = await makePreflightFixture(join(root, kind));
+      const config = join(payload, "app", "PushService.xcconfig");
+      if (kind === "missing") await rm(config);
+      if (kind === "empty") await writeFile(config, "TRON_PUSH_SERVICE_ORIGIN =\n");
+      if (kind === "malformed") await writeFile(config, "TRON_PUSH_SERVICE_ORIGIN = http:/$()/push.example.test\n");
+      if (kind === "symlink") { await rm(config); await symlink("package.json", config); }
+      await assert.rejects(validatePayload(payload, { channel: "stable" }, true), /PushService|incomplete/);
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("dev empty push configuration cannot be promoted into Stable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-push-dev-promotion-"));
+  try {
+    const payload = await makePreflightFixture(join(root, "source"));
+    await writeFile(join(payload, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN =\n");
+    const manifestPath = join(payload, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    const devFingerprint = await payloadFingerprint(payload);
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, channel: "dev", payloadFingerprint: devFingerprint }));
+    const devHome = join(root, "dev-home");
+    const stagedDev = await stagePayload({ home: devHome, channel: "dev", source: payload, version: "dev-empty" });
+    await assert.rejects(
+      stagePayload({ home: join(root, "stable-home"), channel: "stable", source: stagedDev.root, version: "stable-candidate" }),
+      /stable payload PushService.xcconfig requires a non-empty origin/,
+    );
+  } finally {
+    await runBounded("/bin/chmod", ["-R", "u+w", root], { timeoutMs: 5_000, maxOutputBytes: 8_192 }).catch(() => {});
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("preflight imports candidate protocol values and rejects incompatible ranges", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-preflight-protocol-"));

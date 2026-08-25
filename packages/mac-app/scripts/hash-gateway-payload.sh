@@ -14,7 +14,7 @@ ROOT="$(cd "$ROOT" && pwd -P)"
     exit 2
 }
 for required in \
-    app/dist/index.js app/package.json app/package-lock.json \
+    app/dist/index.js app/package.json app/package-lock.json app/PushService.xcconfig \
     app/scripts/ensure-node-pty-helper.mjs app/scripts/gateway-payload-deploy.mjs \
     app/node_modules runtime/node-arm64 runtime/node-x64; do
     [[ -e "$ROOT/$required" && ! -L "$ROOT/$required" ]] || {

@@ -3,6 +3,7 @@
 
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
 NODE_ARM64_SHA256="913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4"
 NODE_X64_SHA256="bf0e0ff20d4e5a16436d1ec372e47161e52be8e487db8070ae3f06b01efbba0c"
 
@@ -63,6 +64,7 @@ verify_app_bundle() {
         "$gateway_root/app/dist/index.js"
         "$gateway_root/app/package.json"
         "$gateway_root/app/package-lock.json"
+        "$gateway_root/app/PushService.xcconfig"
         "$gateway_root/runtime/node-arm64"
         "$gateway_root/runtime/node-x64"
     )
@@ -74,6 +76,8 @@ verify_app_bundle() {
     for required_directory in "${required_directories[@]}"; do
         [ -d "$root/$required_directory" ] || die "app bundle is missing required Gateway directory: $root/$required_directory"
     done
+    "$REPO_ROOT/scripts/validate-push-service-config.sh" "$root/$gateway_root/app/PushService.xcconfig" >/dev/null \
+        || die "app bundle Gateway PushService.xcconfig is invalid or empty"
     [ -x "$root/$helper" ] || die "app bundle helper is not executable: $root/$helper"
     codesign --verify --deep --strict "$root" >/dev/null 2>&1 \
         || die "app bundle deep strict signature is invalid: $root"

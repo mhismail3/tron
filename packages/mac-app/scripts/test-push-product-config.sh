@@ -10,6 +10,8 @@ grep -F '#include "../../../config/PushService.xcconfig"' "$REPO_ROOT/packages/i
 grep -F 'cp "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/"' "$SCRIPT_DIR/bundle-gateway.sh" >/dev/null
 grep -F '"$PAYLOAD_DIR/app/PushService.xcconfig"' "$SCRIPT_DIR/verify-gateway-payload.sh" >/dev/null
 grep -F 'cmp -s "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/PushService.xcconfig"' "$SCRIPT_DIR/bundle-gateway.sh" >/dev/null
+grep -F 'payload_channel=dev' "$SCRIPT_DIR/bundle-gateway.sh" >/dev/null
+grep -F '"$EXPECTED_CHANNEL"' "$SCRIPT_DIR/verify-gateway-payload.sh" >/dev/null
 if grep -R 'TRON_PUSH_SERVICE_ORIGIN' "$REPO_ROOT/packages/gateway/src" --include='*.ts' | grep -F 'environment.TRON_PUSH_SERVICE_ORIGIN' >/dev/null; then
   echo "Gateway must not accept a runtime Push origin" >&2
   exit 1

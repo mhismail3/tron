@@ -583,7 +583,12 @@ atomically selects, requests a real drain-aware restart, and accepts readiness o
 from the candidate's exact fingerprint, source revision, and runtime epoch. Apply and
 rollback serialize per channel; failed pointer changes perform a compensating restart
 and exact health verification. Status keeps observed live identity separate from the
-selected pointer so publication cannot report readiness early. Payload staging,
+selected pointer so publication cannot report readiness early. Each immutable payload fingerprints a regular `app/PushService.xcconfig`.
+Stable staging, promotion, source updates, rollback, launcher/Swift admission,
+and packaging require its one exact non-empty public HTTPS origin; dev alone
+may carry one explicit empty assignment. Stable source updates preserve the
+validated active projection rather than consulting source files or environment,
+and notification state stays outside payload version directories. Payload staging,
 promotion, and rollback use `scripts/gateway-payload-deploy.mjs`. Restart requests use the authenticated drain-aware Gateway protocol; direct self-stop
 is rejected. Clients receive `system.stopping`, reconnect with bounded backoff, and replace
 live state from a new authoritative snapshot. Staging preserves package-manager relative

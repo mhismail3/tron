@@ -30,6 +30,8 @@ trap 'make_writable "$TMP" || true; rm -rf "$TMP"' EXIT
 PAYLOAD="$TMP/Gateway"
 APP="$TMP/Tron Agent.app"
 HELPER="$APP/Contents/MacOS/tron"
+EXPECTED_CHANNEL="$(plutil -extract channel raw -o - "$SOURCE_PAYLOAD/manifest.json" 2>/dev/null || true)"
+[[ "$EXPECTED_CHANNEL" == stable || "$EXPECTED_CHANNEL" == dev ]] || { echo "generated payload channel is invalid" >&2; exit 2; }
 reset_fixture() {
     make_writable "$PAYLOAD"
     make_writable "$APP"
@@ -52,14 +54,14 @@ reset_fixture() {
 }
 expect_rejected() {
     local label="$1"
-    if "$VERIFY" "$PAYLOAD" "$HELPER" >"$TMP/$label.out" 2>"$TMP/$label.err"; then
+    if "$VERIFY" "$PAYLOAD" "$HELPER" "$EXPECTED_CHANNEL" >"$TMP/$label.out" 2>"$TMP/$label.err"; then
         echo "$label fixture was accepted" >&2
         exit 1
     fi
 }
 
 reset_fixture
-"$VERIFY" "$PAYLOAD" "$HELPER" >/dev/null
+"$VERIFY" "$PAYLOAD" "$HELPER" "$EXPECTED_CHANNEL" >/dev/null
 
 reset_fixture
 chmod u+w "$PAYLOAD/app/dist/index.js"

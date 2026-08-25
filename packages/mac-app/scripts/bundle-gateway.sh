@@ -121,14 +121,16 @@ for path in "${required[@]}"; do
     [[ -f "$path" ]] || { echo "missing required source: $path" >&2; exit 3; }
 done
 
+payload_channel=stable
 if ((allow_unconfigured_push)); then
+    payload_channel=dev
     push_origin="$("$REPO_ROOT/scripts/validate-push-service-config.sh" --allow-empty "$REPO_ROOT/config/PushService.xcconfig")"
 else
     push_origin="$("$REPO_ROOT/scripts/validate-push-service-config.sh" "$REPO_ROOT/config/PushService.xcconfig")"
 fi
 
 if ((verify_only)); then
-    "$SCRIPT_DIR/verify-gateway-payload.sh" "$PAYLOAD_DIR" "$HELPER_DIR/MacOS/tron"
+    "$SCRIPT_DIR/verify-gateway-payload.sh" "$PAYLOAD_DIR" "$HELPER_DIR/MacOS/tron" "$payload_channel"
     cmp -s "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/PushService.xcconfig" || {
         echo "staged Gateway PushService.xcconfig does not match canonical product configuration" >&2
         exit 3
@@ -302,8 +304,8 @@ RUNTIME_EPOCH="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 # remains the readable cross-implementation fixture but is intentionally not
 # process-per-file on this large build path.
 PAYLOAD_FINGERPRINT="$("${launchers[0]}" --fingerprint "$PAYLOAD_DIR")"
-printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"%s","nodeVersion":"%s","sourceRevision":"%s","runtimeEpoch":"%s","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' \
-    "$GATEWAY_VERSION" "$GATEWAY_VERSION" "$NODE_VERSION" "$SOURCE_REVISION" "$RUNTIME_EPOCH" "$PAYLOAD_FINGERPRINT" \
+printf '{"schema":1,"kind":"tron-gateway-payload","channel":"%s","version":"%s","gatewayVersion":"%s","nodeVersion":"%s","sourceRevision":"%s","runtimeEpoch":"%s","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' \
+    "$payload_channel" "$GATEWAY_VERSION" "$GATEWAY_VERSION" "$NODE_VERSION" "$SOURCE_REVISION" "$RUNTIME_EPOCH" "$PAYLOAD_FINGERPRINT" \
     > "$PAYLOAD_DIR/manifest.json"
 # Version payloads are immutable after publication; current.json remains the
 # only mutable deployment pointer. The launcher uses this as its bounded

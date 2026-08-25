@@ -7,11 +7,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
 PAYLOAD_DIR="${1:-}"
 HELPER="${2:-}"
+EXPECTED_CHANNEL="${3:-stable}"
 NODE_VERSION_FILE="$REPO_ROOT/.node-version"
 NODE_ARM64_SHA256="913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4"
 NODE_X64_SHA256="bf0e0ff20d4e5a16436d1ec372e47161e52be8e487db8070ae3f06b01efbba0c"
 
-[[ $# -eq 2 ]] || { echo "usage: verify-gateway-payload.sh PAYLOAD_ROOT STAGED_HELPER" >&2; exit 64; }
+[[ $# -ge 2 && $# -le 3 && ( "$EXPECTED_CHANNEL" == stable || "$EXPECTED_CHANNEL" == dev ) ]] || {
+    echo "usage: verify-gateway-payload.sh PAYLOAD_ROOT STAGED_HELPER [stable|dev]" >&2; exit 64;
+}
 fail() { echo "Gateway payload verification failed: $*" >&2; exit 78; }
 assert_no_symlink_ancestors() {
     local path="$1" cursor="$1"
@@ -56,6 +59,14 @@ for required_directory in \
     "$PAYLOAD_DIR/runtime"; do
     [[ -d "$required_directory" && ! -L "$required_directory" ]] || fail "required directory missing: $required_directory"
 done
+if [[ "$EXPECTED_CHANNEL" == dev ]]; then
+    "$REPO_ROOT/scripts/validate-push-service-config.sh" --allow-empty "$PAYLOAD_DIR/app/PushService.xcconfig" >/dev/null ||
+        fail "dev payload PushService.xcconfig is invalid"
+else
+    "$REPO_ROOT/scripts/validate-push-service-config.sh" "$PAYLOAD_DIR/app/PushService.xcconfig" >/dev/null ||
+        fail "stable payload PushService.xcconfig is invalid or empty"
+fi
+
 for required_file in \
     "$PAYLOAD_DIR/manifest.json" "$PAYLOAD_DIR/app/dist/index.js" \
     "$PAYLOAD_DIR/app/package.json" "$PAYLOAD_DIR/app/package-lock.json" \
@@ -120,7 +131,7 @@ cmp -s "$TRUSTED_TEMP/trusted-normalized" "$TRUSTED_TEMP/staged-normalized" || f
 GATEWAY_VERSION="$(plutil -extract version raw -o - "$REPO_ROOT/packages/gateway/package.json" 2>/dev/null || true)"
 SOURCE_REVISION="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
 [[ "$GATEWAY_VERSION" =~ ^[A-Za-z0-9._-]{1,127}$ && "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail "source identity is unavailable"
-"$TRUSTED_VERIFIER" --verify-payload "$PAYLOAD_DIR" "$NODE_VERSION" "$GATEWAY_VERSION" "$SOURCE_REVISION" ||
+"$TRUSTED_VERIFIER" --verify-payload "$PAYLOAD_DIR" "$EXPECTED_CHANNEL" "$NODE_VERSION" "$GATEWAY_VERSION" "$SOURCE_REVISION" ||
     fail "manifest, symlink, required-path, immutability, or fingerprint check failed"
 
 printf 'verified Tron Gateway payload (Node %s, immutable fingerprint and universal helper)\n' "$NODE_VERSION"

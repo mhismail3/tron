@@ -111,6 +111,61 @@ struct GatewayPayloadStoreTests {
         }
     }
 
+    @Test("stable push configuration fails closed while dev explicitly allows empty")
+    func pushConfigurationAdmission() throws {
+        let temporary = try TemporaryPayloadDirectory()
+        defer { temporary.cleanup() }
+        let cases: [(String, String, Bool)] = [
+            ("stable-empty", "TRON_PUSH_SERVICE_ORIGIN =\n", false),
+            ("stable-malformed", "TRON_PUSH_SERVICE_ORIGIN = http:/$()/push.example.test\n", false),
+            ("stable-duplicate", "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\nTRON_PUSH_SERVICE_ORIGIN = https:/$()/other.example.test\n", false),
+            ("dev-empty", "TRON_PUSH_SERVICE_ORIGIN =\n", true),
+        ]
+        for (version, configuration, shouldPass) in cases {
+            let channel = version.hasPrefix("dev") ? "dev" : "stable"
+            let root = temporary.root.appendingPathComponent(version, isDirectory: true)
+            try makePayload(root: root, channel: channel, version: version, fingerprint: String(repeating: "a", count: 64), pushConfiguration: configuration)
+            if shouldPass {
+                guard case .success = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: channel) else {
+                    Issue.record("explicit empty dev configuration should validate")
+                    continue
+                }
+            } else {
+                guard case .failure(.incomplete("app/PushService.xcconfig")) = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: channel) else {
+                    Issue.record("invalid stable configuration was admitted: \(version)")
+                    continue
+                }
+            }
+        }
+
+        let missingRoot = temporary.root.appendingPathComponent("stable-missing", isDirectory: true)
+        try makePayload(root: missingRoot, channel: "stable", version: "stable-missing", fingerprint: String(repeating: "a", count: 64))
+        let missingConfig = missingRoot.appendingPathComponent("app/PushService.xcconfig")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: missingRoot.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: missingConfig.deletingLastPathComponent().path)
+        try FileManager.default.removeItem(at: missingConfig)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: missingConfig.deletingLastPathComponent().path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: missingRoot.path)
+        guard case .failure(.incomplete("app/PushService.xcconfig")) = GatewayPayloadValidator.validate(payloadRoot: missingRoot, expectedChannel: "stable") else {
+            Issue.record("missing stable push configuration was admitted")
+            return
+        }
+
+        let symlinkRoot = temporary.root.appendingPathComponent("stable-symlink", isDirectory: true)
+        try makePayload(root: symlinkRoot, channel: "stable", version: "stable-symlink", fingerprint: String(repeating: "a", count: 64))
+        let config = symlinkRoot.appendingPathComponent("app/PushService.xcconfig")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: symlinkRoot.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: config.deletingLastPathComponent().path)
+        try FileManager.default.removeItem(at: config)
+        try FileManager.default.createSymbolicLink(at: config, withDestinationURL: symlinkRoot.appendingPathComponent("app/package.json"))
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: config.deletingLastPathComponent().path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: symlinkRoot.path)
+        guard case .failure(.incomplete("app/PushService.xcconfig")) = GatewayPayloadValidator.validate(payloadRoot: symlinkRoot, expectedChannel: "stable") else {
+            Issue.record("symlinked stable push configuration was admitted")
+            return
+        }
+    }
+
     @Test("writable payload entries are ordinary incomplete external payloads")
     func writablePayloadFallsBack() throws {
         let temporary = try TemporaryPayloadDirectory()
@@ -184,13 +239,17 @@ struct GatewayPayloadStoreTests {
         gatewayVersion: String = "1",
         nodeVersion: String = "22",
         sourceRevision: String = "test-revision",
-        runtimeEpoch: String = "test-epoch"
+        runtimeEpoch: String = "test-epoch",
+        pushConfiguration: String? = nil
     ) throws {
         let fm = FileManager.default
         let files = [
             "app/dist/index.js": Data(repeating: 0x2f, count: 1_024),
             "app/package.json": Data("{}".utf8),
             "app/package-lock.json": Data("{}".utf8),
+            "app/PushService.xcconfig": Data((pushConfiguration ?? (channel == "dev"
+                ? "TRON_PUSH_SERVICE_ORIGIN =\n"
+                : "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n")).utf8),
             "app/scripts/ensure-node-pty-helper.mjs": Data("// helper".utf8),
             "app/scripts/gateway-payload-deploy.mjs": Data("// update helper".utf8),
         ]
