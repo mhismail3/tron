@@ -727,6 +727,7 @@ struct ExtensionRunDetailsSheet: View {
             }
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.14)
     }
 
@@ -755,6 +756,7 @@ struct ExtensionRunDetailsSheet: View {
                     .font(TronTypography.caption)
                     .foregroundStyle(Color.tronTextMuted)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -821,8 +823,8 @@ private struct SubagentSessionChatView: View {
                             .textSelection(.enabled)
                     }
                     .padding(12)
-                    .tronGlassSurface(accent: .tronTeal, tintOpacity: 0.12)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .tronGlassSurface(accent: .tronTeal, tintOpacity: 0.12)
                 }
                 if let output = child.output, !output.isEmpty {
                     chatBubble(role: "Subagent", text: output, accent: .tronCyan, trailing: false)
@@ -834,6 +836,7 @@ private struct SubagentSessionChatView: View {
                             .foregroundStyle(Color.tronTextMuted)
                     }
                     .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .tronGlassSurface(accent: .tronTeal, tintOpacity: 0.10)
                 } else {
                     ContentUnavailableView(
@@ -885,6 +888,7 @@ private struct SubagentSessionChatView: View {
             Spacer(minLength: 0)
         }
         .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.12)
     }
 
@@ -900,7 +904,7 @@ private struct SubagentSessionChatView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .tronGlassSurface(accent: accent, tintOpacity: 0.12)
-        .padding(trailing ? .leading : .trailing, 28)
+        .padding(.leading, trailing ? 28 : 0)
     }
 }
 

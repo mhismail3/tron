@@ -434,6 +434,7 @@ struct PresentationStyleGuardTests {
         #expect(controls.contains("reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)"))
         #expect(controls.contains("Session context loading"))
         #expect(chat.contains("foregroundStyle(Color.tronEmerald)"))
+        #expect(chat.contains(".opacity(isTranscriptReady ? 1 : 0.38)"))
         #expect(!chat.contains("slider.horizontal.3"))
     }
 
@@ -571,7 +572,7 @@ struct PresentationStyleGuardTests {
         #expect(blur.contains(".allowsHitTesting(false)"))
         #expect(blur.contains(".accessibilityHidden(true)"))
         #expect(blur.contains(".environment(\\.tronTopBlurStyle, style)"))
-        #expect(blur.contains(".overlay(alignment: .top) { InAppNoticeHost() }"))
+        #expect(!blur.contains("InAppNoticeHost"))
         #expect(blur.contains("func tronTopBlurSurface()"))
         #expect(!blur.contains("TronNavigationTopBlurInstaller"))
         #expect(!chat.contains("Text(\"Tron is working\")"))
@@ -648,6 +649,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/NewSessionSheet.swift"),
             encoding: .utf8
         )
+        let sourceControl = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/NewSessionSourceControlSheet.swift"),
+            encoding: .utf8
+        )
         let presentation = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Theme/TronPresentation.swift"),
             encoding: .utf8
@@ -684,6 +689,15 @@ struct PresentationStyleGuardTests {
         #expect(shell.contains("onFocusChange: { focused in"))
         #expect(shell.contains("DragGesture(minimumDistance: 16)"))
         #expect(shell.contains("focusOnAppear: true"))
+        let serverFilter = try #require(
+            shell.components(separatedBy: "private var serverFilterSheet: some View").dropFirst().first?
+                .components(separatedBy: "private func setSortMode").first
+        )
+        #expect(serverFilter.contains("Image(systemName: \"checkmark\")"))
+        #expect(serverFilter.contains(".accessibilityLabel(\"Done\")"))
+        #expect(!serverFilter.contains("Button(\"Done\")"))
+        #expect(sourceControl.contains("HStack(alignment: .center, spacing: 12)"))
+        #expect(!sourceControl.contains("HStack(alignment: .top, spacing: 12)"))
         #expect(presentation.contains("Text(focused ? \"\" : prompt)"))
         #expect(presentation.contains(".glassEffect(.regular.tint(accent.opacity(0.16))"))
         #expect(presentation.contains("onFocusChange?(isFocused)"))
@@ -993,6 +1007,7 @@ struct PresentationStyleGuardTests {
         #expect(context.contains("ProgressView(value: percent, total: 100)"))
         #expect(context.contains(".accessibilityLabel(usage.accessibilityLabel)"))
         #expect(context.contains("Context usage: "))
+        #expect(context.contains("Image(systemName: \"rectangle.compress.vertical\")"))
         #expect(context.contains("Text(\"Compact\")"))
         #expect(context.contains("SessionCompactionControlPolicy.automaticStatus"))
         #expect(context.contains("contextAndCompactionRow(contextValue: contextValue, snapshot: snapshot)"))
@@ -1333,6 +1348,14 @@ struct PresentationStyleGuardTests {
         #expect(attachmentRequest.contains("attachmentDestination = destination"))
         #expect(attachmentRequest.contains("cancelAttachmentPresentation"))
         #expect(attachmentRequest.contains("attachmentPresentationBinding"))
+        let attachmentSelection = try #require(
+            chat.components(separatedBy: "private func requestAttachmentPresentation").dropFirst().first?
+                .components(separatedBy: "private func cancelAttachmentPresentation").first
+        )
+        #expect(!attachmentSelection.contains("composerFocused = false"))
+        #expect(!attachmentSelection.contains("resignFirstResponder"))
+        #expect(attachmentPresentation.contains("action(\"Add Skills\""))
+        #expect(attachmentPresentation.contains("action(\"Add Commands\""))
         #expect(!chat.contains("@State private var showCamera"))
         #expect(!chat.contains("@State private var showPhotos"))
         #expect(!chat.contains("@State private var showFiles"))
@@ -1508,6 +1531,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolTechnicalDetailsSheet.swift"),
             encoding: .utf8
         )
+        let extensionWidgets = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatExtensionWidgetView.swift"),
+            encoding: .utf8
+        )
         let navigationChrome = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolDetailNavigationChrome.swift"),
             encoding: .utf8
@@ -1591,7 +1618,7 @@ struct PresentationStyleGuardTests {
         )
         #expect(primaryDetail.contains("presentation.kind == .bash"))
         #expect(primaryDetail.contains("Text(verbatim: preview.text)"))
-        #expect(primaryDetail.contains(".font(TronTypography.codeContent)"))
+        #expect(primaryDetail.contains(".font(primaryValueFont)"))
         #expect(primaryDetail.contains(".fixedSize(horizontal: false, vertical: true)"))
         #expect(!primaryDetail.contains("ScrollView(.horizontal"))
         #expect(primaryDetail.contains("preview.isBounded, presentation.kind != .bash"))
@@ -1600,6 +1627,16 @@ struct PresentationStyleGuardTests {
                 .components(separatedBy: "private var technicalDetailsButton").first
         )
         #expect(resultDetail.contains(".font(TronTypography.code(size: TronTypography.sizeBodySM))"))
+        #expect(resultDetail.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        #expect(sheet.contains("fullDiffButton(diff)"))
+        #expect(sheet.contains("changesButton(diff, title: \"View full diff\")"))
+        #expect(!sheet.contains("Button(\"Open full diff\")"))
+        let subagentSheet = try #require(
+            extensionWidgets.components(separatedBy: "private struct SubagentSessionChatView").dropFirst().first?
+                .components(separatedBy: "private struct ExtensionChildDisclosureView").first
+        )
+        #expect(subagentSheet.occurrences(of: ".frame(maxWidth: .infinity, alignment: .leading)") >= 4)
+        #expect(subagentSheet.contains(".padding(.leading, trailing ? 28 : 0)"))
         let technicalDetail = try #require(
             technicalSheet.components(separatedBy: "struct ToolTechnicalDetailsSheet").dropFirst().first?
                 .components(separatedBy: "private struct ToolTechnicalMetadataItem").first
@@ -1641,6 +1678,34 @@ struct PresentationStyleGuardTests {
         for tool in ["read", "write", "edit", "bash", "grep", "find", "ls"] {
             #expect(presentation.contains("case \"\(tool)\""), "missing semantic detail mapping for \(tool)")
         }
+    }
+
+    @Test("tool and subagent sheet tweaks share value scale and full-width action surfaces")
+    func focusedToolSheetTweaks() throws {
+        let sheet = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolDetailSheet.swift"),
+            encoding: .utf8
+        )
+        let extensionWidgets = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatExtensionWidgetView.swift"),
+            encoding: .utf8
+        )
+        #expect(sheet.occurrences(of: ".font(primaryValueFont)") == 3)
+        #expect(sheet.contains("TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold)"))
+        #expect(sheet.contains("fullDiffButton(diff)"))
+        #expect(sheet.contains("changesButton(diff, title: \"View full diff\")"))
+        #expect(!sheet.contains("Button(\"Open full diff\")"))
+        let markdownResult = try #require(
+            sheet.components(separatedBy: "TronMarkdownView(text: preview.text").dropFirst().first?
+                .components(separatedBy: ".tronGlassSurface").first
+        )
+        #expect(markdownResult.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        let subagentSheet = try #require(
+            extensionWidgets.components(separatedBy: "private struct SubagentSessionChatView").dropFirst().first?
+                .components(separatedBy: "private struct ExtensionChildDisclosureView").first
+        )
+        #expect(subagentSheet.occurrences(of: ".frame(maxWidth: .infinity, alignment: .leading)") >= 4)
+        #expect(subagentSheet.contains(".padding(.leading, trailing ? 28 : 0)"))
     }
 
     @Test("camera keeps the historical three-control morphing sheet")
@@ -2287,8 +2352,8 @@ struct PresentationStyleGuardTests {
         #expect(picker.contains("Color.tronCyan.opacity(0.40)"))
         #expect(picker.contains("Color.tronPurple"))
         #expect(picker.contains("accessibilityLabel(\"Remove skill,"))
-        #expect(menu.contains("action(\"Skills\", systemImage: \"sparkles\", destination: .skills)"))
-        #expect(menu.contains("action(\"Commands\", systemImage: \"command\", destination: .commands)"))
+        #expect(menu.contains("action(\"Add Skills\", systemImage: \"sparkles\", destination: .skills)"))
+        #expect(menu.contains("action(\"Add Commands\", systemImage: \"command\", destination: .commands)"))
         #expect(menu.contains("button.accessibilityLabel = \"Add attachment\""))
     }
 

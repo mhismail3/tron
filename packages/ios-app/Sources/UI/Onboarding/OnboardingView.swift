@@ -162,7 +162,6 @@ struct OnboardingView: View {
                     }
                 }
             }
-            .inAppNoticeHost()
         }
         .sheet(isPresented: $showWorkspace) {
             WorkspaceBrowser { path in

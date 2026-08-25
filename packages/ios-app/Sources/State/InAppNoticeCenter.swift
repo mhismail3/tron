@@ -72,20 +72,9 @@ final class InAppNoticeCenter {
     private var interactionHolds: Set<UUID> = []
     private var backgrounded = false
     private var handlers: [UUID: [String: @MainActor () -> Void]] = [:]
-    private var hostRegistrations: [UUID] = []
     private var announcedForegroundIDs: Set<UUID> = []
 
     init(clock: MonotonicClock = .continuous) { self.clock = clock }
-
-    var activeHost: UUID? { hostRegistrations.last }
-    @discardableResult
-    func acquireHost() -> UUID {
-        let id = UUID(); hostRegistrations.append(id); return id
-    }
-    func releaseHost(_ id: UUID) {
-        guard let index = hostRegistrations.firstIndex(of: id) else { return }
-        hostRegistrations.remove(at: index)
-    }
 
     /// Foreground order is priority-first and FIFO within a priority.
     var visibleNotices: [Notice] {

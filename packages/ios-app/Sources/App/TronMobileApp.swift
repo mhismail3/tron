@@ -13,6 +13,14 @@ struct TronMobileApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .background {
+                    InAppNoticeWindowInstaller(
+                        model: model,
+                        colorScheme: appearance.mode.colorScheme
+                    )
+                    .frame(width: 0, height: 0)
+                    .allowsHitTesting(false)
+                }
                 .environment(model)
                 .tronPresentation()
                 .preferredColorScheme(appearance.mode.colorScheme)

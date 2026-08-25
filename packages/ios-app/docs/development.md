@@ -167,9 +167,9 @@ progressive sheet. Custom provider editors keep their three dense text fields to
 and use the standard settings-group header treatment. Provider and model catalogs use the shared
 `ModelDisplayFormatting` projections everywhere they are shown; canonical IDs remain unchanged for
 search, persistence, and mutation while labels use product casing such as “OpenAI Codex / GPT 5.6 Luna”.
-New Session quick selectors carry both server and project identity; source-control choices are sent
+New Session quick selectors carry both server and project identity; source-control choices use a vertically centered selection-symbol column, are sent
 through the confirmed `session.create` mutation, and Gateway owns Git worktree creation, trust
-propagation, and rollback. Project Resources normalizes producer whitespace before display, caps overview subtitles to one line, and keeps detailed tool/resource content in the tapped detail sheet so scrolling remains lightweight. Provider settings cards and Custom Models provider rows use the same centered 22-point leading icon column and 14-point leading inset, with vertically centered icons and leading-aligned text; custom provider summaries reserve the trailing menu width and are produced by a lazy provider stack. The Manage Session workspace path
+propagation, and rollback. Dashboard server filters use the shared trailing checkmark confirmation action, and the opening composer dims its placeholder until authoritative transcript readiness without disabling local drafting. Project Resources normalizes producer whitespace before display, caps overview subtitles to one line, and keeps detailed tool/resource content in the tapped detail sheet so scrolling remains lightweight. Provider settings cards and Custom Models provider rows use the same centered 22-point leading icon column and 14-point leading inset, with vertically centered icons and leading-aligned text; custom provider summaries reserve the trailing menu width and are produced by a lazy provider stack. The Manage Session workspace path
 uses a trailing inline group-header detail rather than a second header line.
 Terminal sheet composition, presentation lifecycle/error state, and native SwiftTerm/keyboard rendering live
 in separate source files. The presentation owner permits one active start/show/open flight and one newest pending
@@ -222,7 +222,7 @@ row and `session.listChanged` own projection convergence. The row may disappear 
 Gateway restart when Pi never persisted content. `DashboardStateOwnerTests` prove typed latest-load and
 navigation admission, monotonic live-summary overlays, unknown-row discovery, bounded dirty coalescing,
 safe cache/disconnect projection, and removal, while the bounded in-app notification tests enforce the single AppModel-owned center, eight-entry, 4 KiB-message, and 16 KiB-total
-budgets plus keyed progress coalescing. `ComposerDraftCoordinatorTests` prove profile/session draft
+budgets plus keyed progress coalescing. Their presentation guard also pins one scene-level pass-through notice window and forbids sheet/content blur modifiers from reacquiring the render surface. `ComposerDraftCoordinatorTests` prove profile/session draft
 isolation and same-session-generation isolation for disposable attachment/editor/submission state;
 event tests prove departing routes are excluded from share admission. Compatible synchronization callers now share one outcome without timing polls;
 each actual authoritative open/resync attempt retains its own interval.
@@ -662,9 +662,9 @@ container and verify it immediately presents selectable, vertically scrollable r
 response-first, content-only string, distinct-fallback, request-only, and missing-result cases without a
 readable-output duplicate or third fallback section.
 Verify live updates and true-only truncation metadata without moving the primary sheet's reading position. With
-a nonempty focused composer, open the native attachment menu, verify the keyboard remains visible, verify its
-option symbols are emerald while text retains native system styling, and activate camera, photos, files, Skills,
-and Commands on the first option tap. Record the command/skill panel frame by frame: its material must reveal upward on the same continuous height curve that reduces the transcript viewport, with no full-size flash, delayed chat jump, or second settle. Rapid open/filter/dismiss retargets must continue from the current presentation; dismissal returns downward toward the composer, and a detached reader's visible message must not move to the tail. Verify `@` opens the cyan skill glass, query typing filters without caret
+a nonempty focused composer, open the native attachment menu, verify the keyboard remains visible before and after choosing a destination, verify its
+option symbols are emerald while text retains native system styling, and activate camera, photos, files, Add Skills,
+and Add Commands on the first option tap. Record the command/skill panel frame by frame: its material must reveal upward on the same continuous height curve that reduces the transcript viewport, with no full-size flash, delayed chat jump, or second settle. Rapid open/filter/dismiss retargets must continue from the current presentation; dismissal returns downward toward the composer, and a detached reader's visible message must not move to the tail. Verify `@` opens the cyan skill glass, query typing filters without caret
 jumps, selection removes only the active token and places one removable skill chip below photo/file chips, and
 a newer skill replaces it. Verify `/` at the leading command boundary opens the purple command glass, selection
 completes editable command text with a trailing space, and deleting either active trigger dismisses its picker.

@@ -54,9 +54,9 @@ struct ComposerAttachmentMenuButton: UIViewRepresentable {
                 action("Attach Files", systemImage: "folder", destination: .files),
             ]
             if parent.showsSkills {
-                children.append(action("Skills", systemImage: "sparkles", destination: .skills))
+                children.append(action("Add Skills", systemImage: "sparkles", destination: .skills))
             }
-            children.append(action("Commands", systemImage: "command", destination: .commands))
+            children.append(action("Add Commands", systemImage: "command", destination: .commands))
             return UIMenu(children: children)
         }
 

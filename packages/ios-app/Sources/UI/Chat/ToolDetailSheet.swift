@@ -68,14 +68,14 @@ struct ToolDetailSheet: View {
                         pathText(path)
                     } else if presentation.kind == .bash {
                         Text(verbatim: preview.text)
-                            .font(TronTypography.codeContent)
+                            .font(primaryValueFont)
                             .foregroundStyle(Color.tronTextSecondary)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         Text(preview.text)
-                            .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold))
+                            .font(primaryValueFont)
                             .foregroundStyle(Color.tronTextSecondary)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
@@ -99,7 +99,7 @@ struct ToolDetailSheet: View {
             return Text("\(directory)\(basename)")
         } ?? Text(path.basename).foregroundColor(accent)
         return text
-            .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold))
+            .font(primaryValueFont)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -109,15 +109,9 @@ struct ToolDetailSheet: View {
         if let diff = presentation.diff {
             if diff.showsInline {
                 VStack(alignment: .leading, spacing: 7) {
-                    HStack(alignment: .firstTextBaseline) {
-                        sectionLabel("Change")
-                        Spacer()
-                        Button("Open full diff") { showingChanges = true }
-                            .font(TronTypography.caption)
-                            .foregroundStyle(accent)
-                            .buttonStyle(.plain)
-                    }
+                    sectionLabel("Change")
                     ToolDiffView(lines: diff.visibleLines(for: density))
+                    fullDiffButton(diff)
                     if density == .glance, diff.compactLines != diff.lines {
                         Text("Pull up for more context, or open the full diff.")
                             .font(TronTypography.caption)
@@ -130,7 +124,14 @@ struct ToolDetailSheet: View {
         }
     }
 
-    private func changesButton(_ diff: ToolDiffPresentation) -> some View {
+    private func fullDiffButton(_ diff: ToolDiffPresentation) -> some View {
+        changesButton(diff, title: "View full diff")
+    }
+
+    private func changesButton(
+        _ diff: ToolDiffPresentation,
+        title: String? = nil
+    ) -> some View {
         Button { showingChanges = true } label: {
             HStack(spacing: 11) {
                 Image(systemName: "rectangle.stack.badge.plus")
@@ -138,7 +139,7 @@ struct ToolDetailSheet: View {
                     .foregroundStyle(accent)
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(diff.changesTitle)
+                    Text(title ?? diff.changesTitle)
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(Color.tronTextPrimary)
                     Text(diff.changesSubtitle)
@@ -147,6 +148,7 @@ struct ToolDetailSheet: View {
                 }
                 Spacer(minLength: 8)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
             .contentShape(Rectangle())
         }
@@ -171,6 +173,7 @@ struct ToolDetailSheet: View {
                 } else {
                     TronMarkdownView(text: preview.text, streaming: tool.isRunning)
                         .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .tronGlassSurface(accent: accent, tintOpacity: 0.07)
                 }
             }
@@ -189,6 +192,10 @@ struct ToolDetailSheet: View {
                 .font(TronTypography.bodySM)
                 .foregroundStyle(Color.tronTextSecondary)
         }
+    }
+
+    private var primaryValueFont: Font {
+        TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold)
     }
 
     private var technicalDetailsButton: some View {

@@ -1719,10 +1719,9 @@ struct ChatView: View {
             return
         }
         dismissComposerResourcePicker()
-        // End the responder lifetime before UIKit presents a picker. This also
-        // invalidates queued becomeFirstResponder callbacks in the representable.
-        composerFocused = false
-        _ = composerResponder.resignFirstResponder()
+        // Keep the composer responder intent intact while the native menu
+        // settles. UIKit may temporarily cover the keyboard for a system picker,
+        // but selecting an attachment must not explicitly end the draft's focus.
 
         // A native Menu is still dismissing when its action runs. Presenting a
         // sheet or system picker synchronously can collide with that transient

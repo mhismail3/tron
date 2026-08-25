@@ -85,7 +85,6 @@ struct SessionShellView: View {
                 .disabled(renameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Button("Cancel", role: .cancel) { sessionToRename = nil }
         }
-        .inAppNoticeHost()
         .onChange(of: model.profiles.selected?.id, initial: true) { _, profileID in
             var route = presentedSession
             profileRouteOwner.reconcile(
@@ -269,8 +268,12 @@ struct SessionShellView: View {
             .tronNavigationTitle("Filter Servers")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { showingServerFilter = false }
-                        .tronToolbarAction()
+                    Button { showingServerFilter = false } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
+                    }
+                    .accessibilityLabel("Done")
                 }
             }
         }

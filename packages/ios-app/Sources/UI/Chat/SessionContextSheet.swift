@@ -325,7 +325,7 @@ struct SessionContextSheet: View {
                 case .inProgress:
                     ProgressView().controlSize(.small)
                 case .idle:
-                    EmptyView()
+                    Image(systemName: "rectangle.compress.vertical")
                 }
                 Text("Compact")
             }

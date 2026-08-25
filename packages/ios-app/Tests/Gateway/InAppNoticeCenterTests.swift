@@ -93,17 +93,6 @@ struct InAppNoticeCenterTests {
         #expect(center.notices.isEmpty)
     }
 
-    @Test("host leases restore previous host and ignore stale releases")
-    func hostLeasesRestorePreviousHost() {
-        let center = InAppNoticeCenter(); let first = center.acquireHost(); let second = center.acquireHost()
-        #expect(center.activeHost == second)
-        center.releaseHost(first); #expect(center.activeHost == second)
-        center.releaseHost(second); #expect(center.activeHost == nil)
-        center.releaseHost(first); #expect(center.activeHost == nil)
-        let restored = center.acquireHost(); let nested = center.acquireHost(); center.releaseHost(nested)
-        #expect(center.activeHost == restored)
-    }
-
     @Test("overflow never retains actionless newly rejected timer")
     func overflowDoesNotRetainRejectedTimer() async throws {
         let center = InAppNoticeCenter()
@@ -165,14 +154,24 @@ struct InAppNoticePresentationGuardTests {
             .deletingLastPathComponent()
     }
 
-    @Test("shared hosts cover the shell and app-owned sheet boundary")
-    func sharedHostCoverage() throws {
+    @Test("one scene window owns notices above sheet coordinate spaces")
+    func sceneWindowHostCoverage() throws {
+        let app = try source("Sources/App/TronMobileApp.swift")
+        let presentation = try source("Sources/UI/Components/InAppNoticePresentation.swift")
         let shell = try source("Sources/UI/Chat/SessionShellView.swift")
         let blur = try source("Sources/UI/Chat/ChatTopVariableBlur.swift")
         let onboarding = try source("Sources/UI/Onboarding/OnboardingView.swift")
-        #expect(shell.contains(".inAppNoticeHost()"))
-        #expect(blur.contains(".overlay(alignment: .top) { InAppNoticeHost() }"))
-        #expect(onboarding.contains(".inAppNoticeHost()"))
+        #expect(app.contains("InAppNoticeWindowInstaller("))
+        #expect(presentation.contains("NoticeOverlayWindow(windowScene: scene)"))
+        #expect(presentation.contains("window.windowLevel = UIWindow.Level("))
+        #expect(presentation.contains("override func hitTest"))
+        #expect(presentation.contains("proxy.frame(in: .named(NoticeOverlayCoordinateSpace.name))"))
+        #expect(presentation.contains("interactionRegistry?.contains("))
+        #expect(presentation.contains("rootViewController?.presentedViewController != nil"))
+        #expect(!presentation.contains("maximumInteractiveHeight"))
+        #expect(!shell.contains("InAppNoticeHost"))
+        #expect(!blur.contains("InAppNoticeHost"))
+        #expect(!onboarding.contains("InAppNoticeHost"))
     }
 
     @Test("notice cards retain glass, actions, stacking, motion, and accessibility semantics")

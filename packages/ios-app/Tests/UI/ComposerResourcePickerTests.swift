@@ -77,7 +77,7 @@ struct ComposerResourcePickerTests {
         )
         let supportedTitles = ComposerAttachmentMenuButton.Coordinator(parent: supported)
             .makeMenu().children.compactMap { ($0 as? UIAction)?.title }
-        #expect(supportedTitles == ["Take Photo", "Select Photos", "Attach Files", "Skills", "Commands"])
+        #expect(supportedTitles == ["Take Photo", "Select Photos", "Attach Files", "Add Skills", "Add Commands"])
 
         let legacy = ComposerAttachmentMenuButton(
             isEnabled: true,
@@ -86,8 +86,8 @@ struct ComposerResourcePickerTests {
         )
         let legacyTitles = ComposerAttachmentMenuButton.Coordinator(parent: legacy)
             .makeMenu().children.compactMap { ($0 as? UIAction)?.title }
-        #expect(!legacyTitles.contains("Skills"))
-        #expect(legacyTitles.last == "Commands")
+        #expect(!legacyTitles.contains("Add Skills"))
+        #expect(legacyTitles.last == "Add Commands")
     }
 
     @Test("the bounded catalog retains and filters its thousandth entry")

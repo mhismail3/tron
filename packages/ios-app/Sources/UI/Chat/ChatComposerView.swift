@@ -203,6 +203,7 @@ struct ChatComposerView: View {
                     Text("Type here")
                         .font(TronTypography.input)
                         .foregroundStyle(Color.tronEmerald)
+                        .opacity(isTranscriptReady ? 1 : 0.38)
                         .padding(.leading, 2)
                         .padding(.vertical, 10)
                         .transition(.opacity)

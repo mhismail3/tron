@@ -29,7 +29,7 @@ struct NewSessionSourceControlSheet: View {
                             ForEach(Array(SessionSourceControlMode.allCases.enumerated()), id: \.element) { index, mode in
                                 if index > 0 { TronSettingsDivider() }
                                 Button { choose(mode) } label: {
-                                    HStack(alignment: .top, spacing: 12) {
+                                    HStack(alignment: .center, spacing: 12) {
                                         Image(systemName: selection.mode == mode ? "checkmark.circle.fill" : "circle")
                                             .foregroundStyle(selection.mode == mode ? Color.tronTeal : Color.tronTextMuted)
                                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))

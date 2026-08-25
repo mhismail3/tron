@@ -935,9 +935,12 @@ notification projection is disposable and bounded to eight entries, 4 KiB per me
 progress, orders foreground cards by priority while preserving FIFO ties, stacks at most three visible cards,
 starts automatic dwell only when a card is foremost, and pauses timers while inactive, backgrounded, or interacted
 with. Typed app, presentation, and exact session scopes retire with their owner. The content-layer
-`InAppNoticeHost` uses ordered live host leases so an underlying shell cannot duplicate a notice and a released
-sheet restores the surviving shell. Notices use regular Liquid Glass outside system toolbar chrome, reserving 80 points
-on each horizontal edge and 8 points above the content seam; only the foremost card accepts input. Accessibility Dynamic
+One non-key, transparent, pass-through window per app scene owns `InAppNoticeHost` above app sheets, so notice
+coordinates never transfer into a presented sheet or follow its interactive drag. Content and blur modifiers do not
+install notice hosts. The window receives the existing AppModel-owned center, forwards touches outside the bounded
+notice region, and is retired with its scene; it never creates another notice store. Notices use regular Liquid Glass
+below the safe area and toolbar reservation, keep 80 points clear on each horizontal edge, and accept input only on
+the foremost card. Accessibility Dynamic
 Type uses a vertical action layout. Passive errors expire after roughly eight seconds, while action-bearing errors are
 persistent and expose native actions. Persistent restart, update, rollback, and package-progress cards are low priority
 until completion returns them to normal priority. A session opening assigns notices to its pending presentation generation,
@@ -1096,11 +1099,11 @@ native toolbar chrome. Tool-detail surfaces use their own 112-point top blur whi
 detent is a glance surface: a wrapping chip flow combines state and elapsed time and expresses only useful
 metadata in natural singular/plural copy. The flow caches one bounded measurement per layout pass and uses the exact same width and height proposal for placement, so a dynamically updating status chip cannot under-report its row height or overlap the following section. Pulling to large selects the expanded display density without
 changing the selected call or scroll ownership. Read/write/edit foreground a selectable path whose directory
-uses the restrained secondary tone and whose basename uses the tool accent; bash foregrounds a smaller
-selectable command that wraps without splitting words, while grep/find/list
-foreground their pattern and location. Code results use the larger code size.
+uses the restrained secondary tone and whose basename uses the tool accent; command, path, pattern, and location
+values share one 12-point semibold code scale and wrap without splitting words. Code results use their separate
+readable-result scale.
 Edit uses an authoritative returned patch when present, otherwise it previews only exact requested old/new
-blocks. Exactly one verified requested change with exactly one authoritative diff unit containing a real
+blocks. An admitted inline preview places its full-diff action in a full-width interactive row below the diff. Exactly one verified requested change with exactly one authoritative diff unit containing a real
 addition or removal may appear inline: medium uses a compact bounded head/tail glance and large reveals the
 full bounded diff. Patch admission fails closed on malformed or combined hunk headers and uses the maximum
 evidence across file, `+++`, and valid unified-hunk headers, so extra header-only or binary files cannot hide
