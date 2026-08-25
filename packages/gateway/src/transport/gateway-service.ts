@@ -27,11 +27,17 @@ import { fitSessionSnapshot, safeJson } from "../sessions/projection.js";
 import { ModelCatalogPager } from "./model-pagination.js";
 import { SessionListPaginationStore } from "./session-list-pagination.js";
 import type { NotificationService } from "../notifications/notification-service.js";
+import { AsyncMutex } from "../util/async-mutex.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
 const PROVIDER_CATALOG_MAX_STRING_BYTES = 4 * 1_048_576;
 const PROVIDER_CATALOG_MAX_FIELD_CHARACTERS = 100_000;
+
+interface MobileIdentityLane {
+  mutex: AsyncMutex;
+  users: number;
+}
 
 function parseSessionSourceControl(value: unknown): SessionSourceControlRequest | undefined {
   if (value === undefined || value === null) return undefined;
@@ -114,6 +120,7 @@ export class GatewayService {
   private readonly sessionListPages = new SessionListPaginationStore();
   private readonly modelCatalogPages = new ModelCatalogPager();
   private readonly updateService: GatewayUpdateService;
+  private readonly mobileIdentityLanes = new Map<string, MobileIdentityLane>();
 
   constructor(private readonly dependencies: GatewayServiceDependencies) {
     this.updateService = dependencies.updateService ?? new GatewayUpdateService({
@@ -233,41 +240,47 @@ export class GatewayService {
         });
       case "device.list":
         return safeJson({ devices: await this.dependencies.devices.listDevices() });
-      case "device.revoke":
-        return this.mutation(client, method, params, async () => {
-          const deviceId = string(params.deviceId, "deviceId", { max: 100 });
+      case "device.revoke": {
+        const deviceId = string(params.deviceId, "deviceId", { max: 100 });
+        return this.withMobileIdentityLane(deviceId, () => this.mutation(client, method, params, async () => {
           // Disable local push authority before the bearer disappears. Remote
           // revocation is retained as a bounded tombstone if Tron Push is down.
           await this.dependencies.notifications?.removeDevice(deviceId);
           const revoked = await this.dependencies.devices.revoke(deviceId);
           if (revoked) this.dependencies.deviceRevoked(deviceId);
           return { revoked };
-        });
+        }));
+      }
       case "push.registration.status": {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Push registration status accepts no parameters");
         const notifications = this.requireNotifications();
         return safeJson(await notifications.status(client.isLocal ? undefined : client.identity));
       }
       case "push.registration.upsert":
-        return this.mutation(client, method, params, async () => {
-          if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
+        if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
+        return this.withMobileIdentityLane(client.identity, () => this.mutation(client, method, params, async () => {
           const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "notifyWhenAskPresented"]);
           if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
-          return safeJson(await this.requireNotifications().upsertGrant({
+          const notifications = this.requireNotifications();
+          const input = {
             deviceId: client.identity,
             installationId: string(params.installationId, "installationId", { min: 8, max: 160 }),
             grantId: string(params.grantId, "grantId", { min: 8, max: 160 }),
             secret: string(params.secret, "secret", { min: 43, max: 171 }),
             previewsEnabled: params.previewsEnabled === undefined ? false : boolean(params.previewsEnabled, "previewsEnabled"),
             ...(params.notifyWhenAskPresented === undefined ? {} : { notifyWhenAskPresented: boolean(params.notifyWhenAskPresented, "notifyWhenAskPresented") }),
-          }));
-        });
+          };
+          if (!await this.dependencies.devices.hasDevice(client.identity)) {
+            throw new GatewayError("unauthenticated", "The authenticated mobile device is no longer paired");
+          }
+          return safeJson(await notifications.upsertGrant(input));
+        }));
       case "push.registration.remove":
-        return this.mutation(client, method, params, async () => {
-          if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can remove its push registration");
+        if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can remove its push registration");
+        return this.withMobileIdentityLane(client.identity, () => this.mutation(client, method, params, async () => {
           if (Object.keys(params).some((key) => key !== "commandId")) throw new GatewayError("invalid_request", "Push registration removal accepts no parameters beyond commandId");
           return { removed: await this.requireNotifications().removeDevice(client.identity) };
-        });
+        }));
       case "gateway.restart":
         if (process.env.TRON_GATEWAY_SUPERVISED !== "1") {
           throw new GatewayError("unsupported", "Gateway restart requires an external supervisor");
@@ -840,6 +853,21 @@ export class GatewayService {
   private requireNotifications(): NotificationService {
     if (!this.dependencies.notifications) throw new GatewayError("unsupported", "Push notifications are unavailable in this Gateway build");
     return this.dependencies.notifications;
+  }
+
+  /** Retain the per-device lane from invocation admission through receipt execution. */
+  private async withMobileIdentityLane<T>(deviceId: string, operation: () => Promise<T>): Promise<T> {
+    const lane = this.mobileIdentityLanes.get(deviceId) ?? { mutex: new AsyncMutex(), users: 0 };
+    lane.users += 1;
+    this.mobileIdentityLanes.set(deviceId, lane);
+    try {
+      return await lane.mutex.run(operation);
+    } finally {
+      lane.users -= 1;
+      if (lane.users === 0 && this.mobileIdentityLanes.get(deviceId) === lane) {
+        this.mobileIdentityLanes.delete(deviceId);
+      }
+    }
   }
 
   private async mutation(

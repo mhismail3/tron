@@ -217,7 +217,9 @@ describe("DeviceStore", () => {
     const { store } = await fixture();
     const enrollment = await store.ensureEnrollment();
     const paired = await store.pair(enrollment.code, "Phone");
+    expect(await store.hasDevice(paired.deviceId)).toBe(true);
     expect(await store.revoke(paired.deviceId)).toBe(true);
+    expect(await store.hasDevice(paired.deviceId)).toBe(false);
     expect(await store.authenticate(paired.token)).toBeNull();
   });
 });

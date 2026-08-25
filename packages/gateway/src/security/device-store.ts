@@ -303,6 +303,12 @@ export class DeviceStore {
     return document.devices.map(({ tokenHash: _tokenHash, ...device }) => device);
   }
 
+  /** Revalidate an admitted device identity without projecting bearer material. */
+  async hasDevice(deviceId: string): Promise<boolean> {
+    const document = await this.readDevices();
+    return document.devices.some((device) => device.id === deviceId);
+  }
+
   async revoke(deviceId: string): Promise<boolean> {
     return this.mutex.run(async () => {
       const document = await this.readDevices();

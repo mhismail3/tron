@@ -421,6 +421,7 @@ struct ChatViewScrollHarnessTests {
                             <= ChatTranscriptGeometry.catchUpDistance
                 }
                 let entranceBaseline = ready.observation.animatedEntranceCount
+                let automaticScrollBaseline = ready.observation.automaticScrollCommandCount
                 let smoothBaseline = ready.observation.smoothAutomaticScrollCommandCount
                 let installBaseline = ready.observation.projectionInstallCount
 
@@ -435,6 +436,7 @@ struct ChatViewScrollHarnessTests {
                     $0.observation.projectionInstallCount > installBaseline
                         && $0.observation.animatedEntranceCount == entranceBaseline + 1
                 }
+                #expect(revealed.observation.automaticScrollCommandCount == automaticScrollBaseline)
                 #expect(revealed.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
 
                 // Repeated geometry for the same row cannot replay admission.
