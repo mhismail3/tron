@@ -195,7 +195,7 @@ struct TranscriptRow: View, Equatable {
 
 }
 
-private struct UserPromptBubbleLayout: Layout {
+struct BoundedTrailingContentLayout: Layout {
     let maxWidth: CGFloat
 
     func sizeThatFits(
@@ -206,9 +206,11 @@ private struct UserPromptBubbleLayout: Layout {
         guard let subview = subviews.first else { return .zero }
         let availableWidth = min(maxWidth, proposal.width ?? maxWidth)
         let intrinsic = subview.sizeThatFits(.unspecified)
-        let width = intrinsic.width > 0 && intrinsic.width <= availableWidth
-            ? intrinsic.width
-            : availableWidth
+        let width = UserPromptTextLayoutPolicy.boundedContainerWidth(
+            intrinsic: intrinsic.width,
+            proposed: availableWidth,
+            maximum: maxWidth
+        )
         let fitted = subview.sizeThatFits(ProposedViewSize(width: width, height: proposal.height))
         return CGSize(width: width, height: fitted.height)
     }
@@ -222,9 +224,11 @@ private struct UserPromptBubbleLayout: Layout {
         guard let subview = subviews.first else { return }
         let availableWidth = min(maxWidth, bounds.width)
         let intrinsic = subview.sizeThatFits(.unspecified)
-        let width = intrinsic.width > 0 && intrinsic.width <= availableWidth
-            ? intrinsic.width
-            : availableWidth
+        let width = UserPromptTextLayoutPolicy.boundedContainerWidth(
+            intrinsic: intrinsic.width,
+            proposed: availableWidth,
+            maximum: maxWidth
+        )
         let fitted = subview.sizeThatFits(ProposedViewSize(width: width, height: bounds.height))
         subview.place(
             at: CGPoint(x: bounds.maxX - width, y: bounds.minY),
@@ -244,7 +248,7 @@ struct UserPromptGlassModifier: ViewModifier {
         // their intrinsic bubble width, while long prompts wrap immediately.
         // This replaces ViewThatFits without expanding every prompt to the
         // maximum width or swapping branches after a large paste.
-        UserPromptBubbleLayout(maxWidth: UserPromptTextLayoutPolicy.maximumWidth) {
+        BoundedTrailingContentLayout(maxWidth: UserPromptTextLayoutPolicy.maximumWidth) {
             content.fixedSize(horizontal: false, vertical: true)
         }
         .glassEffect(

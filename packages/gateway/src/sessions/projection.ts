@@ -889,7 +889,7 @@ export function projectEntry(
         entry.message,
         blobs,
         entry.message.role === "toolResult" ? toolMetadata?.get(entry.message.toolCallId) : undefined,
-        entry.message.role === "assistant" ? (presentationIDs?.get(entry.id) ?? entry.id) : entry.id,
+        presentationIDs?.get(entry.id) ?? entry.id,
         entry.message.role === "assistant",
       );
     case "custom_message":

@@ -693,10 +693,11 @@ nonvisual “Tron is working” status on the active blur. Custom working messag
 compaction, and provider retry attempts retain explicit compact rows so operational detail is never hidden.
 A manual compaction accepted during an active turn remains a Gateway-owned pending maintenance
 operation: the optional snapshot flag renders “Compaction queued” without fabricating JSONL, then
-transitions through the existing compacting row to the canonical compaction entry. Successful completion
-publishes an exact, cursor-bearing canonical compaction delta before full-frame settlement; iOS admits it
-only against a contiguous exact tail and matching parent leaf, so the mounted progress row becomes
-“Context compacted” without navigation while malformed or inexact deltas request authoritative rebaseline.
+transitions through the existing compacting row to the canonical compaction entry. Completion publishes
+one immediate fitted authoritative snapshot containing the current canonical tail/leaf—including any
+hook-appended suffix—and restored prompt/automatic-idle operation state; manual marker cleanup retains
+its compacting phase without retaining the spinner. The mounted progress row therefore becomes
+“Context compacted” without spending a cursor on a single-entry delta that may already be a non-leaf.
 One synchronous Gateway claim spans pending and execution, handoff revalidates against newer agent ownership, and
 settlement waits for durable run-marker retirement. The confirmed mutation stays pending until
 canonical completion; shutdown cancels only work that has not started. Older Gateways may omit queued and effective
@@ -708,12 +709,14 @@ be queued without waiting for the current turn to settle. The send control's nat
 menu can explicitly choose steering after the current turn or follow-up after current work. A press
 has immediate scale/opacity feedback, admitted sends replace the arrow with a compact progress
 indicator, and the composer surface acknowledges in-flight admission through the authoritative
-Gateway queue or pending-prompt snapshot. A prompt that enters automatic compaction before its
-canonical user entry exists remains visible as a right-anchored pending bubble and survives chat
-navigation without replay. Pending attachment chips enter and leave with bounded composer-owned
+Gateway queue or pending-prompt snapshot. A semantically ordinary prompt that enters automatic
+compaction in its own preflight is not fabricated as a Pi queue item; its authoritative pending state
+uses the shared right-anchored emerald queue-card visual with truthful “Message” / “After compaction”
+copy, then hands directly to the
+operation-ID-bound canonical user row and survives navigation without replay. Pending attachment chips enter and leave with bounded composer-owned
 motion; their height changes explicitly arm the sole scroll coordinator's viewport transition.
 Authoritative queued entries render after any explicit runtime detail as right-anchored compact cards
-that hug their content and wrap at the same 364-point maximum as a user prompt. They retain stable
+that use one intrinsic-or-wrapped layout, hug their content, and stop at the same 364-point maximum as a user prompt. They retain stable
 identity, delivery stage, position, text, total attachment count, and optional photo/file counts. The
 steer card keeps its delivery detail and smaller behavior icon together at the trailing edge, leaving the
 message and attachment row on the full card width. Its compact top inset matches the reduced gap before
@@ -1046,8 +1049,9 @@ row-scoped text preparation keep a full streaming turn from re-evaluating settle
 attached only to preparation slices that render thinking, and tool rows compare a payload-only revision instead of an
 ambient installation tag. Foreground active and passive sessions therefore converge through the same complete commit:
 live work may be replaced, entrance suppression is consumed once, and neither history revision nor morph entitlement
-can replay. Queue-card replacements use the stricter one-removed/one-new-candidate policy and fail closed for repeated or causally
-ambiguous prompts; no Gateway operation link is inferred. Canonical
+can replay. Queue-card replacements prefer the Gateway operation ID carried as the canonical user
+row's bounded presentation identity; rolling compatibility falls back to the stricter one-removed/one-new-candidate
+policy and fails closed for repeated or causally ambiguous prompts. Canonical
 compaction/branch/configuration entries, embedded assistant failures, and exact admitted custom/retry
 working detail share one semantic notification projection and capsule primitive. Ordinary default running
 state instead drives only the bottom-safe-area blur and never changes transcript geometry. Extension status

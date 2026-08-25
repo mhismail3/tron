@@ -357,9 +357,11 @@ Prompt RPC admission follows the pinned runtime's preflight callback as its sole
 the Gateway does not race it against a local deadline that could report rejection while
 the same uncancelled runtime call later starts canonical work. While the canonical user
 entry is pending, the snapshot's bounded `pendingPrompt` projection carries the display
-text and requested delivery behavior. It is cleared by the canonical user entry or a
-definitive rejection, so iOS can reconstruct an in-flight prompt across navigation without
-replaying it.
+text and requested delivery behavior. The Gateway claims the exact Pi user-message object,
+retires the projection only for that same message at persistence, and exposes the prompt
+operation ID as the canonical user's bounded `presentationId`; repeated text therefore
+cannot settle the wrong mobile admission. Definitive rejection/no-agent settlement clears
+the same owner, so iOS can reconstruct an in-flight prompt across navigation without replay.
 
 Manual compaction has a separate Gateway-owned single-entry maintenance admission. Its
 synchronous claim covers pending, direct, and queued execution, so a second request is rejected
@@ -367,7 +369,12 @@ rather than serialized behind the first. An idle request starts canonical compac
 A request accepted during an active agent run publishes `compactionQueued`, retains the run marker,
 and keeps its command receipt pending until the exact compaction starts after final `agent_settled`
 and completes or fails. Handoff revalidates that no newer agent run owns the session, and queued
-completion awaits durable marker removal before publishing settled. Gateway shutdown synchronously
+completion awaits durable marker removal before publishing settled. Every successful or failed
+`compaction_end` publishes one immediate fitted authoritative snapshot with the current canonical
+tail/leaf and restored prompt/automatic-idle state; manual work remains compacting until its durable
+marker retires. Hooks may append after the compaction entry, so
+the Gateway does not spend a cursor on a single-entry delta that is already a non-leaf.
+Gateway shutdown synchronously
 closes runtime-slot admission, drains any already-entered creation/import critical section through the
 registry mutex, then cancels unstarted queued work and drains every captured runtime before blob disposal.
 This state is not a
@@ -434,8 +441,14 @@ identities, more than 256 packages/updates, more than 1,000 resources of any kin
 8 KiB, or encoded responses above 768 KiB before generic JSON projection can truncate them. The bounded JSON projector tracks only the active recursion path, so shared Pi metadata objects are expanded for each sibling resource while true cycles remain marked and bounded. Pi's configured `sessionDir`, or its
 canonical per-workspace directories under `agentDir/sessions`, remain authoritative; Tron does
 not move or mirror those files. `session.list` defaults to user sessions, while `scope: "all"`
-additively includes extension-owned children classified from nested canonical storage or their
-durable `subagent-*` session metadata. Ordinary user forks remain user sessions. If more than
+additively includes extension-owned children classified from nested canonical storage, durable
+`subagent-*` session metadata, or bounded proof that a same-directory parented JSONL contains only
+entries predating its own fork header (an interrupted frozen child snapshot). This proof is admitted
+only when parent and child resolve in the same canonical directory; cross-project forks remain user
+sessions. Gateway-created user forks synchronously append a tiny canonical provenance entry that
+wins independently of wall-clock order; legacy forks with any post-header entry remain user sessions.
+Suffix inspection has a deterministic pass-wide catalog byte budget, revalidates file size after reading, and
+fails open as user on exhausted, changing, malformed, or oversized evidence. If more than
 one canonical file claims the same embedded session ID, the Gateway omits every ambiguous copy
 and rejects open/delete by that ID until the duplicate is repaired; traversal order never chooses
 canonical ownership. A newly created session has no canonical Pi JSONL until Pi records its first

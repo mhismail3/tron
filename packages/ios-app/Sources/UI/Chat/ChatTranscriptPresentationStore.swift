@@ -65,6 +65,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         let outgoingAttachmentIDs: [String]
         let outgoingAttachments: [Attachment]
         let transportActive: Bool?
+        let outgoingPreflightCompacting: Bool?
         let pendingID: String?
         let pendingText: String?
         let pendingBehavior: String?
@@ -95,6 +96,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
                 kind = .none
                 outgoingID = nil; outgoingText = nil; outgoingBehavior = nil
                 outgoingAttachmentIDs = []; outgoingAttachments = []; transportActive = nil
+                outgoingPreflightCompacting = nil
                 pendingID = nil; pendingText = nil; pendingBehavior = nil
                 pendingAttachmentCount = nil; pendingPhotoCount = nil
                 pendingFileAttachmentCount = nil; pendingIsCompacting = nil
@@ -102,6 +104,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
                 kind = .pending
                 outgoingID = nil; outgoingText = nil; outgoingBehavior = nil
                 outgoingAttachmentIDs = []; outgoingAttachments = []; transportActive = nil
+                outgoingPreflightCompacting = nil
                 pendingID = presentation.id; pendingText = presentation.text
                 pendingBehavior = presentation.behavior?.rawValue
                 pendingAttachmentCount = presentation.attachmentCount
@@ -115,6 +118,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
                 outgoingAttachmentIDs = presentation.attachmentIDs
                 outgoingAttachments = attachments.map(Attachment.init)
                 transportActive = presentation.transportActive
+                outgoingPreflightCompacting = presentation.preflightCompacting
                 pendingID = nil; pendingText = nil; pendingBehavior = nil
                 pendingAttachmentCount = nil; pendingPhotoCount = nil
                 pendingFileAttachmentCount = nil; pendingIsCompacting = nil

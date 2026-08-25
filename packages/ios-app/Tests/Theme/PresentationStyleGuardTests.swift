@@ -1695,6 +1695,8 @@ struct PresentationStyleGuardTests {
             encoding: .utf8
         )
         #expect(sheet.occurrences(of: ".font(primaryValueFont)") == 3)
+        #expect(sheet.contains("HStack(alignment: .center, spacing: 10)"))
+        #expect(!sheet.contains("HStack(alignment: .top, spacing: 10)"))
         #expect(sheet.contains("TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold)"))
         #expect(sheet.contains("fullDiffButton(diff)"))
         #expect(sheet.contains("changesButton(diff, title: \"View full diff\")"))

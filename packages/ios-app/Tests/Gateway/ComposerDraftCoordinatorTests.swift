@@ -824,6 +824,65 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
+    @Test("operation-bound canonical presentation identity resolves repeated prompt text")
+    func operationIdentityResolvesRepeatedCanonicalText() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 44)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "same"
+            )
+            let sending = Task {
+                try await harness.coordinator.send(target: target, behavior: nil)
+            }
+            try await harness.waitForSends(1)
+            #expect(harness.coordinator.matchesPendingPrompt(
+                target: target,
+                pending: .init(
+                    id: "operation-0", createdAt: "2026-01-01T00:00:00Z",
+                    behavior: nil, text: "same", attachmentCount: 0
+                )
+            ))
+            #expect(!harness.coordinator.matchesPendingPrompt(
+                target: target,
+                pending: .init(
+                    id: "operation-other", createdAt: "2026-01-01T00:00:00Z",
+                    behavior: nil, text: "different", attachmentCount: 0
+                )
+            ))
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+
+            func user(_ id: String, presentationID: String) -> TranscriptItem {
+                .message(MessageTranscriptItem(
+                    id: id, parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+                    kind: .message, role: .user, presentationId: presentationID,
+                    content: [ContentPart(
+                        id: "text", ordinal: 0, thinkingRunOrdinal: nil,
+                        type: .text, text: "same", attachment: nil,
+                        redacted: nil, mimeType: nil, blobId: nil,
+                        toolCallId: nil, name: nil, arguments: nil
+                    )],
+                    provider: nil, modelId: nil, stopReason: nil,
+                    errorMessage: nil, toolCallId: nil, toolName: nil,
+                    isError: nil, details: nil, usage: nil, startedAt: nil,
+                    completedAt: nil, durationMs: nil, lastProgressAt: nil,
+                    progressSequence: nil
+                ))
+            }
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [
+                    user("unrelated", presentationID: "unrelated"),
+                    user("owned", presentationID: "operation-0"),
+                ]
+            )
+            #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+            #expect(harness.coordinator.canonicalSubmissionHandoff(target: target)?.canonicalID == "owned")
+        }
+    }
+
     @Test("pre-existing identical queued prompts do not reconcile a newer submission")
     func queuedReconciliationRequiresNewIdentity() async throws {
         try await withTestWatchdog { @MainActor in
@@ -1768,6 +1827,39 @@ struct ComposerDraftCoordinatorTests {
                 try await valueOfOwnedTask(sending)
             }
             #expect(harness.coordinator.text(for: scope) == "outgoing")
+        }
+    }
+
+    @Test("accepted submission retires with its presentation and does not block remount")
+    func acceptedSendRetiresOnPresentationRevocation() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let first = SessionPresentationIdentity(sessionID: "session", generation: 61)
+            let scope = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: first, lifecycleGeneration: 1,
+                initialText: "first"
+            )
+            let firstSend = Task {
+                try await harness.coordinator.send(target: first, behavior: nil)
+            }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(firstSend)
+            #expect(harness.coordinator.outgoingSubmission(for: first) != nil)
+
+            harness.coordinator.revoke(first)
+            let second = SessionPresentationIdentity(sessionID: "session", generation: 62)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: second, lifecycleGeneration: 1
+            )
+            harness.coordinator.setText("second", for: scope)
+            let secondSend = Task {
+                try await harness.coordinator.send(target: second, behavior: nil)
+            }
+            try await harness.waitForSends(2)
+            harness.completeSend(index: 1, result: .success(()))
+            try await valueOfOwnedTask(secondSend)
+            #expect(harness.coordinator.outgoingSubmission(for: second)?.outgoingText == "second")
         }
     }
 

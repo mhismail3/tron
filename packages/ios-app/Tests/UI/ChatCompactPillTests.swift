@@ -29,6 +29,22 @@ struct ChatCompactPillTests {
         #expect(UserPromptTextLayoutPolicy.fittedWidth(measured: 520, proposed: 364) == 364)
     }
 
+    @Test("queued containers hug intrinsic content and remain bounded by proposal and cap")
+    func queuedContainerWidth() {
+        #expect(UserPromptTextLayoutPolicy.boundedContainerWidth(
+            intrinsic: 180, proposed: 364
+        ) == 180)
+        #expect(UserPromptTextLayoutPolicy.boundedContainerWidth(
+            intrinsic: 520, proposed: 364
+        ) == 364)
+        #expect(UserPromptTextLayoutPolicy.boundedContainerWidth(
+            intrinsic: 320, proposed: 240
+        ) == 240)
+        #expect(UserPromptTextLayoutPolicy.boundedContainerWidth(
+            intrinsic: .infinity, proposed: 300
+        ) == 300)
+    }
+
     @Test("bottom blur follows keyboard focus without changing layout")
     func bottomActivityBlurGeometry() {
         #expect(ChatBottomActivityBlurLayout.height(keyboardVisible: false) == 68)

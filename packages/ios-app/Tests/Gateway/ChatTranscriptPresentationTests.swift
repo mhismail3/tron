@@ -33,6 +33,19 @@ struct ChatTranscriptPresentationTests {
         #expect(behavior("steer") == .steer)
         #expect(behavior("followUp") == .followUp)
         #expect(behavior("unrecognized") == .unknown)
+        let preflight = ChatOutgoingSubmissionPresentation(
+            snapshot: ComposerSubmissionSnapshot(
+                target: target, textRevision: 1, outgoingText: "prompt",
+                attachmentIDs: [], behavior: nil, localNonce: 2
+            ),
+            transportActive: true,
+            preflightCompacting: true
+        )
+        #expect(preflight.promptBehavior == .ordinary)
+        #expect(preflight.usesQueuedCardVisual)
+        #expect(preflight.cardBehavior == .steer)
+        #expect(preflight.cardTitle == "Message")
+        #expect(preflight.cardDetail == "After compaction")
         #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: behavior("steer")) == .queuedPrompt)
         #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: behavior("followUp")) == .queuedPrompt)
         #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: behavior(nil)) == .userPrompt)
@@ -63,6 +76,31 @@ struct ChatTranscriptPresentationTests {
             entranceSuppressed: false,
             hasIdentityAlias: true
         ))
+    }
+
+    @Test("pending canonical replacement prefers exact operation identity over repeated text")
+    func pendingCanonicalReplacementPrefersOperationIdentity() throws {
+        let pending = SessionSnapshot.PendingPrompt(
+            id: "operation-exact",
+            createdAt: "2026-01-01T00:00:01Z",
+            behavior: nil,
+            text: "same",
+            attachmentCount: 0
+        )
+        let unrelated = try decodeTranscriptFixture(TranscriptItem.self, from: Data(
+            #"{"id":"unrelated","parentId":null,"presentationId":"other","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","content":[{"id":"text-a","type":"text","text":"same"}]}"#.utf8
+        ))
+        let exact = try decodeTranscriptFixture(TranscriptItem.self, from: Data(
+            #"{"id":"exact","parentId":"unrelated","presentationId":"operation-exact","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"user","content":[{"id":"text-b","type":"text","text":"same"}]}"#.utf8
+        ))
+        #expect(ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
+            for: pending,
+            in: [unrelated, exact]
+        ) == ["exact"])
+        #expect(ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
+            for: pending,
+            in: [exact, exact]
+        ).isEmpty)
     }
 
     @Test("previous installed pending handoff suppresses replacement when new snapshot omits pending")
@@ -940,7 +978,22 @@ struct ChatTranscriptPresentationTests {
             attachmentCount: 1
         ), isCompacting: false)
         #expect(ordinary.statusTitle == "Sending")
+        #expect(ordinary.promptBehavior == .ordinary)
         #expect(ordinary.attachmentCount == 1)
+
+        let preflightCompacting = ChatPendingPromptPresentation(snapshot: .init(
+            id: "pending-preflight",
+            createdAt: "2026-01-01T00:00:00Z",
+            behavior: nil,
+            text: "next after compaction",
+            attachmentCount: 0
+        ), isCompacting: true)
+        #expect(preflightCompacting.promptBehavior == .ordinary)
+        #expect(preflightCompacting.usesQueuedCardVisual)
+        #expect(preflightCompacting.cardBehavior == .steer)
+        #expect(preflightCompacting.cardTitle == "Message")
+        #expect(preflightCompacting.cardDetail == "After compaction")
+        #expect(preflightCompacting.statusTitle == "Sending after compaction")
     }
 
     @Test("optimistic submissions preserve steering identity before Gateway reconstruction")

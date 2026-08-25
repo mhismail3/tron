@@ -70,15 +70,19 @@ admits and reduces mounted-session topics:
   single pending maintenance slot. iOS renders it as explicit runtime feedback and never
   inserts a transcript entry or retries the mutation. The row is replaced by existing
   compacting feedback when the Gateway picks up the work, then by the canonical JSONL
-  compaction entry. `session.compaction` carries that exact projected canonical entry as a
-  typed, cursor-bearing delta. iOS appends it only to a complete contiguous tail whose current
-  leaf matches the entry parent, advances canonical projection immediately, and otherwise
-  requests rebaseline; the following snapshot still owns full phase/operation settlement.
+  compaction entry. Current Gateways publish one immediate contiguous authoritative snapshot
+  at `compaction_end`; it contains the fitted current tail/leaf (including hook-appended suffix)
+  and truthful restored prompt/automatic-idle operation state; manual marker cleanup remains compacting
+  until durable settlement. iOS retains typed `session.compaction`
+  decoding only for rolling compatibility with older Gateways and requests rebaseline for an
+  inexact legacy delta.
   `pendingPrompt` is the companion transient admission for a prompt
   whose canonical user entry is still being prepared, including automatic compaction
-  during prompt preflight. iOS renders that exact prompt after runtime feedback and
-  reconstructs it from every authoritative snapshot until the canonical user entry
-  arrives; a mounted submission keeps one complete representation visible through pending and canonical
+  during prompt preflight. An ordinary prompt compacting in its own preflight remains
+  semantically ordinary (never a fabricated `queuedItem`) but uses the shared emerald queue-card visual
+  with “Message” / “After compaction” until its canonical user entry arrives. Gateway binds that entry's
+  bounded `presentationId` to the prompt operation ID, which iOS consumes before legacy text
+  matching. A mounted submission keeps one complete representation visible through pending and canonical
   installation. Optional skill selection travels as bounded `session.prompt.skillName` metadata rather than
   editor text. The Gateway validates it against the exact live skill catalog, retains the original prompt in
   `pendingPrompt` and queue items, and removes Pi's canonical skill envelope during bounded transcript projection,

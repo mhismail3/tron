@@ -40,6 +40,7 @@ const MAX_EXTENSION_TEMP_ENTRIES = 1_024;
 // Ambient enumeration shares these global pass bounds. Exact-owned artifact
 // reconciliation above is intentionally outside this ambient budget.
 const MAX_EXTENSION_ROOT_ENTRIES = 4_096;
+const MAX_FORK_PROVENANCE_SUFFIX_BYTES = 64 * 1_024;
 
 function isMissingFilesystemError(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
@@ -54,16 +55,21 @@ const DEFAULT_CATALOG_DISCOVERY_LIMITS = {
   maximumAcquisitionBytes: 4 * 1_024 * 1_024,
   maximumHeaderBytes: 64 * 1_024 * 1_024,
   maximumHeaderBytesPerFile: 64 * 1_024,
+  maximumForkProvenanceBytes: 64 * 1_024 * 1_024,
   normalizationConcurrency: 16,
 };
 
 type SessionInfo = Awaited<ReturnType<typeof SessionManager.listAll>>[number];
-type CatalogSessionInfo = Omit<SessionInfo, "allMessagesText">;
+type CatalogSessionInfo = Omit<SessionInfo, "allMessagesText"> & {
+  frozenForkSnapshot?: boolean;
+};
 
 interface CatalogHeaderIdentity {
   id: string;
   cwd: string;
+  timestamp?: string;
   parentSessionPath?: string;
+  frozenForkSnapshot?: boolean;
 }
 
 interface CatalogStructureEvidence {
@@ -576,6 +582,10 @@ export class RuntimeRegistry {
       limits.maximumHeaderBytesPerFile,
       Math.floor(limits.maximumHeaderBytes / Math.max(1, paths.length)),
     );
+    const perCandidateProvenanceBytes = Math.min(
+      MAX_FORK_PROVENANCE_SUFFIX_BYTES,
+      Math.floor(limits.maximumForkProvenanceBytes / Math.max(1, paths.length)),
+    );
     let retainedIdentityBytes = 0;
     const reserveHeaderBytes = (count: number): boolean => {
       if (count > remainingHeaderBytes) return false;
@@ -589,12 +599,23 @@ export class RuntimeRegistry {
       const batchPaths = paths.slice(start, start + limits.normalizationConcurrency);
       const identities = await Promise.all(batchPaths.map(async (path) => {
         try {
-          return (await this.readCatalogHeader(
+          const identity = (await this.readCatalogHeader(
             path,
             perCandidateHeaderBytes,
             reserveHeaderBytes,
             refundHeaderBytes,
           )).identity;
+          if (!identity) return undefined;
+          return {
+            ...identity,
+            ...(await this.isFrozenForkSnapshot(
+              path,
+              identity.timestamp,
+              identity.parentSessionPath,
+              (count) => count <= perCandidateProvenanceBytes,
+              () => {},
+            ) ? { frozenForkSnapshot: true } : {}),
+          };
         } catch {
           return undefined;
         }
@@ -611,7 +632,8 @@ export class RuntimeRegistry {
         digest.update(path).update("\0")
           .update(identity?.id ?? "").update("\0")
           .update(identity?.cwd ?? "").update("\0")
-          .update(identity?.parentSessionPath ?? "").update("\n");
+          .update(identity?.parentSessionPath ?? "").update("\0")
+          .update(identity?.frozenForkSnapshot ? "frozen" : "active").update("\n");
         if (identity) identitiesByPath.set(path, identity);
       }
     }
@@ -648,6 +670,7 @@ export class RuntimeRegistry {
       return {
         id: record.id,
         cwd: typeof record.cwd === "string" ? record.cwd : "",
+        ...(typeof record.timestamp === "string" ? { timestamp: record.timestamp } : {}),
         ...(typeof record.parentSession === "string"
           ? { parentSessionPath: record.parentSession }
           : {}),
@@ -743,6 +766,10 @@ export class RuntimeRegistry {
     }
 
     const normalized = new Array<CatalogSessionInfo>(sessions.length);
+    const perSessionProvenanceBytes = Math.min(
+      MAX_FORK_PROVENANCE_SUFFIX_BYTES,
+      Math.floor(limits.maximumForkProvenanceBytes / Math.max(1, sessions.length)),
+    );
     let nextIndex = 0;
     const normalize = async () => {
       while (true) {
@@ -750,12 +777,20 @@ export class RuntimeRegistry {
         nextIndex += 1;
         const session = sessions[index];
         if (!session) return;
+        const path = await this.canonicalSessionPath(session.path);
         normalized[index] = {
           ...session,
-          path: await this.canonicalSessionPath(session.path),
+          path,
           ...(session.parentSessionPath
             ? { parentSessionPath: await this.canonicalSessionPath(session.parentSessionPath) }
             : {}),
+          ...(await this.isFrozenForkSnapshot(
+            path,
+            session.created.toISOString(),
+            session.parentSessionPath,
+            (count) => count <= perSessionProvenanceBytes,
+            () => {},
+          ) ? { frozenForkSnapshot: true } : {}),
         };
       }
     };
@@ -770,6 +805,71 @@ export class RuntimeRegistry {
 
   private canonicalSessionPath(path: string): Promise<string> {
     return realpath(path).catch(() => resolve(path));
+  }
+
+  /** A same-directory fork is user-visible only after it owns some entry at or
+   * after its own header timestamp. Read one bounded suffix and fail open on
+   * partial, oversized, or malformed evidence so uncertainty never hides data. */
+  private async isFrozenForkSnapshot(
+    path: string,
+    headerTimestamp: string | undefined,
+    parentSessionPath: string | undefined,
+    reserveBytes: (count: number) => boolean,
+    refundBytes: (count: number) => void,
+  ): Promise<boolean> {
+    if (!parentSessionPath || !headerTimestamp) return false;
+    const headerTime = Date.parse(headerTimestamp);
+    if (!Number.isFinite(headerTime)) return false;
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      // Only same-directory frozen branches are extension-clone evidence.
+      // Cross-project and otherwise nonlocal forks remain ordinary user data.
+      const [childPath, childDirectory, parentDirectory] = await Promise.all([
+        realpath(path),
+        realpath(dirname(path)),
+        realpath(dirname(parentSessionPath)),
+      ]);
+      if (childDirectory !== parentDirectory) return false;
+
+      handle = await open(childPath, "r");
+      const before = await handle.stat();
+      const length = Math.min(before.size, MAX_FORK_PROVENANCE_SUFFIX_BYTES);
+      if (length <= 0 || !reserveBytes(length)) return false;
+      const start = before.size - length;
+      const buffer = Buffer.allocUnsafe(length);
+      const { bytesRead } = await handle.read(buffer, 0, length, start);
+      if (bytesRead !== length) {
+        refundBytes(length - bytesRead);
+        return false;
+      }
+      const after = await handle.stat();
+      if (after.size !== before.size) return false;
+      let text = buffer.toString("utf8");
+      if (start > 0) {
+        const newline = text.indexOf("\n");
+        if (newline < 0) return false;
+        text = text.slice(newline + 1);
+      }
+      const lines = text.split("\n").filter((line) => line.trim().length > 0);
+      const last = lines.at(-1);
+      if (!last) return false;
+      let value: unknown;
+      try { value = JSON.parse(last); } catch { return false; }
+      if (!value || typeof value !== "object") return false;
+      const record = value as Record<string, unknown>;
+      if (record.type === "custom" && record.customType === "tron.gateway-user-fork") {
+        return false;
+      }
+      if (record.type === "session" || typeof record.timestamp !== "string") return false;
+      const entryTime = Date.parse(record.timestamp);
+      return Number.isFinite(entryTime) && entryTime < headerTime;
+    } catch {
+      return false;
+    } finally {
+      // Reserved bytes represent actual bounded I/O and deliberately stay
+      // charged. Only unread bytes above were refunded.
+      await handle?.close().catch(() => {});
+    }
   }
 
   async list(scope: "user" | "all" = "user"): Promise<SessionSummary[]> {
@@ -890,7 +990,14 @@ export class RuntimeRegistry {
     return JSON.stringify(infos
       // Structural membership and classification own listRevision. Mutable
       // row fields are delivered through revisioned session.summary events.
-      .map((session) => [session.id, session.path, session.parentSessionPath, session.cwd, session.name])
+      .map((session) => [
+        session.id,
+        session.path,
+        session.parentSessionPath,
+        session.cwd,
+        session.name,
+        session.frozenForkSnapshot === true,
+      ])
       .sort((left, right) => {
         const byId = String(left[0]).localeCompare(String(right[0]));
         return byId !== 0 ? byId : JSON.stringify(left).localeCompare(JSON.stringify(right));
@@ -933,7 +1040,14 @@ export class RuntimeRegistry {
   }
 
   private async buildCatalogAcquisitionFromSessions(
-    sessions: ReadonlyArray<{ id: string; path: string; cwd: string; name?: string }>,
+    sessions: ReadonlyArray<{
+      id: string;
+      path: string;
+      cwd: string;
+      name?: string;
+      parentSessionPath?: string;
+      frozenForkSnapshot?: boolean;
+    }>,
     ambiguousIDs: ReadonlySet<string>,
     structureDigest: string,
   ): Promise<CatalogAcquisitionResolution> {
@@ -969,6 +1083,7 @@ export class RuntimeRegistry {
         canonicalCwd: resolve(session.cwd || process.cwd()),
         structuralSubagent: nestedOwners.has(sessionPath)
           || session.name?.startsWith("subagent-") === true
+          || session.frozenForkSnapshot === true
           || directoryDepth > userDirectoryDepth,
       };
       retainedBytes += Buffer.byteLength(JSON.stringify(entry));
@@ -1086,6 +1201,7 @@ export class RuntimeRegistry {
       session.cwd,
       session.parentSessionPath ? resolve(session.parentSessionPath) : "",
       session.name ?? "",
+      session.frozenForkSnapshot === true,
     ])).sort();
     const digest = createHash("sha256");
     for (const record of records) digest.update(record).update("\n");
@@ -1145,7 +1261,10 @@ export class RuntimeRegistry {
       const directoryFromCatalog = relative(catalogDirectory, dirname(sessionPath));
       const directoryDepth = directoryFromCatalog === "" ? 0 : directoryFromCatalog.split(sep).length;
       const namedSubagent = session.name?.startsWith("subagent-") === true;
-      const kind: SessionSummary["kind"] = nestedOwnerId || namedSubagent || directoryDepth > userDirectoryDepth ? "subagent" : "user";
+      const kind: SessionSummary["kind"] = nestedOwnerId
+        || namedSubagent
+        || session.frozenForkSnapshot === true
+        || directoryDepth > userDirectoryDepth ? "subagent" : "user";
       if (scope === "user" && kind === "subagent") return [];
       const headerParentSessionId = session.parentSessionPath ? pathToId.get(resolve(session.parentSessionPath)) : undefined;
       const parentSessionId = nestedOwnerId ?? headerParentSessionId;

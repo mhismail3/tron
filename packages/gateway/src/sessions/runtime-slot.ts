@@ -45,7 +45,6 @@ import {
   admitCommandCatalog,
   boundStreamingProgressItem,
   fitSessionSnapshot,
-  projectEntry,
   projectJson,
   projectMessage,
   mergeLiveToolOutput,
@@ -323,6 +322,8 @@ export class RuntimeSlot {
   private queuedMessages: RuntimeQueuedMessage[] = [];
   private pendingQueueAdmission: PendingQueueAdmission | undefined;
   private pendingPrompt: PendingPromptState | undefined;
+  /** Exact Pi message object claimed by the foreground pending prompt. */
+  private pendingPromptMessage: AgentMessage | undefined;
   private pendingManualCompaction: PendingManualCompaction | undefined;
   private manualCompactionClaim: symbol | undefined;
   private queuedManualCompactionInFlight = false;
@@ -945,6 +946,15 @@ export class RuntimeSlot {
     this.finalizedStreamPresentationId = undefined;
   }
 
+  private rememberPresentationID(canonicalID: string, presentationID: string): void {
+    if (!this.presentationIDs.has(canonicalID)) this.presentationIDOrder.push(canonicalID);
+    this.presentationIDs.set(canonicalID, presentationID);
+    const excess = this.presentationIDOrder.length - MAX_PRESENTATION_IDENTITY_BINDINGS;
+    if (excess <= 0) return;
+    for (const id of this.presentationIDOrder.slice(0, excess)) this.presentationIDs.delete(id);
+    this.presentationIDOrder.splice(0, excess);
+  }
+
   private bindCanonicalPresentation(message: AgentMessage): void {
     if (message.role !== "assistant") return;
     const presentationID = this.streamPresentationId;
@@ -959,10 +969,7 @@ export class RuntimeSlot {
       if (candidate?.type !== "message"
         || candidate.message.role !== "assistant"
         || candidate.message !== message) return;
-      if (presentationID) {
-        if (!this.presentationIDs.has(candidate.id)) this.presentationIDOrder.push(candidate.id);
-        this.presentationIDs.set(candidate.id, presentationID);
-      }
+      if (presentationID) this.rememberPresentationID(candidate.id, presentationID);
       const completion = successfulAssistantCompletion(candidate);
       if (completion && this.operation?.kind === "prompt") {
         this.pendingAssistantCompletion = {
@@ -972,11 +979,6 @@ export class RuntimeSlot {
         // Pi has synchronously appended the canonical entry. Start its exact
         // durable stamp now; truthful agent settlement still gates projection.
         this.recordCompletionOwnership(this.pendingAssistantCompletion);
-      }
-      const excess = this.presentationIDOrder.length - MAX_PRESENTATION_IDENTITY_BINDINGS;
-      if (excess > 0) {
-        for (const id of this.presentationIDOrder.slice(0, excess)) this.presentationIDs.delete(id);
-        this.presentationIDOrder.splice(0, excess);
       }
       if (presentationID && this.streamPresentationId === presentationID) {
         this.latestStreamingMessage = undefined;
@@ -1414,29 +1416,36 @@ export class RuntimeSlot {
         break;
       case "compaction_end": {
         this.retry = undefined;
-        if (!event.aborted && event.result) {
-          // session_compact hooks run after Pi appends the compaction and may
-          // append another canonical entry before compaction_end. Resolve the
-          // newest exact match on the active branch instead of assuming that
-          // the compaction remains the leaf. A successful overflow compaction
-          // may also set willRetry while still owning this canonical entry.
-          const entry = this.sessionManager.getBranch().reverse().find((candidate) =>
-            candidate.type === "compaction"
-              && candidate.summary === event.result!.summary
-              && candidate.firstKeptEntryId === event.result!.firstKeptEntryId
-              && candidate.tokensBefore === event.result!.tokensBefore
-          );
-          if (entry?.type === "compaction") {
-            const item = projectEntry(entry, this.dependencies.blobs);
-            if (item?.kind === "compaction") {
-              // The cursor-bearing completion delta carries the exact canonical
-              // entry. Mobile clients can replace the in-progress row now;
-              // the following snapshot remains the full-frame settlement owner.
-              this.emit("session.compaction", safeJson({ item }));
-            }
-          }
+        const completedOperation = this.operation;
+        // Hooks may append canonical entries after the compaction. A single-row
+        // delta cannot describe that branch and consumes the client's next
+        // cursor when rejected. Publish one immediate bounded authority frame.
+        if (this.pendingPrompt) {
+          this.phase = "running";
+          this.operation = {
+            id: this.pendingPrompt.id,
+            kind: "prompt",
+            startedAt: this.pendingPrompt.createdAt ?? new Date().toISOString(),
+          };
+        } else if (this.hasActiveAgentRun) {
+          this.phase = "running";
+          this.activeOperationId ??= randomUUID();
+          this.operation = {
+            id: this.activeOperationId,
+            kind: "prompt",
+            startedAt: new Date().toISOString(),
+          };
+        } else if (completedOperation?.kind === "compaction"
+          && completedOperation.reason === "manual") {
+          // The wrapper still owns durable marker retirement. Canonical presence
+          // suppresses the spinner, while phase remains truthful until cleanup.
+          this.phase = "compacting";
+          this.operation = completedOperation;
+        } else {
+          this.phase = "idle";
+          this.operation = undefined;
         }
-        this.scheduleSnapshot();
+        this.publishSnapshot();
         break;
       }
       case "auto_retry_start":
@@ -1483,6 +1492,12 @@ export class RuntimeSlot {
         if (event.message.role === "assistant") {
           this.flushPendingProgress();
           this.captureStreamIdentity(event.message, true);
+        } else if (event.message.role === "user"
+          && this.pendingPrompt
+          && this.pendingPromptMessage === undefined) {
+          // Foreground admission is serialized. Claim the exact Pi object;
+          // repeated text and crossing user callbacks cannot impersonate it.
+          this.pendingPromptMessage = event.message;
         }
         break;
       }
@@ -1634,9 +1649,6 @@ export class RuntimeSlot {
         break;
       case "entry_appended":
         this.summaryContentDirty = true;
-        if (this.pendingPrompt && event.entry.type === "message" && event.entry.message.role === "user") {
-          this.pendingPrompt = undefined;
-        }
         if (event.entry.type === "message" && event.entry.message.role === "toolResult") {
           // The canonical result now owns presentation. Keeping the same payload
           // in the live overlay for the rest of a long run duplicates output and
@@ -1650,12 +1662,28 @@ export class RuntimeSlot {
         if (event.message.role === "assistant") {
           this.finalizeToolInvocationGroups(event.message);
           this.bindCanonicalPresentation(event.message);
-        }
-        // Regular user messages are persisted by Pi at message_end; they do not
-        // emit entry_appended. Retire the transient pending projection here so
-        // it cannot survive the canonical prompt across reconnects.
-        if (this.pendingPrompt && event.message.role === "user") {
-          this.pendingPrompt = undefined;
+        } else if (event.message.role === "user"
+          && this.pendingPrompt
+          && this.pendingPromptMessage === event.message) {
+          const operationID = this.pendingPrompt.id;
+          const message = event.message;
+          // AgentSession persists immediately after listeners return. Resolve
+          // that exact object in the next microtask, then expose operation ID as
+          // its bounded presentation identity for causal mobile settlement.
+          queueMicrotask(() => {
+            const canonicalID = this.sessionManager.getLeafId();
+            const candidate = canonicalID ? this.sessionManager.getEntry(canonicalID) : undefined;
+            if (candidate?.type !== "message"
+              || candidate.message.role !== "user"
+              || candidate.message !== message) return;
+            this.rememberPresentationID(candidate.id, operationID);
+            if (this.pendingPrompt?.id === operationID
+              && this.pendingPromptMessage === message) {
+              this.pendingPrompt = undefined;
+              this.pendingPromptMessage = undefined;
+            }
+            this.scheduleSnapshot();
+          });
         }
         this.scheduleSnapshot();
         break;
@@ -3145,6 +3173,7 @@ export class RuntimeSlot {
         } else if (!queuesIntoActiveRun) {
           this.activeOperationId = operationId;
           this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString() };
+          this.pendingPromptMessage = undefined;
           this.pendingPrompt = {
             id: operationId,
             createdAt: new Date().toISOString(),
@@ -3182,7 +3211,10 @@ export class RuntimeSlot {
         this.pendingQueueAdmission = undefined;
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
         if (this.operation?.id === operationId) this.operation = undefined;
-        if (this.pendingPrompt?.id === operationId) this.pendingPrompt = undefined;
+        if (this.pendingPrompt?.id === operationId) {
+          this.pendingPrompt = undefined;
+          this.pendingPromptMessage = undefined;
+        }
         if (this.pendingExtensionCommand?.id === operationId) this.pendingExtensionCommand = undefined;
         this.settleOperationWork(operationId);
         throw error;
@@ -3202,7 +3234,10 @@ export class RuntimeSlot {
         if (this.shuttingDown || this.hasActiveAgentRun || queuesIntoActiveRun) return;
         const owned = this.activeOperationId === operationId || this.operation?.id === operationId;
         if (!owned || this.queuedManualCompactionInFlight) return;
-        if (this.pendingPrompt?.id === operationId) this.pendingPrompt = undefined;
+        if (this.pendingPrompt?.id === operationId) {
+          this.pendingPrompt = undefined;
+          this.pendingPromptMessage = undefined;
+        }
         if (!this.pendingManualCompaction) await this.clearMarkerOwnership(operationId);
         // Marker I/O may suspend behind a newer run. Clear only this run's live
         // projection; conditional marker deletion already protects its successor.
@@ -3238,7 +3273,10 @@ export class RuntimeSlot {
       if (!admitted) {
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
         if (this.operation?.id === operationId) this.operation = undefined;
-        if (this.pendingPrompt?.id === operationId) this.pendingPrompt = undefined;
+        if (this.pendingPrompt?.id === operationId) {
+          this.pendingPrompt = undefined;
+          this.pendingPromptMessage = undefined;
+        }
         if (this.pendingExtensionCommand?.id === operationId) this.pendingExtensionCommand = undefined;
         await this.clearMarkerOwnership(operationId);
         this.settleOperationWork(operationId);
@@ -3659,6 +3697,9 @@ export class RuntimeSlot {
       this.assertIdle();
       const result = await this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, { position }));
       if (result.cancelled) throw new GatewayError("cancelled", "Fork was cancelled by an extension");
+      // Pi branch extraction initially writes only inherited history. Mark a
+      // Gateway-owned user fork synchronously before any later abortable work.
+      this.sessionManager.appendCustomEntry("tron.gateway-user-fork", { version: 1 });
       const next = this.id;
       this.summaryContentDirty = true;
       this.revision += 1;
@@ -4059,6 +4100,7 @@ export class RuntimeSlot {
     this.finalizedStreamPresentationId = undefined;
     this.presentationIDs.clear();
     this.presentationIDOrder.splice(0);
+    this.pendingPromptMessage = undefined;
     this.stopActivityHeartbeat();
     this.clearToolProgressTimers();
     this.clearExtensionActivityWatchers();

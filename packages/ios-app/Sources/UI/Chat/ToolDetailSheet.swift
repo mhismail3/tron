@@ -59,7 +59,7 @@ struct ToolDetailSheet: View {
            !preview.text.isEmpty {
             VStack(alignment: .leading, spacing: 7) {
                 sectionLabel(label)
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .center, spacing: 10) {
                     Image(systemName: presentation.icon)
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(accent)

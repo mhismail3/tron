@@ -6,6 +6,7 @@ import UIKit
 /// authoritative; this card never invents queue position or edit capability.
 struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
     let behavior: ChatPromptBehavior
+    let title: String
     let text: String
     let detail: String?
     let isInteractive: Bool
@@ -15,6 +16,7 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
 
     init(
         behavior: ChatPromptBehavior,
+        title: String? = nil,
         text: String,
         detail: String? = nil,
         isInteractive: Bool = false,
@@ -23,6 +25,7 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
         @ViewBuilder statusContent: () -> StatusContent
     ) {
         self.behavior = behavior
+        self.title = title ?? behavior.title
         self.text = text
         self.detail = detail
         self.isInteractive = isInteractive
@@ -44,32 +47,34 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
             cornerRadius: ChatPromptContainerStyle.cornerRadius,
             style: .continuous
         )
-        VStack(alignment: .leading, spacing: QueuedMessageCardLayout.contentSpacing) {
-            if let onActivate {
-                Button(action: onActivate) { promptContent }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Opens the queued message editor")
-            } else {
-                promptContent
+        BoundedTrailingContentLayout(maxWidth: UserPromptTextLayoutPolicy.maximumWidth) {
+            VStack(alignment: .leading, spacing: QueuedMessageCardLayout.contentSpacing) {
+                if let onActivate {
+                    Button(action: onActivate) { promptContent }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Opens the queued message editor")
+                } else {
+                    promptContent
+                }
+                attachmentContent
             }
-            attachmentContent
+            .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
+            .padding(.top, QueuedMessageCardLayout.contentSpacing)
+            .padding(.bottom, ChatPromptContainerStyle.queuedMessageBottomPadding)
+            .contentShape(shape)
+            .glassEffect(
+                isInteractive
+                    ? .regular.tint(accent.opacity(ChatPromptContainerStyle.tintOpacity)).interactive()
+                    : .regular.tint(accent.opacity(ChatPromptContainerStyle.tintOpacity)),
+                in: shape
+            )
         }
-        .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
-        .padding(.top, QueuedMessageCardLayout.contentSpacing)
-        .padding(.bottom, ChatPromptContainerStyle.queuedMessageBottomPadding)
-        .contentShape(shape)
-        .glassEffect(
-            isInteractive
-                ? .regular.tint(accent.opacity(ChatPromptContainerStyle.tintOpacity)).interactive()
-                : .regular.tint(accent.opacity(ChatPromptContainerStyle.tintOpacity)),
-            in: shape
-        )
     }
 
     private var promptContent: some View {
         VStack(alignment: .leading, spacing: QueuedMessageCardLayout.contentSpacing) {
             HStack(alignment: .center, spacing: 10) {
-                Text(behavior.title)
+                Text(title)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(1)
@@ -111,7 +116,7 @@ struct ChatPendingPromptRow: View, Equatable {
     let presentation: ChatPendingPromptPresentation
 
     var body: some View {
-        if presentation.promptBehavior.isQueuedKind {
+        if presentation.usesQueuedCardVisual {
             HStack(alignment: .top, spacing: 10) {
                 Spacer(minLength: 24)
                 queueCard
@@ -173,14 +178,15 @@ struct ChatPendingPromptRow: View, Equatable {
             attachments: presentation.attachments
         )
         ChatPromptCard(
-            behavior: presentation.promptBehavior,
+            behavior: presentation.cardBehavior,
+            title: presentation.cardTitle,
             text: presentation.text,
-            detail: presentation.isCompacting ? "After compaction" : "Sending",
+            detail: presentation.cardDetail,
             attachmentContent: {
                 if !chips.isEmpty {
                     QueuedMessageAttachmentChipRow(
                         chips: chips,
-                        accent: presentation.promptBehavior == .followUp ? .tronPurple : .tronEmerald
+                        accent: presentation.cardBehavior == .followUp ? .tronPurple : .tronEmerald
                     )
                 }
             },
@@ -203,13 +209,14 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
     }
 
     var body: some View {
-        if presentation.promptBehavior.isQueuedKind {
+        if presentation.usesQueuedCardVisual {
             HStack(alignment: .top, spacing: 10) {
                 Spacer(minLength: 24)
                 ChatPromptCard(
-                    behavior: presentation.promptBehavior,
+                    behavior: presentation.cardBehavior,
+                    title: presentation.cardTitle,
                     text: presentation.text,
-                    detail: "Sending",
+                    detail: presentation.cardDetail,
                     attachmentContent: { queuedAttachmentChips },
                     statusContent: { EmptyView() }
                 )
@@ -266,7 +273,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
         if !chips.isEmpty {
             QueuedMessageAttachmentChipRow(
                 chips: chips,
-                accent: presentation.promptBehavior == .followUp ? .tronPurple : .tronEmerald,
+                accent: presentation.cardBehavior == .followUp ? .tronPurple : .tronEmerald,
                 morphDestinationIDs: queuedMorphDestinationIDs,
                 morphRegistry: morphRegistry
             )

@@ -274,6 +274,21 @@ enum UserPromptTextLayoutPolicy {
         min(max(0, measured), max(0, proposed))
     }
 
+    /// Chooses one stable intrinsic-or-wrapped container width. Flexible
+    /// children (for example a queued-card header spacer) receive only this
+    /// resolved proposal and therefore cannot expand every short card to the cap.
+    static func boundedContainerWidth(
+        intrinsic: CGFloat,
+        proposed: CGFloat,
+        maximum: CGFloat = maximumWidth
+    ) -> CGFloat {
+        let available = min(max(0, proposed), max(0, maximum))
+        guard intrinsic.isFinite, intrinsic > 0, intrinsic <= available else {
+            return available
+        }
+        return intrinsic
+    }
+
     /// The prompt block remains right-anchored by SwiftUI. Lines read from the
     /// logical leading edge inside that narrower block instead of stretching
     /// inter-word spacing to full justification.

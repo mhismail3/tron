@@ -761,16 +761,26 @@ struct ChatOutgoingSubmissionPresentation: Equatable, Hashable, Identifiable, Se
     let attachmentIDs: [String]
     let behavior: String?
     let transportActive: Bool
+    let preflightCompacting: Bool
 
-    init(snapshot: ComposerSubmissionSnapshot, transportActive: Bool) {
+    init(
+        snapshot: ComposerSubmissionSnapshot,
+        transportActive: Bool,
+        preflightCompacting: Bool = false
+    ) {
         id = snapshot.presentationID
         text = snapshot.outgoingText
         attachmentIDs = snapshot.attachmentIDs
         behavior = snapshot.behavior
         self.transportActive = transportActive
+        self.preflightCompacting = preflightCompacting
     }
 
     var promptBehavior: ChatPromptBehavior { ChatPromptBehavior(rawValue: behavior) }
+    var usesQueuedCardVisual: Bool { promptBehavior.isQueuedKind || preflightCompacting }
+    var cardBehavior: ChatPromptBehavior { preflightCompacting ? .steer : promptBehavior }
+    var cardTitle: String { preflightCompacting ? "Message" : promptBehavior.title }
+    var cardDetail: String { preflightCompacting ? "After compaction" : "Sending" }
 
     var statusTitle: String? {
         switch promptBehavior {
@@ -808,6 +818,13 @@ struct ChatPendingPromptPresentation: Equatable, Hashable, Identifiable, Sendabl
     }
 
     var promptBehavior: ChatPromptBehavior { ChatPromptBehavior(behavior) }
+    var usesQueuedCardVisual: Bool { promptBehavior.isQueuedKind || (isCompacting && behavior == nil) }
+    var cardBehavior: ChatPromptBehavior { isCompacting && behavior == nil ? .steer : promptBehavior }
+    var cardTitle: String { isCompacting && behavior == nil ? "Message" : promptBehavior.title }
+    var cardDetail: String {
+        if isCompacting { return "After compaction" }
+        return promptBehavior.isQueuedKind ? "Sending" : statusTitle
+    }
 
     var statusTitle: String {
         if isCompacting {
@@ -837,6 +854,14 @@ enum ChatPendingCanonicalSuppressionPolicy {
         for pending: SessionSnapshot.PendingPrompt,
         in transcript: [TranscriptItem]
     ) -> Set<String> {
+        let exact = transcript.compactMap { item -> String? in
+            guard item.kind == .message,
+                  item.role == .user,
+                  item.presentationId == pending.id else { return nil }
+            return item.id
+        }
+        if !exact.isEmpty { return exact.count == 1 ? Set(exact) : [] }
+
         if let pendingDate = pending.createdAt.flatMap(GatewayTimestamp.parse) {
             let candidates: [String] = transcript.compactMap { item in
                 guard item.kind == .message,

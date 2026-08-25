@@ -2503,9 +2503,11 @@ export default function (pi) {
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
-    await slot.prompt("stream");
+    const promptReceipt = await slot.prompt("stream");
     await waitUntil(() => !slot.isBusy);
     expect(slot.snapshot().pendingPrompt).toBeUndefined();
+    const canonicalUser = slot.snapshot().transcript.find((item) => item.role === "user");
+    expect(canonicalUser).toMatchObject({ presentationId: promptReceipt.operationId });
 
     const progress = events.filter((event) => event.topic === "session.progress");
     expect(progress.length).toBeGreaterThanOrEqual(2);
@@ -2784,6 +2786,34 @@ export default function (pi) {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("does not retire a newer pending prompt for an older user message callback", async () => {
+    const fixture = await coldFixture("pending-prompt-object-ownership");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      pendingPrompt?: {
+        id: string; createdAt: string; text: string; attachmentCount: number;
+      };
+      pendingPromptMessage?: unknown;
+      onEvent: (event: unknown) => void;
+    };
+    const older = { role: "user", content: "same", timestamp: Date.now() };
+    const newer = { role: "user", content: "same", timestamp: Date.now() + 1 };
+    internal.pendingPrompt = {
+      id: "older-operation", createdAt: new Date().toISOString(),
+      text: "same", attachmentCount: 0,
+    };
+    internal.onEvent({ type: "message_start", message: older });
+    internal.pendingPrompt = {
+      id: "newer-operation", createdAt: new Date().toISOString(),
+      text: "same", attachmentCount: 0,
+    };
+    internal.pendingPromptMessage = undefined;
+    internal.onEvent({ type: "message_start", message: newer });
+    internal.onEvent({ type: "message_end", message: older });
+    expect(internal.pendingPrompt?.id).toBe("newer-operation");
+    expect(internal.pendingPromptMessage).toBe(newer);
   });
 
   it("exports the complete canonical JSONL tree including abandoned branches", async () => {
@@ -3316,7 +3346,7 @@ export default function (pi) {
     expect(slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
   });
 
-  it("broadcasts the exact canonical compaction entry before snapshot settlement", async () => {
+  it("publishes one authoritative compaction snapshot including a hook-appended suffix", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-compaction-delta-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -3362,23 +3392,74 @@ export default function (pi) {
       willRetry: true,
     });
 
-    const delta = broadcasts.find((event) => event.topic === "session.compaction");
-    expect(delta).toMatchObject({
-      sessionId: slot.id,
-      payload: {
-        data: {
-          item: {
-            id: compactionId,
-            parentId: firstKeptEntryId,
-            kind: "compaction",
-            summary,
-            tokensBefore,
-          },
-        },
-      },
+    expect(broadcasts.some((event) => event.topic === "session.compaction")).toBe(false);
+    const completion = broadcasts.filter((event) => event.topic === "session.snapshot").at(-1);
+    const payload = completion?.payload as {
+      eventSequence?: number;
+      phase?: string;
+      leafEntryId?: string;
+      transcript?: Array<{ id: string; kind: string }>;
+    } | undefined;
+    expect(completion?.sessionId).toBe(slot.id);
+    expect(payload).toMatchObject({
+      eventSequence: expect.any(Number),
+      phase: "idle",
+      leafEntryId: expect.any(String),
     });
-    const payload = delta?.payload as { eventSequence?: number } | undefined;
-    expect(payload?.eventSequence).toBeGreaterThan(0);
+    expect(payload?.transcript).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: compactionId, kind: "compaction" }),
+      expect.objectContaining({ id: payload?.leafEntryId, kind: "label" }),
+    ]));
+  });
+
+  it("restores a pre-prompt operation in the authoritative compaction completion frame", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-preprompt-compaction-frame-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const broadcasts: Array<{ topic: string; payload: any }> = [];
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(agentDir),
+      broadcast: (_sessionId, topic, payload) => broadcasts.push({ topic, payload }),
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const internal = slot as unknown as {
+      runtime: { session: { sessionManager: SessionManager } };
+      pendingPrompt: { id: string; createdAt: string; text: string; attachmentCount: number };
+      phase: string;
+      operation: unknown;
+      onEvent: (event: unknown) => void;
+    };
+    const parent = internal.runtime.session.sessionManager.appendMessage(
+      fauxAssistantMessage("history")
+    );
+    const compaction = internal.runtime.session.sessionManager.appendCompaction(
+      "summary", parent, 4_096
+    );
+    internal.runtime.session.sessionManager.appendLabelChange(compaction, "hook suffix");
+    internal.pendingPrompt = {
+      id: "pending-operation", createdAt: "2026-01-01T00:00:00.000Z",
+      text: "continue", attachmentCount: 0,
+    };
+    internal.phase = "compacting";
+    internal.operation = { kind: "compaction" };
+    internal.onEvent({
+      type: "compaction_end", reason: "threshold",
+      result: { summary: "summary", firstKeptEntryId: parent, tokensBefore: 4_096 },
+      aborted: false, willRetry: false,
+    });
+    const completion = broadcasts.filter((event) => event.topic === "session.snapshot").at(-1)?.payload;
+    expect(completion).toMatchObject({
+      phase: "running",
+      operation: { id: "pending-operation", kind: "prompt", startedAt: "2026-01-01T00:00:00.000Z" },
+      pendingPrompt: { id: "pending-operation" },
+    });
+    expect(completion.leafEntryId).not.toBe(compaction);
   });
 
   it("cleans up a failed direct manual compaction claim", async () => {
@@ -4219,6 +4300,45 @@ export default function (pi) {
     fork.appendSessionInfo("ordinary fork");
     const directSubagent = SessionManager.forkFrom(parentFile, cwd, piSessionDirectory);
     directSubagent.appendSessionInfo("subagent-worker-fixture-1");
+    const crossProjectDirectory = join(agentDir, "sessions", "--other-workspace--");
+    await mkdir(crossProjectDirectory, { recursive: true });
+    const crossProjectFork = SessionManager.forkFrom(
+      parentFile, join(root, "other-workspace"), crossProjectDirectory
+    );
+
+    // A child context can be interrupted after Pi writes its inherited branch
+    // but before any task/name provenance is appended. Its last entry predates
+    // its own header and must not become a user dashboard clone.
+    const frozenId = randomUUID();
+    const frozenTimestamp = new Date(Date.now() + 1_000).toISOString();
+    const frozenFile = join(piSessionDirectory, `${frozenId}.jsonl`);
+    await writeFile(frozenFile, [
+      JSON.stringify({
+        type: "session", version: 3, id: frozenId,
+        timestamp: frozenTimestamp, cwd, parentSession: parentFile,
+      }),
+      JSON.stringify({
+        type: "message", id: randomUUID().slice(0, 8), parentId: null,
+        timestamp, message: { role: "user", content: "inherited", timestamp: Date.now() - 1_000 },
+      }),
+    ].join("\n") + "\n");
+    const markedForkId = randomUUID();
+    const markedForkFile = join(piSessionDirectory, `${markedForkId}.jsonl`);
+    await writeFile(markedForkFile, [
+      JSON.stringify({
+        type: "session", version: 3, id: markedForkId,
+        timestamp: frozenTimestamp, cwd, parentSession: parentFile,
+      }),
+      JSON.stringify({
+        type: "message", id: "marked-old", parentId: null,
+        timestamp, message: { role: "user", content: "inherited", timestamp: Date.now() - 1_000 },
+      }),
+      JSON.stringify({
+        type: "custom", id: "marked-provenance", parentId: "marked-old",
+        // Positive provenance wins even if the wall clock moved backwards.
+        timestamp, customType: "tron.gateway-user-fork", data: { version: 1 },
+      }),
+    ].join("\n") + "\n");
 
     const registry = new RuntimeRegistry({
       agentDir,
@@ -4233,14 +4353,27 @@ export default function (pi) {
     await registry.initialize();
     const defaultCatalog = await registry.list();
     const completeCatalog = await registry.list("all");
-    expect(defaultCatalog.map((session) => session.id)).toEqual(expect.arrayContaining([parentId, fork.getSessionId()]));
+    expect(defaultCatalog.map((session) => session.id)).toEqual(expect.arrayContaining([
+      parentId, fork.getSessionId(), crossProjectFork.getSessionId(), markedForkId,
+    ]));
     expect(defaultCatalog.map((session) => session.id)).not.toContain(nestedId);
     expect(defaultCatalog.map((session) => session.id)).not.toContain(directSubagent.getSessionId());
+    expect(defaultCatalog.map((session) => session.id)).not.toContain(frozenId);
     expect(defaultCatalog.map((session) => session.id)).not.toContain(externalId);
     expect(completeCatalog.map((session) => session.id)).not.toContain(externalId);
     expect(completeCatalog.find((session) => session.id === parentId)).toMatchObject({ kind: "user" });
     expect(completeCatalog.find((session) => session.id === fork.getSessionId())).toMatchObject({ kind: "user", parentSessionId: parentId });
+    expect(completeCatalog.find((session) => session.id === crossProjectFork.getSessionId())).toMatchObject({
+      kind: "user", parentSessionId: parentId,
+    });
+    expect(completeCatalog.find((session) => session.id === markedForkId)).toMatchObject({
+      kind: "user", parentSessionId: parentId,
+    });
     expect(completeCatalog.find((session) => session.id === directSubagent.getSessionId())).toMatchObject({
+      kind: "subagent",
+      parentSessionId: parentId,
+    });
+    expect(completeCatalog.find((session) => session.id === frozenId)).toMatchObject({
       kind: "subagent",
       parentSessionId: parentId,
     });
@@ -4249,6 +4382,7 @@ export default function (pi) {
       parentSessionId: parentId,
     });
     await expect(registry.acquire(nestedId)).rejects.toMatchObject({ code: "conflict" });
+    await expect(registry.acquire(frozenId)).rejects.toMatchObject({ code: "conflict" });
     await expect(registry.delete(nestedId)).rejects.toMatchObject({ code: "conflict" });
 
     await registry.delete(parentId);
@@ -4322,6 +4456,14 @@ export default function (pi) {
       isUnread: false,
     });
     expect((await registry.acquire(fork.sessionId)).id).toBe(fork.sessionId);
+    const forkEntries = (slot as unknown as {
+      runtime: { session: { sessionManager: SessionManager } };
+    }).runtime.session.sessionManager.getEntries();
+    expect(forkEntries.at(-1)).toMatchObject({
+      type: "custom",
+      customType: "tron.gateway-user-fork",
+      data: { version: 1 },
+    });
   });
 
   it("rejects imports when live runtime capacity is full", async () => {

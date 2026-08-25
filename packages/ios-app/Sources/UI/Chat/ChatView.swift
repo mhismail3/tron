@@ -844,10 +844,16 @@ struct ChatView: View {
                     }
                     .prefix(ComposerAttachmentPolicy.maximumCount)
                     .map { $0.frozenForHandoff() }
+                let preflightCompacting = snapshot.pendingPrompt.map {
+                    model.composerDrafts.matchesPendingPrompt(target: target, pending: $0)
+                        && (snapshot.phase == .compacting
+                            || snapshot.operation?.kind == .compaction)
+                } ?? false
                 return .outgoing(
                     presentation: ChatOutgoingSubmissionPresentation(
                         snapshot: submission,
-                        transportActive: model.composerDrafts.isSending(target: target)
+                        transportActive: model.composerDrafts.isSending(target: target),
+                        preflightCompacting: preflightCompacting
                     ),
                     attachments: Array(attachments)
                 )

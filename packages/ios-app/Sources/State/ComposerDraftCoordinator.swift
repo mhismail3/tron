@@ -698,7 +698,16 @@ final class ComposerDraftCoordinator {
         canonicalTranscript: [TranscriptItem]
     ) -> Set<String> {
         guard admits(target), let admission = submissionByTarget[target] else { return [] }
-        let matches = canonicalTranscript.compactMap { item in
+        let exactMatches: [String] = admission.operationID.map { operationID in
+            canonicalTranscript.compactMap { item in
+                guard item.kind == .message,
+                      item.role == .user,
+                      item.presentationId == operationID,
+                      !admission.baselineTranscriptIDs.contains(item.id) else { return nil }
+                return item.id
+            }
+        } ?? []
+        let fallbackMatches = canonicalTranscript.compactMap { item in
             Self.canonicalUserMessage(
                 item,
                 matches: admission.snapshot,
@@ -706,6 +715,7 @@ final class ComposerDraftCoordinator {
                 baselineTranscriptIDs: admission.baselineTranscriptIDs
             ) ? item.id : nil
         }
+        let matches = exactMatches.isEmpty ? fallbackMatches : exactMatches
         // Presentation suppression is fail-closed for the same reason as
         // reconciliation: never suppress multiple identical canonical rows.
         guard matches.count == 1 else { return [] }
@@ -728,6 +738,20 @@ final class ComposerDraftCoordinator {
     func outgoingSubmission(for target: SessionPresentationIdentity) -> ComposerSubmissionSnapshot? {
         guard admits(target) else { return nil }
         return submissionByTarget[target]?.snapshot
+    }
+
+    /// Matches the Gateway's sole foreground pending admission to the retained
+    /// local lifecycle. Once transport returns, operation identity is decisive;
+    /// before then, one target owns at most one bounded pending prompt.
+    func matchesPendingPrompt(
+        target: SessionPresentationIdentity,
+        pending: SessionSnapshot.PendingPrompt
+    ) -> Bool {
+        guard admits(target), let admission = submissionByTarget[target] else { return false }
+        if let operationID = admission.operationID { return operationID == pending.id }
+        return admission.snapshot.outgoingText == pending.text
+            && admission.snapshot.attachmentIDs.count == pending.attachmentCount
+            && admission.snapshot.behavior == pending.behavior?.rawValue
     }
 
     func hasPendingSubmission(target: SessionPresentationIdentity) -> Bool {
@@ -850,7 +874,16 @@ final class ComposerDraftCoordinator {
             )
             return
         }
-        let canonicalMatches = canonicalTranscript.compactMap { item in
+        let exactOperationMatches: [String] = admission.operationID.map { operationID in
+            canonicalTranscript.compactMap { item in
+                guard item.kind == .message,
+                      item.role == .user,
+                      item.presentationId == operationID,
+                      !admission.baselineTranscriptIDs.contains(item.id) else { return nil }
+                return item.id
+            }
+        } ?? []
+        let fallbackMatches = canonicalTranscript.compactMap { item in
             Self.canonicalUserMessage(
                 item,
                 matches: admission.snapshot,
@@ -858,10 +891,15 @@ final class ComposerDraftCoordinator {
                 baselineTranscriptIDs: admission.baselineTranscriptIDs
             ) ? item.id : nil
         }
+        // The Gateway's operation-bound presentation identity is causal and
+        // wins over repeated-text ambiguity. Legacy Gateways retain the bounded
+        // exact-content fallback.
+        let canonicalMatches = exactOperationMatches.isEmpty
+            ? fallbackMatches
+            : exactOperationMatches
         // A repeated prompt can produce multiple new canonical matches in one
-        // snapshot. Keep the admission alive until the authoritative stream
-        // makes exactly one causal candidate available; ambiguity must not
-        // retire the outgoing row or create a handoff receipt.
+        // legacy snapshot. Keep the admission alive until the authoritative
+        // stream makes exactly one causal candidate available.
         let transcriptObserved = canonicalMatches.count == 1
         if transcriptObserved, admission.canonicalHandoffID == nil {
             admission.canonicalHandoffID = canonicalMatches[0]
@@ -1819,7 +1857,12 @@ final class ComposerDraftCoordinator {
             task.cancel()
         }
         uploadAdmissions = uploadAdmissions.filter { $0.target != lease.target }
+        let retiredSubmission = submissionByTarget[lease.target]
         self.lease = nil
+        if let retiredSubmission,
+           retiredSubmission.transportState != .sending || retiredSubmission.canonicalObserved {
+            finishSubmission(retiredSubmission)
+        }
         evictInactiveDraftsIfNeeded()
     }
 
