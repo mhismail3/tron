@@ -815,8 +815,10 @@ alerts carry only a bounded machine/session identity pair in addition to fixed p
 copy and the session title. Tap admission rejects partial, oversized, or non-opaque
 routes, resolves the machine only against an already-paired profile, returns to the
 dashboard, and then opens that exact chat through the ordinary profile/session
-navigation owner. A cold-launch tap is retained only in memory until the scene installs
-that owner; it is never persisted as navigation truth. On launch and foreground
+navigation owner. A background or cold-launch tap is retained only in memory until the
+scene installs that owner and foreground lifecycle reconciliation completes; it cannot
+race a second activation generation and silently leave the user on the dashboard. The
+tap is never persisted as navigation truth. On launch and foreground
 activation the app still writes a zero badge to remove state left by the retired badge
 implementation.
 

@@ -178,7 +178,14 @@ final class AppModel {
     var pushNotificationReadiness: PushReadiness = .unavailable
     var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
     private(set) var pushNavigationRequest: PushNavigationRequest?
+    var actionablePushNavigationRequest: PushNavigationRequest? {
+        guard didStart, sceneAllowsCatalogRefresh, pushNavigationActivationReady else { return nil }
+        return pushNavigationRequest
+    }
     private var pushNavigationSequence = 0
+    private var pushNavigationActivationGeneration = 0
+    private var pushNavigationActivationReady = false
+    private var didStart = false
     /// GatewayProfileStore owns transactional persistence; this revision makes
     /// profile metadata changes observable to SwiftUI without duplicating it.
     private(set) var profileRevision = 0
@@ -774,32 +781,46 @@ final class AppModel {
         presentError(error)
     }
 
-    func start() async {
+    func start(sceneIsActive: Bool = true) async {
+        sceneAllowsCatalogRefresh = sceneIsActive
+        pushNavigationActivationReady = sceneIsActive
         await lifecycle.start()
-        reconcileDashboardConnections()
+        didStart = true
+        if sceneAllowsCatalogRefresh {
+            reconcileDashboardConnections()
+        }
     }
 
     func becameInactive() {
+        pushNavigationActivationReady = false
+        pushNavigationActivationGeneration &+= 1
         noticeCenter.setBackgrounded(true)
     }
 
     @discardableResult
     func becameActive() -> Task<Void, Never>? {
         sceneAllowsCatalogRefresh = true
+        pushNavigationActivationReady = false
+        pushNavigationActivationGeneration &+= 1
+        let activationGeneration = pushNavigationActivationGeneration
         noticeCenter.setBackgrounded(false)
-        let task = lifecycle.becameActive()
-        Task { @MainActor [weak self] in
+        let lifecycleTask = lifecycle.becameActive()
+        return Task { @MainActor [weak self] in
+            if let lifecycleTask { await lifecycleTask.value }
             guard let self else { return }
             await self.dashboardConnections.waitForRetirement()
-            guard self.sceneAllowsCatalogRefresh else { return }
+            guard self.sceneAllowsCatalogRefresh,
+                  self.pushNavigationActivationGeneration == activationGeneration else { return }
+            self.pushNavigationActivationReady = true
             self.reconcileDashboardConnections()
         }
-        return task
     }
 
     @discardableResult
     func enteredBackground() -> Task<Void, Never> {
         sceneAllowsCatalogRefresh = false
+        pushNavigationActivationReady = false
+        pushNavigationActivationGeneration &+= 1
         noticeCenter.setBackgrounded(true)
         diagnosticsAreReady = false
         dashboardConnections.retire()
@@ -1586,7 +1607,9 @@ final class AppModel {
                 details: nil
             )
         }
-        if !sceneAllowsCatalogRefresh { _ = becameActive() }
+        guard didStart, sceneAllowsCatalogRefresh, pushNavigationActivationReady else {
+            throw CancellationError()
+        }
         if profiles.selected?.id != profile.id || connectionState != .connected {
             await switchGateway(profile)
         }

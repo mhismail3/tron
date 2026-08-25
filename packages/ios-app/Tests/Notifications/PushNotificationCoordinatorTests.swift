@@ -139,6 +139,51 @@ struct PushNotificationCoordinatorTests {
     }
 
     @MainActor
+    @Test("background taps wait for admitted foreground lifecycle reconciliation")
+    func backgroundTapWaitsForForeground() async {
+        let suiteName = "PushNavigationLifecycleTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = AppModel(profiles: GatewayProfileStore(defaults: defaults))
+        await model.start(sceneIsActive: false)
+        let tap = PushNotificationTap(sessionID: "session-1", machineID: "machine-1")
+        model.requestPushNavigation(tap)
+        #expect(model.pushNavigationRequest?.tap == tap)
+        #expect(model.actionablePushNavigationRequest == nil)
+        await model.becameActive()?.value
+        #expect(model.actionablePushNavigationRequest?.tap == tap)
+
+        model.becameInactive()
+        #expect(model.pushNavigationRequest?.tap == tap)
+        #expect(model.actionablePushNavigationRequest == nil)
+        await model.becameActive()?.value
+        #expect(model.actionablePushNavigationRequest?.tap == tap)
+
+        await model.enteredBackground().value
+        #expect(model.pushNavigationRequest?.tap == tap)
+        #expect(model.actionablePushNavigationRequest == nil)
+        await model.becameActive()?.value
+        #expect(model.actionablePushNavigationRequest?.tap == tap)
+    }
+
+    @Test("canceled route work retains the current notification request")
+    func canceledRouteWorkRetainsRequest() async {
+        let barrier = PushNavigationCancellationBarrier()
+        let routeWork = Task {
+            await barrier.suspend()
+            return PushNavigationFailureAdmission.admits(
+                requestID: 1,
+                pendingRequestID: 1
+            )
+        }
+        await barrier.waitUntilSuspended()
+        routeWork.cancel()
+        await barrier.release()
+
+        #expect(await routeWork.value == false)
+    }
+
+    @MainActor
     @Test("permission denial is isolated from Gateway connectivity")
     func deniedPermission() async {
         let store = MemoryPushCredentialStore()
@@ -986,6 +1031,30 @@ private actor PushAttestRecorder {
         assertionKeys.append(key)
         guard !assertionResults.isEmpty else { return Data("assertion".utf8) }
         return try assertionResults.removeFirst().get()
+    }
+}
+
+private actor PushNavigationCancellationBarrier {
+    private var suspended = false
+    private var suspensionWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    func suspend() async {
+        suspended = true
+        let waiters = suspensionWaiters
+        suspensionWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { releaseContinuation = $0 }
+    }
+
+    func waitUntilSuspended() async {
+        if suspended { return }
+        await withCheckedContinuation { suspensionWaiters.append($0) }
+    }
+
+    func release() {
+        releaseContinuation?.resume()
+        releaseContinuation = nil
     }
 }
 

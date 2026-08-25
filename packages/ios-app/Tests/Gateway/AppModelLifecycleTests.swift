@@ -124,6 +124,65 @@ private final class BackgroundTaskAccessRecorder {
 }
 
 @MainActor
+@Suite("Push navigation lifecycle races", .serialized)
+struct PushNavigationLifecycleRaceTests {
+    @Test("startup completion cannot reopen dashboard connections after background retirement")
+    func backgroundSupersedesSuspendedStartup() async throws {
+        let suiteName = "PushNavigationStartupRaceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let initial = GatewayProfile(
+            id: "initial", label: "Initial", host: "initial.gateway.test", port: 9_847,
+            machineId: "machine-initial", deviceId: "device-initial"
+        )
+        let secondary = GatewayProfile(
+            id: "secondary", label: "Secondary", host: "secondary.gateway.test", port: 9_847,
+            machineId: "machine-secondary", deviceId: "device-secondary"
+        )
+        defaults.set(try JSONEncoder.gateway.encode([initial, secondary]), forKey: "gatewayProfiles.v1")
+        defaults.set(initial.id, forKey: "selectedGateway.v1")
+        let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
+        let socketFactory = ScriptedGatewaySocketFactory(sockets: sockets)
+        let client = GatewayClient(socketFactory: socketFactory.factory)
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: suiteName)
+        let model = AppModel(
+            client: client,
+            profiles: GatewayProfileStore(defaults: defaults),
+            cache: SnapshotCache(root: cacheRoot),
+            profileTokenLookup: { _ in "token" }
+        )
+
+        do {
+            try await withTestWatchdog {
+                try await Task { @MainActor in
+                    let starting = Task { await model.start(sceneIsActive: true) }
+                    defer { starting.cancel() }
+                    try await sockets[0].waitUntilSent(count: 1)
+
+                    let backgrounding = model.enteredBackground()
+                    try await sockets[0].waitUntilClosed()
+                    await backgrounding.value
+                    await starting.value
+                    for _ in 0..<10 { await Task.yield() }
+
+                    #expect(socketFactory.requests.count == 1)
+                }.value
+            }
+        } catch {
+            await model.teardown()
+            await client.close()
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: cacheRoot)
+            throw error
+        }
+        await model.teardown()
+        await client.close()
+        defaults.removePersistentDomain(forName: suiteName)
+        try? FileManager.default.removeItem(at: cacheRoot)
+    }
+}
+
+@MainActor
 @Suite("AppModel connection lifecycle ownership", .serialized)
 struct AppModelLifecycleTests {
     @Test("the lifecycle owner revokes exact admissions across transitions and teardown")

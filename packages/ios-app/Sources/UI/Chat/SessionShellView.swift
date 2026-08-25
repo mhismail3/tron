@@ -1,5 +1,11 @@
 import SwiftUI
 
+enum PushNavigationFailureAdmission {
+    static func admits(requestID: Int, pendingRequestID: Int?) -> Bool {
+        !Task.isCancelled && pendingRequestID == requestID
+    }
+}
+
 struct SessionShellProfileRouteOwner {
     private var hasObservedProfile = false
     private var profileID: String?
@@ -110,8 +116,8 @@ struct SessionShellView: View {
             serverFilter.reconcile(profileIDs: sources.map(\.profileID))
             if !sources.isEmpty { DashboardServerFilterPreferences.save(serverFilter) }
         }
-        .task(id: model.pushNavigationRequest?.id) {
-            guard let request = model.pushNavigationRequest else { return }
+        .task(id: model.actionablePushNavigationRequest?.id) {
+            guard let request = model.actionablePushNavigationRequest else { return }
             await presentPushNavigation(request)
         }
     }
@@ -219,7 +225,10 @@ struct SessionShellView: View {
         } catch is CancellationError {
             return
         } catch {
-            guard model.pushNavigationRequest?.id == request.id else { return }
+            guard PushNavigationFailureAdmission.admits(
+                requestID: request.id,
+                pendingRequestID: model.pushNavigationRequest?.id
+            ) else { return }
             model.consumePushNavigation(request.id)
             model.presentError(error)
         }

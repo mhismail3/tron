@@ -27,7 +27,7 @@ struct TronMobileApp: App {
                 .task {
                     configurePushNotifications()
                     await RetiredNotificationBadge.clear()
-                    await model.start()
+                    await model.start(sceneIsActive: scenePhase == .active)
                     await reconcilePushNotifications()
                 }
                 .onChange(of: model.connectionState) { _, _ in
