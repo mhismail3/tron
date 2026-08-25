@@ -3,14 +3,6 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
-private extension ScrollPosition {
-    static var transcriptBottom: ScrollPosition {
-        var position = ScrollPosition(idType: String.self)
-        position.scrollTo(id: "transcript-bottom", anchor: .bottom)
-        return position
-    }
-}
-
 struct ChatView: View {
     let sessionID: String
     private let initialEditorText: String?
@@ -33,7 +25,7 @@ struct ChatView: View {
     @State private var scrollCoordinator: ChatScrollCoordinator
     @State private var transcriptPresentation: ChatTranscriptPresentationStore
     @State private var performanceTracker: ChatPerformanceTracker
-    @State private var transcriptScrollPosition = ScrollPosition.transcriptBottom
+    @State private var transcriptScrollPosition = ScrollPosition(idType: String.self)
     @Namespace private var composerGlassNamespace
     // UITextView is the responder owner. This mirrors delegate callbacks for
     // placeholder/scroll presentation; SwiftUI FocusState must not compete with
@@ -1338,10 +1330,8 @@ struct ChatView: View {
         performanceTracker.beginScrollCommand()
         let update = {
             switch command.destination {
-            case .tail:
-                transcriptScrollPosition.scrollTo(id: "transcript-bottom", anchor: .bottom)
-            case .openingTail(let renderedID):
-                transcriptScrollPosition.scrollTo(id: renderedID, anchor: .bottom)
+            case .tail, .openingTail:
+                transcriptScrollPosition.scrollTo(edge: .bottom)
             case .offsetY(let offsetY):
                 transcriptScrollPosition.scrollTo(y: offsetY)
             }
@@ -1378,26 +1368,17 @@ struct ChatView: View {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            transcriptScrollPosition = scrollCoordinator.canInstallPersistentBottomPosition
-                ? .transcriptBottom
-                : ScrollPosition(idType: String.self)
+            transcriptScrollPosition = ScrollPosition(idType: String.self)
         }
     }
 
     @MainActor
     private func applyViewportMode(_ mode: ChatViewportMode) {
+        guard mode == .anchored || scrollCoordinator.canInstallPersistentBottomPosition else { return }
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            switch mode {
-            case .pinned:
-                guard scrollCoordinator.canInstallPersistentBottomPosition else { return }
-                // Reconstruct the semantic target so viewport expansion cannot
-                // preserve an absolute offset from a previously smaller viewport.
-                transcriptScrollPosition = .transcriptBottom
-            case .anchored:
-                transcriptScrollPosition = ScrollPosition(idType: String.self)
-            }
+            transcriptScrollPosition = ScrollPosition(idType: String.self)
         }
     }
 

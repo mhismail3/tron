@@ -76,7 +76,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 }
                 tailMarker
             }
-            .padding(.vertical, 12)
+            .padding(.top, 12)
             .scrollTargetLayout()
             .chatStableTranscriptUpdates()
             .offset(y: isReady || reduceMotion ? 0 : 8)
@@ -85,9 +85,12 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         }
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.top, for: .alignment)
-        // The persistent ScrollPosition is the sole owner of pinned content and
-        // viewport size changes. A sizeChanges anchor would apply the same inset
-        // delta a second time; an unpositioned user binding remains native-owned.
+        .defaultScrollAnchor(
+            isReady && scrollCoordinator.viewportMode == .pinned ? .bottom : .top,
+            for: .sizeChanges
+        )
+        // Native size-change anchoring owns ordinary pinned layout changes.
+        // ScrollPosition remains target-free outside bounded explicit commands.
         .scrollPosition($scrollPosition)
         .tronScrollEdgeChrome()
         .onChange(of: scrollPosition.isPositionedByUser) { _, positionedByUser in
