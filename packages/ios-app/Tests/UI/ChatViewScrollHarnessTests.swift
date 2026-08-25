@@ -42,12 +42,62 @@ struct ChatViewScrollHarnessTests {
                     $0.observation.geometry.containerHeight < initialHeight - 100
                 }
                 #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
+                #expect(!harness.probeObservation.geometry.isPastBottomEdge)
+                if let tail = harness.probeObservation.rowFrames["transcript-bottom"] {
+                    #expect(abs(tail.maxY - harness.probeObservation.geometry.containerHeight) <= 2)
+                }
 
                 harness.resize(height: 844)
                 _ = try await harness.recorder.waitUntil {
                     abs($0.observation.geometry.containerHeight - initialHeight) <= 2
                 }
                 #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
+                #expect(!harness.probeObservation.geometry.isPastBottomEdge)
+                if let tail = harness.probeObservation.rowFrames["transcript-bottom"] {
+                    #expect(abs(tail.maxY - harness.probeObservation.geometry.containerHeight) <= 2)
+                }
+            }
+        }
+    }
+
+    @Test("focused short transcript keeps its leading row through keyboard, multiline, and panel changes")
+    func shortTranscriptComposerChangesPreserveLeadingRow() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            let builder = SessionScenarioBuilder(seed: 1_209)
+            var snapshot = try builder.openingTail(targetEncodedBytes: 10_000)
+            snapshot.transcript = [try harnessMessage(id: "short-leading")]
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 1
+
+            try await withHarness(snapshot: snapshot) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.observation.visibleRowIDs.contains(harness.firstTranscriptID)
+                }
+                #expect(!ready.observation.geometry.isPastBottomEdge)
+
+                try harness.focusComposer()
+                harness.resize(height: 620)
+                let focused = try await harness.recorder.waitUntil {
+                    $0.observation.geometry.containerHeight < ready.observation.geometry.containerHeight - 100
+                        && $0.observation.visibleRowIDs.contains(harness.firstTranscriptID)
+                }
+                #expect(!focused.observation.geometry.isPastBottomEdge)
+
+                let baseComposerHeight = focused.observation.composerHeight
+                try harness.setComposerText(String(repeating: "short composer growth ", count: 16))
+                let multiline = try await harness.recorder.waitUntil {
+                    $0.observation.composerHeight > baseComposerHeight + 20
+                        && $0.observation.visibleRowIDs.contains(harness.firstTranscriptID)
+                }
+                #expect(!multiline.observation.geometry.isPastBottomEdge)
+
+                try harness.setComposerText("/")
+                let panel = try await harness.recorder.waitUntil {
+                    $0.observation.composerHeight > baseComposerHeight + 40
+                        && $0.observation.visibleRowIDs.contains(harness.firstTranscriptID)
+                }
+                #expect(!panel.observation.geometry.isPastBottomEdge)
             }
         }
     }
@@ -1027,7 +1077,7 @@ final class ChatViewScrollHarness {
             scrollView.contentSize.height - scrollView.bounds.height
                 + scrollView.adjustedContentInset.bottom
         )
-        return max(0, maximum - scrollView.contentOffset.y)
+        return abs(maximum - scrollView.contentOffset.y)
     }
 
     private func nativeTranscriptScrollView() throws -> UIScrollView {
@@ -1046,12 +1096,21 @@ final class ChatViewScrollHarness {
         hostingController.view.layoutIfNeeded()
     }
 
+    func focusComposer() throws {
+        guard let textView = Self.textViews(in: hostingController.view).first else {
+            throw HarnessError.missingComposer
+        }
+        #expect(textView.becomeFirstResponder())
+    }
+
     func setComposerText(_ text: String) throws {
         guard let textView = Self.textViews(in: hostingController.view).first else {
             throw HarnessError.missingComposer
         }
         textView.text = text
+        textView.selectedRange = NSRange(location: (text as NSString).length, length: 0)
         textView.delegate?.textViewDidChange?(textView)
+        textView.delegate?.textViewDidChangeSelection?(textView)
         hostingController.view.setNeedsLayout()
     }
 

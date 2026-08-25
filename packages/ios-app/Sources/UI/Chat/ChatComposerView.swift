@@ -46,11 +46,7 @@ struct ChatComposerView: View {
     let onComposerHeight: (CGFloat) -> Void
 
     var body: some View {
-        ChatComposerStructuralHost(
-            resourcePanelPresented: resourcePicker != nil,
-            reduceMotion: reduceMotion,
-            onHeightChange: onComposerHeight
-        ) {
+        ChatComposerStructuralHost(onHeightChange: onComposerHeight) {
             VStack(spacing: 10) {
                 extensionPills
                 attachmentStrip

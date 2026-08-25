@@ -3,6 +3,14 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
+private extension ScrollPosition {
+    static var transcriptBottom: ScrollPosition {
+        var position = ScrollPosition(idType: String.self)
+        position.scrollTo(id: "transcript-bottom", anchor: .bottom)
+        return position
+    }
+}
+
 struct ChatView: View {
     let sessionID: String
     private let initialEditorText: String?
@@ -25,7 +33,7 @@ struct ChatView: View {
     @State private var scrollCoordinator: ChatScrollCoordinator
     @State private var transcriptPresentation: ChatTranscriptPresentationStore
     @State private var performanceTracker: ChatPerformanceTracker
-    @State private var transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
+    @State private var transcriptScrollPosition = ScrollPosition.transcriptBottom
     @Namespace private var composerGlassNamespace
     // UITextView is the responder owner. This mirrors delegate callbacks for
     // placeholder/scroll presentation; SwiftUI FocusState must not compete with
@@ -1331,7 +1339,7 @@ struct ChatView: View {
         let update = {
             switch command.destination {
             case .tail:
-                transcriptScrollPosition.scrollTo(edge: .bottom)
+                transcriptScrollPosition.scrollTo(id: "transcript-bottom", anchor: .bottom)
             case .openingTail(let renderedID):
                 transcriptScrollPosition.scrollTo(id: renderedID, anchor: .bottom)
             case .offsetY(let offsetY):
@@ -1371,7 +1379,7 @@ struct ChatView: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             transcriptScrollPosition = scrollCoordinator.canInstallPersistentBottomPosition
-                ? ScrollPosition(idType: String.self, edge: .bottom)
+                ? .transcriptBottom
                 : ScrollPosition(idType: String.self)
         }
     }
@@ -1384,10 +1392,9 @@ struct ChatView: View {
             switch mode {
             case .pinned:
                 guard scrollCoordinator.canInstallPersistentBottomPosition else { return }
-                // One quiescent edge position is the sole physical effect of
-                // logical pinning. Native size changes then follow streaming,
-                // discrete rows, keyboard, and composer contraction.
-                transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
+                // Reconstruct the semantic target so viewport expansion cannot
+                // preserve an absolute offset from a previously smaller viewport.
+                transcriptScrollPosition = .transcriptBottom
             case .anchored:
                 transcriptScrollPosition = ScrollPosition(idType: String.self)
             }

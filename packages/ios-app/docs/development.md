@@ -442,7 +442,7 @@ history back to the retained authoritative tail. Opening ownership is one mutual
 `OpeningTailPhase` (`idle`, `positioning`, `positioned`, or `postReveal`). `ChatViewportModeTests`
 prove that only explicit takeover, return, catch-up, opening, submission, prepend, and presentation
 intents can change durable viewport authority. `ChatScrollCoordinatorTests` assert observable outcomes:
-the persistent bottom position absorbs pinned continuous stream/composer/keyboard and discrete row growth with zero app offset writes, while detached growth remains anchored;
+the persistent exact `transcript-bottom` target absorbs pinned continuous stream/composer/keyboard and discrete row growth with zero app offset writes, while detached growth remains unpositioned;
 direct return clears catch-up and unread; catch-up emits one explicit tail intent and restores unread if
 interrupted; retained resets preserve anchoring; opening targets only the exact physical tail; semantic
 frames remain bounded; and anchor correction preserves the captured offset. Exact layout-epoch restore
@@ -470,16 +470,17 @@ and anchored (or unanchored) settlement; presentation retirement cancels its loc
 retain intrinsic cards capped at the user-prompt bound, full-shape whole-card interactive Liquid Glass,
 leading-toolbar removal, an explicit legacy lock, and Tron surfaces instead of stock forms.
 Native bottom evidence compares `ScrollGeometry.visibleRect.maxY` with the physical
-content edge (`contentSize.height + contentInsets.bottom`); the harness no longer substitutes
-a hard-coded settled distance. Pinned structural shrink is handled solely by the persistent native
-bottom position without a competing size-change anchor, while anchored readers remain inert. Explicit command targets remain installed
-until exact opening/catch-up/semantic settlement and are released on the next frame only by the applied token; no deferred
-unqualified ScrollPosition reset may run across a send or keyboard transaction. A send
-retires a still-applied app target before its first layout mutation. Ready/pinned underflow
-uses bottom alignment, while opening and anchored presentation retain top alignment.
-Ordinary composer height remains animation-disabled. Resource-panel insertion/removal alone
-uses one bounded 240 ms host-height transition with no root geometry feedback or scroll command;
-Reduce Motion installs it atomically. With the keyboard visible, the panel list caps at three
+content edge (`contentSize.height + contentInsets.bottom`); the hosted native helper measures the
+absolute signed offset error so past-bottom overshoot cannot pass as zero distance. Pinned structural
+shrink and viewport expansion are handled by a persistent exact `transcript-bottom` ID target at
+anchor `.bottom`, without a competing size-change anchor; anchored readers remain unpositioned.
+Explicit command targets remain installed until exact opening/catch-up/semantic settlement and are
+released on the next frame only by the applied token; no deferred unqualified ScrollPosition reset may
+run across a send or keyboard transaction. A send retires a still-applied app target before its first
+layout mutation. Short-content alignment is always top-owned.
+Every composer height, including resource-panel insertion/removal, installs atomically with structural
+animations disabled and no root geometry feedback or scroll command; child-local panel transitions may
+remain. With the keyboard visible, the panel list caps at three
 internally scrolling rows and the native editor at four visible lines. Spatial prompt morphs are clipped and admitted
 only for compact measured prompts; long prompts use the bounded outgoing-row entrance.
 A mounted retained snapshot remains readable during reconnect, but command
@@ -499,7 +500,7 @@ have these explicit observable replacements:
 
 | Retired tests | Observable replacement |
 |---|---|
-| `pinnedGrowthCoalesces` through `pinnedProjectionShorteningCorrectsPhysicalTail` (1–7), `appliedAutomaticTailDoesNotBlockShrinkCorrection` through `lifecycleGraftPreservesAuthoritativeMutation` (9–11) | `pinnedNativeEdgeEliminatesFollowCommandStream`, `stickyModeHasNoOffsetCommandDestination` — the persistent bottom position owns continuous and discrete pinned growth with no app offset write. |
+| `pinnedGrowthCoalesces` through `pinnedProjectionShorteningCorrectsPhysicalTail` (1–7), `appliedAutomaticTailDoesNotBlockShrinkCorrection` through `lifecycleGraftPreservesAuthoritativeMutation` (9–11) | `pinnedNativeEdgeEliminatesFollowCommandStream`, `stickyModeHasNoOffsetCommandDestination` — the persistent exact `transcript-bottom` target owns continuous and discrete pinned growth with no app offset write. |
 | `projectionShorteningDefersToDirectTakeover` (8) | `directTakeoverCancelsPendingSemanticRestore` — direct authority leaves anchored mode and no command. |
 | `layoutCorrectionGeometryFirstSettlement` (13) | `anchoredRestoreRequiresFreshEvidence` — one semantic correction appears only after both newer semantic and geometry evidence. |
 | `interactionCancelsProjectionMutation` through `catchUpCancelsAppliedLayoutBinding` (14–17) | `directTakeoverCancelsPendingSemanticRestore`, `stickyModeHasNoOffsetCommandDestination`, `nativeEdgeStateFollowsModeWithoutOffsetCommand` — takeover/catch-up replace mode; no release-binding command exists. |

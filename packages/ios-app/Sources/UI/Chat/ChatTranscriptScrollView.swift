@@ -84,10 +84,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             .allowsHitTesting(isReady)
         }
         .defaultScrollAnchor(.bottom, for: .initialOffset)
-        .defaultScrollAnchor(
-            isReady && scrollCoordinator.viewportMode == .pinned ? .bottom : .top,
-            for: .alignment
-        )
+        .defaultScrollAnchor(.top, for: .alignment)
         // The persistent ScrollPosition is the sole owner of pinned content and
         // viewport size changes. A sizeChanges anchor would apply the same inset
         // delta a second time; an unpositioned user binding remains native-owned.

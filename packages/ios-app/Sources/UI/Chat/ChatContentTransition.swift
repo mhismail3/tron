@@ -1,48 +1,29 @@
 import SwiftUI
 
-/// The composer is one permanently mounted inset owner. Ordinary child and
-/// editor changes install structural height atomically. Only explicit resource
-/// panel insertion/removal receives one bounded height transition, without any
-/// transcript scroll command or root geometry feedback loop.
+/// The composer is one permanently mounted inset owner. Every measured height
+/// installs atomically so the structural safe-area inset never interpolates
+/// through stale viewport sizes. Child-local visual transitions remain scoped
+/// inside the already-installed composer space.
 enum ChatComposerStructuralTransitionPolicy {
     static let heightEpsilon: CGFloat = 0.5
-    static let resourcePanelDuration: TimeInterval = 0.24
 
     static func admitsHeightChange(current: CGFloat?, measured: CGFloat) -> Bool {
         measured.isFinite
             && measured > 0
             && current.map { abs($0 - measured) > heightEpsilon } != false
     }
-
-    static func animatesResourcePanelHeight(
-        current: CGFloat?,
-        installedPanelPresented: Bool,
-        panelPresented: Bool,
-        reduceMotion: Bool
-    ) -> Bool {
-        current != nil
-            && installedPanelPresented != panelPresented
-            && !reduceMotion
-    }
 }
 
 struct ChatComposerStructuralHost<Content: View>: View {
-    let resourcePanelPresented: Bool
-    let reduceMotion: Bool
     let onHeightChange: ((CGFloat) -> Void)?
     @ViewBuilder let content: () -> Content
 
     @State private var presentedHeight: CGFloat?
-    @State private var installedResourcePanelPresented = false
 
     init(
-        resourcePanelPresented: Bool = false,
-        reduceMotion: Bool = false,
         onHeightChange: ((CGFloat) -> Void)? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
-        self.resourcePanelPresented = resourcePanelPresented
-        self.reduceMotion = reduceMotion
         self.onHeightChange = onHeightChange
         self.content = content
     }
@@ -57,24 +38,9 @@ struct ChatComposerStructuralHost<Content: View>: View {
                     current: presentedHeight,
                     measured: height
                 ) else { return }
-                let animatesPanel = ChatComposerStructuralTransitionPolicy.animatesResourcePanelHeight(
-                    current: presentedHeight,
-                    installedPanelPresented: installedResourcePanelPresented,
-                    panelPresented: resourcePanelPresented,
-                    reduceMotion: reduceMotion
-                )
-                installedResourcePanelPresented = resourcePanelPresented
-                if animatesPanel {
-                    withAnimation(.easeInOut(
-                        duration: ChatComposerStructuralTransitionPolicy.resourcePanelDuration
-                    )) {
-                        presentedHeight = height
-                    }
-                } else {
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) { presentedHeight = height }
-                }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { presentedHeight = height }
             }
             .frame(height: presentedHeight, alignment: .bottom)
             .onGeometryChange(for: CGFloat.self) { geometry in

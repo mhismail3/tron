@@ -151,7 +151,7 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   updates, live-to-canonical settlement, thinking-height measurement, and tool status changes
   inherit no stack-wide animation. The stable transcript transaction admits only explicit entrance/tool-chip markers and continuous native-control transactions; thinking height/tail motion is row-local downstream of that boundary. Authority-only changes whose bounded transcript/stream/tool/queue/runtime layout identity is unchanged take a synchronous metadata path and cannot arm settlement. The sole composer inset exposes one bottom-aligned measured height; a generation captured before structural mutation keeps pinned tail coupling nonanimated, preserves a detached semantic locus with zero tail commands, coalesces retargets, and yields immediately to direct interaction. Reduce Motion removes spatial transitions. Tool status text
   updates inside its stable row. Ordinary pinned growth, shrink, and discrete insertion remain
-  coupled by one persistent bottom `ScrollPosition` and create no automatic command stream. Native
+  coupled by one persistent exact-ID `ScrollPosition` targeting `transcript-bottom` at anchor `.bottom` and create no automatic command stream. Native
   bottom distance is bounded for display only: a visible rect beyond the physical content edge is
   not tail settlement. A deliberately detached reader retains the same viewport authority;
 - structure/context/resource invalidations reload an already-presented History,
@@ -200,8 +200,9 @@ remains visible throughout opening, while sending stays disabled until readiness
 positioning and post-reveal settlement are owned by the coordinator's mutually exclusive opening
 phase; ordinary pinned growth, shrink, and discrete insertion create no command ownership. Explicit
 opening, catch-up, semantic restore, and prepend remain command owners; after they release, pinned mode
-installs one persistent bottom `ScrollPosition` with no recurring command stream. Presentation reset
-and retained foreground resume reapply that physical position
+installs one persistent `transcript-bottom` ID target at anchor `.bottom` with no recurring command stream.
+Short-content alignment remains top-owned, and every composer/panel structural height installs with
+animations disabled. Presentation reset and retained foreground resume reconstruct that semantic target
 even when the logical enum is unchanged, while direct user ownership and anchored mode remain unpositioned.
 Session subscription ownership is token-scoped end to end. The open response remains
 provisional until sync acknowledgement and exact route-intent revalidation; both sync and subscription
