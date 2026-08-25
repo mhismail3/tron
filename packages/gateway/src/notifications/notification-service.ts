@@ -57,6 +57,21 @@ function receiptFor(input: {
   return { dedupeKey: input.dedupeKey, sessionKey: input.sessionKey, grantIds: input.grantIds, createdAt: iso(input.now), expiresAt: iso(input.now + RECEIPT_TTL_MS), result: input.result };
 }
 
+function retainRevocationAuthority(document: NotificationDocument): NotificationDocument {
+  const revoking = new Set(document.revocations.map((item) => item.grantId));
+  if (revoking.size === 0) return document;
+  document.grants = document.grants.filter((grant) => !revoking.has(grant.grantId));
+  for (const intent of document.pending) {
+    intent.targets = intent.targets.filter((target) => !revoking.has(target.grantId));
+    if (intent.targets.length === 0) {
+      const receipt = document.receipts.find((candidate) => candidate.dedupeKey === intent.dedupeKey);
+      if (receipt?.result === "queued") receipt.result = "failed";
+    }
+  }
+  document.pending = document.pending.filter((intent) => intent.targets.length > 0);
+  return document;
+}
+
 /** Gateway-owned push authority. Extension code receives only enqueue(), never credentials or transport. */
 export class NotificationService {
   private timer: NodeJS.Timeout | undefined;
@@ -69,6 +84,7 @@ export class NotificationService {
 
   async initialize(): Promise<void> {
     await this.store.initialize();
+    await this.store.update((document) => retainRevocationAuthority(prune(document, this.now())));
     this.timer = setInterval(() => void this.drain(), 2_000);
     this.timer.unref();
     void this.drain();
@@ -85,7 +101,10 @@ export class NotificationService {
     const now = this.now();
     let rotated = false;
     await this.store.update((document) => {
-      prune(document, now);
+      retainRevocationAuthority(prune(document, now));
+      if (document.revocations.some((item) => item.grantId === input.grantId)) {
+        throw new GatewayError("conflict", "Push grant is awaiting revocation and must rotate before registration");
+      }
       const anotherDevice = document.grants.find((grant) => grant.grantId === input.grantId && grant.deviceId !== input.deviceId);
       if (anotherDevice) throw new GatewayError("conflict", "Push grant is already bound to another device");
       const previous = document.grants.find((grant) => grant.deviceId === input.deviceId);
@@ -153,7 +172,8 @@ export class NotificationService {
 
   async status(deviceId?: string): Promise<NotificationStatus> {
     const document = await this.store.snapshot();
-    const active = document.grants.filter((grant) => grant.active);
+    const revoking = new Set(document.revocations.map((item) => item.grantId));
+    const active = document.grants.filter((grant) => grant.active && !revoking.has(grant.grantId));
     return {
       available: this.relay.available,
       registered: active.length > 0,
@@ -172,7 +192,7 @@ export class NotificationService {
     const sessionKey = notificationHash(`session\0${input.sessionId}`);
     let result: NotificationAdmissionStatus = "queued";
     await this.store.update((document) => {
-      prune(document, now);
+      retainRevocationAuthority(prune(document, now));
       if (document.receipts.some((receipt) => receipt.dedupeKey === dedupeKey) || document.pending.some((intent) => intent.dedupeKey === dedupeKey)) {
         result = "suppressed";
         return document;

@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { NotificationGrantStore } from "./grant-store.js";
+import { NotificationGrantStore, notificationHash } from "./grant-store.js";
 import { NotificationService } from "./notification-service.js";
 import type { PushRelayClient, RelayNotificationOutcome } from "./relay-client.js";
 
@@ -102,6 +102,59 @@ describe("NotificationGrantStore and NotificationService", () => {
     await service.upsertGrant({ ...grant, grantId: "grant_ijklmnop", secret: Buffer.alloc(32, 8).toString("base64url") });
     await vi.waitFor(() => expect(relay.revoked).toContain(grant.grantId));
     expect((await service.status(grant.deviceId)).enabledDeviceCount).toBe(1);
+  });
+
+  it("never reactivates a capability while its durable revocation can still cross", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-notifications-revocation-race-"));
+    const store = new NotificationGrantStore(root);
+    await store.initialize();
+    const relay = {
+      available: true,
+      async send() { return "accepted_by_apns" as const; },
+      async revoke() { return "retryable" as const; },
+    } as unknown as PushRelayClient;
+    const service = new NotificationService(store, relay);
+    await service.upsertGrant(grant);
+    await service.removeDevice(grant.deviceId);
+    await expect(service.upsertGrant(grant)).rejects.toMatchObject({ code: "conflict" });
+
+    const replacement = {
+      ...grant,
+      grantId: "grant_replacement",
+      secret: Buffer.alloc(32, 7).toString("base64url"),
+    };
+    await service.upsertGrant(replacement);
+    const snapshot = await store.snapshot();
+    expect(snapshot.grants.map((item) => item.grantId)).toEqual([replacement.grantId]);
+    expect(snapshot.revocations.map((item) => item.grantId)).toEqual([grant.grantId]);
+    const revoking = new Set(snapshot.revocations.map((item) => item.grantId));
+    expect(snapshot.grants.every((item) => !revoking.has(item.grantId))).toBe(true);
+  });
+
+  it("retires a legacy active grant when restart finds revocation authority for the same capability", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-notifications-revocation-repair-"));
+    const store = new NotificationGrantStore(root);
+    await store.initialize();
+    const now = new Date().toISOString();
+    await store.update((document) => {
+      document.grants.push({ ...grant, active: true, createdAt: now, updatedAt: now });
+      document.revocations.push({
+        grantId: grant.grantId,
+        secret: grant.secret,
+        requestId: notificationHash(`revoke\0${grant.grantId}`),
+        createdAt: now,
+        attempts: 0,
+        nextAttemptAt: now,
+      });
+      return document;
+    });
+    const relay = { available: false } as PushRelayClient;
+    const service = new NotificationService(store, relay);
+    await service.initialize();
+    service.dispose();
+    const snapshot = await store.snapshot();
+    expect(snapshot.grants).toEqual([]);
+    expect(snapshot.revocations.map((item) => item.grantId)).toEqual([grant.grantId]);
   });
 
   it("enforces the durable per-session hourly quota", async () => {

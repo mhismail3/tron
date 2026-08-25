@@ -1,9 +1,23 @@
 import { env, SELF, reset, runInDurableObject } from "cloudflare:test";
+import { encode } from "cbor-x";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { REGISTRY_NAME } from "../src/contracts";
-import { hmacHex, sha256Hex, utf8 } from "../src/crypto";
+import { base64Url, canonicalRegistration, concatBytes, hmacHex, ownedBuffer, sha256, sha256Hex, utf8 } from "../src/crypto";
 import type { PushRegistry } from "../src/registry";
 import { testGrant } from "./fixtures";
+
+function rawEcdsaToDer(raw: Uint8Array): Uint8Array {
+  function integer(value: Uint8Array): Uint8Array {
+    let start = 0;
+    while (start < value.byteLength - 1 && value[start] === 0) start += 1;
+    let significant: Uint8Array<ArrayBufferLike> = value.slice(start);
+    if ((significant[0] & 0x80) !== 0) significant = concatBytes(new Uint8Array([0]), significant);
+    return concatBytes(new Uint8Array([0x02, significant.byteLength]), significant);
+  }
+  const r = integer(raw.slice(0, 32));
+  const s = integer(raw.slice(32));
+  return concatBytes(new Uint8Array([0x30, r.byteLength + s.byteLength]), r, s);
+}
 
 function stub() {
   const id = env.PUSH_REGISTRY.idFromName(REGISTRY_NAME);
@@ -127,6 +141,57 @@ describe("v3 Worker boundary", () => {
       grant: durableState.storage.sql.exec<{ enabled: number }>("SELECT enabled FROM grants WHERE grant_id = ?", testGrant.grantId).one().enabled,
     }));
     expect(state).toEqual({ installation: 0, grant: 0 });
+  });
+
+  test("re-admission rotates a disabled grant so an old revoke cannot disable new authority", async () => {
+    await initializeAndSeed();
+    const keys = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+    const publicKeySpki = base64Url(new Uint8Array(await crypto.subtle.exportKey("spki", keys.publicKey)));
+    await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
+      state.storage.sql.exec(
+        "UPDATE installations SET public_key_spki = ?, assertion_counter = 1 WHERE installation_id = ?",
+        publicKeySpki,
+        testGrant.installationId,
+      );
+      state.storage.sql.exec("UPDATE grants SET enabled = 0 WHERE grant_id = ?", testGrant.grantId);
+    });
+    const challengeResponse = await SELF.fetch("https://push.test/v3/attestation/challenge", { method: "POST" });
+    const challenge = await challengeResponse.json<{ challengeId: string; challenge: string }>();
+    const fields = {
+      version: 1 as const,
+      challengeId: challenge.challengeId,
+      challenge: challenge.challenge,
+      keyId: testGrant.keyId,
+      apnsToken: testGrant.deviceToken,
+      route: "beta" as const,
+      bindingHash: testGrant.bindingHash,
+    };
+    const clientDataHash = await sha256(canonicalRegistration(fields));
+    const authenticatorData = new Uint8Array(37);
+    authenticatorData.set(await sha256(utf8(`${env.APPLE_TEAM_ID}.com.tron.mobile.beta`)));
+    new DataView(authenticatorData.buffer).setUint32(33, 2, false);
+    const rawSignature = new Uint8Array(await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      keys.privateKey,
+      ownedBuffer(concatBytes(authenticatorData, clientDataHash)),
+    ));
+    const assertionObject = base64Url(encode({ authenticatorData, signature: rawEcdsaToDer(rawSignature) }));
+    const response = await SELF.fetch("https://push.test/v3/installations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...fields, proof: "assertion", assertionObject }),
+    });
+    expect(response.status).toBe(201);
+    const replacement = await response.json<{ grantId: string; grantSecret: string }>();
+    expect(replacement.grantId).not.toBe(testGrant.grantId);
+    expect(replacement.grantSecret).not.toBe(testGrant.secret);
+
+    const staleRevoke = await SELF.fetch(`https://push.test/v3/grants/${testGrant.grantId}`, await signedRevocation());
+    expect(staleRevoke.status).toBe(404);
+    const active = await runInDurableObject(stub(), async (_instance: PushRegistry, state) => state.storage.sql.exec<{
+      grant_id: string; enabled: number;
+    }>("SELECT grant_id, enabled FROM grants WHERE installation_id = ?", testGrant.installationId).one());
+    expect(active).toEqual(expect.objectContaining({ grant_id: replacement.grantId, enabled: 1 }));
   });
 
   test("enforces installation-wide quota across grants before contacting APNs", async () => {

@@ -106,8 +106,11 @@ The exact bounded body is:
 ```
 
 Grant revocation signs an empty body with method `DELETE` and exact path
-`/v3/grants/{grantId}`. It is idempotent. Disabled grants retain only the secret needed to authenticate idempotent
-revocation and are pruned after the fixed 30-day disabled retention window.
+`/v3/grants/{grantId}`. It is idempotent. Disabled grants are never re-enabled
+with their prior capability: a later registration for the same installation and
+binding atomically rotates both `grantId` and `grantSecret`. The old signed revoke
+therefore resolves as an idempotent missing grant and cannot disable replacement
+authority. Disabled records are pruned after the fixed 30-day retention window.
 
 ## Delivery semantics
 
@@ -121,9 +124,13 @@ Each grant admits at most 30 new requests per hour and 200 per UTC day; each
 installation admits at most 50 per hour and 300 per day across its grants. One
 installation may own at most eight grants, and global installation/grant tables
 are transactionally bounded. Retries of an admitted request do not consume
-another quota unit. Provider-token construction and APNs transport exceptions
-remain retryable but use separate fixed outcome reasons, without projecting
-credentials, provider responses, or exception text. The closed APNs request
+another quota unit. The cached APNs provider token is keyed by a cryptographic
+fingerprint of the team ID, key ID, and complete private-key contents. APNs
+`InvalidProviderToken` and `ExpiredProviderToken` responses clear that cache and
+remain retryable, so credential replacement and provider invalidation cannot
+reuse stale authority. Provider-token construction and APNs transport exceptions
+use separate fixed retryable reasons without projecting credentials, provider
+responses, or exception text. The closed APNs request
 retains a 15-second abort bound and the platform-default redirect mode; forcing
 `redirect: "error"` makes deployed Workers reject APNs egress before a provider
 response. APNs invalid-token responses disable the installation and all of its

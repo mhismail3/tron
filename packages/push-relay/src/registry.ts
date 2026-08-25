@@ -249,8 +249,19 @@ export class PushRegistry {
           );
           grant = this.grant(grantId);
         } else if (grant.enabled !== 1) {
-          this.state.storage.sql.exec("UPDATE grants SET enabled = 1, updated_at = ? WHERE grant_id = ?", now, grant.grant_id);
-          grant = this.grant(grant.grant_id);
+          // A disabled endpoint capability may already have crossed a remote
+          // revocation boundary. Re-admission rotates both opaque authority
+          // values so an old signed tombstone can never disable the new grant.
+          const previousGrantId = grant.grant_id;
+          const grantId = randomOpaqueId();
+          const secret = randomOpaqueId(32);
+          this.state.storage.sql.exec(
+            `UPDATE grants SET grant_id = ?, secret = ?, enabled = 1,
+             hourly_window = ?, hourly_count = 0, daily_window = ?, daily_count = 0,
+             created_at = ?, updated_at = ? WHERE grant_id = ?`,
+            grantId, secret, hourWindow(now), dayWindow(now), now, now, previousGrantId,
+          );
+          grant = this.grant(grantId);
         }
         if (!grant) throw new Error("grant_write_failed");
         return {

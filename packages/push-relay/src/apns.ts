@@ -1,5 +1,5 @@
 import type { ApnsEnvironment, Env, NotificationRequest, RelayResult } from "./contracts";
-import { base64Url, ownedBuffer, pemBytes, stableProviderId, utf8 } from "./crypto";
+import { base64Url, ownedBuffer, pemBytes, sha256, stableProviderId, utf8 } from "./crypto";
 
 const MAX_APNS_PAYLOAD_BYTES = 4096;
 const MAX_APNS_RESPONSE_BYTES = 2048;
@@ -54,6 +54,10 @@ export async function sendToApns(
   const responseApnsId = response.headers.get("apns-id") ?? apnsId;
   if (response.ok) return { status: "accepted_by_apns", apnsId: responseApnsId };
   const reason = await sanitizedApnsReason(response);
+  if (response.status === 403 && (reason === "InvalidProviderToken" || reason === "ExpiredProviderToken")) {
+    cachedProviderToken = undefined;
+    return { status: "retryable", reason, retryAfterSeconds: 1 };
+  }
   if (response.status === 429 || response.status >= 500) {
     const retryAfterSeconds = parseRetryAfter(response.headers.get("retry-after"));
     return { status: "retryable", reason, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) };
@@ -77,7 +81,11 @@ export function buildApnsPayload(request: NotificationRequest): string {
 
 async function providerToken(env: Env): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  const fingerprint = `${env.APNS_TEAM_ID}:${env.APNS_KEY_ID}:${env.APNS_KEY_P8.length}`;
+  const fingerprint = base64Url(await sha256(utf8(JSON.stringify([
+    env.APNS_TEAM_ID,
+    env.APNS_KEY_ID,
+    env.APNS_KEY_P8,
+  ]))));
   if (cachedProviderToken?.fingerprint === fingerprint && cachedProviderToken.expiresAt > now) return cachedProviderToken.token;
   const key = await crypto.subtle.importKey(
     "pkcs8",
