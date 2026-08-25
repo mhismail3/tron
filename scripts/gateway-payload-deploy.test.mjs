@@ -563,11 +563,23 @@ test("production process probes distinguish proven absence from probe failure", 
     output: "  12 Sun Aug 24 10:00:00 2026\n",
   })), undefined);
 
+  const listener = await captureLocalListenerProcess(1234, async (tool, args) => {
+    if (tool === "/usr/sbin/lsof") {
+      assert.deepEqual(args, ["-nP", "-w", "-t", "-iTCP:1234", "-sTCP:LISTEN"]);
+      return { output: "123\n" };
+    }
+    assert.equal(tool, "/bin/ps");
+    return { output: ` 123 ${start}\n` };
+  });
+  assert.deepEqual(listener, { pid: 123, startIdentity: start });
+
   const failure = new Error("spawn failed");
   await assert.rejects(captureLocalProcess(123, async () => { throw failure; }), /spawn failed/);
   await assert.rejects(captureLocalProcess(123, async () => ({ output: "" })), /empty process table/);
   await assert.rejects(captureLocalProcess(123, async () => ({ output: "malformed\n" })), /malformed/);
-  await assert.rejects(captureLocalListenerProcess(1234, async () => ({ output: "unexpected\n" })), /malformed/);
+  await assert.rejects(captureLocalListenerProcess(1234, async () => ({ output: "p123\n" })), /malformed/);
+  await assert.rejects(captureLocalListenerProcess(1234, async () => ({ output: "" })), /empty successful result/);
+  await assert.rejects(captureLocalListenerProcess(1234, async () => ({ output: "123\n456\n" })), /multiple listeners/);
   const denied = Object.assign(new Error("permission denied"), { exitCode: 1, commandOutput: "permission denied" });
   await assert.rejects(captureLocalListenerProcess(1234, async () => { throw denied; }), /permission denied/);
 });

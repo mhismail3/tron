@@ -1318,7 +1318,10 @@ export async function captureLocalListenerProcess(port, runCommand = runBounded)
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("invalid Gateway port");
   let output;
   try {
-    output = (await runCommand("/usr/sbin/lsof", ["-nP", "-Fp", `-iTCP:${port}`, "-sTCP:LISTEN"], {
+    // macOS lsof field mode always emits an `f` record even when only `p`
+    // is requested. Terse mode is the native PID-only contract; suppress
+    // warnings so every successful output line remains machine-parseable.
+    output = (await runCommand("/usr/sbin/lsof", ["-nP", "-w", "-t", `-iTCP:${port}`, "-sTCP:LISTEN"], {
       timeoutMs: 2_000, maxOutputBytes: 8 * 1024,
     })).output;
   } catch (error) {
@@ -1326,10 +1329,10 @@ export async function captureLocalListenerProcess(port, runCommand = runBounded)
     throw error;
   }
   const lines = output.split(/\r?\n/u).filter(Boolean);
-  if (lines.some((line) => !/^p[1-9][0-9]*$/u.test(line))) {
+  if (lines.some((line) => !/^[1-9][0-9]*$/u.test(line))) {
     throw new Error("Gateway listener probe returned malformed output");
   }
-  const pids = [...new Set(lines.map((line) => Number(line.slice(1))))];
+  const pids = [...new Set(lines.map(Number))];
   if (pids.length === 0) throw new Error("Gateway listener probe returned an empty successful result");
   if (pids.length !== 1) throw new Error(`Gateway port ${port} has multiple listeners`);
   return captureLocalProcess(pids[0], runCommand);

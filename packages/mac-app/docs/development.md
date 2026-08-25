@@ -268,8 +268,10 @@ The command serializes selection publication per channel, verifies complete
 payload fingerprints, calls authenticated drain-aware `gateway.restart`, waits
 without a startup deadline for the exact local pre-restart listener process to
 exit or be replaced, and only then starts bounded exact-candidate health checks.
-Health absence alone is never accepted as a drain transition. After a short natural
-relaunch grace, supervised Stable promotion may use one fixed kickstart only when no
+Health absence alone is never accepted as a drain transition. Local listener ownership
+uses bounded `lsof` terse PID output plus a separate process-start identity probe; field
+mode is intentionally excluded because macOS always emits an extra file-descriptor record.
+After a short natural relaunch grace, supervised Stable promotion may use one fixed kickstart only when no
 listener exists. On failure it restores and revalidates the prior selection, accepts an
 already-running exact restored payload, or kickstarts only an absent/exact captured
 failed listener; unknown listeners fail closed. Recovery never issues RPC to the failed Gateway. The Mac menu Restart seam uses
