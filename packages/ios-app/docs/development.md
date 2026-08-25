@@ -719,7 +719,13 @@ remains verbatim in Keychain and is passed verbatim back to `DCAppAttestService`
 Only the Worker registration projection decodes its exact 32-byte credential ID
 and re-encodes it as canonical unpadded base64url before computing the client-data
 hash and sending the request; malformed or non-32-byte identifiers fail closed
-before proof generation or relay admission. Challenge requests retain a short network deadline; the non-blocking App Attest
+before proof generation or relay admission. The Keychain document versions that
+wire projection. On first load after this format was introduced, only a legacy
+missing-version document whose key was already marked rejected clears that key
+and rejection marker, durably records the current version, and retries with a
+fresh Apple key. APNs tokens, grants, pairing, and all other app data remain
+unchanged. Current-version rejected keys remain rejected across relaunches so a
+real fresh-attestation rejection cannot churn keys. Challenge requests retain a short network deadline; the non-blocking App Attest
 installation uses a 60-second deadline so a cold mobile/Worker verification path
 does not become a false registration failure. A registration operation retries only
 ambiguous timeout or retryable 5xx twice, with bounded 250/750 ms backoff and a fresh

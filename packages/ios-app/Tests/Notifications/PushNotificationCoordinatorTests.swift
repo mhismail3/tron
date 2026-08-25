@@ -267,7 +267,8 @@ struct PushNotificationCoordinatorTests {
             requestAuthorization: { true },
             registerForRemoteNotifications: {}
         )
-        let rawKeyID = appAttestKey("key_1")
+        let rawKeyID = "+/8AAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0="
+        let canonicalKeyID = "-_8AAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0"
         let proofHashes = PushProofHashRecorder()
         let attest = PushAppAttestClient(
             isSupported: { true },
@@ -309,7 +310,7 @@ struct PushNotificationCoordinatorTests {
         let registration = try #require(JSONSerialization.jsonObject(with: registrationBody) as? [String: Any])
         #expect(registration["proof"] as? String == "attestation")
         #expect(registration["route"] as? String == "beta")
-        #expect(registration["keyId"] as? String == canonicalAppAttestKey("key_1"))
+        #expect(registration["keyId"] as? String == canonicalKeyID)
         #expect(registration["keyId"] as? String != rawKeyID)
         #expect(store.value?.appAttestKeyID == rawKeyID)
         let wireRouteValue = try #require(registration["route"] as? String)
@@ -352,6 +353,105 @@ struct PushNotificationCoordinatorTests {
             #expect(store.value?.appAttestKeyID == malformedKeyID)
             #expect(store.value?.grants.isEmpty == true)
         }
+    }
+
+    @MainActor
+    @Test("legacy rejected credential wire state rotates once across Codable reload")
+    func legacyRejectedCredentialWireMigration() async throws {
+        let legacyGrant = PushGrant(
+            profileID: "other-profile",
+            installationID: "installation_other",
+            grantID: "grant_other",
+            grantSecret: String(repeating: "s", count: 32),
+            tokenHash: "legacy-token-hash"
+        )
+        let legacy = PushCredentialDocument(
+            appAttestKeyID: appAttestKey("legacy-rejected-key"),
+            apnsToken: "01",
+            grants: [legacyGrant.profileID: legacyGrant],
+            appAttestKeyRejected: true,
+            appAttestCredentialWireVersion: nil
+        )
+        var legacyObject = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy)) as? [String: Any]
+        )
+        legacyObject.removeValue(forKey: "appAttestCredentialWireVersion")
+        let store = CodableReloadPushCredentialStore(
+            data: try JSONSerialization.data(withJSONObject: legacyObject, options: [.sortedKeys])
+        )
+
+        _ = PushNotificationCoordinator(
+            credentials: store,
+            notifications: allowedNotifications,
+            appAttest: PushAttestRecorder().client,
+            configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!)
+        )
+        let migrated = try #require(store.value)
+        #expect(store.saveCount == 1)
+        #expect(migrated.appAttestKeyID == nil)
+        #expect(migrated.appAttestKeyRejected == false)
+        #expect(migrated.appAttestCredentialWireVersion == PushCredentialDocument.currentAppAttestCredentialWireVersion)
+        #expect(migrated.apnsToken == legacy.apnsToken)
+        #expect(migrated.grants == legacy.grants)
+
+        let script = ScriptedPushTransport(installations: [.status(201)])
+        let attest = PushAttestRecorder(generatedKeys: [appAttestKey("post-migration-key")])
+        let coordinator = PushNotificationCoordinator(
+            credentials: store,
+            notifications: allowedNotifications,
+            appAttest: attest.client,
+            configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!),
+            transport: BoundedHTTPDataTransport { request, maximumBytes in
+                try await script.handle(request, maximumBytes: maximumBytes)
+            }
+        )
+        #expect(store.saveCount == 1)
+
+        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        try await waitUntil { store.value?.grants[Self.profile.id] != nil }
+
+        #expect(await attest.generatedCount == 1)
+        #expect(await attest.assertionKeys.isEmpty)
+        #expect(await script.submittedModes == ["attestation"])
+        #expect(store.value?.appAttestKeyID == appAttestKey("post-migration-key"))
+        #expect(store.value?.appAttestCredentialWireVersion == PushCredentialDocument.currentAppAttestCredentialWireVersion)
+        #expect(store.value?.apnsToken == legacy.apnsToken)
+        #expect(store.value?.grants[legacyGrant.profileID] == legacyGrant)
+    }
+
+    @MainActor
+    @Test("current rejected credential wire state still prevents key churn after reload")
+    func currentRejectedCredentialWireChurnPrevention() async throws {
+        let rejected = PushCredentialDocument(
+            appAttestKeyID: appAttestKey("current-rejected-key"),
+            apnsToken: "01",
+            grants: [:],
+            appAttestKeyRejected: true,
+            appAttestCredentialWireVersion: PushCredentialDocument.currentAppAttestCredentialWireVersion
+        )
+        let store = CodableReloadPushCredentialStore(data: try JSONEncoder().encode(rejected))
+        let script = ScriptedPushTransport(installations: [.status(201)])
+        let attest = PushAttestRecorder()
+        let coordinator = PushNotificationCoordinator(
+            credentials: store,
+            notifications: allowedNotifications,
+            appAttest: attest.client,
+            configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!),
+            transport: BoundedHTTPDataTransport { request, maximumBytes in
+                try await script.handle(request, maximumBytes: maximumBytes)
+            }
+        )
+
+        #expect(store.saveCount == 0)
+        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        try await waitUntil { coordinator.diagnostic == .stoppedRejected }
+
+        #expect(await script.challengeCount == 0)
+        #expect(await script.submittedModes.isEmpty)
+        #expect(await attest.generatedCount == 0)
+        #expect(await attest.assertionKeys.isEmpty)
+        #expect(store.saveCount == 0)
+        #expect(store.value == rejected)
     }
 
     @MainActor
@@ -723,6 +823,31 @@ private final class MemoryPushCredentialStore: PushCredentialStoring, @unchecked
     var value: PushCredentialDocument? { lock.withLock { stored } }
     func load() throws -> PushCredentialDocument? { value }
     func save(_ document: PushCredentialDocument) throws { lock.withLock { stored = document } }
+}
+
+private final class CodableReloadPushCredentialStore: PushCredentialStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var data: Data
+    private var saves = 0
+
+    init(data: Data) { self.data = data }
+
+    var value: PushCredentialDocument? {
+        lock.withLock { try? JSONDecoder().decode(PushCredentialDocument.self, from: data) }
+    }
+
+    var saveCount: Int { lock.withLock { saves } }
+
+    func load() throws -> PushCredentialDocument? {
+        try lock.withLock { try JSONDecoder().decode(PushCredentialDocument.self, from: data) }
+    }
+
+    func save(_ document: PushCredentialDocument) throws {
+        try lock.withLock {
+            data = try JSONEncoder().encode(document)
+            saves += 1
+        }
+    }
 }
 
 private actor ScriptedPushTransport {
