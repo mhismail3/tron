@@ -442,7 +442,7 @@ history back to the retained authoritative tail. Opening ownership is one mutual
 `OpeningTailPhase` (`idle`, `positioning`, `positioned`, or `postReveal`). `ChatViewportModeTests`
 prove that only explicit takeover, return, catch-up, opening, submission, prepend, and presentation
 intents can change durable viewport authority. `ChatScrollCoordinatorTests` assert observable outcomes:
-pinned continuous stream/composer/keyboard growth emits zero app offset writes, discrete inserted rows receive one coalesced nonanimated tail correction, and detached growth remains anchored;
+the persistent bottom position absorbs pinned continuous stream/composer/keyboard and discrete row growth with zero app offset writes, while detached growth remains anchored;
 direct return clears catch-up and unread; catch-up emits one explicit tail intent and restores unread if
 interrupted; retained resets preserve anchoring; opening targets only the exact physical tail; semantic
 frames remain bounded; and anchor correction preserves the captured offset. Exact layout-epoch restore
@@ -499,7 +499,7 @@ have these explicit observable replacements:
 
 | Retired tests | Observable replacement |
 |---|---|
-| `pinnedGrowthCoalesces` through `pinnedProjectionShorteningCorrectsPhysicalTail` (1–7), `appliedAutomaticTailDoesNotBlockShrinkCorrection` through `lifecycleGraftPreservesAuthoritativeMutation` (9–11) | `pinnedNativeEdgeEliminatesFollowCommandStream`, `stickyModeHasNoOffsetCommandDestination` — continuous pinned content/inset growth stays native, while discrete rows coalesce to one nonanimated exact-tail lease. |
+| `pinnedGrowthCoalesces` through `pinnedProjectionShorteningCorrectsPhysicalTail` (1–7), `appliedAutomaticTailDoesNotBlockShrinkCorrection` through `lifecycleGraftPreservesAuthoritativeMutation` (9–11) | `pinnedNativeEdgeEliminatesFollowCommandStream`, `stickyModeHasNoOffsetCommandDestination` — the persistent bottom position owns continuous and discrete pinned growth with no app offset write. |
 | `projectionShorteningDefersToDirectTakeover` (8) | `directTakeoverCancelsPendingSemanticRestore` — direct authority leaves anchored mode and no command. |
 | `layoutCorrectionGeometryFirstSettlement` (13) | `anchoredRestoreRequiresFreshEvidence` — one semantic correction appears only after both newer semantic and geometry evidence. |
 | `interactionCancelsProjectionMutation` through `catchUpCancelsAppliedLayoutBinding` (14–17) | `directTakeoverCancelsPendingSemanticRestore`, `stickyModeHasNoOffsetCommandDestination`, `nativeEdgeStateFollowsModeWithoutOffsetCommand` — takeover/catch-up replace mode; no release-binding command exists. |

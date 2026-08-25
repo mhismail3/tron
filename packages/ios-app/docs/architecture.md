@@ -506,11 +506,10 @@ its existing semantic-alias and layout-epoch transaction. This adopts the useful
 pre-Gateway principles of a non-render-path measurement/projection owner and coalesced
 stream updates without reviving the retired Engine, local event reconstruction, or scroll
 proxy architecture. Explicit scroll commands keep their exact target until their opening, catch-up,
-semantic-restore, prepend, or pinned-growth settlement evidence arrives, then release only that token on the next presented frame; submission retires a still-applied app target
+semantic-restore, or prepend settlement evidence arrives, then release only that token on the next presented frame; submission retires a still-applied app target
 before changing layout. The persistent bottom `ScrollPosition` solely owns continuous streaming,
-keyboard, and composer growth; no size-change anchor competes for the same viewport delta. A newly
-inserted prompt/activity row receives one exact nonanimated tail lease so a
-physically pinned reader remains at the latest content even when lazy-row and safe-area updates arrive; a retained presentation reconciles its first native geometry sample so a view physically at the tail regains pinned authority while a genuinely displaced reader remains anchored
+keyboard, composer, and discrete row growth; no size-change anchor or insertion callback competes
+for the same viewport delta. `discreteContentInserted` therefore emits no physical write. A retained presentation reconciles its first native geometry sample so a view physically at the tail regains pinned authority while a genuinely displaced reader remains anchored
 in an order native anchoring cannot retain; anchored readers receive no automatic follow. Compact
 measured prompts may use one clipped composer-to-row morph; long prompts fail over to the row-local
 fade/slide entrance, and attachment/skill/resource surfaces animate only inside the composer's
@@ -1052,12 +1051,14 @@ row height. Only pending rows include the tag
 in their geometry observation, allowing an installed replacement to re-emit exact evidence without
 invalidating every realized row. Visible/pinned discrete rows fade with a small non-layout transform
 exactly once, realized offscreen rows become visible without replay, and direct interaction discards
-unresolved candidates. `ChatScrollCoordinator` alone may consume one coalesced nonanimated pinned-tail
-correction for an admitted discrete insertion. Its bounded rendered-ID entitlement is intersected only on
-actual installed transitions, so a surviving tool/group row retains the same one-shot settlement through
-completion while replacement removes it. Continuity-preserved assistant/tool rows do not manufacture a new
-entrance. A newly admitted visible agent row may pair its one local reveal with the coordinator's one nonanimated pinned-tail correction; those remain separate owners and coalesce rather than issuing competing viewport writes.
-Continuous Markdown growth remains display-frame-coalesced and smoothly follows the pinned tail through native size anchoring, while capped thinking traces animate both viewport height and tail offset locally inside their clipped row. Detached readers receive no writes and Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
+unresolved candidates. `ChatScrollCoordinator` records admitted discrete insertion semantics but emits no physical
+viewport write; the persistent bottom position absorbs the installed row's growth. Its bounded
+rendered-ID entitlement is intersected only on actual installed transitions, so a surviving tool/group
+row retains the same one-shot entrance through completion while replacement removes it.
+Continuity-preserved assistant/tool rows do not manufacture a new entrance. A newly admitted visible
+agent row owns only its local reveal. Continuous Markdown growth remains display-frame-coalesced while
+the persistent bottom position holds pinned readers at the tail. Detached readers receive no writes and
+Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
 the same capsule primitives while retaining left alignment, immutable routes, and detail sheets.
 
 Every tool chip owns a tappable, top-anchored detail sheet, including
@@ -1232,9 +1233,9 @@ maps every tool call to its single compact grouped transcript chip, so page-boun
 regrouping cannot lose that visible semantic anchor. Exact detached-reader ordinary installs and
 page installs advance a layout/projection epoch, and the row geometry transform includes that epoch
 so an exact post-install sample is emitted even when its numeric frame is unchanged. Ordinary
-installs reuse the same bounded semantic correction contract for detached readers; pinned readers use native smooth
-size anchoring for continuous growth and receive one coalesced nonanimated tail correction for discrete overshoot. Settlement
-waits passively for that exact sample; after each disabled-animation correction the
+installs reuse the same bounded semantic correction contract for detached readers; pinned readers remain
+held solely by the persistent bottom position through continuous and discrete growth, with no app write.
+Detached semantic settlement waits passively for that exact sample; after each disabled-animation correction the
 owner requires both a strictly newer sample of the same semantic frame and a newer scroll-geometry
 revision, accepts either callback order, permits at most one late correction, and succeeds only within
 one point. A corrected detached or prepend transaction then completes its bounded programmatic point correction
