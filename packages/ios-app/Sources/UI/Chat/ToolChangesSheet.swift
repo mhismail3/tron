@@ -25,7 +25,7 @@ struct ToolChangesSheet: View {
                             )
                         }
                     }
-                    ToolDiffView(lines: diff.lines)
+                    ToolDiffView(lines: diff.lines, surfaceStyle: .scrollOptimized)
                 }
                 .padding(18)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -55,9 +55,32 @@ struct ToolChangesSheet: View {
 }
 
 struct ToolDiffView: View {
+    enum SurfaceStyle {
+        case glass
+        case scrollOptimized
+    }
+
     let lines: [ToolDiffLine]
+    var surfaceStyle: SurfaceStyle = .glass
 
     var body: some View {
+        styledSurface
+            .accessibilityLabel("File changes")
+    }
+
+    @ViewBuilder
+    private var styledSurface: some View {
+        switch surfaceStyle {
+        case .glass:
+            diffScroll
+                .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
+        case .scrollOptimized:
+            diffScroll
+                .tronScrollSurface(accent: .tronEmerald, tintOpacity: 0.07)
+        }
+    }
+
+    private var diffScroll: some View {
         ScrollView(.horizontal, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(lines) { line in
@@ -80,8 +103,6 @@ struct ToolDiffView: View {
             }
             .padding(.vertical, 7)
         }
-        .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
-        .accessibilityLabel("File changes")
     }
 
     private func marker(for kind: ToolDiffLineKind) -> String {

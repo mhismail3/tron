@@ -1110,7 +1110,8 @@ evidence across file, `+++`, and valid unified-hunk headers, so extra header-onl
 behind one text hunk. File-header-like `---`/`+++` lines encountered inside a hunk retain their source-line
 rendering but make unit evidence ambiguous, conservatively preventing header-light multi-file patches from
 appearing inline. Multiple or uncertain changes fail closed to a dedicated Changes sub-sheet rather than
-crowding the primary sheet or claiming a false count. Compact and expanded lines share bounded source-derived
+crowding the primary sheet or claiming a false count. Its diff container keeps the existing scroll behavior but
+uses the static scroll-optimized tinted surface instead of Liquid Glass. Compact and expanded lines share bounded source-derived
 identities; their omission rows carry distinct range identities so a rolling tail never reuses an identity for
 different visible content. Diff preparation retains only bounded head/tail lines in circular tail storage,
 bounds individual rendered line width, and marks every omitted line or character while the untouched payload remains available under

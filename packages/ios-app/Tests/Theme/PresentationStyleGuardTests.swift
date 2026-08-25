@@ -1611,7 +1611,7 @@ struct PresentationStyleGuardTests {
         #expect(sheet.contains("diff.visibleLines(for: density)"))
         #expect(sheet.contains("Text($0).foregroundColor(Color.tronTextSecondary)"))
         #expect(sheet.contains("Text(path.basename).foregroundColor(accent)"))
-        #expect(changesSheet.contains("ToolDiffView(lines: diff.lines)"))
+        #expect(changesSheet.contains("ToolDiffView(lines: diff.lines, surfaceStyle: .scrollOptimized)"))
         let primaryDetail = try #require(
             sheet.components(separatedBy: "@ViewBuilder private func primarySection").dropFirst().first?
                 .components(separatedBy: "private func pathText").first
@@ -1686,6 +1686,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolDetailSheet.swift"),
             encoding: .utf8
         )
+        let changesSheet = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolChangesSheet.swift"),
+            encoding: .utf8
+        )
         let extensionWidgets = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatExtensionWidgetView.swift"),
             encoding: .utf8
@@ -1695,6 +1699,15 @@ struct PresentationStyleGuardTests {
         #expect(sheet.contains("fullDiffButton(diff)"))
         #expect(sheet.contains("changesButton(diff, title: \"View full diff\")"))
         #expect(!sheet.contains("Button(\"Open full diff\")"))
+        #expect(changesSheet.contains("ToolDiffView(lines: diff.lines, surfaceStyle: .scrollOptimized)"))
+        #expect(changesSheet.contains("ScrollView(.horizontal, showsIndicators: true)"))
+        #expect(!changesSheet.contains("ScrollView([.horizontal, .vertical]"))
+        let scrollOptimizedSurface = try #require(
+            changesSheet.components(separatedBy: "case .scrollOptimized:").dropFirst().first?
+                .components(separatedBy: "private var diffScroll").first
+        )
+        #expect(scrollOptimizedSurface.contains(".tronScrollSurface(accent: .tronEmerald, tintOpacity: 0.07)"))
+        #expect(!scrollOptimizedSurface.contains("tronGlassSurface"))
         let markdownResult = try #require(
             sheet.components(separatedBy: "TronMarkdownView(text: preview.text").dropFirst().first?
                 .components(separatedBy: ".tronGlassSurface").first

@@ -649,7 +649,8 @@ the smaller code size, high-signal generic summary, and larger live result are v
 protocol fields. A bounded command must not add an amber completeness row to the primary sheet. Pull one single-change sheet to large
 and confirm its full bounded diff appears in place; separately verify multiple edits, extra header-only/binary
 files, header-light multi-file patches, and malformed or combined patch hunks show only the focused Changes
-row and dedicated Changes sub-sheet. At an Accessibility Dynamic Type size, confirm every status, metadata,
+row and dedicated Changes sub-sheet. Confirm that destination retains its existing nested scrolling and chip layout
+while the diff container uses the static scroll surface rather than Liquid Glass. At an Accessibility Dynamic Type size, confirm every status, metadata,
 and activity chip hugs its intrinsic content instead of stretching across an available row; when content is wider
 than the sheet, it remains within the sheet and wraps to at most two lines in the original VoiceOver order.
 Open a running single-tool detail before a second tool joins its run and verify the original sheet and detent stay
