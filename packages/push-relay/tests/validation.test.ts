@@ -36,6 +36,20 @@ describe("closed v3 validation", () => {
     expect(validateNotification({ ...validNotification, expiresAt: "2999-01-01T00:00:00Z" }, now)).toEqual({ ok: false, error: "invalid_request" });
   });
 
+  test("admits only a paired bounded session route and title", () => {
+    const routed = {
+      ...validNotification,
+      title: "Release audit",
+      sessionId: "session-abcdefgh",
+      machineId: "machine-abcdefgh",
+    };
+    expect(validateNotification(routed, now)).toEqual({ ok: true, value: routed });
+    expect(validateNotification({ ...routed, machineId: "Mac identity.v1" }, now)).toMatchObject({ ok: true });
+    expect(validateNotification({ ...routed, machineId: undefined }, now)).toEqual({ ok: false, error: "invalid_request" });
+    expect(validateNotification({ ...routed, title: "x".repeat(257) }, now)).toEqual({ ok: false, error: "invalid_request" });
+    expect(validateNotification({ ...routed, sessionId: "../../private" }, now)).toEqual({ ok: false, error: "invalid_request" });
+  });
+
   test("bounds message bytes rather than UTF-16 units", () => {
     expect(validateNotification({ ...validNotification, message: "🦆".repeat(128) }, now)).toMatchObject({ ok: true });
     expect(validateNotification({ ...validNotification, message: "🦆".repeat(129) }, now)).toEqual({ ok: false, error: "invalid_request" });

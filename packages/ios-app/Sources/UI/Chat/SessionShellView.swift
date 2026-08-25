@@ -27,6 +27,7 @@ struct SessionShellProfileRouteOwner {
 
 struct SessionShellView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showNewSession = false
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
@@ -109,6 +110,10 @@ struct SessionShellView: View {
             serverFilter.reconcile(profileIDs: sources.map(\.profileID))
             if !sources.isEmpty { DashboardServerFilterPreferences.save(serverFilter) }
         }
+        .task(id: model.pushNavigationRequest?.id) {
+            guard let request = model.pushNavigationRequest else { return }
+            await presentPushNavigation(request)
+        }
     }
 
     private var dashboardNavigation: some View {
@@ -179,6 +184,45 @@ struct SessionShellView: View {
             model.revokePresentationIntake(target)
         }
         presentedSession = route
+    }
+
+    @MainActor
+    private func presentPushNavigation(_ request: AppModel.PushNavigationRequest) async {
+        navigationOwner.invalidate()
+        showNewSession = false
+        showSettings = false
+        showingServerFilter = false
+        if showingSearch { dismissDashboardSearch() }
+
+        if let current = presentedSession {
+            if let target = model.presentationTarget(for: current.sessionID) {
+                model.revokePresentationIntake(target)
+            }
+            withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
+                presentedSession = nil
+            }
+            if !reduceMotion {
+                do { try await Task.sleep(for: .milliseconds(260)) }
+                catch { return }
+            }
+        }
+
+        do {
+            let route = try await model.navigationRoute(for: request.tap)
+            try Task.checkCancellation()
+            guard model.pushNavigationRequest?.id == request.id,
+                  model.ownsNavigationRoute(route) else { return }
+            withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
+                present(route)
+            }
+            model.consumePushNavigation(request.id)
+        } catch is CancellationError {
+            return
+        } catch {
+            guard model.pushNavigationRequest?.id == request.id else { return }
+            model.consumePushNavigation(request.id)
+            model.presentError(error)
+        }
     }
 
     private var dashboardBottomControls: some View {

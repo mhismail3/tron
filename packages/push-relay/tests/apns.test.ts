@@ -23,6 +23,23 @@ describe("closed APNs payload", () => {
     expect(JSON.stringify(payload)).not.toContain("deviceToken");
   });
 
+  test("projects the product title and exact chat route for an agent completion", () => {
+    const payload = JSON.parse(buildApnsPayload({
+      ...notification,
+      title: "Release audit",
+      sessionId: "session-abcdefgh",
+      machineId: "machine-abcdefgh",
+    }));
+    expect(payload.aps.alert).toEqual({
+      title: "Release audit",
+      body: "Tron needs your input.",
+    });
+    expect(payload).toMatchObject({
+      sessionId: "session-abcdefgh",
+      machineId: "machine-abcdefgh",
+    });
+  });
+
   test("bounds provider-token failures without contacting APNs", async () => {
     const providerFetch = vi.fn();
     vi.stubGlobal("fetch", providerFetch);

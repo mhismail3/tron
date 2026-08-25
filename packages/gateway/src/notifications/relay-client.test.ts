@@ -26,6 +26,34 @@ describe("PushRelayClient", () => {
     expect(JSON.parse(body)).toEqual({ version: 1, kind: "agent_alert", requestId: "request_abcdefgh", message: "hello", expiresAt: "2026-01-01T00:00:00.000Z" });
   });
 
+  it("projects only the bounded product title and exact chat route when supplied", async () => {
+    let body = "";
+    const client = new PushRelayClient("https://push.example.test", async (_url, init) => {
+      body = init.body as string;
+      return new Response(JSON.stringify({ status: "accepted_by_apns" }));
+    });
+    await client.send({
+      grantId: "grant_abcdefgh",
+      secret,
+      requestId: "request_abcdefgh",
+      message: "The agent finished responding.",
+      title: "Release audit",
+      sessionId: "session-abcdefgh",
+      machineId: "machine-abcdefgh",
+      expiresAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(JSON.parse(body)).toEqual({
+      version: 1,
+      kind: "agent_alert",
+      requestId: "request_abcdefgh",
+      message: "The agent finished responding.",
+      title: "Release audit",
+      sessionId: "session-abcdefgh",
+      machineId: "machine-abcdefgh",
+      expiresAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
   it("matches the shared cross-runtime HMAC fixture", () => {
     expect(relaySignature(
       fixture.notification.secret, "POST", fixture.notification.path,

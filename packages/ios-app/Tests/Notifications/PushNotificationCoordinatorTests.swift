@@ -82,11 +82,60 @@ struct PushNotificationCoordinatorTests {
         #expect(status.notifyWhenAskPresented)
     }
 
-    @Test("tap admission ignores arbitrary routing data")
+    @Test("tap admission requires one exact bounded chat route")
     func tapAdmission() {
-        #expect(PushNotificationTap.admit(["sessionId": "session-123"]).sessionID == "session-123")
-        #expect(PushNotificationTap.admit(["sessionId": "../../private"]).sessionID == nil)
+        let admitted = PushNotificationTap.admit([
+            "sessionId": "session-123",
+            "machineId": "machine-123",
+        ])
+        #expect(admitted.sessionID == "session-123")
+        #expect(admitted.machineID == "machine-123")
+        #expect(PushNotificationTap.admit([
+            "sessionId": "session-123",
+            "machineId": "Mac identity.v1",
+        ]).machineID == "Mac identity.v1")
+        #expect(PushNotificationTap.admit(["sessionId": "session-123"]).sessionID == nil)
+        #expect(PushNotificationTap.admit([
+            "sessionId": "../../private",
+            "machineId": "machine-123",
+        ]).sessionID == nil)
         #expect(PushNotificationTap.admit(["url": "https://evil.test"]).sessionID == nil)
+    }
+
+    @MainActor
+    @Test("a cold-launch notification tap waits for the app navigation owner")
+    func coldLaunchTapWaitsForHandler() {
+        let delegate = AppDelegate()
+        let tap = PushNotificationTap.admit([
+            "sessionId": "session-123",
+            "machineId": "machine-123",
+        ])
+        var delivered: [PushNotificationTap] = []
+        delegate.deliverNotificationTap(tap)
+        #expect(delivered.isEmpty)
+        delegate.installNotificationTapHandler { delivered.append($0) }
+        #expect(delivered == [tap])
+    }
+
+    @MainActor
+    @Test("new notification taps supersede older navigation requests")
+    func tapNavigationSupersession() {
+        let model = AppModel()
+        model.requestPushNavigation(PushNotificationTap(sessionID: nil, machineID: nil))
+        #expect(model.pushNavigationRequest == nil)
+
+        let first = PushNotificationTap(sessionID: "session-1", machineID: "machine-1")
+        let second = PushNotificationTap(sessionID: "session-2", machineID: "machine-2")
+        model.requestPushNavigation(first)
+        let firstID = model.pushNavigationRequest?.id
+        model.requestPushNavigation(second)
+        let secondID = model.pushNavigationRequest?.id
+        #expect(secondID != firstID)
+        #expect(model.pushNavigationRequest?.tap == second)
+        model.consumePushNavigation(firstID ?? -1)
+        #expect(model.pushNavigationRequest?.tap == second)
+        model.consumePushNavigation(secondID ?? -1)
+        #expect(model.pushNavigationRequest == nil)
     }
 
     @MainActor

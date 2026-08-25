@@ -65,6 +65,9 @@ export interface NotificationRequest {
   kind: "agent_alert";
   requestId: string;
   message: string;
+  title?: string;
+  sessionId?: string;
+  machineId?: string;
   expiresAt: string;
 }
 
@@ -128,4 +131,5 @@ export const NOTIFICATIONS_PATH = "/v3/notifications";
 export const GRANT_PATH_PREFIX = "/v3/grants/";
 export const MAX_BODY_BYTES = 16 * 1024;
 export const MAX_MESSAGE_BYTES = 512;
+export const MAX_TITLE_BYTES = 256;
 export const REGISTRY_NAME = "push-registry-v3";

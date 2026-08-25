@@ -71,11 +71,14 @@ export async function sendToApns(
 export function buildApnsPayload(request: NotificationRequest): string {
   return JSON.stringify({
     aps: {
-      alert: { title: "Tron", body: request.message },
+      alert: { title: request.title ?? "Tron", body: request.message },
       sound: "default",
       category: "TRON_AGENT_NOTIFICATION",
     },
     tron: { kind: "agent_notification", requestId: request.requestId },
+    ...(request.sessionId && request.machineId
+      ? { sessionId: request.sessionId, machineId: request.machineId }
+      : {}),
   });
 }
 

@@ -3,24 +3,45 @@ import UIKit
 
 struct PushNotificationTap: Equatable, Sendable {
     let sessionID: String?
+    let machineID: String?
+
+    var route: (sessionID: String, machineID: String)? {
+        guard let sessionID, let machineID else { return nil }
+        return (sessionID, machineID)
+    }
 
     static func admit(_ userInfo: [AnyHashable: Any]) -> PushNotificationTap {
-        guard let candidate = userInfo["sessionId"] as? String,
+        guard let sessionID = admitSessionID(userInfo["sessionId"]),
+              let machineID = admitMachineID(userInfo["machineId"]) else {
+            return PushNotificationTap(sessionID: nil, machineID: nil)
+        }
+        return PushNotificationTap(sessionID: sessionID, machineID: machineID)
+    }
+
+    private static func admitSessionID(_ value: Any?) -> String? {
+        guard let candidate = value as? String,
               !candidate.isEmpty,
               candidate.utf8.count <= 160,
               candidate.unicodeScalars.allSatisfy({
                   CharacterSet.alphanumerics.contains($0) || "-_:".unicodeScalars.contains($0)
-              }) else {
-            return PushNotificationTap(sessionID: nil)
-        }
-        return PushNotificationTap(sessionID: candidate)
+              }) else { return nil }
+        return candidate
+    }
+
+    private static func admitMachineID(_ value: Any?) -> String? {
+        guard let candidate = value as? String,
+              !candidate.isEmpty,
+              candidate.utf8.count <= 256,
+              candidate.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else { return nil }
+        return candidate
     }
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUserNotificationCenterDelegate {
     nonisolated(unsafe) var onDeviceToken: (@MainActor @Sendable (Data) -> Void)?
     nonisolated(unsafe) var onRegistrationFailure: (@MainActor @Sendable () -> Void)?
-    nonisolated(unsafe) var onNotificationTap: (@MainActor @Sendable (PushNotificationTap) -> Void)?
+    private nonisolated(unsafe) var onNotificationTap: (@MainActor @Sendable (PushNotificationTap) -> Void)?
+    private nonisolated(unsafe) var pendingNotificationTap: PushNotificationTap?
 
     func application(
         _ application: UIApplication,
@@ -40,6 +61,23 @@ final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUser
         Task { @MainActor in callback?() }
     }
 
+    @MainActor
+    func installNotificationTapHandler(_ handler: @escaping @MainActor @Sendable (PushNotificationTap) -> Void) {
+        onNotificationTap = handler
+        guard let pendingNotificationTap else { return }
+        self.pendingNotificationTap = nil
+        handler(pendingNotificationTap)
+    }
+
+    @MainActor
+    func deliverNotificationTap(_ tap: PushNotificationTap) {
+        guard let onNotificationTap else {
+            pendingNotificationTap = tap
+            return
+        }
+        onNotificationTap(tap)
+    }
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
@@ -52,7 +90,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUser
         didReceive response: UNNotificationResponse
     ) async {
         let tap = PushNotificationTap.admit(response.notification.request.content.userInfo)
-        let callback = onNotificationTap
-        await MainActor.run { callback?(tap) }
+        await deliverNotificationTap(tap)
     }
 }

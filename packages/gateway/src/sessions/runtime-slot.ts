@@ -191,6 +191,7 @@ export interface RuntimeSlotDependencies {
   blobs: BlobStore;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
+  machineId?: string;
   notifications?: NotificationService;
 }
 
@@ -490,6 +491,8 @@ export class RuntimeSlot {
               name: "tron-notify",
               factory: createTronNotifyExtension({
                 sessionId: () => this.id,
+                sessionTitle: () => this.notificationTitle(),
+                ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
                 enqueue: (input) => notifications.enqueue(input),
               }),
             }],
@@ -867,6 +870,12 @@ export class RuntimeSlot {
       }
       this.scheduleSnapshot();
     });
+  }
+
+  private notificationTitle(): string {
+    const summary = this.summary();
+    const title = summary.name?.trim() || summary.firstMessage.trim() || "New session";
+    return boundedSummaryText([...title].slice(0, 80).join(""), 256);
   }
 
   private summary(): SessionSummaryUpdate {

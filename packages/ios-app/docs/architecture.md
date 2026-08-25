@@ -806,9 +806,15 @@ never origins, identifiers, tokens, proofs, grants, response bodies, certificate
 Registration reconciles on connection, foreground, profile, permission, and APNs-token changes;
 Worker failure leaves push pending.
 The app accepts no relay URL or private push credential from settings. Remote alerts
-have no badge, inbox, background content fetch, or notification actions. On launch
-and foreground activation the app still writes a zero badge to remove state left by
-the retired badge implementation.
+have no badge, inbox, background content fetch, or notification actions. Agent-completion
+alerts carry only a bounded machine/session identity pair in addition to fixed product
+copy and the session title. Tap admission rejects partial, oversized, or non-opaque
+routes, resolves the machine only against an already-paired profile, returns to the
+dashboard, and then opens that exact chat through the ordinary profile/session
+navigation owner. A cold-launch tap is retained only in memory until the scene installs
+that owner; it is never persisted as navigation truth. On launch and foreground
+activation the app still writes a zero badge to remove state left by the retired badge
+implementation.
 
 Pairing accepts only `tron://pair` invitations containing a host, port, and
 8–32-character one-time code; missing values and every duplicate query key fail closed.

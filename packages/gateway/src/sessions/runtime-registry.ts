@@ -153,6 +153,7 @@ export class RuntimeRegistry {
       sessionClosed?: (sessionId: string) => void;
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
       stageTiming?: (stage: string, durationMs: number, outcome: "success" | "failure") => void;
+      machineId?: string;
       notifications?: NotificationService;
     },
   ) {
@@ -383,6 +384,7 @@ export class RuntimeRegistry {
       blobs: this.blobs,
       markers: this.markers,
       extensionActivityRecency: this.extensionActivityRecency,
+      ...(this.options.machineId ? { machineId: this.options.machineId } : {}),
       ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
     };
   }

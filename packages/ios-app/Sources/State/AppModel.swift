@@ -105,6 +105,11 @@ final class AppModel {
         }
     }
 
+    struct PushNavigationRequest: Identifiable, Equatable {
+        let id: Int
+        let tap: PushNotificationTap
+    }
+
     typealias SessionPresentationTarget = SessionPresentationIdentity
 
     typealias SessionOpenResponse = GatewaySessionOpenResponse
@@ -172,6 +177,8 @@ final class AppModel {
     var pairedDevices: [PairedDevice] = []
     var pushNotificationReadiness: PushReadiness = .unavailable
     var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
+    private(set) var pushNavigationRequest: PushNavigationRequest?
+    private var pushNavigationSequence = 0
     /// GatewayProfileStore owns transactional persistence; this revision makes
     /// profile metadata changes observable to SwiftUI without duplicating it.
     private(set) var profileRevision = 0
@@ -1524,6 +1531,17 @@ final class AppModel {
         return lifecycle.admits(.init(generation: generation, connectionID: nil))
     }
 
+    func requestPushNavigation(_ tap: PushNotificationTap) {
+        guard tap.sessionID != nil, tap.machineID != nil else { return }
+        pushNavigationSequence &+= 1
+        pushNavigationRequest = PushNavigationRequest(id: pushNavigationSequence, tap: tap)
+    }
+
+    func consumePushNavigation(_ requestID: Int) {
+        guard pushNavigationRequest?.id == requestID else { return }
+        pushNavigationRequest = nil
+    }
+
     func navigationRoute(for session: SessionSummary) async throws -> SessionNavigationRoute {
         let owner = try await activateDashboardProfile(session.gatewayProfileID ?? profiles.selected?.id)
         return SessionNavigationRoute(
@@ -1532,6 +1550,41 @@ final class AppModel {
             gatewayProfileID: owner.profileID,
             gatewayLifecycleGeneration: owner.lifecycleGeneration
         )
+    }
+
+    func navigationRoute(for tap: PushNotificationTap) async throws -> SessionNavigationRoute {
+        guard let route = tap.route else { throw CancellationError() }
+        let candidates = profiles.profiles.filter { $0.machineId == route.machineID && $0.isEnabled }
+        guard let profile = candidates.first(where: { $0.id == profiles.selected?.id }) ?? candidates.first else {
+            throw GatewayFailure(
+                code: "not_found",
+                message: "The server for this notification is no longer paired.",
+                retryable: false,
+                details: nil
+            )
+        }
+        if !sceneAllowsCatalogRefresh { _ = becameActive() }
+        if profiles.selected?.id != profile.id || connectionState != .connected {
+            await switchGateway(profile)
+        }
+        guard profiles.selected?.id == profile.id, connectionState == .connected else {
+            throw GatewayFailure(
+                code: "disconnected",
+                message: "The server for this notification is offline.",
+                retryable: true,
+                details: nil
+            )
+        }
+        _ = await refreshSessions()
+        guard let session = sessionCatalog.sessions.first(where: { $0.id == route.sessionID }) else {
+            throw GatewayFailure(
+                code: "not_found",
+                message: "The chat from this notification is no longer available.",
+                retryable: false,
+                details: nil
+            )
+        }
+        return try await navigationRoute(for: session.withGatewaySource(id: profile.id, label: profile.label))
     }
 
     func performOnOwningGateway<Value>(

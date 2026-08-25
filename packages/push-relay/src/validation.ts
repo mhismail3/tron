@@ -1,5 +1,6 @@
 import {
   MAX_MESSAGE_BYTES,
+  MAX_TITLE_BYTES,
   ROUTES,
   type InstallationRegistration,
   type NotificationRequest,
@@ -8,6 +9,7 @@ import {
 import { utf8 } from "./crypto";
 
 const OPAQUE_ID = /^[A-Za-z0-9_-]{16,128}$/;
+const SESSION_ROUTE_ID = /^[A-Za-z0-9_:-]{1,160}$/;
 const KEY_ID = /^[A-Za-z0-9_-]{32,128}$/;
 const HASH = /^[0-9a-f]{64}$/;
 const APNS_TOKEN = /^(?:[0-9a-f]{2}){1,256}$/;
@@ -45,15 +47,20 @@ export function validateNotification(value: unknown, now = Date.now()):
   | { ok: true; value: NotificationRequest }
   | { ok: false; error: string } {
   if (!isRecord(value)) return { ok: false, error: "invalid_request" };
-  const allowed = ["version", "kind", "requestId", "message", "expiresAt"];
+  const allowed = ["version", "kind", "requestId", "message", "title", "sessionId", "machineId", "expiresAt"];
   if (Object.keys(value).some((key) => !allowed.includes(key))) {
     return { ok: false, error: "unknown_field" };
   }
   const expiration = typeof value.expiresAt === "string" ? Date.parse(value.expiresAt) : Number.NaN;
+  const hasSessionId = value.sessionId !== undefined;
+  const hasMachineId = value.machineId !== undefined;
   if (
     value.version !== 1 || value.kind !== "agent_alert" ||
     !isOpaqueId(value.requestId) ||
     typeof value.message !== "string" || value.message.length < 1 || utf8(value.message).byteLength > MAX_MESSAGE_BYTES ||
+    (value.title !== undefined && (typeof value.title !== "string" || value.title.length < 1 || utf8(value.title).byteLength > MAX_TITLE_BYTES)) ||
+    hasSessionId !== hasMachineId ||
+    (hasSessionId && (!isSessionRouteId(value.sessionId) || !isMachineRouteId(value.machineId))) ||
     !Number.isFinite(expiration) || expiration < now - 60_000 || expiration > now + 24 * 60 * 60 * 1000
   ) {
     return { ok: false, error: "invalid_request" };
@@ -63,6 +70,15 @@ export function validateNotification(value: unknown, now = Date.now()):
 
 export function isOpaqueId(value: unknown): value is string {
   return typeof value === "string" && OPAQUE_ID.test(value);
+}
+
+function isSessionRouteId(value: unknown): value is string {
+  return typeof value === "string" && SESSION_ROUTE_ID.test(value);
+}
+
+function isMachineRouteId(value: unknown): value is string {
+  return typeof value === "string" && utf8(value).byteLength > 0 && utf8(value).byteLength <= 256
+    && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
 export function isPushRoute(value: unknown): value is PushRoute {

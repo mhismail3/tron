@@ -89,9 +89,9 @@ struct TronMobileApp: App {
         appDelegate.onRegistrationFailure = {
             pushNotifications.receiveRegistrationFailure()
         }
-        // The initial alert contract contains no navigation data. A future
-        // deep-link route must pass PushNotificationTap admission first.
-        appDelegate.onNotificationTap = { _ in }
+        appDelegate.installNotificationTapHandler { tap in
+            model.requestPushNavigation(tap)
+        }
     }
 
     @MainActor

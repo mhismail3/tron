@@ -38,10 +38,10 @@ describe("NotificationGrantStore and NotificationService", () => {
   it("persists only the bounded grant capability, admits durably, redacts previews, and deduplicates tool calls", async () => {
     const { root, store, service, relay } = await fixture();
     await service.upsertGrant({ ...grant, notifyWhenAskPresented: true });
-    await expect(service.enqueue({ sessionId: "session-one", toolCallId: "tool-one", kind: "explicit", message: "sensitive text" })).resolves.toBe("queued");
+    await expect(service.enqueue({ sessionId: "session-one", sourceId: "tool-one", kind: "explicit", message: "sensitive text" })).resolves.toBe("queued");
     await vi.waitFor(() => expect(relay.sent).toHaveLength(1));
     expect(relay.sent[0].message).toBe("Tron has an update. Open Tron to view it.");
-    await expect(service.enqueue({ sessionId: "session-one", toolCallId: "tool-one", kind: "explicit", message: "changed" })).resolves.toBe("suppressed");
+    await expect(service.enqueue({ sessionId: "session-one", sourceId: "tool-one", kind: "explicit", message: "changed" })).resolves.toBe("suppressed");
     const persisted = await readFile(join(root, "gateway", "notifications.json"), "utf8");
     expect(persisted).not.toContain("sensitive text");
     expect(persisted).not.toContain("apnsToken");
@@ -51,17 +51,45 @@ describe("NotificationGrantStore and NotificationService", () => {
   it("uses agent text only for a grant whose user enabled previews", async () => {
     const { service, relay } = await fixture();
     await service.upsertGrant({ ...grant, previewsEnabled: true });
-    await service.enqueue({ sessionId: "session-one", toolCallId: "tool-two", kind: "explicit", message: "Build finished" });
+    await service.enqueue({ sessionId: "session-one", sourceId: "tool-two", kind: "explicit", message: "Build finished" });
     await vi.waitFor(() => expect(relay.sent).toHaveLength(1));
     expect(relay.sent[0].message).toBe("Build finished");
+  });
+
+  it("durably carries the session title and exact chat route for a settled agent", async () => {
+    const { service, relay } = await fixture();
+    await service.upsertGrant(grant);
+    await service.enqueue({
+      sessionId: "session-finished",
+      sourceId: "assistant-entry",
+      kind: "agent_finished",
+      message: "The agent finished responding.",
+      title: "Release audit",
+      route: { sessionId: "session-finished", machineId: "machine-abcdefgh" },
+    });
+    await vi.waitFor(() => expect(relay.sent).toHaveLength(1));
+    expect(relay.sent[0]).toMatchObject({
+      title: "Release audit",
+      sessionId: "session-finished",
+      machineId: "machine-abcdefgh",
+      message: "The agent finished responding.",
+    });
+    await expect(service.enqueue({
+      sessionId: "session-finished",
+      sourceId: "assistant-entry",
+      kind: "agent_finished",
+      message: "The agent finished responding.",
+      title: "Changed title",
+      route: { sessionId: "session-finished", machineId: "machine-abcdefgh" },
+    })).resolves.toBe("suppressed");
   });
 
   it("disables invalid APNs grants and retains no future audience", async () => {
     const { service, relay } = await fixture(["invalid_token"]);
     await service.upsertGrant(grant);
-    await service.enqueue({ sessionId: "session-one", toolCallId: "tool-three", kind: "explicit", message: "hello" });
+    await service.enqueue({ sessionId: "session-one", sourceId: "tool-three", kind: "explicit", message: "hello" });
     await vi.waitFor(async () => expect((await service.status(grant.deviceId)).deviceRegistered).toBe(false));
-    await expect(service.enqueue({ sessionId: "session-one", toolCallId: "tool-four", kind: "explicit", message: "hello" })).resolves.toBe("unavailable");
+    await expect(service.enqueue({ sessionId: "session-one", sourceId: "tool-four", kind: "explicit", message: "hello" })).resolves.toBe("unavailable");
     expect(relay.sent).toHaveLength(1);
   });
 
@@ -161,16 +189,16 @@ describe("NotificationGrantStore and NotificationService", () => {
     const { service } = await fixture();
     await service.upsertGrant(grant);
     for (let index = 0; index < 12; index += 1) {
-      await expect(service.enqueue({ sessionId: "session-quota", toolCallId: `tool-${index}`, kind: "explicit", message: "hello" })).resolves.toBe("queued");
+      await expect(service.enqueue({ sessionId: "session-quota", sourceId: `tool-${index}`, kind: "explicit", message: "hello" })).resolves.toBe("queued");
     }
-    await expect(service.enqueue({ sessionId: "session-quota", toolCallId: "tool-over-limit", kind: "explicit", message: "hello" })).resolves.toBe("rate_limited");
+    await expect(service.enqueue({ sessionId: "session-quota", sourceId: "tool-over-limit", kind: "explicit", message: "hello" })).resolves.toBe("rate_limited");
   });
 
   it("recovers a retryable pending intent with the same request identity after restart", async () => {
     let clock = Date.parse("2026-01-01T00:00:00.000Z");
     const { store, service, relay } = await fixture(["retryable"], () => clock);
     await service.upsertGrant(grant);
-    await service.enqueue({ sessionId: "session-restart", toolCallId: "tool-restart", kind: "explicit", message: "hello" });
+    await service.enqueue({ sessionId: "session-restart", sourceId: "tool-restart", kind: "explicit", message: "hello" });
     await vi.waitFor(() => expect(relay.sent).toHaveLength(1));
     const requestId = relay.sent[0].requestId;
     clock += 6_000;

@@ -7,7 +7,7 @@ import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
 
-export type NotificationKind = "explicit" | "ask";
+export type NotificationKind = "explicit" | "ask" | "agent_finished";
 export type DeliveryOutcome = "pending" | "accepted_by_apns" | "retryable" | "invalid_token" | "permanent_failure" | "ambiguous" | "expired";
 
 export interface PushGrant {
@@ -26,6 +26,8 @@ export interface PendingTarget {
   grantId: string;
   requestId: string;
   message: string;
+  title?: string;
+  route?: { sessionId: string; machineId: string };
   attempts: number;
   nextAttemptAt: string;
   outcome: DeliveryOutcome;
@@ -110,8 +112,14 @@ function isGrant(value: unknown): value is PushGrant {
 function isTarget(value: unknown): value is PendingTarget {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;
-  return exact(v, ["grantId", "requestId", "message", "attempts", "nextAttemptAt", "outcome"])
+  const route = v.route as Record<string, unknown> | undefined;
+  return exact(v, ["grantId", "requestId", "message", "attempts", "nextAttemptAt", "outcome"], ["title", "route"])
     && id(v.grantId) && id(v.requestId) && typeof v.message === "string" && Buffer.byteLength(v.message) <= 512
+    && (v.title === undefined || (typeof v.title === "string" && Buffer.byteLength(v.title) > 0 && Buffer.byteLength(v.title) <= 256))
+    && (route === undefined || (typeof route === "object" && route !== null && !Array.isArray(route)
+      && exact(route, ["sessionId", "machineId"]) && id(route.sessionId)
+      && typeof route.machineId === "string" && Buffer.byteLength(route.machineId) > 0
+      && Buffer.byteLength(route.machineId) <= 256 && !/[\u0000-\u001f\u007f]/u.test(route.machineId)))
     && Number.isSafeInteger(v.attempts) && (v.attempts as number) >= 0 && (v.attempts as number) <= 8
     && timestamp(v.nextAttemptAt) && ["pending", "accepted_by_apns", "retryable", "invalid_token", "permanent_failure", "ambiguous", "expired"].includes(v.outcome as string);
 }
@@ -120,7 +128,7 @@ function isIntent(value: unknown): value is PendingIntent {
   const v = value as Record<string, unknown>;
   return exact(v, ["id", "dedupeKey", "sessionKey", "kind", "createdAt", "expiresAt", "targets"])
     && id(v.id) && typeof v.dedupeKey === "string" && HASH.test(v.dedupeKey) && typeof v.sessionKey === "string" && HASH.test(v.sessionKey)
-    && (v.kind === "explicit" || v.kind === "ask") && timestamp(v.createdAt) && timestamp(v.expiresAt)
+    && (v.kind === "explicit" || v.kind === "ask" || v.kind === "agent_finished") && timestamp(v.createdAt) && timestamp(v.expiresAt)
     && Array.isArray(v.targets) && v.targets.length >= 1 && v.targets.length <= MAXIMUM_PUSH_GRANTS && v.targets.every(isTarget)
     && new Set(v.targets.map((target) => target.grantId)).size === v.targets.length;
 }

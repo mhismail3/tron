@@ -94,6 +94,7 @@ const sessions = new RuntimeRegistry({
   sessionListChanged: () => transport?.notifySessionListChanged(),
   sessionRekeyed: (previousId, nextId) => transport?.rekeySession(previousId, nextId),
   sessionClosed: (sessionId) => transport?.revokeSessionTerminals(sessionId),
+  machineId: config.machineId,
   notifications,
   stageTiming: (stage, durationMs, outcome) => {
     if (durationMs < 250 && outcome === "success") return;

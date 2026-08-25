@@ -101,9 +101,14 @@ The exact bounded body is:
   "kind": "agent_alert",
   "requestId": "stable opaque ID",
   "message": "at most 512 UTF-8 bytes",
+  "title": "optional product title, at most 256 UTF-8 bytes",
+  "sessionId": "optional exact session route",
+  "machineId": "required with sessionId",
   "expiresAt": "RFC 3339 within 24 hours"
 }
 ```
+
+`title`, `sessionId`, and `machineId` are omitted for generic alerts. The relay accepts the two route fields only as a pair and projects them as fixed top-level APNs custom data; clients admit them as opaque identifiers and resolve the machine against an already-paired Gateway profile. The model cannot provide these fields.
 
 Grant revocation signs an empty body with method `DELETE` and exact path
 `/v3/grants/{grantId}`. It is idempotent. Disabled grants are never re-enabled

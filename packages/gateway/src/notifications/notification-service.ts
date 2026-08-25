@@ -22,6 +22,7 @@ const MAXIMUM_TARGET_DAILY_INTENTS = 40;
 const GENERIC_MESSAGE = "Tron has an update. Open Tron to view it.";
 const RETRY_DELAYS_MS = [5_000, 20_000, 60_000, 180_000] as const;
 const ACTIVE_OUTCOMES = new Set(["pending", "retryable"]);
+const SESSION_ROUTE_ID = /^[A-Za-z0-9_:-]{1,160}$/u;
 
 export type NotificationAdmissionStatus = "queued" | "suppressed" | "rate_limited" | "unavailable";
 export interface NotificationStatus {
@@ -35,12 +36,20 @@ export interface NotificationStatus {
 
 function iso(ms: number): string { return new Date(ms).toISOString(); }
 function isID(value: string): boolean { return /^[A-Za-z0-9_-]{8,160}$/u.test(value); }
-function boundedMessage(value: string): string {
+function boundedText(value: string, maximumBytes: number, field: "message" | "title"): string {
   const normalized = value.trim();
-  if (!normalized || Buffer.byteLength(normalized) > 512 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(normalized)) {
-    throw new GatewayError("invalid_request", "Notification message must contain 1 through 512 UTF-8 bytes of text");
+  if (!normalized || Buffer.byteLength(normalized) > maximumBytes || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(normalized)) {
+    throw new GatewayError("invalid_request", `Notification ${field} must contain 1 through ${maximumBytes} UTF-8 bytes of text`);
   }
   return normalized;
+}
+function boundedRoute(route: { sessionId: string; machineId: string } | undefined, sessionId: string) {
+  if (route === undefined) return undefined;
+  if (route.sessionId !== sessionId || !SESSION_ROUTE_ID.test(route.sessionId) || !route.machineId
+    || Buffer.byteLength(route.machineId) > 256 || /[\u0000-\u001f\u007f]/u.test(route.machineId)) {
+    throw new GatewayError("invalid_request", "Notification route is malformed");
+  }
+  return route;
 }
 function prune(document: NotificationDocument, now: number): NotificationDocument {
   const expired = new Set(document.pending.filter((intent) => Date.parse(intent.expiresAt) <= now).map((intent) => intent.dedupeKey));
@@ -184,11 +193,20 @@ export class NotificationService {
     };
   }
 
-  async enqueue(input: { sessionId: string; toolCallId: string; kind: NotificationKind; message: string }): Promise<NotificationAdmissionStatus> {
-    const message = boundedMessage(input.message);
-    if (!input.sessionId || !input.toolCallId) throw new GatewayError("invalid_request", "Notification identity is missing");
+  async enqueue(input: {
+    sessionId: string;
+    sourceId: string;
+    kind: NotificationKind;
+    message: string;
+    title?: string;
+    route?: { sessionId: string; machineId: string };
+  }): Promise<NotificationAdmissionStatus> {
+    const message = boundedText(input.message, 512, "message");
+    const title = input.title === undefined ? undefined : boundedText(input.title, 256, "title");
+    const route = boundedRoute(input.route, input.sessionId);
+    if (!input.sessionId || !input.sourceId) throw new GatewayError("invalid_request", "Notification identity is missing");
     const now = this.now();
-    const dedupeKey = notificationHash(`${input.kind}\0${input.sessionId}\0${input.toolCallId}`);
+    const dedupeKey = notificationHash(`${input.kind}\0${input.sessionId}\0${input.sourceId}`);
     const sessionKey = notificationHash(`session\0${input.sessionId}`);
     let result: NotificationAdmissionStatus = "queued";
     await this.store.update((document) => {
@@ -219,7 +237,9 @@ export class NotificationService {
         targets: grants.map((grant) => ({
           grantId: grant.grantId,
           requestId: notificationHash(`${intentId}\0${grant.grantId}`),
-          message: grant.previewsEnabled ? message : GENERIC_MESSAGE,
+          message: input.kind === "agent_finished" || grant.previewsEnabled ? message : GENERIC_MESSAGE,
+          ...(title ? { title } : {}),
+          ...(route ? { route } : {}),
           attempts: 0, nextAttemptAt: iso(now), outcome: "pending",
         })),
       });
@@ -233,7 +253,7 @@ export class NotificationService {
   async askPresented(sessionId: string, toolCallId: string): Promise<void> {
     const document = await this.store.snapshot();
     if (!document.policy.notifyWhenAskPresented) return;
-    await this.enqueue({ sessionId, toolCallId, kind: "ask", message: "Tron needs your input. Open Tron to answer a question." });
+    await this.enqueue({ sessionId, sourceId: toolCallId, kind: "ask", message: "Tron needs your input. Open Tron to answer a question." });
   }
 
   async drain(): Promise<void> {
@@ -255,7 +275,10 @@ export class NotificationService {
           try {
             outcome = await this.relay.send({
               grantId: item.grant.grantId, secret: item.grant.secret, requestId: item.target.requestId,
-              message: item.target.message, expiresAt: item.intent.expiresAt,
+              message: item.target.message,
+              ...(item.target.title ? { title: item.target.title } : {}),
+              ...(item.target.route ? item.target.route : {}),
+              expiresAt: item.intent.expiresAt,
             });
           } catch { outcome = "retryable"; }
           await this.recordOutcome(item.intent.id, item.target.grantId, outcome === "rate_limited" ? "retryable" : outcome);

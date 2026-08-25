@@ -76,11 +76,23 @@ export class PushRelayClient {
     secret: string;
     requestId: string;
     message: string;
+    title?: string;
+    sessionId?: string;
+    machineId?: string;
     expiresAt: string;
   }): Promise<RelayNotificationOutcome> {
     if (!this.origin) return "retryable";
     const path = "/v3/notifications";
-    const body = JSON.stringify({ version: 1, kind: "agent_alert", requestId: input.requestId, message: input.message, expiresAt: input.expiresAt });
+    const body = JSON.stringify({
+      version: 1,
+      kind: "agent_alert",
+      requestId: input.requestId,
+      message: input.message,
+      ...(input.title ? { title: input.title } : {}),
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.machineId ? { machineId: input.machineId } : {}),
+      expiresAt: input.expiresAt,
+    });
     if (Buffer.byteLength(body) > REQUEST_MAX_BYTES) throw new GatewayError("invalid_request", "Notification request exceeds its bounded payload");
     const response = await this.request("POST", path, input.grantId, input.secret, input.requestId, body);
     const text = await boundedBody(response);

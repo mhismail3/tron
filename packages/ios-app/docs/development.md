@@ -705,6 +705,8 @@ added backdrop.
 
 ## Push notification release configuration
 
+Pi's `agent_settled` lifecycle event owns automatic completion alerts. The Gateway sends the bounded session title, fixed “finished responding” body, and exact machine/session route. A notification tap first dismisses any mounted chat back to the dashboard, waits for that pop transition, resolves or switches to the paired owning Gateway, refreshes its authoritative session catalog, and then pushes the requested chat with the normal smooth navigation animation. Reduce Motion removes the spatial transition, and cold-launch taps wait in memory until the SwiftUI navigation owner is installed.
+
 The checked-in build contains no push credential and no user-configurable relay.
 Official Beta and production builds read the public `TRON_PUSH_SERVICE_ORIGIN`
 from the repository-canonical maintainer input `config/PushService.xcconfig`;
