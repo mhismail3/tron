@@ -7,6 +7,7 @@ import { getExamplesPath, ModelRuntime, SessionManager } from "@earendil-works/p
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
+import type { NotificationService } from "../notifications/notification-service.js";
 import type { ExtensionRunActivity, SessionSummaryUpdate } from "../protocol/types.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
@@ -70,6 +71,45 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  });
+
+  it("announces a final successful Pi settlement through the inline notification hook", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-agent-finished-notification-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const faux = fauxProvider({ provider: "tron-agent-finished-notification", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("notification ready")]);
+    runtime.registerNativeProvider(faux.provider);
+    const enqueue = vi.fn(async () => "queued" as const);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+      machineId: "machine-notification-test",
+      notifications: { enqueue, askPresented: vi.fn() } as unknown as NotificationService,
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("finish and notify");
+    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => enqueue.mock.calls.length > 0);
+    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: slot.id,
+      kind: "agent_finished",
+      title: "finish and notify",
+      message: "The agent finished responding.",
+      route: { sessionId: slot.id, machineId: "machine-notification-test" },
+    }));
   });
 
   it("recovers a canonical successful completion missed before restart", async () => {

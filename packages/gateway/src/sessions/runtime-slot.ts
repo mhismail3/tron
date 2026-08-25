@@ -991,8 +991,18 @@ export class RuntimeSlot {
   }
 
   private notificationTitle(): string {
-    const summary = this.summary();
-    const title = summary.name?.trim() || summary.firstMessage.trim() || "New session";
+    // agent_settled extension handlers run before RuntimeSlot's deferred summary
+    // projection necessarily catches up. Read the canonical active branch here
+    // so a new session's first completion cannot be titled "New session".
+    const rawName = this.sessionManager.getSessionName()?.trim();
+    const firstUser = this.sessionManager.getBranch().find((entry) => entry.type === "message"
+      && entry.message.role === "user");
+    const firstMessage = firstUser?.type === "message" && firstUser.message.role === "user"
+      ? (typeof firstUser.message.content === "string"
+        ? firstUser.message.content
+        : firstUser.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join(""))
+      : "";
+    const title = rawName || firstMessage.trim() || "New session";
     return boundedSummaryText([...title].slice(0, 80).join(""), 256);
   }
 
