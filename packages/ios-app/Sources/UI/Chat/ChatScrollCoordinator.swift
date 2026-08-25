@@ -180,6 +180,7 @@ final class ChatScrollCoordinator {
     @ObservationIgnored private var openingTailFrameTask: Task<Void, Never>?
     @ObservationIgnored private var openingTailTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private var targetReleaseTask: Task<Void, Never>?
+    @ObservationIgnored private var directPositionOwnership = false
 
     #if HOSTED_TEST
     private struct HostedCommandWaiter {
@@ -244,6 +245,7 @@ final class ChatScrollCoordinator {
         isAtBottom = true
         hasUnreadContent = false
         isUserInteracting = false
+        directPositionOwnership = false
         geometry = .zero
         geometryRevision = 0
         advanceLayoutEpoch()
@@ -305,12 +307,9 @@ final class ChatScrollCoordinator {
     }
 
     func scrollPositionChanged(isPositionedByUser: Bool) {
+        directPositionOwnership = isPositionedByUser
         guard isPositionedByUser else { return }
-        retainedViewportReconciliationPending = false
-        retireAppliedTargetWithoutCallback()
-        viewportMode.reduce(.userTookOver)
-        isAtBottom = false
-        abandonAutomaticTransactionsForDirectInteraction()
+        beginDirectInteraction()
     }
 
     func scrollPhaseChanged(
@@ -322,17 +321,14 @@ final class ChatScrollCoordinator {
         let wasDirect = Self.isDirectUserPhase(oldPhase) || isUserInteracting
         isUserInteracting = Self.isDirectUserPhase(newPhase)
         if isUserInteracting {
-            retainedViewportReconciliationPending = false
-            retireAppliedTargetWithoutCallback()
-            viewportMode.reduce(.userTookOver)
-            isAtBottom = false
-            abandonAutomaticTransactionsForDirectInteraction()
+            beginDirectInteraction()
             return
         }
         guard newPhase == .idle else { return }
         if wasDirect, geometry.isAtCatchUpBoundary {
             pinAtTail()
         }
+        directPositionOwnership = false
     }
 
     func installedLayoutEpochChanged() {
@@ -372,6 +368,14 @@ final class ChatScrollCoordinator {
         evaluatePrependIfReady()
         evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
         guard !openingTailSettlementPending else { return }
+        if (isUserInteracting || directPositionOwnership),
+           viewportMode == .pinned,
+           current.isValid,
+           !current.isAtCatchUpBoundary,
+           !current.isPastBottomEdge {
+            viewportMode.reduce(.userTookOver)
+            isAtBottom = false
+        }
         let nextIsAtBottom = viewportMode == .pinned
             && (current.isAtBottom || current.isAtCatchUpBoundary)
         if isAtBottom != nextIsAtBottom { isAtBottom = nextIsAtBottom }
@@ -979,6 +983,7 @@ final class ChatScrollCoordinator {
         viewportMode.reduce(.userReturnedToTail)
         isAtBottom = true
         hasUnreadContent = false
+        directPositionOwnership = false
         if changed { tailSettlementGeneration &+= 1 }
     }
 
@@ -1007,6 +1012,19 @@ final class ChatScrollCoordinator {
             hasUnreadContent = catchUpUnreadBeforeJump || hasUnreadContent
         }
         catchUpUnreadBeforeJump = false
+    }
+
+    private func beginDirectInteraction() {
+        retainedViewportReconciliationPending = false
+        retireAppliedTargetWithoutCallback()
+        let isBottomRubberBand = viewportMode == .pinned
+            && geometry.isValid
+            && (geometry.isAtCatchUpBoundary || geometry.isPastBottomEdge)
+        if !isBottomRubberBand {
+            viewportMode.reduce(.userTookOver)
+            isAtBottom = false
+        }
+        abandonAutomaticTransactionsForDirectInteraction()
     }
 
     private func abandonAutomaticTransactionsForDirectInteraction() {

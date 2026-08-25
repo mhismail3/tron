@@ -573,6 +573,66 @@ struct SessionPresentationStoreTests {
         #expect(store.authoritativeSnapshot(for: snapshot.sessionId) == nil)
     }
 
+    @Test("canonical compaction delta replaces live state without reopening chat")
+    func compactionDeltaAdvancesCanonicalChat() async throws {
+        var snapshot = try SessionScenarioBuilder(seed: 8_505).openingTail(targetEncodedBytes: 4_096)
+        snapshot.phase = .compacting
+        snapshot.transcriptStart = 0
+        snapshot.transcriptTotal = snapshot.transcript.count
+        snapshot.leafEntryId = snapshot.transcript.last?.id
+        snapshot.operation = SessionOperationState(
+            id: nil,
+            kind: .compaction,
+            startedAt: "2026-08-24T20:49:00.000Z",
+            reason: "threshold"
+        )
+        let parentID = snapshot.leafEntryId
+        let item = TranscriptItem.summary(SummaryTranscriptItem(
+            id: "compaction-live-1",
+            parentId: parentID,
+            timestamp: "2026-08-24T20:50:00.000Z",
+            kind: .compaction,
+            summary: "Preserved exact decisions",
+            tokensBefore: 12_345,
+            details: nil,
+            usage: nil,
+            fromHook: nil
+        ))
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        store.installHostedSubscription(snapshot: snapshot, token: "token")
+        let canonicalBefore = store.chatCanonicalGeneration
+        let timelineBefore = store.chatTimelineGeneration
+        let oldTotal = try #require(snapshot.transcriptTotal)
+
+        await store.admit(GatewayEvent(
+            type: "event",
+            topic: "session.compaction",
+            sessionId: snapshot.sessionId,
+            payload: .object([
+                "runtimeGeneration": .string(snapshot.runtimeGeneration),
+                "eventSequence": .number(Double(snapshot.eventSequence + 1)),
+                "revision": .number(Double(snapshot.revision + 1)),
+                "data": .object(["item": try JSONValue.encode(item)]),
+            ])
+        ))
+
+        let installed = try #require(store.authoritativeSnapshot(for: snapshot.sessionId))
+        #expect(installed.eventSequence == snapshot.eventSequence + 1)
+        #expect(installed.transcriptTotal == oldTotal + 1)
+        #expect(installed.transcript.last == item)
+        #expect(installed.leafEntryId == item.id)
+        #expect(installed.streaming == nil)
+        #expect(store.chatCanonicalGeneration == canonicalBefore + 1)
+        #expect(store.chatTimelineGeneration == timelineBefore + 1)
+        #expect(ChatNotificationPresentation.runtime(in: installed).allSatisfy {
+            $0.title != "Compacting context"
+        })
+        #expect(ChatNotificationPresentation.canonical(item, globalOrdinal: oldTotal)?.title == "Context compacted")
+    }
+
     @Test("overflow rebaseline installs only for the mounted subscription owner")
     func overflowRebaselineInstallsFreshAuthority() async throws {
         let snapshot = try SessionScenarioBuilder(seed: 84).openingTail(targetEncodedBytes: 4_096)

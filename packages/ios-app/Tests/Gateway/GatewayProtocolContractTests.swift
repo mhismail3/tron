@@ -157,7 +157,7 @@ struct GatewayProtocolContractTests {
     func preparedTopicParityMatrix() throws {
         let topics = [
             "session.summary", "session.snapshot", "session.rebaseline", "session.progress",
-            "session.toolProgress", "session.extensionActivity", "session.extensionPresentation",
+            "session.compaction", "session.toolProgress", "session.extensionActivity", "session.extensionPresentation",
             "terminal.output", "terminal.exit"
         ]
         for topic in topics {
@@ -177,6 +177,61 @@ struct GatewayProtocolContractTests {
             }
             #expect(decoded.preparation == synthetic.preparation, "adapter parity for \\(topic)")
         }
+    }
+
+    @Test("compaction completion prepares only an exact canonical compaction item")
+    func compactionCompletionPreparation() throws {
+        let item: JSONValue = .object([
+            "id": .string("compaction-1"),
+            "parentId": .string("previous-leaf"),
+            "timestamp": .string("2026-08-24T20:50:00.000Z"),
+            "kind": .string("compaction"),
+            "summary": .string("Preserved exact decisions"),
+            "tokensBefore": .number(12_345),
+        ])
+        func event(item: JSONValue) -> GatewayEvent {
+            GatewayEvent(
+                type: "event",
+                topic: "session.compaction",
+                sessionId: "session",
+                payload: .object([
+                    "runtimeGeneration": .string("runtime"),
+                    "eventSequence": .number(8),
+                    "revision": .number(9),
+                    "data": .object(["item": item]),
+                ])
+            )
+        }
+
+        let valid = event(item: item)
+        guard case .sessionEvent(let prepared) = valid.preparation,
+              case .compaction(let decoded) = prepared.data else {
+            Issue.record("canonical compaction did not prepare as a typed delta")
+            return
+        }
+        #expect(decoded.kind == .compaction)
+        #expect(decoded.id == "compaction-1")
+        #expect(valid.isConsumableSessionReplay)
+
+        var wrongKind = try item.decode(SummaryTranscriptItem.self)
+        wrongKind = SummaryTranscriptItem(
+            id: wrongKind.id,
+            parentId: wrongKind.parentId,
+            timestamp: wrongKind.timestamp,
+            kind: .branchSummary,
+            summary: wrongKind.summary,
+            tokensBefore: wrongKind.tokensBefore,
+            details: wrongKind.details,
+            usage: wrongKind.usage,
+            fromHook: wrongKind.fromHook
+        )
+        let invalid = event(item: try JSONValue.encode(wrongKind))
+        guard case .sessionEvent(let rejected) = invalid.preparation else {
+            Issue.record("malformed compaction lost its event envelope")
+            return
+        }
+        #expect(rejected.data == .invalid)
+        #expect(!invalid.isConsumableSessionReplay)
     }
 
     @Test("input lease decoding preserves omitted, null, value, and malformed states")

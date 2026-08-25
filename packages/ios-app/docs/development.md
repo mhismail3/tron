@@ -443,7 +443,9 @@ history back to the retained authoritative tail. Opening ownership is one mutual
 prove that only explicit takeover, return, catch-up, opening, submission, prepend, and presentation
 intents can change durable viewport authority. `ChatScrollCoordinatorTests` assert observable outcomes:
 the native bottom size-change anchor absorbs pinned continuous stream/composer/keyboard and discrete row growth with zero app offset writes, while detached growth remains target-free;
-direct return clears catch-up and unread; catch-up emits one explicit tail intent and restores unread if
+direct return clears catch-up and unread; bottom rubber-band callbacks remain pinned and keep catch-up
+hidden in both geometry/ownership orders, while the same gesture detaches as soon as valid geometry moves
+beyond the tail boundary; catch-up emits one explicit tail intent and restores unread if
 interrupted; retained resets preserve anchoring; opening targets only the exact physical tail; semantic
 frames remain bounded; and anchor correction preserves the captured offset. Exact layout-epoch restore
 and prepend transactions still require newer semantic and geometry evidence, remain bounded to two

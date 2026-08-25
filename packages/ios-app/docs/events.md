@@ -70,7 +70,11 @@ admits and reduces mounted-session topics:
   single pending maintenance slot. iOS renders it as explicit runtime feedback and never
   inserts a transcript entry or retries the mutation. The row is replaced by existing
   compacting feedback when the Gateway picks up the work, then by the canonical JSONL
-  compaction entry. `pendingPrompt` is the companion transient admission for a prompt
+  compaction entry. `session.compaction` carries that exact projected canonical entry as a
+  typed, cursor-bearing delta. iOS appends it only to a complete contiguous tail whose current
+  leaf matches the entry parent, advances canonical projection immediately, and otherwise
+  requests rebaseline; the following snapshot still owns full phase/operation settlement.
+  `pendingPrompt` is the companion transient admission for a prompt
   whose canonical user entry is still being prepared, including automatic compaction
   during prompt preflight. iOS renders that exact prompt after runtime feedback and
   reconstructs it from every authoritative snapshot until the canonical user entry
@@ -203,8 +207,10 @@ opening, catch-up, semantic restore, and prepend remain command owners; after th
 keeps `ScrollPosition` target-free and uses the native bottom size-change anchor with no recurring command stream.
 Short-content alignment remains top-owned. Editor-only composer height changes install atomically;
 attachment, selected-skill, and resource-result identity changes use one value-scoped 240 ms smooth
-host-height transition, disabled under Reduce Motion. Direct user ownership and anchored mode select
-top retention and remain target-free.
+host-height transition, disabled under Reduce Motion. Direct user movement away from the tail and
+anchored mode select top retention and remain target-free. A pinned bottom rubber band remains pinned:
+past-bottom geometry is directional interaction evidence, not a detached-reader request, and catch-up
+appears only after valid geometry moves beyond the tail boundary.
 Session subscription ownership is token-scoped end to end. The open response remains
 provisional until sync acknowledgement and exact route-intent revalidation; both sync and subscription
 credentials must be nonempty, printable UTF-8 tokens no larger than 200 bytes. Baseline plus its

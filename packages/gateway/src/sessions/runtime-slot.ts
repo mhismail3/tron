@@ -44,6 +44,7 @@ import {
   admitCommandCatalog,
   boundStreamingProgressItem,
   fitSessionSnapshot,
+  projectEntry,
   projectJson,
   projectMessage,
   mergeLiveToolOutput,
@@ -1147,11 +1148,33 @@ export class RuntimeSlot {
         this.operation = { kind: "compaction", startedAt: new Date().toISOString(), reason: event.reason };
         this.publishSnapshot();
         break;
-      case "compaction_end":
+      case "compaction_end": {
         this.retry = undefined;
-        this.emit("session.compaction", safeJson(event));
+        if (!event.aborted && event.result) {
+          // session_compact hooks run after Pi appends the compaction and may
+          // append another canonical entry before compaction_end. Resolve the
+          // newest exact match on the active branch instead of assuming that
+          // the compaction remains the leaf. A successful overflow compaction
+          // may also set willRetry while still owning this canonical entry.
+          const entry = this.sessionManager.getBranch().reverse().find((candidate) =>
+            candidate.type === "compaction"
+              && candidate.summary === event.result!.summary
+              && candidate.firstKeptEntryId === event.result!.firstKeptEntryId
+              && candidate.tokensBefore === event.result!.tokensBefore
+          );
+          if (entry?.type === "compaction") {
+            const item = projectEntry(entry, this.dependencies.blobs);
+            if (item?.kind === "compaction") {
+              // The cursor-bearing completion delta carries the exact canonical
+              // entry. Mobile clients can replace the in-progress row now;
+              // the following snapshot remains the full-frame settlement owner.
+              this.emit("session.compaction", safeJson({ item }));
+            }
+          }
+        }
         this.scheduleSnapshot();
         break;
+      }
       case "auto_retry_start":
         this.phase = "retrying";
         this.retry = {

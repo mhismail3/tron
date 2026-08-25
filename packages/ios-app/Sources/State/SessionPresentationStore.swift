@@ -1426,13 +1426,15 @@ final class SessionPresentationStore {
             // and route-keyed effects become observable only after acknowledgement
             // and contiguity establish the exact installed target.
             var replayChangedChatTimeline = false
+            var replayChangedCanonicalChat = false
             var replayRequiresResynchronization = false
             for event in replay {
                 if reduce(
                     event,
                     snapshot: &installed,
                     effects: &replayEffects,
-                    chatTimelineChanged: &replayChangedChatTimeline
+                    chatTimelineChanged: &replayChangedChatTimeline,
+                    chatCanonicalChanged: &replayChangedCanonicalChat
                 ) != nil { replayRequiresResynchronization = true }
             }
             let replayTailSequence = replay.last?.sessionCursor?.eventSequence ?? cursor.eventSequence
@@ -1823,14 +1825,16 @@ final class SessionPresentationStore {
         }
         var effects: [ReducerEffect] = []
         var chatTimelineChanged = false
+        var chatCanonicalChanged = false
         let resync = reduce(
             event,
             snapshot: &current,
             effects: &effects,
-            chatTimelineChanged: &chatTimelineChanged
+            chatTimelineChanged: &chatTimelineChanged,
+            chatCanonicalChanged: &chatCanonicalChanged
         )
         snapshot = current
-        if chatTimelineChanged { advanceChatProjection(canonical: false) }
+        if chatTimelineChanged { advanceChatProjection(canonical: chatCanonicalChanged) }
         publish(effects, target: mountedTarget)
         return resync
     }
@@ -1937,6 +1941,7 @@ final class SessionPresentationStore {
         snapshot: inout SessionSnapshot,
         effects: inout [ReducerEffect],
         chatTimelineChanged: inout Bool,
+        chatCanonicalChanged: inout Bool,
         updatesSecondaryRevisions: Bool = true
     ) -> String? {
         switch event.topic {
@@ -1975,6 +1980,43 @@ final class SessionPresentationStore {
                 chatTimelineChanged = true
             }
             advance(&snapshot, envelope)
+        case "session.compaction":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot),
+                  case .compaction(let item)? = event.preparedSessionEvent?.data,
+                  item.kind == .compaction,
+                  let start = snapshot.transcriptStart,
+                  let total = snapshot.transcriptTotal,
+                  start >= 0, total >= start,
+                  total - start == snapshot.transcript.count,
+                  case let (nextTotal, totalOverflow) = total.addingReportingOverflow(1),
+                  !totalOverflow,
+                  snapshot.leafEntryId == item.parentId,
+                  !visibleTranscriptItems(for: snapshot).contains(where: { $0.id == item.id }) else {
+                return resyncIfNeeded(event, snapshot: snapshot)
+            }
+            let previous = snapshot
+            let hadMountedPrefix = mountedWindow(for: previous) != nil
+            var next = previous
+            next.transcript.append(item)
+            next.transcriptTotal = nextTotal
+            next.leafEntryId = item.id
+            let overflow = max(0, next.transcript.count - SessionSnapshot.maximumTranscriptItems)
+            if overflow > 0 {
+                next.transcript.removeFirst(overflow)
+                next.transcriptStart = start + overflow
+            }
+            let reconciledPrefix = reconcilePrefix(
+                mountedTranscriptWindow,
+                from: previous,
+                into: next
+            )
+            guard !hadMountedPrefix || reconciledPrefix != nil else { return snapshot.sessionId }
+            next.streaming = nil
+            advance(&next, envelope)
+            snapshot = next
+            mountedTranscriptWindow = reconciledPrefix
+            chatTimelineChanged = true
+            chatCanonicalChanged = true
         case "session.toolProgress":
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
                   case .toolProgress(let tool)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }

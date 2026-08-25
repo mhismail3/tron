@@ -2838,6 +2838,71 @@ export default function (pi) {
     expect(slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
   });
 
+  it("broadcasts the exact canonical compaction entry before snapshot settlement", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-compaction-delta-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const broadcasts: Array<{ sessionId: string; topic: string; payload: unknown }> = [];
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(agentDir),
+      broadcast: (sessionId, topic, payload) => broadcasts.push({ sessionId, topic, payload }),
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const runtime = (slot as unknown as {
+      runtime: { session: { sessionManager: SessionManager } };
+      onEvent: (event: unknown) => void;
+    });
+    const firstKeptEntryId = runtime.runtime.session.sessionManager.appendMessage(
+      fauxAssistantMessage("canonical history")
+    );
+    const summary = "Preserved exact decisions";
+    const tokensBefore = 12_345;
+    const compactionId = runtime.runtime.session.sessionManager.appendCompaction(
+      summary,
+      firstKeptEntryId,
+      tokensBefore
+    );
+    runtime.runtime.session.sessionManager.appendLabelChange(
+      compactionId,
+      "hook appended after compaction"
+    );
+
+    runtime.onEvent({
+      type: "compaction_end",
+      reason: "manual",
+      result: { summary, firstKeptEntryId, tokensBefore },
+      aborted: false,
+      willRetry: true,
+    });
+
+    const delta = broadcasts.find((event) => event.topic === "session.compaction");
+    expect(delta).toMatchObject({
+      sessionId: slot.id,
+      payload: {
+        data: {
+          item: {
+            id: compactionId,
+            parentId: firstKeptEntryId,
+            kind: "compaction",
+            summary,
+            tokensBefore,
+          },
+        },
+      },
+    });
+    const payload = delta?.payload as { eventSequence?: number } | undefined;
+    expect(payload?.eventSequence).toBeGreaterThan(0);
+  });
+
   it("cleans up a failed direct manual compaction claim", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-direct-compaction-failure-"));
     const agentDir = join(root, "agent");

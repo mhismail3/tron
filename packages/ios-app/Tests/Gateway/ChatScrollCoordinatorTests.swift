@@ -77,6 +77,9 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.usesBottomSizeChangeAnchor)
 
         coordinator.scrollPositionChanged(isPositionedByUser: true)
+        #expect(coordinator.usesBottomSizeChangeAnchor)
+
+        coordinator.geometryChanged(previous: bottom, current: away)
         #expect(!coordinator.usesBottomSizeChangeAnchor)
     }
 
@@ -303,7 +306,7 @@ struct ChatScrollCoordinatorTests {
         #expect(detached.command == nil)
     }
 
-    @Test("phase-only overshoot and direct rubber-band both avoid app writes")
+    @Test("phase-only overshoot and direct bottom rubber-band remain pinned without app writes")
     func phaseOnlyOvershootRespectsOwnership() {
         let overshoot = ChatTranscriptGeometry(
             offsetY: 900, contentHeight: 900, containerHeight: 400
@@ -312,9 +315,62 @@ struct ChatScrollCoordinatorTests {
         automatic.scrollPhaseChanged(from: .animating, to: .idle, finalGeometry: overshoot)
         #expect(automatic.command == nil)
         let direct = ChatScrollCoordinator()
+        direct.geometryChanged(previous: .zero, current: bottom)
         direct.scrollPhaseChanged(from: .interacting, to: .decelerating, finalGeometry: overshoot)
-        #expect(direct.viewportMode == .anchored)
+        #expect(direct.viewportMode == .pinned)
+        #expect(!direct.shouldShowCatchUpButton)
         #expect(direct.command == nil)
+    }
+
+    @Test("bottom rubber-band callback ordering never exposes catch-up")
+    func bottomRubberBandCallbackOrdering() {
+        let overshoot = ChatTranscriptGeometry(
+            offsetY: 900, contentHeight: 900, containerHeight: 400
+        )
+        let ownershipFirst = ChatScrollCoordinator()
+        ownershipFirst.geometryChanged(previous: .zero, current: bottom)
+        ownershipFirst.scrollPositionChanged(isPositionedByUser: true)
+        ownershipFirst.geometryChanged(previous: bottom, current: overshoot)
+
+        let geometryFirst = ChatScrollCoordinator()
+        geometryFirst.geometryChanged(previous: .zero, current: bottom)
+        geometryFirst.geometryChanged(previous: bottom, current: overshoot)
+        geometryFirst.scrollPositionChanged(isPositionedByUser: true)
+
+        for coordinator in [ownershipFirst, geometryFirst] {
+            #expect(coordinator.viewportMode == .pinned)
+            #expect(!coordinator.shouldShowCatchUpButton)
+            #expect(coordinator.command == nil)
+        }
+    }
+
+    @Test("a bottom-starting direct gesture detaches only after moving away")
+    func bottomStartingGestureDetachesOnAwayGeometry() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        #expect(coordinator.viewportMode == .pinned)
+        #expect(!coordinator.shouldShowCatchUpButton)
+
+        coordinator.geometryChanged(previous: bottom, current: away)
+        #expect(coordinator.viewportMode == .anchored)
+        #expect(coordinator.shouldShowCatchUpButton)
+    }
+
+    @Test("bottom rubber-band release remains pinned")
+    func bottomRubberBandReleaseRemainsPinned() {
+        let overshoot = ChatTranscriptGeometry(
+            offsetY: 900, contentHeight: 900, containerHeight: 400
+        )
+        let coordinator = ChatScrollCoordinator()
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .decelerating, finalGeometry: overshoot)
+        coordinator.scrollPhaseChanged(from: .decelerating, to: .idle, finalGeometry: bottom)
+        #expect(coordinator.viewportMode == .pinned)
+        #expect(!coordinator.shouldShowCatchUpButton)
+        #expect(!coordinator.hasUnreadContent)
+        #expect(coordinator.command == nil)
     }
 
     @Test("detached composer transitions preserve reader ownership and issue no tail command")

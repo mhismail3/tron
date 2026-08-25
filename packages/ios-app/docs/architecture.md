@@ -587,8 +587,9 @@ Transcript growth, keyboard frames, and composer measurements are not mode input
 and inset growth require zero app offset writes, and detached growth cannot pull the reader.
 Short and empty transcripts retain top alignment.
 
-Mode changes come only from explicit intent: native/direct/accessibility takeover anchors;
-a physically observed direct return, catch-up, or opening pins; submission and prepend preserve
+Mode changes come only from explicit intent: native/direct/accessibility movement away from the
+tail anchors; a bottom-starting pull that remains within the tail boundary or native past-bottom
+rubber band stays pinned and never exposes catch-up. A physically observed direct return, catch-up, or opening pins; submission and prepend preserve
 the current mode; a fresh presentation reset pins while a retained same-session reset preserves
 reader authority. `ChatScrollCoordinator` owns the reducer, raw geometry and semantic frames,
 unread state, and four bounded command purposes only: exact opening-tail realization, catch-up,
@@ -688,8 +689,11 @@ nonvisual “Tron is working” status on the active blur. Custom working messag
 compaction, and provider retry attempts retain explicit compact rows so operational detail is never hidden.
 A manual compaction accepted during an active turn remains a Gateway-owned pending maintenance
 operation: the optional snapshot flag renders “Compaction queued” without fabricating JSONL, then
-transitions through the existing compacting row to the canonical compaction entry. One synchronous
-Gateway claim spans pending and execution, handoff revalidates against newer agent ownership, and
+transitions through the existing compacting row to the canonical compaction entry. Successful completion
+publishes an exact, cursor-bearing canonical compaction delta before full-frame settlement; iOS admits it
+only against a contiguous exact tail and matching parent leaf, so the mounted progress row becomes
+“Context compacted” without navigation while malformed or inexact deltas request authoritative rebaseline.
+One synchronous Gateway claim spans pending and execution, handoff revalidates against newer agent ownership, and
 settlement waits for durable run-marker retirement. The confirmed mutation stays pending until
 canonical completion; shutdown cancels only work that has not started. Older Gateways may omit queued and effective
 automatic-compaction evidence.

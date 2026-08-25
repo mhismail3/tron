@@ -348,6 +348,8 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     /// Gateway's bounded authoritative queue capacity. Rich queue projections
     /// exceeding this limit are invalid and must not reach row rendering.
     static let maximumQueuedMessages = 32
+    /// Gateway's canonical count bound for one authoritative transcript tail.
+    static let maximumTranscriptItems = 512
     var sessionId: String
     var runtimeGeneration: String
     var revision: Int

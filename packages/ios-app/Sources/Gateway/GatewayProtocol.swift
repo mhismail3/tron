@@ -42,6 +42,7 @@ struct GatewayFailure: Codable, Error, Hashable, Sendable, LocalizedError {
 
 enum PreparedSessionEventData: Sendable, Equatable {
     case progress(TranscriptItem)
+    case compaction(TranscriptItem)
     case toolProgress(ToolExecutionState)
     case extensionActivity(ExtensionActivityDelta)
     case extensionPresentation(ExtensionPresentationMutation)
@@ -210,6 +211,13 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
                 if let message = envelope.data.objectValue?["message"], message != .null,
                    let item = try? message.decode(TranscriptItem.self) { preparedData = .progress(item) }
                 else { preparedData = .invalid }
+            case "session.compaction":
+                if let value = envelope.data.objectValue?["item"], value != .null,
+                   let item = try? value.decode(TranscriptItem.self), item.kind == .compaction {
+                    preparedData = .compaction(item)
+                } else {
+                    preparedData = .invalid
+                }
             case "session.toolProgress":
                 if let tool = try? envelope.data.decode(ToolExecutionState.self),
                    ExtensionActivityAdmissionPolicy.admitsToolFacts(tool) { preparedData = .toolProgress(tool) }
