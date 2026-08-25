@@ -72,9 +72,11 @@ an exchange the gateway removes the used invitation and issues a new one.
 
 ## Supervision and status
 
-`SMAppService` owns registration and launchd owns the gateway process. Managed
-LaunchAgents advertise `TRON_GATEWAY_SUPERVISED=1`; the Gateway exposes that
-capability so remote restart controls fail closed for direct foreground processes.
+`SMAppService` owns registration and launchd owns the gateway process. Stable's
+LaunchAgent uses Boolean `KeepAlive=true`, `RunAtLoad=true`, and a throttle interval;
+pause and uninstall therefore unregister the job before intentional stoppage. Managed
+LaunchAgents advertise `TRON_GATEWAY_SUPERVISED=1`; planned restart and handled
+supervised signals exit 75 so direct foreground restart controls still fail closed.
 Quitting `Tron.app` does not stop accepted work. `ServerStatusPoller` probes the Tron
 Gateway protocol and combines health with registration state. Menu controls can
 pause, resume, restart, inspect bounded persisted Gateway logs, show a fresh
@@ -157,10 +159,14 @@ from the active immutable payload and never accept a source-tree or environment
 replacement. Notification state remains outside payload versions under the
 canonical Tron home.
 `promote` records expected identity, atomically publishes `current.json` while
-retaining `previous.json`, invokes authenticated `gateway.restart` (the
-Gateway remains the drain-aware supervisor), and waits for health identity and
-a changed runtime epoch. Failure restores the prior selection and requests a
-second restart; `rollback` performs the same checked transition explicitly.
+retaining `previous.json`, and invokes authenticated `gateway.restart`. It waits
+without a deadline for the exact old PID/start to disappear, then requires a different
+PID/start stable across the exact candidate health probe. After a short natural relaunch
+grace, Stable deployment recovery may use only the fixed `com.tron.server` kickstart and
+only when no replacement listener exists. Failure restores and revalidates the prior
+selection, accepts an already-running exact restored payload, or replaces only an absent
+or exact captured failed listener. Unknown listeners fail closed. Recovery verifies the
+exact identity without RPC to the failed Gateway; explicit rollback uses the same boundary.
 Stable and dev have independent locks, selections, and payload directories and
 may run concurrently. The pointer has schema `1`, kind
 `tron-gateway-selection`, and fields `channel`, `version`, and
@@ -187,7 +193,12 @@ The Mac menu Restart action authenticates to the Gateway WebSocket, validates
 protocol identity, and calls `gateway.restart` with a bounded command ID. The
 Gateway drains accepted work; the wrapper then waits for the launchd-owned
 Gateway to become healthy again. It does not use `launchctl kickstart -k` as a
-restart shortcut.
+restart shortcut; the fixed kickstart is reserved for payload deployment recovery after
+the captured old process has exited.
+
+Changing the bundled LaunchAgent plist requires the manual Release reinstall and
+registration refresh in `docs/development.md`; payload promotion cannot update the
+plist already registered by macOS.
 
 ## Signing order
 

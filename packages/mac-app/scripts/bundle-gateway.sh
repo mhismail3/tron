@@ -135,6 +135,10 @@ if ((verify_only)); then
         echo "staged Gateway PushService.xcconfig does not match canonical product configuration" >&2
         exit 3
     }
+    cmp -s "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/gateway-payload-deploy.mjs" || {
+        echo "staged Gateway deployment helper does not match canonical source" >&2
+        exit 3
+    }
     exit 0
 fi
 

@@ -265,9 +265,13 @@ waits for accepted agent runs to settle in canonical JSONL, then replaces the Ga
 process; active PTYs must be closed first because their process state is not restartable.
 iOS keeps the chat mounted, follows `system.stopping` into its ordinary bounded reconnect
 loop, and installs a fresh authoritative session baseline from the replacement runtime.
-A restart response may be immediate or scheduled behind active runs. Diagnostics routes current
-unsupported, busy, receipt, and transport action failures through the existing global error surface;
-lifecycle-retired cancellation remains silent. Unexpected process
+A restart response may be immediate or scheduled behind active runs. Connection Settings may
+briefly poll the bounded drain projection only for an operation explicitly requested in that view;
+it shows fixed aggregate labels and retains nothing after the view's ownership ends. Drain phase,
+counts, and ages are diagnostic presentation only: `system.stopping` and the replacement handshake
+remain the sole reconnect and liveness authority. Diagnostics routes current unsupported, busy,
+receipt, and transport action failures through the existing global error surface; lifecycle-retired
+cancellation remains silent. Unexpected process
 death is different: a surviving run marker projects the session as interrupted and Tron
 never replays the accepted prompt automatically.
 

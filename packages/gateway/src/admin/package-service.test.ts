@@ -8,6 +8,7 @@ import {
   validatePackageInventory,
   validatePackageUpdates,
 } from "./package-service.js";
+import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
 describe("PackageService", () => {
   it("rejects duplicate, oversized, and truncation-prone projections", () => {
@@ -46,14 +47,23 @@ describe("PackageService", () => {
     await Promise.all([mkdir(agentDir), mkdir(workspace), mkdir(packageDir)]);
     await writeFile(join(packageDir, "package.json"), `${JSON.stringify({ name: "sample", pi: { prompts: [] } })}\n`);
     const events: string[] = [];
-    const service = new PackageService(agentDir, new TrustService(agentDir), (topic) => events.push(topic));
+    const registry = new GatewayWorkRegistry("epoch", 8);
+    const service = new PackageService(agentDir, new TrustService(agentDir), (topic) => events.push(topic), registry);
 
     await service.mutate("install", packageDir, workspace, false);
-    expect(JSON.stringify(await service.list(workspace))).toContain(packageDir);
+    const listing = service.list(workspace);
+    expect(registry.size).toBe(1);
+    expect(JSON.stringify(await listing)).toContain(packageDir);
+    expect(registry.size).toBe(0);
     expect(events).toContain("packages.completed");
 
     await service.mutate("remove", packageDir, workspace, false);
     expect(JSON.stringify(await service.list(workspace))).not.toContain(packageDir);
+    expect(registry.size).toBe(0);
+    registry.beginDrain();
+    await expect(service.mutate("install", packageDir, workspace, false)).rejects.toMatchObject({ code: "busy" });
+    await expect(service.list(workspace)).rejects.toMatchObject({ code: "busy" });
+    await expect(service.checkUpdates(workspace)).rejects.toMatchObject({ code: "busy" });
   });
 
   it("projects canonical global packages even when the current project is untrusted", async () => {

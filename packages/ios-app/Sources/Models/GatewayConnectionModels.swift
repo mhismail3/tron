@@ -250,6 +250,41 @@ struct GatewayUpdateStatus: Codable, Hashable, Sendable {
     }
 }
 
+enum AdministrativeDrainPhase: String, Codable, Hashable, Sendable {
+    case idle, preparing, waiting, complete, failed
+
+    var isTerminal: Bool { self == .complete || self == .failed }
+}
+
+enum AdministrativeDrainBlockerCategory: String, Codable, Hashable, Sendable, CaseIterable {
+    case slotAdmission = "slot-admission"
+    case promptPreflight = "prompt-preflight"
+    case foregroundAgentOperation = "foreground-agent-operation"
+    case queuedMutation = "queued-mutation"
+    case compactionExport = "compaction-export"
+    case detachedExtensionRun = "detached-extension-run"
+    case terminalReceiptPersistence = "terminal-receipt-persistence"
+    case extensionCommandPromptUI = "extension-command-prompt-ui"
+    case administrativeProviderPackageOperation = "administrative-provider-package-operation"
+}
+
+struct AdministrativeDrainSnapshot: Codable, Hashable, Sendable {
+    let drainId: String
+    let revision: Int
+    let phase: AdministrativeDrainPhase
+    let blockerCount: Int
+    let blockerCounts: [String: Int]
+    let omittedCount: Int
+    let suspectProjectionCount: Int
+}
+
+struct GatewayRestartResponse: Codable, Hashable, Sendable {
+    let restarting: Bool
+    let scheduled: Bool
+    let activeSessionIds: [String]
+    let drain: AdministrativeDrainSnapshot?
+}
+
 struct GatewayInfo: Codable, Hashable, Sendable {
     let gatewayVersion: String
     let piVersion: String

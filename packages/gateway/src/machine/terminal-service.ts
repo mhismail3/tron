@@ -58,6 +58,7 @@ export class TerminalService {
 
   private readonly replayBytes: number;
   private disposed = false;
+  private restartAdmissionClosed = false;
 
   constructor(
     replayBytes: number,
@@ -67,8 +68,17 @@ export class TerminalService {
     this.replayBytes = Math.max(0, Math.min(replayBytes, MAX_TERMINAL_REPLAY_ENCODED_BYTES));
   }
 
+  /** Atomically refuse replacement when a PTY is live, otherwise close future
+   * PTY admission before any previously dispatched terminal.open can spawn. */
+  beginRestartDrain(): boolean {
+    if (this.activeTerminalIds().length > 0) return false;
+    this.restartAdmissionClosed = true;
+    return true;
+  }
+
   open(sessionId: string, cwd: string, columns = 100, rows = 30, sessionEnvironment: Record<string, string> = {}): TerminalSummary {
     if (this.disposed) throw new GatewayError("conflict", "Terminal service is not available", true);
+    if (this.restartAdmissionClosed) throw new GatewayError("busy", "Gateway restart is not accepting terminal sessions", true);
     if (this.activeTerminalIds().length >= MAX_ACTIVE_TERMINALS) {
       throw new GatewayError("busy", "Active terminals reached their bounded capacity", true);
     }

@@ -28,6 +28,23 @@ describe("TerminalService", () => {
     service.dispose();
   });
 
+  it("closes terminal admission atomically only when no PTY is active", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "tron-terminal-drain-"));
+    const active = new TerminalService(64_000, () => {});
+    const first = active.open("session", cwd);
+    expect(active.beginRestartDrain()).toBe(false);
+    await active.terminate(first.id);
+    // A rejected restart did not leave the admission gate closed.
+    const second = active.open("session", cwd);
+    await active.terminate(second.id);
+    active.dispose();
+
+    const draining = new TerminalService(64_000, () => {});
+    expect(draining.beginRestartDrain()).toBe(true);
+    expect(() => draining.open("session", cwd)).toThrow(/not accepting terminal/u);
+    draining.dispose();
+  });
+
   it("ships an executable node-pty spawn helper on macOS", async () => {
     if (process.platform !== "darwin") return;
     const helper = join(process.cwd(), "node_modules", "node-pty", "prebuilds", `darwin-${process.arch}`, "spawn-helper");

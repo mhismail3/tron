@@ -5,6 +5,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { JsonValue } from "../protocol/types.js";
 import { AuthBroker } from "./auth-broker.js";
+import { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
 type LoginInteraction = Parameters<ModelRuntime["login"]>[2];
 
@@ -183,6 +184,31 @@ describe("AuthBroker", () => {
     throwingBroker.start("phone", "provider", "api_key");
     await flushPromises();
     expect(throwingBroker.activeOperationCount).toBe(0);
+  });
+
+  it("administrative cancellation retires UI but waits for exact provider settlement", async () => {
+    const signals: AbortSignal[] = [];
+    let settleProvider!: () => void;
+    const registry = new GatewayWorkRegistry("epoch", 8);
+    const broker = new AuthBroker(runtimeWithLogin(async (interaction) => {
+      signals.push(interaction.signal);
+      return new Promise<void>((resolve) => { settleProvider = resolve; });
+    }), () => {}, () => {}, { workRegistry: registry });
+    broker.start("phone", "provider", "api_key");
+    await flushPromises();
+    expect(registry.size).toBe(1);
+
+    registry.beginDrain();
+    await registry.requestCancellation();
+    let settled = false;
+    const waiting = registry.waitUntilSettled().then(() => { settled = true; });
+    await Promise.resolve();
+    expect(signals[0]?.aborted).toBe(true);
+    expect(broker.activeOperationCount).toBe(0);
+    expect(settled).toBe(false);
+    settleProvider();
+    await waiting;
+    expect(() => broker.start("phone", "provider", "api_key")).toThrow(/draining/u);
   });
 
   it("disconnect cancellation releases all client capacity even when providers ignore abort", async () => {

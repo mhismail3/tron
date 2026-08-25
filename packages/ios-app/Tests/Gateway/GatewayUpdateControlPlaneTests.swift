@@ -170,6 +170,119 @@ struct GatewayUpdateControlPlaneTests {
         }
     }
 
+    @Test("drain wire models stay additive and presentation is bounded and private")
+    func administrativeDrainWireAndPresentation() throws {
+        let blockers = #"{"id":"opaque-private-id","category":"foreground-agent-operation","state":"active","admittedAt":"2026-01-01T00:00:00Z","ageMs":10}"#
+        let snapshotJSON = #"{"drainId":"private-drain-id","revision":7,"phase":"waiting","startedAt":"2026-01-01T00:00:00Z","lastProgressAt":"2026-01-01T00:00:01Z","blockerCount":9,"blockerCounts":{"foreground-agent-operation":4,"queued-mutation":2,"detached-extension-run":1,"terminal-receipt-persistence":1,"administrative-provider-package-operation":1},"oldestAdmissionAt":"2026-01-01T00:00:00Z","oldestAdmissionAgeMs":1000,"blockers":[\#(blockers)],"omittedCount":5,"suspectProjectionCount":2}"#
+        let snapshot = try JSONDecoder.gateway.decode(AdministrativeDrainSnapshot.self, from: Data(snapshotJSON.utf8))
+        let summary = AdministrativeDrainPresentation.summary(snapshot)
+        #expect(summary.contains("Waiting for 9 accepted operations"))
+        #expect(summary.contains("2 other accepted operations"))
+        #expect(summary.contains("5 blocker details omitted"))
+        #expect(!summary.contains("opaque-private-id"))
+        #expect(!summary.contains("private-drain-id"))
+        #expect(!summary.contains("2026-01-01"))
+        #expect(AdministrativeDrainPresentation.suspectSummary(snapshot) == "2 nonblocking diagnostic projections")
+
+        let restart = try JSONDecoder.gateway.decode(
+            GatewayRestartResponse.self,
+            from: Data(#"{"restarting":false,"scheduled":true,"activeSessionIds":["session-private"],"drainId":"private-drain-id","drainRevision":7,"drain":\#(snapshotJSON),"futureField":true}"#.utf8)
+        )
+        #expect(restart.drain?.revision == 7)
+        let legacy = try JSONDecoder.gateway.decode(
+            GatewayRestartResponse.self,
+            from: Data(#"{"restarting":true,"scheduled":false,"activeSessionIds":[]}"#.utf8)
+        )
+        #expect(legacy.drain == nil)
+    }
+
+    @Test("drain polling policy requires exact local ownership and active presentation")
+    func administrativeDrainPollingPolicy() throws {
+        let draining = GatewayUpdateStatus(
+            state: "draining", channel: "stable", currentIdentity: nil, candidateIdentity: nil,
+            candidateAvailable: false, error: nil, updatedAt: nil, commandId: "local-command"
+        )
+        let updateOwner = AdministrativeDrainPollingOwner.update(commandID: "local-command", drainID: nil)
+        #expect(AdministrativeDrainPresentation.shouldPoll(
+            owner: updateOwner, profileID: "profile", selectedProfileID: "profile",
+            connected: true, sceneActive: true, updateStatus: draining, snapshot: nil
+        ))
+        for value in [
+            AdministrativeDrainPresentation.shouldPoll(owner: nil, profileID: "profile", selectedProfileID: "profile", connected: true, sceneActive: true, updateStatus: draining, snapshot: nil),
+            AdministrativeDrainPresentation.shouldPoll(owner: updateOwner, profileID: "profile", selectedProfileID: "other", connected: true, sceneActive: true, updateStatus: draining, snapshot: nil),
+            AdministrativeDrainPresentation.shouldPoll(owner: updateOwner, profileID: "profile", selectedProfileID: "profile", connected: false, sceneActive: true, updateStatus: draining, snapshot: nil),
+            AdministrativeDrainPresentation.shouldPoll(owner: updateOwner, profileID: "profile", selectedProfileID: "profile", connected: true, sceneActive: false, updateStatus: draining, snapshot: nil),
+            AdministrativeDrainPresentation.shouldPoll(owner: updateOwner, profileID: "profile", selectedProfileID: "profile", connected: true, sceneActive: true, updateStatus: GatewayUpdateStatus(state: "draining", channel: "stable", currentIdentity: nil, candidateIdentity: nil, candidateAvailable: false, error: nil, updatedAt: nil, commandId: "adopted-command"), snapshot: nil),
+        ] { #expect(!value) }
+
+        let complete = try JSONDecoder.gateway.decode(
+            AdministrativeDrainSnapshot.self,
+            from: Data(#"{"drainId":"completed-drain","revision":2,"phase":"complete","blockerCount":0,"blockerCounts":{},"blockers":[],"omittedCount":0,"suspectProjectionCount":0}"#.utf8)
+        )
+        let restartOwner = AdministrativeDrainPollingOwner.restart(drainID: "completed-drain")
+        #expect(!AdministrativeDrainPresentation.shouldPoll(owner: restartOwner, profileID: "profile", selectedProfileID: "profile", connected: true, sceneActive: true, updateStatus: nil, snapshot: complete))
+        #expect(AdministrativeDrainPresentation.summary(AdministrativeDrainSnapshot(
+            drainId: "failed-drain", revision: 3, phase: .failed, blockerCount: 1,
+            blockerCounts: [:], omittedCount: 0, suspectProjectionCount: 0
+        )) == "Restart drain failed. Tron is still connected.")
+        #expect(AdministrativeDrainPresentation.admits(complete, for: restartOwner))
+        #expect(!AdministrativeDrainPresentation.admits(complete, for: .restart(drainID: "replacement-id")))
+    }
+
+    @Test("drain RPC uses empty params and a scheduled restart waits for system stopping")
+    func administrativeDrainRPCAndScheduledRestartLifecycle() async throws {
+        let suiteName = "GatewayDrainControlTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: suiteName, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: cacheRoot) }
+        let profile = GatewayProfile(id: "stable", label: "Stable", host: "gateway.test", port: 9_847, machineId: "machine", deviceId: "device")
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let socket = ScriptedGatewaySocket()
+        let replacementSocket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket, replacementSocket]).factory)
+        let clock = ManualClock()
+        let model = AppModel(client: client, profiles: GatewayProfileStore(defaults: defaults), cache: SnapshotCache(root: cacheRoot), clock: clock.clock)
+        let capabilities = ["gateway-update.v1", "restart-drain.v1", "restart-supervised.v1", "drain-status.v1"]
+        let connecting = Task { try await model.connectHostedGateway(profile: profile, token: "token") }
+        try await socket.waitUntilSent(count: 1)
+        await socket.enqueue(helloFrame(machineID: "machine", capabilities: capabilities))
+        try await connecting.value
+
+        let reading = Task { try await model.loadAdministrativeDrainStatus(for: profile) }
+        try await socket.waitUntilSent(count: 2)
+        let drainRequest = try requestFrame(await socket.sentFrames()[1])
+        #expect(drainRequest.method == "gateway.drain.status")
+        #expect(drainRequest.params == [:])
+        let snapshot: JSONValue = .object([
+            "drainId": .string("drain-one"), "revision": .number(1), "phase": .string("waiting"),
+            "blockerCount": .number(1), "blockerCounts": .object(["foreground-agent-operation": .number(1)]),
+            "blockers": .array([]), "omittedCount": .number(1), "suspectProjectionCount": .number(0),
+        ])
+        await socket.enqueue(successResponse(id: drainRequest.id, result: snapshot))
+        #expect(try await reading.value?.drainId == "drain-one")
+
+        let restarting = Task { await model.requestGatewayRestart(for: profile) }
+        try await socket.waitUntilSent(count: 3)
+        let restartRequest = try requestFrame(await socket.sentFrames()[2])
+        #expect(restartRequest.method == "gateway.restart")
+        await socket.enqueue(successResponse(id: restartRequest.id, result: .object([
+            "restarting": .bool(false), "scheduled": .bool(true), "activeSessionIds": .array([]),
+            "drainId": .string("drain-one"), "drainRevision": .number(1), "drain": snapshot,
+        ])))
+        #expect(await restarting.value?.scheduled == true)
+        #expect(model.connectionState == .connected)
+        clock.advance(by: .seconds(91))
+        await Task.yield()
+        #expect(model.connectionState == .connected)
+
+        await model.handle(GatewayEvent(type: "event", topic: "system.stopping", sessionId: nil, payload: .object([:])))
+        #expect(model.connectionState == .restarting)
+        await model.teardown()
+        await client.close()
+    }
+
     @Test("artifact promotion sends exact tested identity and rejects non-focused targets")
     func artifactPromotionWireAndAdmission() async throws {
         let suiteName = "GatewayUpdateControlPlaneTests.\(UUID().uuidString)"
@@ -372,7 +485,7 @@ struct GatewayUpdateControlPlaneTests {
         return try #require(JSONDecoder.gateway.decode(GatewayUpdateStatus.self, from: data).debugPromotionCandidate)
     }
 
-    private func helloFrame(machineID: String) -> Data {
+    private func helloFrame(machineID: String, capabilities: [String] = ["gateway-update.v1"]) -> Data {
         try! JSONEncoder.gateway.encode(JSONValue.object([
             "type": .string("hello"),
             "gatewayVersion": .string("1.0.0"),
@@ -382,7 +495,7 @@ struct GatewayUpdateControlPlaneTests {
             "machineId": .string(machineID),
             "machineName": .string("Mac"),
             "gatewayChannel": .string("stable"),
-            "capabilities": .array([.string("gateway-update.v1")]),
+            "capabilities": .array(capabilities.map(JSONValue.string)),
         ]))
     }
 

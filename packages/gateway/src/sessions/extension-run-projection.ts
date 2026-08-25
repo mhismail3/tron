@@ -99,14 +99,26 @@ const lifecycleStates = new Set<ExtensionRunLifecycleState>([
 export const terminalLifecycleStates = new Set<ExtensionRunLifecycleState>(["completed", "failed", "stopped", "rejected"]);
 export const EXTENSION_LIFECYCLE_ARTIFACT_VERSION = 3;
 
-/** Admit the current versioned status artifact contract. Historical artifacts
- * are accepted only for final correlation by an exact tool-owned asyncDir; the
- * discovery scan itself never grants session ownership. */
-export function admitExtensionLifecycleArtifact(
+export type ExtensionArtifactRejectionReason =
+  | "invalid-timestamp"
+  | "missing-terminal-time"
+  | "ownership-mismatch"
+  | "malformed-artifact"
+  | "artifact-replacement-in-progress";
+
+export type ExtensionArtifactAdmission =
+  | { accepted: true; artifact: Record<string, unknown> }
+  | { accepted: false; reason: "invalid-timestamp" | "missing-terminal-time" | "malformed-artifact" };
+
+/** Admit the current versioned status artifact contract with a bounded reason.
+ * Historical artifacts are accepted only after exact ownership is proven. */
+export function inspectExtensionLifecycleArtifact(
   value: unknown,
   options: { exactOwnedLegacy?: boolean } = {},
-): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+): ExtensionArtifactAdmission {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { accepted: false, reason: "malformed-artifact" };
+  }
   const artifact = value as Record<string, unknown>;
   const historicalVersion = artifact.lifecycleArtifactVersion;
   const versionAccepted = historicalVersion === EXTENSION_LIFECYCLE_ARTIFACT_VERSION
@@ -118,24 +130,45 @@ export function admitExtensionLifecycleArtifact(
     ));
   if (!versionAccepted
     || typeof artifact.runId !== "string" || artifact.runId.trim().length === 0
-    || extensionLifecycleState(artifact.state ?? artifact.status) === "unknown") return undefined;
+    || extensionLifecycleState(artifact.state ?? artifact.status) === "unknown") {
+    return { accepted: false, reason: "malformed-artifact" };
+  }
   const state = extensionLifecycleState(artifact.state ?? artifact.status);
   const startedAt = artifact.startedAt;
   const lastUpdate = artifact.lastUpdate;
   // completedAt is the supported older spelling of endedAt. If both are
   // present, an invalid primary value must not be hidden by the alias.
   const terminalAt = artifact.endedAt !== undefined ? artifact.endedAt : artifact.completedAt;
-  for (const value of [startedAt, lastUpdate]) {
-    if (!Number.isSafeInteger(value) || (value as number) < 0) return undefined;
+  for (const timestamp of [startedAt, lastUpdate]) {
+    if (!Number.isSafeInteger(timestamp) || (timestamp as number) < 0) {
+      return { accepted: false, reason: "invalid-timestamp" };
+    }
   }
-  if (artifact.endedAt !== undefined && (!Number.isSafeInteger(artifact.endedAt) || (artifact.endedAt as number) < 0)) return undefined;
-  if (artifact.completedAt !== undefined && (!Number.isSafeInteger(artifact.completedAt) || (artifact.completedAt as number) < 0)) return undefined;
+  if (artifact.endedAt !== undefined && (!Number.isSafeInteger(artifact.endedAt) || (artifact.endedAt as number) < 0)) {
+    return { accepted: false, reason: "invalid-timestamp" };
+  }
+  if (artifact.completedAt !== undefined && (!Number.isSafeInteger(artifact.completedAt) || (artifact.completedAt as number) < 0)) {
+    return { accepted: false, reason: "invalid-timestamp" };
+  }
+  if (terminalLifecycleStates.has(state) && terminalAt === undefined) {
+    return { accepted: false, reason: "missing-terminal-time" };
+  }
   const startedMilliseconds = startedAt as number;
   const updatedMilliseconds = lastUpdate as number;
-  if (updatedMilliseconds < startedMilliseconds) return undefined;
-  if (terminalAt !== undefined && (terminalAt as number) < startedMilliseconds) return undefined;
-  if (terminalLifecycleStates.has(state) && terminalAt === undefined) return undefined;
-  return artifact;
+  const terminalAliases = [artifact.endedAt, artifact.completedAt].filter((timestamp) => timestamp !== undefined) as number[];
+  if (updatedMilliseconds < startedMilliseconds
+    || terminalAliases.some((timestamp) => timestamp < startedMilliseconds || timestamp > updatedMilliseconds)) {
+    return { accepted: false, reason: "invalid-timestamp" };
+  }
+  return { accepted: true, artifact };
+}
+
+export function admitExtensionLifecycleArtifact(
+  value: unknown,
+  options: { exactOwnedLegacy?: boolean } = {},
+): Record<string, unknown> | undefined {
+  const admission = inspectExtensionLifecycleArtifact(value, options);
+  return admission.accepted ? admission.artifact : undefined;
 }
 
 /** Gateway sequence admission used by every producer projection. Producer
@@ -183,24 +216,26 @@ export function normalizeExtensionArtifact(
   const status = lifecycleState === "failed" ? "failed" : terminal ? "completed" : "running";
   const artifactStartedAt = value.startedAt === undefined ? undefined : isoTime(value.startedAt);
   const artifactUpdatedAt = value.lastUpdate === undefined ? undefined : isoTime(value.lastUpdate);
-  const artifactEndedAt = value.endedAt !== undefined ? isoTime(value.endedAt)
-    : value.completedAt !== undefined ? isoTime(value.completedAt) : undefined;
+  const endedAtAlias = value.endedAt === undefined ? undefined : isoTime(value.endedAt);
+  const completedAtAlias = value.completedAt === undefined ? undefined : isoTime(value.completedAt);
+  const artifactEndedAt = endedAtAlias ?? completedAtAlias;
   if ((value.startedAt !== undefined && !artifactStartedAt)
       || (value.lastUpdate !== undefined && !artifactUpdatedAt)
-      || (value.endedAt !== undefined && !artifactEndedAt)
-      || (value.completedAt !== undefined && !isoTime(value.completedAt))) return undefined;
+      || (value.endedAt !== undefined && !endedAtAlias)
+      || (value.completedAt !== undefined && !completedAtAlias)) return undefined;
   const startedAt = (options.useArtifactStartedAt !== false ? artifactStartedAt : undefined) ?? options.fallbackStartedAt;
   const updatedAt = artifactUpdatedAt ?? options.fallbackUpdatedAt ?? startedAt ?? options.now;
   const completedAt = terminal ? artifactEndedAt : undefined;
   if (terminal && !completedAt) return undefined;
   const startedMilliseconds = Date.parse(startedAt ?? options.now);
   const updatedMilliseconds = Date.parse(updatedAt);
-  const endedMilliseconds = artifactEndedAt === undefined ? undefined : Date.parse(artifactEndedAt);
+  const terminalMilliseconds = [endedAtAlias, completedAtAlias]
+    .filter((timestamp): timestamp is string => timestamp !== undefined)
+    .map((timestamp) => Date.parse(timestamp));
   if (!Number.isFinite(startedMilliseconds) || !Number.isFinite(updatedMilliseconds)
       || updatedMilliseconds < startedMilliseconds
-      || (endedMilliseconds !== undefined
-        && (!Number.isFinite(endedMilliseconds)
-          || endedMilliseconds < startedMilliseconds))) return undefined;
+      || terminalMilliseconds.some((timestamp) => !Number.isFinite(timestamp)
+        || timestamp < startedMilliseconds || timestamp > updatedMilliseconds)) return undefined;
   const durationMs = number(value.durationMs);
   return {
     lifecycleState,

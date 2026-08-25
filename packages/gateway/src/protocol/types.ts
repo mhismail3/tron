@@ -12,6 +12,43 @@ export interface ModelRef {
 export type SessionPhase = "idle" | "running" | "compacting" | "retrying" | "interrupted";
 export type SessionKind = "user" | "subagent";
 
+export type AdministrativeDrainPhase = "idle" | "preparing" | "waiting" | "complete" | "failed";
+export type AdministrativeDrainBlockerCategory =
+  | "slot-admission"
+  | "prompt-preflight"
+  | "foreground-agent-operation"
+  | "queued-mutation"
+  | "compaction-export"
+  | "detached-extension-run"
+  | "terminal-receipt-persistence"
+  | "extension-command-prompt-ui"
+  | "administrative-provider-package-operation";
+
+export interface AdministrativeDrainBlockerSummary {
+  /** Per-drain opaque identity. It is not a session, run, path, or token ID. */
+  id: string;
+  category: AdministrativeDrainBlockerCategory;
+  state: "active" | "settling" | "suspect";
+  admittedAt?: string;
+  ageMs?: number;
+}
+
+/** Bounded process-local diagnostic projection. It is never liveness authority. */
+export interface AdministrativeDrainSnapshot {
+  drainId: string;
+  revision: number;
+  phase: AdministrativeDrainPhase;
+  startedAt?: string;
+  lastProgressAt?: string;
+  blockerCount: number;
+  blockerCounts: Partial<Record<AdministrativeDrainBlockerCategory, number>>;
+  oldestAdmissionAt?: string;
+  oldestAdmissionAgeMs?: number;
+  blockers: AdministrativeDrainBlockerSummary[];
+  omittedCount: number;
+  suspectProjectionCount: number;
+}
+
 export interface SessionSummary {
   id: string;
   name?: string;

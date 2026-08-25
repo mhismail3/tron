@@ -158,12 +158,12 @@ staged artifacts before source. A successful RPC acknowledges helper launch, not
 build or promotion success; asynchronous helper failures are reported in update progress. A
 planned restart publishes a distinct `draining` phase and may wait without a startup deadline
 for already-accepted runs; only after the exact captured old PID/start identity disappears or
-changes does the bounded candidate health deadline begin. Listener or health loss alone is not
-transition evidence. Candidate startup uses an atomic attempt/commit marker shared
-with the launcher: an uncommitted relaunch crash-rolls back, while a committed exact selection
-and authenticated identity cannot be raced into rollback. If bounded recovery health fails after
-selection restoration, the helper removes the now-mismatched attempt marker under the launcher's
-shared attempt lock so the launcher can start the restored payload instead of failing closed forever.
+changes does the bounded startup deadline begin. Readiness requires one different PID/start
+identity stable across an authenticated exact fingerprint/revision/epoch probe. Stable gets a
+short natural relaunch grace, then the supervised helper may issue one fixed launchd kickstart.
+Candidate startup uses the launcher's atomic attempt/commit marker. Recovery restores and
+revalidates the prior selection under that marker's lock, then kickstarts and verifies the restored
+payload directly; it never depends on RPC to the failed Gateway.
 Debug handoff is exposed as Debug
 origin only when its bounded provenance (candidate version/fingerprint, tested Debug fingerprint,
 source revision, tested runtime epoch, and candidate runtime epoch) matches the verified Stable
@@ -320,7 +320,7 @@ deferred.
 
 Live tool projections may carry an optional extension provenance record derived from the public Pi tool `sourceInfo` and the loaded extension inventory. The Gateway emits that record only when exactly one extension owns the tool and the source path agrees; unknown or ambiguous ownership omits provenance and fails open to the ordinary tool projection. This metadata is disposable presentation state and never modifies Pi JSONL. When an extension-owned tool returns the public structured delegated-run convention (`details.runId`/`asyncId` plus bounded `results[].progress`), the Gateway additionally projects `ExtensionRunActivity` with stable child identities, active time, tool/turn counts, current tool/path, and a bounded output tail. It is carried on the live tool projection and retained as a bounded recent `extensionActivities` snapshot; native clients must not infer it from rendered widget text or open a child JSONL concurrently. The runtime also admits the explicit `pi-subagents` lifecycle-artifact contract: allowlisted `status.json` files are matched to the canonical session file, read with a hard byte bound, and projected as one workflow activity with bounded child progress so detached async runs remain visible after the launching tool returns. Temporary runtime roots and the project-local `.pi/subagents/async-subagent-runs` layout are scanned under one hard work budget; exact live `asyncDir` bindings refresh before bounded ambient enumeration, and terminal ambient evidence outranks decorative live enrichment. A bounded Gateway-owned `runId` binding maps lifecycle events and artifacts to one real tool-call identity; a synthetic `subagent:<runId>` identity is used only for an initially unmatched, session-owned artifact and is re-keyed when the real tool call arrives. Terminal lifecycle status is authoritative, while later artifacts only enrich retained details and cannot resurrect a completed run; terminal recency uses the producer's completion time rather than the later discovery time. Current artifacts are admitted by their exact schema version; historical versioned or unversioned artifacts can supply terminal evidence only after an exact canonical tool-call/`asyncDir` binding proves ownership, so a Gateway reload cannot strand already-finished delegated work in restart drain. Watchers stop on terminal state, disposal, and retention eviction.
 
-Remote restart is advertised only when `TRON_GATEWAY_SUPERVISED=1` is present from a managed LaunchAgent or repository background supervisor; direct foreground processes fail closed for remote restart. The Gateway exits with code 75 only after the registry drain completes, leaving process replacement to the owning supervisor.
+Remote restart is advertised only when `TRON_GATEWAY_SUPERVISED=1` is present from a managed LaunchAgent or repository background supervisor; direct foreground processes fail closed for remote restart. Planned restart exits with code 75 only after the registry drain completes. A handled signal in a supervised runtime also exits 75, while an ordinary foreground signal remains a clean exit; process replacement belongs to the supervisor.
 
 Extension callbacks are wrapped through the public `DefaultResourceLoaderOptions.extensionsOverride` seam on every load and reload. An AsyncLocalStorage owner (an opaque SHA-256 identity derived from stable source/path provenance, a generic humanized title, and exact `sourceInfo.source`) follows handlers, tools, commands, renderers, promises, and timers. Raw extension paths never enter owner IDs. The semantic broker records optional widget owners and per-key status owners; rendered component surfaces retain only exact source provenance. Unattributed calls remain ownerless rather than being guessed, and protocol owner records are bounded at the store and native admission boundary.
 
@@ -565,13 +565,40 @@ Read projections redact secret-looking strings; matching redaction placeholders 
 from canonical state during update so mobile editing cannot erase credentials it was never
 allowed to read.
 
-Administrative restart is a deadline-free drain, not an abort: the Gateway freezes new
-mutations, allows every admitted agent run to settle canonically, then exits with the
-supervised restart code. While waiting it emits bounded, count-only
-`gateway.restart-drain.waiting` diagnostics every 15 seconds with the combined count of
-in-flight slot admissions and drain-busy sessions, plus an explicit completion record,
-so the Logs sheet distinguishes a healthy drain from a stuck or failed restart.
-Live PTYs block restart because process replacement cannot preserve them.
+Administrative restart is a deadline-free drain, not an abort: the Gateway synchronously
+closes session and administration admission, lets every admitted owner settle without
+cancelling accepted work, then exits with the supervised restart code. Unexpected
+signal/error shutdown may request exact fenced cancellation and logs if its bounded
+cleanup grace expires with ownership still outstanding. `GatewayWorkRegistry` is a
+bounded, process-local registry with separate normal and derived-settlement capacity. It
+never persists or expires work by age and does not duplicate Pi's runtime, JSONL, or run
+markers. Prompt preflight transfers one token into accepted foreground, queue, or
+extension-command ownership without a release/reacquire gap. Exact accepted queue owners
+run naturally during a graceful drain; only an explicit client clear/replace settles them
+without execution. Direct Bash and idle compaction persist interruption markers before
+canonical SDK work, and reliable bounded-frequency marker/terminal-receipt retries keep
+the same owner live until durability succeeds.
+Package inventory/update discovery and provider login remain exact administrative owners
+until their underlying asynchronous operation settles; retiring mobile UI does not infer
+provider settlement. Registry tokens are the normal drain authority. Exact-owned
+nonterminal extension artifacts are the sole compatibility exception until the pinned
+extension host exposes direct detached-work registration.
+The pinned SDK exposes no disposal API for the retained administration resource loader or
+model runtime, so admission closure plus exact operation settlement is the truthful
+resource boundary; Tron does not pretend those SDK objects were explicitly disposed.
+
+`gateway.drain.status` returns a bounded in-memory `AdministrativeDrainSnapshot` before
+and during a drain. The accepted `gateway.restart` response includes the same initial
+drain identity and revision while retaining its legacy fields. Snapshots contain category
+counts, at most 64 opaque hashed blocker summaries, omitted and suspect-projection counts,
+and monotonic revisions—never session/run IDs, prompts, output, paths, provider data, or
+credentials. They are diagnostics only; exact tokens, runtime settlement, terminal
+artifacts, and durable receipts remain liveness authority. While waiting the Gateway also
+emits bounded `gateway.restart-drain.waiting` log records every 15 seconds, plus an
+explicit completion record, so operators can distinguish progress from a failed restart.
+Live PTYs block restart because process replacement cannot preserve them. Restart closes
+terminal admission atomically only after proving no PTY is live, so an already-dispatched
+`terminal.open` cannot resume across the cutoff and spawn a shell.
 The installed Release wrapper supervises Stable only. `scripts/tron dev` owns the
 separate Debug lifecycle on 9848 through the same immutable payload store and launcher.
 Its loopback-by-default handoff copies only an authenticated, selected Debug
@@ -580,9 +607,10 @@ identity before and after the copy; it never selects or restarts Stable. Compati
 is checked against the actual installed/active Stable runtime, and Node/helper drift
 requires a manual Mac app replacement. Promotion pins version and fingerprint,
 atomically selects, requests a real drain-aware restart, and accepts readiness only
-from the candidate's exact fingerprint, source revision, and runtime epoch. Apply and
-rollback serialize per channel; failed pointer changes perform a compensating restart
-and exact health verification. Status keeps observed live identity separate from the
+from a different stable PID/start plus the candidate's exact fingerprint, source revision,
+and runtime epoch. Apply and rollback serialize per channel; failed pointer changes restore
+the prior selection and use direct, fixed Stable supervisor recovery with exact health
+verification rather than RPC to the failed process. Status keeps observed live identity separate from the
 selected pointer so publication cannot report readiness early. Each immutable payload fingerprints a regular `app/PushService.xcconfig`.
 Stable staging, promotion, source updates, rollback, launcher/Swift admission,
 and packaging require its one exact non-empty public HTTPS origin; dev alone
@@ -724,8 +752,14 @@ Per-slot watchers are therefore permitted only after that exact ownership has
 already been proven, and never perform global scans. Pure artifact state and timestamp
 normalization is shared by discovery and watcher refresh, while their admission,
 ownership, receipt, and fail-closed policies remain slot-owned. A producer's logical
-`endedAt` may precede the final persistence `lastUpdate`; both must follow `startedAt`,
-but persistence after completion is valid terminal evidence. Oversized status files
+`endedAt` may precede the final persistence `lastUpdate`; admission requires the complete
+`startedAt <= endedAt <= lastUpdate` timeline (including the legacy `completedAt` alias),
+and keeps `updatedAt` bound to persistence while `completedAt` remains logical completion.
+Exact-owned rejection is observable through rate-limited, hard-bounded reason codes
+(`invalid-timestamp`, `missing-terminal-time`, `ownership-mismatch`,
+`malformed-artifact`, or `artifact-replacement-in-progress`) keyed only by opaque hashes.
+Unowned ambient junk is silent, and warnings never include artifact paths or content.
+Oversized status files
 remain outside the projection byte cap; an exact-owned run may recover only its bounded
 top-level lifecycle header when a matching terminal record is also present in the bounded
 `events.jsonl` tail, without parsing or projecting oversized step data. Administrative

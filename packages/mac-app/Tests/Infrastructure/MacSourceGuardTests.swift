@@ -107,6 +107,10 @@ struct MacSourceGuardTests {
         #expect(releaseLaunchAgent.contains("<string>com.tron.server</string>"))
         #expect(releaseLaunchAgent.contains("<key>TRON_GATEWAY_SUPERVISED</key>\n        <string>1</string>"))
         #expect(releaseLaunchAgent.contains("<key>TRON_GATEWAY_CHANNEL</key>\n        <string>stable</string>"))
+        #expect(releaseLaunchAgent.contains("<key>RunAtLoad</key>\n    <true/>"))
+        #expect(releaseLaunchAgent.contains("<key>KeepAlive</key>\n    <true/>"))
+        #expect(!releaseLaunchAgent.contains("SuccessfulExit"))
+        #expect(!releaseLaunchAgent.contains("Crashed"))
         #expect(
             releaseLaunchAgent.contains(
                 "<string>Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron</string>"
@@ -156,6 +160,8 @@ struct MacSourceGuardTests {
         #expect(bundleScript.contains("tron-gateway-launcher.c"))
         #expect(bundleScript.contains("--fingerprint \"$PAYLOAD_DIR\""))
         #expect(bundleScript.contains("gateway-payload-deploy.mjs"))
+        #expect(bundleScript.contains("cmp -s \"$REPO_ROOT/scripts/gateway-payload-deploy.mjs\" \"$APP_DIR/scripts/gateway-payload-deploy.mjs\""))
+        #expect(bundleScript.contains("staged Gateway deployment helper does not match canonical source"))
         #expect(bundleScript.contains("dependencyTreeCoverage"))
         #expect(bundleScript.contains("runtimeEpoch"))
         #expect(bundleScript.contains("--verify-only"))
@@ -163,6 +169,15 @@ struct MacSourceGuardTests {
         #expect(bundleScript.contains("-arch arm64 -arch x86_64"))
         #expect(bundleScript.contains("-arch arm64 -arch x86_64"))
         #expect(!bundleScript.contains("cargo build"))
+
+        let launchdFixture = try Self.read(macRoot, "scripts/test-launchd-relaunch-fixture.sh")
+        #expect(launchdFixture.contains("TRON_RUN_LAUNCHD_FIXTURE"))
+        #expect(launchdFixture.contains("com.example.tron-gateway-relaunch"))
+        #expect(launchdFixture.contains("trap cleanup EXIT INT TERM HUP"))
+        #expect(launchdFixture.contains("second-selection"))
+        #expect(!launchdFixture.contains("com.tron.server"))
+        #expect(!launchdFixture.contains("9847"))
+        #expect(!launchdFixture.contains("~/.tron"))
 
         let verifierScript = try Self.read(macRoot, "scripts/verify-gateway-payload.sh")
         for required in ["--verify-payload", "NODE_ARM64_SHA256", "NODE_X64_SHA256", "payload tree is writable", "Mach-O", "lipo -archs", "realpath", "-arch arm64 -arch x86_64", "cmp -s", "GATEWAY_VERSION", "SOURCE_REVISION"] {

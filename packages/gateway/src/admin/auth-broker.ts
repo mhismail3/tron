@@ -3,6 +3,7 @@ import type { AuthEvent, AuthPrompt, AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
+import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
 interface PendingPrompt {
   id: string;
@@ -18,6 +19,7 @@ interface AuthOperation {
   controller: AbortController;
   prompt: PendingPrompt | undefined;
   timer: NodeJS.Timeout;
+  work?: GatewayWorkHandle;
 }
 
 interface RetiredAuthOperation {
@@ -66,6 +68,7 @@ export class AuthBroker {
   private readonly maximumOperations: number;
   private readonly maximumOperationsPerClient: number;
   private readonly operationTimeoutMs: number;
+  private readonly workRegistry: GatewayWorkRegistry | undefined;
 
   constructor(
     private readonly modelRuntime: ModelRuntime,
@@ -75,11 +78,13 @@ export class AuthBroker {
       maximumOperations?: number;
       maximumOperationsPerClient?: number;
       operationTimeoutMs?: number;
+      workRegistry?: GatewayWorkRegistry;
     } = {},
   ) {
     this.maximumOperations = options.maximumOperations ?? DEFAULT_MAX_AUTH_OPERATIONS;
     this.maximumOperationsPerClient = options.maximumOperationsPerClient ?? DEFAULT_MAX_AUTH_OPERATIONS_PER_CLIENT;
     this.operationTimeoutMs = options.operationTimeoutMs ?? DEFAULT_AUTH_OPERATION_TIMEOUT_MS;
+    this.workRegistry = options.workRegistry;
     if (!Number.isSafeInteger(this.maximumOperations) || this.maximumOperations < 1
       || !Number.isSafeInteger(this.maximumOperationsPerClient) || this.maximumOperationsPerClient < 1
       || this.maximumOperationsPerClient > this.maximumOperations
@@ -106,15 +111,25 @@ export class AuthBroker {
     }
 
     let operation!: AuthOperation;
+    const controller = new AbortController();
+    const work = this.workRegistry?.begin({
+      kind: "administrative-provider-package-operation",
+      hostEpoch: this.workRegistry.runtimeEpoch,
+      cancellation: () => {
+        controller.abort();
+        if (operation) this.retire(operation, "Gateway restart cancelled authentication");
+      },
+    });
     const timer = setTimeout(() => this.timeout(operation), this.operationTimeoutMs);
     timer.unref();
     operation = {
       id: randomUUID(),
       clientId,
       providerId,
-      controller: new AbortController(),
+      controller,
       prompt: undefined,
       timer,
+      ...(work ? { work } : {}),
     };
     this.operations.set(operation.id, operation);
     const interaction = {
@@ -132,7 +147,10 @@ export class AuthBroker {
       .then(
         () => this.complete(operation, true),
         (error: unknown) => this.complete(operation, false, error),
-      );
+      )
+      // UI retirement and abort acknowledgement do not prove the provider has
+      // released credential/runtime resources. Exact ownership ends only here.
+      .finally(() => operation.work?.settle());
     return operation.id;
   }
 

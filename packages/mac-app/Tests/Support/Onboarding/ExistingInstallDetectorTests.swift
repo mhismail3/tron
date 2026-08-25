@@ -235,6 +235,38 @@ struct ExistingInstallDetectorTests {
         ))
     }
 
+    @Test("LaunchAgent plist requires Boolean RunAtLoad and KeepAlive")
+    func launchAgentPlistRequiresBooleanSupervision() throws {
+        let trackedPlist = trackedLaunchAgentPlist(named: "com.tron.server.plist")
+        let data = try Data(contentsOf: trackedPlist)
+        let source = try #require(
+            PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
+        )
+        for (key, value) in [
+            ("RunAtLoad", false as Any),
+            ("KeepAlive", false as Any),
+            ("KeepAlive", ["SuccessfulExit": false] as Any),
+            ("KeepAlive", "true" as Any),
+        ] {
+            let tmp = TestTempDir.make()
+            defer { TestTempDir.cleanup(tmp) }
+            let plist = tmp.appendingPathComponent("com.tron.server.plist")
+            var modified = source
+            modified[key] = value
+            try PropertyListSerialization.data(fromPropertyList: modified, format: .xml, options: 0).write(to: plist)
+            #expect(!ExistingInstallDetector.launchAgentPlistIsCurrent(plistPath: plist))
+        }
+        for key in ["RunAtLoad", "KeepAlive"] {
+            let tmp = TestTempDir.make()
+            defer { TestTempDir.cleanup(tmp) }
+            let plist = tmp.appendingPathComponent("com.tron.server.plist")
+            var modified = source
+            modified.removeValue(forKey: key)
+            try PropertyListSerialization.data(fromPropertyList: modified, format: .xml, options: 0).write(to: plist)
+            #expect(!ExistingInstallDetector.launchAgentPlistIsCurrent(plistPath: plist))
+        }
+    }
+
     @Test("LaunchAgent plist rejects retired log environment overrides")
     func launchAgentPlistRejectsRetiredLogEnvironmentOverride() throws {
         let tmp = TestTempDir.make()

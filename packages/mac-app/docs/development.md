@@ -147,16 +147,35 @@ scripts/gateway-payload-deploy.mjs rollback --channel stable --command-id <uniqu
 ```
 
 Promotion is serialized per channel, verifies the complete payload fingerprint,
-uses authenticated drain-aware `gateway.restart`, and proves the new health
-identity before success. On timeout or identity mismatch it atomically restores
-`previous.json` and requests/awaits rollback restart. The iOS update button invokes
+uses authenticated drain-aware `gateway.restart`, waits without a deadline for the
+exact old PID/start to disappear, and proves one different stable PID/start plus the
+exact candidate health identity. Stable allows a short natural relaunch grace before
+one fixed supervisor kickstart, and never kickstarts over a listener that is already
+starting. On failure it restores and revalidates the prior selection. If the launcher
+already restored the exact healthy payload, recovery accepts it without another kill;
+otherwise it kickstarts only an absent or exact captured failed listener and fails closed
+on an unknown listener. Recovery never calls the failed Gateway. The iOS update button invokes
 only the LaunchAgent-owned helper; verified artifact promotion is wired, and source
 builds read only the validated `gateway/update-config.json` projection. Source mode uses
 the repository's local TypeScript compiler with a private temporary output directory,
 never `packages/gateway/dist`, and stages only verified output. A helper launch
 acknowledgement does not claim eventual build or promotion success; failures are exposed
-through bounded update progress. The Mac menu Restart seam uses the same authenticated drain command rather than
-`launchctl kickstart`.
+through bounded update progress. The Mac menu Restart seam uses the authenticated drain command rather than
+`launchctl kickstart`; kickstart is deployment recovery only.
+
+The Stable plist now requires Boolean `KeepAlive=true`. Delivering that plist requires
+following **Reinstall a local Release build** below and refreshing registration with
+Pause/Resume; payload promotion alone does not replace the registered plist.
+
+An isolated opt-in launchd fixture verifies handled-exit relaunch and selection reread
+without using Tron's label, ports, or data directories:
+
+```bash
+TRON_RUN_LAUNCHD_FIXTURE=1 packages/mac-app/scripts/test-launchd-relaunch-fixture.sh
+```
+
+The fixture registers a temporary `com.example.*` label and cleans it up on exit. It is
+never part of ordinary automated tests because it intentionally invokes `launchctl`.
 
 ## Reinstall a local Release build
 
@@ -249,9 +268,12 @@ The command serializes selection publication per channel, verifies complete
 payload fingerprints, calls authenticated drain-aware `gateway.restart`, waits
 without a startup deadline for the exact local pre-restart listener process to
 exit or be replaced, and only then starts bounded exact-candidate health checks.
-Health absence alone is never accepted as a drain transition. On failure it restores the
-previous selection and requests/awaits rollback. The Mac menu Restart seam
-uses authenticated `gateway.restart` instead of `launchctl kickstart`. Never automate
+Health absence alone is never accepted as a drain transition. After a short natural
+relaunch grace, supervised Stable promotion may use one fixed kickstart only when no
+listener exists. On failure it restores and revalidates the prior selection, accepts an
+already-running exact restored payload, or kickstarts only an absent/exact captured
+failed listener; unknown listeners fail closed. Recovery never issues RPC to the failed Gateway. The Mac menu Restart seam uses
+authenticated `gateway.restart` instead of `launchctl kickstart`. Never automate
 copying into `/Applications`, release deployment, or launchd registration.
 
 ## Efficient focused tests

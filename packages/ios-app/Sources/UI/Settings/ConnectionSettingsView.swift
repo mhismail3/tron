@@ -251,6 +251,84 @@ struct GatewayTechnicalDetail: Identifiable, Equatable {
     var id: String { title }
 }
 
+enum AdministrativeDrainPollingOwner: Equatable {
+    case restart(drainID: String)
+    case update(commandID: String, drainID: String?)
+
+    var drainID: String? {
+        switch self {
+        case .restart(let drainID): return drainID
+        case .update(_, let drainID): return drainID
+        }
+    }
+}
+
+enum AdministrativeDrainPresentation {
+    static func shouldPoll(
+        owner: AdministrativeDrainPollingOwner?,
+        profileID: String,
+        selectedProfileID: String?,
+        connected: Bool,
+        sceneActive: Bool,
+        updateStatus: GatewayUpdateStatus?,
+        snapshot: AdministrativeDrainSnapshot?
+    ) -> Bool {
+        guard let owner, profileID == selectedProfileID, connected, sceneActive,
+              snapshot?.phase.isTerminal != true else { return false }
+        switch owner {
+        case .restart:
+            return true
+        case .update(let commandID, _):
+            return updateStatus?.commandId == commandID && updateStatus?.state == "draining"
+        }
+    }
+
+    static func admits(_ snapshot: AdministrativeDrainSnapshot, for owner: AdministrativeDrainPollingOwner) -> Bool {
+        owner.drainID.map { $0 == snapshot.drainId } ?? true
+    }
+
+    static func summary(_ snapshot: AdministrativeDrainSnapshot) -> String {
+        let ordered = AdministrativeDrainBlockerCategory.allCases.compactMap { category -> (String, Int)? in
+            let count = snapshot.blockerCounts[category.rawValue] ?? 0
+            guard count > 0 else { return nil }
+            return (label(for: category, count: count), count)
+        }
+        let shown = Array(ordered.prefix(3))
+        var parts = shown.map(\.0)
+        let otherCount = max(0, snapshot.blockerCount - shown.reduce(0) { $0 + $1.1 })
+        if otherCount > 0 { parts.append("\(otherCount) other accepted operation\(otherCount == 1 ? "" : "s")") }
+        if snapshot.phase == .failed { return "Restart drain failed. Tron is still connected." }
+        guard snapshot.blockerCount > 0 else { return "Accepted operations have settled." }
+        let detail = parts.isEmpty ? "" : ": \(parts.joined(separator: ", "))"
+        let omitted = snapshot.omittedCount > 0
+            ? " \(snapshot.omittedCount) blocker detail\(snapshot.omittedCount == 1 ? "" : "s") omitted."
+            : ""
+        return "Waiting for \(snapshot.blockerCount) accepted operation\(snapshot.blockerCount == 1 ? "" : "s")\(detail).\(omitted)"
+    }
+
+    static func suspectSummary(_ snapshot: AdministrativeDrainSnapshot) -> String? {
+        guard snapshot.suspectProjectionCount > 0 else { return nil }
+        let count = snapshot.suspectProjectionCount
+        return "\(count) nonblocking diagnostic projection\(count == 1 ? "" : "s")"
+    }
+
+    private static func label(for category: AdministrativeDrainBlockerCategory, count: Int) -> String {
+        let singular: String
+        switch category {
+        case .slotAdmission: singular = "session opening"
+        case .promptPreflight: singular = "prompt admission"
+        case .foregroundAgentOperation: singular = "agent run"
+        case .queuedMutation: singular = "queued operation"
+        case .compactionExport: singular = "compaction or export"
+        case .detachedExtensionRun: singular = "detached run"
+        case .terminalReceiptPersistence: singular = "completion receipt"
+        case .extensionCommandPromptUI: singular = "extension interaction"
+        case .administrativeProviderPackageOperation: singular = "administrative operation"
+        }
+        return "\(count) \(singular)\(count == 1 ? "" : "s")"
+    }
+}
+
 enum GatewayConnectionDetailPresentation {
     static func technicalDetails(
         info: GatewayInfo?,
@@ -340,6 +418,7 @@ enum GatewayUpdateIntent: Identifiable, Equatable {
 struct GatewayConnectionDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     let profile: GatewayProfile
     @State private var info: GatewayInfo?
     @State private var updateStatus: GatewayUpdateStatus?
@@ -350,6 +429,9 @@ struct GatewayConnectionDetailView: View {
     @State private var updateIntent: GatewayUpdateIntent?
     @State private var confirmingRollback = false
     @State private var activeUpdateCommandID: String?
+    @State private var locallyRequestedUpdateCommandID: String?
+    @State private var drainPollingOwner: AdministrativeDrainPollingOwner?
+    @State private var drainSnapshot: AdministrativeDrainSnapshot?
     @State private var acceptedOperationLabel: String?
     @State private var configuringSourceRepository = false
     @State private var showingTechnicalDetails = false
@@ -395,6 +477,10 @@ struct GatewayConnectionDetailView: View {
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 8)
                             }
+                        }
+                        if let drainSnapshot {
+                            TronSettingsDivider(accent: .tronAmber)
+                            administrativeDrainRow(drainSnapshot)
                         }
                         if model.profiles.selected?.id != currentProfile.id {
                             TronSettingsDivider(accent: statusColor)
@@ -524,6 +610,7 @@ struct GatewayConnectionDetailView: View {
         }
         .task(id: detailLoadIdentity) { await loadInfo() }
         .task(id: updatePollIdentity) { await pollGatewayUpdate() }
+        .task(id: drainPollIdentity) { await pollAdministrativeDrain() }
         .alert("Forget \(currentProfile.label)?", isPresented: $confirmingForget) {
             Button("Cancel", role: .cancel) {}
             Button("Forget Server", role: .destructive) {
@@ -575,6 +662,7 @@ struct GatewayConnectionDetailView: View {
                             debugCandidate: request.debugCandidate
                         ) {
                             activeUpdateCommandID = commandID
+                            locallyRequestedUpdateCommandID = commandID
                             acceptedOperationLabel = "Update accepted · waiting for Gateway progress"
                         }
                         updateConfig = await model.loadGatewayUpdateConfig(for: currentProfile)
@@ -593,6 +681,7 @@ struct GatewayConnectionDetailView: View {
                     Task {
                         if let commandID = await model.requestGatewayRollback(for: currentProfile) {
                             activeUpdateCommandID = commandID
+                            locallyRequestedUpdateCommandID = commandID
                             acceptedOperationLabel = "Rollback accepted · waiting for Gateway progress"
                         }
                     }
@@ -606,7 +695,15 @@ struct GatewayConnectionDetailView: View {
                 confirmTitle: "Restart",
                 destructive: true,
                 icon: "arrow.clockwise",
-                onConfirm: { Task { await model.requestGatewayRestart(for: currentProfile) } }
+                onConfirm: {
+                    Task {
+                        guard let response = await model.requestGatewayRestart(for: currentProfile),
+                              response.scheduled,
+                              let drain = response.drain else { return }
+                        drainPollingOwner = .restart(drainID: drain.drainId)
+                        drainSnapshot = drain
+                    }
+                }
             )
         }
     }
@@ -629,6 +726,24 @@ struct GatewayConnectionDetailView: View {
         ) {
             if active {
                 ProgressView().controlSize(.small).tint(accent)
+            }
+        }
+    }
+
+    private func administrativeDrainRow(_ snapshot: AdministrativeDrainSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            TronValueRow(
+                icon: snapshot.phase == .failed ? "exclamationmark.triangle" : "hourglass",
+                title: "Restart drain",
+                value: AdministrativeDrainPresentation.summary(snapshot),
+                accent: snapshot.phase == .failed ? .tronError : .tronAmber
+            )
+            if let suspect = AdministrativeDrainPresentation.suspectSummary(snapshot) {
+                Text(suspect)
+                    .font(TronTypography.caption)
+                    .foregroundStyle(Color.tronTextMuted)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 6)
             }
         }
     }
@@ -698,6 +813,10 @@ struct GatewayConnectionDetailView: View {
         "\(detailLoadIdentity):\(status.label):\(activeUpdateCommandID ?? "none")"
     }
 
+    private var drainPollIdentity: String {
+        "\(detailLoadIdentity):\(status.label):\(scenePhase):\(String(describing: drainPollingOwner))"
+    }
+
     private func loadInfo() async {
         infoLoadGeneration &+= 1
         let generation = infoLoadGeneration
@@ -712,6 +831,9 @@ struct GatewayConnectionDetailView: View {
             updateConfig = nil
             updateStatus = nil
             activeUpdateCommandID = nil
+            locallyRequestedUpdateCommandID = nil
+            drainPollingOwner = nil
+            drainSnapshot = nil
             acceptedOperationLabel = nil
             return
         }
@@ -733,14 +855,78 @@ struct GatewayConnectionDetailView: View {
             guard let commandID = activeUpdateCommandID,
                   model.profiles.selected?.id == currentProfile.id,
                   status == .connected else { return }
-            if let latest = await model.loadGatewayUpdateStatus(for: currentProfile), latest.commandId == commandID {
+            if let latest = await model.loadGatewayUpdateStatus(for: currentProfile) {
                 updateStatus = latest
                 acceptedOperationLabel = nil
+                guard latest.commandId == commandID else {
+                    activeUpdateCommandID = nil
+                    locallyRequestedUpdateCommandID = nil
+                    drainPollingOwner = nil
+                    drainSnapshot = nil
+                    return
+                }
+                if latest.state == "draining", locallyRequestedUpdateCommandID == commandID,
+                   drainPollingOwner == nil {
+                    drainPollingOwner = .update(commandID: commandID, drainID: nil)
+                }
                 if ["ready", "failed", "failure", "rolled-back"].contains(latest.state) {
                     activeUpdateCommandID = nil
+                    locallyRequestedUpdateCommandID = nil
+                    drainPollingOwner = nil
+                    drainSnapshot = nil
                     await loadInfo()
                     return
                 }
+            }
+            do { try await Task.sleep(for: .seconds(1)) }
+            catch { return }
+        }
+    }
+
+    private func pollAdministrativeDrain() async {
+        guard drainPollingOwner != nil, status == .connected else { return }
+        while !Task.isCancelled {
+            guard AdministrativeDrainPresentation.shouldPoll(
+                owner: drainPollingOwner,
+                profileID: currentProfile.id,
+                selectedProfileID: model.profiles.selected?.id,
+                connected: status == .connected,
+                sceneActive: scenePhase == .active,
+                updateStatus: updateStatus,
+                snapshot: drainSnapshot
+            ) else {
+                if model.profiles.selected?.id != currentProfile.id
+                    || (status == .connected && scenePhase == .active) {
+                    drainPollingOwner = nil
+                    drainSnapshot = nil
+                }
+                return
+            }
+            do {
+                guard let latest = try await model.loadAdministrativeDrainStatus(for: currentProfile),
+                      let owner = drainPollingOwner,
+                      AdministrativeDrainPresentation.admits(latest, for: owner) else {
+                    drainPollingOwner = nil
+                    drainSnapshot = nil
+                    return
+                }
+                if case .update(let commandID, nil) = owner {
+                    drainPollingOwner = .update(commandID: commandID, drainID: latest.drainId)
+                }
+                drainSnapshot = latest
+                if latest.phase == .complete {
+                    drainPollingOwner = nil
+                    drainSnapshot = nil
+                    return
+                }
+                if latest.phase == .failed {
+                    drainPollingOwner = nil
+                    return
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                return
             }
             do { try await Task.sleep(for: .seconds(1)) }
             catch { return }

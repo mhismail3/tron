@@ -175,9 +175,11 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   identity, and detach/revocation rejects buffered output and exit frames. Multiple
   presentations share the connection subscription until the final lease closes;
 - stopping/restart topics enter the single `GatewayLifecycleCoordinator` reconnect loop with
-  the exact delivered local connection identity; an accepted administrative restart publishes
-  `Restarting` until the replacement handshake succeeds or a monotonic 90-second watchdog reports
-  failure. Duplicate transport signals cannot replace that owner or revive work after profile teardown. Its
+  the exact delivered local connection identity. A scheduled administrative drain stays connected;
+  only `system.stopping` starts `Restarting` and its monotonic 90-second replacement watchdog.
+  Connection Settings may temporarily poll bounded drain aggregates for the exact locally requested
+  restart/update, but that projection never declares success, disconnects transport, or starts reconnect.
+  Duplicate transport signals cannot replace the lifecycle owner or revive work after profile teardown. Its
   nominal 2-second, ×1.7 backoff is independently jittered within a bounded 80–120%
   window and never exceeds 15 seconds; foreground activation accelerates a pending delay
   once without replacing an active handshake.

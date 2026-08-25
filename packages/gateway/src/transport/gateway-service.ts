@@ -28,6 +28,7 @@ import { ModelCatalogPager } from "./model-pagination.js";
 import { SessionListPaginationStore } from "./session-list-pagination.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import type { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
@@ -69,9 +70,9 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.config", "gateway.update.status", "gateway.update", "gateway.rollback", "gateway.restart",
-  "session.list", "session.open", "session.sync", "session.close", "session.transcript", "session.attention.read", "session.attention.set",
-  "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "extension.respond", "extension.editor.update", "extension.toolsExpanded",
+  "system.info", "system.logs", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status",
+  "session.list", "session.open", "session.sync", "session.close", "session.transcript", "session.attention.read",
+  "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
 ]);
 
@@ -112,14 +113,17 @@ export interface GatewayServiceDependencies {
   sessionDeleted: (sessionId: string) => void;
   broadcast: (topic: string, payload: JsonValue) => void;
   notifications?: NotificationService;
+  workRegistry?: GatewayWorkRegistry;
 }
 
 export class GatewayService {
   private restartRequested = false;
+  private restartScheduled = false;
   private readonly gitWorktrees: GitWorktreeService;
   private readonly sessionListPages = new SessionListPaginationStore();
   private readonly modelCatalogPages = new ModelCatalogPager();
   private readonly updateService: GatewayUpdateService;
+  private readonly workRegistry: GatewayWorkRegistry | undefined;
   private readonly mobileIdentityLanes = new Map<string, MobileIdentityLane>();
 
   constructor(private readonly dependencies: GatewayServiceDependencies) {
@@ -130,6 +134,7 @@ export class GatewayService {
     this.gitWorktrees = dependencies.gitWorktrees ?? new GitWorktreeService(
       dependencies.config?.tronHome ?? process.env.TRON_HOME ?? process.cwd(),
     );
+    this.workRegistry = dependencies.workRegistry ?? dependencies.sessions?.administrativeWorkRegistry;
   }
 
   releaseClient(clientID: string): void {
@@ -179,6 +184,7 @@ export class GatewayService {
         "queue-management.v1",
         "skill-prompt.v1",
         "restart-drain.v1",
+        "drain-status.v1",
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1"] : []),
       ],
@@ -201,6 +207,10 @@ export class GatewayService {
           string(params.method, "method", { max: 160 }),
           string(params.commandId, "commandId", { min: 8, max: 160 }),
         ));
+      case "gateway.drain.status": {
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Gateway drain status accepts no parameters");
+        return safeJson(this.dependencies.sessions.administrativeDrainSnapshot());
+      }
       case "gateway.update.config.status": {
         if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Gateway update config status accepts no parameters");
         return safeJson(await this.updateService.configStatus());
@@ -242,9 +252,7 @@ export class GatewayService {
         return safeJson({ devices: await this.dependencies.devices.listDevices() });
       case "device.revoke": {
         const deviceId = string(params.deviceId, "deviceId", { max: 100 });
-        return this.withMobileIdentityLane(deviceId, () => this.mutation(client, method, params, async () => {
-          // Disable local push authority before the bearer disappears. Remote
-          // revocation is retained as a bounded tombstone if Tron Push is down.
+        return this.mutation(client, method, params, () => this.withMobileIdentityLane(deviceId, async () => {
           await this.dependencies.notifications?.removeDevice(deviceId);
           const revoked = await this.dependencies.devices.revoke(deviceId);
           if (revoked) this.dependencies.deviceRevoked(deviceId);
@@ -258,7 +266,7 @@ export class GatewayService {
       }
       case "push.registration.upsert":
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
-        return this.withMobileIdentityLane(client.identity, () => this.mutation(client, method, params, async () => {
+        return this.mutation(client, method, params, () => this.withMobileIdentityLane(client.identity, async () => {
           const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "notifyWhenAskPresented"]);
           if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
           const notifications = this.requireNotifications();
@@ -277,35 +285,53 @@ export class GatewayService {
         }));
       case "push.registration.remove":
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can remove its push registration");
-        return this.withMobileIdentityLane(client.identity, () => this.mutation(client, method, params, async () => {
+        return this.mutation(client, method, params, () => this.withMobileIdentityLane(client.identity, async () => {
           if (Object.keys(params).some((key) => key !== "commandId")) throw new GatewayError("invalid_request", "Push registration removal accepts no parameters beyond commandId");
           return { removed: await this.requireNotifications().removeDevice(client.identity) };
         }));
-      case "gateway.restart":
+      case "gateway.restart": {
         if (process.env.TRON_GATEWAY_SUPERVISED !== "1") {
           throw new GatewayError("unsupported", "Gateway restart requires an external supervisor");
         }
-        return this.mutation(client, method, params, async () => {
-          const terminalIds = this.dependencies.terminals.activeTerminalIds();
-          if (terminalIds.length > 0) {
-            throw new GatewayError("busy", "Close active terminal sessions before restarting the Gateway", true);
-          }
-          const activeSessionIds = this.dependencies.sessions.activeSessionIds();
-          this.dependencies.logger?.log(
-            "info",
-            `Gateway restart requested; draining ${activeSessionIds.length} active session${activeSessionIds.length === 1 ? "" : "s"}`,
-            { event: "gateway.restart.requested", source: "transport" }
-          );
-          if (!this.restartRequested) {
-            this.restartRequested = true;
+        if (this.restartRequested) {
+          throw new GatewayError("busy", "Gateway restart is already draining; inspect gateway.drain.status or command.status", true);
+        }
+        let ownsSchedule = false;
+        try {
+          return await this.mutation(client, method, params, async () => {
+            if (!this.dependencies.terminals.beginRestartDrain()) {
+              throw new GatewayError("busy", "Close active terminal sessions before restarting the Gateway", true);
+            }
+            const activeSessionIds = this.dependencies.sessions.activeSessionIds();
+            const drain = this.dependencies.sessions.beginAdministrativeDrain();
+            this.dependencies.logger?.log(
+              "info",
+              `Gateway restart requested; draining ${activeSessionIds.length} active session${activeSessionIds.length === 1 ? "" : "s"}`,
+              { event: "gateway.restart.requested", source: "transport" }
+            );
+            if (!this.restartRequested) {
+              this.restartRequested = true;
+              ownsSchedule = true;
+            }
+            return safeJson({
+              restarting: drain.blockerCount === 0,
+              scheduled: drain.blockerCount > 0,
+              activeSessionIds,
+              drainId: drain.drainId,
+              drainRevision: drain.revision,
+              drain,
+            });
+          });
+        } finally {
+          // CommandReceiptStore has completed (or failed) its terminal write
+          // attempt before this boundary. A failed receipt cannot reopen the
+          // already accepted drain, so replacement still progresses exactly once.
+          if (ownsSchedule && !this.restartScheduled) {
+            this.restartScheduled = true;
             setTimeout(this.dependencies.requestRestart, 100).unref();
           }
-          return {
-            restarting: activeSessionIds.length === 0,
-            scheduled: activeSessionIds.length > 0,
-            activeSessionIds,
-          };
-        });
+        }
+      }
       case "legacy.inspect":
         return safeJson(await this.dependencies.legacyImport.inspect());
       case "legacy.import":
@@ -525,9 +551,9 @@ export class GatewayService {
               : oneOf(params.kind, "kind", ["agent", "compaction", "retry", "branchSummary", "bash"] as const),
           );
           return { aborted: true };
-        });
+        }, true);
       case "session.clearQueue":
-        return this.mutation(client, method, params, async () => safeJson(await (await this.openedSlot(client, params)).clearQueue()));
+        return this.mutation(client, method, params, async () => safeJson(await (await this.openedSlot(client, params)).clearQueue()), true);
       case "session.queue.replace":
         return this.mutation(client, method, params, async () => {
           if (!Array.isArray(params.items)) throw new GatewayError("invalid_request", "items must be an array");
@@ -543,7 +569,7 @@ export class GatewayService {
             integer(params.expectedRevision, "expectedRevision", 0, Number.MAX_SAFE_INTEGER),
             items,
           ));
-        });
+        }, true);
       case "session.bash":
         return this.mutation(client, method, params, async () => (await this.openedSlot(client, params)).executeBash(
           string(params.command, "command", { max: 100_000 }),
@@ -628,20 +654,20 @@ export class GatewayService {
             params.cancelled === undefined ? false : boolean(params.cancelled, "cancelled"),
           );
           return { answered: true };
-        });
+        }, true);
       case "extension.editor.update":
         return this.mutation(client, method, params, async () => (await this.openedSlot(client, params)).updateExtensionEditor(
           string(params.hostEpoch, "hostEpoch", { max: 100 }),
           integer(params.baseRevision, "baseRevision", 0, Number.MAX_SAFE_INTEGER),
           string(params.operationId, "operationId", { max: 256 }),
           text(params.text, "text", 192 * 1_024),
-        ));
+        ), true);
       case "extension.toolsExpanded":
         return this.mutation(client, method, params, async () => (await this.openedSlot(client, params)).setExtensionToolsExpanded(
           string(params.hostEpoch, "hostEpoch", { max: 100 }),
           integer(params.presentationRevision, "presentationRevision", 0, Number.MAX_SAFE_INTEGER),
           boolean(params.expanded, "expanded"),
-        ));
+        ), true);
 
       case "provider.list":
         return this.providers(await this.modelRuntime(params));
@@ -744,22 +770,32 @@ export class GatewayService {
           this.dependencies.broadcast("models.customChanged", {});
           return safeJson(result);
         });
-      case "models.refresh":
-        return this.mutation(client, method, params, async () => {
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 60_000);
-          timer.unref();
-          try {
-            const result = await (await this.modelRuntime(params)).refresh({
-              allowNetwork: true,
-              force: params.force === undefined ? false : boolean(params.force, "force"),
-              signal: controller.signal,
-            });
-            return safeJson({ aborted: result.aborted, errors: Object.fromEntries([...result.errors].map(([key, error]) => [key, error.message])) });
-          } finally {
-            clearTimeout(timer);
-          }
+      case "models.refresh": {
+        const controller = new AbortController();
+        const work = this.workRegistry?.begin({
+          kind: "administrative-provider-package-operation",
+          hostEpoch: this.workRegistry.runtimeEpoch,
+          cancellation: () => controller.abort(),
         });
+        try {
+          return await this.mutation(client, method, params, async () => {
+            const timer = setTimeout(() => controller.abort(), 60_000);
+            timer.unref();
+            try {
+              const result = await (await this.modelRuntime(params)).refresh({
+                allowNetwork: true,
+                force: params.force === undefined ? false : boolean(params.force, "force"),
+                signal: controller.signal,
+              });
+              return safeJson({ aborted: result.aborted, errors: Object.fromEntries([...result.errors].map(([key, error]) => [key, error.message])) });
+            } finally {
+              clearTimeout(timer);
+            }
+          });
+        } finally {
+          work?.settle();
+        }
+      }
 
       case "filesystem.home":
         return { path: this.dependencies.filesystem.root };
@@ -822,7 +858,7 @@ export class GatewayService {
           this.requireOwnedTerminal(client, terminalId);
           await this.dependencies.terminals.terminate(terminalId);
           return { terminated: true };
-        });
+        }, true);
       default:
         throw new GatewayError("not_found", `Unknown gateway method: ${method}`);
     }
@@ -855,7 +891,6 @@ export class GatewayService {
     return this.dependencies.notifications;
   }
 
-  /** Retain the per-device lane from invocation admission through receipt execution. */
   private async withMobileIdentityLane<T>(deviceId: string, operation: () => Promise<T>): Promise<T> {
     const lane = this.mobileIdentityLanes.get(deviceId) ?? { mutex: new AsyncMutex(), users: 0 };
     lane.users += 1;
@@ -875,9 +910,25 @@ export class GatewayService {
     method: string,
     params: Record<string, unknown>,
     operation: () => Promise<JsonValue>,
+    settlementDuringDrain = false,
   ): Promise<JsonValue> {
     const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
-    return this.dependencies.receipts.execute(client.identity, method, commandId, operation);
+    const work = this.workRegistry
+      ? (settlementDuringDrain && !this.workRegistry.isAdmissionOpen
+          ? this.workRegistry.beginDerived({
+              kind: "terminal-receipt-persistence",
+              hostEpoch: this.workRegistry.runtimeEpoch,
+            })
+          : this.workRegistry.begin({
+              kind: "terminal-receipt-persistence",
+              hostEpoch: this.workRegistry.runtimeEpoch,
+            }))
+      : undefined;
+    try {
+      return await this.dependencies.receipts.execute(client.identity, method, commandId, operation);
+    } finally {
+      work?.settle();
+    }
   }
 
   private async modelRuntime(params: Record<string, unknown>): Promise<ModelRuntime> {

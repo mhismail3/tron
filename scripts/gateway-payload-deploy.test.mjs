@@ -27,7 +27,15 @@ import {
   proveDebugHandoffIdentity,
   handoffDebugCandidate,
   healthMatchesCandidate,
+  stableSupervisorKickstartSpec,
+  kickstartStableSupervisor,
+  verifyReplacementIdentity,
+  waitForReplacement,
+  waitForDrainedReplacement,
+  restoreAndVerifyReplacement,
   waitForDrainCompletion,
+  captureLocalProcess,
+  captureLocalListenerProcess,
   confirmAndClearPendingAttempt,
   verifyIdempotentPromotion,
   restoreSelectionStateAndClearAttempt,
@@ -495,7 +503,281 @@ test("planned drain polls the exact old PID after its listener disappears", asyn
   assert.equal(exitedReads, 5);
 });
 
- test("committed marker consumed by launcher requires exact selection and live identity revalidation", async () => {
+test("startup timing and kickstart do not begin while the exact old process remains", async () => {
+  const oldProcess = { pid: 10, startIdentity: "old" };
+  const expected = { payloadFingerprint: "a".repeat(64), sourceRevision: "revision", runtimeEpoch: "new-epoch" };
+  let releaseDrain; let launches = 0; let clockReads = 0;
+  const drained = new Promise((resolve) => { releaseDrain = resolve; });
+  const pending = waitForDrainedReplacement({
+    oldProcess,
+    expected,
+    oldEpoch: "old-epoch",
+    timeoutMs: 2_000,
+    replacement: {
+      readExactProcess: async () => { await drained; return undefined; },
+      readListener: async () => ({ pid: 11, startIdentity: "new" }),
+      readHealth: async () => ({
+        buildFingerprint: expected.payloadFingerprint,
+        sourceRevision: expected.sourceRevision,
+        runtimeEpoch: expected.runtimeEpoch,
+      }),
+      launchSupervisor: async () => { launches += 1; },
+      now: () => { clockReads += 1; return 0; },
+      sleep: async () => {},
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(clockReads, 0);
+  assert.equal(launches, 0);
+  releaseDrain();
+  await pending;
+  assert.equal(launches, 0);
+
+  clockReads = 0;
+  await assert.rejects(waitForDrainedReplacement({
+    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 2_000,
+    replacement: {
+      readExactProcess: async () => { throw new Error("process probe failed"); },
+      readListener: async () => undefined,
+      readHealth: async () => ({}),
+      launchSupervisor: async () => { launches += 1; },
+      now: () => { clockReads += 1; return 0; },
+      sleep: async () => {},
+    },
+  }), /process probe failed/);
+  assert.equal(clockReads, 0);
+  assert.equal(launches, 0);
+});
+
+test("production process probes distinguish proven absence from probe failure", async () => {
+  const absent = Object.assign(new Error("exit 1"), { exitCode: 1, commandOutput: "" });
+  assert.equal(await captureLocalListenerProcess(1234, async () => { throw absent; }), undefined);
+
+  const start = "Mon Aug 25 11:00:00 2026";
+  assert.deepEqual(await captureLocalProcess(123, async (tool, args) => {
+    assert.equal(tool, "/bin/ps");
+    assert.deepEqual(args, ["-axo", "pid=,lstart="]);
+    return { output: `  12 Sun Aug 24 10:00:00 2026\n 123 ${start}\n` };
+  }), { pid: 123, startIdentity: start });
+  assert.equal(await captureLocalProcess(123, async () => ({
+    output: "  12 Sun Aug 24 10:00:00 2026\n",
+  })), undefined);
+
+  const failure = new Error("spawn failed");
+  await assert.rejects(captureLocalProcess(123, async () => { throw failure; }), /spawn failed/);
+  await assert.rejects(captureLocalProcess(123, async () => ({ output: "" })), /empty process table/);
+  await assert.rejects(captureLocalProcess(123, async () => ({ output: "malformed\n" })), /malformed/);
+  await assert.rejects(captureLocalListenerProcess(1234, async () => ({ output: "unexpected\n" })), /malformed/);
+  const denied = Object.assign(new Error("permission denied"), { exitCode: 1, commandOutput: "permission denied" });
+  await assert.rejects(captureLocalListenerProcess(1234, async () => { throw denied; }), /permission denied/);
+});
+
+test("Stable kickstart is fixed and fails closed outside supervised Stable", async () => {
+  const environment = { TRON_GATEWAY_SUPERVISED: "1", TRON_GATEWAY_CHANNEL: "stable" };
+  assert.deepEqual(stableSupervisorKickstartSpec("stable", environment, "darwin", 501), {
+    tool: "/bin/launchctl",
+    args: ["kickstart", "-k", "gui/501/com.tron.server"],
+  });
+  for (const input of [
+    ["dev", environment, "darwin", 501],
+    ["stable", {}, "darwin", 501],
+    ["stable", { ...environment, TRON_GATEWAY_CHANNEL: "dev" }, "darwin", 501],
+    ["stable", environment, "linux", 501],
+  ]) assert.throws(() => stableSupervisorKickstartSpec(...input), /supervisor recovery|unavailable/);
+
+  const calls = [];
+  await kickstartStableSupervisor("stable", async (tool, args, options) => {
+    calls.push({ tool, args, options });
+    return { output: "" };
+  }, environment, "darwin", 501);
+  assert.deepEqual(calls, [{
+    tool: "/bin/launchctl",
+    args: ["kickstart", "-k", "gui/501/com.tron.server"],
+    options: { timeoutMs: 10_000, maxOutputBytes: 16 * 1024 },
+  }]);
+  await assert.rejects(kickstartStableSupervisor("stable", async () => {
+    throw new Error("launchctl refused");
+  }, environment, "darwin", 501), /launchctl refused/);
+});
+
+test("replacement waits for coherent new process and kickstarts only after natural grace", async () => {
+  const oldProcess = { pid: 10, startIdentity: "old" };
+  const nextProcess = { pid: 11, startIdentity: "new" };
+  const expected = { payloadFingerprint: "a".repeat(64), sourceRevision: "revision", runtimeEpoch: "new-epoch" };
+  const health = { buildFingerprint: expected.payloadFingerprint, sourceRevision: expected.sourceRevision, runtimeEpoch: expected.runtimeEpoch };
+
+  let launches = 0;
+  const natural = await waitForReplacement({
+    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 2_000,
+    readListener: async () => nextProcess,
+    readHealth: async () => health,
+    launchSupervisor: async () => { launches += 1; },
+  });
+  assert.deepEqual(natural, { process: nextProcess, health });
+  assert.equal(launches, 0);
+
+  let now = 0; let launched = false;
+  const kicked = await waitForReplacement({
+    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 2_000, naturalGraceMs: 500,
+    readListener: async () => launched ? nextProcess : undefined,
+    readHealth: async () => health,
+    launchSupervisor: async () => { launches += 1; launched = true; },
+    now: () => now,
+    sleep: async (milliseconds) => { now += milliseconds; },
+  });
+  assert.deepEqual(kicked.process, nextProcess);
+  assert.equal(launches, 1);
+
+  now = 0; launches = 0;
+  const slowLive = await waitForReplacement({
+    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 2_000, naturalGraceMs: 500,
+    readListener: async () => nextProcess,
+    readHealth: async () => {
+      if (now < 1_500) throw new Error("still starting");
+      return health;
+    },
+    launchSupervisor: async () => { launches += 1; },
+    now: () => now,
+    sleep: async (milliseconds) => { now += milliseconds; },
+  });
+  assert.deepEqual(slowLive.process, nextProcess);
+  assert.equal(launches, 0);
+
+  now = 0; launches = 0;
+  let listenerReads = 0;
+  const appearedAtBoundary = await waitForReplacement({
+    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 2_000, naturalGraceMs: 0,
+    readListener: async () => (++listenerReads === 1 ? undefined : nextProcess),
+    readHealth: async () => health,
+    launchSupervisor: async () => { launches += 1; },
+    now: () => now,
+    sleep: async (milliseconds) => { now += milliseconds; },
+  });
+  assert.deepEqual(appearedAtBoundary.process, nextProcess);
+  assert.equal(launches, 0);
+
+  launches = 0;
+  await assert.rejects(waitForReplacement({
+    oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 2_000, naturalGraceMs: 0,
+    readListener: async () => { throw new Error("listener probe denied"); },
+    readHealth: async () => health,
+    launchSupervisor: async () => { launches += 1; },
+  }), /listener probe denied/);
+  assert.equal(launches, 0);
+});
+
+test("same or unstable listener and stale health cannot satisfy replacement", async () => {
+  const oldProcess = { pid: 10, startIdentity: "old" };
+  const expected = { payloadFingerprint: "a".repeat(64), sourceRevision: "revision", runtimeEpoch: "new-epoch" };
+  const stale = { buildFingerprint: expected.payloadFingerprint, sourceRevision: expected.sourceRevision, runtimeEpoch: "old-epoch" };
+  assert.equal(await verifyReplacementIdentity({
+    oldProcess, expected, oldEpoch: "old-epoch",
+    readListener: async () => oldProcess,
+    readHealth: async () => stale,
+  }), undefined);
+
+  let reads = 0;
+  assert.equal(await verifyReplacementIdentity({
+    oldProcess, expected, oldEpoch: "old-epoch",
+    readListener: async () => (++reads === 1
+      ? { pid: 11, startIdentity: "one" }
+      : { pid: 12, startIdentity: "two" }),
+    readHealth: async () => ({ ...stale, runtimeEpoch: expected.runtimeEpoch }),
+  }), undefined);
+
+  let now = 0;
+  let foreignError;
+  try {
+    await waitForReplacement({
+      oldProcess, expected, oldEpoch: "old-epoch", timeoutMs: 500, naturalGraceMs: 0,
+      readListener: async () => ({ pid: 99, startIdentity: "foreign" }),
+      readHealth: async () => ({ ...stale, buildFingerprint: "b".repeat(64) }),
+      launchSupervisor: async () => assert.fail("foreign listener must not be kickstarted"),
+      now: () => now,
+      sleep: async (milliseconds) => { now += milliseconds; },
+    });
+  } catch (error) { foreignError = error; }
+  assert.match(foreignError.message, /coherent replacement/);
+  assert.equal(foreignError.observedProcess, undefined);
+});
+
+test("recovery coordinates an existing restored listener and fails closed on unknown listeners", async () => {
+  const expected = { payloadFingerprint: "a".repeat(64), sourceRevision: "old-revision", runtimeEpoch: "old-epoch" };
+  const health = { buildFingerprint: expected.payloadFingerprint, sourceRevision: expected.sourceRevision, runtimeEpoch: expected.runtimeEpoch };
+  const candidate = { pid: 12, startIdentity: "candidate" };
+  const restored = { pid: 13, startIdentity: "restored" };
+  const order = [];
+  let launched = false; let now = 0;
+  const replacement = {
+    readListener: async () => launched ? restored : candidate,
+    readHealth: async () => launched ? health : { ...health, buildFingerprint: "b".repeat(64) },
+    launchSupervisor: async () => { order.push("launch"); launched = true; },
+    now: () => now,
+    sleep: async (milliseconds) => { now += milliseconds; },
+  };
+  const result = await restoreAndVerifyReplacement({
+    restore: async () => { order.push("restore"); },
+    validateRestored: async () => { order.push("validate"); },
+    beforeLaunch: async () => { order.push("rollback-requested"); },
+    replacement, expected, oldEpoch: "candidate-epoch", timeoutMs: 2_000,
+    replaceableProcess: candidate,
+  });
+  assert.deepEqual(order, ["restore", "validate", "rollback-requested", "launch"]);
+  assert.deepEqual(result.process, restored);
+
+  let launches = 0;
+  const alreadyRestored = await restoreAndVerifyReplacement({
+    restore: async () => {}, validateRestored: async () => {},
+    replacement: {
+      readListener: async () => restored,
+      readHealth: async () => health,
+      launchSupervisor: async () => { launches += 1; },
+    },
+    expected, oldEpoch: "candidate-epoch", timeoutMs: 500,
+    replaceableProcess: candidate,
+  });
+  assert.deepEqual(alreadyRestored.process, restored);
+  assert.equal(launches, 0);
+
+  await assert.rejects(restoreAndVerifyReplacement({
+    restore: async () => {}, validateRestored: async () => {},
+    replacement: {
+      readListener: async () => ({ pid: 99, startIdentity: "unknown" }),
+      readHealth: async () => ({ ...health, buildFingerprint: "b".repeat(64) }),
+      launchSupervisor: async () => { launches += 1; },
+    },
+    expected, oldEpoch: "candidate-epoch", timeoutMs: 500,
+    replaceableProcess: candidate,
+  }), /unknown live listener/);
+  assert.equal(launches, 0);
+
+  let selectionRestored = false;
+  await assert.rejects(restoreAndVerifyReplacement({
+    restore: async () => { selectionRestored = true; },
+    validateRestored: async () => assert.equal(selectionRestored, true),
+    replacement: {
+      readListener: async () => undefined,
+      readHealth: async () => health,
+      launchSupervisor: async () => { throw new Error("launchctl refused"); },
+    },
+    expected, oldEpoch: "candidate-epoch", timeoutMs: 500,
+  }), /launchctl refused/);
+  assert.equal(selectionRestored, true);
+
+  launched = false; now = 0;
+  await assert.rejects(restoreAndVerifyReplacement({
+    restore: async () => {}, validateRestored: async () => {},
+    replacement: {
+      ...replacement,
+      readListener: async () => launched ? restored : undefined,
+      readHealth: async () => ({ ...health, buildFingerprint: "b".repeat(64) }),
+      launchSupervisor: async () => { launched = true; },
+    },
+    expected, oldEpoch: "candidate-epoch", timeoutMs: 500,
+  }), /coherent replacement/);
+});
+
+test("committed marker consumed by launcher requires exact selection and live identity revalidation", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-pending-interleave-"));
   try {
     const store = await paths(root);

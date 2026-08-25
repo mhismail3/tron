@@ -775,10 +775,6 @@ export function validateApplyRequest(value) {
   return { channel, mode, ...(candidateVersion === undefined ? {} : { candidateVersion }), ...(candidateFingerprint === undefined ? {} : { candidateFingerprint }), commandId };
 }
 
-function suffixedCommandId(value, suffix) {
-  return `${value.slice(0, 160 - suffix.length)}${suffix}`;
-}
-
 function applyArguments() {
   const values = {};
   const names = new Map([
@@ -936,7 +932,13 @@ export function runBounded(tool, args, options = {}) {
     child.once("close", (code, signal) => {
       if (terminating) return;
       if (code === 0) finish(undefined, { code, signal, output });
-      else finish(new Error(`Gateway source build failed (${signal ?? `exit ${code}`}): ${output.slice(-2_048)}`));
+      else {
+        const error = new Error(`Gateway source build failed (${signal ?? `exit ${code}`}): ${output.slice(-2_048)}`);
+        error.exitCode = code;
+        error.signal = signal;
+        error.commandOutput = output;
+        finish(error);
+      }
     });
     timer = setTimeout(() => failAndTerminate("Gateway source build timed out"), timeoutMs);
     timer.unref?.();
@@ -1083,22 +1085,6 @@ async function requestRestart({ host, port, token, timeoutMs, commandId }) {
   return authenticatedRequest({ host, port, token, timeoutMs, method: "gateway.restart", params: { commandId } });
 }
 
-async function health(host, port, timeoutMs) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(`http://${host.includes(":") ? `[${host}]` : host}:${port}/health`, { signal: controller.signal });
-    if (!response.ok) throw new Error(`Gateway health returned HTTP ${response.status}`);
-    const value = await response.json();
-    if (!value || value.status !== "ok" || value.protocolVersion !== PROTOCOL_VERSION
-      || value.minProtocolVersion !== PROTOCOL_VERSION || typeof value.runtimeEpoch !== "string"
-      || typeof value.buildFingerprint !== "string" || typeof value.sourceRevision !== "string") {
-      throw new Error("Gateway health identity is incomplete");
-    }
-    return value;
-  } finally { clearTimeout(timer); }
-}
-
 export async function preflightPayload(root, runCommand = runBounded, timeoutMs = 30_000) {
   const manifest = await validatePayload(root, {}, true);
   const runtime = join(root, process.arch === "arm64" ? "runtime/node-arm64" : "runtime/node-x64");
@@ -1137,32 +1123,195 @@ export function healthMatchesCandidate(value, expected, oldEpoch, requireEpochCh
     && (!requireEpochChange || oldEpoch === undefined || value.runtimeEpoch !== oldEpoch);
 }
 
-async function waitHealth(options, expected, oldEpoch, requireEpochChange = true) {
-  const deadline = Date.now() + options.timeoutMs;
-  let last;
-  while (Date.now() < deadline) {
-    try {
-      const value = await health(options.host, options.port, Math.min(2_000, options.timeoutMs));
-      last = value;
-      if (healthMatchesCandidate(value, expected, oldEpoch, requireEpochChange)) return value;
-    } catch { /* restart window */ }
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+export function stableSupervisorKickstartSpec(
+  channel,
+  environment = process.env,
+  platform = process.platform,
+  uid = typeof process.getuid === "function" ? process.getuid() : undefined,
+) {
+  if (channel !== "stable" || environment.TRON_GATEWAY_SUPERVISED !== "1"
+    || environment.TRON_GATEWAY_CHANNEL !== "stable") {
+    throw new Error("Stable supervisor recovery requires the supervised Stable Gateway boundary");
   }
-  throw new Error(`Gateway did not become ready with the expected payload identity${last ? ` (observed ${JSON.stringify(last)})` : ""}`);
+  if (platform !== "darwin" || !Number.isSafeInteger(uid) || uid < 0) {
+    throw new Error("Stable supervisor recovery is unavailable on this runtime");
+  }
+  return { tool: "/bin/launchctl", args: ["kickstart", "-k", `gui/${uid}/com.tron.server`] };
+}
+
+export async function kickstartStableSupervisor(
+  channel,
+  runCommand = runBounded,
+  environment = process.env,
+  platform = process.platform,
+  uid = typeof process.getuid === "function" ? process.getuid() : undefined,
+) {
+  const command = stableSupervisorKickstartSpec(channel, environment, platform, uid);
+  await runCommand(command.tool, command.args, { timeoutMs: 10_000, maxOutputBytes: 16 * 1024 });
+}
+
+function sameProcess(left, right) {
+  return left !== undefined && right !== undefined
+    && left.pid === right.pid && left.startIdentity === right.startIdentity;
+}
+
+export async function verifyReplacementIdentity({
+  oldProcess,
+  expected,
+  oldEpoch,
+  requireEpochChange = true,
+  readListener,
+  readHealth,
+}) {
+  const before = await readListener();
+  if (!before || sameProcess(before, oldProcess)) return undefined;
+  const value = await readHealth();
+  const after = await readListener();
+  if (!sameProcess(before, after)
+    || !healthMatchesCandidate(value, expected, oldEpoch, requireEpochChange)) return undefined;
+  return { process: after, health: value };
+}
+
+export async function waitForReplacement({
+  oldProcess,
+  expected,
+  oldEpoch,
+  requireEpochChange = true,
+  timeoutMs,
+  naturalGraceMs = 1_500,
+  readListener,
+  readHealth,
+  launchSupervisor,
+  now = Date.now,
+  sleep = (milliseconds) => new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds)),
+}) {
+  const startedAt = now();
+  const deadline = startedAt + timeoutMs;
+  let launched = false;
+  let observedProcess;
+  while (now() < deadline) {
+    // Listener probe failures are safety failures, never evidence of absence.
+    const listener = await readListener();
+    if (listener) {
+      try {
+        const value = await readHealth();
+        const after = await readListener();
+        if (sameProcess(listener, after) && !sameProcess(after, oldProcess)) {
+          // Only an exact payload identity is intentional replacement authority.
+          // A foreign listener must never become killable merely because it was
+          // observed during the candidate window.
+          if (healthMatchesCandidate(value, expected, oldEpoch, false)) observedProcess = after;
+          if (healthMatchesCandidate(value, expected, oldEpoch, requireEpochChange)) {
+            return { process: after, health: value };
+          }
+        }
+      } catch {
+        // A live replacement may need the full bounded startup window. Health
+        // failures are retryable but never authorize killing that listener.
+      }
+    }
+    if (!launched && now() - startedAt >= naturalGraceMs) {
+      // Recheck immediately at the destructive boundary. Only proven listener
+      // absence authorizes the one fixed Stable kickstart.
+      const beforeLaunch = await readListener();
+      if (!beforeLaunch) {
+        await launchSupervisor();
+        launched = true;
+      }
+    }
+    await sleep(250);
+  }
+  const error = new Error("Gateway did not become ready with a coherent replacement payload identity");
+  if (observedProcess) error.observedProcess = observedProcess;
+  throw error;
+}
+
+export async function waitForDrainedReplacement({ oldProcess, replacement, expected, oldEpoch, timeoutMs, onDrainComplete }) {
+  await waitForDrainCompletion(oldProcess, replacement.readExactProcess, replacement.sleep);
+  onDrainComplete?.();
+  return waitForReplacement({
+    oldProcess,
+    expected,
+    oldEpoch,
+    timeoutMs,
+    readListener: replacement.readListener,
+    readHealth: replacement.readHealth,
+    launchSupervisor: replacement.launchSupervisor,
+    ...(replacement.now ? { now: replacement.now } : {}),
+    ...(replacement.sleep ? { sleep: replacement.sleep } : {}),
+  });
+}
+
+export async function restoreAndVerifyReplacement({
+  restore, validateRestored, beforeLaunch, replacement, expected, oldEpoch, timeoutMs, replaceableProcess,
+}) {
+  await restore();
+  await validateRestored();
+  await beforeLaunch?.();
+
+  const listener = await replacement.readListener();
+  if (listener) {
+    let value;
+    try { value = await replacement.readHealth(); } catch { /* exact captured candidate may be replaced below */ }
+    // A second listener read is a safety check and must propagate failure.
+    const after = await replacement.readListener();
+    if (sameProcess(listener, after)
+      && value !== undefined
+      && healthMatchesCandidate(value, expected, oldEpoch, false)) {
+      // The retained launcher already restored and relaunched the exact recovery
+      // payload. Do not create a second kill owner.
+      return { process: after, health: value };
+    }
+    if (!sameProcess(listener, after) || !sameProcess(after, replaceableProcess)) {
+      throw new Error("Gateway recovery found an unknown live listener; supervisor kickstart was withheld");
+    }
+  }
+
+  // No listener, or the exact process captured from the failed candidate
+  // attempt, is the only intentional replacement boundary.
+  await replacement.launchSupervisor();
+  return waitForReplacement({
+    oldProcess: listener,
+    expected,
+    oldEpoch,
+    requireEpochChange: false,
+    timeoutMs,
+    readListener: replacement.readListener,
+    readHealth: replacement.readHealth,
+    launchSupervisor: replacement.launchSupervisor,
+    // The supervisor was invoked explicitly above; this disables another call.
+    naturalGraceMs: Number.POSITIVE_INFINITY,
+    ...(replacement.now ? { now: replacement.now } : {}),
+    ...(replacement.sleep ? { sleep: replacement.sleep } : {}),
+  });
+}
+
+function commandProvedAbsence(error) {
+  return error?.exitCode === 1 && String(error?.commandOutput ?? "").trim().length === 0;
 }
 
 export async function captureLocalProcess(pid, runCommand = runBounded) {
   if (!Number.isSafeInteger(pid) || pid < 1) throw new Error("invalid Gateway PID");
-  let startIdentity;
-  try {
-    startIdentity = (await runCommand("/bin/ps", ["-o", "lstart=", "-p", String(pid)], {
-      timeoutMs: 2_000, maxOutputBytes: 4 * 1024,
-    })).output.trim();
-  } catch {
-    return undefined;
+  // Enumerating the bounded local process table makes absence an exit-zero,
+  // parsed fact. A targeted `ps -p` uses exit 1 for both absence and some probe
+  // failures, which is not a safe replacement boundary.
+  const output = (await runCommand("/bin/ps", ["-axo", "pid=,lstart="], {
+    timeoutMs: 2_000, maxOutputBytes: 512 * 1024,
+  })).output;
+  const lines = output.split(/\r?\n/u).filter((line) => line.trim().length > 0);
+  if (lines.length === 0) throw new Error("Gateway process probe returned an empty process table");
+  const startPattern = /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+[ 0-9][0-9]\s+[0-9]{2}:[0-9]{2}:[0-9]{2}\s+[0-9]{4}$/u;
+  const matches = [];
+  for (const line of lines) {
+    const match = /^([1-9][0-9]*)\s+(.+)$/u.exec(line.trim());
+    if (!match || !startPattern.test(match[2]) || Buffer.byteLength(match[2]) > 512) {
+      throw new Error("Gateway process probe returned malformed process identity");
+    }
+    if (Number(match[1]) === pid) matches.push(match[2]);
   }
-  if (!startIdentity || Buffer.byteLength(startIdentity) > 512) return undefined;
-  return { pid, startIdentity };
+  if (matches.length === 0) return undefined;
+  if (matches.length !== 1) throw new Error("Gateway process probe returned duplicate process identities");
+  return { pid, startIdentity: matches[0] };
 }
 
 export async function captureLocalListenerProcess(port, runCommand = runBounded) {
@@ -1172,13 +1321,16 @@ export async function captureLocalListenerProcess(port, runCommand = runBounded)
     output = (await runCommand("/usr/sbin/lsof", ["-nP", "-Fp", `-iTCP:${port}`, "-sTCP:LISTEN"], {
       timeoutMs: 2_000, maxOutputBytes: 8 * 1024,
     })).output;
-  } catch {
-    return undefined;
+  } catch (error) {
+    if (commandProvedAbsence(error)) return undefined;
+    throw error;
   }
-  const pids = [...new Set(output.split(/\r?\n/u)
-    .filter((line) => /^p[1-9][0-9]*$/u.test(line))
-    .map((line) => Number(line.slice(1))))];
-  if (pids.length === 0) return undefined;
+  const lines = output.split(/\r?\n/u).filter(Boolean);
+  if (lines.some((line) => !/^p[1-9][0-9]*$/u.test(line))) {
+    throw new Error("Gateway listener probe returned malformed output");
+  }
+  const pids = [...new Set(lines.map((line) => Number(line.slice(1))))];
+  if (pids.length === 0) throw new Error("Gateway listener probe returned an empty successful result");
   if (pids.length !== 1) throw new Error(`Gateway port ${port} has multiple listeners`);
   return captureLocalProcess(pids[0], runCommand);
 }
@@ -1229,8 +1381,23 @@ async function captureAuthenticatedRestartBoundary({ host, port, token, timeoutM
   return { info, process };
 }
 
-async function awaitLocalRestartTransition(_port, processIdentity) {
-  return waitForDrainCompletion(processIdentity, (pid) => captureLocalProcess(pid));
+function productionReplacementDependencies({ channel, host, port, token, timeoutMs }) {
+  return {
+    readExactProcess: (pid) => captureLocalProcess(pid),
+    readListener: () => captureLocalListenerProcess(port),
+    readHealth: async () => requireAuthenticatedRuntimeInfo(await authenticatedRequest({
+      host, port, token, timeoutMs: Math.min(2_000, timeoutMs), method: "system.info",
+    }), channel),
+    launchSupervisor: () => kickstartStableSupervisor(channel),
+  };
+}
+
+async function requireSelectedPayload(paths, expected) {
+  const selected = await currentSelection(paths);
+  if (!selected || selected.version !== expected.version
+    || selected.payloadFingerprint !== expected.payloadFingerprint) {
+    throw new Error("restored Gateway selection does not match the validated recovery payload");
+  }
 }
 
 export async function verifyIdempotentPromotion({ paths, channel, manifest, current, requestInfo }) {
@@ -1249,7 +1416,7 @@ export async function verifyIdempotentPromotion({ paths, channel, manifest, curr
   return { state: "ready", manifest, health: info, idempotent: true };
 }
 
-async function promote({ paths, channel, version, expectedFingerprint, host, port, token, timeoutMs, commandId }) {
+async function promote({ paths, channel, version, expectedFingerprint, host, port, token, timeoutMs, commandId, replacement }) {
   return withStoreLock(paths, async () => {
     const targetRoot = join(paths.versionsRoot, version);
     const manifest = await validatePayload(targetRoot, { channel, version }, true);
@@ -1277,6 +1444,7 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
     const boundary = await captureAuthenticatedRestartBoundary({ host, port, token, timeoutMs, channel });
     const before = boundary.info;
     const oldProcess = boundary.process;
+    const replacementBoundary = replacement ?? productionReplacementDependencies({ channel, host, port, token, timeoutMs });
     await preflightPayload(targetRoot, runBounded, Math.min(timeoutMs, 30_000));
     const target = { schema: SCHEMA, kind: SELECTION_KIND, channel, version, payloadFingerprint: manifest.payloadFingerprint };
     const priorDeploymentState = await readOptional(paths.state);
@@ -1304,6 +1472,7 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
     // process is healthy. In that case current already names the candidate;
     // publishing again would overwrite the real rollback pointer with itself.
     let published = candidateAlreadyPublished;
+    let oldProcessGone = false;
     try {
       if (!unchanged) {
         await writePendingAttempt(paths, target, prior);
@@ -1316,47 +1485,63 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
       await requestRestart({ host, port, token, timeoutMs, commandId: stateBase.commandId });
       await writeState(paths, { ...stateBase, state: "draining" });
       await writeProgress(paths, "draining", stateBase.commandId);
-      await awaitLocalRestartTransition(port, oldProcess);
-      const ready = await waitHealth({ host, port, timeoutMs }, manifest, before.runtimeEpoch);
-      // Commit startup before publishing success. A concurrent launcher sees
-      // committed and must preserve the candidate rather than crash-rollback.
-      if (prior) await commitPendingAttempt(paths, target);
-      const confirmed = prior
-        ? await confirmAndClearPendingAttempt(paths, target, manifest, before.runtimeEpoch, { host, port, timeoutMs })
-        : await health(host, port, Math.min(2_000, timeoutMs));
-      if (!prior && !healthMatchesCandidate(confirmed, manifest, before.runtimeEpoch)) {
-        throw new Error("candidate identity changed before startup commit");
+      const ready = await waitForDrainedReplacement({
+        oldProcess,
+        replacement: replacementBoundary,
+        expected: manifest,
+        oldEpoch: before.runtimeEpoch,
+        timeoutMs,
+        onDrainComplete: () => { oldProcessGone = true; },
+      });
+      // Commit only after one coherent replacement identity is proven.
+      await requireSelectedPayload(paths, target);
+      if (prior) {
+        await commitPendingAttempt(paths, target);
+        await clearPendingAttempt(paths, target, true);
       }
+      const confirmed = ready.health;
       await writeState(paths, { ...stateBase, state: "ready" });
       return { state: "ready", manifest, health: confirmed };
-    } catch (error) {
+    } catch (caught) {
+      const error = caught instanceof Error ? caught : new Error(String(caught));
       if (published) {
         try {
-          if (unchanged) await rollbackSelectionAndClearAttempt(paths);
-          else await restoreSelectionStateAndClearAttempt(paths, priorState);
           await writeState(paths, { ...stateBase, state: deploymentTransition("published", "failed"), error: String(error?.message ?? error) });
-          const recoveryBoundary = await captureAuthenticatedRestartBoundary({ host, port, token, timeoutMs, channel });
-          const recoveryBefore = recoveryBoundary.info;
-          const recoveryProcess = recoveryBoundary.process;
-          await requestRestart({ host, port, token, timeoutMs, commandId: suffixedCommandId(stateBase.commandId, "-rollback") });
-          await awaitLocalRestartTransition(port, recoveryProcess);
-          const recoveryTarget = recoveryManifest ?? {
-            payloadFingerprint: before.buildFingerprint, sourceRevision: before.sourceRevision,
-            runtimeEpoch: before.runtimeEpoch,
-          };
-          await waitHealth({ host, port, timeoutMs }, recoveryTarget, recoveryBefore.runtimeEpoch, false);
-          await writeState(paths, { ...stateBase, state: deploymentTransition("failed", "rollbackRequested") });
+          if (!recoverySelectionValue || !recoveryManifest) throw new Error("validated recovery payload is unavailable");
+          const restore = () => unchanged
+            ? rollbackSelectionAndClearAttempt(paths)
+            : restoreSelectionStateAndClearAttempt(paths, priorState);
+          if (!oldProcessGone) {
+            await restore();
+            await requireSelectedPayload(paths, recoverySelectionValue);
+            throw new Error("supervisor recovery withheld until the exact old Gateway identity disappears");
+          }
+          await restoreAndVerifyReplacement({
+            restore,
+            validateRestored: () => requireSelectedPayload(paths, recoverySelectionValue),
+            beforeLaunch: () => writeState(paths, {
+              ...stateBase, state: deploymentTransition("failed", "rollbackRequested"),
+            }),
+            replacement: replacementBoundary,
+            expected: recoveryManifest,
+            oldEpoch: before.runtimeEpoch,
+            timeoutMs,
+            replaceableProcess: error.observedProcess,
+          });
           await writeState(paths, { ...stateBase, state: deploymentTransition("rollback-requested", "rolledBack") });
           // Preserve terminal automatic rollback through the outer apply
           // boundary; callers still receive the original bounded failure.
           if (error && typeof error === "object") error.automaticRollbackCompleted = true;
-        } catch (recoveryError) {
-          try {
-            await restoreSelectionStateAndClearAttempt(paths, priorState);
-          } catch (restoreError) {
-            recoveryError.message += `; selection restore failed: ${restoreError.message}`;
-          }
+        } catch (caughtRecovery) {
+          const recoveryError = caughtRecovery instanceof Error
+            ? caughtRecovery
+            : new Error(String(caughtRecovery));
           error.message += `; deployment recovery failed: ${recoveryError.message}`;
+          await writeState(paths, {
+            ...stateBase,
+            state: "failed",
+            error: error.message,
+          }).catch(() => {});
         }
       } else {
         await rm(paths.pending ?? join(paths.channelRoot, "pending-attempt.json"), { force: true }).catch(() => {});
@@ -1809,47 +1994,80 @@ export async function loadRollbackTarget(paths) {
     join(paths.versionsRoot, currentSelectionValue.version),
     { channel: paths.channel, version: currentSelectionValue.version, payloadFingerprint: currentSelectionValue.payloadFingerprint }, true,
   );
-  return { priorState, priorSelection, manifest, currentManifest };
+  return { priorState, priorSelection, manifest, currentSelectionValue, currentManifest };
 }
 
-async function rollback({ paths, host, port, token, timeoutMs, commandId }) {
+async function rollback({ paths, host, port, token, timeoutMs, commandId, replacement }) {
   return withStoreLock(paths, async () => {
-    const { priorState, manifest: target, currentManifest } = await loadRollbackTarget(paths);
+    const { priorState, manifest: target, currentSelectionValue, currentManifest } = await loadRollbackTarget(paths);
     const boundary = await captureAuthenticatedRestartBoundary({
       host, port, token, timeoutMs, channel: paths.channel,
     });
     const before = boundary.info;
     const oldProcess = boundary.process;
+    const replacementBoundary = replacement ?? productionReplacementDependencies({
+      channel: paths.channel, host, port, token, timeoutMs,
+    });
     let switched = false;
+    let oldProcessGone = false;
     const restartCommandId = commandId ?? `gateway-payload-rollback-${randomUUID()}`;
     try {
-      await rollbackSelection(paths);
+      await rollbackSelectionAndClearAttempt(paths);
       switched = true;
       await requestRestart({ host, port, token, timeoutMs, commandId: restartCommandId });
-      await awaitLocalRestartTransition(port, oldProcess);
-      const ready = await waitHealth({ host, port, timeoutMs }, target, before.runtimeEpoch);
+      const ready = await waitForDrainedReplacement({
+        oldProcess,
+        replacement: replacementBoundary,
+        expected: target,
+        oldEpoch: before.runtimeEpoch,
+        timeoutMs,
+        onDrainComplete: () => { oldProcessGone = true; },
+      });
       await writeState(paths, {
         state: "rolled-back", channel: paths.channel, version: target.version,
         payloadFingerprint: target.payloadFingerprint, sourceRevision: target.sourceRevision, runtimeEpoch: target.runtimeEpoch,
         commandId: restartCommandId,
       });
-      return { state: "rolled-back", manifest: target, health: ready };
-    } catch (error) {
+      return { state: "rolled-back", manifest: target, health: ready.health };
+    } catch (caught) {
+      const error = caught instanceof Error ? caught : new Error(String(caught));
       if (switched) {
         try {
-          await restoreSelectionState(paths, priorState);
-          if (currentManifest) {
-            const compensationBoundary = await captureAuthenticatedRestartBoundary({
-              host, port, token, timeoutMs, channel: paths.channel,
+          if (currentManifest && currentSelectionValue) {
+            const restore = () => restoreSelectionStateAndClearAttempt(paths, priorState);
+            if (!oldProcessGone) {
+              await restore();
+              await requireSelectedPayload(paths, currentSelectionValue);
+              throw new Error("rollback compensation withheld until the exact old Gateway identity disappears");
+            }
+            await restoreAndVerifyReplacement({
+              restore,
+              validateRestored: () => requireSelectedPayload(paths, currentSelectionValue),
+              replacement: replacementBoundary,
+              expected: currentManifest,
+              oldEpoch: before.runtimeEpoch,
+              timeoutMs,
+              replaceableProcess: error.observedProcess,
             });
-            const compensationBefore = compensationBoundary.info;
-            const compensationProcess = compensationBoundary.process;
-            await requestRestart({ host, port, token, timeoutMs, commandId: suffixedCommandId(restartCommandId, "-compensate") });
-            await awaitLocalRestartTransition(port, compensationProcess);
-            await waitHealth({ host, port, timeoutMs }, currentManifest, compensationBefore.runtimeEpoch, false);
+          } else {
+            await restoreSelectionStateAndClearAttempt(paths, priorState);
           }
-        } catch (restoreError) {
+        } catch (caughtRestore) {
+          const restoreError = caughtRestore instanceof Error
+            ? caughtRestore
+            : new Error(String(caughtRestore));
           error.message += `; rollback compensation failed: ${restoreError.message}`;
+          const selectedManifest = currentManifest ?? target;
+          await writeState(paths, {
+            state: "failed",
+            channel: paths.channel,
+            version: selectedManifest.version,
+            payloadFingerprint: selectedManifest.payloadFingerprint,
+            sourceRevision: selectedManifest.sourceRevision,
+            runtimeEpoch: selectedManifest.runtimeEpoch,
+            commandId: restartCommandId,
+            error: error.message,
+          }).catch(() => {});
         }
       }
       throw error;

@@ -1,10 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { existsSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { copyFile, mkdtemp, open, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
 import {
   AgentSessionRuntime,
@@ -27,6 +27,7 @@ import type {
   RetryState,
   SessionOperationState,
   SessionPhase,
+  AdministrativeDrainBlockerCategory,
   SessionSnapshot,
   PendingPromptState,
   SessionSummaryUpdate,
@@ -58,11 +59,12 @@ import {
 } from "./projection.js";
 import type { RunMarkerEvidence, RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, extensionOwnerFor } from "../extensions/owner-attribution.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionLifecycleArtifact, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasStructuredExtensionRunActivity, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates, type ExtensionArtifactRejectionReason } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import type { ExtensionActivityHistoryPage } from "./extension-activity-history.js";
 import type { NotificationService } from "../notifications/notification-service.js";
+import type { GatewayWorkHandle, GatewayWorkKind, GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { createTronNotifyExtension } from "../notifications/tron-notify-extension.js";
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
@@ -191,14 +193,24 @@ export interface RuntimeSlotDependencies {
   blobs: BlobStore;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
+  workRegistry: GatewayWorkRegistry;
   machineId?: string;
   notifications?: NotificationService;
+  extensionArtifactWarning?: (warning: { reason: ExtensionArtifactRejectionReason; owner: string }) => void;
 }
 
 type CompletionOwnershipItem = {
   completion: CanonicalAssistantCompletion;
   stamp: Promise<void> | undefined;
+  fallbackWork?: GatewayWorkHandle;
 };
+
+export interface RuntimeDrainBlockerFact {
+  key: string;
+  category: AdministrativeDrainBlockerCategory;
+  state: "active" | "settling" | "suspect";
+  admittedAt?: string;
+}
 
 /**
  * Owns one live Pi runtime and the reconnect-safe mobile projection for its
@@ -238,6 +250,7 @@ export class RuntimeSlot {
    * are started independently so a failed projection head cannot hide a newer
    * continuation from restart reconciliation. */
   private readonly completionOwnershipQueue: CompletionOwnershipItem[] = [];
+  private readonly completionWorkOwners = new Map<string, string>();
   private attentionBarrier: Promise<void> | undefined;
   private rebindAttentionDisposition: SessionAttentionRebindDisposition = "migrate";
   /** Disposable runtime-only bridge from canonical entry IDs to mounted turn IDs. */
@@ -249,6 +262,7 @@ export class RuntimeSlot {
   /** Monotonic invocation starts keep duration independent of wall-clock changes. */
   private readonly toolStartedAtMonotonicMs = new Map<string, number>();
   private activeOperationId: string | undefined;
+  private readonly operationWork = new Map<string, GatewayWorkHandle>();
   private activeExports = 0;
   private operation: SessionOperationState | undefined;
   private pendingExtensionCommand: SessionOperationState | undefined;
@@ -256,6 +270,7 @@ export class RuntimeSlot {
   private resourceReloadOptions: { resolveProjectTrust: () => Promise<boolean> } | undefined;
   private projectTrustReloadOverride: boolean | undefined;
   private trustReloadPending = false;
+  private trustReloadWork: GatewayWorkHandle | undefined;
   private readonly toolExecutions = new Map<string, ToolExecutionState>();
   /** Latched declaration facts keyed by exact Pi tool call ID. Runtime-only;
    * never persisted to canonical Pi JSONL. */
@@ -277,9 +292,18 @@ export class RuntimeSlot {
   }>();
   private readonly extensionActivityWatchers = new Map<string, { watcher: FSWatcher; timer: NodeJS.Timeout | undefined; asyncDir: string }>();
   private readonly extensionActivityReadGenerations = new Map<string, number>();
+  private readonly extensionArtifactWarnings = new Map<string, number>();
   /** Receipt persistence is runtime work: eviction and restart drain wait for
    * this bounded barrier rather than disposing the Pi manager underneath it. */
   private readonly pendingReceiptWrites = new Set<Promise<void>>();
+  private readonly durableWrites = new Map<string, Promise<void>>();
+  private readonly extensionReceiptWrites = new Map<string, Promise<void>>();
+  private readonly extensionReceiptOwners = new Map<string, GatewayWorkHandle>();
+  private extensionShutdownWork: GatewayWorkHandle | undefined;
+  private extensionShutdownInFlight = false;
+  private extensionShutdownRetryTimer: NodeJS.Timeout | undefined;
+  /** Follow-up queue owners removed by Pi immediately before their agent_start. */
+  private readonly dequeuedFollowUpOwners: string[] = [];
   private readonly unregisterExtensionExpiry: () => void;
   /** Bounded runtime timing enriches the mobile projection without changing Pi
    * JSONL. Historical entries without retained metadata use timestamp fallback. */
@@ -369,38 +393,105 @@ export class RuntimeSlot {
   /** Retained presentation protects only automatic idle eviction. */
   get isEvictionProtected(): boolean { return this.lifecycle.preventsEviction; }
   get isDrainBusy(): boolean {
-    return this.lifecycle.preventsAdministrativeDrain
-      || this.pendingReceiptWrites.size > 0
-      || this.pendingAssistantCompletion !== undefined;
+    return this.dependencies.workRegistry.hasSessionWork(this.id)
+      || this.administrativeDrainBlockers().length > 0;
+  }
+
+  administrativeDrainBlockers(): RuntimeDrainBlockerFact[] {
+    const facts: RuntimeDrainBlockerFact[] = [];
+    for (const activity of this.extensionActivities.values()) {
+      const state = activity.lifecycle?.state;
+      if (state === "queued" || state === "running" || state === "paused") {
+        facts.push({
+          category: "detached-extension-run",
+          key: activity.activityId ?? activity.toolCallId,
+          admittedAt: activity.startedAt,
+          state: "active",
+        });
+      }
+    }
+    const uiOwned = this.dependencies.workRegistry.facts().some((work) => work.sessionId === this.id
+      && (work.kind === "prompt-preflight" || work.kind === "foreground-agent-operation"
+        || work.kind === "extension-command-prompt-ui"));
+    if (this.lifecycle.pendingUICount > 0 && !uiOwned) {
+      facts.push({ category: "extension-command-prompt-ui", key: "unowned-extension-ui", state: "active" });
+    }
+    return facts.slice(0, 256);
+  }
+
+  /** Synchronous admission cutoff used in the restart RPC turn. */
+  beginAdministrativeDrainCutoff(): void {
+    this.lifecycle.beginDrain();
   }
 
   async prepareForAdministrativeDrain(): Promise<void> {
-    this.lifecycle.beginDrain();
-    if (this.queuedMessages.length > 0 || this.runtime.session.getSteeringMessages().length > 0 || this.runtime.session.getFollowUpMessages().length > 0) {
-      await this.clearQueue();
+    // Accepted steering/follow-up work remains authoritative. The exact queue
+    // tokens drain only when Pi consumes them or a client explicitly clears them.
+    this.beginAdministrativeDrainCutoff();
+  }
+
+  private beginOperationWork(operationId: string, kind: GatewayWorkKind = "prompt-preflight"): GatewayWorkHandle {
+    const existing = this.operationWork.get(operationId);
+    if (existing) {
+      existing.transition(kind);
+      return existing;
+    }
+    const work = this.dependencies.workRegistry.begin({
+      kind,
+      sessionId: this.id,
+      hostEpoch: this.ui.hostEpoch,
+    });
+    this.operationWork.set(operationId, work);
+    return work;
+  }
+
+  private beginDerivedOperationWork(operationId: string, kind: GatewayWorkKind): GatewayWorkHandle {
+    const existing = this.operationWork.get(operationId);
+    if (existing) {
+      existing.transition(kind);
+      return existing;
+    }
+    const work = this.dependencies.workRegistry.beginDerived({
+      kind,
+      sessionId: this.id,
+      hostEpoch: this.ui.hostEpoch,
+    });
+    this.operationWork.set(operationId, work);
+    return work;
+  }
+
+  private settleOperationWork(operationId: string | undefined): void {
+    if (!operationId) return;
+    this.lifecycle.cancelPreflight(operationId);
+    const work = this.operationWork.get(operationId);
+    if (!work) return;
+    this.operationWork.delete(operationId);
+    work.settle();
+  }
+
+  private settleRetiredOperationWork(): void {
+    const retained = new Set([
+      this.activeOperationId,
+      this.operation?.id,
+      this.pendingPrompt?.id,
+      this.pendingExtensionCommand?.id,
+      this.pendingAssistantCompletion?.operationId,
+      ...this.completionWorkOwners.values(),
+      ...this.queuedMessages.map((item) => item.id),
+      ...this.dequeuedFollowUpOwners,
+    ].filter((value): value is string => typeof value === "string"));
+    for (const operationId of [...this.operationWork.keys()]) {
+      if (!retained.has(operationId)) this.settleOperationWork(operationId);
     }
   }
 
   private hasRuntimeWork(): boolean {
-    return this.activeExports > 0
-      || this.activeOperationId !== undefined
-      || this.operation !== undefined
-      || this.pendingExtensionCommand !== undefined
-      || this.manualCompactionClaim !== undefined
-      || this.pendingManualCompaction !== undefined
-      || this.queuedManualCompactionInFlight
-      || this.pendingQueueAdmission !== undefined
-      || this.queuedMessages.length > 0
-      || this.effectivePhase === "running"
-      || this.effectivePhase === "compacting"
-      || this.effectivePhase === "retrying"
-      || this.runtime?.session.isBashRunning === true
-      || this.pendingReceiptWrites.size > 0
-      // Detached nonterminal extension work owns this session lane until a
-      // terminal receipt or explicit resolution is observed.
+    return this.dependencies.workRegistry.hasSessionWork(this.id)
+      // Detached nonterminal extension work remains the explicit compatibility
+      // authority until the extension host offers direct registration tokens.
       || [...this.extensionActivities.values()].some((activity) => activity.lifecycle?.state === "queued"
         || activity.lifecycle?.state === "running"
-        || activity.lifecycle?.state === "paused" || activity.lifecycle?.attention === "needsAttention");
+        || activity.lifecycle?.state === "paused");
   }
 
   /** AgentSession can start an extension-triggered continuation while an older
@@ -421,6 +512,7 @@ export class RuntimeSlot {
     if (this.phase === "idle" || this.phase === "interrupted") this.phase = "running";
     this.activeOperationId ??= randomUUID();
     this.operation ??= { id: this.activeOperationId, kind: "prompt", startedAt: new Date().toISOString() };
+    this.beginDerivedOperationWork(this.activeOperationId, "foreground-agent-operation");
     if (!this.activityHeartbeat) this.startActivityHeartbeat();
   }
 
@@ -700,6 +792,18 @@ export class RuntimeSlot {
   }
 
   private requestExtensionShutdown(): void {
+    if (!this.extensionShutdownWork) {
+      try {
+        this.extensionShutdownWork = this.dependencies.workRegistry.beginDerived({
+          kind: "extension-command-prompt-ui",
+          sessionId: this.id,
+          hostEpoch: this.ui.hostEpoch,
+        });
+      } catch (error) {
+        this.emit("session.extensionError", safeJson(error));
+        return;
+      }
+    }
     this.lifecycle.requestShutdown();
     this.revision += 1;
     this.ui.context().notify("Extension requested a graceful session close", "info");
@@ -707,26 +811,40 @@ export class RuntimeSlot {
   }
 
   private maybePerformExtensionShutdown(): void {
-    if (!this.lifecycle.isShutdownRequested || this.lifecycle.hasPendingCommands || this.lifecycle.hasPendingPrompts || this.shuttingDown || this.disposed) return;
-    void this.runtime.session.waitForIdle().then(() => this.lane.run(async () => {
+    if (!this.lifecycle.isShutdownRequested || this.lifecycle.hasPendingCommands || this.lifecycle.hasPendingPrompts
+      || this.extensionShutdownInFlight || this.extensionShutdownRetryTimer || this.shuttingDown || this.disposed) return;
+    this.extensionShutdownInFlight = true;
+    void this.runtime.session.waitForIdle().then(async () => {
+      await this.waitForReceiptWrites();
+      return this.lane.run(async () => {
       if (!this.lifecycle.isShutdownRequested || this.lifecycle.hasPendingCommands || this.lifecycle.hasPendingPrompts || this.disposed) return;
       this.shuttingDown = true;
       const closedID = this.id;
       const hostEpoch = this.ui.hostEpoch;
-      // Pi owns session_shutdown; closure is truthful only after it completes.
       await this.disposeRuntime();
-      await this.dependencies.markers.clear(closedID);
+      await this.retryDurableWrite("marker:clear:all", () => this.dependencies.markers.clear(closedID));
       this.phase = "idle";
       this.operation = undefined;
       this.pendingExtensionCommand = undefined;
       this.retry = undefined;
-      // Persisted catalog membership survives runtime closure. Publish its
-      // truthful idle row without inventing a structural list event.
       this.publishSummary();
       this.emit("session.closed", { reason: "extension_shutdown", hostEpoch });
       this.hooks.closed?.(closedID, this);
-    })).catch((error) => {
+      this.extensionShutdownWork?.settle();
+      this.extensionShutdownWork = undefined;
+      });
+    }).catch((error) => {
+      this.shuttingDown = false;
       this.emit("session.extensionError", safeJson({ message: error instanceof Error ? error.message : String(error) }));
+      if (!this.disposed && !this.extensionShutdownRetryTimer) {
+        this.extensionShutdownRetryTimer = setTimeout(() => {
+          this.extensionShutdownRetryTimer = undefined;
+          this.maybePerformExtensionShutdown();
+        }, 1_000);
+        this.extensionShutdownRetryTimer.unref();
+      }
+    }).finally(() => {
+      this.extensionShutdownInFlight = false;
     });
   }
 
@@ -914,34 +1032,92 @@ export class RuntimeSlot {
     };
   }
 
-  private trackOwnershipWrite(write: Promise<void>): Promise<void> {
+  private trackOwnershipWrite(
+    startWrite: () => Promise<void>,
+    existingOwner?: GatewayWorkHandle,
+  ): Promise<void> {
+    const derived = existingOwner === undefined;
+    const work = existingOwner ?? this.dependencies.workRegistry.beginDerived({
+      kind: "terminal-receipt-persistence",
+      sessionId: this.id,
+      hostEpoch: this.ui.hostEpoch,
+    });
+    work.progress();
+    let write: Promise<void>;
+    try {
+      write = startWrite();
+    } catch (error) {
+      if (derived) work.settle();
+      throw error;
+    }
     this.pendingReceiptWrites.add(write);
-    void write.then(
-      () => this.pendingReceiptWrites.delete(write),
-      () => this.pendingReceiptWrites.delete(write),
-    );
+    void write.finally(() => {
+      this.pendingReceiptWrites.delete(write);
+      if (derived) work.settle();
+    }).catch(() => {});
+    return write;
+  }
+
+  private retryDurableWrite(key: string, operation: () => Promise<void>): Promise<void> {
+    const existing = this.durableWrites.get(key);
+    if (existing) return existing;
+    const write = (async () => {
+      let attempt = 0;
+      for (;;) {
+        try {
+          await operation();
+          return;
+        } catch {
+          attempt += 1;
+          if (attempt === 1 || attempt % 60 === 0) {
+            this.emit("session.operationFailed", safeJson({ message: "Canonical ownership persistence is retrying" }));
+          }
+          await new Promise((resolve) => {
+            const timer = setTimeout(resolve, Math.min(1_000, 25 * attempt));
+            timer.unref();
+          });
+        }
+      }
+    })();
+    this.durableWrites.set(key, write);
+    void write.finally(() => {
+      if (this.durableWrites.get(key) === write) this.durableWrites.delete(key);
+    }).catch(() => {});
     return write;
   }
 
   private enqueueMarkerOwnership(operationId: string): Promise<void> {
-    // The durable marker store has its own per-session lane and retains multiple
-    // owners. Never queue a newer admission behind attention projection.
-    return this.trackOwnershipWrite(this.dependencies.markers.mark(this.id, operationId));
+    // An existing operation token already owns this marker write. Avoid spending
+    // derived capacity for a second representation of the same accepted work.
+    return this.trackOwnershipWrite(
+      () => this.retryDurableWrite(`marker:mark:${operationId}`, () => this.dependencies.markers.mark(this.id, operationId)),
+      this.operationWork.get(operationId),
+    );
+  }
+
+  private clearMarkerOwnership(operationId?: string, existingOwner?: GatewayWorkHandle): Promise<void> {
+    const key = operationId ?? "all";
+    return this.trackOwnershipWrite(
+      () => this.retryDurableWrite(`marker:clear:${key}`, () => this.dependencies.markers.clear(this.id, operationId)),
+      existingOwner ?? (operationId ? this.operationWork.get(operationId) : undefined),
+    );
   }
 
   private startCompletionStamp(item: CompletionOwnershipItem): Promise<void> {
     if (item.stamp) return item.stamp;
     const { completion } = item;
     if (!completion.operationId) return Promise.resolve();
-    const stamp = this.trackOwnershipWrite(this.dependencies.markers.markAssistantCompletion(
-      this.id,
-      completion.operationId,
-      completion.id,
-      completion.completedAt,
-    ));
+    const stamp = this.trackOwnershipWrite(() => this.retryDurableWrite(
+      `marker:completion:${completion.operationId}:${completion.id}`,
+      () => this.dependencies.markers.markAssistantCompletion(
+        this.id,
+        completion.operationId!,
+        completion.id,
+        completion.completedAt,
+      ),
+    ), this.operationWork.get(completion.operationId) ?? item.fallbackWork);
     item.stamp = stamp;
     void stamp.catch(() => {
-      // A later reconciliation attempt may retry a failed durability write.
       if (item.stamp === stamp) item.stamp = undefined;
     });
     return stamp;
@@ -950,11 +1126,21 @@ export class RuntimeSlot {
   private recordCompletionOwnership(completion: CanonicalAssistantCompletion): CompletionOwnershipItem {
     let item = this.completionOwnershipQueue.find((candidate) => candidate.completion.id === completion.id);
     if (!item) {
-      item = { completion, stamp: undefined };
+      const operationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
+      const exactOwner = operationId ? this.operationWork.get(operationId) : undefined;
+      item = {
+        completion,
+        stamp: undefined,
+        ...(exactOwner ? {} : {
+          fallbackWork: this.dependencies.workRegistry.beginDerived({
+            kind: "terminal-receipt-persistence",
+            sessionId: this.id,
+            hostEpoch: this.ui.hostEpoch,
+          }),
+        }),
+      };
       this.completionOwnershipQueue.push(item);
     }
-    // Start exact durable ownership immediately, even when an older completion
-    // is still retrying serialized attention admission.
     void this.startCompletionStamp(item).catch(() => {});
     return item;
   }
@@ -970,12 +1156,14 @@ export class RuntimeSlot {
       while (this.completionOwnershipQueue.length > 0) {
         const item = this.completionOwnershipQueue[0]!;
         await this.startCompletionStamp(item);
-        await this.settleAssistantCompletion(item.completion);
+        await this.settleAssistantCompletion(item);
         this.completionOwnershipQueue.shift();
+        item.fallbackWork?.settle();
       }
     })().finally(() => {
       this.pendingReceiptWrites.delete(operation);
       if (this.attentionBarrier === operation) this.attentionBarrier = undefined;
+      this.settleRetiredOperationWork();
     });
     this.attentionBarrier = operation;
     this.pendingReceiptWrites.add(operation);
@@ -983,7 +1171,8 @@ export class RuntimeSlot {
     return operation;
   }
 
-  private async settleAssistantCompletion(completion: CanonicalAssistantCompletion): Promise<void> {
+  private async settleAssistantCompletion(item: CompletionOwnershipItem): Promise<void> {
+    const { completion } = item;
     try {
       let lastError: unknown;
       for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -997,8 +1186,11 @@ export class RuntimeSlot {
       }
       if (lastError !== undefined) throw lastError;
       if (!this.pendingManualCompaction) {
-        await this.dependencies.markers.clear(this.id, completion.operationId);
+        await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
+      const completionWorkOwner = completion.operationId ?? this.completionWorkOwners.get(completion.id);
+      this.settleOperationWork(completionWorkOwner);
+      this.completionWorkOwners.delete(completion.id);
       if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
       // A continuation may already own the agent while this older durable write
       // unwinds. Settlement retires only its exact completion; the newer run
@@ -1056,7 +1248,7 @@ export class RuntimeSlot {
       const completion = completionOwnedByMarker(this.sessionManager, marker);
       if (!completion) continue;
       await this.hooks.assistantResponseCompleted(this.id, completion, true);
-      await this.dependencies.markers.clear(this.id, marker.operationId);
+      await this.clearMarkerOwnership(marker.operationId);
     }
   }
 
@@ -1064,8 +1256,21 @@ export class RuntimeSlot {
     this.revision += 1;
     this.touch();
     switch (event.type) {
-      case "agent_start":
+      case "agent_start": {
+        const continuationFromSettlement = this.pendingAssistantCompletion !== undefined;
+        const dequeuedOwner = this.dequeuedFollowUpOwners[0];
+        const queuedOwner = dequeuedOwner
+          ?? this.queuedMessages.find((item) => item.behavior === "followUp")?.id;
+        const preflightOwner = this.pendingExtensionCommand?.id
+          ?? queuedOwner
+          ?? this.activeOperationId;
+        const requiresDistinctAgentOwner = queuedOwner === undefined
+          && (continuationFromSettlement || this.pendingExtensionCommand !== undefined);
         if (this.pendingAssistantCompletion) {
+          if (!this.pendingAssistantCompletion.operationId && this.activeOperationId) {
+            this.pendingAssistantCompletion = { ...this.pendingAssistantCompletion, operationId: this.activeOperationId };
+          }
+          if (this.activeOperationId) this.completionWorkOwners.set(this.pendingAssistantCompletion.id, this.activeOperationId);
           // Pi may start an extension continuation before the older settlement
           // callback unwinds. Preserve and immediately commit the prior exact
           // completion, then give the continuation a distinct marker owner so
@@ -1075,10 +1280,14 @@ export class RuntimeSlot {
           this.activeOperationId = undefined;
           this.operation = undefined;
         }
-        if (!this.lifecycle.admitAgentStartDuringDrain()) {
+        if (!this.lifecycle.admitAgentStartDuringDrain(preflightOwner)) {
+          const rejectedOperationId = preflightOwner;
+          if (dequeuedOwner && rejectedOperationId === dequeuedOwner) this.dequeuedFollowUpOwners.shift();
           this.phase = "interrupted";
           this.operation = undefined;
           this.activeOperationId = undefined;
+          if (this.pendingExtensionCommand?.id === rejectedOperationId) this.pendingExtensionCommand = undefined;
+          this.settleOperationWork(rejectedOperationId);
           this.emit("session.operationFailed", {
             message: "Extension continuation was rejected after the administrative drain cutoff",
           });
@@ -1086,18 +1295,25 @@ export class RuntimeSlot {
           this.publishSnapshot();
           break;
         }
+        if (dequeuedOwner && preflightOwner === dequeuedOwner) this.dequeuedFollowUpOwners.shift();
+        if (queuedOwner && preflightOwner === queuedOwner && this.activeOperationId !== queuedOwner) {
+          this.activeOperationId = undefined;
+          this.operation = undefined;
+        }
         this.phase = "running";
         this.toolExecutions.clear();
         this.toolInvocationGroups.clear();
         this.toolStartedAtMonotonicMs.clear();
         this.nextToolOrder = 0;
-        this.activeOperationId ??= randomUUID();
+        this.activeOperationId ??= requiresDistinctAgentOwner ? randomUUID() : (preflightOwner ?? randomUUID());
         this.operation ??= { id: this.activeOperationId, kind: "prompt", startedAt: new Date().toISOString() };
+        this.beginDerivedOperationWork(this.activeOperationId, "foreground-agent-operation");
         void this.enqueueMarkerOwnership(this.activeOperationId)
           .catch(() => this.runtime.session.abort());
         if (!this.activityHeartbeat) this.startActivityHeartbeat();
         this.publishSnapshot();
         break;
+      }
       case "agent_settled":
         if (this.shuttingDown) break;
         // An extension completion can trigger the next turn while the previous
@@ -1132,6 +1348,9 @@ export class RuntimeSlot {
         this.stopActivityHeartbeat();
         this.clearToolProgressTimers();
         if (this.pendingManualCompaction) {
+          // The independently admitted compaction token already owns the queued
+          // mutation, so the settled foreground token can retire without a gap.
+          this.settleOperationWork(settledOperationId);
           // The accepted compaction command owns the existing run marker. If the
           // prompt produced a successful response, attention commits before the
           // canonical compaction is allowed to inherit that marker.
@@ -1147,6 +1366,11 @@ export class RuntimeSlot {
         }
         if (this.pendingExtensionCommand === undefined) {
           if (this.pendingAssistantCompletion) {
+            if (!this.pendingAssistantCompletion.operationId && settledOperationId) {
+              this.pendingAssistantCompletion = { ...this.pendingAssistantCompletion, operationId: settledOperationId };
+            }
+            if (settledOperationId) this.completionWorkOwners.set(this.pendingAssistantCompletion.id, settledOperationId);
+            this.operationWork.get(settledOperationId ?? "")?.transition("terminal-receipt-persistence");
             // Pi has settled, but the Gateway remains operationally running until
             // the exact canonical completion is durable. This is the open/drain
             // barrier that prevents a snapshot from outrunning attention truth.
@@ -1155,8 +1379,21 @@ export class RuntimeSlot {
             void this.beginAttentionSettlement(this.pendingAssistantCompletion).catch(() => {});
             break;
           }
-          void this.dependencies.markers.clear(this.id, settledOperationId);
-          this.hooks.settled(this.id);
+          this.operationWork.get(settledOperationId ?? "")?.transition("terminal-receipt-persistence");
+          const markerClear = this.clearMarkerOwnership(settledOperationId);
+          // The foreground token remains the exact owner; do not create a second
+          // receipt token or report drain completion while marker I/O is active.
+          void markerClear.then(
+            () => undefined,
+            (error) => this.emit("session.operationFailed", safeJson({
+              operationId: settledOperationId,
+              message: error instanceof Error ? error.message : String(error),
+            })),
+          ).finally(() => {
+            this.settleOperationWork(settledOperationId);
+            this.hooks.settled(this.id);
+            this.publishSnapshot();
+          });
         }
         this.publishSnapshot();
         break;
@@ -1414,11 +1651,6 @@ export class RuntimeSlot {
         break;
       case "queue_update":
         if (!this.suppressQueueEvents) this.reconcileQueuedMessages();
-        if (this.lifecycle.isDraining && (this.runtime.session.getSteeringMessages().length > 0 || this.runtime.session.getFollowUpMessages().length > 0)) {
-          void this.clearQueue().catch((error) => this.emit("session.operationFailed", safeJson({
-            message: error instanceof Error ? error.message : String(error),
-          })));
-        }
         this.scheduleSnapshot();
         break;
       case "thinking_level_changed":
@@ -1456,8 +1688,10 @@ export class RuntimeSlot {
         && (temporaryParts.length === 3 || temporaryParts[3] === "status.json" || temporaryParts[3] === "events.jsonl");
       if (temporaryRun) return true;
 
-      const projectParts = relative(projectRoot, value)
-        .split(/[\\/]/u).filter(Boolean);
+      const projectRelative = relative(projectRoot, value);
+      if (projectRelative === "" || isAbsolute(projectRelative)
+        || projectRelative === ".." || projectRelative.startsWith(`..${sep}`)) return false;
+      const projectParts = projectRelative.split(/[\\/]/u).filter(Boolean);
       return projectParts.length >= 1
         && projectParts.length <= 2
         && projectParts[0] !== ""
@@ -1598,7 +1832,10 @@ export class RuntimeSlot {
             ? extensionLifecycleState(value.status)
             : "stopped";
         if (eventState !== headerState || !terminalLifecycleStates.has(eventState)) return undefined;
-        return { ...candidate, state: eventState, endedAt: value.ts };
+        const persistedAt = typeof candidate.lastUpdate === "number" && Number.isSafeInteger(candidate.lastUpdate)
+          ? Math.max(candidate.lastUpdate, value.ts as number)
+          : value.ts;
+        return { ...candidate, state: eventState, endedAt: value.ts, lastUpdate: persistedAt };
       }
       return undefined;
     } finally {
@@ -1623,6 +1860,32 @@ export class RuntimeSlot {
     return [...new Set(candidates.map((candidate) => candidate.directory))].slice(0, 64);
   }
 
+  private extensionArtifactOwnerForDirectory(directory: string): string | undefined {
+    for (const [runId, binding] of this.extensionRunOwnership) {
+      if (!binding.asyncDir) continue;
+      const owned = this.canonicalExtensionArtifactDirectory(binding.asyncDir);
+      if (owned === directory) return `${runId}\0${binding.toolCallId}`;
+    }
+    return undefined;
+  }
+
+  private warnExtensionArtifact(reason: ExtensionArtifactRejectionReason, owner: string): void {
+    if (!this.dependencies.extensionArtifactWarning) return;
+    const opaqueOwner = createHash("sha256").update(`${this.id}\0${owner}`).digest("hex").slice(0, 24);
+    const key = `${opaqueOwner}:${reason}`;
+    const now = Date.now();
+    const previous = this.extensionArtifactWarnings.get(key);
+    if (previous !== undefined && now - previous < 60_000) return;
+    this.extensionArtifactWarnings.delete(key);
+    this.extensionArtifactWarnings.set(key, now);
+    while (this.extensionArtifactWarnings.size > 256) {
+      const oldest = this.extensionArtifactWarnings.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.extensionArtifactWarnings.delete(oldest);
+    }
+    this.dependencies.extensionArtifactWarning({ reason, owner: opaqueOwner });
+  }
+
   /** Called only by the Gateway-scoped bounded artifact discovery owner or by
    * a watcher attached after this slot proved canonical ownership. */
   discoverExtensionArtifact(asyncDir: string): Promise<void> {
@@ -1633,6 +1896,11 @@ export class RuntimeSlot {
    * exact-owned artifacts instead of depending on watcher delivery or ambient
    * discovery scheduling. Genuine nonterminal work remains a blocker. */
   async reconcileOwnedExtensionArtifactsForDrain(): Promise<void> {
+    if (this.completionOwnershipQueue.length > 0 && !this.attentionBarrier) {
+      await this.drainCompletionOwnership().catch(() => {
+        this.emit("session.operationFailed", safeJson({ message: "Canonical completion persistence is retrying" }));
+      });
+    }
     const canonicalFacts = this.canonicalExtensionRunFacts();
     for (const asyncDir of this.ownedExtensionArtifactDirectories()) {
       await this.refreshSubagentActivityFromArtifact(asyncDir, canonicalFacts);
@@ -1643,46 +1911,75 @@ export class RuntimeSlot {
     asyncDir: string,
     canonicalFacts?: ReadonlyMap<string, CanonicalExtensionRunFact>,
   ): Promise<void> {
+    let diagnosticOwner: string | undefined;
+    let claimedReceipt: { activityId: string; owner: GatewayWorkHandle } | undefined;
     try {
       const realAsyncDir = this.canonicalExtensionArtifactDirectory(asyncDir);
       if (!realAsyncDir) return;
+      diagnosticOwner = this.extensionArtifactOwnerForDirectory(realAsyncDir);
       const rawValue = await this.readExtensionStatusArtifact(realAsyncDir);
+      if (rawValue === undefined) {
+        if (diagnosticOwner) this.warnExtensionArtifact("artifact-replacement-in-progress", diagnosticOwner);
+        return;
+      }
       // Registry discovery is bounded but grants no ownership. Historical
       // artifacts become admissible only here, where the canonical tool result
       // or an exact live asyncDir binding proves the owning session/tool call.
-      const raw = admitExtensionLifecycleArtifact(rawValue, { exactOwnedLegacy: true });
-      if (!raw) return;
+      const admission = inspectExtensionLifecycleArtifact(rawValue, { exactOwnedLegacy: true });
+      if (!admission.accepted) {
+        if (diagnosticOwner) this.warnExtensionArtifact(admission.reason, diagnosticOwner);
+        return;
+      }
+      const raw = admission.artifact;
       const runId = raw.runId as string;
       if (!runId) return;
       // The file's declared directory is advisory. If present, it must agree
       // with the directory that was actually discovered/read.
       if (typeof raw.asyncDir === "string") {
         const declaredAsyncDir = this.canonicalExtensionArtifactDirectory(raw.asyncDir);
-        if (!declaredAsyncDir || declaredAsyncDir !== realAsyncDir) return;
+        if (!declaredAsyncDir || declaredAsyncDir !== realAsyncDir) {
+          if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
+          return;
+        }
       }
       const ownership = this.extensionRunOwnership.get(runId);
       const canonical = (canonicalFacts ?? this.canonicalExtensionRunFacts()).get(runId);
       const historicalArtifact = raw.lifecycleArtifactVersion !== EXTENSION_LIFECYCLE_ARTIFACT_VERSION;
       if (historicalArtifact && !ownership?.asyncDir && !canonical?.asyncDir) return;
       // A duplicated runId in canonical JSONL has no safe artifact owner.
-      if (canonical?.ambiguous) return;
+      if (canonical?.ambiguous) {
+        if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
+        return;
+      }
       if (ownership?.asyncDir) {
         const ownershipAsyncDir = this.canonicalExtensionArtifactDirectory(ownership.asyncDir);
-        if (!ownershipAsyncDir || ownershipAsyncDir !== realAsyncDir) return;
+        if (!ownershipAsyncDir || ownershipAsyncDir !== realAsyncDir) {
+          if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
+          return;
+        }
       }
       if (canonical?.asyncDir) {
         const canonicalAsyncDir = this.canonicalExtensionArtifactDirectory(canonical.asyncDir);
-        if (!canonicalAsyncDir || canonicalAsyncDir !== realAsyncDir) return;
+        if (!canonicalAsyncDir || canonicalAsyncDir !== realAsyncDir) {
+          if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
+          return;
+        }
       }
       if (canonical?.toolCallId && ownership && ownership.toolCallId !== canonical.toolCallId) {
         // A synthetic artifact row may be re-keyed to its first real tool call,
         // but a real ownership binding must never switch to another call.
-        if (!ownership.toolCallId.startsWith("subagent:") || ownership.toolCallId === canonical.toolCallId) return;
+        if (!ownership.toolCallId.startsWith("subagent:") || ownership.toolCallId === canonical.toolCallId) {
+          if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
+          return;
+        }
       }
       const matchingEntries = [...this.extensionActivities.entries()].filter(([, activity]) => activity.runId === runId);
       // Correlation is Gateway-owned; never pick an arbitrary activity when a
       // malformed or legacy payload has produced duplicate run identities.
-      if (!ownership && !canonical?.toolCallId && matchingEntries.length > 1) return;
+      if (!ownership && !canonical?.toolCallId && matchingEntries.length > 1) {
+        if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
+        return;
+      }
       const boundToolCallId = canonical?.toolCallId ?? ownership?.toolCallId;
       let existingEntry: readonly [string, ExtensionRunActivity | undefined] | undefined = boundToolCallId
         ? ([boundToolCallId, this.extensionActivities.get(boundToolCallId)] as const)
@@ -1712,7 +2009,10 @@ export class RuntimeSlot {
         ...(previous?.updatedAt ? { fallbackUpdatedAt: previous.updatedAt } : {}),
         useArtifactStartedAt: false,
       });
-      if (!normalized) return;
+      if (!normalized) {
+        if (diagnosticOwner) this.warnExtensionArtifact("invalid-timestamp", diagnosticOwner);
+        return;
+      }
       const { status: state, startedAt, updatedAt, completedAt, durationMs } = normalized;
       // A terminal lifecycle event is authoritative; a late running artifact
       // enriches neither status nor ownership and must not resurrect the pill.
@@ -1750,12 +2050,22 @@ export class RuntimeSlot {
       // the same Gateway terminal latch and sequence admission as live tool
       // events before replacing an existing row.
       if (admitExtensionRunActivity(previous, activity) === previous) return;
+      const terminalReceiptOwner = activity.status === "running"
+        ? undefined
+        : this.claimExtensionReceiptOwnership(activityKey);
+      if (activity.status !== "running" && !terminalReceiptOwner) return;
+      if (terminalReceiptOwner) claimedReceipt = { activityId: activityKey, owner: terminalReceiptOwner };
       const ownershipAccepted = this.bindExtensionRunOwnership(runId, {
         toolCallId,
         asyncDir: realAsyncDir,
         terminal: activity.status !== "running" || Boolean(ownership?.terminal),
       });
-      if (!ownershipAccepted) return;
+      if (!ownershipAccepted) {
+        this.releaseExtensionReceiptOwnership(activityKey, terminalReceiptOwner);
+        claimedReceipt = undefined;
+        if (diagnosticOwner) this.warnExtensionArtifact("ownership-mismatch", diagnosticOwner);
+        return;
+      }
       if (existingEntry) this.extensionActivities.delete(existingEntry[0]);
       const syntheticToolCallId = matchingEntries.find(([id]) => id.startsWith("subagent:") && id !== toolCallId)?.[0];
       if (syntheticToolCallId) this.extensionActivities.delete(syntheticToolCallId);
@@ -1767,13 +2077,18 @@ export class RuntimeSlot {
       } else {
         if (activity.status !== "running") {
           void this.appendExtensionActivityReceipt(activity).catch((error) => this.emit("session.extensionError", safeJson(error)));
+          claimedReceipt = undefined;
         }
         this.stopExtensionActivityWatcher(toolCallId);
       }
       this.trimExtensionActivities();
       this.publishExtensionActivity(activity);
-    } catch {
-      // The artifact may be mid-replacement or may have been removed after the scan.
+    } catch (error) {
+      if (claimedReceipt) this.releaseExtensionReceiptOwnership(claimedReceipt.activityId, claimedReceipt.owner);
+      if (diagnosticOwner) this.warnExtensionArtifact(
+        error instanceof SyntaxError ? "malformed-artifact" : "artifact-replacement-in-progress",
+        diagnosticOwner,
+      );
     }
   }
 
@@ -1890,37 +2205,62 @@ export class RuntimeSlot {
     if (!previous || this.disposed || !realAsyncDir) return;
     const generation = (this.extensionActivityReadGenerations.get(toolCallId) ?? 0) + 1;
     this.extensionActivityReadGenerations.set(toolCallId, generation);
+    let claimedReceiptOwner: GatewayWorkHandle | undefined;
+    let claimedReceiptActivityId: string | undefined;
     try {
       const rawValue = await this.readExtensionStatusArtifact(realAsyncDir);
-      const raw = admitExtensionLifecycleArtifact(rawValue, { exactOwnedLegacy: true });
-      if (!raw) return;
+      if (rawValue === undefined) {
+        this.warnExtensionArtifact("artifact-replacement-in-progress", `${previous.runId ?? "run"}\0${toolCallId}`);
+        return;
+      }
+      const admission = inspectExtensionLifecycleArtifact(rawValue, { exactOwnedLegacy: true });
+      if (!admission.accepted) {
+        this.warnExtensionArtifact(admission.reason, `${previous.runId ?? "run"}\0${toolCallId}`);
+        return;
+      }
+      const raw = admission.artifact;
       if (this.disposed || this.extensionActivityReadGenerations.get(toolCallId) !== generation) return;
       const runId = raw.runId as string;
       if (!runId || runId !== previous.runId) return;
       if (typeof raw.asyncDir === "string") {
         const declaredAsyncDir = this.canonicalExtensionArtifactDirectory(raw.asyncDir);
-        if (!declaredAsyncDir || declaredAsyncDir !== realAsyncDir) return;
+        if (!declaredAsyncDir || declaredAsyncDir !== realAsyncDir) {
+          this.warnExtensionArtifact("ownership-mismatch", `${runId}\0${toolCallId}`);
+          return;
+        }
       }
       const canonical = this.canonicalExtensionRunFacts().get(runId);
       const ownership = this.extensionRunOwnership.get(runId);
       // Watcher refresh is bound to one tool and one canonical directory. A
       // duplicate canonical runId or either mismatch fails closed.
-      if (canonical?.ambiguous || (canonical?.toolCallId && canonical.toolCallId !== toolCallId)) return;
-      if (!ownership || ownership.toolCallId !== toolCallId) return;
+      if (canonical?.ambiguous || (canonical?.toolCallId && canonical.toolCallId !== toolCallId)
+        || !ownership || ownership.toolCallId !== toolCallId) {
+        this.warnExtensionArtifact("ownership-mismatch", `${runId}\0${toolCallId}`);
+        return;
+      }
       if (ownership.asyncDir) {
         const ownershipAsyncDir = this.canonicalExtensionArtifactDirectory(ownership.asyncDir);
-        if (!ownershipAsyncDir || ownershipAsyncDir !== realAsyncDir) return;
+        if (!ownershipAsyncDir || ownershipAsyncDir !== realAsyncDir) {
+          this.warnExtensionArtifact("ownership-mismatch", `${runId}\0${toolCallId}`);
+          return;
+        }
       }
       if (canonical?.asyncDir) {
         const canonicalAsyncDir = this.canonicalExtensionArtifactDirectory(canonical.asyncDir);
-        if (!canonicalAsyncDir || canonicalAsyncDir !== realAsyncDir) return;
+        if (!canonicalAsyncDir || canonicalAsyncDir !== realAsyncDir) {
+          this.warnExtensionArtifact("ownership-mismatch", `${runId}\0${toolCallId}`);
+          return;
+        }
       }
       const normalized = normalizeExtensionArtifact(raw, {
         now: new Date().toISOString(),
         fallbackStartedAt: previous.startedAt,
         useArtifactStartedAt: false,
       });
-      if (!normalized) return;
+      if (!normalized) {
+        this.warnExtensionArtifact("invalid-timestamp", `${runId}\0${toolCallId}`);
+        return;
+      }
       const { status: artifactState, updatedAt, completedAt, durationMs } = normalized;
       const terminalStates = ["completed", "failed", "stopped", "rejected"];
       if (ownership.terminal && artifactState === "running") return;
@@ -1961,6 +2301,11 @@ export class RuntimeSlot {
       if (admitExtensionRunActivity(current, activity) === current) return;
       if (current.lifecycle?.sequence !== undefined && activity.lifecycle?.sequence !== undefined
         && activity.lifecycle.sequence <= current.lifecycle.sequence) return;
+      if (activity.status !== "running") {
+        claimedReceiptOwner = this.claimExtensionReceiptOwnership(activityKey);
+        if (!claimedReceiptOwner) return;
+        claimedReceiptActivityId = activityKey;
+      }
       this.extensionActivities.delete(toolCallId);
       this.extensionActivities.set(toolCallId, activity);
       this.upsertExtensionActivity(activity);
@@ -1974,11 +2319,17 @@ export class RuntimeSlot {
       });
       if (activity.status !== "running") {
         this.stopExtensionActivityWatcher(toolCallId);
+        claimedReceiptOwner = undefined;
+        claimedReceiptActivityId = undefined;
         void this.appendExtensionActivityReceipt(activity).catch((error) => this.emit("session.extensionError", safeJson(error)));
       }
-    } catch {
-      // The runner may be atomically replacing status.json. The next filesystem
-      // event or the normal runtime snapshot will retry without surfacing noise.
+    } catch (error) {
+      if (claimedReceiptActivityId) this.releaseExtensionReceiptOwnership(claimedReceiptActivityId, claimedReceiptOwner);
+      // The next filesystem event or normal snapshot retries; warning is bounded.
+      this.warnExtensionArtifact(
+        error instanceof SyntaxError ? "malformed-artifact" : "artifact-replacement-in-progress",
+        `${previous.runId ?? "run"}\0${toolCallId}`,
+      );
     }
   }
 
@@ -2017,38 +2368,58 @@ export class RuntimeSlot {
     }
   }
 
+  private claimExtensionReceiptOwnership(activityId: string): GatewayWorkHandle | undefined {
+    const existing = this.extensionReceiptOwners.get(activityId);
+    if (existing) return existing;
+    try {
+      const owner = this.dependencies.workRegistry.beginDerived({
+        kind: "terminal-receipt-persistence",
+        sessionId: this.id,
+        hostEpoch: this.ui.hostEpoch,
+      });
+      this.extensionReceiptOwners.set(activityId, owner);
+      return owner;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private releaseExtensionReceiptOwnership(activityId: string, owner?: GatewayWorkHandle): void {
+    if (!owner || this.extensionReceiptOwners.get(activityId) !== owner) return;
+    this.extensionReceiptOwners.delete(activityId);
+    owner.settle();
+  }
+
   private appendExtensionActivityReceipt(activity: ExtensionRunActivity): Promise<void> {
     if (!activity.lifecycle || !["completed", "failed", "stopped", "rejected"].includes(activity.lifecycle.state)) return Promise.resolve();
     const receipt = makeExtensionActivityReceipt(activity, this.id);
-    if (!receipt) return Promise.resolve();
-    const write = (async () => {
-      let lastError: unknown;
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        try {
-          await this.lane.run(async () => {
-            const existing = extensionActivityReceipts(this.runtime.session.sessionManager.getEntries(), this.id)
-              .some((entry) => entry.receipt.activityId === receipt.activityId);
-            if (existing) return;
-            this.runtime.session.sessionManager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, receipt);
-            this.revision += 1;
-            this.scheduleSnapshot();
-          });
-          return;
-        } catch (error) {
-          lastError = error;
-          await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
-        }
-      }
-      // Keep the failure observable to the owning barrier. The caller observes
-      // the rejection; disposal/drain still awaits this tracked operation before
-      // it can tear down the canonical session manager.
-      if (lastError) throw lastError;
-    })();
-    this.pendingReceiptWrites.add(write);
-    void write.then(
-      () => this.pendingReceiptWrites.delete(write),
-      () => this.pendingReceiptWrites.delete(write),
-    );
+    const activityId = receipt?.activityId ?? activity.activityId ?? activity.toolCallId;
+    const owner = this.extensionReceiptOwners.get(activityId);
+    if (!receipt) {
+      this.releaseExtensionReceiptOwnership(activityId, owner);
+      return Promise.resolve();
+    }
+    const existingWrite = this.extensionReceiptWrites.get(receipt.activityId);
+    if (existingWrite) return existingWrite;
+    if (!owner) return Promise.reject(new GatewayError("busy", "Extension receipt ownership is unavailable", true));
+    const write = this.trackOwnershipWrite(() => this.retryDurableWrite(
+      `extension-receipt:${receipt.activityId}`,
+      async () => {
+        await this.lane.run(async () => {
+          const existing = extensionActivityReceipts(this.runtime.session.sessionManager.getEntries(), this.id)
+            .some((entry) => entry.receipt.activityId === receipt.activityId);
+          if (existing) return;
+          this.runtime.session.sessionManager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, receipt);
+          this.revision += 1;
+          this.scheduleSnapshot();
+        });
+      },
+    ), owner);
+    this.extensionReceiptWrites.set(receipt.activityId, write);
+    void write.finally(() => {
+      if (this.extensionReceiptWrites.get(receipt.activityId) === write) this.extensionReceiptWrites.delete(receipt.activityId);
+      this.releaseExtensionReceiptOwnership(receipt.activityId, owner);
+    }).catch(() => {});
     return write;
   }
 
@@ -2074,6 +2445,8 @@ export class RuntimeSlot {
       if (status === "running") return current;
       const requestedTerminal = status === "failed" ? "failed" : "completed";
       if (requestedTerminal !== current.lifecycle.state) return current;
+      void this.appendExtensionActivityReceipt(current).catch(() => {});
+      return current;
     }
     const sequence = (this.extensionActivitySequences.get(activityKey) ?? current?.lifecycle?.sequence ?? 0) + 1;
     this.extensionActivitySequences.set(activityKey, sequence);
@@ -2107,12 +2480,17 @@ export class RuntimeSlot {
       ...(recentUntil ? { recentUntil } : {}),
     });
     if (admitExtensionRunActivity(current, activity) === current) return current;
+    const terminalReceiptOwner = terminal ? this.claimExtensionReceiptOwnership(activityKey) : undefined;
+    if (terminal && !terminalReceiptOwner) return current;
     const asyncDir = requestedAsyncDir ? this.canonicalExtensionArtifactDirectory(requestedAsyncDir) : undefined;
     if (activity.runId && !this.bindExtensionRunOwnership(activity.runId, {
       toolCallId,
       ...(asyncDir === undefined ? {} : { asyncDir }),
       terminal: activity.status !== "running",
-    })) return current;
+    })) {
+      this.releaseExtensionReceiptOwnership(activityKey, terminalReceiptOwner);
+      return current;
+    }
     // A synchronous result can be the first lifecycle payload carrying runId.
     // Re-key any artifact-created synthetic row to the real Pi tool call.
     const ownership = activity.runId ? this.extensionRunOwnership.get(activity.runId) : undefined;
@@ -2375,6 +2753,46 @@ export class RuntimeSlot {
     reconciled.sort((left, right) => left.behavior === right.behavior
       ? left.ordinal - right.ordinal
       : left.behavior === "steer" ? -1 : 1);
+    for (const item of reconciled) {
+      if (!this.operationWork.has(item.id)) this.beginDerivedOperationWork(item.id, "queued-mutation");
+    }
+    const removed = previous.filter((item) => !reconciled.some((candidate) => candidate.id === item.id));
+    if (removed.length > 0 && this.hasActiveAgentRun) {
+      this.ensureAgentProjection();
+      if (this.activeOperationId) this.beginDerivedOperationWork(this.activeOperationId, "foreground-agent-operation");
+    }
+    for (const item of removed) {
+      if (item.behavior === "followUp" && this.operationWork.has(item.id)) {
+        if (!this.hasActiveAgentRun) {
+          // Pi can remove a follow-up immediately before emitting its next
+          // agent_start. Retain the exact accepted owner across that event gap;
+          // the start consumes this FIFO latch instead of deriving new work.
+          if (!this.dequeuedFollowUpOwners.includes(item.id)) this.dequeuedFollowUpOwners.push(item.id);
+          this.operationWork.get(item.id)?.transition("foreground-agent-operation");
+          continue;
+        }
+        if (this.activeOperationId !== item.id) {
+          // Pi can emit agent_start before queue_update. The exact removed
+          // follow-up then retrospectively transfers its pre-cutoff token into
+          // the already-started foreground run; retire only the synthetic owner.
+          const syntheticOwner = this.activeOperationId;
+          this.activeOperationId = item.id;
+          this.operation = { id: item.id, kind: "prompt", startedAt: new Date().toISOString() };
+          // Queue removal can follow agent_start. Durably transfer the marker
+          // before retiring the synthetic event-time owner, so completion stamps
+          // cannot race a missing exact marker.
+          void this.enqueueMarkerOwnership(item.id).then(async () => {
+            if (syntheticOwner) await this.clearMarkerOwnership(syntheticOwner);
+            this.settleOperationWork(syntheticOwner);
+          }).catch(() => this.runtime.session.abort());
+        }
+        this.operationWork.get(item.id)?.transition("foreground-agent-operation");
+        const pendingIndex = this.dequeuedFollowUpOwners.indexOf(item.id);
+        if (pendingIndex >= 0) this.dequeuedFollowUpOwners.splice(pendingIndex, 1);
+      } else {
+        this.settleOperationWork(item.id);
+      }
+    }
     const changed = previous.length !== reconciled.length || previous.some((item, index) => {
       const next = reconciled[index];
       return next === undefined
@@ -2695,51 +3113,70 @@ export class RuntimeSlot {
         };
       }
 
-      if (isExactExtensionCommand) {
-        this.pendingExtensionCommand = { id: operationId, kind: "command", startedAt: new Date().toISOString() };
-        // Exact commands run before Pi's preflight callback and can wait on UI
-        // indefinitely. Persist the provisional admission before invoking Pi.
-        await this.enqueueMarkerOwnership(operationId);
-        this.revision += 1;
-        this.publishSnapshot();
-      } else if (!queuesIntoActiveRun) {
-        this.activeOperationId = operationId;
-        this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString() };
-        this.pendingPrompt = {
-          id: operationId,
-          createdAt: new Date().toISOString(),
-          ...(behavior === undefined ? {} : { behavior }),
-          text: boundedSummaryText(
-            queueDisplay?.text ?? text,
-            MAXIMUM_PENDING_PROMPT_BYTES
-          ),
-          attachmentCount: queueDisplay?.attachmentCount ?? images.length,
-          ...(queueDisplay?.photoCount === undefined && images.length === 0
-            ? {}
-            : { photoCount: queueDisplay?.photoCount ?? images.length }),
-          ...(queueDisplay?.fileAttachmentCount === undefined && images.length === 0
-            ? {}
-            : {
-                fileAttachmentCount: queueDisplay?.fileAttachmentCount
-                  ?? Math.max(0, (queueDisplay?.attachmentCount ?? images.length) - (queueDisplay?.photoCount ?? images.length)),
-              }),
-          ...(queueDisplay?.attachments === undefined ? {} : { attachments: queueDisplay.attachments }),
-        };
-        this.revision += 1;
-        // Publish before entering Pi preflight. Automatic compaction can begin
-        // inside that call before the RPC receives its admission result.
-        this.publishSnapshot();
-      }
-
+      let operationWork!: GatewayWorkHandle;
+      let preflightStarted = false;
       let acceptedResolve!: (accepted: boolean) => void;
       const accepted = new Promise<boolean>((resolve) => { acceptedResolve = resolve; });
-      this.lifecycle.beginPreflight();
-      const sdkRun = session.prompt(text, {
-        images,
-        ...(queuesIntoActiveRun ? { streamingBehavior: behavior } : {}),
-        source: "rpc",
-        preflightResult: acceptedResolve,
-      });
+      let sdkRun: Promise<void>;
+      try {
+        operationWork = this.beginOperationWork(operationId);
+        // Exact preflight ownership begins synchronously before marker I/O, so a
+        // drain that starts while the marker is pending snapshots this owner.
+        this.lifecycle.beginPreflight(operationId);
+        preflightStarted = true;
+
+        if (isExactExtensionCommand) {
+          this.pendingExtensionCommand = { id: operationId, kind: "command", startedAt: new Date().toISOString() };
+          // Exact commands run before Pi's preflight callback and can wait on UI
+          // indefinitely. Persist the provisional admission before invoking Pi.
+          await this.enqueueMarkerOwnership(operationId);
+          this.revision += 1;
+          this.publishSnapshot();
+        } else if (!queuesIntoActiveRun) {
+          this.activeOperationId = operationId;
+          this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString() };
+          this.pendingPrompt = {
+            id: operationId,
+            createdAt: new Date().toISOString(),
+            ...(behavior === undefined ? {} : { behavior }),
+            text: boundedSummaryText(
+              queueDisplay?.text ?? text,
+              MAXIMUM_PENDING_PROMPT_BYTES
+            ),
+            attachmentCount: queueDisplay?.attachmentCount ?? images.length,
+            ...(queueDisplay?.photoCount === undefined && images.length === 0
+              ? {}
+              : { photoCount: queueDisplay?.photoCount ?? images.length }),
+            ...(queueDisplay?.fileAttachmentCount === undefined && images.length === 0
+              ? {}
+              : {
+                  fileAttachmentCount: queueDisplay?.fileAttachmentCount
+                    ?? Math.max(0, (queueDisplay?.attachmentCount ?? images.length) - (queueDisplay?.photoCount ?? images.length)),
+                }),
+            ...(queueDisplay?.attachments === undefined ? {} : { attachments: queueDisplay.attachments }),
+          };
+          this.revision += 1;
+          // Publish before entering Pi preflight. Automatic compaction can begin
+          // inside that call before the RPC receives its admission result.
+          this.publishSnapshot();
+        }
+
+        sdkRun = session.prompt(text, {
+          images,
+          ...(queuesIntoActiveRun ? { streamingBehavior: behavior } : {}),
+          source: "rpc",
+          preflightResult: acceptedResolve,
+        });
+      } catch (error) {
+        if (preflightStarted) this.lifecycle.cancelPreflight(operationId);
+        this.pendingQueueAdmission = undefined;
+        if (this.activeOperationId === operationId) this.activeOperationId = undefined;
+        if (this.operation?.id === operationId) this.operation = undefined;
+        if (this.pendingPrompt?.id === operationId) this.pendingPrompt = undefined;
+        if (this.pendingExtensionCommand?.id === operationId) this.pendingExtensionCommand = undefined;
+        this.settleOperationWork(operationId);
+        throw error;
+      }
       let runSettled = false;
       let commandSettled = false;
       let admissionFinalized = false;
@@ -2756,11 +3193,12 @@ export class RuntimeSlot {
         const owned = this.activeOperationId === operationId || this.operation?.id === operationId;
         if (!owned || this.queuedManualCompactionInFlight) return;
         if (this.pendingPrompt?.id === operationId) this.pendingPrompt = undefined;
-        if (!this.pendingManualCompaction) await this.dependencies.markers.clear(this.id, operationId);
+        if (!this.pendingManualCompaction) await this.clearMarkerOwnership(operationId);
         // Marker I/O may suspend behind a newer run. Clear only this run's live
         // projection; conditional marker deletion already protects its successor.
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
         if (this.operation?.id === operationId) this.operation = undefined;
+        this.settleOperationWork(operationId);
         if (this.activeOperationId !== undefined || this.hasActiveAgentRun) return;
         this.phase = "idle";
         if (this.pendingManualCompaction) {
@@ -2781,28 +3219,30 @@ export class RuntimeSlot {
         },
       );
 
-      let admitted: boolean;
-      try {
-        // Pi's callback is authoritative. A local timeout could reject while the
-        // same uncancelled input handler later accepts canonical work.
-        admitted = await accepted;
-      } finally {
-        this.pendingQueueAdmission = undefined;
-        this.lifecycle.endPreflight();
-      }
+      // Pi's callback is authoritative. A local timeout could reject while the
+      // same uncancelled input handler later accepts canonical work.
+      const admitted = await accepted;
+      this.pendingQueueAdmission = undefined;
+      this.lifecycle.resolvePreflight(operationId, admitted);
       admissionFinalized = true;
       if (!admitted) {
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
         if (this.operation?.id === operationId) this.operation = undefined;
         if (this.pendingPrompt?.id === operationId) this.pendingPrompt = undefined;
         if (this.pendingExtensionCommand?.id === operationId) this.pendingExtensionCommand = undefined;
-        await this.dependencies.markers.clear(this.id, operationId);
+        await this.clearMarkerOwnership(operationId);
+        this.settleOperationWork(operationId);
         this.revision += 1;
         this.publishSnapshot();
         throw new GatewayError("invalid_request", "The agent runtime rejected the prompt before admission");
       }
 
-      if (!queuesIntoActiveRun && !isExactExtensionCommand) await this.enqueueMarkerOwnership(operationId);
+      if (isExactExtensionCommand) operationWork.transition("extension-command-prompt-ui");
+      else if (queuesIntoActiveRun) operationWork.transition("queued-mutation");
+      else {
+        operationWork.transition("foreground-agent-operation");
+        await this.enqueueMarkerOwnership(operationId);
+      }
       this.revision += 1;
       this.publishSnapshot();
 
@@ -2813,7 +3253,7 @@ export class RuntimeSlot {
             // Transfer marker ownership back to the foreground/new agent run:
             // commit its record before retiring the command's provisional one.
             await this.enqueueMarkerOwnership(this.activeOperationId);
-            await this.dependencies.markers.clear(this.id, operationId);
+            await this.clearMarkerOwnership(operationId);
           } else if (this.activeOperationId === undefined) {
             if (this.pendingAssistantCompletion) {
               // No continuation claimed the final assistant entry. Retire the
@@ -2824,11 +3264,12 @@ export class RuntimeSlot {
               this.maybePerformExtensionShutdown();
               return;
             }
-            await this.dependencies.markers.clear(this.id, operationId);
+            await this.clearMarkerOwnership(operationId);
             this.hooks.settled(this.id);
           }
           if (this.pendingExtensionCommand?.id !== operationId) return;
           this.pendingExtensionCommand = undefined;
+          this.settleOperationWork(operationId);
           this.revision += 1;
           this.publishSnapshot();
           this.maybePerformExtensionShutdown();
@@ -2871,6 +3312,7 @@ export class RuntimeSlot {
       } finally {
         this.suppressQueueEvents = false;
       }
+      for (const item of this.queuedMessages) this.settleOperationWork(item.id);
       this.queuedMessages = [];
       this.queueRevision += 1;
       this.revision += 1;
@@ -2972,6 +3414,9 @@ export class RuntimeSlot {
           survivors.push({ ...aligned[index]!, runtimeText: texts[texts.length - aligned.length + index]! });
         }
       }
+      for (const item of this.queuedMessages) {
+        if (!survivors.some((candidate) => candidate.id === item.id)) this.settleOperationWork(item.id);
+      }
       this.queuedMessages = survivors.sort((left, right) => left.behavior === right.behavior
         ? left.ordinal - right.ordinal
         : left.behavior === "steer" ? -1 : 1);
@@ -3022,7 +3467,19 @@ export class RuntimeSlot {
     }
     const claim = Symbol("manual-compaction");
     this.manualCompactionClaim = claim;
+    let work: GatewayWorkHandle;
+    try {
+      work = this.dependencies.workRegistry.begin({
+        kind: "compaction-export",
+        sessionId: this.id,
+        hostEpoch: this.ui.hostEpoch,
+      });
+    } catch (error) {
+      if (this.manualCompactionClaim === claim) this.manualCompactionClaim = undefined;
+      throw error;
+    }
 
+    const operationId = randomUUID();
     try {
       let queuedCompletion: Promise<void> | undefined;
       const queued = await this.lane.run(async () => {
@@ -3044,7 +3501,7 @@ export class RuntimeSlot {
         }
 
         this.assertIdleForManualCompaction(claim);
-        await this.performManualCompaction(instructions, false);
+        await this.performManualCompaction(instructions, false, operationId, work);
         return false;
       });
 
@@ -3055,6 +3512,7 @@ export class RuntimeSlot {
       return { queued };
     } finally {
       if (this.manualCompactionClaim === claim) this.manualCompactionClaim = undefined;
+      work.settle();
     }
   }
 
@@ -3084,10 +3542,22 @@ export class RuntimeSlot {
     });
   }
 
-  private async performManualCompaction(instructions: string | undefined, queued: boolean): Promise<void> {
+  private async performManualCompaction(
+    instructions: string | undefined,
+    queued: boolean,
+    operationId?: string,
+    work?: GatewayWorkHandle,
+  ): Promise<void> {
     let operationError: unknown;
+    if (!queued) {
+      if (!operationId || !work) throw new Error("Direct compaction ownership is missing");
+      await this.trackOwnershipWrite(
+        () => this.retryDurableWrite(`marker:mark:${operationId}`, () => this.dependencies.markers.mark(this.id, operationId)),
+        work,
+      );
+    }
     this.phase = "compacting";
-    this.operation = { kind: "compaction", startedAt: new Date().toISOString(), reason: "manual" };
+    this.operation = { ...(operationId ? { id: operationId } : {}), kind: "compaction", startedAt: new Date().toISOString(), reason: "manual" };
     this.revision += 1;
     this.publishSnapshot();
     try {
@@ -3097,24 +3567,13 @@ export class RuntimeSlot {
     }
 
     if (queued) {
-      try {
-        // The queued command and restart-drain owner cannot settle ahead of the
-        // durable marker that proves accepted work remains live across restart.
-        await this.dependencies.markers.clear(this.id);
-      } catch (markerError) {
-        this.queuedManualCompactionInFlight = false;
-        this.phase = "interrupted";
-        this.operation = undefined;
-        this.retry = undefined;
-        this.revision += 1;
-        this.publishSnapshot();
-        if (operationError !== undefined) {
-          throw new AggregateError([operationError, markerError], "Compaction and run-marker cleanup failed");
-        }
-        throw markerError;
-      }
+      // The queued command inherited the foreground marker. Reliable cleanup
+      // keeps the accepted-work token live through durable deletion.
+      await this.clearMarkerOwnership();
       this.queuedManualCompactionInFlight = false;
       this.hooks.settled(this.id);
+    } else {
+      await this.clearMarkerOwnership(operationId, work);
     }
 
     this.phase = "idle";
@@ -3126,22 +3585,40 @@ export class RuntimeSlot {
   }
 
   async executeBash(command: string, excludeFromContext: boolean): Promise<JsonValue> {
-    return this.lane.run(async () => {
-      this.assertIdle();
-      const operationId = randomUUID();
-      this.phase = "running";
-      this.operation = { id: operationId, kind: "bash", startedAt: new Date().toISOString() };
-      this.revision += 1;
-      this.publishSnapshot();
-      try {
-        return safeJson(await this.runtime.session.executeBash(command, undefined, { excludeFromContext, id: operationId }));
-      } finally {
-        this.phase = "idle";
-        this.operation = undefined;
+    let work: GatewayWorkHandle | undefined;
+    try {
+      return await this.lane.run(async () => {
+        this.assertIdle();
+        // Admission and the first canonical Bash call are in one lane turn with
+        // no suspension between them. The new token therefore cannot make its
+        // own idle check fail and no competing session mutation can enter.
+        work = this.dependencies.workRegistry.begin({
+          kind: "foreground-agent-operation",
+          sessionId: this.id,
+          hostEpoch: this.ui.hostEpoch,
+        });
+        const operationId = randomUUID();
+        await this.trackOwnershipWrite(
+          () => this.retryDurableWrite(`marker:mark:${operationId}`, () => this.dependencies.markers.mark(this.id, operationId)),
+          work,
+        );
+        this.phase = "running";
+        this.operation = { id: operationId, kind: "bash", startedAt: new Date().toISOString() };
         this.revision += 1;
         this.publishSnapshot();
-      }
-    });
+        try {
+          return safeJson(await this.runtime.session.executeBash(command, undefined, { excludeFromContext, id: operationId }));
+        } finally {
+          await this.clearMarkerOwnership(operationId, work);
+          this.phase = "idle";
+          this.operation = undefined;
+          this.revision += 1;
+          this.publishSnapshot();
+        }
+      });
+    } finally {
+      work?.settle();
+    }
   }
 
   async rename(name: string): Promise<void> {
@@ -3188,6 +3665,11 @@ export class RuntimeSlot {
     return this.lane.run(async () => {
       this.assertIdle();
       const ownsBranchSummary = options.summarize;
+      const work = ownsBranchSummary ? this.dependencies.workRegistry.begin({
+        kind: "compaction-export",
+        sessionId: this.id,
+        hostEpoch: this.ui.hostEpoch,
+      }) : undefined;
       this.operation = ownsBranchSummary ? { kind: "branchSummary", startedAt: new Date().toISOString() } : undefined;
       let completed = false;
       try {
@@ -3211,6 +3693,7 @@ export class RuntimeSlot {
         }
         if (!completed && ownsBranchSummary) this.revision += 1;
         if (completed || ownsBranchSummary) this.publishSnapshot();
+        work?.settle();
       }
     });
   }
@@ -3352,12 +3835,23 @@ export class RuntimeSlot {
   beginTrustReload(): void {
     if (this.trustReloadPending) return;
     this.assertIdle();
+    this.trustReloadWork = this.dependencies.workRegistry.begin({
+      kind: "administrative-provider-package-operation",
+      sessionId: this.id,
+      hostEpoch: this.ui.hostEpoch,
+    });
     this.trustReloadPending = true;
   }
 
   async reload(projectTrusted?: boolean, publish = true, trustTransition = false): Promise<void> {
     await this.lane.run(async () => {
-      this.assertIdle(trustTransition);
+      if (this.trustReloadWork) this.assertUsable(true);
+      else this.assertIdle(trustTransition);
+      const work = this.trustReloadWork ?? this.dependencies.workRegistry.begin({
+        kind: "administrative-provider-package-operation",
+        sessionId: this.id,
+        hostEpoch: this.ui.hostEpoch,
+      });
       const previousOverride = this.projectTrustReloadOverride;
       this.projectTrustReloadOverride = projectTrusted;
       try {
@@ -3365,6 +3859,8 @@ export class RuntimeSlot {
         if (publish) this.commitReload();
       } finally {
         this.projectTrustReloadOverride = previousOverride;
+        work.settle();
+        if (this.trustReloadWork === work) this.trustReloadWork = undefined;
       }
     });
   }
@@ -3390,6 +3886,11 @@ export class RuntimeSlot {
 
   async export(format: "html" | "jsonl"): Promise<{ blobId: string; name: string; mimeType: string }> {
     this.assertUsable();
+    const work = this.dependencies.workRegistry.begin({
+      kind: "compaction-export",
+      sessionId: this.id,
+      hostEpoch: this.ui.hostEpoch,
+    });
     this.activeExports += 1;
     try {
       return await this.lane.run(() => this.dependencies.blobs.withFileProductionAdmission(async () => {
@@ -3433,6 +3934,7 @@ export class RuntimeSlot {
       }));
     } finally {
       this.activeExports = Math.max(0, this.activeExports - 1);
+      work.settle();
     }
   }
 
@@ -3523,6 +4025,10 @@ export class RuntimeSlot {
       this.operation = undefined;
       this.pendingExtensionCommand = undefined;
       this.retry = undefined;
+      if (this.extensionShutdownRetryTimer) clearTimeout(this.extensionShutdownRetryTimer);
+      this.extensionShutdownRetryTimer = undefined;
+      this.extensionShutdownWork?.settle();
+      this.extensionShutdownWork = undefined;
     });
   }
 
@@ -3551,6 +4057,7 @@ export class RuntimeSlot {
     this.ui.cancelAll();
     this.extensionHost.retire("Session runtime disposed");
     await this.runtime.dispose();
+    for (const operationId of [...this.operationWork.keys()]) this.settleOperationWork(operationId);
     this.lifecycle.retire();
     this.ui.retire();
     this.disposed = true;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasStructuredExtensionRunActivity, normalizeExtensionArtifact, projectExtensionRunActivity } from "./extension-run-projection.js";
+import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity } from "./extension-run-projection.js";
 
 const base = {
   id: "tool-call",
@@ -58,15 +58,23 @@ describe("projectExtensionRunActivity", () => {
       runId: "timeline",
       state: "completed",
       startedAt: 100,
-      lastUpdate: 200,
-      completedAt: 300,
+      lastUpdate: 300,
+      completedAt: 200,
     };
     expect(admitExtensionLifecycleArtifact(valid)).toEqual(valid);
     expect(admitExtensionLifecycleArtifact({ ...valid, lastUpdate: 99 })).toBeUndefined();
     expect(admitExtensionLifecycleArtifact({ ...valid, endedAt: 199 })).toBeDefined();
+    expect(admitExtensionLifecycleArtifact({ ...valid, endedAt: 199, completedAt: 301 })).toBeUndefined();
+    expect(admitExtensionLifecycleArtifact({ ...valid, endedAt: 199, completedAt: 99 })).toBeUndefined();
+    expect(normalizeExtensionArtifact(
+      { state: "completed", startedAt: 100, endedAt: 200, completedAt: 301, lastUpdate: 300 },
+      { now: "2026-01-01T00:00:00.000Z" },
+    )).toBeUndefined();
     expect(admitExtensionLifecycleArtifact({ ...valid, endedAt: 99 })).toBeUndefined();
-    expect(admitExtensionLifecycleArtifact({ ...valid, endedAt: undefined, completedAt: undefined })).toBeUndefined();
+    expect(inspectExtensionLifecycleArtifact({ ...valid, endedAt: 301 })).toEqual({ accepted: false, reason: "invalid-timestamp" });
+    expect(inspectExtensionLifecycleArtifact({ ...valid, endedAt: undefined, completedAt: undefined })).toEqual({ accepted: false, reason: "missing-terminal-time" });
     expect(admitExtensionLifecycleArtifact({ ...valid, state: "running", endedAt: 50 })).toBeUndefined();
+    expect(inspectExtensionLifecycleArtifact("not-an-artifact")).toEqual({ accepted: false, reason: "malformed-artifact" });
   });
 
   it("admits only explicit delegated-run conventions for ambient activity", () => {

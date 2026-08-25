@@ -8,6 +8,7 @@ import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 import type { TrustService } from "./trust-service.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 
 interface ConfiguredPackageProjection {
   source: string;
@@ -92,6 +93,7 @@ export class PackageService {
     private readonly agentDir: string,
     private readonly trust: TrustService,
     private readonly broadcast: (topic: string, payload: JsonValue) => void,
+    private readonly workRegistry?: GatewayWorkRegistry,
   ) {}
 
   private async manager(cwdInput: string, requireProjectTrust: boolean): Promise<DefaultPackageManager> {
@@ -102,26 +104,45 @@ export class PackageService {
     return new DefaultPackageManager({ cwd: trust.cwd, agentDir: this.agentDir, settingsManager: settings });
   }
 
+  private async trackAdministrative<T>(operation: (work: GatewayWorkHandle | undefined) => Promise<T>): Promise<T> {
+    const work = this.workRegistry?.begin({
+      kind: "administrative-provider-package-operation",
+      hostEpoch: this.workRegistry.runtimeEpoch,
+    });
+    try {
+      return await operation(work);
+    } finally {
+      work?.settle();
+    }
+  }
+
   async list(cwd: string): Promise<unknown> {
-    const manager = await this.manager(cwd, false);
-    const packages = manager.listConfiguredPackages();
-    const resources = await manager.resolve(async () => "skip");
-    validatePackageInventory(packages, resources);
-    return { packages, resources };
+    return this.trackAdministrative(async () => {
+      const manager = await this.manager(cwd, false);
+      const packages = manager.listConfiguredPackages();
+      const resources = await manager.resolve(async () => "skip");
+      validatePackageInventory(packages, resources);
+      return { packages, resources };
+    });
   }
 
   async checkUpdates(cwd: string): Promise<unknown> {
-    const manager = await this.manager(cwd, false);
-    const updates = await manager.checkForAvailableUpdates();
-    validatePackageUpdates(updates);
-    return { updates };
+    return this.trackAdministrative(async () => {
+      const manager = await this.manager(cwd, false);
+      const updates = await manager.checkForAvailableUpdates();
+      validatePackageUpdates(updates);
+      return { updates };
+    });
   }
 
   async mutate(action: "install" | "remove" | "update", source: string | undefined, cwd: string, local: boolean): Promise<{ operationId: string }> {
-    return this.mutex.run(async () => {
+    return this.trackAdministrative((work) => this.mutex.run(async () => {
       const operationId = randomUUID();
       const manager = await this.manager(cwd, local);
-      manager.setProgressCallback((event) => this.broadcast("packages.progress", { operationId, event } as unknown as JsonValue));
+      manager.setProgressCallback((event) => {
+        work?.progress();
+        this.broadcast("packages.progress", { operationId, event } as unknown as JsonValue);
+      });
       try {
         if (action === "install") await manager.installAndPersist(source!, { local });
         else if (action === "remove") await manager.removeAndPersist(source!, { local });
@@ -138,6 +159,6 @@ export class PackageService {
         manager.setProgressCallback(undefined);
       }
       return { operationId };
-    });
+    }));
   }
 }

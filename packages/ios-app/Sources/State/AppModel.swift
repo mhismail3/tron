@@ -1287,6 +1287,29 @@ final class AppModel {
         }
     }
 
+    nonisolated static func supportsAdministrativeDrainStatus(capabilities: [String]) -> Bool {
+        capabilities.contains("drain-status.v1")
+    }
+
+    func loadAdministrativeDrainStatus(for profile: GatewayProfile) async throws -> AdministrativeDrainSnapshot? {
+        guard profiles.selected?.id == profile.id,
+              connectionState == .connected,
+              Self.supportsAdministrativeDrainStatus(capabilities: gatewayInfo?.capabilities ?? []),
+              let admission = lifecycle.generationAdmission else { return nil }
+        try requireLifecycle(admission)
+        do {
+            let snapshot: AdministrativeDrainSnapshot = try await client.request(
+                "gateway.drain.status",
+                EmptyParams(),
+                timeout: .seconds(10)
+            )
+            try requireLifecycle(admission)
+            return snapshot
+        } catch let failure as GatewayFailure where failure.code == "not_found" || failure.code == "unsupported" {
+            return nil
+        }
+    }
+
     func requestGatewayUpdate(
         for profile: GatewayProfile,
         mode: String = "source",
@@ -2160,7 +2183,7 @@ final class AppModel {
         }
         try requireLifecycle(admission)
         do {
-            try await restartGateway(admission: admission)
+            _ = try await restartGateway(admission: admission)
         } catch {
             guard admitsLifecycle(admission) else { throw CancellationError() }
             throw error
@@ -2171,32 +2194,35 @@ final class AppModel {
         capabilities.contains("restart-drain.v1") && capabilities.contains("restart-supervised.v1")
     }
 
-    func restartGateway() async throws {
+    @discardableResult
+    func restartGateway() async throws -> GatewayRestartResponse {
         guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
         do {
-            try await restartGateway(admission: admission)
+            return try await restartGateway(admission: admission)
         } catch {
             guard admitsLifecycle(admission) else { throw CancellationError() }
             throw error
         }
     }
 
-    func requestGatewayRestart() async {
-        do { try await restartGateway() }
-        catch { surface(error) }
+    @discardableResult
+    func requestGatewayRestart() async -> GatewayRestartResponse? {
+        do { return try await restartGateway() }
+        catch { surface(error); return nil }
     }
 
-    func requestGatewayRestart(for profile: GatewayProfile) async {
+    @discardableResult
+    func requestGatewayRestart(for profile: GatewayProfile) async -> GatewayRestartResponse? {
         if profiles.selected?.id != profile.id {
             await switchGateway(profile)
         }
-        guard profiles.selected?.id == profile.id else { return }
-        await requestGatewayRestart()
+        guard profiles.selected?.id == profile.id else { return nil }
+        return await requestGatewayRestart()
     }
 
     private func restartGateway(
         admission: GatewayLifecycleCoordinator.Admission
-    ) async throws {
+    ) async throws -> GatewayRestartResponse {
         try requireLifecycle(admission)
         guard Self.supportsSafeGatewayRestart(capabilities: gatewayInfo?.capabilities ?? []) else {
             throw GatewayFailure(
@@ -2207,9 +2233,8 @@ final class AppModel {
             )
         }
         struct Params: Codable { let commandId: String }
-        struct Response: Codable { let restarting: Bool; let scheduled: Bool; let activeSessionIds: [String] }
         let commandID = uuidSource.next().uuidString
-        let response: Response
+        let response: GatewayRestartResponse
         do {
             response = try await mutationExecutor.perform(method: "gateway.restart", commandID: commandID) {
                 try await client.request("gateway.restart", Params(commandId: commandID))
@@ -2219,10 +2244,14 @@ final class AppModel {
             throw error
         }
         try requireLifecycle(admission)
-        lifecycle.beginRestarting()
+        if response.restarting && !response.scheduled { lifecycle.beginRestarting() }
         if response.scheduled {
+            let blockerCount = response.drain?.blockerCount
+            let detail = blockerCount.map {
+                " after \($0) accepted operation\($0 == 1 ? " finishes" : "s finish")"
+            } ?? " after accepted operations finish"
             postNotice(
-                "Gateway restart scheduled after \(response.activeSessionIds.count) active agent run\(response.activeSessionIds.count == 1 ? "" : "s") finishes.",
+                "Gateway restart scheduled\(detail).",
                 replacing: .gatewayRestart,
                 role: .progress,
                 lifetime: .persistent,
@@ -2231,6 +2260,7 @@ final class AppModel {
         } else {
             postNotice("Gateway is restarting. Tron will reconnect automatically.", replacing: .gatewayRestart, role: .progress, lifetime: .persistent, priority: .low)
         }
+        return response
     }
 
     func loadWorkspace(path: String? = nil) async throws {

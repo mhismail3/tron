@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { open, opendir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
@@ -6,7 +6,14 @@ import { performance } from "node:perf_hooks";
 import { ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { installKimiK3Policy } from "../providers/kimi-k3-policy.js";
-import type { SessionSummary, SessionSummaryUpdate } from "../protocol/types.js";
+import type {
+  AdministrativeDrainBlockerCategory,
+  AdministrativeDrainBlockerSummary,
+  AdministrativeDrainPhase,
+  AdministrativeDrainSnapshot,
+  SessionSummary,
+  SessionSummaryUpdate,
+} from "../protocol/types.js";
 import { SessionAttentionStore, type SessionAttentionProjection } from "./session-attention-store.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { TrustService } from "../admin/trust-service.js";
@@ -22,6 +29,7 @@ import {
 import { ExtensionActivityRecency } from "./extension-activity-recency.js";
 import { admitExtensionLifecycleArtifact } from "./extension-run-projection.js";
 import type { NotificationService } from "../notifications/notification-service.js";
+import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 // MaximumLiveRuntimes is 16 and each slot retains at most 64 owned activity
@@ -29,8 +37,8 @@ const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 const MAX_EXTENSION_DISCOVERY_WORK = 1_024;
 const MAX_EXTENSION_DISCOVERY_ROOTS = 64;
 const MAX_EXTENSION_TEMP_ENTRIES = 1_024;
-// Root enumeration is structurally bounded independently of the smaller
-// selected routing budget, so directory order cannot hide a newer candidate.
+// Ambient enumeration shares these global pass bounds. Exact-owned artifact
+// reconciliation above is intentionally outside this ambient budget.
 const MAX_EXTENSION_ROOT_ENTRIES = 4_096;
 
 function isMissingFilesystemError(error: unknown): boolean {
@@ -135,6 +143,13 @@ export class RuntimeRegistry {
   private artifactDiscoveryInFlight = false;
   private slotAdmissionsInFlight = 0;
   private administrativeDrainStarted = false;
+  private readonly workRegistry: GatewayWorkRegistry;
+  private drainId: string;
+  private drainRevision = 0;
+  private drainPhase: AdministrativeDrainPhase = "idle";
+  private drainStartedAt: string | undefined;
+  private drainLastProgressAt: string | undefined;
+  private drainFingerprint = "";
   private shutdownState: "active" | "shuttingDown" | "disposed" = "active";
   private disposalPromise: Promise<void> | undefined;
 
@@ -155,11 +170,15 @@ export class RuntimeRegistry {
       stageTiming?: (stage: string, durationMs: number, outcome: "success" | "failure") => void;
       machineId?: string;
       notifications?: NotificationService;
+      workRegistry?: GatewayWorkRegistry;
+      extensionArtifactWarning?: (warning: { reason: import("./extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
     },
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     this.markers = new RunMarkerStore(options.tronHome);
     this.attention = new SessionAttentionStore(options.tronHome);
+    this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
+    this.drainId = `idle-${createHash("sha256").update(this.workRegistry.runtimeEpoch).digest("hex").slice(0, 16)}`;
     this.configuredSessionDir = SettingsManager.create(
       process.cwd(),
       options.agentDir,
@@ -173,6 +192,8 @@ export class RuntimeRegistry {
   get listRevision(): number {
     return this.revision;
   }
+
+  get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
 
   async initialize(): Promise<void> {
     await this.attention.initialize();
@@ -384,8 +405,10 @@ export class RuntimeRegistry {
       blobs: this.blobs,
       markers: this.markers,
       extensionActivityRecency: this.extensionActivityRecency,
+      workRegistry: this.workRegistry,
       ...(this.options.machineId ? { machineId: this.options.machineId } : {}),
       ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
+      ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
     };
   }
 
@@ -1654,7 +1677,12 @@ export class RuntimeRegistry {
       } catch { /* an unavailable temp directory leaves exact bindings authoritative */ }
 
       const rootList = [...roots];
-      for (let rootIndex = 0; rootIndex < rootList.length && work < MAX_EXTENSION_DISCOVERY_WORK; rootIndex += 1) {
+      let ambientStructuralEntries = 0;
+      let ambientStatusReads = 0;
+      for (let rootIndex = 0; rootIndex < rootList.length
+        && work < MAX_EXTENSION_DISCOVERY_WORK
+        && ambientStructuralEntries < MAX_EXTENSION_ROOT_ENTRIES
+        && ambientStatusReads < MAX_EXTENSION_DISCOVERY_WORK; rootIndex += 1) {
         const root = rootList[rootIndex]!;
         const rootsRemaining = rootList.length - rootIndex;
         const routedSlots = Math.max(1, slots.length);
@@ -1663,12 +1691,13 @@ export class RuntimeRegistry {
         ));
         const candidates: Array<{ asyncDir: string; active: boolean; timestamp: number }> = [];
         try {
-          let examined = 0;
           const entries = await opendir(root);
           for await (const entry of entries) {
-            examined += 1;
-            if (examined > MAX_EXTENSION_ROOT_ENTRIES) break;
+            ambientStructuralEntries += 1;
+            if (ambientStructuralEntries > MAX_EXTENSION_ROOT_ENTRIES) break;
             if (!entry.isDirectory()) continue;
+            if (ambientStatusReads >= MAX_EXTENSION_DISCOVERY_WORK) break;
+            ambientStatusReads += 1;
             const asyncDir = join(root, entry.name);
             try {
               const statusPath = join(asyncDir, "status.json");
@@ -1699,8 +1728,7 @@ export class RuntimeRegistry {
         // already refreshed above and do not outrank it in ambient discovery.
         candidates.sort((left, right) => Number(right.active) - Number(left.active)
           || right.timestamp - left.timestamp || left.asyncDir.localeCompare(right.asyncDir));
-        // Validate the bounded structural scan before selecting only the amount
-        // this pass can safely route to live slots.
+        // Route only the amount this pass can safely project to live slots.
         for (const candidate of candidates.slice(0, rootBudget)) {
           for (const slot of slots) {
             if (work >= MAX_EXTENSION_DISCOVERY_WORK) return;
@@ -1760,40 +1788,157 @@ export class RuntimeRegistry {
     return [...this.slots.values()].filter((slot) => slot.isBusy).map((slot) => slot.id);
   }
 
-  drainBusySessionCount(): number {
-    return this.slotAdmissionsInFlight
-      + [...this.slots.values()].filter((slot) => slot.isDrainBusy).length;
+  /** Close every Gateway work admission in the same synchronous turn as the
+   * accepted restart RPC and return its initial bounded identity. */
+  beginAdministrativeDrain(): AdministrativeDrainSnapshot {
+    if (!this.administrativeDrainStarted) {
+      this.administrativeDrainStarted = true;
+      this.workRegistry.beginDrain();
+      // Existing slot preflights close in this same synchronous turn. Queue
+      // clearing remains asynchronous preparation after the response boundary.
+      for (const slot of this.slots.values()) slot.beginAdministrativeDrainCutoff();
+      this.drainId = randomUUID();
+      this.drainPhase = "preparing";
+      this.drainStartedAt = new Date().toISOString();
+      this.drainLastProgressAt = this.drainStartedAt;
+      this.drainFingerprint = "";
+      this.drainRevision += 1;
+    }
+    return this.administrativeDrainSnapshot();
   }
 
-  async waitUntilIdle(): Promise<void> {
-    // Freeze slot-creating admissions synchronously, then wait for every
-    // create/acquire/import that entered before the freeze—including trust and
-    // catalog awaits outside the mutex—to publish or fail before snapshotting.
-    this.administrativeDrainStarted = true;
-    while (this.slotAdmissionsInFlight > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+  private setDrainPhase(phase: AdministrativeDrainPhase): void {
+    if (this.drainPhase === phase) return;
+    this.drainPhase = phase;
+    this.drainRevision += 1;
+    this.drainLastProgressAt = new Date().toISOString();
+    this.drainFingerprint = "";
+  }
+
+  administrativeDrainSnapshot(): AdministrativeDrainSnapshot {
+    const now = Date.now();
+    const facts: Array<{
+      key: string;
+      category: AdministrativeDrainBlockerCategory;
+      state: AdministrativeDrainBlockerSummary["state"];
+      admittedAt?: string;
+      progressAt?: string;
+    }> = [];
+    const workFacts = this.workRegistry.facts();
+    for (const work of workFacts) {
+      facts.push({
+        key: `work:${work.token}`,
+        category: work.kind,
+        state: work.kind === "terminal-receipt-persistence" ? "settling" : "active",
+        admittedAt: work.admittedAt,
+        progressAt: work.progressAt,
+      });
     }
-    const slots = await this.mutex.run(() => [...this.slots.values()]);
-    let preparationSettled = false;
-    let preparationError: unknown;
-    void Promise.all(slots.map((slot) => slot.prepareForAdministrativeDrain())).then(
-      () => { preparationSettled = true; },
-      (error) => { preparationError = error; preparationSettled = true; },
-    );
-    let lastArtifactReconciliation = Number.NEGATIVE_INFINITY;
-    while (!preparationSettled || slots.some((slot) => slot.isDrainBusy)) {
-      const now = performance.now();
-      if (preparationSettled && preparationError === undefined
-        && now - lastArtifactReconciliation >= 750) {
-        lastArtifactReconciliation = now;
-        await Promise.all(slots
-          .filter((slot) => slot.isDrainBusy)
-          .map((slot) => slot.reconcileOwnedExtensionArtifactsForDrain()));
-        continue;
+    for (const slot of this.slots.values()) {
+      for (const fact of slot.administrativeDrainBlockers()) {
+        facts.push({ ...fact, key: `slot:${slot.id}:${fact.key}` });
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    if (preparationError !== undefined) throw preparationError;
+    facts.sort((left, right) => (left.admittedAt ?? "").localeCompare(right.admittedAt ?? "")
+      || left.category.localeCompare(right.category) || left.key.localeCompare(right.key));
+    const counts: Partial<Record<AdministrativeDrainBlockerCategory, number>> = {};
+    for (const fact of facts) counts[fact.category] = (counts[fact.category] ?? 0) + 1;
+    const admitted = facts.flatMap((fact) => {
+      if (!fact.admittedAt) return [];
+      const milliseconds = Date.parse(fact.admittedAt);
+      return Number.isFinite(milliseconds) ? [{ timestamp: fact.admittedAt, milliseconds }] : [];
+    }).sort((left, right) => left.milliseconds - right.milliseconds);
+    const oldest = admitted[0];
+    const summaries = facts.slice(0, 64).map((fact) => {
+      const admittedMilliseconds = fact.admittedAt ? Date.parse(fact.admittedAt) : Number.NaN;
+      return {
+        id: `blocker-${createHash("sha256").update(`${this.drainId}\0${fact.key}`).digest("hex").slice(0, 20)}`,
+        category: fact.category,
+        state: fact.state,
+        ...(fact.admittedAt && Number.isFinite(admittedMilliseconds) ? {
+          admittedAt: fact.admittedAt,
+          ageMs: Math.max(0, now - admittedMilliseconds),
+        } : {}),
+      } satisfies AdministrativeDrainBlockerSummary;
+    });
+    const fingerprint = JSON.stringify({
+      phase: this.drainPhase,
+      facts: facts.map((fact) => [fact.key, fact.category, fact.state, fact.admittedAt, fact.progressAt]),
+    });
+    if (fingerprint !== this.drainFingerprint) {
+      this.drainFingerprint = fingerprint;
+      this.drainRevision += 1;
+      if (this.administrativeDrainStarted) this.drainLastProgressAt = new Date(now).toISOString();
+    }
+    return {
+      drainId: this.drainId,
+      revision: this.drainRevision,
+      phase: this.drainPhase,
+      ...(this.drainStartedAt ? { startedAt: this.drainStartedAt } : {}),
+      ...(this.drainLastProgressAt ? { lastProgressAt: this.drainLastProgressAt } : {}),
+      blockerCount: facts.length,
+      blockerCounts: counts,
+      ...(oldest ? {
+        oldestAdmissionAt: oldest.timestamp,
+        oldestAdmissionAgeMs: Math.max(0, now - oldest.milliseconds),
+      } : {}),
+      blockers: summaries,
+      omittedCount: Math.max(0, facts.length - summaries.length),
+      // No projection is currently retired without exact settlement evidence.
+      // Keep this additive lane explicit rather than conflating it with blockers.
+      suspectProjectionCount: 0,
+    };
+  }
+
+  drainBusySessionCount(): number { return this.administrativeDrainSnapshot().blockerCount; }
+
+  async waitUntilIdle(): Promise<void> {
+    // Freeze slot/admin admissions synchronously, then wait for every operation
+    // admitted before the cutoff. Graceful restart never cancels accepted work.
+    this.beginAdministrativeDrain();
+    try {
+      while (this.slotAdmissionsInFlight > 0) {
+        this.administrativeDrainSnapshot();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      const slots = await this.mutex.run(() => [...this.slots.values()]);
+      let preparationSettled = false;
+      let preparationError: unknown;
+      void Promise.all(slots.map((slot) => slot.prepareForAdministrativeDrain())).then(
+        () => { preparationSettled = true; },
+        (error) => { preparationError = error; preparationSettled = true; },
+      );
+      let lastArtifactReconciliation = Number.NEGATIVE_INFINITY;
+      this.setDrainPhase("waiting");
+      while (!preparationSettled || this.workRegistry.size > 0 || slots.some((slot) => slot.isDrainBusy)) {
+        this.administrativeDrainSnapshot();
+        const monotonic = performance.now();
+        if (preparationSettled && preparationError === undefined
+          && monotonic - lastArtifactReconciliation >= 750) {
+          lastArtifactReconciliation = monotonic;
+          await Promise.all(slots
+            .filter((slot) => slot.isDrainBusy)
+            .map((slot) => slot.reconcileOwnedExtensionArtifactsForDrain()));
+          continue;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (preparationError !== undefined) throw preparationError;
+      const finalWaiting = this.administrativeDrainSnapshot();
+      if (finalWaiting.blockerCount !== 0) {
+        throw new Error("Administrative drain cannot complete while blockers remain");
+      }
+      this.workRegistry.completeDrain();
+      this.setDrainPhase("complete");
+      const completed = this.administrativeDrainSnapshot();
+      if (completed.blockerCount !== 0) {
+        throw new Error("Administrative drain completion invariant was violated");
+      }
+    } catch (error) {
+      this.setDrainPhase("failed");
+      this.administrativeDrainSnapshot();
+      throw error;
+    }
   }
 
   async dispose(): Promise<void> {
@@ -1839,12 +1984,17 @@ export class RuntimeRegistry {
     if (this.administrativeDrainStarted) {
       throw new GatewayError("busy", "Gateway restart is draining admitted session work", true);
     }
+    const work = this.workRegistry.begin({
+      kind: "slot-admission",
+      hostEpoch: this.workRegistry.runtimeEpoch,
+    });
     this.slotAdmissionsInFlight += 1;
     let finished = false;
     return () => {
       if (finished) return;
       finished = true;
       this.slotAdmissionsInFlight -= 1;
+      work.settle();
     };
   }
 

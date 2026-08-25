@@ -13,6 +13,7 @@ import { PackageService } from "./admin/package-service.js";
 import { AuthBroker } from "./admin/auth-broker.js";
 import { LegacyImportService } from "./admin/legacy-import-service.js";
 import { RuntimeRegistry } from "./sessions/runtime-registry.js";
+import { GatewayWorkRegistry } from "./sessions/gateway-work-registry.js";
 import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
@@ -23,6 +24,7 @@ import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
 import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
 import { NotificationService } from "./notifications/notification-service.js";
+import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
 
 const config = await loadConfig();
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
@@ -82,6 +84,7 @@ const modelConfig = new ModelConfigService(config.agentDir);
 const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
 
+const workRegistry = new GatewayWorkRegistry();
 let transport: GatewayServer;
 const sessions = new RuntimeRegistry({
   agentDir: config.agentDir,
@@ -96,6 +99,12 @@ const sessions = new RuntimeRegistry({
   sessionClosed: (sessionId) => transport?.revokeSessionTerminals(sessionId),
   machineId: config.machineId,
   notifications,
+  workRegistry,
+  extensionArtifactWarning: ({ reason, owner }) => logger.log(
+    "warning",
+    `Extension lifecycle artifact rejected (${reason}; owner ${owner})`,
+    { event: "extension.artifact-rejected", source: "sessions" },
+  ),
   stageTiming: (stage, durationMs, outcome) => {
     if (durationMs < 250 && outcome === "success") return;
     logger.log(
@@ -115,8 +124,14 @@ const auth = new AuthBroker(
   modelRuntime,
   (clientId, topic, payload) => transport?.emitToClient(clientId, topic, payload),
   (topic, payload) => transport?.broadcast(topic, payload),
+  { workRegistry },
 );
-const packages = new PackageService(config.agentDir, trust, (topic, payload) => transport?.broadcast(topic, payload));
+const packages = new PackageService(
+  config.agentDir,
+  trust,
+  (topic, payload) => transport?.broadcast(topic, payload),
+  workRegistry,
+);
 const legacyImport = new LegacyImportService(config.tronHome);
 
 let stopping = false;
@@ -127,10 +142,32 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
   const forced = setTimeout(() => process.exit(1), 15_000);
   forced.unref();
   try {
+    workRegistry.beginDrain();
     await transport.close();
+    await workRegistry.requestCancellation();
+    // Administrative restart already waited without a deadline. Signal/error
+    // shutdown gets only a short cleanup grace; failure cannot reopen admission.
+    let cleanupTimer!: NodeJS.Timeout;
+    const cleanupGrace = new Promise<void>((resolve) => {
+      cleanupTimer = setTimeout(resolve, 2_000);
+      cleanupTimer.unref();
+    });
+    await Promise.race([workRegistry.waitUntilSettled(), cleanupGrace]);
+    clearTimeout(cleanupTimer);
+    if (workRegistry.size > 0) {
+      logger.log(
+        "warning",
+        `Gateway shutdown cleanup grace expired with ${workRegistry.size} owned operation${workRegistry.size === 1 ? "" : "s"} still outstanding`,
+        { event: "gateway.shutdown-cleanup-expired", source: "lifecycle" },
+      );
+    }
     terminal.dispose();
     notifications.dispose();
     await sessions.dispose();
+    // pi-coding-agent 0.84.1 exposes no disposal API on the retained
+    // administration resource loader/model runtime. Admission closure and exact
+    // operation settlement above are therefore its truthful teardown boundary.
+    void administrationServices;
     await releaseRuntimeLock();
     clearTimeout(forced);
     process.exit(exitCode);
@@ -147,10 +184,14 @@ function requestRestart(): void {
   logger.log("info", "Gateway restart scheduled after accepted agent runs settle", { event: "gateway.restart-drain", source: "lifecycle" });
   requestedRestart = (async () => {
     const waitingLog = setInterval(() => {
-      const remaining = sessions.drainBusySessionCount();
+      const snapshot = sessions.administrativeDrainSnapshot();
+      const categories = Object.entries(snapshot.blockerCounts)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([category, count]) => `${category}=${count}`)
+        .join(", ");
       logger.log(
         "info",
-        `Gateway restart is waiting for ${remaining} admitted session operation${remaining === 1 ? "" : "s"} to settle`,
+        `Gateway restart is waiting for ${snapshot.blockerCount} admitted operation${snapshot.blockerCount === 1 ? "" : "s"} to settle${categories ? ` (${categories})` : ""}`,
         { event: "gateway.restart-drain.waiting", source: "lifecycle" },
       );
     }, 15_000);
@@ -161,7 +202,7 @@ function requestRestart(): void {
       clearInterval(waitingLog);
     }
     logger.log("info", "Gateway restart drain completed", { event: "gateway.restart-drain.completed", source: "lifecycle" });
-    await shutdown("requested restart", 75);
+    await shutdown("requested restart", SUPERVISOR_RELAUNCH_EXIT_CODE);
   })().catch((error) => {
     logger.log("error", error instanceof Error ? error.message : String(error), { event: "gateway.restart-drain-failed", source: "lifecycle" });
     void shutdown("restart drain failed", 1);
@@ -191,6 +232,7 @@ const service = new GatewayService({
   sessionDeleted: (sessionId) => transport?.revokeSessionTerminals(sessionId),
   broadcast: (topic, payload) => transport?.broadcast(topic, payload),
   notifications,
+  workRegistry,
 });
 transport = new GatewayServer({
   host: config.host,
@@ -209,8 +251,9 @@ transport = new GatewayServer({
   logger,
 });
 
-process.once("SIGTERM", () => void shutdown("SIGTERM"));
-process.once("SIGINT", () => void shutdown("SIGINT"));
+const supervised = process.env.TRON_GATEWAY_SUPERVISED === "1";
+process.once("SIGTERM", () => void shutdown("SIGTERM", handledSignalExitCode(supervised, requestedRestart !== undefined)));
+process.once("SIGINT", () => void shutdown("SIGINT", handledSignalExitCode(supervised, requestedRestart !== undefined)));
 process.on("uncaughtException", (error) => {
   logger.log("error", `Uncaught exception: ${error.message}`, { event: "process.uncaught-exception", source: "process" });
   void shutdown("uncaught exception", 1);
