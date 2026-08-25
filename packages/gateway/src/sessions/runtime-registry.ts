@@ -189,7 +189,7 @@ export class RuntimeRegistry {
     return this.blobs.initialize();
   }
 
-  private async reconcileCanonicalAttention(markerEvidence: ReadonlyMap<string, RunMarkerEvidence>): Promise<void> {
+  private async reconcileCanonicalAttention(markerEvidence: ReadonlyMap<string, readonly RunMarkerEvidence[]>): Promise<void> {
     const scanBoundary = new Date().toISOString();
     // Canonical JSONL alone never creates unread state. Recovery considers only
     // exact durable run-marker ownership and does not warm the catalog cache.
@@ -197,13 +197,15 @@ export class RuntimeRegistry {
     const retainedIDs = new Set(infos.map((info) => info.id));
     await this.attention.prune(retainedIDs);
     for (const info of infos) {
-      const marker = markerEvidence.get(info.id);
-      if (!marker) continue;
+      const markers = markerEvidence.get(info.id);
+      if (!markers) continue;
       const manager = SessionManager.open(info.path);
-      const completion = completionOwnedByMarker(manager, marker);
-      if (!completion) continue;
-      await this.attention.complete(info.id, completion.id);
-      await this.markers.clear(info.id, marker.operationId);
+      for (const marker of markers) {
+        const completion = completionOwnedByMarker(manager, marker);
+        if (!completion) continue;
+        await this.attention.complete(info.id, completion.id);
+        await this.markers.clear(info.id, marker.operationId);
+      }
     }
     await this.attention.advanceReconciliationCursor(scanBoundary);
   }

@@ -185,15 +185,10 @@ export interface RuntimeSlotDependencies {
   notifications?: NotificationService;
 }
 
-type CompletionOwnershipItem =
-  | {
-      kind: "marker";
-      operationId: string;
-      admitted: Promise<void>;
-      resolve: () => void;
-      reject: (error: unknown) => void;
-    }
-  | { kind: "completion"; completion: CanonicalAssistantCompletion };
+type CompletionOwnershipItem = {
+  completion: CanonicalAssistantCompletion;
+  stamp: Promise<void> | undefined;
+};
 
 /**
  * Owns one live Pi runtime and the reconnect-safe mobile projection for its
@@ -229,9 +224,9 @@ export class RuntimeSlot {
   private finalizedStreamPresentationId: string | undefined;
   /** Exact successful canonical assistant completion awaiting durable attention admission. */
   private pendingAssistantCompletion: CanonicalAssistantCompletion | undefined;
-  /** Accepted marker transitions and exact completions share one ordered lane. A
-   * failed head remains queued so reconciliation can retry without allowing a
-   * continuation to replace its durable ownership evidence. */
+  /** Exact completions retain canonical attention order. Their durable stamps
+   * are started independently so a failed projection head cannot hide a newer
+   * continuation from restart reconciliation. */
   private readonly completionOwnershipQueue: CompletionOwnershipItem[] = [];
   private attentionBarrier: Promise<void> | undefined;
   private rebindAttentionDisposition: SessionAttentionRebindDisposition = "migrate";
@@ -844,6 +839,9 @@ export class RuntimeSlot {
           ...completion,
           ...(this.activeOperationId ? { operationId: this.activeOperationId } : {}),
         };
+        // Pi has synchronously appended the canonical entry. Start its exact
+        // durable stamp now; truthful agent settlement still gates projection.
+        this.recordCompletionOwnership(this.pendingAssistantCompletion);
       }
       const excess = this.presentationIDOrder.length - MAX_PRESENTATION_IDENTITY_BINDINGS;
       if (excess > 0) {
@@ -898,29 +896,53 @@ export class RuntimeSlot {
     };
   }
 
-  private enqueueMarkerOwnership(operationId: string): Promise<void> {
-    const existing = this.completionOwnershipQueue.find(
-      (item): item is Extract<CompletionOwnershipItem, { kind: "marker" }> =>
-        item.kind === "marker" && item.operationId === operationId,
+  private trackOwnershipWrite(write: Promise<void>): Promise<void> {
+    this.pendingReceiptWrites.add(write);
+    void write.then(
+      () => this.pendingReceiptWrites.delete(write),
+      () => this.pendingReceiptWrites.delete(write),
     );
-    if (existing) return existing.admitted;
-    let resolve!: () => void;
-    let reject!: (error: unknown) => void;
-    const admitted = new Promise<void>((resolvePromise, rejectPromise) => {
-      resolve = resolvePromise;
-      reject = rejectPromise;
+    return write;
+  }
+
+  private enqueueMarkerOwnership(operationId: string): Promise<void> {
+    // The durable marker store has its own per-session lane and retains multiple
+    // owners. Never queue a newer admission behind attention projection.
+    return this.trackOwnershipWrite(this.dependencies.markers.mark(this.id, operationId));
+  }
+
+  private startCompletionStamp(item: CompletionOwnershipItem): Promise<void> {
+    if (item.stamp) return item.stamp;
+    const { completion } = item;
+    if (!completion.operationId) return Promise.resolve();
+    const stamp = this.trackOwnershipWrite(this.dependencies.markers.markAssistantCompletion(
+      this.id,
+      completion.operationId,
+      completion.id,
+      completion.completedAt,
+    ));
+    item.stamp = stamp;
+    void stamp.catch(() => {
+      // A later reconciliation attempt may retry a failed durability write.
+      if (item.stamp === stamp) item.stamp = undefined;
     });
-    this.completionOwnershipQueue.push({ kind: "marker", operationId, admitted, resolve, reject });
-    void this.drainCompletionOwnership().catch(() => {});
-    return admitted;
+    return stamp;
+  }
+
+  private recordCompletionOwnership(completion: CanonicalAssistantCompletion): CompletionOwnershipItem {
+    let item = this.completionOwnershipQueue.find((candidate) => candidate.completion.id === completion.id);
+    if (!item) {
+      item = { completion, stamp: undefined };
+      this.completionOwnershipQueue.push(item);
+    }
+    // Start exact durable ownership immediately, even when an older completion
+    // is still retrying serialized attention admission.
+    void this.startCompletionStamp(item).catch(() => {});
+    return item;
   }
 
   private beginAttentionSettlement(completion: CanonicalAssistantCompletion): Promise<void> {
-    if (!this.completionOwnershipQueue.some(
-      (item) => item.kind === "completion" && item.completion.id === completion.id,
-    )) {
-      this.completionOwnershipQueue.push({ kind: "completion", completion });
-    }
+    this.recordCompletionOwnership(completion);
     return this.drainCompletionOwnership();
   }
 
@@ -929,17 +951,7 @@ export class RuntimeSlot {
     const operation = (async () => {
       while (this.completionOwnershipQueue.length > 0) {
         const item = this.completionOwnershipQueue[0]!;
-        if (item.kind === "marker") {
-          try {
-            await this.dependencies.markers.mark(this.id, item.operationId);
-            this.completionOwnershipQueue.shift();
-            item.resolve();
-          } catch (error) {
-            item.reject(error);
-            throw error;
-          }
-          continue;
-        }
+        await this.startCompletionStamp(item);
         await this.settleAssistantCompletion(item.completion);
         this.completionOwnershipQueue.shift();
       }
@@ -958,14 +970,6 @@ export class RuntimeSlot {
       let lastError: unknown;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          if (completion.operationId) {
-            await this.dependencies.markers.markAssistantCompletion(
-              this.id,
-              completion.operationId,
-              completion.id,
-              completion.completedAt,
-            );
-          }
           await this.hooks.assistantResponseCompleted(this.id, completion, false);
           lastError = undefined;
           break;
@@ -1029,12 +1033,13 @@ export class RuntimeSlot {
       await this.beginAttentionSettlement(this.pendingAssistantCompletion);
       return;
     }
-    const marker = await this.dependencies.markers.evidenceFor(this.id);
-    if (!marker) return;
-    const completion = completionOwnedByMarker(this.sessionManager, marker);
-    if (!completion) return;
-    await this.hooks.assistantResponseCompleted(this.id, completion, true);
-    await this.dependencies.markers.clear(this.id, marker.operationId);
+    const markers = await this.dependencies.markers.evidenceFor(this.id);
+    for (const marker of markers) {
+      const completion = completionOwnedByMarker(this.sessionManager, marker);
+      if (!completion) continue;
+      await this.hooks.assistantResponseCompleted(this.id, completion, true);
+      await this.dependencies.markers.clear(this.id, marker.operationId);
+    }
   }
 
   private onEvent(event: AgentSessionEvent): void {
@@ -2663,9 +2668,10 @@ export class RuntimeSlot {
         const finishCommand = async () => {
           if (this.pendingExtensionCommand?.id !== operationId) return;
           if (this.hasActiveAgentRun && this.activeOperationId !== undefined) {
-            // Transfer marker ownership atomically back to the foreground/new
-            // agent run after the command's provisional marker.
+            // Transfer marker ownership back to the foreground/new agent run:
+            // commit its record before retiring the command's provisional one.
             await this.enqueueMarkerOwnership(this.activeOperationId);
+            await this.dependencies.markers.clear(this.id, operationId);
           } else if (this.activeOperationId === undefined) {
             if (this.pendingAssistantCompletion) {
               // No continuation claimed the final assistant entry. Retire the

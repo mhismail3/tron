@@ -1983,6 +1983,104 @@ export default function (pi) {
     expect(snapshots.some((snapshot) => snapshot.phase === "running" && snapshot.operation)).toBe(true);
   });
 
+  it("recovers ordered continuation completions after the attention head repeatedly fails and restart", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-settlement-crash-durable-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([
+      mkdir(agentDir),
+      mkdir(join(cwd, ".pi", "extensions"), { recursive: true }),
+    ]);
+    await writeFile(join(cwd, ".pi", "extensions", "continuation.ts"), `
+let triggered = false;
+export default function (pi) {
+  pi.on("agent_settled", () => {
+    if (triggered) return;
+    triggered = true;
+    pi.sendMessage({ customType: "test-continuation", content: "continue", display: false }, { triggerTurn: true });
+  });
+}
+`);
+    const faux = fauxProvider({ provider: "tron-settlement-crash-durable", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      fauxAssistantMessage("completion A"),
+      fauxAssistantMessage("completion B"),
+    ]);
+    const createModels = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const tronHome = join(root, "tron");
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: createModels, trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const internals = registry as unknown as {
+      attention: { complete: (sessionId: string, completionId: string) => Promise<unknown> };
+      markers: {
+        evidenceFor: (sessionId: string) => Promise<Array<{ assistantCompletionId?: string }>>;
+        markAssistantCompletion: (
+          sessionId: string, operationId: string, completionId: string, completedAt: string,
+        ) => Promise<void>;
+      };
+    };
+    vi.spyOn(internals.attention, "complete").mockRejectedValue(new Error("injected persistent attention failure"));
+    const originalStamp = internals.markers.markAssistantCompletion.bind(internals.markers);
+    let secondStampEntered!: () => void;
+    let releaseSecondStamp!: () => void;
+    const secondStampEntry = new Promise<void>((resolve) => { secondStampEntered = resolve; });
+    const secondStampBarrier = new Promise<void>((resolve) => { releaseSecondStamp = resolve; });
+    let stampCount = 0;
+    vi.spyOn(internals.markers, "markAssistantCompletion").mockImplementation(async (...arguments_) => {
+      stampCount += 1;
+      if (stampCount === 2) {
+        secondStampEntered();
+        await secondStampBarrier;
+      }
+      await originalStamp(...arguments_);
+    });
+
+    await slot.prompt("start");
+    await secondStampEntry;
+    await waitUntil(() => slot.snapshot().phase === "interrupted");
+    const blockedQueue = (slot as unknown as { completionOwnershipQueue: unknown[] }).completionOwnershipQueue;
+    expect(blockedQueue).toHaveLength(2);
+    let disposalSettled = false;
+    const disposal = registry.dispose().finally(() => { disposalSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(disposalSettled).toBe(false);
+    releaseSecondStamp();
+    await disposal;
+
+    const durableCompletionIds = (await internals.markers.evidenceFor(slot.id))
+      .map((marker) => marker.assistantCompletionId)
+      .filter((id): id is string => id !== undefined);
+    expect(durableCompletionIds).toHaveLength(2);
+    expect(new Set(durableCompletionIds).size).toBe(2);
+    const restarted = new RuntimeRegistry({
+      agentDir, tronHome, idleRuntimeMs: 60_000, modelRuntimeFactory: createModels,
+      trust: new TrustService(agentDir),
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(restarted);
+    const restartedAttention = (restarted as unknown as {
+      attention: { complete: (sessionId: string, completionId: string) => Promise<unknown> };
+    }).attention;
+    const recovered = vi.spyOn(restartedAttention, "complete");
+    await restarted.initialize();
+
+    expect(recovered.mock.calls.map(([, completionId]) => completionId)).toEqual(durableCompletionIds);
+    expect(restarted.attentionProjection(slot.id)).toMatchObject({ completionRevision: 2, isUnread: true });
+  });
+
   it("coalesces streaming progress frames while keeping the event stream contiguous and complete", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-streaming-coalesce-"));
     const agentDir = join(root, "agent");
@@ -3225,8 +3323,10 @@ export default function (pi) {
     expect(during.phase).toBe("running");
     expect(during.operation?.kind).toBe("prompt");
     expect(during.extensionCommand?.kind).toBe("command");
-    const marker = JSON.parse(await readFile(join(root, "tron", "gateway", "runtime-markers", `${slot.id}.json`), "utf8")) as { operationId: string };
-    expect(marker.operationId).toBe(during.extensionCommand?.id);
+    const marker = JSON.parse(await readFile(join(root, "tron", "gateway", "runtime-markers", `${slot.id}.json`), "utf8")) as {
+      operations: Array<{ operationId: string }>;
+    };
+    expect(marker.operations.map((operation) => operation.operationId)).toContain(during.extensionCommand?.id);
     let drainSettled = false;
     const drain = registry.waitUntilIdle().then(() => { drainSettled = true; });
     await new Promise((resolve) => setTimeout(resolve, 25));

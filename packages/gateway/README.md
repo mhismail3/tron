@@ -476,11 +476,15 @@ recent-completion deduplication set, and a restart-reconciliation cursor. Only a
 accepted prompt turn's canonical assistant entry ending with Pi `stop` or `length`
 at truthful agent settlement advances completion; generic idle, compaction,
 abort/error/deferred output, runtime close, and intermediate tool-use messages do
-not. Accepted markers and their exact canonical completion stamps use synced
-file-and-directory replacement. Settlement serializes marker ownership with
-attention admission and blocks open/drain until both are committed; after restart,
-a bounded canonical JSONL scan admits only the successful completion named by an
-exact durable marker stamp before advancing its cursor. Catalog rows and
+not. A private per-session marker document retains at most 16 accepted operation
+records and their exact canonical completion stamps using synced file-and-directory
+replacement; a full document rejects newer admission rather than dropping evidence.
+Legacy v1 single-operation markers migrate on mutation without inferring an unstamped
+completion. Marker creation and exact stamping run independently of serialized
+attention admission, so a failing older projection cannot hide a completed extension
+continuation. Open/drain joins live settlement; after restart, a bounded canonical
+JSONL scan admits every successful completion named by the ordered exact durable
+stamps, and no markerless or temporal completion, before advancing its cursor. Catalog rows and
 revisioned `session.summary` events project
 `completionRevision`, `attentionRevision`, and `isUnread` without changing
 structural `listRevision`. `session.attention.set` uses ordinary command receipts;

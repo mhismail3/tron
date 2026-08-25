@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, open, rename, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { RunMarkerStore } from "./run-markers.js";
+import { MAXIMUM_RUN_MARKER_OPERATIONS, RunMarkerStore } from "./run-markers.js";
 
 describe("RunMarkerStore", () => {
   it("records accepted work without storing the prompt", async () => {
@@ -13,11 +13,11 @@ describe("RunMarkerStore", () => {
     await store.markAssistantCompletion("session", "operation", "completion", "2026-01-01T00:00:00.000Z");
     expect(await store.evidence()).toEqual(new Map([[
       "session",
-      expect.objectContaining({
+      [expect.objectContaining({
         operationId: "operation",
         assistantCompletionId: "completion",
         assistantCompletedAt: "2026-01-01T00:00:00.000Z",
-      }),
+      })],
     ]]));
     await expect(store.markAssistantCompletion(
       "session", "older-operation", "other", "2026-01-01T00:00:01.000Z",
@@ -86,6 +86,44 @@ describe("RunMarkerStore", () => {
     expect(remove).toHaveBeenCalledWith(expect.stringMatching(/\.tmp$/u), { force: true });
   });
 
+  it("migrates v1 evidence on mutation without inventing a completion", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-markers-v1-"));
+    const directory = join(root, "gateway", "runtime-markers");
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "session.json"), JSON.stringify({
+      version: 1,
+      sessionId: "session",
+      operationId: "legacy-operation",
+      acceptedAt: "2026-01-01T00:00:00.000Z",
+    }));
+    const store = new RunMarkerStore(root);
+
+    expect(await store.evidenceFor("session")).toEqual([expect.objectContaining({
+      operationId: "legacy-operation",
+    })]);
+    expect((await store.evidenceFor("session"))[0]!.assistantCompletionId).toBeUndefined();
+    await store.mark("session", "new-operation");
+    const migrated = JSON.parse(await readFile(join(directory, "session.json"), "utf8")) as {
+      version: number;
+      operations: Array<{ operationId: string; assistantCompletionId?: string }>;
+    };
+    expect(migrated.version).toBe(2);
+    expect(migrated.operations.map((operation) => operation.operationId))
+      .toEqual(["legacy-operation", "new-operation"]);
+    expect(migrated.operations[0]!.assistantCompletionId).toBeUndefined();
+  });
+
+  it("rejects new ownership at the document bound without dropping retained evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-markers-bound-"));
+    const store = new RunMarkerStore(root);
+    for (let index = 0; index < MAXIMUM_RUN_MARKER_OPERATIONS; index += 1) {
+      await store.mark("session", `operation-${index}`);
+    }
+    await expect(store.mark("session", "overflow")).rejects.toThrow("bound reached");
+    expect((await store.evidenceFor("session")).map((operation) => operation.operationId))
+      .toEqual(Array.from({ length: MAXIMUM_RUN_MARKER_OPERATIONS }, (_, index) => `operation-${index}`));
+  });
+
   it("cleans lanes after sequential operations across many sessions", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-markers-many-"));
     const store = new RunMarkerStore(root);
@@ -101,8 +139,8 @@ describe("RunMarkerStore", () => {
     const root = await mkdtemp(join(tmpdir(), "tron-markers-queued-"));
     const store = new RunMarkerStore(root);
     await Promise.all([
-      ...Array.from({ length: 20 }, (_, index) => store.mark("same-session", `operation-${index}`)),
-      ...Array.from({ length: 20 }, (_, index) => store.clear("same-session", `operation-${index}`)),
+      ...Array.from({ length: 12 }, (_, index) => store.mark("same-session", `operation-${index}`)),
+      ...Array.from({ length: 12 }, (_, index) => store.clear("same-session", `operation-${index}`)),
     ]);
     expect((store as unknown as { lanes: Map<string, unknown> }).lanes.size).toBe(0);
   });

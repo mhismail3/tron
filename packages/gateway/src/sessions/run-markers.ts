@@ -5,13 +5,24 @@ import { readJson, removeIfExists } from "../util/json.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 
 export interface RunMarkerEvidence {
-  version: 1;
-  sessionId: string;
   operationId: string;
   acceptedAt: string;
   assistantCompletionId?: string;
   assistantCompletedAt?: string;
 }
+
+interface LegacyRunMarkerEvidence extends RunMarkerEvidence {
+  version: 1;
+  sessionId: string;
+}
+
+interface RunMarkerDocument {
+  version: 2;
+  sessionId: string;
+  operations: RunMarkerEvidence[];
+}
+
+type StoredRunMarker = LegacyRunMarkerEvidence | RunMarkerDocument;
 
 interface Lane {
   mutex: AsyncMutex;
@@ -30,6 +41,10 @@ interface RunMarkerStoreOptions {
 }
 
 const productionFileSystem: RunMarkerFileSystem = { mkdir, open, rename, rm };
+export const MAXIMUM_RUN_MARKER_OPERATIONS = 16;
+const MAXIMUM_RUN_MARKER_BYTES = 32 * 1_024;
+const MAXIMUM_MARKER_IDENTIFIER_BYTES = 256;
+const MAXIMUM_MARKER_TIMESTAMP_BYTES = 128;
 
 export class RunMarkerStore {
   private readonly directory: string;
@@ -55,7 +70,6 @@ export class RunMarkerStore {
 
   private releaseLane(sessionId: string, lane: Lane): void {
     lane.users -= 1;
-    // Do not remove a replacement lane created after this lane was released.
     if (lane.users === 0 && this.lanes.get(sessionId) === lane) this.lanes.delete(sessionId);
   }
 
@@ -69,9 +83,18 @@ export class RunMarkerStore {
   }
 
   async mark(sessionId: string, operationId: string): Promise<void> {
+    if (!boundedString(operationId, MAXIMUM_MARKER_IDENTIFIER_BYTES)) {
+      throw new Error("Run marker operation identifier exceeds its bound");
+    }
     await this.withLane(sessionId, async () => {
-      const marker: RunMarkerEvidence = { version: 1, sessionId, operationId, acceptedAt: new Date().toISOString() };
-      await durableWriteRunMarker(join(this.directory, `${sessionId}.json`), marker, this.fileSystem);
+      const path = join(this.directory, `${sessionId}.json`);
+      const operations = await readOperations(path, sessionId);
+      if (operations.some((operation) => operation.operationId === operationId)) return;
+      if (operations.length >= MAXIMUM_RUN_MARKER_OPERATIONS) {
+        throw new Error("Run marker operation bound reached before durable admission");
+      }
+      operations.push({ operationId, acceptedAt: new Date().toISOString() });
+      await durableWriteRunMarker(path, { version: 2, sessionId, operations }, this.fileSystem);
     });
   }
 
@@ -81,39 +104,39 @@ export class RunMarkerStore {
     completionId: string,
     completedAt: string,
   ): Promise<void> {
+    if (!boundedString(operationId, MAXIMUM_MARKER_IDENTIFIER_BYTES)
+      || !boundedString(completionId, MAXIMUM_MARKER_IDENTIFIER_BYTES)
+      || !boundedString(completedAt, MAXIMUM_MARKER_TIMESTAMP_BYTES)) {
+      throw new Error("Run marker completion evidence exceeds its bound");
+    }
     await this.withLane(sessionId, async () => {
       const path = join(this.directory, `${sessionId}.json`);
-      const marker = await readJson<RunMarkerEvidence | undefined>(path, undefined, 4_096);
-      if (!marker || marker.operationId !== operationId) {
-        throw new Error("Run marker ownership changed before assistant completion admission");
+      const operations = await readOperations(path, sessionId);
+      const operation = operations.find((candidate) => candidate.operationId === operationId);
+      if (!operation) throw new Error("Run marker ownership changed before assistant completion admission");
+      if (operation.assistantCompletionId !== undefined
+        && (operation.assistantCompletionId !== completionId || operation.assistantCompletedAt !== completedAt)) {
+        throw new Error("Run marker operation already owns a different assistant completion");
       }
-      await durableWriteRunMarker(path, {
-        ...marker,
-        assistantCompletionId: completionId,
-        assistantCompletedAt: completedAt,
-      } satisfies RunMarkerEvidence, this.fileSystem);
+      if (operation.assistantCompletionId === completionId && operation.assistantCompletedAt === completedAt) return;
+      operation.assistantCompletionId = completionId;
+      operation.assistantCompletedAt = completedAt;
+      await durableWriteRunMarker(path, { version: 2, sessionId, operations }, this.fileSystem);
     });
   }
 
-  async evidenceFor(sessionId: string): Promise<RunMarkerEvidence | undefined> {
-    return this.withLane(sessionId, async () => {
-      const marker = await readJson<RunMarkerEvidence | undefined>(
-        join(this.directory, `${sessionId}.json`),
-        undefined,
-        4_096,
-      );
-      return admitsMarker(marker, sessionId) ? marker : undefined;
-    });
+  async evidenceFor(sessionId: string): Promise<RunMarkerEvidence[]> {
+    return this.withLane(sessionId, async () => readOperations(join(this.directory, `${sessionId}.json`), sessionId));
   }
 
-  async evidence(): Promise<Map<string, RunMarkerEvidence>> {
+  async evidence(): Promise<Map<string, RunMarkerEvidence[]>> {
     try {
       const names = (await readdir(this.directory)).filter((name) => name.endsWith(".json"));
-      const evidence = new Map<string, RunMarkerEvidence>();
+      const evidence = new Map<string, RunMarkerEvidence[]>();
       for (const name of names) {
         const sessionId = name.slice(0, -5);
-        const marker = await readJson<RunMarkerEvidence | undefined>(join(this.directory, name), undefined, 4_096);
-        if (admitsMarker(marker, sessionId)) evidence.set(sessionId, marker);
+        const operations = await readOperations(join(this.directory, name), sessionId);
+        if (operations.length > 0) evidence.set(sessionId, operations);
       }
       return evidence;
     } catch (error) {
@@ -122,15 +145,22 @@ export class RunMarkerStore {
     }
   }
 
-  /** Clear only the marker owned by operationId when one is supplied. */
+  /** Clear only the record owned by operationId when one is supplied. */
   async clear(sessionId: string, operationId?: string): Promise<void> {
     await this.withLane(sessionId, async () => {
       const path = join(this.directory, `${sessionId}.json`);
-      if (operationId !== undefined) {
-        const marker = await readJson<RunMarkerEvidence | undefined>(path, undefined, 4_096);
-        if (marker?.operationId !== operationId) return;
+      if (operationId === undefined) {
+        await removeIfExists(path);
+        return;
       }
-      await removeIfExists(path);
+      const operations = await readOperations(path, sessionId);
+      const retained = operations.filter((operation) => operation.operationId !== operationId);
+      if (retained.length === operations.length) return;
+      if (retained.length === 0) {
+        await removeIfExists(path);
+        return;
+      }
+      await durableWriteRunMarker(path, { version: 2, sessionId, operations: retained }, this.fileSystem);
     });
   }
 
@@ -145,14 +175,47 @@ export class RunMarkerStore {
   }
 }
 
-function admitsMarker(marker: RunMarkerEvidence | undefined, sessionId: string): marker is RunMarkerEvidence {
-  return marker?.version === 1 && marker.sessionId === sessionId
-    && typeof marker.operationId === "string" && typeof marker.acceptedAt === "string";
+async function readOperations(path: string, sessionId: string): Promise<RunMarkerEvidence[]> {
+  const stored = await readJson<StoredRunMarker | undefined>(path, undefined, MAXIMUM_RUN_MARKER_BYTES);
+  if (admitsLegacyMarker(stored, sessionId)) {
+    const { operationId, acceptedAt, assistantCompletionId, assistantCompletedAt } = stored;
+    return [{ operationId, acceptedAt, ...(assistantCompletionId === undefined ? {} : { assistantCompletionId }),
+      ...(assistantCompletedAt === undefined ? {} : { assistantCompletedAt }) }];
+  }
+  if (!admitsMarkerDocument(stored, sessionId)) return [];
+  return stored.operations.map((operation) => ({ ...operation }));
+}
+
+function boundedString(value: unknown, maximumBytes: number): value is string {
+  return typeof value === "string" && value.length > 0 && Buffer.byteLength(value) <= maximumBytes;
+}
+
+function admitsOperation(operation: unknown): operation is RunMarkerEvidence {
+  if (!operation || typeof operation !== "object") return false;
+  const candidate = operation as Partial<RunMarkerEvidence>;
+  if (!boundedString(candidate.operationId, MAXIMUM_MARKER_IDENTIFIER_BYTES)
+    || !boundedString(candidate.acceptedAt, MAXIMUM_MARKER_TIMESTAMP_BYTES)) return false;
+  const hasCompletionId = candidate.assistantCompletionId !== undefined;
+  const hasCompletedAt = candidate.assistantCompletedAt !== undefined;
+  return hasCompletionId === hasCompletedAt
+    && (!hasCompletionId || (boundedString(candidate.assistantCompletionId, MAXIMUM_MARKER_IDENTIFIER_BYTES)
+      && boundedString(candidate.assistantCompletedAt, MAXIMUM_MARKER_TIMESTAMP_BYTES)));
+}
+
+function admitsLegacyMarker(marker: StoredRunMarker | undefined, sessionId: string): marker is LegacyRunMarkerEvidence {
+  return marker?.version === 1 && marker.sessionId === sessionId && admitsOperation(marker);
+}
+
+function admitsMarkerDocument(marker: StoredRunMarker | undefined, sessionId: string): marker is RunMarkerDocument {
+  if (marker?.version !== 2 || marker.sessionId !== sessionId || !Array.isArray(marker.operations)
+    || marker.operations.length === 0 || marker.operations.length > MAXIMUM_RUN_MARKER_OPERATIONS
+    || !marker.operations.every(admitsOperation)) return false;
+  return new Set(marker.operations.map((operation) => operation.operationId)).size === marker.operations.length;
 }
 
 async function durableWriteRunMarker(
   path: string,
-  marker: RunMarkerEvidence,
+  marker: RunMarkerDocument,
   fileSystem: RunMarkerFileSystem,
 ): Promise<void> {
   const directory = dirname(path);
