@@ -24,6 +24,10 @@ export interface SessionSummary {
   firstMessage: string;
   phase: SessionPhase;
   summaryRevision: number;
+  /** Gateway-canonical cross-client attention projection. Missing only during a rolling upgrade. */
+  completionRevision?: number;
+  attentionRevision?: number;
+  isUnread?: boolean;
 }
 
 /** Bounded global projection used to update dashboard rows without subscribing
@@ -36,6 +40,9 @@ export interface SessionSummaryUpdate {
   updatedAt: string;
   messageCount: number;
   firstMessage: string;
+  completionRevision?: number;
+  attentionRevision?: number;
+  isUnread?: boolean;
 }
 
 export type ContentPart =

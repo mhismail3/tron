@@ -377,6 +377,9 @@ struct SessionCatalogCoordinator: Equatable {
             firstMessage: update.firstMessage,
             phase: update.phase,
             summaryRevision: update.summaryRevision,
+            completionRevision: update.completionRevision,
+            attentionRevision: update.attentionRevision,
+            isUnread: update.isUnread,
             gatewayProfileID: summary.gatewayProfileID,
             gatewayProfileLabel: summary.gatewayProfileLabel
         )

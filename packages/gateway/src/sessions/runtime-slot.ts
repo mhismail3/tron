@@ -116,12 +116,46 @@ function boundedSummaryText(value: string, maximumBytes = 1_024): string {
   return `${encoded.subarray(0, available).toString("utf8").replace(/\uFFFD$/u, "")}${suffix}`;
 }
 
+export type SessionAttentionRebindDisposition = "migrate" | "preserve" | "reset" | "discard";
+
+export interface CanonicalAssistantCompletion {
+  id: string;
+  completedAt: string;
+  operationId?: string;
+}
+
+type CanonicalCompletionEntry = {
+  id: string;
+  timestamp: string;
+  type: string;
+  message?: { role?: string; stopReason?: string };
+};
+
+export function successfulAssistantCompletion(
+  entry: CanonicalCompletionEntry | undefined,
+): CanonicalAssistantCompletion | undefined {
+  if (entry?.type !== "message" || entry.message?.role !== "assistant") return undefined;
+  if (entry.message.stopReason !== "stop" && entry.message.stopReason !== "length") return undefined;
+  return { id: entry.id, completedAt: entry.timestamp };
+}
+
+export function latestSuccessfulAssistantCompletion(
+  entries: readonly CanonicalCompletionEntry[],
+): CanonicalAssistantCompletion | undefined {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const completion = successfulAssistantCompletion(entries[index]);
+    if (completion) return completion;
+  }
+  return undefined;
+}
+
 export interface RuntimeSlotHooks {
   broadcast: SessionBroadcast;
   summaryChanged: (summary: SessionSummaryUpdate) => void;
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
-  rekey: (previousId: string, nextId: string, slot: RuntimeSlot) => void;
+  assistantResponseCompleted: (sessionId: string, completion: CanonicalAssistantCompletion, recovery: boolean) => Promise<void>;
+  rekey: (previousId: string, nextId: string, slot: RuntimeSlot, disposition: SessionAttentionRebindDisposition) => Promise<void>;
   closed?: (sessionId: string, slot: RuntimeSlot) => void;
 }
 
@@ -167,6 +201,10 @@ export class RuntimeSlot {
   private streamPresentationId: string | undefined;
   private streamStartedAt: string | undefined;
   private finalizedStreamPresentationId: string | undefined;
+  /** Exact successful canonical assistant completion awaiting durable attention admission. */
+  private pendingAssistantCompletion: CanonicalAssistantCompletion | undefined;
+  private attentionBarrier: Promise<void> | undefined;
+  private rebindAttentionDisposition: SessionAttentionRebindDisposition = "migrate";
   /** Disposable runtime-only bridge from canonical entry IDs to mounted turn IDs. */
   private readonly presentationIDs = new Map<string, string>();
   private readonly presentationIDOrder: string[] = [];
@@ -290,10 +328,16 @@ export class RuntimeSlot {
   }
 
   /** Actionable work only; decorative presentation must not block trust/delete. */
-  get isBusy(): boolean { return this.lifecycle.preventsOperationalQuiescence; }
+  get isBusy(): boolean {
+    return this.lifecycle.preventsOperationalQuiescence || this.pendingAssistantCompletion !== undefined;
+  }
   /** Retained presentation protects only automatic idle eviction. */
   get isEvictionProtected(): boolean { return this.lifecycle.preventsEviction; }
-  get isDrainBusy(): boolean { return this.lifecycle.preventsAdministrativeDrain || this.pendingReceiptWrites.size > 0; }
+  get isDrainBusy(): boolean {
+    return this.lifecycle.preventsAdministrativeDrain
+      || this.pendingReceiptWrites.size > 0
+      || this.pendingAssistantCompletion !== undefined;
+  }
 
   async prepareForAdministrativeDrain(): Promise<void> {
     this.lifecycle.beginDrain();
@@ -452,10 +496,10 @@ export class RuntimeSlot {
   private commandActions(): ExtensionCommandContextActions {
     return {
       waitForIdle: () => this.runtime.session.waitForIdle(),
-      newSession: (options) => this.runtime.newSession(options),
-      fork: (entryId, options) => this.runtime.fork(entryId, options),
+      newSession: (options) => this.withRebindAttentionDisposition("reset", () => this.runtime.newSession(options)),
+      fork: (entryId, options) => this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, options)),
       navigateTree: (targetId, options) => this.runtime.session.navigateTree(targetId, options),
-      switchSession: (sessionPath, options) => this.runtime.switchSession(sessionPath, options),
+      switchSession: (sessionPath, options) => this.withRebindAttentionDisposition("preserve", () => this.runtime.switchSession(sessionPath, options)),
       reload: async () => {
         await this.reloadBoundSession();
         if (this.projectTrustReloadOverride === undefined) this.commitReload();
@@ -481,6 +525,19 @@ export class RuntimeSlot {
     await session.reload({ beforeSessionStart: () => this.rotateSemanticHost() });
   }
 
+  private async withRebindAttentionDisposition<T>(
+    disposition: SessionAttentionRebindDisposition,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.rebindAttentionDisposition;
+    this.rebindAttentionDisposition = disposition;
+    try {
+      return await operation();
+    } finally {
+      this.rebindAttentionDisposition = previous;
+    }
+  }
+
   private async bindSession(): Promise<void> {
     const previousId = this.runtime?.session.sessionId ?? this.sessionManager.getSessionId();
     this.unsubscribe?.();
@@ -504,7 +561,7 @@ export class RuntimeSlot {
       this.extensionActivities.clear();
       this.extensionActivitySequences.clear();
       this.extensionRunOwnership.clear();
-      this.hooks.rekey(previousId, nextId, this);
+      await this.hooks.rekey(previousId, nextId, this, this.rebindAttentionDisposition);
     }
     this.revision += 1;
     this.publishSnapshot();
@@ -704,8 +761,8 @@ export class RuntimeSlot {
   }
 
   private bindCanonicalPresentation(message: AgentMessage): void {
+    if (message.role !== "assistant") return;
     const presentationID = this.streamPresentationId;
-    if (!presentationID || message.role !== "assistant") return;
     // Pi notifies listeners before synchronously appending the finalized
     // message. The microtask runs after that append and before the next model
     // continuation, so the exact new leaf owns this live-turn identity.
@@ -717,14 +774,23 @@ export class RuntimeSlot {
       if (candidate?.type !== "message"
         || candidate.message.role !== "assistant"
         || candidate.message !== message) return;
-      if (!this.presentationIDs.has(candidate.id)) this.presentationIDOrder.push(candidate.id);
-      this.presentationIDs.set(candidate.id, presentationID);
+      if (presentationID) {
+        if (!this.presentationIDs.has(candidate.id)) this.presentationIDOrder.push(candidate.id);
+        this.presentationIDs.set(candidate.id, presentationID);
+      }
+      const completion = successfulAssistantCompletion(candidate);
+      if (completion && this.operation?.kind === "prompt") {
+        this.pendingAssistantCompletion = {
+          ...completion,
+          ...(this.activeOperationId ? { operationId: this.activeOperationId } : {}),
+        };
+      }
       const excess = this.presentationIDOrder.length - MAX_PRESENTATION_IDENTITY_BINDINGS;
       if (excess > 0) {
         for (const id of this.presentationIDOrder.slice(0, excess)) this.presentationIDs.delete(id);
         this.presentationIDOrder.splice(0, excess);
       }
-      if (this.streamPresentationId === presentationID) {
+      if (presentationID && this.streamPresentationId === presentationID) {
         this.latestStreamingMessage = undefined;
         this.streamIdentityMessage = undefined;
         this.streamAnchorId = undefined;
@@ -772,11 +838,78 @@ export class RuntimeSlot {
     };
   }
 
+  private beginAttentionSettlement(completion: CanonicalAssistantCompletion): Promise<void> {
+    if (this.attentionBarrier) return this.attentionBarrier;
+    const operation = (async () => {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          if (completion.operationId) {
+            await this.dependencies.markers.markAssistantCompletion(
+              this.id,
+              completion.operationId,
+              completion.id,
+              completion.completedAt,
+            );
+          }
+          await this.hooks.assistantResponseCompleted(this.id, completion, false);
+          lastError = undefined;
+          break;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      if (lastError !== undefined) throw lastError;
+      if (this.pendingAssistantCompletion?.id === completion.id) this.pendingAssistantCompletion = undefined;
+      if (this.pendingManualCompaction) {
+        // The already-accepted compaction inherits the run marker. Start it only
+        // after the preceding response's attention fact is durable.
+        this.phase = "idle";
+        this.revision += 1;
+        this.publishSnapshot();
+        this.startPendingManualCompaction();
+        return;
+      }
+      await this.dependencies.markers.clear(this.id);
+      this.hooks.settled(this.id);
+      this.phase = "idle";
+      this.revision += 1;
+      this.publishSnapshot();
+    })().catch((error) => {
+      // The canonical response remains recoverable from JSONL and the run marker
+      // remains durable. Open/drain joins this barrier; a later open or restart
+      // retries reconciliation rather than falsely declaring the response read.
+      this.phase = "interrupted";
+      this.revision += 1;
+      this.publishSnapshot();
+      throw error;
+    });
+    this.attentionBarrier = operation;
+    this.pendingReceiptWrites.add(operation);
+    void operation.catch(() => {}).finally(() => {
+      this.pendingReceiptWrites.delete(operation);
+      if (this.attentionBarrier === operation) this.attentionBarrier = undefined;
+    });
+    return operation;
+  }
+
+  /** Join live settlement and reconcile bounded canonical evidence before open. */
+  async reconcileAttention(): Promise<void> {
+    if (this.attentionBarrier) await this.attentionBarrier;
+    if (this.pendingAssistantCompletion) {
+      await this.beginAttentionSettlement(this.pendingAssistantCompletion);
+      return;
+    }
+    const completion = successfulAssistantCompletion(this.sessionManager.getLeafEntry());
+    if (completion) await this.hooks.assistantResponseCompleted(this.id, completion, true);
+  }
+
   private onEvent(event: AgentSessionEvent): void {
     this.revision += 1;
     this.touch();
     switch (event.type) {
       case "agent_start":
+        this.pendingAssistantCompletion = undefined;
         if (!this.lifecycle.admitAgentStartDuringDrain()) {
           this.phase = "interrupted";
           this.operation = undefined;
@@ -833,15 +966,29 @@ export class RuntimeSlot {
         this.stopActivityHeartbeat();
         this.clearToolProgressTimers();
         if (this.pendingManualCompaction) {
-          // The accepted compaction command owns the existing run marker until
-          // its exact canonical mutation settles. Publishing first exposes a
-          // brief authoritative queued state if the SDK settlement callback and
-          // lane handoff occur in different turns of the event loop.
-          this.publishSnapshot();
-          this.startPendingManualCompaction();
+          // The accepted compaction command owns the existing run marker. If the
+          // prompt produced a successful response, attention commits before the
+          // canonical compaction is allowed to inherit that marker.
+          if (this.pendingAssistantCompletion) {
+            this.phase = "running";
+            this.publishSnapshot();
+            void this.beginAttentionSettlement(this.pendingAssistantCompletion).catch(() => {});
+          } else {
+            this.publishSnapshot();
+            this.startPendingManualCompaction();
+          }
           break;
         }
         if (this.pendingExtensionCommand === undefined) {
+          if (this.pendingAssistantCompletion) {
+            // Pi has settled, but the Gateway remains operationally running until
+            // the exact canonical completion is durable. This is the open/drain
+            // barrier that prevents a snapshot from outrunning attention truth.
+            this.phase = "running";
+            this.publishSnapshot();
+            void this.beginAttentionSettlement(this.pendingAssistantCompletion).catch(() => {});
+            break;
+          }
           void this.dependencies.markers.clear(this.id, settledOperationId);
           this.hooks.settled(this.id);
         }
@@ -2369,6 +2516,15 @@ export class RuntimeSlot {
             // agent run after the command's provisional marker.
             await this.dependencies.markers.mark(this.id, this.activeOperationId);
           } else if (this.activeOperationId === undefined) {
+            if (this.pendingAssistantCompletion) {
+              // No continuation claimed the final assistant entry. Retire the
+              // command owner, then let the same durable attention barrier own
+              // marker cleanup and truthful settlement.
+              this.pendingExtensionCommand = undefined;
+              await this.beginAttentionSettlement(this.pendingAssistantCompletion);
+              this.maybePerformExtensionShutdown();
+              return;
+            }
             await this.dependencies.markers.clear(this.id, operationId);
             this.hooks.settled(this.id);
           }
@@ -2716,10 +2872,10 @@ export class RuntimeSlot {
     return this.lane.run(async () => {
       this.assertIdle();
       const previous = this.id;
-      const result = await this.runtime.fork(entryId, { position });
+      const result = await this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, { position }));
       if (result.cancelled) throw new GatewayError("cancelled", "Fork was cancelled by an extension");
       const next = this.id;
-      if (previous !== next) this.hooks.rekey(previous, next, this);
+      if (previous !== next) await this.hooks.rekey(previous, next, this, "reset");
       this.summaryContentDirty = true;
       this.revision += 1;
       this.emit("session.structureChanged", { branchChanged: true });
@@ -2926,7 +3082,7 @@ export class RuntimeSlot {
   async importFromJsonl(path: string, cwdOverride?: string): Promise<void> {
     await this.lane.run(async () => {
       this.assertIdle();
-      const result = await this.runtime.importFromJsonl(path, cwdOverride);
+      const result = await this.withRebindAttentionDisposition("discard", () => this.runtime.importFromJsonl(path, cwdOverride));
       if (result.cancelled) throw new GatewayError("cancelled", "Session import was cancelled by an extension");
       this.summaryContentDirty = true;
       this.revision += 1;

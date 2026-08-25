@@ -11,17 +11,21 @@ struct AppModelPerformanceSignpostTests {
             let harness = try await makeHarness()
             let snapshot = try SessionScenarioBuilder(seed: 41).openingTail(targetEncodedBytes: 8_192)
             let openResponder = Task {
-                try await respondToSessionSynchronization(
+                let progress = try await respondToSessionSynchronization(
                     socket: harness.socket,
                     firstFrameIndex: 1,
                     snapshot: snapshot
                 )
-                try await respondToPresentationRefreshes(socket: harness.socket, firstFrameIndex: 3)
+                return try await respondToPresentationRefreshes(
+                    socket: harness.socket,
+                    firstFrameIndex: progress.nextFrameIndex,
+                    excluding: progress.handledRefreshes
+                )
             }
             defer { openResponder.cancel() }
 
             _ = try await harness.model.openSessionPresentation(snapshot.sessionId)
-            try await valueOfOwnedTask(openResponder)
+            let nextFrameIndex = try await valueOfOwnedTask(openResponder)
             #expect(harness.signposts.events() == [
                 .begin(.sessionOpen),
                 .begin(.sessionSync),
@@ -33,7 +37,7 @@ struct AppModelPerformanceSignpostTests {
             let resyncResponder = Task {
                 try await respondToSessionSynchronization(
                     socket: harness.socket,
-                    firstFrameIndex: 6,
+                    firstFrameIndex: nextFrameIndex,
                     snapshot: snapshot
                 )
             }
@@ -68,6 +72,7 @@ struct AppModelPerformanceSignpostTests {
                     "session": try JSONValue.encode(snapshot),
                     "syncToken": .string("sync-token"),
                     "subscriptionToken": .string("subscription-token"),
+                    "completionRevision": .number(4),
                 ])
             ))
             let sync = try await request(in: harness.socket, frameIndex: 2)
@@ -81,12 +86,21 @@ struct AppModelPerformanceSignpostTests {
                 id: sync.id,
                 result: .object(["synchronized": .bool(true)])
             ))
+            let progress = try await respondToAttentionRead(
+                socket: harness.socket,
+                firstFrameIndex: 3,
+                expectedRevision: 4
+            )
             _ = try await valueOfOwnedTask(opening)
             #expect(await MainActor.run {
                 harness.model.authoritativeSnapshot(for: snapshot.sessionId)?.sessionId
             } == snapshot.sessionId)
             let refreshResponder = Task {
-                try await respondToPresentationRefreshes(socket: harness.socket, firstFrameIndex: 3)
+                try await respondToPresentationRefreshes(
+                    socket: harness.socket,
+                    firstFrameIndex: progress.nextFrameIndex,
+                    excluding: progress.handledRefreshes
+                )
             }
             defer { refreshResponder.cancel() }
             try await valueOfOwnedTask(refreshResponder)
@@ -189,12 +203,16 @@ struct AppModelPerformanceSignpostTests {
             let harness = try await makeHarness()
             let snapshot = try SessionScenarioBuilder(seed: 46).openingTail(targetEncodedBytes: 8_192)
             let responder = Task {
-                try await respondToSessionSynchronization(
+                let progress = try await respondToSessionSynchronization(
                     socket: harness.socket,
                     firstFrameIndex: 1,
                     snapshot: snapshot
                 )
-                try await respondToPresentationRefreshes(socket: harness.socket, firstFrameIndex: 3)
+                try await respondToPresentationRefreshes(
+                    socket: harness.socket,
+                    firstFrameIndex: progress.nextFrameIndex,
+                    excluding: progress.handledRefreshes
+                )
             }
             defer { responder.cancel() }
 
@@ -259,18 +277,22 @@ struct AppModelPerformanceSignpostTests {
             let harness = try await makeHarness()
             let snapshot = try SessionScenarioBuilder(seed: 43).openingTail(targetEncodedBytes: 8_192)
             let openingResponder = Task {
-                try await respondToSessionSynchronization(
+                let progress = try await respondToSessionSynchronization(
                     socket: harness.socket,
                     firstFrameIndex: 1,
                     snapshot: snapshot
                 )
-                try await respondToPresentationRefreshes(socket: harness.socket, firstFrameIndex: 3)
+                return try await respondToPresentationRefreshes(
+                    socket: harness.socket,
+                    firstFrameIndex: progress.nextFrameIndex,
+                    excluding: progress.handledRefreshes
+                )
             }
             defer { openingResponder.cancel() }
 
             _ = try await harness.model.openSessionPresentation(snapshot.sessionId)
-            try await valueOfOwnedTask(openingResponder)
-            let expandedCount = await MainActor.run { () -> Int in
+            let nextFrameIndex = try await valueOfOwnedTask(openingResponder)
+            let staleExpandedCount = await MainActor.run { () -> Int in
                 var expanded = snapshot
                 if let first = snapshot.transcript.first {
                     expanded.transcript.insert(.label(LabelTranscriptItem(
@@ -287,10 +309,11 @@ struct AppModelPerformanceSignpostTests {
                 harness.model.replaceHostedAuthoritativeSnapshot(expanded)
                 return expanded.transcript.count
             }
+            #expect(staleExpandedCount > snapshot.transcript.count)
             let reconnectResponder = Task {
                 try await respondToSessionSynchronization(
                     socket: harness.socket,
-                    firstFrameIndex: 6,
+                    firstFrameIndex: nextFrameIndex,
                     snapshot: snapshot
                 )
             }
@@ -298,9 +321,10 @@ struct AppModelPerformanceSignpostTests {
             await harness.model.restoreMountedPresentationAfterReconnect()
             try await valueOfOwnedTask(reconnectResponder)
             #expect(await MainActor.run { harness.model.selectedSessionID } == snapshot.sessionId)
-            #expect(await MainActor.run {
+            let restoredCount = await MainActor.run {
                 harness.model.selectedSnapshot?.transcript.count
-            } == expandedCount)
+            }
+            #expect(restoredCount == snapshot.transcript.count)
             await harness.client.close()
         }
     }
@@ -339,12 +363,16 @@ struct AppModelPerformanceSignpostTests {
             }
             let opening = Task { try await harness.model.openSessionPresentation(snapshot.sessionId) }
             let responder = Task {
-                try await respondToSessionSynchronization(
+                let progress = try await respondToSessionSynchronization(
                     socket: harness.socket,
                     firstFrameIndex: 1,
-                    snapshot: snapshot
+                    snapshot: snapshot,
+                    acknowledgesAttention: false
                 )
-                try await respondToRejectedOpenCleanup(socket: harness.socket, firstFrameIndex: 3)
+                try await respondToRejectedOpenCleanup(
+                    socket: harness.socket,
+                    firstFrameIndex: progress.nextFrameIndex
+                )
             }
             defer {
                 opening.cancel()
@@ -1127,27 +1155,113 @@ struct AppModelPerformanceSignpostTests {
         return Harness(socket: socket, client: client, model: model, signposts: signposts)
     }
 
+    private struct SynchronizationResponseProgress {
+        let nextFrameIndex: Int
+        let handledRefreshes: Set<String>
+    }
+
     private func respondToSessionSynchronization(
         socket: ScriptedGatewaySocket,
         firstFrameIndex: Int,
-        snapshot: SessionSnapshot
-    ) async throws {
-        let open = try await request(in: socket, frameIndex: firstFrameIndex)
-        #expect(open.method == "session.open")
+        snapshot: SessionSnapshot,
+        acknowledgesAttention: Bool = true
+    ) async throws -> SynchronizationResponseProgress {
+        var index = firstFrameIndex
+        var handledRefreshes = Set<String>()
+        let open: Request
+        while true {
+            let next = try await request(in: socket, frameIndex: index)
+            index += 1
+            if next.method == "session.open" {
+                open = next
+                break
+            }
+            if let result = presentationRefreshResult(for: next.method) {
+                handledRefreshes.insert(next.method)
+                await socket.enqueue(successResponse(id: next.id, result: result))
+                continue
+            }
+            if next.method == "session.close" {
+                await socket.enqueue(successResponse(
+                    id: next.id,
+                    result: .object(["closed": .bool(true)])
+                ))
+                continue
+            }
+            Issue.record("unexpected request before session open: \(next.method)")
+            return SynchronizationResponseProgress(
+                nextFrameIndex: index,
+                handledRefreshes: handledRefreshes
+            )
+        }
         await socket.enqueue(successResponse(
             id: open.id,
             result: .object([
                 "session": try JSONValue.encode(snapshot),
                 "syncToken": .string("sync-token"),
                 "subscriptionToken": .string("subscription-token"),
+                "completionRevision": .number(11),
             ])
         ))
-        let sync = try await request(in: socket, frameIndex: firstFrameIndex + 1)
+        let sync = try await request(in: socket, frameIndex: index)
+        index += 1
         #expect(sync.method == "session.sync")
         await socket.enqueue(successResponse(
             id: sync.id,
             result: .object(["synchronized": .bool(true)])
         ))
+        guard acknowledgesAttention else {
+            return SynchronizationResponseProgress(
+                nextFrameIndex: index,
+                handledRefreshes: handledRefreshes
+            )
+        }
+        let attention = try await respondToAttentionRead(
+            socket: socket,
+            firstFrameIndex: index,
+            expectedRevision: 11
+        )
+        return SynchronizationResponseProgress(
+            nextFrameIndex: attention.nextFrameIndex,
+            handledRefreshes: handledRefreshes.union(attention.handledRefreshes)
+        )
+    }
+
+    private func respondToAttentionRead(
+        socket: ScriptedGatewaySocket,
+        firstFrameIndex: Int,
+        expectedRevision: Int
+    ) async throws -> SynchronizationResponseProgress {
+        var index = firstFrameIndex
+        var handledRefreshes = Set<String>()
+        while true {
+            let next = try await request(in: socket, frameIndex: index)
+            index += 1
+            if next.method == "session.attention.read" {
+                #expect(next.params?.objectValue?["throughCompletionRevision"] == .number(Double(expectedRevision)))
+                await socket.enqueue(successResponse(
+                    id: next.id,
+                    result: .object([
+                        "completionRevision": .number(Double(expectedRevision)),
+                        "attentionRevision": .number(1),
+                        "isUnread": .bool(false),
+                    ])
+                ))
+                return SynchronizationResponseProgress(
+                    nextFrameIndex: index,
+                    handledRefreshes: handledRefreshes
+                )
+            }
+            guard let result = presentationRefreshResult(for: next.method) else {
+                Issue.record("unexpected request before attention acknowledgement: \(next.method)")
+                return SynchronizationResponseProgress(
+                    nextFrameIndex: index,
+                    handledRefreshes: handledRefreshes
+                )
+            }
+            handledRefreshes.insert(next.method)
+            await socket.enqueue(successResponse(id: next.id, result: result))
+        }
     }
 
     private func respondToRejectedOpenCleanup(
@@ -1166,6 +1280,12 @@ struct AppModelPerformanceSignpostTests {
                 result = .object(["models": .array([]), "nextCursor": .null])
             case "session.commands":
                 result = .object(["commands": .array([])])
+            case "session.attention.read":
+                result = .object([
+                    "completionRevision": .number(11),
+                    "attentionRevision": .number(1),
+                    "isUnread": .bool(false),
+                ])
             case "session.close":
                 await socket.enqueue(successResponse(
                     id: next.id,
@@ -1182,27 +1302,35 @@ struct AppModelPerformanceSignpostTests {
 
     private func respondToPresentationRefreshes(
         socket: ScriptedGatewaySocket,
-        firstFrameIndex: Int
-    ) async throws {
-        var pending = Set(["provider.list", "model.list", "session.commands"])
-        for index in firstFrameIndex..<(firstFrameIndex + pending.count) {
+        firstFrameIndex: Int,
+        excluding handled: Set<String> = []
+    ) async throws -> Int {
+        var pending = Set(["provider.list", "model.list", "session.commands"]).subtracting(handled)
+        var index = firstFrameIndex
+        while !pending.isEmpty {
             let next = try await request(in: socket, frameIndex: index)
-            #expect(pending.remove(next.method) != nil)
-            let result: JSONValue
-            switch next.method {
-            case "provider.list":
-                result = .object(["providers": .array([])])
-            case "model.list":
-                result = .object(["models": .array([]), "nextCursor": .null])
-            case "session.commands":
-                result = .object(["commands": .array([])])
-            default:
+            index += 1
+            guard let result = presentationRefreshResult(for: next.method) else {
                 Issue.record("unexpected presentation refresh: \(next.method)")
-                return
+                return index
             }
+            pending.remove(next.method)
             await socket.enqueue(successResponse(id: next.id, result: result))
         }
-        #expect(pending.isEmpty)
+        return index
+    }
+
+    private func presentationRefreshResult(for method: String) -> JSONValue? {
+        switch method {
+        case "provider.list":
+            .object(["providers": .array([])])
+        case "model.list":
+            .object(["models": .array([]), "nextCursor": .null])
+        case "session.commands":
+            .object(["commands": .array([])])
+        default:
+            nil
+        }
     }
 
     private func request(in socket: ScriptedGatewaySocket, frameIndex: Int) async throws -> Request {

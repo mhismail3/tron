@@ -468,6 +468,29 @@ the catalog. At most four traversals remain per runtime and eight globally. Each
 and 16 MiB of encoded model entries; each page is additionally capped at 800,000 encoded entry bytes
 beneath the socket envelope ceiling. Provider catalogs reject more than 1,000 rows, duplicate IDs,
 or 4 MiB of strings before generic projection can truncate them.
+
+Cross-client read attention is narrow Gateway-owned metadata, not transcript or
+catalog mirroring. A bounded atomic `gateway/session-attention.json` document
+stores only completion/read-through revisions, a manual-unread flag, a bounded
+recent-completion deduplication set, and a restart-reconciliation cursor. Only an
+accepted prompt turn's canonical assistant entry ending with Pi `stop` or `length`
+at truthful agent settlement advances completion; generic idle, compaction,
+abort/error/deferred output, runtime close, and intermediate tool-use messages do
+not. Settlement retains the run marker and blocks open/drain until attention is
+committed; a bounded canonical JSONL scan after restart reconciles the latest
+successful completion before advancing its durable cursor. Catalog rows and
+revisioned `session.summary` events project
+`completionRevision`, `attentionRevision`, and `isUnread` without changing
+structural `listRevision`. `session.attention.set` uses ordinary command receipts;
+mark-read carries the exact rendered completion revision so a racing newer
+completion stays unread. Successful `session.open` returns its current completion
+revision, and first-party clients acknowledge it only after installing the
+snapshot, retries transient acknowledgement failure against that same absolute
+revision, and treats an older Gateway without the additive method as compatible.
+Delete removes attention metadata, true identity replacement moves it without
+overwriting a target, switches preserve both identities, and new/imported/forked
+sessions begin read.
+
 `session.open` carries a
 byte-bounded authoritative transcript tail with `transcriptStart` and
 `transcriptTotal`; `session.transcript` pages backward through the same canonical

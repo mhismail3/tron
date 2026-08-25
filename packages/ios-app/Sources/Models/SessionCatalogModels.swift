@@ -20,6 +20,9 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     let firstMessage: String
     let phase: SessionPhase
     let summaryRevision: Int?
+    let completionRevision: Int
+    let attentionRevision: Int
+    let isUnread: Bool
     /// Dashboard-only ownership metadata. Gateway payloads omit these fields.
     let gatewayProfileID: String?
     let gatewayProfileLabel: String?
@@ -28,6 +31,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         id: String, name: String?, cwd: String, kind: Kind = .user, parentSessionId: String?,
         createdAt: String, updatedAt: String, messageCount: Int,
         firstMessage: String, phase: SessionPhase, summaryRevision: Int? = nil,
+        completionRevision: Int = 0, attentionRevision: Int = 0, isUnread: Bool = false,
         gatewayProfileID: String? = nil, gatewayProfileLabel: String? = nil
     ) {
         self.id = id
@@ -41,12 +45,16 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         self.firstMessage = firstMessage
         self.phase = phase
         self.summaryRevision = summaryRevision
+        self.completionRevision = completionRevision
+        self.attentionRevision = attentionRevision
+        self.isUnread = isUnread
         self.gatewayProfileID = gatewayProfileID
         self.gatewayProfileLabel = gatewayProfileLabel
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, cwd, kind, parentSessionId, createdAt, updatedAt, messageCount, firstMessage, phase, summaryRevision
+        case completionRevision, attentionRevision, isUnread
     }
 
     init(from decoder: Decoder) throws {
@@ -62,6 +70,9 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         firstMessage = try container.decode(String.self, forKey: .firstMessage)
         phase = try container.decode(SessionPhase.self, forKey: .phase)
         summaryRevision = try container.decodeIfPresent(Int.self, forKey: .summaryRevision)
+        completionRevision = try container.decodeIfPresent(Int.self, forKey: .completionRevision) ?? 0
+        attentionRevision = try container.decodeIfPresent(Int.self, forKey: .attentionRevision) ?? 0
+        isUnread = try container.decodeIfPresent(Bool.self, forKey: .isUnread) ?? false
         gatewayProfileID = nil
         gatewayProfileLabel = nil
     }
@@ -79,6 +90,9 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
             firstMessage: firstMessage,
             phase: phase,
             summaryRevision: summaryRevision,
+            completionRevision: completionRevision,
+            attentionRevision: attentionRevision,
+            isUnread: isUnread,
             gatewayProfileID: profileID,
             gatewayProfileLabel: label
         )
@@ -115,4 +129,43 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
     let updatedAt: String
     let messageCount: Int
     let firstMessage: String
+    let completionRevision: Int
+    let attentionRevision: Int
+    let isUnread: Bool
+
+    init(
+        sessionId: String, summaryRevision: Int, phase: SessionPhase, name: String?,
+        updatedAt: String, messageCount: Int, firstMessage: String,
+        completionRevision: Int = 0, attentionRevision: Int = 0, isUnread: Bool = false
+    ) {
+        self.sessionId = sessionId
+        self.summaryRevision = summaryRevision
+        self.phase = phase
+        self.name = name
+        self.updatedAt = updatedAt
+        self.messageCount = messageCount
+        self.firstMessage = firstMessage
+        self.completionRevision = completionRevision
+        self.attentionRevision = attentionRevision
+        self.isUnread = isUnread
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionId, summaryRevision, phase, name, updatedAt, messageCount, firstMessage
+        case completionRevision, attentionRevision, isUnread
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessionId = try container.decode(String.self, forKey: .sessionId)
+        summaryRevision = try container.decode(Int.self, forKey: .summaryRevision)
+        phase = try container.decode(SessionPhase.self, forKey: .phase)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        updatedAt = try container.decode(String.self, forKey: .updatedAt)
+        messageCount = try container.decode(Int.self, forKey: .messageCount)
+        firstMessage = try container.decode(String.self, forKey: .firstMessage)
+        completionRevision = try container.decodeIfPresent(Int.self, forKey: .completionRevision) ?? 0
+        attentionRevision = try container.decodeIfPresent(Int.self, forKey: .attentionRevision) ?? 0
+        isUnread = try container.decodeIfPresent(Bool.self, forKey: .isUnread) ?? false
+    }
 }

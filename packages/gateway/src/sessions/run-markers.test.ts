@@ -10,6 +10,18 @@ describe("RunMarkerStore", () => {
     const store = new RunMarkerStore(root);
     await store.mark("session", "operation");
     expect(await store.interruptedSessionIds()).toEqual(new Set(["session"]));
+    await store.markAssistantCompletion("session", "operation", "completion", "2026-01-01T00:00:00.000Z");
+    expect(await store.evidence()).toEqual(new Map([[
+      "session",
+      expect.objectContaining({
+        operationId: "operation",
+        assistantCompletionId: "completion",
+        assistantCompletedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ]]));
+    await expect(store.markAssistantCompletion(
+      "session", "older-operation", "other", "2026-01-01T00:00:01.000Z",
+    )).rejects.toThrow("ownership changed");
     await store.clear("session", "older-operation");
     expect(await store.interruptedSessionIds()).toEqual(new Set(["session"]));
     await store.clear("session", "operation");

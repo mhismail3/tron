@@ -519,10 +519,13 @@ struct SessionShellView: View {
         return Button {
             guard openingSessionID == nil else { return }
             openingSessionID = session.dashboardID
+            let navigationIntent = navigationOwner.begin()
             Task {
                 defer { openingSessionID = nil }
                 do {
                     let route = try await model.navigationRoute(for: session)
+                    guard navigationOwner.admit(navigationIntent),
+                          model.ownsNavigationRoute(route) else { return }
                     present(route)
                 } catch is CancellationError {
                     return
@@ -542,6 +545,20 @@ struct SessionShellView: View {
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .listRowInsets(SessionDashboardLayout.rowInsets)
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            Button(
+                session.isUnread ? "Mark Read" : "Mark Unread",
+                systemImage: session.isUnread ? "circle" : "circle.fill"
+            ) {
+                Task {
+                    do { try await model.setSessionUnread(session, unread: !session.isUnread) }
+                    catch is CancellationError { return }
+                    catch { model.presentError(error) }
+                }
+            }
+            .tint(Color.tronCyan)
+            .accessibilityIdentifier("session-attention-action-\(session.dashboardID)")
+        }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button("Delete", systemImage: "trash") { sessionToDelete = session }
                 .tint(Color.tronError)
@@ -851,7 +868,7 @@ private struct HistoricalSessionRow: View {
                 if activity == .active || activity == .resuming {
                     ProgressView().controlSize(.small).tint(.tronEmerald)
                 } else {
-                    Image(systemName: activity == .interrupted ? "exclamationmark.circle" : "circle")
+                    Image(systemName: activity == .interrupted ? "exclamationmark.circle" : session.isUnread ? "circle.fill" : "circle")
                         .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                         .foregroundStyle(activity == .interrupted ? Color.tronAmber : Color.tronEmerald.opacity(0.82))
                 }
@@ -891,7 +908,7 @@ private struct HistoricalSessionRow: View {
             interactive: true
         )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(session.title), \(activity.accessibilityDescription), \(session.relativeActivityDescription())")
+        .accessibilityLabel("\(session.title), \(activity.accessibilityDescription)\(session.isUnread ? ", unread" : ""), \(session.relativeActivityDescription())")
     }
 
     private var projectServerContext: String {

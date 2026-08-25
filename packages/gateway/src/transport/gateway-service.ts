@@ -64,7 +64,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 
 const restartDrainMethods = new Set([
   "system.info", "system.logs", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.config", "gateway.update.status", "gateway.update", "gateway.rollback", "gateway.restart",
-  "session.list", "session.open", "session.sync", "session.close", "session.transcript",
+  "session.list", "session.open", "session.sync", "session.close", "session.transcript", "session.attention.read", "session.attention.set",
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "extension.respond", "extension.editor.update", "extension.toolsExpanded",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
 ]);
@@ -368,6 +368,9 @@ export class GatewayService {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
         const startedAt = performance.now();
         const slot = await this.dependencies.sessions.acquire(sessionId);
+        // Join the exact canonical completion barrier before snapshotting. The
+        // response and completionRevision therefore describe one admitted cut.
+        await slot.reconcileAttention();
         const acquiredAt = performance.now();
         const syncToken = client.beginSynchronization(sessionId);
         const snapshot = slot.snapshot();
@@ -378,8 +381,30 @@ export class GatewayService {
           `Session open prepared in ${Math.max(0, Math.round(completedAt - startedAt))}ms (acquire ${Math.max(0, Math.round(acquiredAt - startedAt))}ms, snapshot ${Math.max(0, Math.round(completedAt - acquiredAt))}ms)`,
           { event: "session.open.prepared", source: "sessions" },
         );
-        return safeJson({ session: snapshot, syncToken, subscriptionToken: syncToken });
+        return safeJson({
+          session: snapshot,
+          syncToken,
+          subscriptionToken: syncToken,
+          completionRevision: this.dependencies.sessions.attentionProjection(sessionId).completionRevision,
+        });
       }
+      case "session.attention.read": {
+        const sessionId = string(params.sessionId, "sessionId", { max: 200 });
+        const throughCompletionRevision = integer(params.throughCompletionRevision, "throughCompletionRevision", 0, Number.MAX_SAFE_INTEGER);
+        return safeJson(await this.dependencies.sessions.setAttention(sessionId, false, throughCompletionRevision));
+      }
+      case "session.attention.set":
+        return this.mutation(client, method, params, async () => {
+          const sessionId = string(params.sessionId, "sessionId", { max: 200 });
+          const unread = boolean(params.unread, "unread");
+          const throughCompletionRevision = params.throughCompletionRevision === undefined
+            ? undefined
+            : integer(params.throughCompletionRevision, "throughCompletionRevision", 0, Number.MAX_SAFE_INTEGER);
+          if (!unread && throughCompletionRevision === undefined) {
+            throw new GatewayError("invalid_request", "Mark read requires a completion revision");
+          }
+          return safeJson(await this.dependencies.sessions.setAttention(sessionId, unread, throughCompletionRevision));
+        });
       case "session.sync": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
         client.completeSynchronization(sessionId, string(params.syncToken, "syncToken", { max: 200 }));

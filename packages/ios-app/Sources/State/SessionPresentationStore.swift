@@ -53,8 +53,9 @@ struct GatewaySessionOpenResponse: Decodable {
     let session: SessionSnapshot
     let syncToken: String
     let subscriptionToken: String
+    let completionRevision: Int
 
-    private enum CodingKeys: String, CodingKey { case session, syncToken, subscriptionToken }
+    private enum CodingKeys: String, CodingKey { case session, syncToken, subscriptionToken, completionRevision }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -65,6 +66,7 @@ struct GatewaySessionOpenResponse: Decodable {
         }
         let decodedSyncToken = try container.decode(String.self, forKey: .syncToken)
         let decodedSubscriptionToken = try container.decode(String.self, forKey: .subscriptionToken)
+        let decodedCompletionRevision = try container.decodeIfPresent(Int.self, forKey: .completionRevision) ?? 0
         guard GatewayTokenAdmissionPolicy.admit(decodedSyncToken) else {
             throw DecodingError.dataCorruptedError(forKey: .syncToken, in: container, debugDescription: "Invalid sync token")
         }
@@ -72,7 +74,11 @@ struct GatewaySessionOpenResponse: Decodable {
             throw DecodingError.dataCorruptedError(forKey: .subscriptionToken, in: container, debugDescription: "Invalid subscription token")
         }
         syncToken = decodedSyncToken
+        guard decodedCompletionRevision >= 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .completionRevision, in: container, debugDescription: "Invalid completion revision")
+        }
         subscriptionToken = decodedSubscriptionToken
+        completionRevision = decodedCompletionRevision
     }
 }
 
@@ -162,6 +168,15 @@ final class SessionPresentationStore {
     private var subscribedSessionID: String?
     private var subscriptionToken: String?
     private var subscriptionTarget: SessionPresentationIdentity?
+    private struct PendingAttentionRead {
+        let sessionID: String
+        let throughCompletionRevision: Int
+        let target: SessionPresentationIdentity
+        let subscriptionToken: String
+        let connectionGeneration: Int
+    }
+    private var pendingAttentionRead: PendingAttentionRead?
+    @ObservationIgnored private var attentionReadTask: Task<Void, Never>?
     private var pendingSubscriptionTokens: [String: String] = [:]
     private var pendingRebaselines: [String: PreparedSessionRebaseline] = [:]
     private let synchronization = SessionSynchronizationCoordinator()
@@ -360,6 +375,7 @@ final class SessionPresentationStore {
         delegate?.sessionPresentationStoreDidOpen(requested)
         if let snapshot { delegate?.sessionPresentationStoreDidPublishSnapshot(snapshot, target: requested) }
         publish(deferredEffectsByTarget.removeValue(forKey: requested) ?? [], target: requested)
+        schedulePendingAttentionRead(targetOverride: requested)
         didOpen = true
         result = .success
         return requested.generation
@@ -768,6 +784,9 @@ final class SessionPresentationStore {
     }
 
     func retireConnection() {
+        attentionReadTask?.cancel()
+        attentionReadTask = nil
+        pendingAttentionRead = nil
         connectionGeneration &+= 1
         transcriptLoadTarget = nil
         loadingEarlierTranscript = false
@@ -1061,6 +1080,9 @@ final class SessionPresentationStore {
     private func closeSubscription(_ sessionID: String, expectedTarget: SessionPresentationIdentity?) async -> Bool {
         if let expectedTarget, subscriptionTarget != expectedTarget { return false }
         guard subscribedSessionID == sessionID, let token = subscriptionToken else { return true }
+        attentionReadTask?.cancel()
+        attentionReadTask = nil
+        pendingAttentionRead = nil
         let expectedConnectionGeneration = connectionGeneration
         let expectedSubscriptionTarget = subscriptionTarget
         struct Params: Codable { let sessionId, subscriptionToken: String }
@@ -1208,6 +1230,9 @@ final class SessionPresentationStore {
             ) {
             case .success:
                 synchronization.complete(lease, outcome: true)
+                if case .reconnect = lease.intent, pendingTarget?.sessionID != sessionID {
+                    schedulePendingAttentionRead()
+                }
                 delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope)
                 delegate?.sessionPresentationStoreCheckpointCache()
                 return true
@@ -1487,6 +1512,16 @@ final class SessionPresentationStore {
                 Task { [weak self] in await self?.loadCommands(sessionID: sessionID) }
             }
             advanceChatProjection(canonical: true)
+            // Acknowledge only the completion revision carried by the exact
+            // snapshot that was admitted above. Retry retains that absolute cut;
+            // it can never clear a completion that raced after session.open.
+            pendingAttentionRead = PendingAttentionRead(
+                sessionID: sessionID,
+                throughCompletionRevision: response.completionRevision,
+                target: installedTarget,
+                subscriptionToken: response.subscriptionToken,
+                connectionGeneration: attemptConnectionGeneration
+            )
             switch lease.intent {
             case .presentation:
                 deferredEffectsByTarget[installedTarget, default: []].append(contentsOf: replayEffects)
@@ -1580,6 +1615,97 @@ final class SessionPresentationStore {
             return pendingTarget == SessionPresentationIdentity(sessionID: sessionID, generation: generation)
         case .reconnect(let generation):
             return owns(SessionPresentationIdentity(sessionID: sessionID, generation: generation))
+        }
+    }
+
+    private func schedulePendingAttentionRead(targetOverride: SessionPresentationIdentity? = nil) {
+        guard let pending = pendingAttentionRead else { return }
+        pendingAttentionRead = nil
+        scheduleAttentionRead(
+            sessionID: pending.sessionID,
+            throughCompletionRevision: pending.throughCompletionRevision,
+            target: targetOverride ?? pending.target,
+            subscriptionToken: pending.subscriptionToken,
+            connectionGeneration: pending.connectionGeneration
+        )
+    }
+
+    private func scheduleAttentionRead(
+        sessionID: String,
+        throughCompletionRevision: Int,
+        target: SessionPresentationIdentity,
+        subscriptionToken: String,
+        connectionGeneration: Int
+    ) {
+        attentionReadTask?.cancel()
+        attentionReadTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.acknowledgeAttentionRead(
+                    sessionID: sessionID,
+                    throughCompletionRevision: throughCompletionRevision,
+                    target: target,
+                    subscriptionToken: subscriptionToken,
+                    connectionGeneration: connectionGeneration
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func acknowledgeAttentionRead(
+        sessionID: String,
+        throughCompletionRevision: Int,
+        target: SessionPresentationIdentity,
+        subscriptionToken expectedToken: String,
+        connectionGeneration expectedConnectionGeneration: Int
+    ) async throws {
+        struct Params: Codable {
+            let sessionId: String
+            let throughCompletionRevision: Int
+        }
+        let params = Params(
+            sessionId: sessionID,
+            throughCompletionRevision: throughCompletionRevision
+        )
+        for attempt in 0..<3 {
+            try Task.checkCancellation()
+            guard connectionGeneration == expectedConnectionGeneration,
+                  subscribedSessionID == sessionID,
+                  subscriptionTarget == target,
+                  subscriptionToken == expectedToken else {
+                throw CancellationError()
+            }
+            do {
+                let _: JSONValue = try await client.requestValue(
+                    "session.attention.read",
+                    params,
+                    timeout: .seconds(8)
+                )
+                guard connectionGeneration == expectedConnectionGeneration,
+                      subscribedSessionID == sessionID,
+                      subscriptionTarget == target,
+                      subscriptionToken == expectedToken else {
+                    throw CancellationError()
+                }
+                return
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let failure as GatewayFailure {
+                // Rolling upgrades can briefly pair a newer app with a Gateway
+                // that does not own the additive attention method yet.
+                if ["unsupported", "not_found", "method_not_found"].contains(failure.code) { return }
+                if failure.retryable && attempt < 2 { continue }
+                // Attention convergence is non-blocking for chat. A later
+                // reconnect/open retries the same canonical operation.
+                return
+            } catch {
+                if attempt < 2 { continue }
+                return
+            }
         }
     }
 

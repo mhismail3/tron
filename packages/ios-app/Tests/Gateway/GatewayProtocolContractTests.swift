@@ -211,10 +211,20 @@ struct GatewayProtocolContractTests {
 
     @Test("dashboard summary update carries a monotonic revision")
     func summaryUpdateDecodes() throws {
-        let data = Data(#"{"sessionId":"session-1","summaryRevision":7,"phase":"running","updatedAt":"2026-01-01T00:00:01Z","messageCount":2,"firstMessage":"hello"}"#.utf8)
+        let data = Data(#"{"sessionId":"session-1","summaryRevision":7,"phase":"running","updatedAt":"2026-01-01T00:00:01Z","messageCount":2,"firstMessage":"hello","completionRevision":3,"attentionRevision":4,"isUnread":true}"#.utf8)
         let update = try JSONDecoder.gateway.decode(SessionSummaryUpdate.self, from: data)
         #expect(update.summaryRevision == 7)
         #expect(update.phase == .running)
+        #expect(update.completionRevision == 3)
+        #expect(update.attentionRevision == 4)
+        #expect(update.isUnread)
+
+        let rolling = try JSONDecoder.gateway.decode(
+            SessionSummaryUpdate.self,
+            from: Data(#"{"sessionId":"session-1","summaryRevision":6,"phase":"idle","updatedAt":"2026-01-01T00:00:00Z","messageCount":1,"firstMessage":"hello"}"#.utf8)
+        )
+        #expect(rolling.completionRevision == 0)
+        #expect(!rolling.isUnread)
     }
 
     @Test("flat session-tree projection decodes")

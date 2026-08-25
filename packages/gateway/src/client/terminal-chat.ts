@@ -7,7 +7,7 @@ import type { ContentPart, JsonValue, SessionSnapshot, TranscriptItem } from "..
 import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
 import { readLocalCredential } from "./local-credential.js";
 
-interface SnapshotEnvelope { session: SessionSnapshot; syncToken: string; subscriptionToken: string }
+interface SnapshotEnvelope { session: SessionSnapshot; syncToken: string; subscriptionToken: string; completionRevision?: number }
 interface SessionMutationEnvelope { sessionId: string }
 interface SessionListEnvelope { sessions: Array<{ id: string; name?: string; firstMessage: string; cwd: string }>; nextCursor?: string; listRevision: number }
 
@@ -68,6 +68,15 @@ export async function connectResilient(client: GatewayProtocolClient): Promise<v
 async function synchronize(client: GatewayProtocolClient, sessionId: string): Promise<SnapshotEnvelope> {
   const baseline = await client.request("session.open", { sessionId }) as unknown as SnapshotEnvelope;
   await client.request("session.sync", { sessionId, syncToken: baseline.syncToken });
+  try {
+    await client.request("session.attention.read", {
+      sessionId,
+      throughCompletionRevision: baseline.completionRevision ?? 0,
+    });
+  } catch (error) {
+    if (!(error instanceof GatewayClientError)
+      || !["unsupported", "not_found", "method_not_found"].includes(error.code)) throw error;
+  }
   return baseline;
 }
 

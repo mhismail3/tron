@@ -7,11 +7,18 @@ import { ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/p
 import { GatewayError } from "../errors.js";
 import { installKimiK3Policy } from "../providers/kimi-k3-policy.js";
 import type { SessionSummary, SessionSummaryUpdate } from "../protocol/types.js";
+import { SessionAttentionStore, type SessionAttentionProjection } from "./session-attention-store.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { BlobStore } from "./blob-store.js";
-import { RunMarkerStore } from "./run-markers.js";
-import { RuntimeSlot, type SessionBroadcast } from "./runtime-slot.js";
+import { RunMarkerStore, type RunMarkerEvidence } from "./run-markers.js";
+import {
+  RuntimeSlot,
+  successfulAssistantCompletion,
+  type CanonicalAssistantCompletion,
+  type SessionAttentionRebindDisposition,
+  type SessionBroadcast,
+} from "./runtime-slot.js";
 import { ExtensionActivityRecency } from "./extension-activity-recency.js";
 import { admitExtensionLifecycleArtifact } from "./extension-run-projection.js";
 import type { NotificationService } from "../notifications/notification-service.js";
@@ -96,9 +103,12 @@ export class RuntimeRegistry {
   private readonly mutex = new AsyncMutex();
   private readonly catalogMutex = new AsyncMutex();
   private readonly catalogAcquisitionMutex = new AsyncMutex();
+  /** Serializes attention membership checks with set/delete/rekey. */
+  private readonly attentionLane = new AsyncMutex();
   private readonly blobs: BlobStore;
   private readonly markers: RunMarkerStore;
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
+  private readonly attention: SessionAttentionStore;
   private readonly configuredSessionDir: string | undefined;
   private interrupted = new Set<string>();
   private readonly subscribers = new Map<string, Set<string>>();
@@ -108,6 +118,7 @@ export class RuntimeRegistry {
   private readonly idleEvictions = new Map<string, IdleEviction>();
   private readonly summaryRevisions = new Map<string, number>();
   private readonly latestSummaries = new Map<string, SessionSummaryUpdate>();
+  private readonly pendingAttentionRemovals = new Set<string>();
   private ambiguousSessionIds = new Set<string>();
   private readonly trustReloadProjects = new Set<string>();
   private revision = 0;
@@ -146,6 +157,7 @@ export class RuntimeRegistry {
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     this.markers = new RunMarkerStore(options.tronHome);
+    this.attention = new SessionAttentionStore(options.tronHome);
     this.configuredSessionDir = SettingsManager.create(
       process.cwd(),
       options.agentDir,
@@ -161,6 +173,9 @@ export class RuntimeRegistry {
   }
 
   async initialize(): Promise<void> {
+    await this.attention.initialize();
+    const markerEvidence = await this.markers.evidence();
+    await this.reconcileCanonicalAttention(markerEvidence);
     this.interrupted = await this.markers.interruptedSessionIds();
     this.evictionTimer = setInterval(() => void this.evictIdle(), 60_000);
     this.evictionTimer.unref();
@@ -173,20 +188,38 @@ export class RuntimeRegistry {
     return this.blobs.initialize();
   }
 
+  private async reconcileCanonicalAttention(markerEvidence: ReadonlyMap<string, RunMarkerEvidence>): Promise<void> {
+    const cursor = this.attention.reconciliationCursor();
+    const scanBoundary = new Date().toISOString();
+    // Recovery uses a bounded SDK file listing without publishing or warming the
+    // Gateway catalog acquisition cache. Catalog semantics and first-list costs
+    // therefore remain unchanged.
+    const infos = await this.sessionInfos();
+    const retainedIDs = new Set(infos.map((info) => info.id));
+    await this.attention.prune(retainedIDs);
+    for (const info of infos) {
+      const marker = markerEvidence.get(info.id);
+      if (info.modified.toISOString() <= cursor && marker?.assistantCompletionId === undefined) continue;
+      const manager = SessionManager.open(info.path);
+      // Recovery admits only a successful terminal leaf. A prior successful
+      // response followed by a newer user/tool/maintenance entry cannot settle
+      // the newer run marker.
+      const completion = successfulAssistantCompletion(manager.getLeafEntry());
+      if (!completion || completion.completedAt <= cursor) continue;
+      await this.attention.complete(info.id, completion.id);
+      const markerOwnsCompletion = marker?.assistantCompletionId === completion.id
+        || (marker?.assistantCompletionId === undefined && marker !== undefined
+          && marker.acceptedAt <= completion.completedAt);
+      if (marker && markerOwnsCompletion) await this.markers.clear(info.id, marker.operationId);
+    }
+    await this.attention.advanceReconciliationCursor(scanBoundary);
+  }
+
   private hooks() {
     return {
       broadcast: this.options.broadcast,
       summaryChanged: (summary: SessionSummaryUpdate) => {
-        const summaryRevision = (this.summaryRevisions.get(summary.sessionId) ?? 0) + 1;
-        this.summaryRevisions.set(summary.sessionId, summaryRevision);
-        const revisioned = { ...summary, summaryRevision };
-        // Store fields and revision atomically. A catalog materialization may
-        // observe either this whole summary or an older whole summary, never
-        // stale fields stamped with a newer revision.
-        this.latestSummaries.set(summary.sessionId, revisioned);
-        // Row activity is revisioned independently from catalog structure.
-        // A running session must not invalidate an immutable list traversal.
-        this.options.sessionSummaryChanged(revisioned);
+        this.publishRevisionedSummary({ ...summary, ...this.attention.projection(summary.sessionId) });
       },
       changed: () => {
         this.invalidateCatalogAcquisition();
@@ -194,6 +227,15 @@ export class RuntimeRegistry {
         this.options.sessionListChanged();
       },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
+      assistantResponseCompleted: async (
+        sessionId: string,
+        completion: CanonicalAssistantCompletion,
+        recovery: boolean,
+      ) => this.attentionLane.run(async () => {
+        if (recovery && completion.completedAt <= this.attention.reconciliationCursor()) return;
+        const result = await this.attention.complete(sessionId, completion.id);
+        if (result.changed) await this.publishAttentionSummary(sessionId, result.projection);
+      }),
       closed: (sessionId: string, slot: RuntimeSlot) => {
         const removed = this.slots.get(sessionId) === slot;
         const persistedPath = slot.persistedSessionFile;
@@ -223,18 +265,34 @@ export class RuntimeRegistry {
         // retains its revision continuity; membership did not change.
         this.options.sessionClosed?.(sessionId);
       },
-      rekey: (previousId: string, nextId: string, slot: RuntimeSlot) => {
+      rekey: async (
+        previousId: string,
+        nextId: string,
+        slot: RuntimeSlot,
+        disposition: SessionAttentionRebindDisposition,
+      ) => this.attentionLane.run(async () => {
+        await this.flushPendingAttentionRemovals();
         const existing = this.slots.get(nextId);
         if (existing && existing !== slot) throw new GatewayError("conflict", "Replacement session is already active");
+        // Persist the fallible attention disposition before changing runtime
+        // ownership. A failed write leaves the old identity wholly authoritative.
+        if (disposition === "migrate") await this.attention.rekey(previousId, nextId);
+        if (disposition === "reset" || disposition === "discard") await this.attention.assertAbsent(nextId);
+        if (disposition === "discard") await this.attention.remove(previousId);
         if (this.slots.get(previousId) === slot) this.slots.delete(previousId);
         this.slots.set(nextId, slot);
-        const previousSummaryRevision = this.summaryRevisions.get(previousId);
-        this.summaryRevisions.delete(previousId);
-        if (previousSummaryRevision !== undefined) this.summaryRevisions.set(nextId, previousSummaryRevision);
-        const previousSummary = this.latestSummaries.get(previousId);
-        this.latestSummaries.delete(previousId);
-        if (previousSummary) this.latestSummaries.set(nextId, { ...previousSummary, sessionId: nextId });
-        if (this.interrupted.delete(previousId)) this.interrupted.add(nextId);
+        if (disposition === "migrate" || disposition === "discard") {
+          const previousSummaryRevision = this.summaryRevisions.get(previousId);
+          this.summaryRevisions.delete(previousId);
+          const previousSummary = this.latestSummaries.get(previousId);
+          this.latestSummaries.delete(previousId);
+          const wasInterrupted = this.interrupted.delete(previousId);
+          if (disposition === "migrate") {
+            if (previousSummaryRevision !== undefined) this.summaryRevisions.set(nextId, previousSummaryRevision);
+            if (previousSummary) this.latestSummaries.set(nextId, { ...previousSummary, sessionId: nextId });
+            if (wasInterrupted) this.interrupted.add(nextId);
+          }
+        }
         const subscribers = this.subscribers.get(previousId);
         if (subscribers) {
           this.subscribers.delete(previousId);
@@ -249,8 +307,62 @@ export class RuntimeRegistry {
         this.invalidateCatalogAcquisition();
         this.revision += 1;
         this.options.sessionListChanged();
-      },
+      }),
     };
+  }
+
+  private publishRevisionedSummary(summary: SessionSummaryUpdate): void {
+    const summaryRevision = (this.summaryRevisions.get(summary.sessionId) ?? 0) + 1;
+    this.summaryRevisions.set(summary.sessionId, summaryRevision);
+    const revisioned = { ...summary, summaryRevision };
+    this.latestSummaries.set(summary.sessionId, revisioned);
+    this.options.sessionSummaryChanged(revisioned);
+  }
+
+  private async flushPendingAttentionRemovals(): Promise<void> {
+    for (const sessionId of [...this.pendingAttentionRemovals]) {
+      try {
+        await this.attention.remove(sessionId);
+        this.pendingAttentionRemovals.delete(sessionId);
+      } catch {
+        // Retain for the next attention operation; restart reconciliation also
+        // prunes records with no canonical catalog owner.
+      }
+    }
+  }
+
+  private async publishAttentionSummary(
+    sessionId: string,
+    projection: SessionAttentionProjection = this.attention.projection(sessionId),
+  ): Promise<void> {
+    // Completion originates from a live slot, whose latest full row projection
+    // is already retained. Never reacquire the catalog here: doing so could
+    // fabricate a row while duplicate-ID discovery is quarantining membership.
+    const summary = this.latestSummaries.get(sessionId);
+    if (!summary) return;
+    this.publishRevisionedSummary({ ...summary, ...projection });
+  }
+
+  attentionProjection(sessionId: string): SessionAttentionProjection {
+    return this.attention.projection(sessionId);
+  }
+
+  async setAttention(sessionId: string, unread: boolean, throughCompletionRevision?: number): Promise<SessionAttentionProjection> {
+    return this.attentionLane.run(async () => {
+      await this.flushPendingAttentionRemovals();
+      const catalog = await this.catalog("all");
+      const summary = catalog.sessions.find((session) => session.id === sessionId);
+      if (!summary) throw new GatewayError("not_found", "Tron session was not found");
+      const result = await this.attention.set(sessionId, unread, throughCompletionRevision);
+      if (result.changed) {
+        // The store write may suspend while a live summary advances. Merge into
+        // the newest retained facts rather than stamping stale catalog fields
+        // with a newer summary revision.
+        const latest = this.latestSummaries.get(sessionId) ?? summary;
+        this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
+      }
+      return result.projection;
+    });
   }
 
   private dependencies() {
@@ -1023,6 +1135,7 @@ export class RuntimeRegistry {
         firstMessage: latest?.firstMessage ?? session.firstMessage,
         phase: latest?.phase ?? (slot ? slot.catalogPhase : this.interrupted.has(session.id) ? "interrupted" : "idle"),
         summaryRevision: latest?.summaryRevision ?? 0,
+        ...this.attention.projection(session.id),
       }];
     });
     const liveOnly: SessionSummary[] = [...this.slots].flatMap(([id, slot]) => {
@@ -1043,6 +1156,7 @@ export class RuntimeRegistry {
         firstMessage: latest?.firstMessage ?? "",
         phase: latest?.phase ?? slot.catalogPhase,
         summaryRevision: latest?.summaryRevision ?? 0,
+        ...this.attention.projection(id),
       }];
     });
     return [...persisted, ...liveOnly]
@@ -1380,7 +1494,7 @@ export class RuntimeRegistry {
   }
 
   async delete(sessionId: string): Promise<void> {
-    await this.mutex.run(async () => {
+    await this.mutex.run(() => this.attentionLane.run(async () => {
       const catalog = await this.catalogSnapshot("all");
       this.requireUnambiguousSessionId(sessionId);
       const summary = catalog.sessions.find((session) => session.id === sessionId);
@@ -1406,6 +1520,9 @@ export class RuntimeRegistry {
       this.interrupted.delete(sessionId);
       await this.markers.clear(sessionId);
       if (info) {
+        // Canonical deletion commits before projection cleanup. If cleanup fails,
+        // restart reconciliation prunes the now-unowned record; it can never
+        // resurrect catalog membership or publish a summary.
         await rm(info.path, { force: true });
         if (!(await this.removeIndexedCatalogFile(info.path))) this.invalidateCatalogAcquisition();
       } else {
@@ -1413,7 +1530,12 @@ export class RuntimeRegistry {
       }
       this.revision += 1;
       this.options.sessionListChanged();
-    });
+      try {
+        await this.attention.remove(sessionId);
+      } catch {
+        this.pendingAttentionRemovals.add(sessionId);
+      }
+    }));
   }
 
   private requireLiveSlotCapacity(): void {

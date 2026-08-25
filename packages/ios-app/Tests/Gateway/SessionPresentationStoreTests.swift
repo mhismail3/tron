@@ -7,6 +7,51 @@ import Testing
 @MainActor
 @Suite("Session presentation ownership")
 struct SessionPresentationStoreTests {
+    private func nextAttentionRead(
+        _ socket: ScriptedGatewaySocket,
+        startingAt frameIndex: Int
+    ) async throws -> (request: JSONValue, index: Int) {
+        var index = frameIndex
+        while true {
+            try await socket.waitUntilSent(count: index + 1)
+            let request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[index])
+            let requestID = try #require(request.objectValue?["id"]?.stringValue)
+            switch request.objectValue?["method"]?.stringValue {
+            case "session.attention.read":
+                return (request, index)
+            case "session.commands":
+                // Command readiness is an independent background request. Leave
+                // it pending so this helper observes only attention ordering.
+                _ = requestID
+                index += 1
+            default:
+                Issue.record("unexpected request before attention acknowledgement")
+                return (request, index)
+            }
+        }
+    }
+
+    @discardableResult
+    private func answerAttentionRead(
+        _ socket: ScriptedGatewaySocket,
+        frameIndex: Int,
+        expectedRevision: Int
+    ) async throws -> Int {
+        let (request, index) = try await nextAttentionRead(socket, startingAt: frameIndex)
+        #expect(request.objectValue?["method"]?.stringValue == "session.attention.read")
+        #expect(request.objectValue?["params"]?.objectValue?["throughCompletionRevision"] == .number(Double(expectedRevision)))
+        let requestID = try #require(request.objectValue?["id"]?.stringValue)
+        await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
+            "result": .object([
+                "completionRevision": .number(Double(expectedRevision)),
+                "attentionRevision": .number(1),
+                "isUnread": .bool(false),
+            ]),
+        ])))
+        return index
+    }
+
     @Test("pending presentation owns notices before first open mounts")
     func pendingPresentationOwnsNoticeScope() {
         let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
@@ -1277,6 +1322,7 @@ struct SessionPresentationStoreTests {
                     "session": try JSONValue.encode(newSnapshot),
                     "syncToken": .string("new-sync"),
                     "subscriptionToken": .string("new-token"),
+                    "completionRevision": .number(5),
                 ]),
             ])))
 
@@ -1288,6 +1334,7 @@ struct SessionPresentationStoreTests {
                 "type": .string("response"), "id": .string(id), "ok": .bool(true),
                 "result": .object(["synchronized": .bool(true)]),
             ])))
+            try await answerAttentionRead(socket, frameIndex: 4, expectedRevision: 5)
             _ = try await opening.value
             #expect(store.mountedTarget?.sessionID == newSnapshot.sessionId)
             #expect(store.authoritativeSnapshot(for: newSnapshot.sessionId) == newSnapshot)
@@ -1336,6 +1383,7 @@ struct SessionPresentationStoreTests {
                     "session": try JSONValue.encode(baseline),
                     "syncToken": .string("sync"),
                     "subscriptionToken": .string("subscription"),
+                    "completionRevision": .number(6),
                 ]),
             ])))
 
@@ -1348,12 +1396,13 @@ struct SessionPresentationStoreTests {
                 "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
                 "result": .object(["synchronized": .bool(true)]),
             ])))
+            try await answerAttentionRead(socket, frameIndex: 3, expectedRevision: 6)
 
             _ = try await opening.value
             #expect(store.snapshot?.phase == .compacting)
             #expect(store.snapshot?.transcriptStart == 10)
             #expect(store.snapshot?.transcript.isEmpty == true)
-            #expect(await socket.sentFrames().count == 3)
+            #expect(await socket.sentFrames().count >= 4)
             await client.close()
         }
     }
@@ -1399,6 +1448,7 @@ struct SessionPresentationStoreTests {
                     "session": try JSONValue.encode(baseline),
                     "syncToken": .string("sync"),
                     "subscriptionToken": .string("subscription"),
+                    "completionRevision": .number(6),
                 ]),
             ])))
 
@@ -1411,6 +1461,7 @@ struct SessionPresentationStoreTests {
                 "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
                 "result": .object(["synchronized": .bool(true)]),
             ])))
+            try await answerAttentionRead(socket, frameIndex: 3, expectedRevision: 6)
 
             _ = try await opening.value
             #expect(store.snapshot?.phase == .running)
@@ -1420,6 +1471,92 @@ struct SessionPresentationStoreTests {
                 return value.objectValue?["method"]?.stringValue
             }
             #expect(!methods.contains("session.transcript"))
+            await client.close()
+        }
+    }
+
+    @Test("attention acknowledgement retries the exact installed completion revision")
+    func attentionReadRetriesExactRevision() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847, machineId: "machine", deviceId: "device")
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            let baseline = try SessionScenarioBuilder(seed: 8_930).openingTail(targetEncodedBytes: 4_096)
+            let store = SessionPresentationStore(client: client, performanceSignposts: SystemPerformanceSignposts.shared)
+            let opening = Task { try await store.open(baseline.sessionId) }
+            try await socket.waitUntilSent(count: 2)
+            let open = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[1])
+            let openID = try #require(open.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(openID), "ok": .bool(true),
+                "result": .object([
+                    "session": try JSONValue.encode(baseline), "syncToken": .string("sync"),
+                    "subscriptionToken": .string("subscription"), "completionRevision": .number(17),
+                ]),
+            ])))
+            try await socket.waitUntilSent(count: 3)
+            var request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[2])
+            let syncID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(syncID), "ok": .bool(true),
+                "result": .object(["synchronized": .bool(true)]),
+            ])))
+            let firstAttention = try await nextAttentionRead(socket, startingAt: 3)
+            request = firstAttention.request
+            #expect(request.objectValue?["method"]?.stringValue == "session.attention.read")
+            #expect(store.snapshot?.sessionId == baseline.sessionId)
+            #expect(request.objectValue?["params"]?.objectValue?["throughCompletionRevision"] == .number(17))
+            let firstAttentionID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(firstAttentionID), "ok": .bool(false),
+                "error": .object(["code": .string("busy"), "message": .string("retry"), "retryable": .bool(true)]),
+            ])))
+            try await answerAttentionRead(socket, frameIndex: firstAttention.index + 1, expectedRevision: 17)
+            _ = try await opening.value
+            await client.close()
+        }
+    }
+
+    @Test("an older Gateway without attention acknowledgement does not block open")
+    func unsupportedAttentionReadIsNoop() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847, machineId: "machine", deviceId: "device")
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+            let baseline = try SessionScenarioBuilder(seed: 8_931).openingTail(targetEncodedBytes: 4_096)
+            let store = SessionPresentationStore(client: client, performanceSignposts: SystemPerformanceSignposts.shared)
+            let opening = Task { try await store.open(baseline.sessionId) }
+            try await socket.waitUntilSent(count: 2)
+            var request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[1])
+            let openID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(openID), "ok": .bool(true),
+                "result": .object(["session": try JSONValue.encode(baseline), "syncToken": .string("sync"), "subscriptionToken": .string("subscription"), "completionRevision": .number(2)]),
+            ])))
+            try await socket.waitUntilSent(count: 3)
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[2])
+            let syncID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(syncID), "ok": .bool(true), "result": .object(["synchronized": .bool(true)]),
+            ])))
+            let attention = try await nextAttentionRead(socket, startingAt: 3)
+            request = attention.request
+            let attentionID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(attentionID), "ok": .bool(false),
+                "error": .object(["code": .string("not_found"), "message": .string("older gateway"), "retryable": .bool(false)]),
+            ])))
+            _ = try await opening.value
+            #expect(await socket.sentFrames().count == attention.index + 1)
             await client.close()
         }
     }
@@ -1496,6 +1633,7 @@ struct SessionPresentationStoreTests {
                     "session": try JSONValue.encode(baseline),
                     "syncToken": .string("retry-sync"),
                     "subscriptionToken": .string("retry-subscription"),
+                    "completionRevision": .number(9),
                 ]),
             ])))
 
@@ -1508,6 +1646,7 @@ struct SessionPresentationStoreTests {
                 "type": .string("response"), "id": .string(syncID), "ok": .bool(true),
                 "result": .object(["synchronized": .bool(true)]),
             ])))
+            try await answerAttentionRead(socket, frameIndex: 7, expectedRevision: 9)
 
             _ = try await opening.value
             #expect(store.snapshot?.sessionId == baseline.sessionId)
@@ -1702,6 +1841,9 @@ struct SessionPresentationStoreTests {
                 client: client,
                 cache: SnapshotCache(
                     root: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+                ),
+                composerDraftStore: ComposerDraftStore(
+                    root: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
                 )
             )
             let connecting = Task { try await model.connectHostedGateway(profile: profile, token: "token") }
@@ -1726,6 +1868,7 @@ struct SessionPresentationStoreTests {
                     "session": try JSONValue.encode(snapshot),
                     "syncToken": .string("sync"),
                     "subscriptionToken": .string("subscription"),
+                    "completionRevision": .number(13),
                 ]),
             ])))
 
@@ -1758,6 +1901,7 @@ struct SessionPresentationStoreTests {
                 "ok": .bool(true),
                 "result": .object(["synchronized": .bool(true)]),
             ])))
+            try await answerAttentionRead(socket, frameIndex: 3, expectedRevision: 13)
 
             let generation = try await opening.value
             let target = SessionPresentationIdentity(
@@ -1796,7 +1940,12 @@ struct SessionPresentationStoreTests {
             let openID = try #require(request.objectValue?["id"]?.stringValue)
             await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("response"), "id": .string(openID), "ok": .bool(true),
-                "result": .object(["session": try JSONValue.encode(snapshot), "syncToken": .string("sync"), "subscriptionToken": .string("subscription")]),
+                "result": .object([
+                    "session": try JSONValue.encode(snapshot),
+                    "syncToken": .string("sync"),
+                    "subscriptionToken": .string("subscription"),
+                    "completionRevision": .number(14),
+                ]),
             ])))
             try await socket.waitUntilSent(count: 3)
             frames = await socket.sentFrames()
@@ -1805,6 +1954,7 @@ struct SessionPresentationStoreTests {
             await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("response"), "id": .string(syncID), "ok": .bool(true), "result": .object(["synchronized": .bool(true)]),
             ])))
+            try await answerAttentionRead(socket, frameIndex: 3, expectedRevision: 14)
             let generation = try await opening.value
             let target = SessionPresentationIdentity(sessionID: snapshot.sessionId, generation: generation)
             frames = await socket.sentFrames()

@@ -3,11 +3,13 @@ import { join } from "node:path";
 import { atomicWriteJson, readJson, removeIfExists } from "../util/json.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 
-interface Marker {
+export interface RunMarkerEvidence {
   version: 1;
   sessionId: string;
   operationId: string;
   acceptedAt: string;
+  assistantCompletionId?: string;
+  assistantCompletedAt?: string;
 }
 
 interface Lane {
@@ -53,9 +55,48 @@ export class RunMarkerStore {
   async mark(sessionId: string, operationId: string): Promise<void> {
     await this.withLane(sessionId, async () => {
       await mkdir(this.directory, { recursive: true, mode: 0o700 });
-      const marker: Marker = { version: 1, sessionId, operationId, acceptedAt: new Date().toISOString() };
+      const marker: RunMarkerEvidence = { version: 1, sessionId, operationId, acceptedAt: new Date().toISOString() };
       await atomicWriteJson(join(this.directory, `${sessionId}.json`), marker);
     });
+  }
+
+  async markAssistantCompletion(
+    sessionId: string,
+    operationId: string,
+    completionId: string,
+    completedAt: string,
+  ): Promise<void> {
+    await this.withLane(sessionId, async () => {
+      const path = join(this.directory, `${sessionId}.json`);
+      const marker = await readJson<RunMarkerEvidence | undefined>(path, undefined, 4_096);
+      if (!marker || marker.operationId !== operationId) {
+        throw new Error("Run marker ownership changed before assistant completion admission");
+      }
+      await atomicWriteJson(path, {
+        ...marker,
+        assistantCompletionId: completionId,
+        assistantCompletedAt: completedAt,
+      } satisfies RunMarkerEvidence);
+    });
+  }
+
+  async evidence(): Promise<Map<string, RunMarkerEvidence>> {
+    try {
+      const names = (await readdir(this.directory)).filter((name) => name.endsWith(".json"));
+      const evidence = new Map<string, RunMarkerEvidence>();
+      for (const name of names) {
+        const sessionId = name.slice(0, -5);
+        const marker = await readJson<RunMarkerEvidence | undefined>(join(this.directory, name), undefined, 4_096);
+        if (marker?.version === 1 && marker.sessionId === sessionId
+          && typeof marker.operationId === "string" && typeof marker.acceptedAt === "string") {
+          evidence.set(sessionId, marker);
+        }
+      }
+      return evidence;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
+      throw error;
+    }
   }
 
   /** Clear only the marker owned by operationId when one is supplied. */
@@ -63,7 +104,7 @@ export class RunMarkerStore {
     await this.withLane(sessionId, async () => {
       const path = join(this.directory, `${sessionId}.json`);
       if (operationId !== undefined) {
-        const marker = await readJson<Marker | undefined>(path, undefined, 4_096);
+        const marker = await readJson<RunMarkerEvidence | undefined>(path, undefined, 4_096);
         if (marker?.operationId !== operationId) return;
       }
       await removeIfExists(path);

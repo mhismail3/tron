@@ -1777,6 +1777,16 @@ final class AppModel {
         try await sessionMutations.rename(sessionID, name: name)
     }
 
+    func setSessionUnread(_ session: SessionSummary, unread: Bool) async throws {
+        try await performOnOwningGateway(session) {
+            try await self.sessionMutations.setAttention(
+                sessionID: session.id,
+                unread: unread,
+                throughCompletionRevision: session.completionRevision
+            )
+        }
+    }
+
     func compact(sessionID: String, instructions: String? = nil) async throws {
         try await sessionMutations.compact(sessionID: sessionID, instructions: instructions)
     }

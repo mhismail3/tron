@@ -529,6 +529,32 @@ struct SessionMutationServiceTests {
         }
     }
 
+    @Test("attention mutation carries absolute rendered completion revision")
+    func attentionMutation() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let mutation = Task {
+                try await harness.service.setAttention(
+                    sessionID: "session-a",
+                    unread: false,
+                    throughCompletionRevision: 7
+                )
+            }
+            let request = try await request(in: harness.socket, frameIndex: 1)
+            #expect(request.method == "session.attention.set")
+            #expect(request.params?["sessionId"] == .string("session-a"))
+            #expect(request.params?["unread"] == .bool(false))
+            #expect(request.params?["throughCompletionRevision"] == .number(7))
+            try expectCommandID(request)
+            await harness.socket.enqueue(successResponse(
+                id: request.id,
+                result: .object(["isUnread": .bool(false)])
+            ))
+            try await valueOfOwnedTask(mutation)
+            await harness.client.close()
+        }
+    }
+
     private struct Harness {
         let socket: ScriptedGatewaySocket
         let client: GatewayClient

@@ -65,6 +65,81 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
   });
 
+  it("recovers a canonical successful completion missed before restart", async () => {
+    const fixture = await coldFixture("attention-restart");
+    expect(fixture.registry.attentionProjection(fixture.manager.getSessionId()).isUnread).toBe(false);
+    // Simulate the crash window: accepted work retained its marker and Pi's
+    // successful terminal leaf committed after the persisted reconciliation
+    // cursor, but attention admission/marker cleanup did not.
+    const markerStore = (fixture.registry as unknown as {
+      markers: { mark: (sessionId: string, operationId: string) => Promise<void> };
+    }).markers;
+    await markerStore.mark(fixture.manager.getSessionId(), "crashed-operation");
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    fixture.manager.appendMessage(fauxAssistantMessage("completed immediately before crash"));
+    await fixture.registry.dispose();
+
+    const restarted = new RuntimeRegistry({
+      agentDir: fixture.agentDir,
+      tronHome: join(fixture.root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(fixture.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(restarted);
+    await restarted.initialize();
+    expect(restarted.attentionProjection(fixture.manager.getSessionId()))
+      .toMatchObject({ completionRevision: 1, isUnread: true });
+    expect((await restarted.catalog("all")).sessions.find((row) => row.id === fixture.manager.getSessionId()))
+      .toMatchObject({ phase: "idle", isUnread: true });
+  });
+
+  it("merges a suspended attention write into latest summary facts and cannot race deletion", async () => {
+    const fixture = await coldFixture("attention-races");
+    const sessionId = fixture.manager.getSessionId();
+    const internals = fixture.registry as unknown as {
+      attention: { set: (id: string, unread: boolean, through?: number) => Promise<unknown> };
+      latestSummaries: Map<string, SessionSummaryUpdate>;
+    };
+    const originalSet = internals.attention.set.bind(internals.attention);
+    let entered!: () => void;
+    let release!: () => void;
+    const enteredBarrier = new Promise<void>((resolve) => { entered = resolve; });
+    const writeBarrier = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(internals.attention, "set").mockImplementation(async (id, unread, through) => {
+      entered();
+      await writeBarrier;
+      return originalSet(id, unread, through);
+    });
+
+    const setting = fixture.registry.setAttention(sessionId, true, 0);
+    await enteredBarrier;
+    const catalogSummary = (await fixture.registry.catalog("all")).sessions.find((row) => row.id === sessionId)!;
+    internals.latestSummaries.set(sessionId, {
+      sessionId,
+      phase: "running",
+      updatedAt: catalogSummary.updatedAt,
+      messageCount: 99,
+      firstMessage: catalogSummary.firstMessage,
+      summaryRevision: 41,
+    });
+    expect(internals.latestSummaries.get(sessionId)).toMatchObject({ phase: "running", messageCount: 99 });
+    const deleting = fixture.registry.delete(sessionId);
+    release();
+    await setting;
+    expect(internals.latestSummaries.get(sessionId)).toMatchObject({ phase: "running", messageCount: 99, isUnread: true });
+    await deleting;
+    expect(fixture.registry.attentionProjection(sessionId)).toEqual({
+      completionRevision: 0,
+      attentionRevision: 0,
+      isUnread: false,
+    });
+    expect((await fixture.registry.catalog("all")).sessions.find((row) => row.id === sessionId)).toBeUndefined();
+  });
+
   it("projects empty live sessions until deletion, persistence, eviction, or restart", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-live-empty-catalog-"));
     const agentDir = join(root, "agent");
@@ -1053,6 +1128,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await slot.setModel(model.provider, model.id);
     await slot.prompt("catalog race baseline");
     await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => registry.attentionProjection(slot.id).isUnread);
+    expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 1, isUnread: true });
 
     const internals = registry as unknown as { sessionInfos: () => Promise<unknown[]> };
     const originalSessionInfos = internals.sessionInfos.bind(registry);
@@ -2854,6 +2931,8 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
     await slot.prompt("run tools");
     await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => registry.attentionProjection(slot.id).isUnread);
+    expect(registry.attentionProjection(slot.id).completionRevision).toBe(1);
 
     const progress = events
       .filter((event) => event.topic === "session.toolProgress")
@@ -3291,12 +3370,19 @@ export default function (pi) {
     await slot.prompt("fork this");
     await waitUntil(() => !slot.isBusy);
     const original = slot.id;
+    expect(registry.attentionProjection(original).isUnread).toBe(true);
     const userEntry = slot.snapshot().transcript.find((item) => item.role === "user");
     expect(userEntry).toBeDefined();
 
     const fork = await slot.fork(userEntry!.id, "at");
     expect(fork.sessionId).not.toBe(original);
     expect(rekeys).toEqual([[original, fork.sessionId]]);
+    expect(registry.attentionProjection(original).isUnread).toBe(true);
+    expect(registry.attentionProjection(fork.sessionId)).toEqual({
+      completionRevision: 0,
+      attentionRevision: 0,
+      isUnread: false,
+    });
     expect((await registry.acquire(fork.sessionId)).id).toBe(fork.sessionId);
   });
 

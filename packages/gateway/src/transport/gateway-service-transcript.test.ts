@@ -255,6 +255,67 @@ describe("session transcript paging", () => {
     expect(removeSession).toHaveBeenCalledWith("deleted");
   });
 
+  it("joins the attention barrier before snapshotting an open revision", async () => {
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    let reconciled = false;
+    const snapshot = vi.fn(() => ({ sessionId: "session", revision: 2 }));
+    const slot = {
+      reconcileAttention: vi.fn(async () => { await barrier; reconciled = true; }),
+      snapshot: vi.fn(() => {
+        expect(reconciled).toBe(true);
+        return snapshot();
+      }),
+    };
+    const service = new GatewayService({
+      sessions: {
+        acquire: vi.fn(async () => slot),
+        attentionProjection: vi.fn(() => ({ completionRevision: 7, attentionRevision: 7, isUnread: true })),
+      },
+      logger: { log: vi.fn() },
+    } as unknown as GatewayServiceDependencies);
+
+    let settled = false;
+    const open = service.invoke(client, "session.open", { sessionId: "session" }).then((value) => {
+      settled = true;
+      return value;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(snapshot).not.toHaveBeenCalled();
+    release();
+    await expect(open).resolves.toMatchObject({ completionRevision: 7 });
+    expect(snapshot).toHaveBeenCalledTimes(1);
+  });
+
+  it("serializes absolute attention mutations and stale-safe open acknowledgements", async () => {
+    const setAttention = vi.fn(async (_sessionId: string, unread: boolean, through?: number) => ({
+      completionRevision: 4, attentionRevision: 8, isUnread: unread || (through ?? 0) < 4,
+    }));
+    const execute = vi.fn(async (
+      _identity: string,
+      _method: string,
+      _commandId: string,
+      operation: () => Promise<unknown>,
+    ) => operation());
+    const service = new GatewayService({
+      sessions: { setAttention },
+      receipts: { execute },
+    } as unknown as GatewayServiceDependencies);
+
+    await expect(service.invoke(client, "session.attention.read", {
+      sessionId: "session", throughCompletionRevision: 3,
+    })).resolves.toMatchObject({ isUnread: true });
+    await expect(service.invoke(client, "session.attention.set", {
+      sessionId: "session", unread: false, throughCompletionRevision: 4, commandId: "command-read",
+    })).resolves.toMatchObject({ isUnread: false });
+    await expect(service.invoke(client, "session.attention.set", {
+      sessionId: "session", unread: true, throughCompletionRevision: 4, commandId: "command-unread",
+    })).resolves.toMatchObject({ isUnread: true });
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(setAttention).toHaveBeenNthCalledWith(1, "session", false, 3);
+  });
+
   it("rejects terminal creation before the client opens the session", async () => {
     const acquire = vi.fn();
     const open = vi.fn();

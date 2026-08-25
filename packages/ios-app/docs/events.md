@@ -24,7 +24,13 @@ admits and reduces mounted-session topics:
   phase/name/count projection, so runs started by terminal or another mobile client update
   known dashboard rows synchronously without subscribing every device to every transcript or
   issuing a list request. A summary makes only that row live before full catalog completion;
-  unknown summaries request discovery without fabricating a row. `session.listChanged` marks
+  unknown summaries request discovery without fabricating a row. The same row projection carries
+  Gateway-canonical completion/read-through attention. A final prompt response becomes unread only
+  at truthful settlement; opening acknowledges only the completion revision installed by that
+  exact presentation/connection owner, transient retries retain the same absolute revision, and
+  explicit Mark Read/Unread mutations use command receipts. Cached rows may show
+  stale offline attention but never own it, while foreground and background profile event streams
+  converge every dashboard. `session.listChanged` marks
   the shared traversal dirty instead of cancel/restarting it. User-scoped 500-row pagination
   has exact page/item/identity/cursor bounds and publishes atomically. Mixed page revisions
   and expired continuation leases restart once from a nil cursor and then retain the previous catalog silently; this expected
