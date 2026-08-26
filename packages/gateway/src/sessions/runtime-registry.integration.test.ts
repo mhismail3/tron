@@ -911,60 +911,63 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(removedFixture.runtimeFactory).not.toHaveBeenCalled();
   });
 
-  it("resolves deepest nested topology owners without scanning every root", async () => {
+  it("recognizes only the exact delegated-session producer topology", async () => {
     const fixture = await coldFixture("topology-helper");
     const internals = fixture.registry as unknown as {
-      nestedOwners: (sessions: Array<{ id: string; path: string }>) => ReadonlyMap<string, string>;
+      delegatedSessionTopologies: (sessions: Array<{
+        id: string; path: string; parentSessionPath?: string;
+      }>) => ReadonlyMap<string, { parentSessionId?: string; contradictoryHeader: boolean }>;
+      catalogDirectory: () => string;
     };
-    const root = join(fixture.root, "topology");
+    const root = join(await realpath(internals.catalogDirectory()), "topology");
     const parent = join(root, "parent.jsonl");
-    const child = join(root, "parent", "child.jsonl");
-    const grandchild = join(root, "parent", "child", "run", "grandchild.jsonl");
-    const unrelated = join(root, "unrelated.jsonl");
+    const fork = join(root, "parent", "forks", "fork.jsonl");
+    const fresh = join(root, "parent", "worker", "run-0", "session.jsonl");
+    const interrupted = join(root, "parent", "reviewer", "run-1", "session.jsonl");
+    const contradictory = join(root, "parent", "worker", "run-2", "session.jsonl");
+    const extraDepthRun = join(root, "parent", "worker", "run-3", "extra", "session.jsonl");
+    const extraDepthFork = join(root, "parent", "forks", "extra", "fork.jsonl");
+    const wrongRunBasename = join(root, "parent", "worker", "run-4", "child.jsonl");
+    const arbitraryDeep = join(root, "parent", "arbitrary", "deep", "session.jsonl");
+    const topLevelParented = join(root, "ordinary-fork.jsonl");
 
-    expect([...internals.nestedOwners([
+    expect([...internals.delegatedSessionTopologies([
       { id: "parent", path: parent },
-      { id: "child", path: child },
-      { id: "grandchild", path: grandchild },
-      { id: "unrelated", path: unrelated },
+      { id: "fork", path: fork, parentSessionPath: parent },
+      { id: "fresh", path: fresh },
+      { id: "interrupted", path: interrupted },
+      { id: "contradictory", path: contradictory, parentSessionPath: topLevelParented },
+      { id: "extra-run", path: extraDepthRun },
+      { id: "extra-fork", path: extraDepthFork, parentSessionPath: parent },
+      { id: "wrong-basename", path: wrongRunBasename },
+      { id: "deep", path: arbitraryDeep },
+      { id: "ordinary", path: topLevelParented, parentSessionPath: parent },
     ])]).toEqual([
-      [resolve(child), "parent"],
-      [resolve(grandchild), "child"],
+      [resolve(fork), { parentSessionId: "parent", contradictoryHeader: false }],
+      [resolve(fresh), { contradictoryHeader: false }],
+      [resolve(interrupted), { contradictoryHeader: false }],
+      [resolve(contradictory), { contradictoryHeader: true }],
     ]);
   });
 
-  it("keeps structural and exact current named subagent sessions non-openable", async () => {
-    const nestedFixture = await coldFixture("nested-subagent", { nested: true });
-    const nestedInternals = nestedFixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const nestedMaterialize = vi.spyOn(nestedInternals, "sessionInfos");
-    const nestedCatalog = await nestedFixture.registry.catalog("all");
-    expect(nestedCatalog.sessions.find((session) => session.id === nestedFixture.manager.getSessionId())?.kind)
-      .toBe("subagent");
-    await expect(nestedFixture.registry.acquire(nestedFixture.manager.getSessionId())).rejects.toMatchObject({
-      code: "conflict",
-    });
-    expect(nestedMaterialize).toHaveBeenCalledTimes(1);
-    expect(nestedFixture.runtimeFactory).not.toHaveBeenCalled();
+  it("does not infer delegated identity from names, titles, or generic depth", async () => {
+    const nestedFixture = await coldFixture("nested-user", { nested: true });
+    expect((await nestedFixture.registry.catalog("all")).sessions.find(
+      (session) => session.id === nestedFixture.manager.getSessionId(),
+    )?.kind).toBe("user");
+    expect((await nestedFixture.registry.acquire(nestedFixture.manager.getSessionId())).id)
+      .toBe(nestedFixture.manager.getSessionId());
 
-    const namedFixture = await coldFixture("named-subagent", { name: "subagent-catalog-child" });
-    const namedInternals = namedFixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const namedMaterialize = vi.spyOn(namedInternals, "sessionInfos");
-    await expect(namedFixture.registry.acquire(namedFixture.manager.getSessionId())).rejects.toMatchObject({
-      code: "conflict",
-    });
-    expect(namedMaterialize).not.toHaveBeenCalled();
-    expect(namedFixture.runtimeFactory).not.toHaveBeenCalled();
+    const namedFixture = await coldFixture("named-user", { name: "subagent-catalog-child" });
+    expect((await namedFixture.registry.acquire(namedFixture.manager.getSessionId())).id)
+      .toBe(namedFixture.manager.getSessionId());
 
-    const renamedFixture = await coldFixture("renamed-subagent");
-    const renamedInternals = renamedFixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
-    const renamedMaterialize = vi.spyOn(renamedInternals, "sessionInfos");
-    await renamedFixture.registry.catalog("all");
+    const renamedFixture = await coldFixture("renamed-user");
+    const beforeRename = await renamedFixture.registry.catalog("all");
     renamedFixture.manager.appendSessionInfo("subagent-renamed-after-catalog");
-    await expect(renamedFixture.registry.acquire(renamedFixture.manager.getSessionId())).rejects.toMatchObject({
-      code: "conflict",
-    });
-    expect(renamedMaterialize).toHaveBeenCalledTimes(1);
-    expect(renamedFixture.runtimeFactory).not.toHaveBeenCalled();
+    expect((await renamedFixture.registry.catalog("all")).listRevision).toBe(beforeRename.listRevision);
+    expect((await renamedFixture.registry.acquire(renamedFixture.manager.getSessionId())).id)
+      .toBe(renamedFixture.manager.getSessionId());
   });
 
   it("rejects identity, cwd, or duplicate mutation before runtime creation", async () => {
@@ -1003,6 +1006,70 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       } finally {
         admission.mockRestore();
       }
+    }
+  });
+
+  it("does not follow a session path replaced by a symlink during delete", async () => {
+    const fixture = await coldFixture("delete-symlink-race");
+    await fixture.registry.catalog("all");
+    const moved = `${fixture.sessionFile}.moved`;
+    const external = join(fixture.root, "external.jsonl");
+    const externalContent = `${JSON.stringify({
+      type: "session", version: 3, id: fixture.manager.getSessionId(),
+      timestamp: new Date().toISOString(), cwd: fixture.cwd,
+    })}\n`;
+    await writeFile(external, externalContent);
+    const internals = fixture.registry as unknown as {
+      catalogSnapshot: (scope: "user" | "all") => Promise<unknown>;
+    };
+    const original = internals.catalogSnapshot.bind(fixture.registry);
+    let replaced = false;
+    vi.spyOn(internals, "catalogSnapshot").mockImplementation(async (scope) => {
+      const snapshot = await original(scope);
+      if (!replaced) {
+        replaced = true;
+        await rename(fixture.sessionFile, moved);
+        await symlink(external, fixture.sessionFile);
+      }
+      return snapshot;
+    });
+
+    await expect(fixture.registry.delete(fixture.manager.getSessionId())).rejects.toMatchObject({
+      code: "busy", retryable: true,
+    });
+    expect(await readFile(external, "utf8")).toBe(externalContent);
+    expect(existsSync(moved)).toBe(true);
+  });
+
+  it("revalidates parent creation, duplicate identity, and topology changes in the delete gap", async () => {
+    for (const mutation of ["parent", "duplicate", "topology"] as const) {
+      const fixture = await coldFixture(`delete-catalog-gap-${mutation}`);
+      await fixture.registry.catalog("all");
+      const mutationDirectory = join(fixture.agentDir, "sessions", `delete-gap-${mutation}`);
+      const movedFile = join(mutationDirectory, "owner", "worker", "run-0", "session.jsonl");
+      const internals = fixture.registry as unknown as {
+        removeCanonicalCatalogFile: (...arguments_: any[]) => Promise<void>;
+      };
+      const original = internals.removeCanonicalCatalogFile.bind(fixture.registry);
+      vi.spyOn(internals, "removeCanonicalCatalogFile").mockImplementation(async (...arguments_) => {
+        await mkdir(mutationDirectory, { recursive: true });
+        if (mutation === "parent") {
+          await writeFile(join(mutationDirectory, "new-parent.jsonl"), `${JSON.stringify({
+            type: "session", version: 3, id: "new-parent", timestamp: new Date().toISOString(), cwd: fixture.cwd,
+          })}\n`);
+        } else if (mutation === "duplicate") {
+          await copyFile(fixture.sessionFile, join(mutationDirectory, "duplicate.jsonl"));
+        } else {
+          await mkdir(dirname(movedFile), { recursive: true });
+          await rename(fixture.sessionFile, movedFile);
+        }
+        return original(...arguments_);
+      });
+
+      await expect(fixture.registry.delete(fixture.manager.getSessionId())).rejects.toMatchObject({
+        code: "busy", retryable: true,
+      });
+      expect(existsSync(mutation === "topology" ? movedFile : fixture.sessionFile)).toBe(true);
     }
   });
 
@@ -1218,6 +1285,185 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect((await acquiring).entriesByID.size).toBe(count);
     expect(headers).toHaveBeenCalledTimes(count);
   });
+
+  it("keeps a child mutation-protected when its parent ID is duplicated", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-duplicate-parent-"));
+    const agentDir = join(root, "agent");
+    const directory = join(agentDir, "sessions", "workspace");
+    const duplicateDirectory = join(agentDir, "sessions", "duplicate-workspace");
+    const cwd = join(root, "workspace");
+    await Promise.all([
+      mkdir(directory, { recursive: true }),
+      mkdir(duplicateDirectory, { recursive: true }),
+      mkdir(cwd),
+    ]);
+    const timestamp = new Date().toISOString();
+    const parentId = "ambiguous-parent";
+    const parentFile = join(directory, `${parentId}.jsonl`);
+    const header = `${JSON.stringify({ type: "session", version: 3, id: parentId, timestamp, cwd })}\n`;
+    await Promise.all([
+      writeFile(parentFile, header),
+      writeFile(join(duplicateDirectory, "duplicate.jsonl"), header),
+    ]);
+    const childDirectory = join(directory, parentId, "worker", "run-0");
+    await mkdir(childDirectory, { recursive: true });
+    const childId = "child-of-ambiguous-parent";
+    await writeFile(join(childDirectory, "session.jsonl"), `${JSON.stringify({
+      type: "session", version: 3, id: childId, timestamp, cwd,
+    })}\n`);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+
+    const all = await registry.catalog("all");
+    expect(all.sessions.map((session) => session.id)).not.toContain(parentId);
+    expect(all.sessions.find((session) => session.id === childId)).toMatchObject({ kind: "subagent" });
+    await expect(registry.acquire(childId)).rejects.toMatchObject({ code: "conflict" });
+    await expect(registry.delete(childId)).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("omits a reserved child with a contradictory parent header without making it mutable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-contradictory-header-"));
+    const agentDir = join(root, "agent");
+    const directory = join(agentDir, "sessions", "workspace");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(directory, { recursive: true }), mkdir(cwd)]);
+    const timestamp = new Date().toISOString();
+    const parentId = "expected-parent";
+    const parentFile = join(directory, `${parentId}.jsonl`);
+    const otherParentFile = join(directory, "other-parent.jsonl");
+    await Promise.all([
+      writeFile(parentFile, `${JSON.stringify({ type: "session", version: 3, id: parentId, timestamp, cwd })}\n`),
+      writeFile(otherParentFile, `${JSON.stringify({
+        type: "session", version: 3, id: "other-parent", timestamp, cwd,
+      })}\n`),
+    ]);
+    const childDirectory = join(directory, parentId, "worker", "run-0");
+    await mkdir(childDirectory, { recursive: true });
+    const childId = "contradictory-child";
+    const childFile = join(childDirectory, "session.jsonl");
+    await writeFile(childFile, `${JSON.stringify({
+      type: "session", version: 3, id: childId, timestamp, cwd, parentSession: otherParentFile,
+    })}\n`);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+
+    expect((await registry.catalog("all")).sessions.map((session) => session.id)).not.toContain(childId);
+    const acquisition = await (registry as unknown as {
+      catalogAcquisition: () => Promise<{
+        entriesByID: ReadonlyMap<string, { structuralSubagent: boolean }>;
+      }>;
+    }).catalogAcquisition();
+    expect(acquisition.entriesByID.get(childId)?.structuralSubagent).toBe(true);
+    await expect(registry.acquire(childId)).rejects.toMatchObject({ code: "conflict" });
+    await expect(registry.delete(childId)).rejects.toMatchObject({ code: "not_found" });
+    expect(existsSync(childFile)).toBe(true);
+  });
+
+  it("keeps a reserved child delegated after its parent is deleted and ignores later title metadata", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-parent-deleted-"));
+    const agentDir = join(root, "agent");
+    const directory = join(agentDir, "sessions", "workspace");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(directory, { recursive: true }), mkdir(cwd)]);
+    const timestamp = new Date().toISOString();
+    const parentId = "deleted-parent";
+    const parentFile = join(directory, `${parentId}.jsonl`);
+    await writeFile(parentFile, `${JSON.stringify({
+      type: "session", version: 3, id: parentId, timestamp, cwd,
+    })}\n`);
+    const childDirectory = join(directory, parentId, "worker", "run-0");
+    await mkdir(childDirectory, { recursive: true });
+    const childId = "interrupted-before-title";
+    const childFile = join(childDirectory, "session.jsonl");
+    await writeFile(childFile, `${JSON.stringify({
+      type: "session", version: 3, id: childId, timestamp, cwd,
+    })}\n`);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+
+    expect((await registry.catalog("all")).sessions.find((session) => session.id === childId)?.kind)
+      .toBe("subagent");
+    await rm(parentFile);
+    const withoutParent = await registry.catalog("all");
+    expect(withoutParent.sessions.find((session) => session.id === childId)?.kind).toBe("subagent");
+    await writeFile(childFile, `${await readFile(childFile, "utf8")}${JSON.stringify({
+      type: "session_info", id: "late-title", parentId: null, timestamp,
+      name: "ordinary title",
+    })}\n`);
+    const afterTitle = await registry.catalog("all");
+    expect(afterTitle.listRevision).toBe(withoutParent.listRevision);
+    expect(afterTitle.sessions.find((session) => session.id === childId)?.kind).toBe("subagent");
+    await expect(registry.acquire(childId)).rejects.toMatchObject({ code: "conflict" });
+    await expect(registry.delete(childId)).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("classifies a 1,541-file catalog using positive topology only", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-topology-scale-"));
+    const agentDir = join(root, "agent");
+    const directory = join(agentDir, "sessions", "workspace");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(directory, { recursive: true }), mkdir(cwd)]);
+    const timestamp = new Date().toISOString();
+    const parentId = "scale-parent";
+    const parentFile = join(directory, `${parentId}.jsonl`);
+    const incidentId = "incident-top-level-parented";
+    await Promise.all([
+      writeFile(parentFile, `${JSON.stringify({ type: "session", version: 3, id: parentId, timestamp, cwd })}\n`),
+      writeFile(join(directory, `${incidentId}.jsonl`), `${JSON.stringify({
+        type: "session", version: 3, id: incidentId, timestamp, cwd, parentSession: parentFile,
+      })}\n`),
+      ...Array.from({ length: 1_538 }, (_, index) => writeFile(
+        join(directory, `ordinary-${String(index).padStart(4, "0")}.jsonl`),
+        `${JSON.stringify({ type: "session", version: 3, id: `ordinary-${index}`, timestamp, cwd })}\n`,
+      )),
+    ]);
+    const childDirectory = join(directory, parentId, "worker", "run-0");
+    await mkdir(childDirectory, { recursive: true });
+    const childId = "scale-interrupted-child";
+    await writeFile(join(childDirectory, "session.jsonl"), `${JSON.stringify({
+      type: "session", version: 3, id: childId, timestamp, cwd,
+    })}\n`);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+
+    const all = await registry.catalog("all");
+    expect(all.sessions).toHaveLength(1_541);
+    expect(all.sessions.find((session) => session.id === childId)?.kind).toBe("subagent");
+    expect(all.sessions.find((session) => session.id === incidentId)?.kind).toBe("user");
+    expect((await registry.list("user")).map((session) => session.id)).not.toContain(childId);
+  }, 30_000);
 
   it("reserves a deterministic aggregate header-read budget across concurrent readers", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-strict-header-budget-"));
@@ -1935,7 +2181,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
   });
 
-  it("persists only a validated opaque child-session reference for process viewing", async () => {
+  it("admits the exact fresh child path for read-only process viewing", async () => {
     const fixture = await coldFixture("validated-child-session");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const runId = "validated-child-run";
@@ -1946,14 +2192,15 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const childProducerId = "child-run";
     const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), childProducerId, "run-0");
     await Promise.all([mkdir(asyncDir, { recursive: true }), mkdir(childDirectory, { recursive: true })]);
-    // Match the deployed pi-subagents producer: the canonical child path and
-    // structural name carry the child run while the header omits parentSession.
+    // Match the current producer: the exact lifecycle artifact and canonical
+    // reserved path authorize the child while the header omits parentSession.
     const childManager = SessionManager.create(fixture.cwd, childDirectory, {
       id: "validated-child-session",
     });
-    childManager.appendSessionInfo(`subagent-worker-${childProducerId}-1`);
     childManager.appendMessage(fauxAssistantMessage("child transcript"));
-    const childFile = childManager.getSessionFile()!;
+    const generatedChildFile = childManager.getSessionFile()!;
+    const childFile = join(childDirectory, "session.jsonl");
+    await rename(generatedChildFile, childFile);
     const startedAt = new Date(Date.now() - 1_000).toISOString();
     const internal = slot as unknown as {
       extensionActivities: Map<string, ExtensionRunActivity>;
@@ -2041,6 +2288,99 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       "validated-child-session", admission.path, slot.id, process!.processId, runId,
       undefined, undefined, admission.fileIdentity,
     )).rejects.toMatchObject({ code: "conflict", retryable: true });
+  });
+
+  it("admits a fork-context transcript only from its artifact child identity and mounted parent", async () => {
+    const fixture = await coldFixture("validated-fork-context");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const parentFile = slot.sessionFile!;
+    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "fork-run");
+    await Promise.all([mkdir(forksDirectory, { recursive: true }), mkdir(asyncDir, { recursive: true })]);
+    const fork = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
+    fork.appendMessage(fauxAssistantMessage("fork transcript"));
+    const forkFile = fork.getSessionFile()!;
+    const artifactChildId = "artifact-fork-child";
+    const startedAt = new Date(Date.now() - 1_000).toISOString();
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
+      refreshExtensionActivityFromArtifact: (toolCallId: string, asyncDir: string) => Promise<void>;
+    };
+    internal.extensionActivities.set("fork-tool", {
+      id: "fork-tool", activityId: "fork-activity", runId: "fork-run", toolCallId: "fork-tool",
+      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      startedAt, updatedAt: startedAt, children: [],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
+    });
+    internal.extensionRunOwnership.set("fork-run", { toolCallId: "fork-tool", asyncDir, terminal: false });
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      runId: "fork-run", state: "running", startedAt: Date.parse(startedAt), lastUpdate: Date.now(),
+      mode: "workflow",
+      steps: [{ runId: artifactChildId, agent: "filename-must-not-bind", status: "running", sessionFile: forkFile }],
+    }));
+
+    await internal.refreshExtensionActivityFromArtifact("fork-tool", asyncDir);
+    const process = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
+    expect(process).toMatchObject({ childSessionRef: fork.getSessionId() });
+    expect(slot.processChildSessionPath(process!.processId)).toEqual({
+      ref: fork.getSessionId(), producerId: artifactChildId, runId: "fork-run", path: await realpath(forkFile),
+    });
+    const admission = await fixture.registry.resolveReadOnlySubagentPath(
+      fork.getSessionId(), await realpath(forkFile), slot.id, process!.processId, "fork-run",
+    );
+    expect((await fixture.registry.readOnlySubagentTranscriptPage(
+      fork.getSessionId(), admission.path, slot.id, process!.processId, "fork-run",
+    )).total).toBeGreaterThan(0);
+  });
+
+  it("rejects wrong-parent, unbound, and extra-depth fork or fresh child paths", async () => {
+    const fixture = await coldFixture("rejected-child-shapes");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const parentFile = slot.sessionFile!;
+    const childRoot = join(dirname(parentFile), basename(parentFile, ".jsonl"));
+    const forksDirectory = join(childRoot, "forks");
+    const otherParent = SessionManager.create(fixture.cwd, dirname(parentFile), { id: "other-fork-parent" });
+    otherParent.appendMessage(fauxAssistantMessage("other parent"));
+    await mkdir(forksDirectory, { recursive: true });
+    const wrongParentFork = SessionManager.forkFrom(otherParent.getSessionFile()!, fixture.cwd, forksDirectory);
+    wrongParentFork.appendMessage(fauxAssistantMessage("wrong parent fork"));
+    const validParentFork = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
+    validParentFork.appendMessage(fauxAssistantMessage("unbound fork"));
+    const extraForkDirectory = join(forksDirectory, "extra");
+    await mkdir(extraForkDirectory, { recursive: true });
+    const extraDepthFork = SessionManager.forkFrom(parentFile, fixture.cwd, extraForkDirectory);
+    extraDepthFork.appendMessage(fauxAssistantMessage("extra fork"));
+    const extraRunDirectory = join(childRoot, "fresh-child", "run-0", "extra");
+    await mkdir(extraRunDirectory, { recursive: true });
+    const extraDepthRun = SessionManager.create(fixture.cwd, extraRunDirectory, {
+      id: "extra-depth-run", parentSession: parentFile,
+    });
+    extraDepthRun.appendMessage(fauxAssistantMessage("extra run"));
+    const extraDepthRunFile = join(extraRunDirectory, "session.jsonl");
+    await rename(extraDepthRun.getSessionFile()!, extraDepthRunFile);
+    const startedAt = new Date().toISOString();
+    const activity: ExtensionRunActivity = {
+      id: "tool", activityId: "activity", runId: "expected-run", toolCallId: "tool",
+      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      startedAt, updatedAt: startedAt,
+      children: [{ id: "artifact-child", label: "worker", status: "running" }],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
+    };
+    const attach = (slot as unknown as {
+      attachChildSessionReferences: (activity: ExtensionRunActivity, value: unknown) => ExtensionRunActivity;
+    }).attachChildSessionReferences.bind(slot);
+    const child = (sessionFile: string, producerId = "artifact-child", includeProducer = true) => attach({
+      ...activity, children: [{ id: producerId, label: "worker", status: "running" }],
+    }, {
+      runId: "expected-run",
+      results: [{ ...(includeProducer ? { runId: producerId } : {}), agent: producerId, sessionFile }],
+    }).children[0]?.childSessionRef;
+
+    expect(child(wrongParentFork.getSessionFile()!)).toBeUndefined();
+    expect(child(validParentFork.getSessionFile()!, "artifact-child", false)).toBeUndefined();
+    expect(child(extraDepthFork.getSessionFile()!)).toBeUndefined();
+    expect(child(extraDepthRunFile, "fresh-child")).toBeUndefined();
   });
 
   it("fails closed for foreign or wrong-run child-session evidence", async () => {
@@ -4653,7 +4993,7 @@ export default function (pi) {
     expect(resourceEvents).toContain("session.resourcesChanged");
   });
 
-  it("owns its catalog, infers nested subagents, and keeps ordinary forks user-visible", async () => {
+  it("classifies exact producer topology and keeps top-level parented sessions user-visible", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-session-catalog-"));
     const agentDir = join(root, "agent");
     const tronHome = join(root, "tron");
@@ -4681,8 +5021,12 @@ export default function (pi) {
     const nestedDirectory = join(parentFile.replace(/\.jsonl$/, ""), "child", "run-0");
     await mkdir(nestedDirectory, { recursive: true });
     const nestedId = randomUUID();
-    await writeSession(nestedDirectory, nestedId, "nested fresh child");
+    const generatedNestedFile = await writeSession(nestedDirectory, nestedId, "nested fresh child");
+    await rename(generatedNestedFile, join(nestedDirectory, "session.jsonl"));
 
+    const forksDirectory = join(parentFile.replace(/\.jsonl$/, ""), "forks");
+    await mkdir(forksDirectory, { recursive: true });
+    const nestedFork = SessionManager.forkFrom(parentFile, cwd, forksDirectory);
     const fork = SessionManager.forkFrom(parentFile, cwd, piSessionDirectory);
     fork.appendSessionInfo("ordinary fork");
     const directSubagent = SessionManager.forkFrom(parentFile, cwd, piSessionDirectory);
@@ -4693,37 +5037,19 @@ export default function (pi) {
       parentFile, join(root, "other-workspace"), crossProjectDirectory
     );
 
-    // A child context can be interrupted after Pi writes its inherited branch
-    // but before any task/name provenance is appended. Its last entry predates
-    // its own header and must not become a user dashboard clone.
-    const frozenId = randomUUID();
-    const frozenTimestamp = new Date(Date.now() + 1_000).toISOString();
-    const frozenFile = join(piSessionDirectory, `${frozenId}.jsonl`);
-    await writeFile(frozenFile, [
+    // Reproduce the incident shape without using text or timestamps: a
+    // top-level parented snapshot interrupted before child naming remains a
+    // user session because it does not satisfy delegated producer topology.
+    const interruptedId = randomUUID();
+    const interruptedFile = join(piSessionDirectory, `${interruptedId}.jsonl`);
+    await writeFile(interruptedFile, [
       JSON.stringify({
-        type: "session", version: 3, id: frozenId,
-        timestamp: frozenTimestamp, cwd, parentSession: parentFile,
+        type: "session", version: 3, id: interruptedId,
+        timestamp, cwd, parentSession: parentFile,
       }),
       JSON.stringify({
         type: "message", id: randomUUID().slice(0, 8), parentId: null,
         timestamp, message: { role: "user", content: "inherited", timestamp: Date.now() - 1_000 },
-      }),
-    ].join("\n") + "\n");
-    const markedForkId = randomUUID();
-    const markedForkFile = join(piSessionDirectory, `${markedForkId}.jsonl`);
-    await writeFile(markedForkFile, [
-      JSON.stringify({
-        type: "session", version: 3, id: markedForkId,
-        timestamp: frozenTimestamp, cwd, parentSession: parentFile,
-      }),
-      JSON.stringify({
-        type: "message", id: "marked-old", parentId: null,
-        timestamp, message: { role: "user", content: "inherited", timestamp: Date.now() - 1_000 },
-      }),
-      JSON.stringify({
-        type: "custom", id: "marked-provenance", parentId: "marked-old",
-        // Positive provenance wins even if the wall clock moved backwards.
-        timestamp, customType: "tron.gateway-user-fork", data: { version: 1 },
       }),
     ].join("\n") + "\n");
 
@@ -4741,11 +5067,11 @@ export default function (pi) {
     const defaultCatalog = await registry.list();
     const completeCatalog = await registry.list("all");
     expect(defaultCatalog.map((session) => session.id)).toEqual(expect.arrayContaining([
-      parentId, fork.getSessionId(), crossProjectFork.getSessionId(), markedForkId,
+      parentId, fork.getSessionId(), directSubagent.getSessionId(),
+      crossProjectFork.getSessionId(), interruptedId,
     ]));
     expect(defaultCatalog.map((session) => session.id)).not.toContain(nestedId);
-    expect(defaultCatalog.map((session) => session.id)).not.toContain(directSubagent.getSessionId());
-    expect(defaultCatalog.map((session) => session.id)).not.toContain(frozenId);
+    expect(defaultCatalog.map((session) => session.id)).not.toContain(nestedFork.getSessionId());
     expect(defaultCatalog.map((session) => session.id)).not.toContain(externalId);
     expect(completeCatalog.map((session) => session.id)).not.toContain(externalId);
     expect(completeCatalog.find((session) => session.id === parentId)).toMatchObject({ kind: "user" });
@@ -4753,27 +5079,34 @@ export default function (pi) {
     expect(completeCatalog.find((session) => session.id === crossProjectFork.getSessionId())).toMatchObject({
       kind: "user", parentSessionId: parentId,
     });
-    expect(completeCatalog.find((session) => session.id === markedForkId)).toMatchObject({
-      kind: "user", parentSessionId: parentId,
-    });
     expect(completeCatalog.find((session) => session.id === directSubagent.getSessionId())).toMatchObject({
-      kind: "subagent",
+      kind: "user",
       parentSessionId: parentId,
     });
-    expect(completeCatalog.find((session) => session.id === frozenId)).toMatchObject({
+    expect(completeCatalog.find((session) => session.id === interruptedId)).toMatchObject({
+      kind: "user",
+      parentSessionId: parentId,
+    });
+    expect(completeCatalog.find((session) => session.id === nestedFork.getSessionId())).toMatchObject({
       kind: "subagent",
       parentSessionId: parentId,
     });
     expect(completeCatalog.find((session) => session.id === nestedId)).toMatchObject({
       kind: "subagent",
-      parentSessionId: parentId,
     });
+    const acquisition = await (registry as unknown as {
+      catalogAcquisition: () => Promise<{ entriesByID: ReadonlyMap<string, { structuralSubagent: boolean; path: string }> }>;
+    }).catalogAcquisition();
+    expect(acquisition.entriesByID.get(nestedId)?.structuralSubagent).toBe(true);
+    expect(acquisition.entriesByID.get(nestedFork.getSessionId())?.structuralSubagent).toBe(true);
     await expect(registry.acquire(nestedId)).rejects.toMatchObject({ code: "conflict" });
-    await expect(registry.acquire(frozenId)).rejects.toMatchObject({ code: "conflict" });
+    await expect(registry.acquire(nestedFork.getSessionId())).rejects.toMatchObject({ code: "conflict" });
     await expect(registry.delete(nestedId)).rejects.toMatchObject({ code: "conflict" });
 
     await registry.delete(parentId);
     expect((await registry.list("all")).find((session) => session.id === nestedId)).toMatchObject({ kind: "subagent" });
+    expect((await registry.list("all")).find((session) => session.id === nestedFork.getSessionId()))
+      .toMatchObject({ kind: "subagent" });
   });
 
   it("rekeys the owning slot when a completed session is forked", async () => {
@@ -4843,14 +5176,6 @@ export default function (pi) {
       isUnread: false,
     });
     expect((await registry.acquire(fork.sessionId)).id).toBe(fork.sessionId);
-    const forkEntries = (slot as unknown as {
-      runtime: { session: { sessionManager: SessionManager } };
-    }).runtime.session.sessionManager.getEntries();
-    expect(forkEntries.at(-1)).toMatchObject({
-      type: "custom",
-      customType: "tron.gateway-user-fork",
-      data: { version: 1 },
-    });
   });
 
   it("rejects imports when live runtime capacity is full", async () => {

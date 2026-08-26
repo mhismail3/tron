@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, open, opendir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { lstat, open, opendir, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
@@ -53,7 +54,7 @@ const MAX_EXTENSION_TEMP_ENTRIES = 1_024;
 // Ambient enumeration shares these global pass bounds. Exact-owned artifact
 // reconciliation above is intentionally outside this ambient budget.
 const MAX_EXTENSION_ROOT_ENTRIES = 4_096;
-const MAX_FORK_PROVENANCE_SUFFIX_BYTES = 64 * 1_024;
+const SUBAGENT_RUN_DIRECTORY = /^run-\d+$/u;
 
 function isMissingFilesystemError(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
@@ -65,16 +66,9 @@ function assertProcessSessionRef(value: string): void {
   }
 }
 
-function subagentNameBindsProducer(name: string, producerId: string): boolean {
-  const escaped = producerId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  return new RegExp(`-${escaped}(?:-\\d+)?$`, "u").test(name);
-}
-
 function branchFromParsedSession(entries: FileEntry[]): {
   sessionId: string;
   parentSession?: string;
-  structuralSubagent: boolean;
-  subagentName?: string;
   branch: SessionEntry[];
   leafEntryId?: string;
 } | undefined {
@@ -92,18 +86,9 @@ function branchFromParsedSession(entries: FileEntry[]): {
     cursor = cursor.parentId === null ? undefined : byID.get(cursor.parentId);
     if (reversed[reversed.length - 1]!.parentId !== null && cursor === undefined) return undefined;
   }
-  let subagentName: string | undefined;
-  for (const entry of sessionEntries) {
-    if (entry.type === "session_info" && entry.name?.startsWith("subagent-")) {
-      subagentName = entry.name;
-      break;
-    }
-  }
   return {
     sessionId: header.id,
     ...(header.parentSession ? { parentSession: header.parentSession } : {}),
-    structuralSubagent: subagentName !== undefined,
-    ...(subagentName ? { subagentName } : {}),
     branch: reversed.reverse(),
     ...(leaf ? { leafEntryId: leaf.id } : {}),
   };
@@ -143,21 +128,24 @@ const DEFAULT_CATALOG_DISCOVERY_LIMITS = {
   maximumAcquisitionBytes: 4 * 1_024 * 1_024,
   maximumHeaderBytes: 64 * 1_024 * 1_024,
   maximumHeaderBytesPerFile: 64 * 1_024,
-  maximumForkProvenanceBytes: 64 * 1_024 * 1_024,
   normalizationConcurrency: 16,
 };
 
 type SessionInfo = Awaited<ReturnType<typeof SessionManager.listAll>>[number];
 type CatalogSessionInfo = Omit<SessionInfo, "allMessagesText"> & {
-  frozenForkSnapshot?: boolean;
+  fileIdentity?: string;
 };
 
 interface CatalogHeaderIdentity {
   id: string;
   cwd: string;
-  timestamp?: string;
+  fileIdentity: string;
   parentSessionPath?: string;
-  frozenForkSnapshot?: boolean;
+}
+
+interface DelegatedSessionTopology {
+  parentSessionId?: string;
+  contradictoryHeader: boolean;
 }
 
 interface CatalogStructureEvidence {
@@ -678,10 +666,6 @@ export class RuntimeRegistry {
       limits.maximumHeaderBytesPerFile,
       Math.floor(limits.maximumHeaderBytes / Math.max(1, paths.length)),
     );
-    const perCandidateProvenanceBytes = Math.min(
-      MAX_FORK_PROVENANCE_SUFFIX_BYTES,
-      Math.floor(limits.maximumForkProvenanceBytes / Math.max(1, paths.length)),
-    );
     let retainedIdentityBytes = 0;
     const reserveHeaderBytes = (count: number): boolean => {
       if (count > remainingHeaderBytes) return false;
@@ -702,16 +686,9 @@ export class RuntimeRegistry {
             refundHeaderBytes,
           )).identity;
           if (!identity) return undefined;
-          return {
-            ...identity,
-            ...(await this.isFrozenForkSnapshot(
-              path,
-              identity.timestamp,
-              identity.parentSessionPath,
-              (count) => count <= perCandidateProvenanceBytes,
-              () => {},
-            ) ? { frozenForkSnapshot: true } : {}),
-          };
+          return identity.parentSessionPath
+            ? { ...identity, parentSessionPath: await this.canonicalSessionPath(identity.parentSessionPath) }
+            : identity;
         } catch {
           return undefined;
         }
@@ -728,8 +705,8 @@ export class RuntimeRegistry {
         digest.update(path).update("\0")
           .update(identity?.id ?? "").update("\0")
           .update(identity?.cwd ?? "").update("\0")
-          .update(identity?.parentSessionPath ?? "").update("\0")
-          .update(identity?.frozenForkSnapshot ? "frozen" : "active").update("\n");
+          .update(identity?.fileIdentity ?? "").update("\0")
+          .update(identity?.parentSessionPath ?? "").update("\n");
         if (identity) identitiesByPath.set(path, identity);
       }
     }
@@ -754,19 +731,32 @@ export class RuntimeRegistry {
       refundBytes(firstReadLength);
       throw error;
     }
+    let opened: Awaited<ReturnType<typeof handle.stat>>;
+    try { opened = await handle.stat(); }
+    catch (error) {
+      refundBytes(firstReadLength);
+      await handle.close().catch(() => {});
+      throw error;
+    }
+    if (!opened.isFile()) {
+      refundBytes(firstReadLength);
+      await handle.close();
+      return {};
+    }
+    const fileIdentity = `${opened.dev}:${opened.ino}`;
     const buffer = Buffer.allocUnsafe(maximumBytes);
-    const parseCandidate = (line: Buffer): CatalogHeaderIdentity | null | undefined => {
+    const parseHeader = (line: Buffer): CatalogHeaderIdentity | undefined => {
       if (line.length === 0 || !line.toString("utf8").trim()) return undefined;
       let value: unknown;
       try { value = JSON.parse(line.toString("utf8")); }
       catch { return undefined; }
       if (!value || typeof value !== "object") return undefined;
       const record = value as Record<string, unknown>;
-      if (record.type !== "session" || typeof record.id !== "string") return null;
+      if (record.type !== "session" || typeof record.id !== "string") return undefined;
       return {
         id: record.id,
         cwd: typeof record.cwd === "string" ? record.cwd : "",
-        ...(typeof record.timestamp === "string" ? { timestamp: record.timestamp } : {}),
+        fileIdentity,
         ...(typeof record.parentSession === "string"
           ? { parentSessionPath: record.parentSession }
           : {}),
@@ -787,18 +777,15 @@ export class RuntimeRegistry {
         }
         refundBytes(readLength - bytesRead);
         if (bytesRead === 0) {
-          const identity = parseCandidate(buffer.subarray(lineStart, bytesReadTotal));
+          if (lineStart >= bytesReadTotal) return {};
+          const identity = parseHeader(buffer.subarray(lineStart, bytesReadTotal));
           return identity ? { identity } : {};
         }
-        const previousEnd = bytesReadTotal;
         bytesReadTotal += bytesRead;
-        let newline = buffer.indexOf(0x0a, Math.max(lineStart, previousEnd));
-        while (newline >= 0 && newline < bytesReadTotal) {
-          const identity = parseCandidate(buffer.subarray(lineStart, newline));
-          if (identity === null) return {};
-          if (identity) return { identity };
-          lineStart = newline + 1;
-          newline = buffer.indexOf(0x0a, lineStart);
+        const newline = buffer.indexOf(0x0a, lineStart);
+        if (newline >= 0 && newline < bytesReadTotal) {
+          const identity = parseHeader(buffer.subarray(lineStart, newline));
+          return identity ? { identity } : {};
         }
       }
       return {};
@@ -862,10 +849,6 @@ export class RuntimeRegistry {
     }
 
     const normalized = new Array<CatalogSessionInfo>(sessions.length);
-    const perSessionProvenanceBytes = Math.min(
-      MAX_FORK_PROVENANCE_SUFFIX_BYTES,
-      Math.floor(limits.maximumForkProvenanceBytes / Math.max(1, sessions.length)),
-    );
     let nextIndex = 0;
     const normalize = async () => {
       while (true) {
@@ -880,13 +863,6 @@ export class RuntimeRegistry {
           ...(session.parentSessionPath
             ? { parentSessionPath: await this.canonicalSessionPath(session.parentSessionPath) }
             : {}),
-          ...(await this.isFrozenForkSnapshot(
-            path,
-            session.created.toISOString(),
-            session.parentSessionPath,
-            (count) => count <= perSessionProvenanceBytes,
-            () => {},
-          ) ? { frozenForkSnapshot: true } : {}),
         };
       }
     };
@@ -899,72 +875,18 @@ export class RuntimeRegistry {
     return [...new Map(normalized.map((session) => [resolve(session.path), session])).values()];
   }
 
-  private canonicalSessionPath(path: string): Promise<string> {
-    return realpath(path).catch(() => resolve(path));
-  }
-
-  /** A same-directory fork is user-visible only after it owns some entry at or
-   * after its own header timestamp. Read one bounded suffix and fail open on
-   * partial, oversized, or malformed evidence so uncertainty never hides data. */
-  private async isFrozenForkSnapshot(
-    path: string,
-    headerTimestamp: string | undefined,
-    parentSessionPath: string | undefined,
-    reserveBytes: (count: number) => boolean,
-    refundBytes: (count: number) => void,
-  ): Promise<boolean> {
-    if (!parentSessionPath || !headerTimestamp) return false;
-    const headerTime = Date.parse(headerTimestamp);
-    if (!Number.isFinite(headerTime)) return false;
-    let handle: Awaited<ReturnType<typeof open>> | undefined;
-    try {
-      // Only same-directory frozen branches are extension-clone evidence.
-      // Cross-project and otherwise nonlocal forks remain ordinary user data.
-      const [childPath, childDirectory, parentDirectory] = await Promise.all([
-        realpath(path),
-        realpath(dirname(path)),
-        realpath(dirname(parentSessionPath)),
-      ]);
-      if (childDirectory !== parentDirectory) return false;
-
-      handle = await open(childPath, "r");
-      const before = await handle.stat();
-      const length = Math.min(before.size, MAX_FORK_PROVENANCE_SUFFIX_BYTES);
-      if (length <= 0 || !reserveBytes(length)) return false;
-      const start = before.size - length;
-      const buffer = Buffer.allocUnsafe(length);
-      const { bytesRead } = await handle.read(buffer, 0, length, start);
-      if (bytesRead !== length) {
-        refundBytes(length - bytesRead);
-        return false;
+  private async canonicalSessionPath(path: string): Promise<string> {
+    try { return await realpath(path); }
+    catch {
+      const resolvedPath = resolve(path);
+      const configuredRoot = resolve(this.catalogDirectory());
+      const fromCatalog = relative(configuredRoot, resolvedPath);
+      if (fromCatalog !== "" && fromCatalog !== ".." && !fromCatalog.startsWith(`..${sep}`)
+        && !isAbsolute(fromCatalog)) {
+        const canonicalRoot = await realpath(configuredRoot).catch(() => configuredRoot);
+        return join(canonicalRoot, fromCatalog);
       }
-      const after = await handle.stat();
-      if (after.size !== before.size) return false;
-      let text = buffer.toString("utf8");
-      if (start > 0) {
-        const newline = text.indexOf("\n");
-        if (newline < 0) return false;
-        text = text.slice(newline + 1);
-      }
-      const lines = text.split("\n").filter((line) => line.trim().length > 0);
-      const last = lines.at(-1);
-      if (!last) return false;
-      let value: unknown;
-      try { value = JSON.parse(last); } catch { return false; }
-      if (!value || typeof value !== "object") return false;
-      const record = value as Record<string, unknown>;
-      if (record.type === "custom" && record.customType === "tron.gateway-user-fork") {
-        return false;
-      }
-      if (record.type === "session" || typeof record.timestamp !== "string") return false;
-      const entryTime = Date.parse(record.timestamp);
-      return Number.isFinite(entryTime) && entryTime < headerTime;
-    } catch {
-      return false;
-    } finally {
-      // Reserved bytes represent actual bounded I/O and deliberately stay
-      // charged. Only unread bytes above were refunded.
-      await handle?.close().catch(() => {});
+      return resolvedPath;
     }
   }
 
@@ -986,6 +908,7 @@ export class RuntimeRegistry {
           ? materialized.sessions
           : materialized.sessions.filter((session) => session.kind === "user"),
         listRevision: materialized.listRevision,
+        structureDigest: materialized.structureDigest,
       };
     });
   }
@@ -994,6 +917,7 @@ export class RuntimeRegistry {
     infos: CatalogSessionInfo[];
     sessions: SessionSummary[];
     listRevision: number;
+    structureDigest: string;
   }> {
     const cached = await this.validatedStructuralIndex();
     if (cached) {
@@ -1004,6 +928,7 @@ export class RuntimeRegistry {
         infos: [...infos],
         sessions: await this.projectSessions(infos, "all", ambiguousIDs),
         listRevision: this.revision,
+        structureDigest: cached.structureDigest,
       };
     }
 
@@ -1053,6 +978,7 @@ export class RuntimeRegistry {
       infos: [...infos],
       sessions: await this.projectSessions(infos, "all", ambiguousIDs),
       listRevision: this.revision,
+      structureDigest: materialized.after.digest,
     };
   }
 
@@ -1067,9 +993,10 @@ export class RuntimeRegistry {
     const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
     const structuralGeneration = this.catalogStructuralGeneration;
     const before = await this.catalogStructureEvidence();
-    const allInfos = await this.sessionInfos();
-    const ambiguousDiskIDs = this.diskAmbiguousSessionIDs(allInfos);
+    const discoveredInfos = await this.sessionInfos();
     const after = await this.catalogStructureEvidence();
+    const allInfos = this.withCatalogEvidence(discoveredInfos, after);
+    const ambiguousDiskIDs = this.diskAmbiguousSessionIDs(allInfos);
     return {
       allInfos,
       ambiguousDiskIDs,
@@ -1083,6 +1010,7 @@ export class RuntimeRegistry {
   }
 
   private catalogIdentityFingerprint(infos: readonly CatalogSessionInfo[]): string {
+    const delegated = this.delegatedSessionTopologies(infos);
     return JSON.stringify(infos
       // Structural membership and classification own listRevision. Mutable
       // row fields are delivered through revisioned session.summary events.
@@ -1091,8 +1019,8 @@ export class RuntimeRegistry {
         session.path,
         session.parentSessionPath,
         session.cwd,
-        session.name,
-        session.frozenForkSnapshot === true,
+        session.fileIdentity,
+        delegated.has(resolve(session.path)),
       ])
       .sort((left, right) => {
         const byId = String(left[0]).localeCompare(String(right[0]));
@@ -1110,29 +1038,73 @@ export class RuntimeRegistry {
     this.ambiguousSessionIds = ambiguousIDs;
   }
 
-  private nestedOwners(
-    sessions: ReadonlyArray<{ id: string; path: string }>,
-  ): ReadonlyMap<string, string> {
-    const roots = new Map(sessions.map((session) => [
-      resolve(session.path).replace(/\.jsonl$/i, ""),
-      session.id,
-    ]));
-    const owners = new Map<string, string>();
+  private withCatalogEvidence(
+    sessions: readonly CatalogSessionInfo[],
+    evidence: CatalogStructureEvidence,
+  ): CatalogSessionInfo[] {
+    return sessions.map((session) => {
+      const identity = evidence.identitiesByPath.get(resolve(session.path));
+      if (identity?.id !== session.id) return session;
+      return { ...session, fileIdentity: identity.fileIdentity };
+    });
+  }
+
+  private delegatedTopologyParentPath(sessionPath: string, catalogRoot: string): string | undefined {
+    const resolvedPath = resolve(sessionPath);
+    const fromCatalog = relative(catalogRoot, resolvedPath);
+    if (fromCatalog === "" || fromCatalog === ".." || fromCatalog.startsWith(`..${sep}`)
+      || isAbsolute(fromCatalog) || !resolvedPath.endsWith(".jsonl")) return undefined;
+
+    const containingDirectory = dirname(resolvedPath);
+    let expectedParent: string | undefined;
+    if (basename(containingDirectory) === "forks" && basename(resolvedPath) !== ".jsonl") {
+      expectedParent = resolve(`${dirname(containingDirectory)}.jsonl`);
+    } else if (basename(resolvedPath) === "session.jsonl"
+      && SUBAGENT_RUN_DIRECTORY.test(basename(containingDirectory))) {
+      const producerDirectory = dirname(containingDirectory);
+      const producer = basename(producerDirectory);
+      if (producer && producer !== "forks") expectedParent = resolve(`${dirname(producerDirectory)}.jsonl`);
+    }
+    if (!expectedParent) return undefined;
+    const parentFromCatalog = relative(catalogRoot, expectedParent);
+    return parentFromCatalog !== "" && parentFromCatalog !== ".."
+      && !parentFromCatalog.startsWith(`..${sep}`) && !isAbsolute(parentFromCatalog)
+      ? expectedParent : undefined;
+  }
+
+  /** The only delegated-session catalog contract. pi-subagents reserves
+   * <parent-stem>/forks/<fork-session>.jsonl and
+   * <parent-stem>/<producer>/run-N/session.jsonl beneath the canonical catalog.
+   * The topology remains mutation-protected without an extant or unambiguous
+   * parent. An optional matching header binds the projected parent identity;
+   * a contradictory header fails closed and is omitted from catalog rows. */
+  private delegatedSessionTopologies(
+    sessions: ReadonlyArray<{
+      id: string;
+      path: string;
+      parentSessionPath?: string;
+    }>,
+  ): ReadonlyMap<string, DelegatedSessionTopology> {
+    const sessionsByPath = new Map(sessions.map((session) => [resolve(session.path), session]));
+    const delegated = new Map<string, DelegatedSessionTopology>();
+    let catalogRoot: string;
+    try { catalogRoot = realpathSync(this.catalogDirectory()); }
+    catch { catalogRoot = resolve(this.catalogDirectory()); }
     for (const session of sessions) {
       const sessionPath = resolve(session.path);
-      let ancestor = dirname(sessionPath);
-      while (true) {
-        const owner = roots.get(ancestor);
-        if (owner !== undefined && owner !== session.id) {
-          owners.set(sessionPath, owner);
-          break;
-        }
-        const parent = dirname(ancestor);
-        if (parent === ancestor) break;
-        ancestor = parent;
-      }
+      const expectedParentPath = this.delegatedTopologyParentPath(sessionPath, catalogRoot);
+      if (!expectedParentPath) continue;
+      const contradictoryHeader = session.parentSessionPath !== undefined
+        && resolve(session.parentSessionPath) !== expectedParentPath;
+      const parent = !contradictoryHeader && session.parentSessionPath !== undefined
+        ? sessionsByPath.get(expectedParentPath)
+        : undefined;
+      delegated.set(sessionPath, {
+        contradictoryHeader,
+        ...(parent ? { parentSessionId: parent.id } : {}),
+      });
     }
-    return owners;
+    return delegated;
   }
 
   private async buildCatalogAcquisitionFromSessions(
@@ -1140,9 +1112,7 @@ export class RuntimeRegistry {
       id: string;
       path: string;
       cwd: string;
-      name?: string;
       parentSessionPath?: string;
-      frozenForkSnapshot?: boolean;
     }>,
     ambiguousIDs: ReadonlySet<string>,
     structureDigest: string,
@@ -1162,31 +1132,24 @@ export class RuntimeRegistry {
     if (unambiguousSessions.length + resolvedAmbiguousIDs.size > limits.maximumSessions) {
       this.catalogCapacityExceeded();
     }
-    const nestedOwners = this.nestedOwners(unambiguousSessions);
+    const delegated = this.delegatedSessionTopologies(unambiguousSessions);
     const sessionIDByPath = new Map(unambiguousSessions.map((session) => [resolve(session.path), session.id]));
-    const configuredDirectory = this.configuredSessionDirectory();
-    const catalogDirectory = await realpath(this.catalogDirectory()).catch(() => resolve(this.catalogDirectory()));
-    const userDirectoryDepth = configuredDirectory ? 0 : 1;
     const entriesByID = new Map<string, CatalogAcquisitionEntry>();
     let retainedBytes = 0;
     for (const session of unambiguousSessions) {
       const sessionPath = resolve(session.path);
-      const directoryFromCatalog = relative(catalogDirectory, dirname(sessionPath));
-      const directoryDepth = directoryFromCatalog === "" ? 0 : directoryFromCatalog.split(sep).length;
+      const topology = delegated.get(sessionPath);
+      const headerParentSessionId = session.parentSessionPath
+        ? sessionIDByPath.get(resolve(session.parentSessionPath))
+        : undefined;
+      const parentSessionId = topology?.parentSessionId ?? headerParentSessionId;
       const entry: CatalogAcquisitionEntry = {
         id: session.id,
         path: sessionPath,
         cwd: session.cwd,
         canonicalCwd: resolve(session.cwd || process.cwd()),
-        structuralSubagent: nestedOwners.has(sessionPath)
-          || session.name?.startsWith("subagent-") === true
-          || session.frozenForkSnapshot === true
-          || directoryDepth > userDirectoryDepth,
-        ...(nestedOwners.get(sessionPath)
-          ?? (session.parentSessionPath ? sessionIDByPath.get(resolve(session.parentSessionPath)) : undefined)
-          ? { parentSessionId: nestedOwners.get(sessionPath)
-            ?? sessionIDByPath.get(resolve(session.parentSessionPath!))! }
-          : {}),
+        structuralSubagent: topology !== undefined,
+        ...(parentSessionId ? { parentSessionId } : {}),
       };
       retainedBytes += Buffer.byteLength(JSON.stringify(entry));
       if (retainedBytes > limits.maximumAcquisitionBytes) this.catalogCapacityExceeded();
@@ -1297,13 +1260,14 @@ export class RuntimeRegistry {
   }
 
   private sdkCatalogIdentityFingerprint(infos: readonly CatalogSessionInfo[]): string {
+    const delegated = this.delegatedSessionTopologies(infos);
     const records = infos.map((session) => JSON.stringify([
       resolve(session.path),
       session.id,
       session.cwd,
+      session.fileIdentity ?? "",
       session.parentSessionPath ? resolve(session.parentSessionPath) : "",
-      session.name ?? "",
-      session.frozenForkSnapshot === true,
+      delegated.has(resolve(session.path)),
     ])).sort();
     const digest = createHash("sha256");
     for (const record of records) digest.update(record).update("\n");
@@ -1314,9 +1278,11 @@ export class RuntimeRegistry {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
       const before = await this.catalogStructureEvidence();
-      const firstInfos = await this.sessionInfos();
+      const firstInfos = this.withCatalogEvidence(await this.sessionInfos(), before);
       const firstFingerprint = this.sdkCatalogIdentityFingerprint(firstInfos);
-      const allInfos = await this.sessionInfos();
+      const discoveredInfos = await this.sessionInfos();
+      const after = await this.catalogStructureEvidence();
+      const allInfos = this.withCatalogEvidence(discoveredInfos, after);
       const identityFingerprint = this.sdkCatalogIdentityFingerprint(allInfos);
       if (firstFingerprint !== identityFingerprint) continue;
       const counts = new Map<string, number>();
@@ -1329,7 +1295,6 @@ export class RuntimeRegistry {
         ambiguousIDs,
         before.digest,
       );
-      const after = await this.catalogStructureEvidence();
       if (invalidationGeneration === this.catalogAcquisitionInvalidationGeneration
         && before.digest === after.digest) {
         return {
@@ -1348,28 +1313,17 @@ export class RuntimeRegistry {
     ambiguousIDs: ReadonlySet<string> = new Set(),
   ): Promise<SessionSummary[]> {
     const pathToId = new Map(sessions.map((session) => [resolve(session.path), session.id]));
-    const configuredDirectory = this.configuredSessionDirectory();
-    const catalogDirectory = await realpath(this.catalogDirectory()).catch(() => resolve(this.catalogDirectory()));
-    const userDirectoryDepth = configuredDirectory ? 0 : 1;
-    const nestedOwners = this.nestedOwners(sessions);
+    const delegated = this.delegatedSessionTopologies(sessions);
 
     const persistedIDs = new Set(sessions.map((session) => session.id));
     const persisted = sessions.flatMap((session) => {
       const sessionPath = resolve(session.path);
-      const nestedOwnerId = nestedOwners.get(sessionPath);
-      // Pi's default catalog groups user sessions one directory per cwd; an
-      // explicit sessionDir stores them directly. Anything deeper is extension-
-      // owned child state, even if its parent file was later removed.
-      const directoryFromCatalog = relative(catalogDirectory, dirname(sessionPath));
-      const directoryDepth = directoryFromCatalog === "" ? 0 : directoryFromCatalog.split(sep).length;
-      const namedSubagent = session.name?.startsWith("subagent-") === true;
-      const kind: SessionSummary["kind"] = nestedOwnerId
-        || namedSubagent
-        || session.frozenForkSnapshot === true
-        || directoryDepth > userDirectoryDepth ? "subagent" : "user";
+      const topology = delegated.get(sessionPath);
+      if (topology?.contradictoryHeader) return [];
+      const kind: SessionSummary["kind"] = topology ? "subagent" : "user";
       if (scope === "user" && kind === "subagent") return [];
       const headerParentSessionId = session.parentSessionPath ? pathToId.get(resolve(session.parentSessionPath)) : undefined;
-      const parentSessionId = nestedOwnerId ?? headerParentSessionId;
+      const parentSessionId = topology?.parentSessionId ?? headerParentSessionId;
       const slot = this.slots.get(session.id);
       const latest = this.latestSummaries.get(session.id);
       const name = latest?.name ?? session.name;
@@ -1567,7 +1521,7 @@ export class RuntimeRegistry {
       // allow replace/read/swap-back to project a different inode while the
       // final path metadata appeared unchanged.
       const parsed = await readOpenedSession(handle, metadata.size);
-      if (!parsed || parsed.sessionId !== childSessionRef || !parsed.structuralSubagent) {
+      if (!parsed || parsed.sessionId !== childSessionRef) {
         throw new GatewayError("conflict", "Subagent session identity changed", true);
       }
       let page: TranscriptPage;
@@ -1636,8 +1590,13 @@ export class RuntimeRegistry {
     const ownedRelative = relative(childRoot, canonical);
     const parts = ownedRelative.split(sep);
     if (ownedRelative === "" || ownedRelative === ".." || ownedRelative.startsWith(`..${sep}`)
-      || isAbsolute(ownedRelative) || parts[0] !== expectedProducerId || parts.length < 3) return undefined;
-    const pathProducerId = parts[0];
+      || isAbsolute(ownedRelative)) return undefined;
+    const forkContext = parts.length === 2 && parts[0] === "forks"
+      && parts[1] !== ".jsonl" && parts[1]!.endsWith(".jsonl");
+    const freshContext = parts.length === 3 && parts[0] !== "forks"
+      && parts[0] === expectedProducerId && SUBAGENT_RUN_DIRECTORY.test(parts[1]!)
+      && parts[2] === "session.jsonl";
+    if (!forkContext && !freshContext) return undefined;
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
       handle = await open(canonical, "r");
@@ -1649,12 +1608,11 @@ export class RuntimeRegistry {
         if (read.bytesRead !== 1 || final[0] !== 0x0a) return undefined;
       }
       const parsed = await readOpenedSession(handle, opened.size);
-      if (!parsed?.structuralSubagent || parsed.sessionId !== childSessionRef) return undefined;
+      if (!parsed || parsed.sessionId !== childSessionRef) return undefined;
       if (parsed.parentSession) {
         const headerParent = await realpath(parsed.parentSession).catch(() => undefined);
         if (headerParent !== parentCanonical) return undefined;
-      } else if (!pathProducerId || !parsed.subagentName
-        || !subagentNameBindsProducer(parsed.subagentName, pathProducerId)) {
+      } else if (forkContext) {
         return undefined;
       }
       const after = await lstat(canonical);
@@ -1770,9 +1728,6 @@ export class RuntimeRegistry {
         || resolve(manager.getCwd()) !== entry.canonicalCwd) {
         throw new GatewayError("conflict", "Tron session identity changed after catalog discovery", true);
       }
-      if (manager.getSessionName()?.startsWith("subagent-") === true) {
-        throw new GatewayError("conflict", "Subagent sessions are informational and remain owned by their originating runtime");
-      }
       if (acquisition.indexedStructuralGeneration !== undefined) {
         const indexed = this.catalogStructuralIndex;
         const validated = await this.catalogStructureEvidence();
@@ -1789,7 +1744,8 @@ export class RuntimeRegistry {
           || invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration) {
           throw new GatewayError("busy", "Session catalog changed while opening the session", true);
         }
-        const finalInfos = await this.sessionInfos();
+        const finalEvidence = await this.catalogStructureEvidence();
+        const finalInfos = this.withCatalogEvidence(await this.sessionInfos(), finalEvidence);
         if (invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration
           || this.sdkCatalogIdentityFingerprint(finalInfos) !== acquisition.fallbackIdentityFingerprint) {
           throw new GatewayError("busy", "Session catalog changed while opening the session", true);
@@ -1971,7 +1927,12 @@ export class RuntimeRegistry {
           // Canonical deletion commits before projection cleanup. If cleanup fails,
           // restart reconciliation prunes the now-unowned record; it can never
           // resurrect catalog membership or publish a summary.
-          await rm(info.path, { force: true });
+          await this.removeCanonicalCatalogFile(
+            info.path,
+            sessionId,
+            info.fileIdentity,
+            catalog.structureDigest,
+          );
           if (!(await this.removeIndexedCatalogFile(info.path))) this.invalidateCatalogAcquisition();
         } else {
           this.invalidateCatalogAdmission();
@@ -1991,6 +1952,65 @@ export class RuntimeRegistry {
         }
         this.deletingSessionIds.delete(sessionId);
       });
+    }
+  }
+
+  private async removeCanonicalCatalogFile(
+    path: string,
+    expectedSessionId: string,
+    expectedFileIdentity: string | undefined,
+    admittedStructureDigest: string,
+  ): Promise<void> {
+    if (!expectedFileIdentity) {
+      throw new GatewayError("busy", "Session file identity is unavailable for deletion", true);
+    }
+
+    // Deletion is the only catalog mutation committed from a prior row
+    // admission. Rebuild the bounded structural classification at the commit
+    // boundary so a newly created parent, duplicate ID, or topology change
+    // cannot make a stale user admission destructive.
+    const evidence = await this.catalogStructureEvidence();
+    if (!evidence.complete || evidence.digest !== admittedStructureDigest) {
+      throw new GatewayError("busy", "Session catalog changed before deletion", true);
+    }
+    const acquisition = await this.buildCatalogAcquisition(evidence);
+    const entry = acquisition.entriesByID.get(expectedSessionId);
+    if (acquisition.ambiguousIDs.has(expectedSessionId)
+      || !entry || entry.structuralSubagent || entry.path !== resolve(path)) {
+      throw new GatewayError("conflict", "Session catalog identity changed before deletion", true);
+    }
+
+    let current: Awaited<ReturnType<typeof lstat>>;
+    try { current = await lstat(path); }
+    catch { throw new GatewayError("not_found", "Tron session was removed before it could be deleted"); }
+    if (!current.isFile() || current.isSymbolicLink()
+      || `${current.dev}:${current.ino}` !== expectedFileIdentity) {
+      throw new GatewayError("conflict", "Tron session file was replaced before deletion", true);
+    }
+
+    const quarantine = `${path}.tron-delete-${randomUUID()}`;
+    await rename(path, quarantine).catch(() => {
+      throw new GatewayError("busy", "Tron session changed while deletion was committing", true);
+    });
+    let committed = false;
+    try {
+      const moved = await lstat(quarantine);
+      if (!moved.isFile() || moved.isSymbolicLink()
+        || `${moved.dev}:${moved.ino}` !== expectedFileIdentity) {
+        throw new GatewayError("conflict", "Tron session file was replaced before deletion", true);
+      }
+      const header = await this.readCatalogHeader(quarantine, 64 * 1_024, () => true, () => {});
+      if (header.identity?.id !== expectedSessionId
+        || header.identity.fileIdentity !== expectedFileIdentity) {
+        throw new GatewayError("conflict", "Tron session identity changed before deletion", true);
+      }
+      await rm(quarantine);
+      committed = true;
+    } finally {
+      if (!committed) {
+        const originalExists = await lstat(path).then(() => true).catch(() => false);
+        if (!originalExists) await rename(quarantine, path).catch(() => {});
+      }
     }
   }
 

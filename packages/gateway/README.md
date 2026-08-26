@@ -442,14 +442,21 @@ identities, more than 256 packages/updates, more than 1,000 resources of any kin
 8 KiB, or encoded responses above 768 KiB before generic JSON projection can truncate them. The bounded JSON projector tracks only the active recursion path, so shared Pi metadata objects are expanded for each sibling resource while true cycles remain marked and bounded. Pi's configured `sessionDir`, or its
 canonical per-workspace directories under `agentDir/sessions`, remain authoritative; Tron does
 not move or mirror those files. `session.list` defaults to user sessions, while `scope: "all"`
-additively includes extension-owned children classified from nested canonical storage, durable
-`subagent-*` session metadata, or bounded proof that a same-directory parented JSONL contains only
-entries predating its own fork header (an interrupted frozen child snapshot). This proof is admitted
-only when parent and child resolve in the same canonical directory; cross-project forks remain user
-sessions. Gateway-created user forks synchronously append a tiny canonical provenance entry that
-wins independently of wall-clock order; legacy forks with any post-header entry remain user sessions.
-Suffix inspection has a deterministic pass-wide catalog byte budget, revalidates file size after reading, and
-fails open as user on exhausted, changing, malformed, or oversized evidence. If more than
+additively includes delegated children through one positive pi-subagents topology contract. The
+only delegated identities are canonical JSONL files at exactly
+`<canonical-parent-stem>/forks/<fork-session>.jsonl` or
+`<canonical-parent-stem>/<producer>/run-N/session.jsonl` inside the canonical catalog. Extra path
+components and alternate basenames are not delegated topology. This reservation is authoritative even when the parent file was deleted or its embedded ID
+is ambiguous. An optional header may bind `parentSessionId` only when it names the exact parent path
+derived from topology. A contradictory header remains mutation-protected but fails closed and is
+omitted rather than becoming a user row. The same classifier owns list, acquisition/open, and delete
+decisions. Ordinary top-level forks—including parented, unnamed snapshots and names beginning with
+`subagent-`—remain user sessions, as do arbitrary deep files outside the two reserved producer shapes.
+No session name/title, `session_info`, transcript text, timestamp ordering, generic directory depth,
+or transcript-tail read participates in classification or structural evidence. Existing top-level
+files created by older subagent producers have no runtime compatibility inference and require
+explicit pre-deployment disposition. They are not silently migrated or deleted. The Gateway does not
+rename, delete, or otherwise mutate `~/.pi` as part of that disposition. If more than
 one canonical file claims the same embedded session ID, the Gateway omits every ambiguous copy
 and rejects open/delete by that ID until the duplicate is repaired; traversal order never chooses
 canonical ownership. A newly created session has no canonical Pi JSONL until Pi records its first
@@ -466,7 +473,7 @@ transcript-wide picker search text. The first complete structural read after sta
 
 `RuntimeRegistry` separately retains only a bounded acquisition admission: canonical header ID/path/cwd, structural user-versus-subagent classification, the atomic ambiguous-ID set, and a fixed-size digest. It never retains transcript text or a second canonical catalog. The normal cold-acquire path uses an independent mutex and builds or validates this admission from canonical JSONL membership, canonicalized paths, and bounded header ID/cwd/parent evidence, without waiting for transcript-wide catalog materialization. A warmed structural index supplies the same admission without another SDK scan; exact header evidence and the selected manager's ID/cwd are still revalidated before runtime resources load. Ordinary message/tool appends do not change the digest. Additions, removals, aliases, duplicate identities, or same-path header identity replacement do. A malformed unrelated JSONL header does not globally block valid sessions: incomplete lightweight evidence falls back, without holding the acquisition mutex, to two matching SDK-derived fingerprints over the full normalized canonical identity set. That one-off result is not cached and its exact SDK identity fingerprint is validated again immediately before runtime creation. Directories named `*.jsonl` are not file candidates.
 
-The exact opened manager must still reproduce the admitted ID and canonical cwd, and its current name is checked for the durable `subagent-*` classification. Normal complete-header acquisition runs a second bounded structure/header comparison after manager open and before runtime resources load; fallback acquisition instead repeats its full SDK-derived identity validation. Changes reject retryably, while the unavoidable cross-process race after that final validation point is not presented as eliminated. Header validation starts with 512-byte reads, runs in deterministic batches of at most 16 files, permits at most 64 KiB per candidate with a strict shared 64 MiB aggregate budget apportioned across the candidate set, and inserts at most 25,000 identities/4 MiB into transient or reusable evidence. Gateway-owned mutations are generation-checked before and after every lightweight build and again immediately before a full catalog identity is published. An unstable lightweight scan or full list retries once and then fails retryably without publishing stale evidence. Hot slots not marked ambiguous by the latest full catalog bypass global header validation; known ambiguous IDs continue validating until duplicate repair is observed. Same-session cold opens share one startup, while distinct session starts reserve capacity atomically and perform manager/runtime initialization outside the registry-global publication mutex. Creation uses the same short reservation boundary, so one slow project resource loader cannot serialize unrelated starts. Administrative drain and shutdown wait for already-admitted starts before snapshotting runtime ownership. Thus idle resume normally avoids a transcript-wide catalog parse while JSONL and the pinned manager remain canonical. Privacy-safe stage and RPC-completion records report only method/stage, outcome, and duration; they never log IDs, paths, prompts, or parameters.
+The exact opened manager must still reproduce the admitted ID and canonical cwd. Normal complete-header acquisition runs a second bounded structure/header comparison after manager open and before runtime resources load; fallback acquisition instead repeats its full SDK-derived identity validation. Changes reject retryably, while the unavoidable cross-process race after that final validation point is not presented as eliminated. Header validation starts with 512-byte reads, runs in deterministic batches of at most 16 files, permits at most 64 KiB per candidate with a strict shared 64 MiB aggregate budget apportioned across the candidate set, and inserts at most 25,000 identities/4 MiB into transient or reusable evidence. Validation reads only the canonical session header; later `session_info` and transcript appends do not change the structural digest. Gateway-owned mutations are generation-checked before and after every lightweight build and again immediately before a full catalog identity is published. Delete additionally revalidates the admitted structural digest and user classification immediately before inode-safe quarantine, so a new parent file, duplicate ID, or topology change cannot commit stale deletion. An unstable lightweight scan or full list retries once and then fails retryably without publishing stale evidence. Hot slots not marked ambiguous by the latest full catalog bypass global header validation; known ambiguous IDs continue validating until duplicate repair is observed. Same-session cold opens share one startup, while distinct session starts reserve capacity atomically and perform manager/runtime initialization outside the registry-global publication mutex. Creation uses the same short reservation boundary, so one slow project resource loader cannot serialize unrelated starts. Administrative drain and shutdown wait for already-admitted starts before snapshotting runtime ownership. Thus idle resume normally avoids a transcript-wide catalog parse while JSONL and the pinned manager remain canonical. Privacy-safe stage and RPC-completion records report only method/stage, outcome, and duration; they never log IDs, paths, prompts, or parameters.
 
 Every session-list traversal is one
 immutable, disposable catalog materialization: every page carries the same structural `listRevision`, and its authenticated opaque cursor
@@ -793,10 +800,13 @@ for canonical paging. Page and live-refresh requests serialize per lease and rec
 client's expected revision inside that lane, so a canceled mobile prepend cannot race a
 refresh and advance the same lease generation out of order.
 Open, page, and invalidation reads each revalidate the exact live parent process/tool/run
-binding, structural subagent marker, canonical path, and original file identity. A child
-with a parent header must bind it to the exact parent. The current producer shape may omit
-that header only when its tool-owned status artifact, `<child-run>/run-N` topology, and
-anchored `subagent-…-<child-run>-N` marker all bind the same child identity. Replacement
+binding, exact reserved child path, header identity, and original file identity. Fresh children are
+admitted only at `<parent-stem>/<producer>/run-N/session.jsonl`, with exactly three relative path
+components and the producer ID bound to the path. Fork-context children are admitted only at
+`<parent-stem>/forks/<fork-session>.jsonl` when their header resolves to the mounted parent; their
+producer ID comes only from the exact tool-owned lifecycle artifact's child ID, never a filename,
+name, or title. Fresh children may omit the parent header because the artifact and producer-bound
+path remain authoritative. Session names and `session_info` never participate in admission. Replacement
 or ambiguity closes/fails the lease. Transcript projection
 parses the already-open, identity-pinned descriptor through a pure read-only branch adapter
 under an explicit 64 MiB per-session parse budget, so a replace/read/swap-back race cannot

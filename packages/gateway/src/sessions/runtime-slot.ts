@@ -82,11 +82,6 @@ export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonV
 
 type QueueBehavior = QueuedMessageState["behavior"];
 
-function subagentNameBindsProducer(name: string, producerId: string): boolean {
-  const escaped = producerId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  return new RegExp(`-${escaped}(?:-\\d+)?$`, "u").test(name);
-}
-
 type RuntimeQueuedMessage = QueuedMessageState & {
   runtimeText: string;
   skillName?: string;
@@ -817,8 +812,6 @@ export class RuntimeSlot {
   private boundedSessionHeader(descriptor: number): {
     id: string;
     parentSession?: string;
-    structuralSubagent: boolean;
-    subagentName?: string;
   } | undefined {
     const maximum = 64 * 1_024;
     try {
@@ -833,19 +826,9 @@ export class RuntimeSlot {
       if (header.type !== "session" || typeof header.id !== "string" || !header.id.trim()) return undefined;
       const parentSession = typeof header.parentSession === "string" && header.parentSession.trim()
         ? header.parentSession.trim() : undefined;
-      let subagentName: string | undefined;
-      for (const line of lines.slice(1)) {
-        const entry = JSON.parse(line) as Record<string, unknown>;
-        if (entry.type === "session_info" && typeof entry.name === "string" && entry.name.startsWith("subagent-")) {
-          subagentName = entry.name;
-          break;
-        }
-      }
       return {
         id: header.id,
         ...(parentSession ? { parentSession } : {}),
-        structuralSubagent: subagentName !== undefined,
-        ...(subagentName ? { subagentName } : {}),
       };
     } catch { return undefined; }
   }
@@ -871,15 +854,20 @@ export class RuntimeSlot {
     const childRoot = join(dirname(parentCanonical), basename(parentCanonical, ".jsonl"));
     const ownedRelative = relative(childRoot, canonical);
     const pathParts = ownedRelative.split(sep);
-    const structurallyOwned = ownedRelative !== "" && ownedRelative !== ".."
-      && !ownedRelative.startsWith(`..${sep}`) && !isAbsolute(ownedRelative)
-      && pathParts.length >= 3;
-    if (!structurallyOwned) return undefined;
-    // Real pi-subagents session layout is <parent-session>/<child-run>/run-N/session.jsonl;
-    // the parent workflow ID lives in the separately tool-owned status artifact.
-    const pathProducerId = pathParts[0];
-    if (declaredChildId && pathProducerId !== declaredChildId) return undefined;
-    const producerId = pathProducerId;
+    if (ownedRelative === "" || ownedRelative === ".." || ownedRelative.startsWith(`..${sep}`)
+      || isAbsolute(ownedRelative)) return undefined;
+    const forkContext = pathParts.length === 2 && pathParts[0] === "forks"
+      && pathParts[1] !== ".jsonl" && pathParts[1]!.endsWith(".jsonl");
+    const freshContext = pathParts.length === 3 && pathParts[0] !== "forks"
+      && pathParts[2] === "session.jsonl" && /^run-\d+$/u.test(pathParts[1]!);
+    if (!forkContext && !freshContext) return undefined;
+    // Fresh contexts bind producer identity to the reserved path. Fork contexts
+    // have no producer path component, so only the exact lifecycle artifact's
+    // child ID may supply it; filenames and transcript presentation never do.
+    const pathProducerId = freshContext ? pathParts[0] : undefined;
+    if (freshContext && declaredChildId && pathProducerId !== declaredChildId) return undefined;
+    if (forkContext && !declaredChildId) return undefined;
+    const producerId = forkContext ? declaredChildId : pathProducerId;
     if (!producerId || Buffer.byteLength(producerId) > 256 || /[\\/\0]/u.test(producerId)) return undefined;
     let descriptor: number | undefined;
     try {
@@ -887,17 +875,13 @@ export class RuntimeSlot {
       const opened = fstatSync(descriptor);
       if (!opened.isFile() || opened.dev !== identity.dev || opened.ino !== identity.ino) return undefined;
       const header = this.boundedSessionHeader(descriptor);
-      if (!header?.structuralSubagent) return undefined;
+      if (!header) return undefined;
       if (header.parentSession) {
         let headerParent: string;
         try { headerParent = realpathSync(header.parentSession); } catch { return undefined; }
         if (headerParent !== parentCanonical) return undefined;
-      } else {
-        // Current pi-subagents children omit parentSession from the Pi header.
-        // Admit that real producer shape only when the exact tool-owned run
-        // directory and structural session name both bind the same child ID.
-        if (!pathProducerId || !header.subagentName
-          || !subagentNameBindsProducer(header.subagentName, pathProducerId)) return undefined;
+      } else if (forkContext) {
+        return undefined;
       }
       const after = lstatSync(canonical);
       if (!after.isFile() || after.isSymbolicLink() || after.dev !== opened.dev || after.ino !== opened.ino) return undefined;
@@ -4160,9 +4144,6 @@ export class RuntimeSlot {
       this.assertIdle();
       const result = await this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, { position }));
       if (result.cancelled) throw new GatewayError("cancelled", "Fork was cancelled by an extension");
-      // Pi branch extraction initially writes only inherited history. Mark a
-      // Gateway-owned user fork synchronously before any later abortable work.
-      this.sessionManager.appendCustomEntry("tron.gateway-user-fork", { version: 1 });
       const next = this.id;
       this.summaryContentDirty = true;
       this.revision += 1;
