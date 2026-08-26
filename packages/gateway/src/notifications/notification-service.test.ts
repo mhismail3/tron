@@ -25,12 +25,16 @@ function fakeRelay(outcomes: RelayNotificationOutcome[] = ["accepted_by_apns"]) 
   };
 }
 
-async function fixture(outcomes?: RelayNotificationOutcome[], now: () => number = Date.now) {
+async function fixture(
+  outcomes?: RelayNotificationOutcome[],
+  now: () => number = Date.now,
+  rateLimits?: { dailyIntents: number; sessionHourlyIntents: number; targetDailyIntents: number },
+) {
   const root = await mkdtemp(join(tmpdir(), "tron-notifications-"));
   const store = new NotificationGrantStore(root);
   await store.initialize();
   const relay = fakeRelay(outcomes);
-  const service = new NotificationService(store, relay.client, now);
+  const service = new NotificationService(store, relay.client, now, rateLimits);
   return { root, store, service, relay };
 }
 
@@ -186,12 +190,30 @@ describe("NotificationGrantStore and NotificationService", () => {
   });
 
   it("enforces the durable per-session hourly quota", async () => {
-    const { service } = await fixture();
+    const { service } = await fixture(undefined, Date.now, {
+      dailyIntents: 10,
+      sessionHourlyIntents: 2,
+      targetDailyIntents: 10,
+    });
     await service.upsertGrant(grant);
-    for (let index = 0; index < 12; index += 1) {
+    for (let index = 0; index < 2; index += 1) {
       await expect(service.enqueue({ sessionId: "session-quota", sourceId: `tool-${index}`, kind: "explicit", message: "hello" })).resolves.toBe("queued");
     }
     await expect(service.enqueue({ sessionId: "session-quota", sourceId: "tool-over-limit", kind: "explicit", message: "hello" })).resolves.toBe("rate_limited");
+  });
+
+  it("does not persist rate-limited attempts or let them consume another session's quota", async () => {
+    const { service, store } = await fixture(undefined, Date.now, {
+      dailyIntents: 3,
+      sessionHourlyIntents: 2,
+      targetDailyIntents: 3,
+    });
+    await service.upsertGrant(grant);
+    await expect(service.enqueue({ sessionId: "session-quota-a", sourceId: "tool-a1", kind: "explicit", message: "hello" })).resolves.toBe("queued");
+    await expect(service.enqueue({ sessionId: "session-quota-a", sourceId: "tool-a2", kind: "explicit", message: "hello" })).resolves.toBe("queued");
+    await expect(service.enqueue({ sessionId: "session-quota-a", sourceId: "tool-a3", kind: "explicit", message: "hello" })).resolves.toBe("rate_limited");
+    expect((await store.snapshot()).receipts).toHaveLength(2);
+    await expect(service.enqueue({ sessionId: "session-quota-b", sourceId: "tool-b1", kind: "explicit", message: "hello" })).resolves.toBe("queued");
   });
 
   it("recovers a retryable pending intent with the same request identity after restart", async () => {

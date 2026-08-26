@@ -16,9 +16,19 @@ import { PushRelayClient, type RelayNotificationOutcome } from "./relay-client.j
 
 const INTENT_TTL_MS = 15 * 60_000;
 const RECEIPT_TTL_MS = 24 * 60 * 60_000;
-const MAXIMUM_DAILY_INTENTS = 60;
-const MAXIMUM_SESSION_HOURLY_INTENTS = 12;
-const MAXIMUM_TARGET_DAILY_INTENTS = 40;
+interface NotificationRateLimits {
+  dailyIntents: number;
+  sessionHourlyIntents: number;
+  targetDailyIntents: number;
+}
+
+const DEFAULT_NOTIFICATION_RATE_LIMITS: NotificationRateLimits = {
+  // Receipts are bounded to 512 entries, so these remain enforceable abuse
+  // ceilings without throttling ordinary high-volume local agent workflows.
+  dailyIntents: 480,
+  sessionHourlyIntents: 240,
+  targetDailyIntents: 480,
+};
 const GENERIC_MESSAGE = "Tron has an update. Open Tron to view it.";
 const RETRY_DELAYS_MS = [5_000, 20_000, 60_000, 180_000] as const;
 const ACTIVE_OUTCOMES = new Set(["pending", "retryable"]);
@@ -89,6 +99,7 @@ export class NotificationService {
     private readonly store: NotificationGrantStore,
     private readonly relay: PushRelayClient,
     private readonly now: () => number = Date.now,
+    private readonly rateLimits: NotificationRateLimits = DEFAULT_NOTIFICATION_RATE_LIMITS,
   ) {}
 
   async initialize(): Promise<void> {
@@ -223,11 +234,17 @@ export class NotificationService {
       const day = now - 24 * 60 * 60_000;
       const hour = now - 60 * 60_000;
       const recent = document.receipts.filter((receipt) => Date.parse(receipt.createdAt) > day);
-      const targetLimited = grants.some((grant) => recent.filter((receipt) => receipt.grantIds.includes(grant.grantId)).length >= MAXIMUM_TARGET_DAILY_INTENTS);
-      if (recent.length >= MAXIMUM_DAILY_INTENTS
-        || recent.filter((receipt) => receipt.sessionKey === sessionKey && Date.parse(receipt.createdAt) > hour).length >= MAXIMUM_SESSION_HOURLY_INTENTS
+      // Legacy rejected receipts remain readable until normal expiry, but they
+      // never consume quota or extend their own lockout window.
+      const admitted = recent.filter((receipt) => receipt.result !== "rate_limited");
+      const targetLimited = grants.some((grant) => admitted
+        .filter((receipt) => receipt.grantIds.includes(grant.grantId)).length >= this.rateLimits.targetDailyIntents);
+      if (admitted.length >= this.rateLimits.dailyIntents
+        || admitted.filter((receipt) => receipt.sessionKey === sessionKey
+          && Date.parse(receipt.createdAt) > hour).length >= this.rateLimits.sessionHourlyIntents
         || targetLimited || document.pending.length >= MAXIMUM_PENDING_INTENTS) {
-        document.receipts.push(receiptFor({ dedupeKey, sessionKey, grantIds: grants.map((grant) => grant.grantId), now, result: "rate_limited" }));
+        // Rejection is returned synchronously but is not persisted: a rejected
+        // attempt owns no delivery and must not displace durable quota authority.
         result = "rate_limited";
         return document;
       }
