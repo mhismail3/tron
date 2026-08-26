@@ -65,6 +65,30 @@ describe("ProcessActivityRecency", () => {
     expect(latch.currentAndRecent().activities[0]?.lifecycle.state).toBe("completed");
   });
 
+  it("retains a bounded terminal latch after ambient expiry", () => {
+    const clock = new Clock();
+    const recency = new ProcessActivityRecency(clock);
+    recency.upsert(activity("completed", 2));
+    clock.advance(PROCESS_ACTIVITY_RECENT_MS);
+    clock.callback?.();
+    expect(recency.currentAndRecent().activities).toEqual([]);
+    expect(recency.upsert(activity("running", 99)).accepted).toBe(false);
+    expect(recency.currentAndRecent().activities).toEqual([]);
+  });
+
+  it("does not retain unknown evidence without an expiry", () => {
+    const clock = new Clock();
+    const recency = new ProcessActivityRecency(clock);
+    const unknown = {
+      ...activity("running"),
+      lifecycle: { ...activity("running").lifecycle, state: "unknown" as const },
+      visibility: "unknown" as const,
+    };
+    expect(recency.upsert(unknown).accepted).toBe(false);
+    expect(recency.currentAndRecent().activities).toEqual([]);
+    expect(clock.delay).toBeUndefined();
+  });
+
   it("fails closed instead of extending recency for implausible future timestamps", () => {
     const clock = new Clock();
     const recency = new ProcessActivityRecency(clock);

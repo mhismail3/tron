@@ -27,12 +27,18 @@ export interface ProcessActivityExpiryFrame {
 export type ProcessActivityExpiryCallback = (frame: ProcessActivityExpiryFrame) => void;
 
 const terminalStates = new Set(["completed", "failed", "stopped", "rejected", "interrupted"]);
+const MAX_TERMINAL_TOMBSTONES = 2_048;
+
+type TerminalTombstone = { sequence: number; state: string };
 
 /** Gateway-owned five-minute partition for disposable process presentation.
  * Canonical history is read independently and is never removed here. */
 export class ProcessActivityRecency {
   private readonly activities = new Map<string, SessionProcessActivity>();
   private readonly monotonicDeadlines = new Map<string, number>();
+  /** Bounded non-presentational terminal latches prevent a late artifact from
+   * resurrecting work after its five-minute row has expired. */
+  private readonly terminalTombstones = new Map<string, TerminalTombstone>();
   private readonly callbacks = new Set<ProcessActivityExpiryCallback>();
   private expiryTimer: unknown;
   private revision = 0;
@@ -45,6 +51,16 @@ export class ProcessActivityRecency {
   }
 
   upsert(activity: SessionProcessActivity): { activity: SessionProcessActivity; accepted: boolean } {
+    // Unknown is unavailable evidence, not ambient work. Never retain it in
+    // the registry-global recency owner where it has no terminal deadline.
+    if (activity.lifecycle.state === "unknown" || activity.visibility === "unknown") {
+      const previous = this.activities.get(activity.processId);
+      return { activity: previous ? this.wire(previous) : { ...activity, visibility: "unknown" }, accepted: false };
+    }
+    const tombstone = this.terminalTombstones.get(activity.processId);
+    if (tombstone) {
+      return { activity: { ...activity, visibility: "historical" }, accepted: false };
+    }
     const previous = this.activities.get(activity.processId);
     if (previous && activity.lifecycle.sequence <= previous.lifecycle.sequence) {
       return { activity: this.wire(previous), accepted: false };
@@ -124,6 +140,7 @@ export class ProcessActivityRecency {
       if (this.visibility(activity) !== "historical") continue;
       this.activities.delete(processId);
       this.monotonicDeadlines.delete(processId);
+      if (terminalStates.has(activity.lifecycle.state)) this.latchTerminal(processId, activity);
       expiredProcessIds.push(processId);
     }
     if (expiredProcessIds.length > 0) this.revision += 1;
@@ -145,6 +162,19 @@ export class ProcessActivityRecency {
     };
     if (notify && expiredProcessIds.length > 0) for (const callback of this.callbacks) callback(frame);
     return frame;
+  }
+
+  private latchTerminal(processId: string, activity: SessionProcessActivity): void {
+    this.terminalTombstones.delete(processId);
+    this.terminalTombstones.set(processId, {
+      sequence: activity.lifecycle.sequence,
+      state: activity.lifecycle.state,
+    });
+    while (this.terminalTombstones.size > MAX_TERMINAL_TOMBSTONES) {
+      const oldest = this.terminalTombstones.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.terminalTombstones.delete(oldest);
+    }
   }
 
   private schedule(): void {

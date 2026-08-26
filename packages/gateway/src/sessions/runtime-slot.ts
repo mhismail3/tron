@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { closeSync, existsSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from "node:fs";
+import { closeSync, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { copyFile, mkdtemp, open, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -321,6 +321,7 @@ export class RuntimeSlot {
   private readonly unregisterProcessExpiry: () => void;
   private readonly processActivities = new Map<string, SessionProcessActivity>();
   private readonly processIDsByToolCall = new Map<string, Set<string>>();
+  private readonly pendingProcessRemovalsByToolCall = new Map<string, Set<string>>();
   private readonly validatedChildSessionPaths = new Map<string, string>();
   private processRevision = 0;
   private processAsOf = new Date().toISOString();
@@ -792,20 +793,29 @@ export class RuntimeSlot {
     return references;
   }
 
-  private boundedSessionHeader(candidate: string): { id: string; parentSession?: string } | undefined {
+  private boundedSessionHeader(descriptor: number): { id: string; parentSession: string; structuralSubagent: boolean } | undefined {
     const maximum = 64 * 1_024;
-    let descriptor: number | undefined;
     try {
-      descriptor = openSync(candidate, "r");
       const bytes = Buffer.alloc(maximum + 1);
       const count = readSync(descriptor, bytes, 0, bytes.length, 0);
-      const newline = bytes.subarray(0, count).indexOf(0x0a);
-      if (newline < 0 || newline > maximum) return undefined;
-      const header = JSON.parse(bytes.subarray(0, newline).toString("utf8")) as Record<string, unknown>;
-      if (header.type !== "session" || typeof header.id !== "string" || !header.id.trim()) return undefined;
-      return { id: header.id, ...(typeof header.parentSession === "string" ? { parentSession: header.parentSession } : {}) };
+      const bounded = bytes.subarray(0, Math.min(count, maximum));
+      const finalNewline = bounded.lastIndexOf(0x0a);
+      if (finalNewline < 0) return undefined;
+      const lines = bounded.subarray(0, finalNewline).toString("utf8").split("\n").filter(Boolean);
+      if (lines.length === 0) return undefined;
+      const header = JSON.parse(lines[0]!) as Record<string, unknown>;
+      if (header.type !== "session" || typeof header.id !== "string" || !header.id.trim()
+        || typeof header.parentSession !== "string" || !header.parentSession.trim()) return undefined;
+      let structuralSubagent = false;
+      for (const line of lines.slice(1)) {
+        const entry = JSON.parse(line) as Record<string, unknown>;
+        if (entry.type === "session_info" && typeof entry.name === "string" && entry.name.startsWith("subagent-")) {
+          structuralSubagent = true;
+          break;
+        }
+      }
+      return { id: header.id, parentSession: header.parentSession, structuralSubagent };
     } catch { return undefined; }
-    finally { if (descriptor !== undefined) closeSync(descriptor); }
   }
 
   private validateChildSessionFile(candidate: string, expectedRunId: string): { ref: string; path: string } | undefined {
@@ -829,22 +839,24 @@ export class RuntimeSlot {
       && !ownedRelative.startsWith(`..${sep}`) && !isAbsolute(ownedRelative)
       && pathParts[0] === expectedRunId && pathParts.length >= 3;
     if (!structurallyOwned) return undefined;
-    const header = this.boundedSessionHeader(canonical);
-    if (!header) return undefined;
-    if (header.parentSession) {
+    let descriptor: number | undefined;
+    try {
+      descriptor = openSync(canonical, "r");
+      const opened = fstatSync(descriptor);
+      if (!opened.isFile() || opened.dev !== identity.dev || opened.ino !== identity.ino) return undefined;
+      const header = this.boundedSessionHeader(descriptor);
+      if (!header?.structuralSubagent) return undefined;
       let headerParent: string;
       try { headerParent = realpathSync(header.parentSession); } catch { return undefined; }
       if (headerParent !== parentCanonical) return undefined;
-    }
-    try {
-      const manager = SessionManager.open(canonical);
       const after = lstatSync(canonical);
-      if (!after.isFile() || after.isSymbolicLink() || after.dev !== identity.dev || after.ino !== identity.ino) return undefined;
-      const ref = manager.getSessionId();
-      if (ref !== header.id || !ref || ref === this.id || Buffer.byteLength(ref) > 256) return undefined;
+      if (!after.isFile() || after.isSymbolicLink() || after.dev !== opened.dev || after.ino !== opened.ino) return undefined;
+      const ref = header.id;
+      if (!ref || ref === this.id || Buffer.byteLength(ref) > 256) return undefined;
       this.validatedChildSessionPaths.set(ref, canonical);
       return { ref, path: canonical };
     } catch { return undefined; }
+    finally { if (descriptor !== undefined) closeSync(descriptor); }
   }
 
   private attachChildSessionReferences(activity: ExtensionRunActivity, value: unknown): ExtensionRunActivity {
@@ -862,16 +874,19 @@ export class RuntimeSlot {
    * tool results. This preserves the canonical terminalAt across a restart;
    * receipts are authoritative when the disposable result projection is rebuilt. */
   private hydrateCanonicalExtensionActivities(): void {
-    for (const { receipt } of extensionActivityReceipts(this.sessionManager.getEntries(), this.id)) {
+    const branch = this.sessionManager.getBranch();
+    const receipts = extensionActivityReceipts(branch, this.id);
+    const receiptToolCallIDs = new Set(receipts.map(({ receipt }) => receipt.toolCallId));
+    for (const { receipt } of receipts) {
       const activity = extensionReceiptActivity(receipt);
-      this.upsertExtensionActivity(activity);
-      // Retain even an already-expired terminal latch in the disposable map so
-      // tool-result backfill cannot manufacture a new terminalAt on restart;
-      // snapshot visibility still omits historical rows.
-      this.extensionActivities.set(activity.toolCallId, activity);
+      const visibility = this.upsertExtensionActivity(activity).visibility;
+      if (visibility === "current" || visibility === "recent") {
+        this.extensionActivities.set(activity.toolCallId, activity);
+      }
     }
-    for (const entry of this.sessionManager.getEntries()) {
-      if (entry.type !== "message" || entry.message.role !== "toolResult") continue;
+    for (const entry of branch) {
+      if (entry.type !== "message" || entry.message.role !== "toolResult"
+        || receiptToolCallIDs.has(entry.message.toolCallId)) continue;
       const toolName = entry.message.toolName;
       const origin = this.extensionToolOrigin(toolName);
       if (!origin) continue;
@@ -908,6 +923,7 @@ export class RuntimeSlot {
     for (const processId of this.processActivities.keys()) this.dependencies.processActivityRecency.remove(processId);
     this.processActivities.clear();
     this.processIDsByToolCall.clear();
+    this.pendingProcessRemovalsByToolCall.clear();
     this.validatedChildSessionPaths.clear();
     this.processRevision += 1;
     this.processAsOf = new Date().toISOString();
@@ -915,10 +931,12 @@ export class RuntimeSlot {
 
   private replaceProcessesForToolCall(toolCallId: string, projected: readonly SessionProcessActivity[]): void {
     const previousIDs = this.processIDsByToolCall.get(toolCallId) ?? new Set<string>();
-    const nextIDs = new Set(projected.map((activity) => activity.processId));
+    const projectedIDs = new Set(projected.map((activity) => activity.processId));
+    const installedNextIDs = new Set<string>();
+    const removed = new Set(this.pendingProcessRemovalsByToolCall.get(toolCallId) ?? []);
     for (const processId of previousIDs) {
-      if (nextIDs.has(processId)) continue;
-      this.processActivities.delete(processId);
+      if (projectedIDs.has(processId)) continue;
+      if (this.processActivities.delete(processId)) removed.add(processId);
       this.dependencies.processActivityRecency.remove(processId);
       this.processRevision += 1;
     }
@@ -937,12 +955,21 @@ export class RuntimeSlot {
           } }
         : projectedCandidate;
       const admitted = this.dependencies.processActivityRecency.upsert(candidate);
-      if (!admitted.accepted) continue;
+      if (!admitted.accepted) {
+        if (this.processActivities.has(candidate.processId)) installedNextIDs.add(candidate.processId);
+        continue;
+      }
+      if (admitted.activity.visibility !== "active" && admitted.activity.visibility !== "recent") {
+        if (this.processActivities.delete(candidate.processId)) removed.add(candidate.processId);
+        continue;
+      }
       this.processActivities.set(candidate.processId, admitted.activity);
+      installedNextIDs.add(candidate.processId);
       this.processRevision += 1;
     }
-    if (nextIDs.size > 0) this.processIDsByToolCall.set(toolCallId, nextIDs);
+    if (installedNextIDs.size > 0) this.processIDsByToolCall.set(toolCallId, installedNextIDs);
     else this.processIDsByToolCall.delete(toolCallId);
+    if (removed.size > 0) this.pendingProcessRemovalsByToolCall.set(toolCallId, removed);
     this.processAsOf = new Date().toISOString();
   }
 
@@ -984,13 +1011,18 @@ export class RuntimeSlot {
     };
   }
 
-  private publishProcessActivity(activity: SessionProcessActivity): void {
-    const installed = this.processActivities.get(activity.processId);
-    if (!installed) return;
-    const current = this.dependencies.processActivityRecency.wire(installed);
-    if (current.visibility !== "active" && current.visibility !== "recent") return;
+  private publishProcessDelta(activity: SessionProcessActivity | undefined, removedProcessIds?: string[]): void {
+    if (activity) {
+      const installed = this.processActivities.get(activity.processId);
+      if (!installed) return;
+      const current = this.dependencies.processActivityRecency.wire(installed);
+      if (current.visibility !== "active" && current.visibility !== "recent") return;
+      activity = current;
+    }
+    if (!activity && (!removedProcessIds || removedProcessIds.length === 0)) return;
     this.emit("session.processActivity", safeJson({
-      activity: current,
+      ...(activity ? { activity } : {}),
+      ...(removedProcessIds && removedProcessIds.length > 0 ? { removedProcessIds } : {}),
       processRevision: this.processRevision,
       processAsOf: this.processAsOf,
       overview: this.currentProcessProjection().overview,
@@ -998,10 +1030,16 @@ export class RuntimeSlot {
   }
 
   private publishProcessesForToolCall(toolCallId: string): void {
+    const removals = [...(this.pendingProcessRemovalsByToolCall.get(toolCallId) ?? [])].sort();
+    this.pendingProcessRemovalsByToolCall.delete(toolCallId);
+    let emitted = false;
     for (const processId of this.processIDsByToolCall.get(toolCallId) ?? []) {
       const activity = this.processActivities.get(processId);
-      if (activity) this.publishProcessActivity(activity);
+      if (!activity) continue;
+      this.publishProcessDelta(activity, emitted ? undefined : removals);
+      emitted = true;
     }
+    if (!emitted && removals.length > 0) this.publishProcessDelta(undefined, removals);
   }
 
   private upsertExtensionActivity(activity: ExtensionRunActivity): ActivityVisibility {
@@ -2775,9 +2813,15 @@ export class RuntimeSlot {
     // terminal state; treating this acknowledgement as terminal made pills
     // flash directly into Recently Finished with a near-zero duration.
     const requestedAsyncDir = extensionRunAsyncDir(value);
+    const asyncDir = requestedAsyncDir ? this.canonicalExtensionArtifactDirectory(requestedAsyncDir) : undefined;
+    const invalidDetachedDirectory = requestedAsyncDir !== undefined && asyncDir === undefined;
     const derivedStatus = extensionActivityStatusFromTool(value, status);
-    const { terminal, reportedTerminal } = derivedStatus;
-    const effectiveStatus = derivedStatus.status;
+    // An async acknowledgement without an admitted observable directory cannot
+    // author a detached live row. Settle the launcher projection instead of
+    // creating unwatched runtime/drain ownership.
+    const terminal = invalidDetachedDirectory ? true : derivedStatus.terminal;
+    const reportedTerminal = derivedStatus.reportedTerminal;
+    const effectiveStatus = invalidDetachedDirectory ? (status === "failed" ? "failed" : "completed") : derivedStatus.status;
     const observedAt = new Date().toISOString();
     const terminalAt = terminal ? current?.lifecycle?.terminalAt ?? observedAt : current?.lifecycle?.terminalAt;
     const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
@@ -2788,7 +2832,7 @@ export class RuntimeSlot {
       source: extensionOrigin,
       title: toolName,
       status: current?.lifecycle && terminalStates.includes(current.lifecycle.state) ? current.status : effectiveStatus,
-      authoritativeStatus: reportedTerminal || Boolean(current?.lifecycle && terminalStates.includes(current.lifecycle.state)),
+      authoritativeStatus: invalidDetachedDirectory || reportedTerminal || Boolean(current?.lifecycle && terminalStates.includes(current.lifecycle.state)),
       startedAt,
       updatedAt,
       ...(terminal && completedAt ? { completedAt } : {}),
@@ -2802,7 +2846,6 @@ export class RuntimeSlot {
     if (admitExtensionRunActivity(current, activity) === current) return current;
     const terminalReceiptOwner = terminal ? this.claimExtensionReceiptOwnership(activityKey) : undefined;
     if (terminal && !terminalReceiptOwner) return current;
-    const asyncDir = requestedAsyncDir ? this.canonicalExtensionArtifactDirectory(requestedAsyncDir) : undefined;
     if (activity.runId && !this.bindExtensionRunOwnership(activity.runId, {
       toolCallId,
       ...(asyncDir === undefined ? {} : { asyncDir }),
@@ -4441,6 +4484,7 @@ export class RuntimeSlot {
     }
     this.processActivities.clear();
     this.processIDsByToolCall.clear();
+    this.pendingProcessRemovalsByToolCall.clear();
     this.validatedChildSessionPaths.clear();
     if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
     if (this.progressFlushTimer) clearTimeout(this.progressFlushTimer);

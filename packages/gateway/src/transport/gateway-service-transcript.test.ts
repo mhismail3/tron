@@ -15,6 +15,25 @@ const client: ClientContext = {
 };
 
 describe("session transcript paging", () => {
+  it("advertises activity, history, and read-only transcript process capabilities independently", () => {
+    const service = new GatewayService({
+      config: {
+        machineId: "machine",
+        machineGroupID: "group",
+        machineName: "Mac",
+        tronHome: "/tmp/tron-process-capabilities",
+      },
+      sessions: {},
+    } as unknown as GatewayServiceDependencies);
+
+    const capabilities = (service.info() as { capabilities: string[] }).capabilities;
+    expect(capabilities).toEqual(expect.arrayContaining([
+      "process-activity.v1",
+      "process-history.v1",
+      "process-transcript.v1",
+    ]));
+  });
+
   it("routes bounded unified process history through an established parent session", async () => {
     const processHistory = vi.fn(() => ({ activities: [], historyRevision: "revision" }));
     const processDetail = vi.fn(() => ({

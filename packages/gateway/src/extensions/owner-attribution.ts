@@ -36,6 +36,10 @@ function owned<T extends (...args: any[]) => any>(fn: T, owner: ExtensionOwner):
  * to apply on every resource reload because each load result is wrapped once
  * and all maps/functions are retained as public Pi objects. */
 export function attributeExtensions(base: LoadExtensionsResult, hooks: ExtensionAdapterHooks = {}): LoadExtensionsResult {
+  const bashOwners = base.extensions.filter((extension) => extension.tools.has("bash"));
+  if (bashOwners.length > 0) {
+    throw new GatewayError("conflict", "The bash tool name is reserved by Tron");
+  }
   const notifyOwners = base.extensions.filter((extension) => extension.tools.has("notify"));
   if (notifyOwners.some((extension) => extension.path !== "<inline:tron-notify>")) {
     throw new GatewayError("conflict", "The notify tool name is reserved by Tron");

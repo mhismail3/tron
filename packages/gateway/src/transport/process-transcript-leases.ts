@@ -17,7 +17,11 @@ type Lease = {
   childSessionRef: string;
   runId: string;
   path: string;
+  fileIdentity: string;
+  /** Last revision acknowledged by a page response to this client. */
   revision: string;
+  /** Newest invalidation announced but not yet acknowledged by a page read. */
+  pendingRevision?: string;
   watcher: FSWatcher;
   invalidationTimer: NodeJS.Timeout | undefined;
   timeout: NodeJS.Timeout;
@@ -45,14 +49,32 @@ export class ProcessTranscriptLeaseStore {
       || clientLeases.filter((lease) => lease.parentSessionId === parentSessionId).length >= MAX_LEASES_PER_CLIENT_SESSION) {
       throw new GatewayError("busy", "Read-only subagent viewer capacity is full", true);
     }
-    const path = await this.sessions.resolveReadOnlySubagentPath(childSessionRef, preferredPath, parentSessionId, runId);
-    const page = await this.sessions.readOnlySubagentTranscriptPage(childSessionRef, path);
+    const admission = await this.sessions.resolveReadOnlySubagentPath(
+      childSessionRef, preferredPath, parentSessionId, processId, runId,
+    );
     const id = randomUUID();
+    let changedDuringOpen = false;
     let watcher: FSWatcher;
     try {
-      watcher = watch(path, { persistent: false }, () => this.scheduleInvalidation(id));
+      // Install observation before the baseline read. Until the lease enters
+      // the map, callbacks latch a dirty bit so an append in the open window
+      // cannot disappear between baseline capture and ownership publication.
+      watcher = watch(admission.path, { persistent: false }, () => {
+        if (this.leases.has(id)) this.scheduleInvalidation(id);
+        else changedDuringOpen = true;
+      });
     } catch {
       throw new GatewayError("conflict", "Subagent session cannot be observed", true);
+    }
+    let page: Awaited<ReturnType<RuntimeRegistry["readOnlySubagentTranscriptPage"]>>;
+    try {
+      page = await this.sessions.readOnlySubagentTranscriptPage(
+        childSessionRef, admission.path, parentSessionId, processId, runId,
+        undefined, undefined, admission.fileIdentity,
+      );
+    } catch (error) {
+      watcher.close();
+      throw error;
     }
     const timeout = setTimeout(() => this.closeOwned(clientId, id), LEASE_TIMEOUT_MS);
     timeout.unref();
@@ -63,7 +85,8 @@ export class ProcessTranscriptLeaseStore {
       processId,
       childSessionRef,
       runId,
-      path,
+      path: admission.path,
+      fileIdentity: page.fileIdentity,
       revision: page.revision,
       watcher,
       invalidationTimer: undefined,
@@ -72,6 +95,7 @@ export class ProcessTranscriptLeaseStore {
     };
     watcher.on("error", () => this.closeOwned(clientId, id, "observer closed"));
     this.leases.set(id, lease);
+    if (changedDuringOpen) this.scheduleInvalidation(id);
     return {
       leaseId: id,
       processId,
@@ -99,13 +123,30 @@ export class ProcessTranscriptLeaseStore {
     if (expectedRevision !== undefined && expectedRevision !== lease.revision) {
       throw new GatewayError("conflict", "Subagent transcript changed; refresh the viewer", true);
     }
-    const page = await this.sessions.readOnlySubagentTranscriptPage(
-      lease.childSessionRef,
-      lease.path,
-      before,
-      expectedNextEntryId,
-    );
+    // A watcher announces pendingRevision without advancing the client's
+    // acknowledged revision. This lets the mounted read-only viewer refresh
+    // the newest page on the same lease using the revision it actually owns.
+    const pendingAtStart = lease.pendingRevision;
+    let page: Awaited<ReturnType<RuntimeRegistry["readOnlySubagentTranscriptPage"]>>;
+    try {
+      page = await this.sessions.readOnlySubagentTranscriptPage(
+        lease.childSessionRef,
+        lease.path,
+        lease.parentSessionId,
+        lease.processId,
+        lease.runId,
+        before,
+        expectedNextEntryId,
+        lease.fileIdentity,
+      );
+    } catch (error) {
+      if (!(error instanceof GatewayError && error.code === "busy" && error.retryable)) {
+        this.closeOwned(clientId, leaseId, "session unavailable");
+      }
+      throw error;
+    }
     lease.revision = page.revision;
+    if (lease.pendingRevision === pendingAtStart) delete lease.pendingRevision;
     return {
       items: page.items,
       start: page.start,
@@ -173,9 +214,18 @@ export class ProcessTranscriptLeaseStore {
     const lease = this.leases.get(leaseId);
     if (!lease) return;
     try {
-      const page = await this.sessions.readOnlySubagentTranscriptPage(lease.childSessionRef, lease.path);
-      if (page.revision === lease.revision) return;
-      lease.revision = page.revision;
+      const page = await this.sessions.readOnlySubagentTranscriptPage(
+        lease.childSessionRef,
+        lease.path,
+        lease.parentSessionId,
+        lease.processId,
+        lease.runId,
+        undefined,
+        undefined,
+        lease.fileIdentity,
+      );
+      if (page.revision === lease.revision || page.revision === lease.pendingRevision) return;
+      lease.pendingRevision = page.revision;
       lease.notify("session.processTranscript.changed", lease.parentSessionId, {
         leaseId: lease.id,
         processId: lease.processId,

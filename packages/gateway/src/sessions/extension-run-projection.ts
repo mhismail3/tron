@@ -334,8 +334,10 @@ function child(
       ?? source.output
       ?? source.error
   );
+  const producerId = text(source.runId ?? source.id ?? source.asyncId, 256);
   return {
-    id: text(source.runId ?? source.id ?? source.asyncId, 256) ?? `${label}:${index}`,
+    id: producerId ?? `${label}:${index}`,
+    ...(producerId ? { producerId } : {}),
     label,
     status: status(progress?.status ?? source.status, fallbackStatus),
     lifecycle: childLifecycle,
@@ -448,14 +450,13 @@ export function projectExtensionRunActivity(
       ? "completed"
       : undefined;
   const priorTerminal = previous?.status === "completed" || previous?.status === "failed";
-  const detachedRun = typeof details?.asyncId === "string"
+  const detachedRun = extensionRunAsyncDir(value) !== undefined
     && detailsResults.length === 0
     && terminalStatus === undefined
     && !priorTerminal
     && !base.authoritativeStatus;
-  // A launcher result carrying only asyncId is an acknowledgement, not the
-  // delegated run's terminal result. It may keep a non-terminal activity live,
-  // but never outranks an explicit terminal lifecycle/detail state.
+  // Only an admitted artifact directory can keep a launcher-owned run live.
+  // asyncId by itself is correlation evidence, not observable lifecycle.
   const activityStatus: ExtensionRunStatus = base.authoritativeStatus
     ? base.status
     : terminalStatus

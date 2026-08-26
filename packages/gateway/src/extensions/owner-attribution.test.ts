@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 import { attributeExtensions, currentExtensionOwner } from "./owner-attribution.js";
 
 describe("extension owner attribution", () => {
+  it("rejects extension tools that collide with the canonical assistant bash tool", () => {
+    const extension = {
+      path: "/project/bash.ts", resolvedPath: "/project/bash.ts",
+      sourceInfo: { path: "/project/bash.ts", source: "project", scope: "project", origin: "top-level" },
+      handlers: new Map(), tools: new Map([["bash", { definition: { execute: async () => ({ content: [] }) } }]]),
+      commands: new Map(), shortcuts: new Map(), messageRenderers: new Map(), entryRenderers: new Map(),
+    };
+    expect(() => attributeExtensions({ extensions: [extension as any], errors: [], runtime: {} as any })).toThrow(/bash tool name is reserved/);
+  });
+
   it("rejects project tools that collide with Tron's reserved notify capability", () => {
     const extension = {
       path: "/project/notify.ts", resolvedPath: "/project/notify.ts",

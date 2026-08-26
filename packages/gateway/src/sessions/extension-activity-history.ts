@@ -24,7 +24,7 @@ export interface ExtensionActivityReceipt {
   observedAt: string;
   durationMs?: number;
   /** Durable summaries intentionally exclude child task/output/path/timing data. */
-  summary?: { children?: Array<{ id: string; label: string; parentId?: string; state: ExtensionRunLifecycleState; attention: ExtensionRunAttention; childSessionRef?: string }>; toolCount?: number; turnCount?: number };
+  summary?: { children?: Array<{ id: string; producerId?: string; label: string; parentId?: string; state: ExtensionRunLifecycleState; attention: ExtensionRunAttention; childSessionRef?: string }>; toolCount?: number; turnCount?: number };
 }
 
 function bounded(value: unknown, max: number): string | undefined {
@@ -95,7 +95,8 @@ export function makeExtensionActivityReceipt(activity: ExtensionRunActivity, ses
       const childAttention = child.attention ?? "none";
       if (!id || !label || !terminalOrLifecycleState(childState) || !attentionState(childAttention)) continue;
       const childSessionRef = opaqueSessionRef(child.childSessionRef);
-      children.push({ id, label, ...(parentId ? { parentId } : {}), state: childState, attention: childAttention, ...(childSessionRef ? { childSessionRef } : {}) });
+      const producerId = bounded(child.producerId, 256);
+      children.push({ id, ...(producerId ? { producerId } : {}), label, ...(parentId ? { parentId } : {}), state: childState, attention: childAttention, ...(childSessionRef ? { childSessionRef } : {}) });
       if (child.children?.length) appendChildren(child.children, id, depth + 1);
     }
   };
@@ -168,8 +169,9 @@ export function admitExtensionActivityReceipt(value: unknown, expectedSessionId?
     const childAttention = child.attention === undefined ? "none" : child.attention;
     if (!id || !label || !terminalOrLifecycleState(childState) || !attentionState(childAttention)) return [];
     const childSessionRef = opaqueSessionRef(child.childSessionRef);
+    const producerId = bounded(child.producerId, 256);
     const parentId = bounded(child.parentId, 256);
-    return [{ id, label, ...(parentId ? { parentId } : {}), state: childState, attention: childAttention, ...(childSessionRef ? { childSessionRef } : {}) }];
+    return [{ id, ...(producerId ? { producerId } : {}), label, ...(parentId ? { parentId } : {}), state: childState, attention: childAttention, ...(childSessionRef ? { childSessionRef } : {}) }];
   }) : undefined;
   if (children) {
     const childIDs = new Set(children.map((child) => child.id));
@@ -316,6 +318,7 @@ export function extensionReceiptActivity(receipt: ExtensionActivityReceipt): Ext
     if (childNodes.has(child.id)) continue;
     childNodes.set(child.id, {
       id: child.id,
+      ...(child.producerId ? { producerId: child.producerId } : {}),
       label: child.label,
       status: child.state === "failed" ? "failed" as const
         : child.state === "running" || child.state === "queued" || child.state === "paused" ? "running" as const

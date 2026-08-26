@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { basename } from "node:path";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
 
 type ReadonlySessionManager = Pick<SessionManager, "getBranch" | "getEntries" | "getSessionId" | "getLeafId">;
@@ -14,6 +15,7 @@ import type {
 import { extensionActivityReceipts, extensionReceiptActivity } from "./extension-activity-history.js";
 import { PROCESS_ACTIVITY_RECENT_MS } from "./process-activity-recency.js";
 
+export const PROCESS_ACTIVITY_CAPABILITY = "process-activity.v1";
 export const PROCESS_ACTIVITY_HISTORY_CAPABILITY = "process-history.v1";
 export const PROCESS_TRANSCRIPT_CAPABILITY = "process-transcript.v1";
 export const MAX_PROCESS_ACTIVITY_COUNT = 32;
@@ -50,15 +52,36 @@ function processHash(namespace: string, ...parts: string[]): string {
 }
 
 /** Process presentation is not an alternate secret store. Canonical JSONL is
- * left untouched; only bounded wire previews redact common credential forms. */
+ * left untouched; bounded wire previews fail closed for common shell, header,
+ * structured, provider-token, and high-entropy credential shapes. */
 export function redactProcessText(value: string): string {
-  const secret = "(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|password|passwd|secret|client[_-]?secret|private[_-]?key)";
-  return value
-    .replace(new RegExp(`(\\b${secret}\\b\\s*=\\s*)(?:"[^"]*"|'[^']*'|[^\\s]+)`, "giu"), "$1[REDACTED]")
-    .replace(new RegExp(`(--${secret})(?:=|\\s+)(?:"[^"]*"|'[^']*'|[^\\s]+)`, "giu"), "$1=[REDACTED]")
-    .replace(new RegExp(`(["']${secret}["']\\s*:\\s*["'])[^"']*(["'])`, "giu"), "$1[REDACTED]$2")
-    .replace(/(authorization\s*:\s*(?:bearer|basic)\s+)[^\s]+/giu, "$1[REDACTED]")
-    .replace(/:\/\/([^\s/:@]+):([^\s/@]+)@/gu, "://$1:[REDACTED]@");
+  const secretName = "(?:api[_-]?key|access[_-]?key|access[_-]?token|auth(?:orization)?[_-]?token|token|password|passwd|secret|client[_-]?secret|private[_-]?key|session[_-]?key|cookie)";
+  const quotedOrToken = "(?:\"[^\"]*\"|'[^']*'|[^\\s]+)";
+  let redacted = value
+    // Environment assignments are intentionally all masked: arbitrary names
+    // can carry credentials and the process surface does not need their value.
+    .replace(/(\b[A-Za-z_][A-Za-z0-9_]*\s*=\s*)(?:"[^"]*"|'[^']*'|[^\s]+)/gu, "$1[REDACTED]")
+    .replace(new RegExp(`(\\b${secretName}\\b\\s*[=:]\\s*)${quotedOrToken}`, "giu"), "$1[REDACTED]")
+    .replace(new RegExp(`(--${secretName})(?:=|\\s+)${quotedOrToken}`, "giu"), "$1=[REDACTED]")
+    .replace(new RegExp(`(["']${secretName}["']\\s*:\\s*["'])[^"']*(["'])`, "giu"), "$1[REDACTED]$2")
+    .replace(/(authorization\s*:\s*)[^\r\n]+/giu, "$1[REDACTED]")
+    .replace(/((?:-H|--header)\s+)(["']?)([^\r\n"']+)(["']?)/giu, (_match, flag: string, openQuote: string, header: string, closeQuote: string) => {
+      const separator = header.indexOf(":");
+      const name = separator >= 0 ? header.slice(0, separator + 1) : "Header:";
+      return `${flag}${openQuote}${name} [REDACTED]${closeQuote}`;
+    })
+    .replace(/((?:-b|--cookie|--cookie-jar|-u|--user|-p|--password)\s+)(?:"[^"]*"|'[^']*'|[^\s]+)/giu, "$1[REDACTED]")
+    .replace(/([?&](?:api[_-]?key|access[_-]?token|token|password|secret|signature)=)[^&#\s]+/giu, "$1[REDACTED]")
+    .replace(/:\/\/([^\s/:@]+):([^\s/@]+)@/gu, "://$1:[REDACTED]@")
+    .replace(/-----BEGIN [^-\r\n]{1,80}-----[\s\S]*?-----END [^-\r\n]{1,80}-----/gu, "[REDACTED PRIVATE KEY]")
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/gu, "[REDACTED]")
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{16,}|xox[baprs]-[A-Za-z0-9-]{16,})\b/gu, "[REDACTED]")
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu, "[REDACTED]");
+  // Provider-neutral high-entropy fallback. Preserve ordinary hashes/IDs only
+  // when they are not mixed alphabetic+numeric bearer-like tokens.
+  redacted = redacted.replace(/\b[A-Za-z0-9_+/=-]{32,}\b/gu, (token) =>
+    /[A-Za-z]/u.test(token) && /\d/u.test(token) ? "[REDACTED]" : token);
+  return redacted;
 }
 
 export function commandProcessId(sessionId: string, toolCallId: string): string {
@@ -72,22 +95,30 @@ export function subagentProcessId(sessionId: string, toolCallId: string, childId
 function commandArgument(argumentsValue: ToolExecutionState["arguments"]): string {
   if (!argumentsValue || typeof argumentsValue !== "object" || Array.isArray(argumentsValue)) return "Shell command";
   const command = argumentsValue.command;
-  return redactProcessText(utf8Prefix(typeof command === "string" && command.trim() ? command.trim() : "Shell command", 2_048).value);
+  const source = typeof command === "string" && command.trim() ? command.trim() : "Shell command";
+  return utf8Prefix(redactProcessText(source), 2_048).value;
 }
 
 function processOutput(value: string | undefined): { value: string; truncated: boolean } | undefined {
   if (value === undefined) return undefined;
-  const output = utf8Suffix(value, 32 * 1_024);
-  return { ...output, value: redactProcessText(output.value) };
+  return utf8Suffix(redactProcessText(value), 32 * 1_024);
+}
+
+function boundedDurationMs(value: number | undefined, startedAt?: string, terminalAt?: string): number | undefined {
+  const derived = startedAt && terminalAt ? Date.parse(terminalAt) - Date.parse(startedAt) : undefined;
+  const candidate = value ?? derived;
+  if (candidate === undefined || !Number.isFinite(candidate) || candidate < 0) return undefined;
+  return Math.min(Number.MAX_SAFE_INTEGER, Math.round(candidate));
 }
 
 /** Projects only the assistant-owned runtime bash tool state supplied by
  * RuntimeSlot. Direct user bash and Terminal PTYs never enter this function. */
 export function commandProcessFromTool(sessionId: string, tool: ToolExecutionState): SessionProcessActivity | undefined {
-  if (tool.toolName !== "bash") return undefined;
+  if (tool.toolName !== "bash" || tool.extensionOrigin !== undefined) return undefined;
   const terminalAt = tool.status === "running" ? undefined : tool.completedAt ?? tool.updatedAt;
   const state: SessionProcessState = tool.status === "running" ? "running" : tool.status === "failed" ? "failed" : "completed";
   const output = processOutput(tool.output);
+  const durationMs = boundedDurationMs(tool.durationMs, tool.startedAt, terminalAt);
   return {
     version: 1,
     processId: commandProcessId(sessionId, tool.toolCallId),
@@ -104,6 +135,7 @@ export function commandProcessFromTool(sessionId: string, tool: ToolExecutionSta
     },
     visibility: terminalAt ? "recent" : "active",
     startedAt: tool.startedAt,
+    ...(durationMs === undefined ? {} : { durationMs }),
     title: "Command",
     command: commandArgument(tool.arguments),
     ...(output ? { outputTail: output.value } : {}),
@@ -135,7 +167,12 @@ function childRows(
   const parentState = extensionState(activity.lifecycle?.state);
   const parentIsTerminal = terminalStates.has(parentState);
   for (const child of children) {
-    const processId = subagentProcessId(sessionId, activity.toolCallId, child.id);
+    // Compatibility child IDs may be label/index fallbacks. They are useful to
+    // the old extension renderer but are not process ownership evidence.
+    const exactChildId = child.producerId;
+    const processId = exactChildId
+      ? subagentProcessId(sessionId, activity.toolCallId, exactChildId)
+      : undefined;
     const reportedState = extensionState(child.lifecycle ?? (child.status === "running" ? "running" : child.status === "failed" ? "failed" : "completed"));
     // A terminal receipt cannot author an active historical child. Conversely,
     // a child may finish while its workflow parent remains active; Gateway
@@ -147,13 +184,16 @@ function childRows(
         : activity.lifecycle?.observedAt ?? activity.updatedAt
       : undefined;
     const output = processOutput(child.output);
-    const executable = !(child.children?.length)
+    const durationMs = boundedDurationMs(child.durationMs ?? activity.durationMs, activity.startedAt, terminalAt);
+    const executable = exactChildId !== undefined && (
+      !(child.children?.length)
       || child.childSessionRef !== undefined
       || child.currentTool !== undefined
       || child.output !== undefined
       || child.toolCount !== undefined
-      || child.turnCount !== undefined;
-    if (executable) rows.push({
+      || child.turnCount !== undefined
+    );
+    if (executable && processId) rows.push({
       version: 1,
       processId,
       kind: "subagent",
@@ -171,9 +211,10 @@ function childRows(
       },
       visibility: terminalAt ? "recent" : state === "unknown" ? "unknown" : "active",
       startedAt: activity.startedAt,
+      ...(durationMs === undefined ? {} : { durationMs }),
       title: utf8Prefix(child.label, 512).value,
       ...(child.currentTool ? { currentTool: utf8Prefix(child.currentTool, 2_048).value } : {}),
-      ...(child.currentPath ? { currentPathBasename: utf8Prefix(child.currentPath, 2_048).value } : {}),
+      ...(child.currentPath ? { currentPathBasename: utf8Prefix(basename(child.currentPath), 2_048).value } : {}),
       ...(output ? { outputTail: output.value } : {}),
       outputTruncated: output?.truncated === true,
       ...(child.toolCount === undefined ? {} : { toolCount: Math.max(0, child.toolCount) }),
@@ -187,7 +228,7 @@ function childRows(
       sessionId,
       activity,
       child.children,
-      executable ? processId : parentProcessId,
+      executable && processId ? processId : parentProcessId,
     ));
   }
   return rows;
@@ -195,15 +236,26 @@ function childRows(
 
 export function subagentProcessesFromActivity(sessionId: string, activity: ExtensionRunActivity): SessionProcessActivity[] {
   if (activity.children.length > 0) return childRows(sessionId, activity, activity.children);
-  const processId = subagentProcessId(sessionId, activity.toolCallId, activity.runId ?? activity.activityId ?? activity.id);
+  // Workflow roots are orchestration containers, not executable subagents.
+  // A single/sync run still has exact run identity and remains a valid row.
+  if (!activity.runId || activity.mode?.toLowerCase() === "workflow") return [];
+  const mode = subagentMode(activity.mode);
+  const hasExecutionEvidence = activity.currentTool !== undefined
+    || activity.output !== undefined || activity.toolCount !== undefined
+    || activity.turnCount !== undefined || activity.lifecycle?.producerUpdatedAt !== undefined;
+  // An asyncId-only launcher acknowledgement has correlation but no observed
+  // child execution. Do not turn that settled launcher into a phantom process.
+  if (mode === "asynchronous" && !hasExecutionEvidence) return [];
+  const processId = subagentProcessId(sessionId, activity.toolCallId, activity.runId);
   const state = extensionState(activity.lifecycle?.state ?? (activity.status === "running" ? "running" : activity.status === "failed" ? "failed" : "completed"));
   const terminalAt = terminalStates.has(state) ? activity.lifecycle?.terminalAt ?? activity.completedAt : undefined;
   const output = processOutput(activity.output);
+  const durationMs = boundedDurationMs(activity.durationMs, activity.startedAt, terminalAt);
   return [{
     version: 1,
     processId,
     kind: "subagent",
-    executionMode: subagentMode(activity.mode),
+    executionMode: mode,
     source: "admittedExtension",
     lifecycle: {
       version: 1,
@@ -216,9 +268,10 @@ export function subagentProcessesFromActivity(sessionId: string, activity: Exten
     },
     visibility: terminalAt ? "recent" : state === "unknown" ? "unknown" : "active",
     startedAt: activity.startedAt,
+    ...(durationMs === undefined ? {} : { durationMs }),
     title: utf8Prefix(activity.title === "Pi Subagents" ? "Subagent" : activity.title, 512).value,
     ...(activity.currentTool ? { currentTool: utf8Prefix(activity.currentTool, 2_048).value } : {}),
-    ...(activity.currentPath ? { currentPathBasename: utf8Prefix(activity.currentPath, 2_048).value } : {}),
+    ...(activity.currentPath ? { currentPathBasename: utf8Prefix(basename(activity.currentPath), 2_048).value } : {}),
     ...(output ? { outputTail: output.value } : {}),
     outputTruncated: output?.truncated === true,
     ...(activity.toolCount === undefined ? {} : { toolCount: Math.max(0, activity.toolCount) }),
@@ -285,7 +338,7 @@ export function processOverview(
   };
 }
 
-function commandHistory(manager: ReadonlySessionManager): SessionProcessActivity[] {
+function commandHistory(manager: ReadonlySessionManager, excludedToolCallIds: ReadonlySet<string>): SessionProcessActivity[] {
   const declarations = new Map<string, { command: string; timestamp: string }>();
   const results: SessionProcessActivity[] = [];
   for (const entry of manager.getBranch()) {
@@ -293,9 +346,12 @@ function commandHistory(manager: ReadonlySessionManager): SessionProcessActivity
     const message = entry.message;
     if (message.role === "assistant") {
       for (const part of message.content) {
-        if (part.type !== "toolCall" || part.name !== "bash") continue;
+        if (part.type !== "toolCall" || part.name !== "bash" || excludedToolCallIds.has(part.id)) continue;
         const raw = part.arguments && typeof part.arguments.command === "string" ? part.arguments.command : "Shell command";
-        declarations.set(part.id, { command: utf8Prefix(raw, 2_048).value, timestamp: entry.timestamp });
+        declarations.set(part.id, {
+          command: utf8Prefix(raw, 2_048).value,
+          timestamp: new Date(message.timestamp).toISOString(),
+        });
       }
       continue;
     }
@@ -304,7 +360,8 @@ function commandHistory(manager: ReadonlySessionManager): SessionProcessActivity
     if (!declaration) continue;
     const outputValue = message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
     const output = outputValue ? processOutput(outputValue) : undefined;
-    const terminalAt = entry.timestamp;
+    const terminalAt = new Date(message.timestamp).toISOString();
+    const durationMs = boundedDurationMs(undefined, declaration.timestamp, terminalAt);
     results.push({
       version: 1,
       processId: commandProcessId(manager.getSessionId(), message.toolCallId),
@@ -322,6 +379,7 @@ function commandHistory(manager: ReadonlySessionManager): SessionProcessActivity
       },
       visibility: "historical",
       startedAt: declaration.timestamp,
+      ...(durationMs === undefined ? {} : { durationMs }),
       title: "Command",
       command: redactProcessText(declaration.command),
       ...(output ? { outputTail: output.value } : {}),
@@ -333,9 +391,14 @@ function commandHistory(manager: ReadonlySessionManager): SessionProcessActivity
 }
 
 export function canonicalProcessHistory(manager: ReadonlySessionManager): SessionProcessActivity[] {
-  const commands = commandHistory(manager);
-  const subagents = extensionActivityReceipts(manager.getBranch(), manager.getSessionId())
-    .flatMap(({ receipt }) => subagentProcessesFromActivity(manager.getSessionId(), extensionReceiptActivity(receipt)));
+  const receipts = extensionActivityReceipts(manager.getBranch(), manager.getSessionId());
+  const extensionToolCallIds = new Set(receipts.map(({ receipt }) => receipt.toolCallId));
+  const commands = commandHistory(manager, extensionToolCallIds);
+  const subagents = receipts
+    .flatMap(({ receipt }) => subagentProcessesFromActivity(manager.getSessionId(), extensionReceiptActivity(receipt)))
+    // Canonical pages are the Earlier partition. Mounted five-minute rows are
+    // supplied independently by RuntimeSlot and deduplicated by processId.
+    .map((activity) => ({ ...activity, visibility: "historical" as const }));
   const byID = new Map<string, SessionProcessActivity>();
   for (const activity of [...commands, ...subagents]) {
     const previous = byID.get(activity.processId);
@@ -371,26 +434,32 @@ export function listProcessHistory(
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > all.length) throw new Error("process history cursor invalid");
   }
   const boundedLimit = Math.min(MAX_PROCESS_HISTORY_PAGE, Math.max(1, Math.floor(limit)));
-  const pageEnd = Math.min(all.length, offset + boundedLimit);
+  const maximumEnd = Math.min(all.length, offset + boundedLimit);
   const activities: SessionProcessActivity[] = [];
   let bytes = 2;
   let omittedBytes = 0;
   let omittedCount = 0;
-  for (let index = offset; index < pageEnd; index += 1) {
+  let nextOffset = offset;
+  for (let index = offset; index < maximumEnd; index += 1) {
     const activity = all[index]!;
     const size = Buffer.byteLength(JSON.stringify(activity)) + 1;
     if (bytes + size > MAX_PROCESS_HISTORY_BYTES) {
+      // A row that only exhausts this page's remainder belongs at the next
+      // cursor. Only a row too large for an otherwise empty page is omitted.
+      if (activities.length > 0 || omittedCount > 0) break;
       omittedBytes += size;
       omittedCount += 1;
+      nextOffset = index + 1;
       continue;
     }
     activities.push(activity);
     bytes += size;
+    nextOffset = index + 1;
   }
   return {
     activities,
     historyRevision: revision,
-    ...(pageEnd < all.length ? { nextCursor: `${revision}:${pageEnd}` } : {}),
+    ...(nextOffset < all.length ? { nextCursor: `${revision}:${nextOffset}` } : {}),
     ...(omittedCount > 0 ? { omissions: { count: omittedCount, bytes: omittedBytes, reason: "bytes" as const } } : {}),
   };
 }

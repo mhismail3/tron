@@ -737,22 +737,26 @@ and credential separation.
 
 ## Unified session process activity
 
-The additive `process-history.v1` contract observes execution that already has an
+The additive `process-activity.v1` projection observes execution that already has an
 authoritative producer; it does not add another shell tool, detached executor,
 PTY, process supervisor, or event journal. The current producers are assistant-owned
 Pi `bash` tool executions and structured synchronous/asynchronous delegated runs.
 Direct user `!` bash, Terminal-sheet PTYs, ordinary tools, administrative work, and
-shell grandchildren inferred from command syntax are excluded. A future producer
+shell grandchildren inferred from command syntax are excluded. The canonical `bash`
+tool name is reserved against extension registration, and live command admission also
+rejects any tool state carrying extension origin. A future producer
 may join only with exact session/tool ownership, bounded lifecycle data, monotonic
 replacement evidence, and authoritative terminal evidence.
 
 `SessionProcessActivity` gives command and subagent rows a stable namespaced
 `processId`, typed source/mode/lifecycle, bounded command/current-tool/output facts,
-and an optional opaque validated child-session reference. Absolute session and
+an optional bounded `durationMs` derived only from existing producer timing or canonical
+start/terminal timestamps, and an optional opaque validated child-session reference. Absolute session and
 artifact paths, PIDs, environment values, and unbounded task/output data never cross
-the wire. Bounded command/output previews redact common credential assignments,
-flags, JSON keys, authorization headers, and URL userinfo without modifying canonical
-JSONL. `SessionProcessOverview` is the shallow composer authority:
+the wire. Bounded command/output previews conservatively mask environment assignments,
+headers/cookies, long and short credential flags, JSON/query keys, URL userinfo, PEM
+blocks, recognizable provider tokens, JWTs, and high-entropy bearer-like strings without
+modifying canonical JSONL. `SessionProcessOverview` is the shallow composer authority:
 active/recent/problem counts, revision, Gateway `asOf`, and nearest expiry. High-frequency
 output remains in bounded process deltas and does not require a transcript rebuild.
 
@@ -762,18 +766,36 @@ revisioned expiry snapshot even when no other session event occurs, and reconstr
 recent commands from canonical Pi tool declarations/results plus recent subagents from
 their canonical receipts after runtime acquisition. Existing 15-minute extension
 compatibility fields do not extend the process deadline. Active work always outranks
-recent terminal work, and expiry removes only the disposable projection.
+recent terminal work. Expiry removes only the disposable projection while retaining a
+bounded terminal tombstone so late advisory artifacts cannot resurrect the same process.
+Process replacement deltas carry exact removed process IDs, including removal-only frames,
+so a re-keyed or retired producer row cannot remain mounted on iOS.
 
 `session.processHistory.list` and `.get` merge canonical assistant `bash` declarations/results
 with normalized subagent terminal receipts under one bounded branch-derived revision and
-opaque cursor. Ordinary synchronous command results do not receive duplicate custom
-receipts. Old `tron.extension-activity.v1` entries remain readable; newer receipts may
-add a validated opaque child-session ID but continue to omit paths, task text, and output.
+opaque cursor. Pagination stops before a row that exhausts the current page's byte
+remainder so that row remains reachable at the next cursor; only a row that cannot fit
+an empty page is omitted and reported in omission count/bytes. Cursors conflict when the
+canonical generation changes. Ordinary synchronous command results do not receive duplicate custom
+receipts. Old `tron.extension-activity.v1` entries remain readable by extension history;
+process history admits individual historical children only when the receipt records their
+exact producer ID. Newer receipts may add that identity and a validated opaque
+child-session ID but continue to omit paths, task text, and output.
 
+The companion `process-history.v1` capability advertises canonical history reads.
 The `process-transcript.v1` capability authorizes `session.processTranscript.open`,
 `.page`, and `.close` through the exact parent process-to-child relationship. A
-connection-owned lease watches only the validated canonical child file, emits bounded
-invalidation events, and reopens it through a read-only projection for canonical paging.
+connection-owned lease watches only the validated canonical child file, installs that
+watch before capturing its initial page, latches any append in the baseline-publication
+window, emits bounded invalidation events, and reopens it through a read-only projection
+for canonical paging.
+Open, page, and invalidation reads each revalidate the exact live parent process/tool/run
+binding, required parent header, structural subagent marker, canonical path, and original
+file identity; replacement or ambiguity closes/fails the lease. Transcript projection
+parses the already-open, identity-pinned descriptor through a pure read-only branch adapter
+under an explicit 64 MiB per-session parse budget, so a replace/read/swap-back race cannot
+redirect parsing to another inode and a legitimate but unbounded child file cannot exhaust
+Gateway memory.
 It never calls `RuntimeRegistry.acquire` for the child, exposes mutation methods, or
 keeps a second transcript mirror. Producer admission requires the exact owning tool/run,
 a unique child identity, and a regular session file structurally nested beneath the

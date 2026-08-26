@@ -213,6 +213,8 @@ export interface ExtensionRunLifecycle {
  * as a live card while the extension remains the authority for execution. */
 export interface ExtensionRunChild {
   id: string;
+  /** Exact producer identity. Absent when `id` is only a compatibility display fallback. */
+  producerId?: string;
   label: string;
   /** Opaque validated child-session identity. Absolute paths never cross the wire. */
   childSessionRef?: string;
@@ -299,6 +301,8 @@ export interface SessionProcessActivity {
   lifecycle: SessionProcessLifecycle;
   visibility: SessionProcessVisibility;
   startedAt?: string;
+  /** Bounded producer/canonical elapsed time; absent when no authoritative interval exists. */
+  durationMs?: number;
   title: string;
   command?: string;
   currentTool?: string;
@@ -326,7 +330,10 @@ export interface SessionProcessOverview {
 }
 
 export interface SessionProcessDelta {
-  activity: SessionProcessActivity;
+  /** One exact upsert. A removal-only frame deliberately omits it. */
+  activity?: SessionProcessActivity;
+  /** Exact identities removed or re-keyed by the same authoritative replacement. */
+  removedProcessIds?: string[];
   processRevision: number;
   processAsOf: string;
   overview: SessionProcessOverview;

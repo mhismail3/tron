@@ -10,7 +10,7 @@ import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../sessions/extension-activity-history.js";
-import { PROCESS_ACTIVITY_HISTORY_CAPABILITY, PROCESS_TRANSCRIPT_CAPABILITY } from "../sessions/process-activity.js";
+import { PROCESS_ACTIVITY_CAPABILITY, PROCESS_ACTIVITY_HISTORY_CAPABILITY, PROCESS_TRANSCRIPT_CAPABILITY } from "../sessions/process-activity.js";
 import { ProcessTranscriptLeaseStore } from "./process-transcript-leases.js";
 import type { FilesystemService } from "../machine/filesystem-service.js";
 import { GitWorktreeService, type SessionSourceControlRequest } from "../machine/git-worktree-service.js";
@@ -192,6 +192,7 @@ export class GatewayService {
         "terminal.v1",
         "extension-presentation.v1",
         EXTENSION_ACTIVITY_HISTORY_CAPABILITY,
+        PROCESS_ACTIVITY_CAPABILITY,
         PROCESS_ACTIVITY_HISTORY_CAPABILITY,
         PROCESS_TRANSCRIPT_CAPABILITY,
         "queue-management.v1",

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { copyFile, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { getExamplesPath, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -8,7 +8,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-work
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
 import type { NotificationService } from "../notifications/notification-service.js";
-import type { ExtensionRunActivity, SessionSummaryUpdate } from "../protocol/types.js";
+import type { ExtensionRunActivity, ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../protocol/types.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 
@@ -42,6 +42,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     manager.appendMessage(fauxAssistantMessage(`cold acquisition ${label}`));
     if (options.name) manager.appendSessionInfo(options.name);
     const runtimeFactory = vi.fn(async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }));
+    const events: Array<{ topic: string; payload: any }> = [];
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
@@ -50,7 +51,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       workRegistry: options.workRegistry,
       modelRuntimeFactory: runtimeFactory,
       trust: new TrustService(agentDir),
-      broadcast: () => {},
+      broadcast: (_sessionId, topic, payload) => events.push({ topic, payload }),
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
     });
@@ -63,6 +64,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       manager,
       registry,
       runtimeFactory,
+      events,
       sessionFile: manager.getSessionFile()!,
     };
   }
@@ -73,24 +75,17 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
   });
 
-  it("pages a structurally indexed subagent without acquiring a writable runtime", async () => {
-    const fixture = await coldFixture("readonly-subagent", { nested: true, name: "subagent-worker" });
+  it("rejects read-only child access without an exact live parent process owner", async () => {
+    const fixture = await coldFixture("readonly-unowned", { nested: true, name: "subagent-worker" });
     const sessionId = fixture.manager.getSessionId();
-    const path = await fixture.registry.resolveReadOnlySubagentPath(sessionId);
-    expect(path).toBe(await realpath(fixture.sessionFile));
-    const page = await fixture.registry.readOnlySubagentTranscriptPage(sessionId, path);
-    expect(page.total).toBeGreaterThan(0);
-    expect(page.revision).toMatch(/^[a-f0-9]{32}$/u);
-    await expect(fixture.registry.acquire(sessionId)).rejects.toMatchObject({ code: "conflict" });
-  });
-
-  it("rejects a partial child-session append rather than parsing guessed JSONL", async () => {
-    const fixture = await coldFixture("readonly-partial", { nested: true, name: "subagent-worker" });
-    const sessionId = fixture.manager.getSessionId();
-    const path = await fixture.registry.resolveReadOnlySubagentPath(sessionId);
-    await writeFile(path, "{\"type\":\"message\"", { flag: "a" });
-    await expect(fixture.registry.readOnlySubagentTranscriptPage(sessionId, path))
-      .rejects.toMatchObject({ code: "busy", retryable: true });
+    await expect(fixture.registry.resolveReadOnlySubagentPath(
+      sessionId,
+      await realpath(fixture.sessionFile),
+      "missing-parent",
+      "missing-process",
+      "missing-run",
+    )).rejects.toMatchObject({ code: "not_found" });
+    expect(fixture.runtimeFactory).not.toHaveBeenCalled();
   });
 
   it("announces a final successful Pi settlement through the inline notification hook", async () => {
@@ -1712,6 +1707,67 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     if (receiptAppend) expect(receiptAppend.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("does not retain unwatched async launcher acknowledgements as running work", async () => {
+    const fixture = await coldFixture("unwatched-async-launcher");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const update = (slot as unknown as {
+      updateExtensionActivity: (
+        toolCallId: string, toolName: string, origin: ExtensionToolOrigin,
+        status: "running" | "completed" | "failed", startedAt: string,
+        updatedAt: string, value: unknown, completedAt?: string, durationMs?: number,
+      ) => ExtensionRunActivity | undefined;
+      extensionActivityWatchers: Map<string, unknown>;
+    });
+    const now = new Date().toISOString();
+    const origin: ExtensionToolOrigin = { source: "project" };
+
+    const idOnly = update.updateExtensionActivity(
+      "id-only-tool", "subagent", origin, "completed", now, now,
+      { details: { asyncId: "id-only-run", mode: "async" } }, now, 44,
+    );
+    expect(idOnly?.status).toBe("completed");
+    expect(update.extensionActivityWatchers.has("id-only-tool")).toBe(false);
+
+    const rejectedDirectory = update.updateExtensionActivity(
+      "rejected-dir-tool", "subagent", origin, "completed", now, now,
+      { details: { asyncId: "rejected-dir-run", mode: "async", asyncDir: "/tmp/not-owned-by-this-session" } }, now, 44,
+    );
+    expect(rejectedDirectory?.status).toBe("completed");
+    expect(update.extensionActivityWatchers.has("rejected-dir-tool")).toBe(false);
+
+    await fixture.registry.waitUntilIdle();
+    expect(slot.isDrainBusy).toBe(false);
+    expect(slot.snapshot().processActivities ?? []).toEqual([]);
+  });
+
+  it("emits exact removals when process producer identity is replaced", async () => {
+    const fixture = await coldFixture("process-removal-delta");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      replaceProcessesForToolCall: (toolCallId: string, activities: SessionProcessActivity[]) => void;
+      publishProcessesForToolCall: (toolCallId: string) => void;
+    };
+    const now = new Date().toISOString();
+    const process = (processId: string, sequence: number): SessionProcessActivity => ({
+      version: 1, processId, kind: "subagent", executionMode: "asynchronous",
+      source: "delegatedAgent", visibility: "active", title: "worker", outputTruncated: false,
+      lifecycle: { version: 1, state: "running", attention: "none", sequence, observedAt: now },
+      toolCallId: "tool-1", runId: "run-1",
+    });
+    internal.replaceProcessesForToolCall("tool-1", [process("process-old", 1)]);
+    internal.publishProcessesForToolCall("tool-1");
+    fixture.events.splice(0);
+
+    internal.replaceProcessesForToolCall("tool-1", [process("process-new", 2)]);
+    internal.publishProcessesForToolCall("tool-1");
+    const delta = fixture.events.find((event) => event.topic === "session.processActivity")?.payload.data;
+    expect(delta).toMatchObject({
+      activity: { processId: "process-new" },
+      removedProcessIds: ["process-old"],
+      overview: { visibility: "active", activeCount: 1 },
+    });
+  });
+
   it("claims receipt ownership before watcher-driven terminal projection", async () => {
     const fixture = await coldFixture("watcher-terminal-receipt");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
@@ -1796,9 +1852,31 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       runId,
       path: await realpath(childFile),
     });
+    const admission = await fixture.registry.resolveReadOnlySubagentPath(
+      "validated-child-session", await realpath(childFile), slot.id, process!.processId, runId,
+    );
+    const page = await fixture.registry.readOnlySubagentTranscriptPage(
+      "validated-child-session", admission.path, slot.id, process!.processId, runId,
+      undefined, undefined, admission.fileIdentity,
+    );
+    expect(page.total).toBeGreaterThan(0);
+    expect(page.revision).toMatch(/^[a-f0-9]{32}$/u);
+    expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
+    await expect(fixture.registry.resolveReadOnlySubagentPath(
+      "validated-child-session", admission.path, slot.id, "wrong-process", runId,
+    )).rejects.toMatchObject({ code: "not_found" });
     await waitUntil(() => slot.processHistory(undefined, 25, { kind: "subagent" }).activities.length === 1);
     expect(slot.processHistory(undefined, 25, { kind: "subagent" }).activities[0])
       .toMatchObject({ childSessionRef: "validated-child-session" });
+
+    const replacement = `${childFile}.replacement`;
+    await writeFile(replacement, await readFile(childFile));
+    await rm(childFile);
+    await rename(replacement, childFile);
+    await expect(fixture.registry.readOnlySubagentTranscriptPage(
+      "validated-child-session", admission.path, slot.id, process!.processId, runId,
+      undefined, undefined, admission.fileIdentity,
+    )).rejects.toMatchObject({ code: "conflict", retryable: true });
   });
 
   it("fails closed for foreign or wrong-run child-session evidence", async () => {
@@ -1840,6 +1918,29 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       results: [{ runId: "child-run", sessionFile: oversizedFile }],
     });
     expect(oversized.children[0]?.childSessionRef).toBeUndefined();
+
+    const missingParentDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "expected-run", "run-missing-parent");
+    await mkdir(missingParentDirectory, { recursive: true });
+    const missingParent = SessionManager.create(fixture.cwd, missingParentDirectory, { id: "missing-parent-child" });
+    missingParent.appendSessionInfo("subagent-worker");
+    const missingParentResult = attach(activity, {
+      runId: "expected-run",
+      results: [{ runId: "child-run", sessionFile: missingParent.getSessionFile() }],
+    });
+    expect(missingParentResult.children[0]?.childSessionRef).toBeUndefined();
+
+    const ordinaryDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "expected-run", "run-ordinary");
+    await mkdir(ordinaryDirectory, { recursive: true });
+    const ordinary = SessionManager.create(fixture.cwd, ordinaryDirectory, {
+      id: "ordinary-child",
+      parentSession: parentFile,
+    });
+    ordinary.appendSessionInfo("ordinary-worker");
+    const ordinaryResult = attach(activity, {
+      runId: "expected-run",
+      results: [{ runId: "child-run", sessionFile: ordinary.getSessionFile() }],
+    });
+    expect(ordinaryResult.children[0]?.childSessionRef).toBeUndefined();
   });
 
   it("rejects canonical artifact paths outside the exact project run root", async () => {

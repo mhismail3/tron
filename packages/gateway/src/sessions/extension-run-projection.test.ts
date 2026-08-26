@@ -172,7 +172,7 @@ describe("projectExtensionRunActivity", () => {
 
   it("keeps detached async work live after the launching tool returns", () => {
     const activity = projectExtensionRunActivity({
-      details: { mode: "single", asyncId: "async-1", results: [] },
+      details: { mode: "single", asyncId: "async-1", asyncDir: "/tmp/admitted-async-1", results: [] },
     }, {
       ...base,
       status: "completed",
@@ -181,6 +181,18 @@ describe("projectExtensionRunActivity", () => {
     expect(activity.status).toBe("running");
     expect(activity.completedAt).toBeUndefined();
     expect(activity.runId).toBe("async-1");
+  });
+
+  it("does not keep an asyncId-only launcher acknowledgement running", () => {
+    const activity = projectExtensionRunActivity({
+      details: { mode: "single", asyncId: "async-without-artifact", results: [] },
+    }, {
+      ...base,
+      status: "completed",
+      completedAt: "2026-01-01T00:00:03.000Z",
+    });
+    expect(activity.status).toBe("completed");
+    expect(activity.completedAt).toBe("2026-01-01T00:00:03.000Z");
   });
 
   it("does not resurrect a terminal activity from a late async acknowledgement", () => {

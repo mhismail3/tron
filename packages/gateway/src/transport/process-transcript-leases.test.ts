@@ -8,8 +8,12 @@ import { ProcessTranscriptLeaseStore } from "./process-transcript-leases.js";
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
-function page(revision: string, total = 0) {
-  return { items: [], start: 0, end: 0, total, revision };
+function page(revision: string, total = 0, fileIdentity = "1:1") {
+  return { items: [], start: 0, end: 0, total, revision, fileIdentity };
+}
+
+function admission(path: string) {
+  return { path, fileIdentity: "1:1" };
 }
 
 describe("ProcessTranscriptLeaseStore", () => {
@@ -19,7 +23,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     const path = join(root, "child.jsonl");
     await writeFile(path, "{}\n");
     const sessions = {
-      resolveReadOnlySubagentPath: vi.fn(async () => path),
+      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
       readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
     } as unknown as RuntimeRegistry;
     const store = new ProcessTranscriptLeaseStore(sessions);
@@ -29,6 +33,10 @@ describe("ProcessTranscriptLeaseStore", () => {
     expect(opened).toMatchObject({ processId: "process-1", childSessionRef: "child-1", revision: "revision-1" });
     await expect(store.page("client-2", opened.leaseId)).rejects.toMatchObject({ code: "not_found" });
     await expect(store.page("client-1", opened.leaseId, undefined, undefined, "stale")).rejects.toMatchObject({ code: "conflict" });
+    await store.page("client-1", opened.leaseId);
+    expect(sessions.readOnlySubagentTranscriptPage).toHaveBeenLastCalledWith(
+      "child-1", path, "parent-1", "process-1", "run-1", undefined, undefined, "1:1",
+    );
     expect(store.closeOwned("client-1", opened.leaseId)).toBe(true);
     await expect(store.page("client-1", opened.leaseId)).rejects.toMatchObject({ code: "not_found" });
   });
@@ -39,7 +47,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     const path = join(root, "child.jsonl");
     await writeFile(path, "{}\n");
     const sessions = {
-      resolveReadOnlySubagentPath: vi.fn(async () => path),
+      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
       readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
     } as unknown as RuntimeRegistry;
     const store = new ProcessTranscriptLeaseStore(sessions);
@@ -55,7 +63,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     await writeFile(path, "{}\n");
     let revision = "revision-1";
     const sessions = {
-      resolveReadOnlySubagentPath: vi.fn(async () => path),
+      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
       readOnlySubagentTranscriptPage: vi.fn(async () => page(revision, revision === "revision-1" ? 0 : 1)),
     } as unknown as RuntimeRegistry;
     const store = new ProcessTranscriptLeaseStore(sessions);
@@ -68,7 +76,71 @@ describe("ProcessTranscriptLeaseStore", () => {
       "parent-1",
       expect.objectContaining({ leaseId: opened.leaseId, revision: "revision-2", total: 1 }),
     ));
+    // Invalidation announces revision-2 but revision-1 remains the client's
+    // acknowledged lease generation until this same-lease refresh completes.
+    await expect(store.page(
+      "client-1", opened.leaseId, undefined, undefined, "revision-1",
+    )).resolves.toMatchObject({ revision: "revision-2", total: 1 });
+    await expect(store.page(
+      "client-1", opened.leaseId, undefined, undefined, "revision-1",
+    )).rejects.toMatchObject({ code: "conflict" });
     store.releaseClient("client-1");
+  });
+
+  it("does not lose an append between watcher installation and baseline publication", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-process-open-race-"));
+    roots.push(root);
+    const path = join(root, "child.jsonl");
+    await writeFile(path, "{}\n");
+    let reads = 0;
+    const sessions = {
+      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
+      readOnlySubagentTranscriptPage: vi.fn(async () => {
+        reads += 1;
+        if (reads === 1) {
+          await writeFile(path, "{\"appendedDuringOpen\":true}\n");
+          return page("revision-1");
+        }
+        return page("revision-2", 1);
+      }),
+    } as unknown as RuntimeRegistry;
+    const store = new ProcessTranscriptLeaseStore(sessions);
+    const notify = vi.fn();
+    const opened = await store.open(
+      "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify,
+    );
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(
+      "session.processTranscript.changed",
+      "parent-1",
+      expect.objectContaining({ leaseId: opened.leaseId, revision: "revision-2" }),
+    ));
+    store.releaseClient("client-1");
+  });
+
+  it("closes an invalidated lease when exact authorization or file identity changes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-process-replaced-"));
+    roots.push(root);
+    const path = join(root, "child.jsonl");
+    await writeFile(path, "{}\n");
+    let replaced = false;
+    const sessions = {
+      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
+      readOnlySubagentTranscriptPage: vi.fn(async () => {
+        if (replaced) throw Object.assign(new Error("replaced"), { code: "conflict", retryable: true });
+        return page("revision-1");
+      }),
+    } as unknown as RuntimeRegistry;
+    const store = new ProcessTranscriptLeaseStore(sessions);
+    const notify = vi.fn();
+    const opened = await store.open("client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify);
+    replaced = true;
+    await writeFile(path, "{\"replaced\":true}\n");
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(
+      "session.processTranscript.changed",
+      "parent-1",
+      expect.objectContaining({ leaseId: opened.leaseId, closed: true, reason: "session unavailable" }),
+    ));
+    await expect(store.page("client-1", opened.leaseId)).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("retires an inactive lease at its bounded timeout", async () => {
@@ -77,7 +149,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     const path = join(root, "child.jsonl");
     await writeFile(path, "{}\n");
     const sessions = {
-      resolveReadOnlySubagentPath: vi.fn(async () => path),
+      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
       readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
     } as unknown as RuntimeRegistry;
     vi.useFakeTimers();
@@ -97,7 +169,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     const path = join(root, "child.jsonl");
     await writeFile(path, "{}\n");
     const sessions = {
-      resolveReadOnlySubagentPath: vi.fn(async () => path),
+      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
       readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
     } as unknown as RuntimeRegistry;
     const store = new ProcessTranscriptLeaseStore(sessions);
