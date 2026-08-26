@@ -804,10 +804,10 @@ never origins, identifiers, tokens, proofs, grants, response bodies, certificate
 Registration reconciles on connection, foreground, profile, permission, and APNs-token changes;
 Worker failure leaves push pending.
 The app accepts no relay URL or private push credential from settings. Remote alerts
-have no badge, inbox, background content fetch, or notification actions. Agent-completion
-alerts carry only a bounded machine/session identity pair in addition to fixed product
+have no app-icon badge, background content fetch, or notification actions. The Settings leading toolbar bell opens a profile-aggregated inbox backed by Gateway's bounded `notification-inbox.v1` resource; `NotificationInboxCoordinator` retains only a bounded local projection, while Gateway list revisions and command-receipt read mutations remain authoritative. The bell uses `bell.badge.fill` and an exact unread accessibility count, rows are newest-first with All/Unread filtering, opening marks one row read, Mark Read clears all Gateway buckets, and details use standard Tron sheet/glass/metadata presentation before routing to the exact chat. Agent-completion
+alerts carry a bounded APNs request ID and machine/session identity pair in addition to fixed product
 copy and the session title. Tap admission rejects partial, oversized, or non-opaque
-routes, resolves the machine only against an already-paired profile, returns to the
+routes and request IDs, resolves the machine only against an already-paired profile, marks the matching canonical inbox item read without delaying navigation, returns to the
 dashboard, and then opens that exact chat through the ordinary profile/session
 navigation owner. A background or cold-launch tap is retained only in memory until the
 scene installs that owner and foreground lifecycle reconciliation completes; it cannot

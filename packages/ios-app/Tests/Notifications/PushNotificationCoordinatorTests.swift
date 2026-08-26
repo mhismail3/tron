@@ -87,9 +87,11 @@ struct PushNotificationCoordinatorTests {
         let admitted = PushNotificationTap.admit([
             "sessionId": "session-123",
             "machineId": "machine-123",
+            "tron": ["kind": "agent_notification", "requestId": "request-abcdefgh"],
         ])
         #expect(admitted.sessionID == "session-123")
         #expect(admitted.machineID == "machine-123")
+        #expect(admitted.requestID == "request-abcdefgh")
         #expect(PushNotificationTap.admit([
             "sessionId": "session-123",
             "machineId": "Mac identity.v1",
@@ -100,6 +102,10 @@ struct PushNotificationCoordinatorTests {
             "machineId": "machine-123",
         ]).sessionID == nil)
         #expect(PushNotificationTap.admit(["url": "https://evil.test"]).sessionID == nil)
+        #expect(PushNotificationTap.admit([
+            "sessionId": "session-123", "machineId": "machine-123",
+            "tron": ["requestId": "../../private"],
+        ]).requestID == nil)
     }
 
     @MainActor

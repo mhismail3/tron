@@ -69,7 +69,15 @@ export function createTronNotifyExtension(input: {
       parameters: Type.Object({ message: Type.String({ minLength: 1, maxLength: 512 }) }, { additionalProperties: false }),
       executionMode: "sequential",
       execute: async (toolCallId, params) => {
-        const status = await input.enqueue({ sessionId: input.sessionId(), sourceId: toolCallId, kind: "explicit", message: params.message });
+        const sessionId = input.sessionId();
+        const status = await input.enqueue({
+          sessionId,
+          sourceId: toolCallId,
+          kind: "explicit",
+          title: input.sessionTitle(),
+          message: params.message,
+          ...(input.machineId ? { route: { sessionId, machineId: input.machineId } } : {}),
+        });
         return {
           content: [{ type: "text", text: status === "queued" ? "Notification queued." : `Notification ${status.replaceAll("_", " ")}.` }],
           details: { status },

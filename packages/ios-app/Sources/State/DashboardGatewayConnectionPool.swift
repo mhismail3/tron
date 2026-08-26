@@ -17,6 +17,7 @@ protocol DashboardGatewayConnectionPoolDelegate: AnyObject {
         sessions: [SessionSummary],
         state: DashboardServerConnectionState
     )
+    func dashboardPoolNotificationInboxChanged(profileID: String)
 }
 
 /// Maintains lightweight dashboard catalog connections for non-focused servers.
@@ -115,6 +116,34 @@ final class DashboardGatewayConnectionPool {
     func diagnostics(for profileID: String) -> GatewayDiagnosticsService? {
         guard let client = entries[profileID]?.client else { return nil }
         return GatewayDiagnosticsService(client: client)
+    }
+
+    func notificationInbox(for profileID: String) async throws -> NotificationInboxGatewayClient.Snapshot {
+        guard let client = entries[profileID]?.client else {
+            throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
+        }
+        return try await NotificationInboxGatewayClient.list(client: client)
+    }
+
+    func markNotificationRead(profileID: String, id: String, commandID: String) async throws {
+        guard let client = entries[profileID]?.client else {
+            throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
+        }
+        try await NotificationInboxGatewayClient.markRead(id: id, client: client, commandID: commandID)
+    }
+
+    func markNotificationRead(profileID: String, requestID: String, commandID: String) async throws {
+        guard let client = entries[profileID]?.client else {
+            throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
+        }
+        try await NotificationInboxGatewayClient.markRead(requestID: requestID, client: client, commandID: commandID)
+    }
+
+    func markAllNotificationsRead(profileID: String, commandID: String) async throws {
+        guard let client = entries[profileID]?.client else {
+            throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
+        }
+        try await NotificationInboxGatewayClient.markAllRead(client: client, commandID: commandID)
     }
 
     func devices(for profileID: String) async throws -> [PairedDevice] {
@@ -295,6 +324,8 @@ final class DashboardGatewayConnectionPool {
             }
         case "session.listChanged":
             scheduleRefresh(profileID: profileID, generation: generation)
+        case "notification.inbox.changed":
+            delegate?.dashboardPoolNotificationInboxChanged(profileID: profileID)
         case "transport.disconnected":
             retireConnectionEpoch(profileID: profileID, generation: generation, state: .reconnecting)
             scheduleReconnect(profileID: profileID, generation: generation)

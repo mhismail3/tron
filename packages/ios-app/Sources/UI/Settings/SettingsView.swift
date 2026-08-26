@@ -10,6 +10,7 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var showsNotifications = false
 
     init(
         scope: Scope = .dashboard,
@@ -117,6 +118,12 @@ struct SettingsView: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NotificationInboxToolbarButton(
+                        unreadCount: model.notificationInbox.unreadCount,
+                        action: { showsNotifications = true }
+                    )
+                }
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Settings") }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
@@ -130,7 +137,11 @@ struct SettingsView: View {
         }
         .tronTopBlur(.sheet)
         .presentationDragIndicator(.hidden)
+        .sheet(isPresented: $showsNotifications) {
+            NotificationInboxView(onOpenSession: onImported)
+        }
         .task {
+            await model.refreshNotificationInbox()
             await model.refreshAll(
                 settingsTarget: projectCWD.map(SettingsTarget.project(cwd:)) ?? .global,
                 providerTarget: projectSessionID.map(ProviderCatalogTarget.session(id:)) ?? .global

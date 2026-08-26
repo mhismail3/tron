@@ -142,6 +142,33 @@ struct PresentationStyleGuardTests {
         #expect(!toolbar.contains("Text(\"Settings\")"))
     }
 
+    @Test("settings owns the notification bell and standardized inbox sheets")
+    func notificationInboxChrome() throws {
+        let settings = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/SettingsView.swift"),
+            encoding: .utf8
+        )
+        let inbox = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/NotificationInboxView.swift"),
+            encoding: .utf8
+        )
+        #expect(settings.contains("ToolbarItem(placement: .topBarLeading)"))
+        #expect(settings.contains("NotificationInboxToolbarButton("))
+        #expect(settings.contains("NotificationInboxView(onOpenSession: onImported)"))
+        #expect(inbox.contains("bell.badge.fill"))
+        #expect(inbox.contains("Open notifications, \\(unreadCount) unread"))
+        #expect(inbox.contains("TronSegmentedControl("))
+        #expect(inbox.contains("TronGlassCard("))
+        #expect(inbox.contains("TronTechnicalMetadataSection("))
+        #expect(inbox.contains("TronToolbarTextLabel("))
+        #expect(inbox.contains(".presentationDetents([.medium, .large])"))
+        #expect(inbox.occurrences(of: "TronSheetTitle(title:") == 2)
+        #expect(inbox.occurrences(of: "Image(systemName: \"checkmark\")") == 2)
+        #expect(!inbox.contains(".pickerStyle(.segmented)"))
+        #expect(!inbox.contains("List {"))
+        #expect(!inbox.contains("Form {"))
+    }
+
     @Test("shared toggles own accessible motion while tool chips retain native glass interaction")
     func sharedToggleMotionAndNativeToolChipInteraction() throws {
         let presentation = try String(
@@ -251,7 +278,7 @@ struct PresentationStyleGuardTests {
         let composedOwners = [
             "AgentDefaultsSettingsView.swift", "AppearanceSettingsView.swift", "ConnectionSettingsView.swift",
             "CustomModelsSettingsView.swift", "GatewayDiagnosticsView.swift", "GatewayLogsSettingsView.swift", "PackagesSettingsView.swift", "ProviderSettingsView.swift",
-            "ResourceSettingsView.swift", "RuntimeBehaviorSettingsView.swift", "SettingsView.swift", "ProjectResourcesView.swift", "ExtensionInteractionSheet.swift",
+            "ResourceSettingsView.swift", "RuntimeBehaviorSettingsView.swift", "SettingsView.swift", "NotificationInboxView.swift", "ProjectResourcesView.swift", "ExtensionInteractionSheet.swift",
             "SessionContextSheet.swift", "SessionTreeSheet.swift",
         ]
         for (url, source) in uiSources where composedOwners.contains(url.lastPathComponent) {

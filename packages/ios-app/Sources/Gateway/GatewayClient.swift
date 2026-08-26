@@ -102,6 +102,7 @@ private actor GatewayEventHub {
         switch delivery.event.preparation {
         case .sessionSummary(let update): return "summary:\(update.sessionId)"
         case .none where delivery.event.topic == "session.listChanged": return "listChanged"
+        case .none where delivery.event.topic == "notification.inbox.changed": return "notificationInboxChanged"
         default: return nil
         }
     }

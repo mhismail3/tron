@@ -29,12 +29,13 @@ async function fixture(
   outcomes?: RelayNotificationOutcome[],
   now: () => number = Date.now,
   rateLimits?: { dailyIntents: number; sessionHourlyIntents: number; targetDailyIntents: number },
+  inboxChanged: () => void = () => {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "tron-notifications-"));
   const store = new NotificationGrantStore(root);
   await store.initialize();
   const relay = fakeRelay(outcomes);
-  const service = new NotificationService(store, relay.client, now, rateLimits);
+  const service = new NotificationService(store, relay.client, now, rateLimits, inboxChanged);
   return { root, store, service, relay };
 }
 
@@ -50,6 +51,12 @@ describe("NotificationGrantStore and NotificationService", () => {
     expect(persisted).not.toContain("sensitive text");
     expect(persisted).not.toContain("apnsToken");
     expect((await store.snapshot()).receipts[0]?.result).toBe("accepted_by_apns");
+    expect((await service.inbox()).notifications[0]).toMatchObject({
+      title: "Tron",
+      message: "Tron has an update. Open Tron to view it.",
+      isUnread: true,
+      outcome: "accepted_by_apns",
+    });
   });
 
   it("uses agent text only for a grant whose user enabled previews", async () => {
@@ -88,6 +95,50 @@ describe("NotificationGrantStore and NotificationService", () => {
     })).resolves.toBe("suppressed");
   });
 
+  it("keeps inbox invalidation callbacks outside canonical notification admission", async () => {
+    const { service } = await fixture(undefined, Date.now, undefined, () => { throw new Error("presentation failed"); });
+    await service.upsertGrant(grant);
+    await expect(service.enqueue({
+      sessionId: "session-callback", sourceId: "source-callback", kind: "agent_finished",
+      title: "Finished", message: "The agent finished responding.",
+    })).resolves.toBe("queued");
+    expect((await service.inbox()).notifications).toHaveLength(1);
+  });
+
+  it("pages canonical inbox rows and owns idempotent read state by notification or APNs request identity", async () => {
+    const changed = vi.fn();
+    const { service, relay, store } = await fixture(undefined, Date.now, undefined, changed);
+    await service.upsertGrant({ ...grant, previewsEnabled: true });
+    for (let index = 0; index < 3; index += 1) {
+      await service.enqueue({
+        sessionId: "session-inbox",
+        sourceId: `source-${index}`,
+        kind: "explicit",
+        title: `Title ${index}`,
+        message: `Message ${index}`,
+        route: { sessionId: "session-inbox", machineId: "machine-abcdefgh" },
+      });
+    }
+    await vi.waitFor(async () => expect((await store.snapshot()).pending).toHaveLength(2));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await service.drain();
+    await vi.waitFor(() => expect(relay.sent).toHaveLength(3));
+    const first = await service.inbox(undefined, 2);
+    expect(first.notifications.map((item) => item.title)).toEqual(["Title 2", "Title 1"]);
+    expect(first.unreadCount).toBe(3);
+    expect(first.nextCursor).toBeDefined();
+    const second = await service.inbox(first.nextCursor, 2);
+    expect(second.notifications.map((item) => item.title)).toEqual(["Title 0"]);
+
+    await expect(service.markInboxRead({ requestId: relay.sent[2].requestId })).resolves.toMatchObject({ changed: true });
+    await expect(service.markInboxRead({ id: first.notifications[0]!.id })).resolves.toMatchObject({ changed: false });
+    expect((await service.inbox()).unreadCount).toBe(2);
+    await expect(service.inbox(first.nextCursor, 2)).rejects.toMatchObject({ code: "conflict" });
+    await expect(service.markAllInboxRead()).resolves.toEqual({ changed: 2 });
+    expect((await service.inbox()).unreadCount).toBe(0);
+    expect(changed.mock.calls.length).toBeGreaterThanOrEqual(6);
+  });
+
   it("disables invalid APNs grants and retains no future audience", async () => {
     const { service, relay } = await fixture(["invalid_token"]);
     await service.upsertGrant(grant);
@@ -95,6 +146,17 @@ describe("NotificationGrantStore and NotificationService", () => {
     await vi.waitFor(async () => expect((await service.status(grant.deviceId)).deviceRegistered).toBe(false));
     await expect(service.enqueue({ sessionId: "session-one", sourceId: "tool-four", kind: "explicit", message: "hello" })).resolves.toBe("unavailable");
     expect(relay.sent).toHaveLength(1);
+  });
+
+  it("marks an undeliverable inbox row failed when its final target is removed", async () => {
+    const changed = vi.fn();
+    const { service, store } = await fixture(["retryable"], Date.now, undefined, changed);
+    await service.upsertGrant(grant);
+    await service.enqueue({ sessionId: "session-remove", sourceId: "source-remove", kind: "explicit", message: "hello" });
+    await vi.waitFor(async () => expect((await store.snapshot()).pending[0]?.targets[0]?.outcome).toBe("retryable"));
+    await service.removeDevice(grant.deviceId);
+    expect((await service.inbox()).notifications[0]).toMatchObject({ outcome: "failed" });
+    expect(changed).toHaveBeenCalled();
   });
 
   it("removes local authority first and drains a durable revocation tombstone", async () => {
@@ -187,6 +249,21 @@ describe("NotificationGrantStore and NotificationService", () => {
     const snapshot = await store.snapshot();
     expect(snapshot.grants).toEqual([]);
     expect(snapshot.revocations.map((item) => item.grantId)).toEqual([grant.grantId]);
+  });
+
+  it("migrates a pre-inbox notification document without losing grant authority", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-notifications-inbox-migration-"));
+    const store = new NotificationGrantStore(root);
+    await store.initialize();
+    const path = join(root, "gateway", "notifications.json");
+    const legacy = JSON.parse(await readFile(path, "utf8"));
+    delete legacy.inbox;
+    await writeFile(path, JSON.stringify(legacy), { mode: 0o600 });
+    const service = new NotificationService(new NotificationGrantStore(root), { available: false } as PushRelayClient);
+    await service.initialize();
+    service.dispose();
+    expect((await service.inbox()).notifications).toEqual([]);
+    expect((await new NotificationGrantStore(root).snapshot()).inbox).toEqual([]);
   });
 
   it("enforces the durable per-session hourly quota", async () => {

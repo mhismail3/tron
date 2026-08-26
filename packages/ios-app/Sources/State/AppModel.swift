@@ -175,6 +175,7 @@ final class AppModel {
     var customModelInvalidationGeneration: Int { customModelConfiguration.invalidationGeneration }
     var trustRevision: Int { settingsTrust.trustRevision }
     var pairedDevices: [PairedDevice] = []
+    let notificationInbox = NotificationInboxCoordinator()
     var pushNotificationReadiness: PushReadiness = .unavailable
     var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
     private(set) var pushNavigationRequest: PushNavigationRequest?
@@ -1584,6 +1585,138 @@ final class AppModel {
         pushNavigationRequest = PushNavigationRequest(id: pushNavigationSequence, tap: tap)
     }
 
+    func refreshNotificationInbox() async {
+        let enabled = notificationInboxProfiles()
+        notificationInbox.retainProfiles(Set(enabled.map(\.id)))
+        for profile in enabled { await refreshNotificationInbox(profile: profile) }
+    }
+
+    func markNotificationRead(_ item: NotificationInboxItem) async {
+        guard item.notification.isUnread else { return }
+        notificationInbox.markReadOptimistically(item)
+        do {
+            try await sendNotificationRead(profileID: item.profileID, id: item.notification.id)
+            if let profile = profiles.profiles.first(where: { $0.id == item.profileID }) {
+                await refreshNotificationInbox(profile: profile)
+            }
+        } catch {
+            if let profile = profiles.profiles.first(where: { $0.id == item.profileID }) {
+                await refreshNotificationInbox(profile: profile)
+            }
+            presentError((error as? GatewayFailure)?.message ?? "Unable to mark the notification read.")
+        }
+    }
+
+    func markAllNotificationsRead() async {
+        let profileIDs = notificationInbox.buckets.compactMap { $0.value.unreadCount > 0 ? $0.key : nil }
+        guard !profileIDs.isEmpty else { return }
+        notificationInbox.markAllReadOptimistically()
+        for profileID in profileIDs {
+            do {
+                try await sendAllNotificationsRead(profileID: profileID)
+            } catch {
+                presentError((error as? GatewayFailure)?.message ?? "Unable to mark notifications read.")
+            }
+        }
+        await refreshNotificationInbox()
+    }
+
+    private func markNotificationRead(requestID: String, machineID: String) async {
+        guard let profile = notificationInboxProfiles().first(where: { $0.machineId == machineID }) else { return }
+        do {
+            let commandID = uuidSource.next().uuidString
+            if profile.id == profiles.selected?.id {
+                struct Params: Encodable { let commandId, requestId: String }
+                _ = try await mutationExecutor.performValue(
+                    method: "notification.inbox.read",
+                    commandID: commandID
+                ) {
+                    try await self.client.request(
+                        "notification.inbox.read",
+                        Params(commandId: commandID, requestId: requestID)
+                    ) as JSONValue
+                }
+            } else {
+                try await dashboardConnections.markNotificationRead(
+                    profileID: profile.id,
+                    requestID: requestID,
+                    commandID: commandID
+                )
+            }
+            await refreshNotificationInbox(profile: profile)
+        } catch {
+            // Push navigation remains useful even if read-state reconciliation is temporarily offline.
+        }
+    }
+
+    private func notificationInboxProfiles() -> [GatewayProfile] {
+        _ = profileRevision
+        var groups = Set<String>()
+        let selectedID = profiles.selected?.id
+        return profiles.profiles
+            .filter(\.isEnabled)
+            .sorted { ($0.id == selectedID ? 0 : 1, $0.label, $0.id) < ($1.id == selectedID ? 0 : 1, $1.label, $1.id) }
+            .filter { groups.insert($0.machineGroupID).inserted }
+    }
+
+    private func refreshNotificationInbox(profile: GatewayProfile) async {
+        let generation = notificationInbox.begin(profileID: profile.id)
+        do {
+            let snapshot = profile.id == profiles.selected?.id
+                ? try await NotificationInboxGatewayClient.list(client: client)
+                : try await dashboardConnections.notificationInbox(for: profile.id)
+            notificationInbox.install(profile: profile, snapshot: snapshot, generation: generation)
+        } catch let failure as GatewayFailure where failure.code == "unsupported" {
+            notificationInbox.fail(
+                profileID: profile.id,
+                generation: generation,
+                message: "Update the Gateway to view notifications."
+            )
+        } catch {
+            notificationInbox.fail(
+                profileID: profile.id,
+                generation: generation,
+                message: (error as? GatewayFailure)?.message ?? "Unable to load notifications."
+            )
+        }
+    }
+
+    private func sendNotificationRead(profileID: String, id: String) async throws {
+        let commandID = uuidSource.next().uuidString
+        if profileID == profiles.selected?.id {
+            struct Params: Encodable { let commandId, id: String }
+            _ = try await mutationExecutor.performValue(
+                method: "notification.inbox.read",
+                commandID: commandID
+            ) {
+                try await self.client.request(
+                    "notification.inbox.read",
+                    Params(commandId: commandID, id: id)
+                ) as JSONValue
+            }
+        } else {
+            try await dashboardConnections.markNotificationRead(profileID: profileID, id: id, commandID: commandID)
+        }
+    }
+
+    private func sendAllNotificationsRead(profileID: String) async throws {
+        let commandID = uuidSource.next().uuidString
+        if profileID == profiles.selected?.id {
+            struct Params: Encodable { let commandId: String }
+            _ = try await mutationExecutor.performValue(
+                method: "notification.inbox.readAll",
+                commandID: commandID
+            ) {
+                try await self.client.request(
+                    "notification.inbox.readAll",
+                    Params(commandId: commandID)
+                ) as JSONValue
+            }
+        } else {
+            try await dashboardConnections.markAllNotificationsRead(profileID: profileID, commandID: commandID)
+        }
+    }
+
     func consumePushNavigation(_ requestID: Int) {
         guard pushNavigationRequest?.id == requestID else { return }
         pushNavigationRequest = nil
@@ -1632,6 +1765,11 @@ final class AppModel {
                 retryable: false,
                 details: nil
             )
+        }
+        if let requestID = tap.requestID {
+            Task { @MainActor [weak self] in
+                await self?.markNotificationRead(requestID: requestID, machineID: route.machineID)
+            }
         }
         return try await navigationRoute(for: session.withGatewaySource(id: profile.id, label: profile.label))
     }
@@ -2541,6 +2679,8 @@ final class AppModel {
             packageConfiguration.notePackagesChanged()
         case "models.customChanged":
             customModelConfiguration.noteCustomModelsChanged()
+        case "notification.inbox.changed":
+            if let profile = profiles.selected { await refreshNotificationInbox(profile: profile) }
         case "packages.progress", "packages.completed":
             postNotice(
                 event.topic == "packages.completed" ? "Package operation completed" : "Updating agent package…",
@@ -2763,6 +2903,11 @@ final class AppModel {
 }
 
 extension AppModel: DashboardGatewayConnectionPoolDelegate {
+    func dashboardPoolNotificationInboxChanged(profileID: String) {
+        guard let profile = profiles.profiles.first(where: { $0.id == profileID }) else { return }
+        Task { @MainActor [weak self] in await self?.refreshNotificationInbox(profile: profile) }
+    }
+
     func dashboardPoolDidUpdate(
         profileID: String,
         sessions: [SessionSummary],

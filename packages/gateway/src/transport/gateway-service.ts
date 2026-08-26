@@ -200,7 +200,7 @@ export class GatewayService {
         "restart-drain.v1",
         "drain-status.v1",
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
-        ...(this.dependencies.notifications ? ["push-notifications.v1"] : []),
+        ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
       ],
     };
   }
@@ -278,6 +278,37 @@ export class GatewayService {
         const notifications = this.requireNotifications();
         return safeJson(await notifications.status(client.isLocal ? undefined : client.identity));
       }
+      case "notification.inbox.list": {
+        if (Object.keys(params).some((key) => key !== "cursor" && key !== "limit")) {
+          throw new GatewayError("invalid_request", "Notification inbox list accepts only cursor and limit");
+        }
+        const cursor = params.cursor === undefined ? undefined : string(params.cursor, "cursor", { min: 1, max: 256 });
+        const limit = params.limit === undefined ? 50 : integer(params.limit, "limit", 1, 50);
+        return safeJson(await this.requireNotifications().inbox(cursor, limit));
+      }
+      case "notification.inbox.read":
+        return this.mutation(client, method, params, async () => {
+          const allowed = new Set(["commandId", "id", "requestId"]);
+          if (Object.keys(params).some((key) => !allowed.has(key))) {
+            throw new GatewayError("invalid_request", "Notification read accepts only one notification identity");
+          }
+          const id = params.id === undefined ? undefined : string(params.id, "id", { min: 8, max: 160 });
+          const requestId = params.requestId === undefined ? undefined : string(params.requestId, "requestId", { min: 8, max: 160 });
+          if ((id === undefined) === (requestId === undefined)) {
+            throw new GatewayError("invalid_request", "Notification read requires exactly one notification or request ID");
+          }
+          return safeJson(await this.requireNotifications().markInboxRead({
+            ...(id === undefined ? {} : { id }),
+            ...(requestId === undefined ? {} : { requestId }),
+          }));
+        });
+      case "notification.inbox.readAll":
+        return this.mutation(client, method, params, async () => {
+          if (Object.keys(params).some((key) => key !== "commandId")) {
+            throw new GatewayError("invalid_request", "Notification read-all accepts no parameters beyond commandId");
+          }
+          return safeJson(await this.requireNotifications().markAllInboxRead());
+        });
       case "push.registration.upsert":
         if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
         return this.mutation(client, method, params, () => this.withMobileIdentityLane(client.identity, async () => {

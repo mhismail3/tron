@@ -664,7 +664,9 @@ export class RuntimeSlot {
             }],
           } : {}),
           extensionsOverride: (base) => attributeExtensions(base, {
-            ...(notifications ? { askPresented: ({ toolCallId }) => notifications.askPresented(this.id, toolCallId) } : {}),
+            ...(notifications ? {
+              askPresented: ({ toolCallId }) => notifications.askPresented(this.id, toolCallId, this.dependencies.machineId),
+            } : {}),
           }),
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,

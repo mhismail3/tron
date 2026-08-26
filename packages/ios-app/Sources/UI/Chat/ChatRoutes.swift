@@ -41,7 +41,11 @@ struct ChatRoutes: ViewModifier {
                 SettingsView(
                     scope: .project,
                     projectSessionID: sessionID,
-                    projectCWD: projectCWD
+                    projectCWD: projectCWD,
+                    onImported: { route in
+                        showSettings = false
+                        onForkCreated(route)
+                    }
                 )
                 .presentationDragIndicator(.hidden)
             }

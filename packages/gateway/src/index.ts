@@ -43,11 +43,15 @@ process.env.AI_AGENT ??= "pi";
 process.env.PI_SKIP_VERSION_CHECK ??= "1";
 
 const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"));
+let transport: GatewayServer;
 const devices = new DeviceStore(config.tronHome, config.machineId);
 await devices.initialize();
 const notifications = new NotificationService(
   new NotificationGrantStore(config.tronHome),
   new PushRelayClient(config.pushServiceOrigin),
+  Date.now,
+  undefined,
+  () => transport?.broadcast("notification.inbox.changed", {}),
 );
 await notifications.initialize();
 
@@ -85,7 +89,6 @@ const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
 
 const workRegistry = new GatewayWorkRegistry();
-let transport: GatewayServer;
 const sessions = new RuntimeRegistry({
   agentDir: config.agentDir,
   tronHome: config.tronHome,

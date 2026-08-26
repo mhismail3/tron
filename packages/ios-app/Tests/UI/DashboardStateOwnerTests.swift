@@ -336,6 +336,8 @@ struct DashboardStateOwnerTests {
                 id: initial.id, sessions: [summary(revision: 1)], listRevision: 1
             ))
             try await Self.waitUntil { recorder.updates.last?.sessions.first?.summaryRevision == 1 }
+            await oldSocket.enqueue(Self.notificationInboxChangedEvent())
+            try await Self.waitUntil { recorder.notificationInvalidations == [remote.id] }
 
             await replacement.enqueue(hello)
             await oldSocket.enqueue(Self.stoppingEvent())
@@ -452,6 +454,12 @@ struct DashboardStateOwnerTests {
     private static func listChangedEvent() -> Data {
         try! JSONSerialization.data(withJSONObject: [
             "type": "event", "topic": "session.listChanged", "payload": [:],
+        ])
+    }
+
+    private static func notificationInboxChangedEvent() -> Data {
+        try! JSONSerialization.data(withJSONObject: [
+            "type": "event", "topic": "notification.inbox.changed", "payload": [:],
         ])
     }
 
@@ -768,6 +776,11 @@ private final class DashboardPoolRecorder: DashboardGatewayConnectionPoolDelegat
     }
 
     private(set) var updates: [Update] = []
+    private(set) var notificationInvalidations: [String] = []
+
+    func dashboardPoolNotificationInboxChanged(profileID: String) {
+        notificationInvalidations.append(profileID)
+    }
 
     func dashboardPoolDidUpdate(
         profileID: String,

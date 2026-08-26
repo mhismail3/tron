@@ -37,7 +37,14 @@ describe("first-party Tron notify extension", () => {
     expect(Object.keys(tool.parameters.properties)).toEqual(["message"]);
     expect(tool.parameters.additionalProperties).toBe(false);
     const result = await tool.execute("canonical-tool", { message: "Ready" });
-    expect(value.admitted[0]).toEqual({ sessionId: "canonical-session", sourceId: "canonical-tool", kind: "explicit", message: "Ready" });
+    expect(value.admitted[0]).toEqual({
+      sessionId: "canonical-session",
+      sourceId: "canonical-tool",
+      kind: "explicit",
+      title: "Canonical title",
+      message: "Ready",
+      route: { sessionId: "canonical-session", machineId: "machine-abcdefgh" },
+    });
     expect(result.details).toEqual({ status: "queued" });
 
     value.handlers.get("agent_start")?.({}, {});

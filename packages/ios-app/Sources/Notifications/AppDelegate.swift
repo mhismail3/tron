@@ -4,6 +4,13 @@ import UIKit
 struct PushNotificationTap: Equatable, Sendable {
     let sessionID: String?
     let machineID: String?
+    let requestID: String?
+
+    init(sessionID: String?, machineID: String?, requestID: String? = nil) {
+        self.sessionID = sessionID
+        self.machineID = machineID
+        self.requestID = requestID
+    }
 
     var route: (sessionID: String, machineID: String)? {
         guard let sessionID, let machineID else { return nil }
@@ -11,11 +18,12 @@ struct PushNotificationTap: Equatable, Sendable {
     }
 
     static func admit(_ userInfo: [AnyHashable: Any]) -> PushNotificationTap {
+        let requestID = admitRequestID((userInfo["tron"] as? [AnyHashable: Any])?["requestId"])
         guard let sessionID = admitSessionID(userInfo["sessionId"]),
               let machineID = admitMachineID(userInfo["machineId"]) else {
-            return PushNotificationTap(sessionID: nil, machineID: nil)
+            return PushNotificationTap(sessionID: nil, machineID: nil, requestID: requestID)
         }
-        return PushNotificationTap(sessionID: sessionID, machineID: machineID)
+        return PushNotificationTap(sessionID: sessionID, machineID: machineID, requestID: requestID)
     }
 
     private static func admitSessionID(_ value: Any?) -> String? {
@@ -24,6 +32,15 @@ struct PushNotificationTap: Equatable, Sendable {
               candidate.utf8.count <= 160,
               candidate.unicodeScalars.allSatisfy({
                   CharacterSet.alphanumerics.contains($0) || "-_:".unicodeScalars.contains($0)
+              }) else { return nil }
+        return candidate
+    }
+
+    private static func admitRequestID(_ value: Any?) -> String? {
+        guard let candidate = value as? String,
+              (8...160).contains(candidate.utf8.count),
+              candidate.unicodeScalars.allSatisfy({
+                  CharacterSet.alphanumerics.contains($0) || "-_".unicodeScalars.contains($0)
               }) else { return nil }
         return candidate
     }
