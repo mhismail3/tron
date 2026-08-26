@@ -19,18 +19,19 @@ struct ProcessActivityOrbTests {
         expect(moved[29], [11.717005, 8.646124, 0.963792, 0.849134, 0.089776, 1])
     }
 
-    @Test("breathing geometry matches upstream 20-point golden vectors")
-    func breathingGoldenVectors() {
-        let frame = ProcessActivityOrbEngine.frame(mode: .breathing, time: 0.6)
-        #expect(frame.count == 120)
-        expect(frame[0], [12.339578, 17.20048, -1.987396, 0.4153, 0.536055, 0.623562])
-        expect(frame[60], [15.590196, 12.488915, 0.229471, 0.608374, 0.319242, 0.708826])
-        expect(frame[119], [3.883903, 5.556396, 1.984477, 0.519, 0.424028, 0.776326])
+    @Test("thinking geometry matches upstream composing-20 golden vectors")
+    func thinkingGoldenVectors() {
+        let frame = ProcessActivityOrbEngine.frame(mode: .thinking, time: 0.6)
+        #expect(frame.count == 208)
+        expect(frame[0], [7.795005, 12.112063, -7.177547, 0.3, 0.682444, 0.42394])
+        expect(frame[104], [17.798885, 9.900929, -0.087031, 0.398683, 0.322455, 0.696653])
+        expect(frame[207], [10, 6.759833, 7.095162, 0.431603, 0.27988, 0.972891])
 
-        let moved = ProcessActivityOrbEngine.frame(mode: .breathing, time: 3.3)
-        #expect(moved.count == 120)
-        expect(moved[0], [9.201663, 17.595667, -2.004845, 0.414845, 0.536547, 0.622891])
-        expect(moved[119], [16.910423, 13.076719, 1.985655, 0.519031, 0.423994, 0.776371])
+        let moved = ProcessActivityOrbEngine.frame(mode: .thinking, time: 3.3)
+        #expect(moved.count == 208)
+        expect(moved[0], [12.25499, 12.510684, -7.032175, 0.3, 0.678343, 0.429532])
+        expect(moved[104], [2.850035, 6.905081, 0.373456, 0.362251, 0.389467, 0.714364])
+        expect(moved[207], [10, 7.503918, 7.389829, 0.436692, 0.271569, 0.984224])
     }
 
     @Test("reduced motion and offscreen rendering pause deterministically")
@@ -50,15 +51,15 @@ struct ProcessActivityOrbTests {
         ))
         #expect(
             ProcessActivityOrbEngine.frame(
-                mode: .breathing,
+                mode: .thinking,
                 time: ProcessActivityOrbEngine.reducedMotionTime
-            ) == ProcessActivityOrbEngine.frame(mode: .breathing, time: 0.6)
+            ) == ProcessActivityOrbEngine.frame(mode: .thinking, time: 0.6)
         )
     }
 
     @Test("frames remain depth sorted for painter order")
     func depthOrder() {
-        for mode in [ProcessActivityOrbMode.solving, .breathing] {
+        for mode in [ProcessActivityOrbMode.solving, .thinking] {
             let frame = ProcessActivityOrbEngine.frame(mode: mode, time: 5.1)
             #expect(zip(frame, frame.dropFirst()).allSatisfy { pair in pair.0.z <= pair.1.z })
             #expect(frame.allSatisfy { $0.radius >= 0.3 && $0.alpha >= 0.02 })

@@ -23,7 +23,7 @@ struct SessionProcessButton: View {
             if isVisible {
                 Button(action: onTap) {
                     ProcessActivityOrb(
-                        mode: overview.visibility == .active ? .solving : .breathing,
+                        mode: overview.visibility == .active ? .solving : .thinking,
                         isVisible: isVisible
                     )
                     .frame(

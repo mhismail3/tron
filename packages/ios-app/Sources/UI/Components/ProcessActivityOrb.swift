@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// Native emerald-tinted port of the 20-point `solving` and `breathing`
+/// Native emerald-tinted port of the 20-point `solving` and `composing`
 /// geometry from Jakub Antalik's MIT-licensed thinking-orbs project.
 /// Geometry stays renderer-independent so focused tests can compare the
 /// upstream numeric golden vectors without relying on screenshots.
 enum ProcessActivityOrbMode: Hashable, Sendable {
     case solving
-    case breathing
+    case thinking
 }
 
 struct ProcessActivityOrbDot: Equatable, Sendable {
@@ -37,7 +37,7 @@ enum ProcessActivityOrbEngine {
     static func frame(mode: ProcessActivityOrbMode, time: Double) -> [ProcessActivityOrbDot] {
         switch mode {
         case .solving: solvingFrame(time: time)
-        case .breathing: breathingFrame(time: time)
+        case .thinking: thinkingFrame(time: time)
         }
     }
 
@@ -166,61 +166,92 @@ enum ProcessActivityOrbEngine {
         return (x, y, z, inActive)
     }
 
-    // MARK: Thinking / Breathing ring
+    // MARK: Thinking / Composing ribbon
 
-    private static func breathingFrame(time: Double) -> [ProcessActivityOrbDot] {
+    /// The demo labels upstream's `composing` ribbon as “Thinking…”. Unlike
+    /// the compact `breathing` ring, this is the dotted spherical sash the
+    /// resting composer control is intended to show.
+    private static func thinkingFrame(time: Double) -> [ProcessActivityOrbDot] {
         let center = size / 2
-        let ringRadius = (size / 2) * 0.78
+        let sphereRadius = (size / 2) * 0.78
         let cameraTilt = 0.3
         let project = projector(yaw: 0, tilt: cameraTilt, centerX: center, centerY: center, scale: 1)
         let radiusScale = pow(size / 300, 0.6)
-        let theta = -cameraTilt
+        var dots: [ProcessActivityOrbDot] = []
+
+        // Upstream composing-20 preset: eight faint Fibonacci-lattice dots
+        // retain the spherical volume behind the ten-lane ribbon.
+        let ghostCount = 8
+        dots.reserveCapacity(ghostCount + 200)
+        for index in 0..<ghostCount {
+            let direction = fibonacciDirection(index: index, count: ghostCount)
+            let projected = project(
+                direction.x * sphereRadius,
+                direction.y * sphereRadius,
+                direction.z * sphereRadius
+            )
+            let depth = (projected.z / sphereRadius + 1) / 2
+            dots.append(ProcessActivityOrbDot(
+                x: projected.x,
+                y: projected.y,
+                z: projected.z,
+                radius: max(0.3, 0.8 * radiusScale),
+                white: 0.78,
+                alpha: 0.1 + 0.22 * depth
+            ))
+        }
+
+        // spin=0 freezes the band orientation while its two waves travel.
+        let tilt = 0.55
         let ux = 1.0
         let uy = 0.0
         let uz = 0.0
-        let vx = -uz * sin(theta)
-        let vy = cos(theta)
-        let vz = ux * sin(theta)
+        let vx = 0.0
+        let vy = cos(tilt)
+        let vz = sin(tilt)
         let nx = uy * vz - uz * vy
         let ny = uz * vx - ux * vz
         let nz = ux * vy - uy * vx
-        let wobbleMultiplier = 0.565
-        let wobbleAmplitude = 0.23 * wobbleMultiplier
-        let baseRadius = ringRadius / (1 + 0.85 * wobbleAmplitude)
-        let lanes = max(1, Int((2 * 3.968).rounded()))
-        let segments = 15
-        var dots: [ProcessActivityOrbDot] = []
-        dots.reserveCapacity(lanes * segments)
+        let lanes = 10
+        let segments = 20
 
         for lane in 0..<lanes {
             let laneOffset = (Double(lane) - Double(lanes - 1) / 2) * 0.075
             let edge = abs(Double(lane) - Double(lanes - 1) / 2) / max(1, Double(lanes - 1) / 2)
             for segment in 0..<segments {
                 let angle = (Double(segment) / Double(segments)) * 2 * Double.pi
-                let wobble = (
-                    0.16 * sin(angle * 3 - time * 1.7 + Double(lane) * 0.22)
-                        + 0.07 * sin(angle * 5 + time * 1.1)
-                ) * wobbleMultiplier
-                let radial = 1 + wobble
-                let offset = laneOffset
+                let wobble = 0.16 * sin(angle * 3 - time * 1.7 + Double(lane) * 0.22)
+                    + 0.07 * sin(angle * 5 + time * 1.1)
+                let offset = laneOffset + wobble
                 let x = ux * cos(angle) + vx * sin(angle) + nx * offset
                 let y = uy * cos(angle) + vy * sin(angle) + ny * offset
                 let z = uz * cos(angle) + vz * sin(angle) + nz * offset
                 let length = sqrt(x * x + y * y + z * z)
-                let radius = baseRadius * radial
-                let projected = project((x / length) * radius, (y / length) * radius, (z / length) * radius)
-                let depth = (projected.z / ringRadius + 1) / 2
+                let projected = project(
+                    (x / length) * sphereRadius,
+                    (y / length) * sphereRadius,
+                    (z / length) * sphereRadius
+                )
+                let depth = (projected.z / sphereRadius + 1) / 2
                 dots.append(ProcessActivityOrbDot(
                     x: projected.x,
                     y: projected.y,
                     z: projected.z,
-                    radius: max(0.3, (1.7842 + 2.7574 * depth) * (1 - 0.25 * edge) * radiusScale),
+                    radius: max(0.3, (1.1803 + 1.8241 * depth) * (1 - 0.25 * edge) * radiusScale),
                     white: 0.52 - 0.44 * depth + 0.18 * edge,
                     alpha: 0.4 + 0.6 * depth
                 ))
             }
         }
         return finalized(dots)
+    }
+
+    private static func fibonacciDirection(index: Int, count: Int) -> (x: Double, y: Double, z: Double) {
+        let goldenAngle = Double.pi * (3 - sqrt(5))
+        let y = 1 - (2 * (Double(index) + 0.5)) / Double(count)
+        let radial = sqrt(1 - y * y)
+        let angle = Double(index) * goldenAngle
+        return (radial * cos(angle), y, radial * sin(angle))
     }
 
     // MARK: Shared math
@@ -305,7 +336,7 @@ struct ProcessActivityOrb: View {
     private var speed: Double {
         switch mode {
         case .solving: 1.95
-        case .breathing: 3.78
+        case .thinking: 3.12
         }
     }
 }
