@@ -5,6 +5,7 @@ import { GatewayError } from "../errors.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 
 const MAX_LEASES_PER_CLIENT = 8;
+const MAX_LEASES_PER_CLIENT_SESSION = 2;
 const LEASE_TIMEOUT_MS = 30 * 60_000;
 const INVALIDATION_DEBOUNCE_MS = 150;
 
@@ -14,6 +15,7 @@ type Lease = {
   parentSessionId: string;
   processId: string;
   childSessionRef: string;
+  runId: string;
   path: string;
   revision: string;
   watcher: FSWatcher;
@@ -34,13 +36,16 @@ export class ProcessTranscriptLeaseStore {
     parentSessionId: string,
     processId: string,
     childSessionRef: string,
+    runId: string,
     preferredPath: string | undefined,
     notify: (topic: string, sessionId: string, payload: JsonValue) => void,
   ): Promise<ProcessTranscriptLease> {
-    if ([...this.leases.values()].filter((lease) => lease.clientId === clientId).length >= MAX_LEASES_PER_CLIENT) {
+    const clientLeases = [...this.leases.values()].filter((lease) => lease.clientId === clientId);
+    if (clientLeases.length >= MAX_LEASES_PER_CLIENT
+      || clientLeases.filter((lease) => lease.parentSessionId === parentSessionId).length >= MAX_LEASES_PER_CLIENT_SESSION) {
       throw new GatewayError("busy", "Read-only subagent viewer capacity is full", true);
     }
-    const path = await this.sessions.resolveReadOnlySubagentPath(childSessionRef, preferredPath, parentSessionId);
+    const path = await this.sessions.resolveReadOnlySubagentPath(childSessionRef, preferredPath, parentSessionId, runId);
     const page = await this.sessions.readOnlySubagentTranscriptPage(childSessionRef, path);
     const id = randomUUID();
     let watcher: FSWatcher;
@@ -57,6 +62,7 @@ export class ProcessTranscriptLeaseStore {
       parentSessionId,
       processId,
       childSessionRef,
+      runId,
       path,
       revision: page.revision,
       watcher,

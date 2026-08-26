@@ -49,6 +49,18 @@ function processHash(namespace: string, ...parts: string[]): string {
   return `process:${namespace}:${createHash("sha256").update(parts.join("\0")).digest("hex").slice(0, 32)}`;
 }
 
+/** Process presentation is not an alternate secret store. Canonical JSONL is
+ * left untouched; only bounded wire previews redact common credential forms. */
+export function redactProcessText(value: string): string {
+  const secret = "(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|password|passwd|secret|client[_-]?secret|private[_-]?key)";
+  return value
+    .replace(new RegExp(`(\\b${secret}\\b\\s*=\\s*)(?:"[^"]*"|'[^']*'|[^\\s]+)`, "giu"), "$1[REDACTED]")
+    .replace(new RegExp(`(--${secret})(?:=|\\s+)(?:"[^"]*"|'[^']*'|[^\\s]+)`, "giu"), "$1=[REDACTED]")
+    .replace(new RegExp(`(["']${secret}["']\\s*:\\s*["'])[^"']*(["'])`, "giu"), "$1[REDACTED]$2")
+    .replace(/(authorization\s*:\s*(?:bearer|basic)\s+)[^\s]+/giu, "$1[REDACTED]")
+    .replace(/:\/\/([^\s/:@]+):([^\s/@]+)@/gu, "://$1:[REDACTED]@");
+}
+
 export function commandProcessId(sessionId: string, toolCallId: string): string {
   return processHash("command", sessionId, toolCallId);
 }
@@ -60,7 +72,13 @@ export function subagentProcessId(sessionId: string, toolCallId: string, childId
 function commandArgument(argumentsValue: ToolExecutionState["arguments"]): string {
   if (!argumentsValue || typeof argumentsValue !== "object" || Array.isArray(argumentsValue)) return "Shell command";
   const command = argumentsValue.command;
-  return utf8Prefix(typeof command === "string" && command.trim() ? command.trim() : "Shell command", 2_048).value;
+  return redactProcessText(utf8Prefix(typeof command === "string" && command.trim() ? command.trim() : "Shell command", 2_048).value);
+}
+
+function processOutput(value: string | undefined): { value: string; truncated: boolean } | undefined {
+  if (value === undefined) return undefined;
+  const output = utf8Suffix(value, 32 * 1_024);
+  return { ...output, value: redactProcessText(output.value) };
 }
 
 /** Projects only the assistant-owned runtime bash tool state supplied by
@@ -69,7 +87,7 @@ export function commandProcessFromTool(sessionId: string, tool: ToolExecutionSta
   if (tool.toolName !== "bash") return undefined;
   const terminalAt = tool.status === "running" ? undefined : tool.completedAt ?? tool.updatedAt;
   const state: SessionProcessState = tool.status === "running" ? "running" : tool.status === "failed" ? "failed" : "completed";
-  const output = tool.output === undefined ? undefined : utf8Suffix(tool.output, 32 * 1_024);
+  const output = processOutput(tool.output);
   return {
     version: 1,
     processId: commandProcessId(sessionId, tool.toolCallId),
@@ -114,12 +132,28 @@ function childRows(
   parentProcessId?: string,
 ): SessionProcessActivity[] {
   const rows: SessionProcessActivity[] = [];
+  const parentState = extensionState(activity.lifecycle?.state);
+  const parentIsTerminal = terminalStates.has(parentState);
   for (const child of children) {
     const processId = subagentProcessId(sessionId, activity.toolCallId, child.id);
-    const state = extensionState(child.lifecycle ?? (child.status === "running" ? "running" : child.status === "failed" ? "failed" : "completed"));
-    const terminalAt = terminalStates.has(state) ? activity.lifecycle?.terminalAt ?? activity.completedAt : undefined;
-    const output = child.output === undefined ? undefined : utf8Suffix(child.output, 32 * 1_024);
-    rows.push({
+    const reportedState = extensionState(child.lifecycle ?? (child.status === "running" ? "running" : child.status === "failed" ? "failed" : "completed"));
+    // A terminal receipt cannot author an active historical child. Conversely,
+    // a child may finish while its workflow parent remains active; Gateway
+    // observation time then owns that child's terminal admission.
+    const state = parentIsTerminal && !terminalStates.has(reportedState) ? parentState : reportedState;
+    const terminalAt = terminalStates.has(state)
+      ? parentIsTerminal
+        ? activity.lifecycle?.terminalAt ?? activity.completedAt
+        : activity.lifecycle?.observedAt ?? activity.updatedAt
+      : undefined;
+    const output = processOutput(child.output);
+    const executable = !(child.children?.length)
+      || child.childSessionRef !== undefined
+      || child.currentTool !== undefined
+      || child.output !== undefined
+      || child.toolCount !== undefined
+      || child.turnCount !== undefined;
+    if (executable) rows.push({
       version: 1,
       processId,
       kind: "subagent",
@@ -149,7 +183,12 @@ function childRows(
       ...(activity.runId ? { runId: activity.runId } : {}),
       ...(child.childSessionRef ? { childSessionRef: child.childSessionRef } : {}),
     });
-    if (child.children?.length) rows.push(...childRows(sessionId, activity, child.children, processId));
+    if (child.children?.length) rows.push(...childRows(
+      sessionId,
+      activity,
+      child.children,
+      executable ? processId : parentProcessId,
+    ));
   }
   return rows;
 }
@@ -159,7 +198,7 @@ export function subagentProcessesFromActivity(sessionId: string, activity: Exten
   const processId = subagentProcessId(sessionId, activity.toolCallId, activity.runId ?? activity.activityId ?? activity.id);
   const state = extensionState(activity.lifecycle?.state ?? (activity.status === "running" ? "running" : activity.status === "failed" ? "failed" : "completed"));
   const terminalAt = terminalStates.has(state) ? activity.lifecycle?.terminalAt ?? activity.completedAt : undefined;
-  const output = activity.output === undefined ? undefined : utf8Suffix(activity.output, 32 * 1_024);
+  const output = processOutput(activity.output);
   return [{
     version: 1,
     processId,
@@ -264,7 +303,7 @@ function commandHistory(manager: ReadonlySessionManager): SessionProcessActivity
     const declaration = declarations.get(message.toolCallId);
     if (!declaration) continue;
     const outputValue = message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
-    const output = outputValue ? utf8Suffix(outputValue, 32 * 1_024) : undefined;
+    const output = outputValue ? processOutput(outputValue) : undefined;
     const terminalAt = entry.timestamp;
     results.push({
       version: 1,
@@ -284,7 +323,7 @@ function commandHistory(manager: ReadonlySessionManager): SessionProcessActivity
       visibility: "historical",
       startedAt: declaration.timestamp,
       title: "Command",
-      command: declaration.command,
+      command: redactProcessText(declaration.command),
       ...(output ? { outputTail: output.value } : {}),
       outputTruncated: output?.truncated === true,
       toolCallId: message.toolCallId,
@@ -295,7 +334,7 @@ function commandHistory(manager: ReadonlySessionManager): SessionProcessActivity
 
 export function canonicalProcessHistory(manager: ReadonlySessionManager): SessionProcessActivity[] {
   const commands = commandHistory(manager);
-  const subagents = extensionActivityReceipts(manager.getEntries(), manager.getSessionId())
+  const subagents = extensionActivityReceipts(manager.getBranch(), manager.getSessionId())
     .flatMap(({ receipt }) => subagentProcessesFromActivity(manager.getSessionId(), extensionReceiptActivity(receipt)));
   const byID = new Map<string, SessionProcessActivity>();
   for (const activity of [...commands, ...subagents]) {

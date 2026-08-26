@@ -1,6 +1,7 @@
 import type { SessionProcessActivity } from "../protocol/types.js";
 
 export const PROCESS_ACTIVITY_RECENT_MS = 5 * 60 * 1_000;
+export const MAX_PROCESS_TIMESTAMP_FUTURE_SKEW_MS = 60_000;
 
 export interface ProcessActivityClock {
   wallNow(): number;
@@ -98,9 +99,14 @@ export class ProcessActivityRecency {
     const terminal = terminalStates.has(activity.lifecycle.state);
     const terminalAt = terminal ? activity.lifecycle.terminalAt : undefined;
     const terminalMs = terminalAt === undefined ? Number.NaN : Date.parse(terminalAt);
-    const recentUntil = Number.isFinite(terminalMs)
+    const plausibleTerminal = Number.isFinite(terminalMs)
+      && terminalMs <= this.clock.wallNow() + MAX_PROCESS_TIMESTAMP_FUTURE_SKEW_MS;
+    // A malformed/future producer timestamp must never extend ambient
+    // visibility. Give it an already-due deadline so the disposable row is
+    // retired while canonical history retains the original timestamp.
+    const recentUntil = plausibleTerminal
       ? new Date(terminalMs + PROCESS_ACTIVITY_RECENT_MS).toISOString()
-      : undefined;
+      : terminal ? new Date(this.clock.wallNow()).toISOString() : undefined;
     return {
       ...activity,
       lifecycle: {

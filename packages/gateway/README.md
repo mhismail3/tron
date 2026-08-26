@@ -749,8 +749,10 @@ replacement evidence, and authoritative terminal evidence.
 `SessionProcessActivity` gives command and subagent rows a stable namespaced
 `processId`, typed source/mode/lifecycle, bounded command/current-tool/output facts,
 and an optional opaque validated child-session reference. Absolute session and
-artifact paths, PIDs, environment values, credentials, and unbounded task/output data
-never cross the wire. `SessionProcessOverview` is the shallow composer authority:
+artifact paths, PIDs, environment values, and unbounded task/output data never cross
+the wire. Bounded command/output previews redact common credential assignments,
+flags, JSON keys, authorization headers, and URL userinfo without modifying canonical
+JSONL. `SessionProcessOverview` is the shallow composer authority:
 active/recent/problem counts, revision, Gateway `asOf`, and nearest expiry. High-frequency
 output remains in bounded process deltas and does not require a transcript rebuild.
 
@@ -773,10 +775,14 @@ The `process-transcript.v1` capability authorizes `session.processTranscript.ope
 connection-owned lease watches only the validated canonical child file, emits bounded
 invalidation events, and reopens it through a read-only projection for canonical paging.
 It never calls `RuntimeRegistry.acquire` for the child, exposes mutation methods, or
-keeps a second transcript mirror. Reads reject symlinks, identity/path replacement,
-foreign or ambiguous catalog identities, incomplete trailing JSONL appends, stale page
-anchors, and retired leases. Closing the parent presentation or client retires every
-owned child observer.
+keeps a second transcript mirror. Producer admission requires the exact owning tool/run,
+a unique child identity, and a regular session file structurally nested beneath the
+canonical parent session's exact run directory; persisted reopening repeats the
+parent/run/catalog checks. Reads reject missing ownership, symlinks, oversized headers,
+identity/path replacement, foreign or ambiguous catalog identities, incomplete trailing
+JSONL appends, stale page anchors, and retired leases. Leases are bounded per connection
+and per parent session. Closing the parent presentation or client retires every owned
+child observer.
 
 ## Extension activity lifecycle and history
 

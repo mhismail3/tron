@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { copyFile, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { getExamplesPath, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -1754,9 +1754,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const toolCallId = "validated-child-tool";
     const activityId = "validated-child-activity";
     const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
-    const childDirectory = join(fixture.agentDir, "sessions", "workspace", "child");
+    const parentFile = slot.sessionFile!;
+    const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), runId, "run-0");
     await Promise.all([mkdir(asyncDir, { recursive: true }), mkdir(childDirectory, { recursive: true })]);
-    const childManager = SessionManager.create(fixture.cwd, childDirectory, { id: "validated-child-session" });
+    const childManager = SessionManager.create(fixture.cwd, childDirectory, {
+      id: "validated-child-session",
+      parentSession: parentFile,
+    });
     childManager.appendSessionInfo("subagent-worker");
     childManager.appendMessage(fauxAssistantMessage("child transcript"));
     const childFile = childManager.getSessionFile()!;
@@ -1789,11 +1793,53 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(JSON.stringify(process)).not.toContain(childFile);
     expect(slot.processChildSessionPath(process!.processId)).toEqual({
       ref: "validated-child-session",
+      runId,
       path: await realpath(childFile),
     });
     await waitUntil(() => slot.processHistory(undefined, 25, { kind: "subagent" }).activities.length === 1);
     expect(slot.processHistory(undefined, 25, { kind: "subagent" }).activities[0])
       .toMatchObject({ childSessionRef: "validated-child-session" });
+  });
+
+  it("fails closed for foreign or wrong-run child-session evidence", async () => {
+    const fixture = await coldFixture("rejected-child-session");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const unrelatedDirectory = join(fixture.agentDir, "sessions", "workspace", "unrelated");
+    await mkdir(unrelatedDirectory, { recursive: true });
+    const unrelated = SessionManager.create(fixture.cwd, unrelatedDirectory, { id: "unrelated-child" });
+    unrelated.appendMessage(fauxAssistantMessage("not this run"));
+    const startedAt = new Date().toISOString();
+    const activity: ExtensionRunActivity = {
+      id: "tool", activityId: "activity", runId: "expected-run", toolCallId: "tool",
+      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      startedAt, updatedAt: startedAt,
+      children: [{ id: "child-run", label: "worker", status: "running" }],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
+    };
+    const attach = (slot as unknown as {
+      attachChildSessionReferences: (activity: ExtensionRunActivity, value: unknown) => ExtensionRunActivity;
+    }).attachChildSessionReferences.bind(slot);
+    const foreign = attach(activity, {
+      runId: "expected-run",
+      results: [{ runId: "child-run", sessionFile: unrelated.getSessionFile() }],
+    });
+    expect(foreign.children[0]?.childSessionRef).toBeUndefined();
+    const wrongRun = attach(activity, {
+      runId: "forged-run",
+      results: [{ runId: "child-run", sessionFile: unrelated.getSessionFile() }],
+    });
+    expect(wrongRun.children[0]?.childSessionRef).toBeUndefined();
+
+    const parentFile = slot.sessionFile!;
+    const oversizedDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "expected-run", "run-0");
+    await mkdir(oversizedDirectory, { recursive: true });
+    const oversizedFile = join(oversizedDirectory, "session.jsonl");
+    await writeFile(oversizedFile, `${JSON.stringify({ type: "session", version: 3, id: "oversized-child", timestamp: startedAt, cwd: fixture.cwd })}${" ".repeat(70 * 1_024)}\n`);
+    const oversized = attach(activity, {
+      runId: "expected-run",
+      results: [{ runId: "child-run", sessionFile: oversizedFile }],
+    });
+    expect(oversized.children[0]?.childSessionRef).toBeUndefined();
   });
 
   it("rejects canonical artifact paths outside the exact project run root", async () => {
@@ -3978,8 +4024,10 @@ export default function (pi) {
     expect(settled.processActivities).toEqual([
       expect.objectContaining({ kind: "command", toolCallId: "call-bash", outputTail: "startend" }),
     ]);
-    expect(slot.processHistory(undefined, 25, { kind: "command" }).activities)
-      .toEqual([expect.objectContaining({ kind: "command", toolCallId: "call-bash" })]);
+    const commandHistory = slot.processHistory(undefined, 25, { kind: "command" }).activities;
+    expect(commandHistory).toEqual([expect.objectContaining({ kind: "command", toolCallId: "call-bash" })]);
+    expect(settled.processActivities?.[0]?.lifecycle.terminalAt)
+      .toBe(commandHistory[0]?.lifecycle.terminalAt);
     const canonicalAssistant = settled.transcript.find((item) => item.kind === "message" && item.role === "assistant");
     const canonicalCalls = canonicalAssistant?.kind === "message"
       ? canonicalAssistant.content.filter((part) => part.type === "toolCall")
@@ -4580,6 +4628,7 @@ export default function (pi) {
 
     const bash = slot.executeBash("printf ok", true);
     await waitUntil(() => execute.mock.calls.length === 1);
+    expect(slot.snapshot().processActivities ?? []).toEqual([]);
     const markerPath = join((registry as unknown as { options: { tronHome: string } }).options.tronHome,
       "gateway", "runtime-markers", `${slot.id}.json`);
     expect(JSON.parse(await readFile(markerPath, "utf8")).operations).toHaveLength(1);
@@ -4594,6 +4643,7 @@ export default function (pi) {
     expect(execute).toHaveBeenCalledTimes(1);
     expect(registry.administrativeWorkRegistry.size).toBe(0);
     expect(slot.snapshot()).toMatchObject({ phase: "idle" });
+    expect(slot.snapshot().processActivities ?? []).toEqual([]);
   });
 
   it("cancels an idle eviction when a selected slot is acquired or subscribed before disposal", async () => {

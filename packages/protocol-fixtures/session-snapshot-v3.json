@@ -326,6 +326,62 @@
       "groupFinalized": true
     }
   ],
+  "processActivities": [
+    {
+      "version": 1,
+      "processId": "process:command:fixture",
+      "kind": "command",
+      "executionMode": "foreground",
+      "source": "mainAssistant",
+      "lifecycle": {
+        "version": 1,
+        "state": "running",
+        "attention": "none",
+        "sequence": 2,
+        "observedAt": "2026-01-01T00:00:11Z"
+      },
+      "visibility": "active",
+      "startedAt": "2026-01-01T00:00:10Z",
+      "title": "Command",
+      "command": "build",
+      "outputTail": "working\nstep two",
+      "outputTruncated": false,
+      "toolCallId": "live-tool"
+    },
+    {
+      "version": 1,
+      "processId": "process:subagent:fixture",
+      "kind": "subagent",
+      "executionMode": "asynchronous",
+      "source": "delegatedAgent",
+      "lifecycle": {
+        "version": 1,
+        "state": "completed",
+        "attention": "none",
+        "sequence": 3,
+        "observedAt": "2026-01-01T00:00:11Z",
+        "terminalAt": "2026-01-01T00:00:10Z",
+        "recentUntil": "2026-01-01T00:05:10Z"
+      },
+      "visibility": "recent",
+      "startedAt": "2026-01-01T00:00:00Z",
+      "title": "reviewer",
+      "outputTruncated": false,
+      "toolCallId": "subagent-tool",
+      "runId": "fixture-run",
+      "childSessionRef": "fixture-child-session"
+    }
+  ],
+  "processOverview": {
+    "version": 1,
+    "revision": 5,
+    "asOf": "2026-01-01T00:00:11Z",
+    "activeCount": 1,
+    "recentCount": 1,
+    "problemCount": 0,
+    "visibility": "active",
+    "nearestExpiry": "2026-01-01T00:05:10Z"
+  },
   "extensionPresentation": {
     "version": 2,
     "hostEpoch": "fixture-host-epoch",

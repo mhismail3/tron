@@ -65,6 +65,19 @@ describe("ProcessActivityRecency", () => {
     expect(latch.currentAndRecent().activities[0]?.lifecycle.state).toBe("completed");
   });
 
+  it("fails closed instead of extending recency for implausible future timestamps", () => {
+    const clock = new Clock();
+    const recency = new ProcessActivityRecency(clock);
+    const future = activity("completed");
+    const terminalAt = new Date(clock.wall + 60 * 60_000).toISOString();
+    const installed = recency.upsert({
+      ...future,
+      lifecycle: { ...future.lifecycle, terminalAt, observedAt: terminalAt },
+    });
+    expect(installed.activity.visibility).toBe("historical");
+    expect(recency.currentAndRecent().activities).toEqual([]);
+  });
+
   it("publishes one expiry callback without deleting canonical history", () => {
     const clock = new Clock();
     const recency = new ProcessActivityRecency(clock);

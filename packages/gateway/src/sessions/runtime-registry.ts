@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, open, opendir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
 import { ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -1393,20 +1393,41 @@ export class RuntimeRegistry {
   /** Resolves an opaque child-session identity without acquiring a runtime.
    * A live producer-validated path may bridge the catalog's next invalidation;
    * persisted history resolves only structurally indexed subagent sessions. */
-  async resolveReadOnlySubagentPath(childSessionRef: string, preferredPath?: string, expectedParentSessionId?: string): Promise<string> {
+  async resolveReadOnlySubagentPath(
+    childSessionRef: string,
+    preferredPath?: string,
+    expectedParentSessionId?: string,
+    expectedRunId?: string,
+  ): Promise<string> {
     assertProcessSessionRef(childSessionRef);
+    const acquisition = await this.catalogAcquisition();
+    const parentEntry = expectedParentSessionId ? acquisition.entriesByID.get(expectedParentSessionId) : undefined;
+    const liveParentPath = expectedParentSessionId ? this.slots.get(expectedParentSessionId)?.sessionFile : undefined;
+    const expectedParentPath = liveParentPath ?? parentEntry?.path;
+    if (expectedParentSessionId && (!expectedParentPath || !expectedRunId)) {
+      throw new GatewayError("not_found", "Subagent session ownership is unavailable");
+    }
     if (preferredPath) {
-      const admitted = await this.validateReadOnlySubagentPath(childSessionRef, preferredPath, false);
+      const admitted = await this.validateReadOnlySubagentPath(
+        childSessionRef,
+        preferredPath,
+        expectedParentPath,
+        expectedRunId,
+      );
       if (admitted) return admitted;
     }
-    const acquisition = await this.catalogAcquisition();
     this.requireUnambiguousSessionId(childSessionRef, acquisition.ambiguousIDs);
     const entry = acquisition.entriesByID.get(childSessionRef);
     if (!entry || !entry.structuralSubagent
       || (expectedParentSessionId !== undefined && entry.parentSessionId !== expectedParentSessionId)) {
       throw new GatewayError("not_found", "Subagent session is unavailable");
     }
-    const admitted = await this.validateReadOnlySubagentPath(childSessionRef, entry.path, true);
+    const admitted = await this.validateReadOnlySubagentPath(
+      childSessionRef,
+      entry.path,
+      expectedParentPath,
+      expectedRunId,
+    );
     if (!admitted) throw new GatewayError("conflict", "Subagent session identity changed", true);
     return admitted;
   }
@@ -1417,7 +1438,7 @@ export class RuntimeRegistry {
     before?: number,
     expectedNextEntryId?: string,
   ): Promise<TranscriptPage & { revision: string }> {
-    const admitted = await this.validateReadOnlySubagentPath(childSessionRef, path, false);
+    const admitted = await this.validateReadOnlySubagentPath(childSessionRef, path);
     if (!admitted) throw new GatewayError("conflict", "Subagent session identity changed", true);
     const handle = await open(admitted, "r");
     try {
@@ -1455,7 +1476,12 @@ export class RuntimeRegistry {
     }
   }
 
-  private async validateReadOnlySubagentPath(childSessionRef: string, input: string, _catalogStructuralEvidence: boolean): Promise<string | undefined> {
+  private async validateReadOnlySubagentPath(
+    childSessionRef: string,
+    input: string,
+    expectedParentPath?: string,
+    expectedRunId?: string,
+  ): Promise<string | undefined> {
     let canonical: string;
     try { canonical = await realpath(input); } catch { return undefined; }
     const roots = await Promise.all([join(this.options.agentDir, "sessions"), this.catalogDirectory()]
@@ -1463,14 +1489,21 @@ export class RuntimeRegistry {
     if (!roots.some((root) => canonical === root || canonical.startsWith(root + sep))) return undefined;
     const canonicalInput = await realpath(input).catch(() => undefined);
     if (!canonicalInput || canonicalInput !== canonical) return undefined;
+    if (expectedParentPath !== undefined) {
+      if (!expectedRunId || /[\\/\0]/u.test(expectedRunId)) return undefined;
+      let parentCanonical: string;
+      try { parentCanonical = await realpath(expectedParentPath); } catch { return undefined; }
+      const childRoot = join(dirname(parentCanonical), basename(parentCanonical, ".jsonl"));
+      const ownedRelative = relative(childRoot, canonical);
+      const parts = ownedRelative.split(sep);
+      if (ownedRelative === "" || ownedRelative === ".." || ownedRelative.startsWith(`..${sep}`)
+        || isAbsolute(ownedRelative) || parts[0] !== expectedRunId || parts.length < 3) return undefined;
+    }
     try {
       const metadata = await lstat(input);
       if (!metadata.isFile() || metadata.isSymbolicLink()) return undefined;
       const manager = SessionManager.open(canonical);
       if (manager.getSessionId() !== childSessionRef) return undefined;
-      // Catalog callers establish structural subagent classification before
-      // this path/identity check. Live callers supply an exact producer-bound
-      // path that RuntimeSlot already admitted.
       return canonical;
     } catch { return undefined; }
   }

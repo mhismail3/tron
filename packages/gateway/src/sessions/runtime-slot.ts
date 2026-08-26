@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { existsSync, lstatSync, realpathSync, watch, type FSWatcher } from "node:fs";
+import { closeSync, existsSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { copyFile, mkdtemp, open, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -64,7 +64,7 @@ import { attributeExtensions, extensionOwnerFor } from "../extensions/owner-attr
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates, type ExtensionArtifactRejectionReason } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
-import { ProcessActivityRecency, type ProcessActivityExpiryFrame } from "./process-activity-recency.js";
+import { MAX_PROCESS_TIMESTAMP_FUTURE_SKEW_MS, PROCESS_ACTIVITY_RECENT_MS, ProcessActivityRecency, type ProcessActivityExpiryFrame } from "./process-activity-recency.js";
 import {
   boundProcessActivities,
   canonicalProcessHistory,
@@ -750,8 +750,19 @@ export class RuntimeSlot {
     await this.bindSession();
   }
 
-  private childSessionReferences(value: unknown): Map<string, string> {
+  private childSessionReferences(value: unknown, activity: ExtensionRunActivity): Map<string, string> {
     const references = new Map<string, string>();
+    const ambiguous = new Set<string>();
+    if (!activity.runId) return references;
+    const wrapper = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+    const root = wrapper?.details && typeof wrapper.details === "object" && !Array.isArray(wrapper.details)
+      ? wrapper.details as Record<string, unknown> : wrapper;
+    const declaredRun = [root?.runId, root?.asyncId]
+      .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
+    // Exact producer run ownership is established before a child path can
+    // enrich the already tool-owned activity. Generic nested records cannot
+    // nominate arbitrary sessions.
+    if (declaredRun !== activity.runId) return references;
     const visit = (candidate: unknown, depth: number): void => {
       if (depth > 4 || candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) return;
       const record = candidate as Record<string, unknown>;
@@ -761,23 +772,44 @@ export class RuntimeSlot {
         .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
       const sessionFile = [record.sessionFile, progress?.sessionFile]
         .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
-      if (childID && sessionFile) {
-        const admitted = this.validateChildSessionFile(sessionFile);
-        if (admitted) references.set(childID, admitted.ref);
+      if (childID && sessionFile && childID !== activity.runId) {
+        const admitted = this.validateChildSessionFile(sessionFile, activity.runId!);
+        if (admitted) {
+          const prior = references.get(childID);
+          if (prior && prior !== admitted.ref) {
+            references.delete(childID);
+            ambiguous.add(childID);
+          } else if (!ambiguous.has(childID)) references.set(childID, admitted.ref);
+        }
       }
       for (const key of ["results", "steps", "children"] as const) {
         const nested = record[key];
         if (Array.isArray(nested)) for (const child of nested.slice(0, 64)) visit(child, depth + 1);
       }
       if (Array.isArray(record.progress)) for (const child of record.progress.slice(0, 64)) visit(child, depth + 1);
-      if (record.details && typeof record.details === "object" && !Array.isArray(record.details)) visit(record.details, depth + 1);
     };
-    visit(value, 0);
+    visit(root, 0);
     return references;
   }
 
-  private validateChildSessionFile(candidate: string): { ref: string; path: string } | undefined {
-    if (!isAbsolute(candidate) || candidate.length > 4_096) return undefined;
+  private boundedSessionHeader(candidate: string): { id: string; parentSession?: string } | undefined {
+    const maximum = 64 * 1_024;
+    let descriptor: number | undefined;
+    try {
+      descriptor = openSync(candidate, "r");
+      const bytes = Buffer.alloc(maximum + 1);
+      const count = readSync(descriptor, bytes, 0, bytes.length, 0);
+      const newline = bytes.subarray(0, count).indexOf(0x0a);
+      if (newline < 0 || newline > maximum) return undefined;
+      const header = JSON.parse(bytes.subarray(0, newline).toString("utf8")) as Record<string, unknown>;
+      if (header.type !== "session" || typeof header.id !== "string" || !header.id.trim()) return undefined;
+      return { id: header.id, ...(typeof header.parentSession === "string" ? { parentSession: header.parentSession } : {}) };
+    } catch { return undefined; }
+    finally { if (descriptor !== undefined) closeSync(descriptor); }
+  }
+
+  private validateChildSessionFile(candidate: string, expectedRunId: string): { ref: string; path: string } | undefined {
+    if (!isAbsolute(candidate) || candidate.length > 4_096 || !expectedRunId || /[\\/\0]/u.test(expectedRunId)) return undefined;
     let canonical: string;
     let identity: { dev: number; ino: number };
     try {
@@ -786,34 +818,37 @@ export class RuntimeSlot {
       identity = { dev: metadata.dev, ino: metadata.ino };
       canonical = realpathSync(candidate);
     } catch { return undefined; }
-    const roots = [this.sessionManager.getSessionDir(), join(this.dependencies.agentDir, "sessions")]
-      .flatMap((root) => {
-        try { return [realpathSync(root)]; } catch { return []; }
-      });
-    if (!roots.some((root) => {
-      const child = relative(root, canonical);
-      return child !== "" && child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child);
-    })) return undefined;
+    const parentFile = this.sessionManager.getSessionFile();
+    if (!parentFile) return undefined;
+    let parentCanonical: string;
+    try { parentCanonical = realpathSync(parentFile); } catch { return undefined; }
+    const childRoot = join(dirname(parentCanonical), basename(parentCanonical, ".jsonl"));
+    const ownedRelative = relative(childRoot, canonical);
+    const pathParts = ownedRelative.split(sep);
+    const structurallyOwned = ownedRelative !== "" && ownedRelative !== ".."
+      && !ownedRelative.startsWith(`..${sep}`) && !isAbsolute(ownedRelative)
+      && pathParts[0] === expectedRunId && pathParts.length >= 3;
+    if (!structurallyOwned) return undefined;
+    const header = this.boundedSessionHeader(canonical);
+    if (!header) return undefined;
+    if (header.parentSession) {
+      let headerParent: string;
+      try { headerParent = realpathSync(header.parentSession); } catch { return undefined; }
+      if (headerParent !== parentCanonical) return undefined;
+    }
     try {
       const manager = SessionManager.open(canonical);
       const after = lstatSync(canonical);
       if (!after.isFile() || after.isSymbolicLink() || after.dev !== identity.dev || after.ino !== identity.ino) return undefined;
       const ref = manager.getSessionId();
-      if (!ref || ref === this.id || Buffer.byteLength(ref) > 256) return undefined;
-      const parent = manager.getHeader()?.parentSession;
-      const parentFile = this.sessionManager.getSessionFile();
-      if (parent && parentFile) {
-        let parentCanonical: string;
-        try { parentCanonical = realpathSync(parent); } catch { return undefined; }
-        if (parentCanonical !== realpathSync(parentFile)) return undefined;
-      }
+      if (ref !== header.id || !ref || ref === this.id || Buffer.byteLength(ref) > 256) return undefined;
       this.validatedChildSessionPaths.set(ref, canonical);
       return { ref, path: canonical };
     } catch { return undefined; }
   }
 
   private attachChildSessionReferences(activity: ExtensionRunActivity, value: unknown): ExtensionRunActivity {
-    const references = this.childSessionReferences(value);
+    const references = this.childSessionReferences(value, activity);
     if (references.size === 0) return activity;
     const attach = (children: ExtensionRunActivity["children"]): ExtensionRunActivity["children"] => children.map((child) => ({
       ...child,
@@ -862,7 +897,9 @@ export class RuntimeSlot {
     for (const activity of canonicalProcessHistory(this.sessionManager)) {
       if (activity.kind !== "command") continue;
       const terminalAt = Date.parse(activity.lifecycle.terminalAt ?? "");
-      if (!Number.isFinite(terminalAt) || terminalAt + 5 * 60_000 <= now) continue;
+      if (!Number.isFinite(terminalAt)
+        || terminalAt > now + MAX_PROCESS_TIMESTAMP_FUTURE_SKEW_MS
+        || terminalAt + PROCESS_ACTIVITY_RECENT_MS <= now) continue;
       this.replaceProcessesForToolCall(activity.toolCallId ?? activity.processId, [activity]);
     }
   }
@@ -885,7 +922,20 @@ export class RuntimeSlot {
       this.dependencies.processActivityRecency.remove(processId);
       this.processRevision += 1;
     }
-    for (const candidate of projected) {
+    for (const projectedCandidate of projected) {
+      const previous = this.processActivities.get(projectedCandidate.processId);
+      const previousTerminal = previous && ["completed", "failed", "stopped", "rejected", "interrupted"].includes(previous.lifecycle.state);
+      const candidateTerminal = ["completed", "failed", "stopped", "rejected", "interrupted"].includes(projectedCandidate.lifecycle.state);
+      // Repeated parent artifact frames must not move a child's already
+      // admitted terminal clock. Canonical command settlement is reconciled
+      // separately with an explicitly newer sequence.
+      const candidate = projectedCandidate.kind === "subagent" && previousTerminal && candidateTerminal
+        ? { ...projectedCandidate, lifecycle: {
+            ...projectedCandidate.lifecycle,
+            ...(previous!.lifecycle.terminalAt ? { terminalAt: previous!.lifecycle.terminalAt } : {}),
+            ...(previous!.lifecycle.recentUntil ? { recentUntil: previous!.lifecycle.recentUntil } : {}),
+          } }
+        : projectedCandidate;
       const admitted = this.dependencies.processActivityRecency.upsert(candidate);
       if (!admitted.accepted) continue;
       this.processActivities.set(candidate.processId, admitted.activity);
@@ -900,6 +950,18 @@ export class RuntimeSlot {
     const activity = commandProcessFromTool(this.id, state);
     if (!activity) return;
     this.replaceProcessesForToolCall(state.toolCallId, [activity]);
+  }
+
+  private reconcileCanonicalCommandProcess(toolCallId: string): void {
+    if (this.disposed) return;
+    const canonical = canonicalProcessHistory(this.sessionManager)
+      .find((activity) => activity.kind === "command" && activity.toolCallId === toolCallId);
+    if (!canonical) return;
+    const previousSequence = this.processActivities.get(canonical.processId)?.lifecycle.sequence ?? 0;
+    const reconciled = { ...canonical, lifecycle: { ...canonical.lifecycle, sequence: previousSequence + 1 } };
+    this.replaceProcessesForToolCall(toolCallId, [reconciled]);
+    this.publishProcessesForToolCall(toolCallId);
+    this.scheduleSnapshot();
   }
 
   private syncSubagentProcesses(activity: ExtensionRunActivity): void {
@@ -1835,6 +1897,38 @@ export class RuntimeSlot {
       case "entry_appended":
         this.summaryContentDirty = true;
         if (event.entry.type === "message" && event.entry.message.role === "toolResult") {
+          // Reconcile assistant bash to the exact canonical result timestamp and
+          // output before retiring its high-frequency live overlay. This keeps
+          // the five-minute handoff stable across restart/reconnect.
+          if (event.entry.message.toolName === "bash") {
+            const toolCallId = event.entry.message.toolCallId;
+            const live = this.toolExecutions.get(toolCallId);
+            if (live?.toolName === "bash") {
+              const canonicalOutput = event.entry.message.content
+                .filter((part) => part.type === "text")
+                .map((part) => part.text)
+                .join("\n");
+              const canonicalState: ToolExecutionState = {
+                ...live,
+                status: event.entry.message.isError ? "failed" : "completed",
+                isError: event.entry.message.isError,
+                updatedAt: event.entry.timestamp,
+                lastProgressAt: event.entry.timestamp,
+                completedAt: event.entry.timestamp,
+                progressSequence: live.progressSequence + 1,
+                ...(canonicalOutput ? { output: canonicalOutput } : {}),
+              };
+              const canonical = commandProcessFromTool(this.id, canonicalState);
+              if (canonical) {
+                this.replaceProcessesForToolCall(toolCallId, [canonical]);
+                this.publishProcessesForToolCall(toolCallId);
+              }
+            }
+            // Pi persists the final tool-result entry immediately after the
+            // listener unwinds. Re-read in the next microtask so the process
+            // terminal clock/output exactly matches canonical JSONL.
+            queueMicrotask(() => this.reconcileCanonicalCommandProcess(toolCallId));
+          }
           // The canonical result now owns presentation. Keeping the same payload
           // in the live overlay for the rest of a long run duplicates output and
           // can grow snapshots without bound.
@@ -1847,6 +1941,9 @@ export class RuntimeSlot {
         if (event.message.role === "assistant") {
           this.finalizeToolInvocationGroups(event.message);
           this.bindCanonicalPresentation(event.message);
+        } else if (event.message.role === "toolResult" && event.message.toolName === "bash") {
+          const toolCallId = event.message.toolCallId;
+          queueMicrotask(() => this.reconcileCanonicalCommandProcess(toolCallId));
         } else if (event.message.role === "user"
           && this.pendingPrompt
           && this.pendingPromptMessage === event.message) {
@@ -3264,25 +3361,37 @@ export class RuntimeSlot {
   processDetail(processId: string, expectedHistoryRevision?: string): SessionProcessActivity | undefined {
     this.assertNoTrustReload();
     try {
-      const canonical = processHistoryDetail(this.runtime.session.sessionManager, processId, expectedHistoryRevision);
-      if (canonical) return canonical;
+      // History detail is canonical-only. Mutable mounted state has its own
+      // process revision and must never be returned under a history revision.
+      return processHistoryDetail(this.runtime.session.sessionManager, processId, expectedHistoryRevision);
     } catch (error) {
       if (error instanceof Error && error.message.includes("generation conflict")) {
         throw new GatewayError("conflict", "Process history generation changed; refresh history", true);
       }
       throw error;
     }
-    return this.processActivities.get(processId);
+  }
+
+  private processForViewer(processId: string): SessionProcessActivity | undefined {
+    return this.processActivities.get(processId)
+      ?? processHistoryDetail(this.runtime.session.sessionManager, processId);
+  }
+
+  processChildSessionBinding(processId: string): { ref: string; runId?: string } | undefined {
+    const process = this.processForViewer(processId);
+    return process?.childSessionRef
+      ? { ref: process.childSessionRef, ...(process.runId ? { runId: process.runId } : {}) }
+      : undefined;
   }
 
   processChildSessionRef(processId: string): string | undefined {
-    return this.processDetail(processId)?.childSessionRef;
+    return this.processChildSessionBinding(processId)?.ref;
   }
 
-  processChildSessionPath(processId: string): { ref: string; path: string } | undefined {
-    const ref = this.processChildSessionRef(processId);
-    const path = ref ? this.validatedChildSessionPaths.get(ref) : undefined;
-    return ref && path ? { ref, path } : undefined;
+  processChildSessionPath(processId: string): { ref: string; path: string; runId?: string } | undefined {
+    const binding = this.processChildSessionBinding(processId);
+    const path = binding ? this.validatedChildSessionPaths.get(binding.ref) : undefined;
+    return binding && path ? { ...binding, path } : undefined;
   }
 
   publishSnapshot(): void {

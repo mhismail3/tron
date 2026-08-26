@@ -8,6 +8,7 @@ import {
   commandProcessFromTool,
   listProcessHistory,
   processOverview,
+  redactProcessText,
   subagentProcessesFromActivity,
 } from "./process-activity.js";
 
@@ -65,6 +66,20 @@ describe("session process projection", () => {
     expect(commandProcessFromTool("session-1", tool("read"))).toBeUndefined();
   });
 
+  it("redacts common credential forms only in process previews", () => {
+    const projected = commandProcessFromTool("session-1", {
+      ...tool(),
+      arguments: { command: "API_KEY=top-secret curl -H 'Authorization: Bearer abc123' https://user:pass@example.test" },
+      output: "{\"access_token\":\"response-secret\"}\npassword=hunter2",
+    });
+    expect(projected?.command).not.toContain("top-secret");
+    expect(projected?.command).not.toContain("abc123");
+    expect(projected?.command).not.toContain(":pass@");
+    expect(projected?.outputTail).not.toContain("response-secret");
+    expect(projected?.outputTail).not.toContain("hunter2");
+    expect(redactProcessText("ordinary output remains")).toBe("ordinary output remains");
+  });
+
   it("projects executable subagent children with opaque session references", () => {
     const rows = subagentProcessesFromActivity("session-1", subagent);
     expect(rows).toHaveLength(1);
@@ -76,6 +91,41 @@ describe("session process projection", () => {
       visibility: "recent",
     });
     expect(rows[0]?.lifecycle.recentUntil).toBe("2026-01-01T00:05:02.000Z");
+  });
+
+  it("retains a terminal child while siblings run and omits workflow-only containers", () => {
+    const activeParent: ExtensionRunActivity = {
+      ...subagent,
+      status: "running",
+      completedAt: undefined,
+      lifecycle: {
+        version: 1, state: "running", attention: "none", sequence: 5,
+        observedAt: "2026-01-01T00:00:04.000Z",
+      },
+      children: [{
+        id: "workflow", label: "workflow", status: "running", lifecycle: "running",
+        children: [
+          { id: "failed-child", label: "reviewer", status: "failed", lifecycle: "failed" },
+          { id: "active-child", label: "worker", status: "running", lifecycle: "running", currentTool: "read" },
+        ],
+      }],
+    };
+    const rows = subagentProcessesFromActivity("session-1", activeParent);
+    expect(rows.map((row) => row.title).sort()).toEqual(["reviewer", "worker"]);
+    expect(rows.find((row) => row.title === "reviewer")).toMatchObject({
+      visibility: "recent",
+      lifecycle: { state: "failed", terminalAt: "2026-01-01T00:00:04.000Z" },
+    });
+    expect(rows.find((row) => row.title === "worker")?.visibility).toBe("active");
+
+    const receiptRows = subagentProcessesFromActivity("session-1", {
+      ...subagent,
+      children: [{ id: "stale-running-child", label: "worker", status: "running", lifecycle: "running" }],
+    });
+    expect(receiptRows[0]).toMatchObject({
+      visibility: "recent",
+      lifecycle: { state: "completed", terminalAt: "2026-01-01T00:00:02.000Z" },
+    });
   });
 
   it("merges canonical assistant command results and subagent receipts", () => {
@@ -112,6 +162,31 @@ describe("session process projection", () => {
     expect(first.nextCursor).toBeDefined();
     expect(listProcessHistory(manager, first.nextCursor, 1).activities).toHaveLength(1);
     expect(() => listProcessHistory(manager, "stale:1", 1)).toThrow(/cursor conflict/u);
+  });
+
+  it("reads subagent receipts only from the selected canonical branch", () => {
+    const manager = SessionManager.inMemory("/tmp/process-branch", { id: "session-1" });
+    const root = manager.appendMessage({
+      role: "user", content: [{ type: "text", text: "root" }], timestamp: Date.parse("2026-01-01T00:00:00.000Z"),
+    } as never);
+    const abandoned = makeExtensionActivityReceipt({
+      ...subagent,
+      activityId: "abandoned-activity",
+      toolCallId: "abandoned-tool",
+      children: [{ ...subagent.children[0]!, id: "abandoned-child", label: "abandoned" }],
+    }, "session-1")!;
+    manager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, abandoned);
+    manager.branch(root);
+    const selected = makeExtensionActivityReceipt({
+      ...subagent,
+      activityId: "selected-activity",
+      toolCallId: "selected-tool",
+      children: [{ ...subagent.children[0]!, id: "selected-child", label: "selected" }],
+    }, "session-1")!;
+    manager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, selected);
+
+    const history = canonicalProcessHistory(manager).filter((row) => row.kind === "subagent");
+    expect(history.map((row) => row.title)).toEqual(["selected"]);
   });
 
   it("bounds ambient rows and authors a shallow aggregate", () => {
