@@ -171,7 +171,9 @@ baseline and disables Save again, while edits made during the request stay dirty
 Custom-model field bindings advance their revision in the same setter transaction and apply the same exact-revision
 completion rule. Every textual toolbar action uses the shared system-weight label with a leading SF Symbol (or its
 in-progress indicator); toolbar typography does not impose bold, semibold, or medium text. The dashboard Settings
-action is deliberately icon-only and retains an explicit accessibility label. Custom provider editors keep their three dense text fields together before the API-format row
+action is deliberately icon-only and retains an explicit accessibility label. Technical-detail sheets use the shared
+`TronTechnicalMetadataSection`/`TronTechnicalSectionLabel` treatment and drill into bounded JSON through
+`TronTechnicalJSONRow` instead of inventing sheet-local metadata cards or displaying large raw payloads inline. Custom provider editors keep their three dense text fields together before the API-format row
 and use the standard settings-group header treatment. Provider and model catalogs use the shared
 `ModelDisplayFormatting` projections everywhere they are shown; canonical IDs remain unchanged for
 search, persistence, and mutation while labels use product casing such as “OpenAI Codex / GPT 5.6 Luna”.

@@ -1084,7 +1084,7 @@ the native bottom size-change anchor holds pinned readers at the tail. Detached 
 Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
 the same capsule primitives while retaining left alignment, immutable routes, and detail sheets.
 
-Producer-receipted `sessionInput` custom messages are conversation input rather than tool activity. They use a distinct cyan, right-aligned interactive glass container that displays the actual message text and opens a technical sheet containing canonical identity, trigger semantics, producer payload, and exact extension attribution when available. Custom messages without that Gateway-authored evidence retain ordinary extension/tool presentation; iOS never classifies delivery from title, text, timestamp, or custom-type names.
+Producer-receipted `sessionInput` custom messages are conversation input rather than tool activity. They use a distinct cyan, right-aligned interactive glass container that displays the actual message text; the container's complete rounded geometry is one hit target rather than delegating interaction to individual header/text glyphs. Its medium/large technical sheet shares the standard technical-detail title, close control, blur, metadata-card, and drill-in JSON presentation used by tool details while exposing canonical identity, trigger semantics, producer payload, and exact extension attribution when available. Custom messages without that Gateway-authored evidence retain ordinary extension/tool presentation; iOS never classifies delivery from title, text, timestamp, or custom-type names.
 
 Every tool chip owns a tappable, top-anchored detail sheet, including
 read/write/edit and filesystem search tools. Inline chips use the same native

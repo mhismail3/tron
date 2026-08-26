@@ -104,15 +104,26 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptProjectionKernel.swift"),
             encoding: .utf8
         )
+        let toolDetails = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolTechnicalDetailsSheet.swift"),
+            encoding: .utf8
+        )
 
         #expect(row.contains("item.role == .user || item.sessionInput != nil"))
         #expect(row.contains("SessionInputMessageView(item: item)"))
         #expect(message.contains("Button { showingDetails = true }"))
         #expect(message.contains("UserPromptText(text: messageText)"))
+        #expect(message.contains(".contentShape(bubbleShape)"))
         #expect(message.contains("Color.tronCyan.opacity(0.14)).interactive()"))
         #expect(message.contains("SessionInputDetailsSheet(item: item)"))
-        #expect(message.contains("detailGroup(\"Origin\")"))
-        #expect(message.contains("detailGroup(\"Producer details\")"))
+        #expect(message.contains("TronMarkdownView(text: messageText, streaming: false)"))
+        #expect(message.contains("TronTechnicalMetadataSection("))
+        #expect(message.contains("TronTechnicalJSONRow("))
+        #expect(message.contains(".presentationDetents([.medium, .large])"))
+        #expect(message.contains(".tronTopBlur(.toolDetail)"))
+        #expect(message.contains("Image(systemName: \"checkmark\")"))
+        #expect(!message.contains("TronToolbarTextLabel(\"Done\""))
+        #expect(toolDetails.contains("TronTechnicalMetadataSection("))
         #expect(kernel.contains("guard item.sessionInput == nil else { return [] }"))
     }
 

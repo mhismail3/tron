@@ -44,22 +44,17 @@ struct ToolTechnicalDetailsSheet: View {
     }
 
     private var protocolMetadata: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("Execution")
-            VStack(spacing: 0) {
-                ForEach(Array(executionMetadata.enumerated()), id: \.element.id) { index, item in
-                    if index > 0 { Divider().overlay(accent.opacity(0.18)) }
-                    compactMetadataRow(item)
-                }
-            }
-            .tronGlassSurface(accent: accent, tintOpacity: 0.08)
-        }
+        TronTechnicalMetadataSection(
+            title: "Execution",
+            items: executionMetadata,
+            accent: accent
+        )
     }
 
-    private var executionMetadata: [ToolTechnicalMetadataItem] {
+    private var executionMetadata: [TronTechnicalMetadataItem] {
         var items = [
-            ToolTechnicalMetadataItem(title: "Tool", value: presentation.displayTitle, icon: presentation.icon),
-            ToolTechnicalMetadataItem(
+            TronTechnicalMetadataItem(title: "Tool", value: presentation.displayTitle, icon: presentation.icon),
+            TronTechnicalMetadataItem(
                 title: "Status",
                 value: tool.subtitle,
                 icon: tool.error ? "exclamationmark.triangle.fill" : "waveform.path.ecg"
@@ -100,30 +95,6 @@ struct ToolTechnicalDetailsSheet: View {
         return items
     }
 
-    private func compactMetadataRow(_ item: ToolTechnicalMetadataItem) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: item.icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                .foregroundStyle(accent)
-                .frame(width: 16)
-            Text(item.title)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(Color.tronTextPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            Text(item.value)
-                .font(TronTypography.code(size: TronTypography.sizeBody3))
-                .foregroundStyle(Color.tronTextSecondary)
-                .multilineTextAlignment(.trailing)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(item.title), \(item.value)")
-    }
-
     private func payload(_ title: String, value: JSONValue) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel("\(title) JSON")
@@ -138,9 +109,7 @@ struct ToolTechnicalDetailsSheet: View {
     }
 
     private func sectionLabel(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(TronTypography.sheetSectionHeader)
-            .foregroundStyle(Color.tronTextMuted)
+        TronTechnicalSectionLabel(title)
     }
 }
 
@@ -154,12 +123,4 @@ enum ToolTechnicalPayloadSummary {
         }
         return "Scalar protocol value"
     }
-}
-
-private struct ToolTechnicalMetadataItem: Identifiable {
-    let title: String
-    let value: String
-    let icon: String
-
-    var id: String { title }
 }

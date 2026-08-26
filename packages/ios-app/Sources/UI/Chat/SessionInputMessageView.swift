@@ -16,6 +16,13 @@ struct SessionInputMessageView: View {
         return text.isEmpty ? "No text content" : text
     }
 
+    private var bubbleShape: RoundedRectangle {
+        RoundedRectangle(
+            cornerRadius: ChatPromptContainerStyle.cornerRadius,
+            style: .continuous
+        )
+    }
+
     var body: some View {
         Button { showingDetails = true } label: {
             BoundedTrailingContentLayout(maxWidth: UserPromptTextLayoutPolicy.maximumWidth) {
@@ -30,12 +37,13 @@ struct SessionInputMessageView: View {
                 .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
                 .fixedSize(horizontal: false, vertical: true)
             }
+            // The custom layout's transparent padded region must participate in
+            // hit testing. Without this explicit shape UIKit-backed message text
+            // can leave only its header glyphs reliably tappable.
+            .contentShape(bubbleShape)
             .glassEffect(
                 .regular.tint(Color.tronCyan.opacity(0.14)).interactive(),
-                in: RoundedRectangle(
-                    cornerRadius: ChatPromptContainerStyle.cornerRadius,
-                    style: .continuous
-                )
+                in: bubbleShape
             )
         }
         .buttonStyle(.plain)
@@ -51,110 +59,115 @@ private struct SessionInputDetailsSheet: View {
     let item: TranscriptItem
     @Environment(\.dismiss) private var dismiss
 
+    private let accent = Color.tronCyan
+
     private var origin: ExtensionToolOrigin? { item.sessionInput?.origin }
+
     private var messageText: String {
         let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? "No text content" : text
     }
-    private var contentJSON: String {
-        (try? JSONValue.encode(item.content ?? []).prettyPrinted) ?? ""
+
+    private var originMetadata: [TronTechnicalMetadataItem] {
+        [
+            .init(title: "Extension", value: origin?.owner?.title ?? "Unknown extension", icon: "puzzlepiece.extension"),
+            .init(title: "Source", value: origin?.source ?? "Not attributed", icon: "externaldrive"),
+            .init(title: "Custom type", value: item.customType ?? "Unknown", icon: "tag"),
+            .init(title: "Delivery", value: "Triggered an agent turn", icon: "arrow.turn.down.right"),
+        ]
+    }
+
+    private var canonicalMetadata: [TronTechnicalMetadataItem] {
+        [
+            .init(title: "Entry", value: item.id, icon: "number"),
+            .init(title: "Timestamp", value: item.timestamp, icon: "clock"),
+        ]
+    }
+
+    private var contentPayload: JSONValue {
+        (try? JSONValue.encode(item.content ?? [])) ?? .array([])
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    detailGroup("Message") {
-                        Text(messageText)
-                            .font(TronFont.body(14))
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    detailGroup("Origin") {
-                        detailRow("Extension", origin?.owner?.title ?? "Unknown extension")
-                        detailRow("Source", origin?.source ?? "Not attributed")
-                        detailRow("Custom type", item.customType ?? "Unknown")
-                        detailRow("Delivery", "Triggered an agent turn")
-                    }
-
-                    detailGroup("Canonical identity") {
-                        detailRow("Entry", item.id)
-                        detailRow("Timestamp", item.timestamp)
-                    }
-
+                LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+                    messageSection
+                    TronTechnicalMetadataSection(
+                        title: "Origin",
+                        items: originMetadata,
+                        accent: accent
+                    )
+                    TronTechnicalMetadataSection(
+                        title: "Canonical identity",
+                        items: canonicalMetadata,
+                        accent: .tronSlate
+                    )
                     if let details = item.details {
-                        detailGroup("Producer details") {
-                            technicalText(details.prettyPrinted)
-                        }
+                        payloadSection(
+                            "Producer details",
+                            value: details,
+                            sheetTitle: "Producer details"
+                        )
                     }
-
-                    if !contentJSON.isEmpty {
-                        detailGroup("Content payload") {
-                            technicalText(contentJSON)
-                        }
-                    }
+                    payloadSection(
+                        "Content payload",
+                        value: contentPayload,
+                        sheetTitle: "Content payload"
+                    )
                 }
-                .padding(16)
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .background(Color.tronBackground)
-            .navigationBarTitleDisplayMode(.inline)
+            .defaultScrollAnchor(.top, for: .initialOffset)
+            .defaultScrollAnchor(.top, for: .alignment)
+            .defaultScrollAnchor(.top, for: .sizeChanges)
+            .tronScrollEdgeChrome()
+            .tronToolDetailNavigationChrome()
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Session message")
+                    TronSheetTitle(title: "Session message", accent: accent)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
-                        TronToolbarTextLabel("Done", systemImage: "checkmark")
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
                     }
-                    .tronToolbarAction()
+                    .accessibilityLabel("Done")
                 }
             }
         }
-        .tronTopBlur(.sheet)
+        .tronTopBlur(.toolDetail)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+        .tronPresentation()
     }
 
-    private func detailGroup<Content: View>(
-        _ title: String,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text(title.uppercased())
-                .font(TronFont.mono(10, weight: .medium))
-                .foregroundStyle(Color.tronTextMuted)
-            VStack(alignment: .leading, spacing: 9) { content() }
-                .padding(12)
+    private var messageSection: some View {
+        VStack(alignment: .leading, spacing: TronSpacing.sm) {
+            TronTechnicalSectionLabel("Message")
+            TronMarkdownView(text: messageText, streaming: false)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.tronSurface.opacity(0.78))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.tronBorder.opacity(0.65), lineWidth: 0.5)
-                }
+                .padding(TronSpacing.lg)
+                .tronGlassSurface(accent: accent, tintOpacity: 0.08)
         }
     }
 
-    private func detailRow(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(TronFont.body(11))
-                .foregroundStyle(Color.tronTextMuted)
-            Text(value)
-                .font(TronFont.mono(12))
-                .foregroundStyle(Color.tronTextPrimary)
-                .textSelection(.enabled)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func technicalText(_ value: String) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            Text(value)
-                .font(TronFont.mono(11))
-                .foregroundStyle(Color.tronTextSecondary)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: true, vertical: false)
+    private func payloadSection(
+        _ title: String,
+        value: JSONValue,
+        sheetTitle: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: TronSpacing.sm) {
+            TronTechnicalSectionLabel(title)
+            TronTechnicalJSONRow(
+                value: value,
+                title: "Inspect \(title.lowercased())",
+                subtitle: ToolTechnicalPayloadSummary.summary(for: value),
+                sheetTitle: sheetTitle,
+                accent: accent
+            )
         }
     }
 }
