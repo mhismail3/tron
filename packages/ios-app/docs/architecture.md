@@ -887,10 +887,10 @@ settings groups use Tron's tinted Liquid Glass surfaces. High-cardinality or
 very tall scrolling collections use the shared static scroll surface instead:
 it preserves tint, border, geometry, and hit regions without installing a live
 backdrop filter for every row or a multi-screen card. Long settings screens use
-lazy outer stacks, while their small divider-owned sections remain eager. The main Settings sheet is a single
-list of separated row containers rather than category headers; each row carries a concise secondary
-summary while retaining progressive destination construction and exact dashboard/project scope
-admission. Settings rows share one semantic value policy rather than sheet-local typography: stable
+lazy outer stacks, while their small divider-owned sections remain eager. The main Settings sheet places its
+complete divider-owned row list inside one Liquid Glass container rather than category headers or one
+backdrop per destination; each row carries a concise secondary summary while retaining progressive
+destination construction and exact dashboard/project scope admission. Settings rows share one semantic value policy rather than sheet-local typography: stable
 explanations and identities use the selected reading family; live or user-selectable values use the
 code family. A row with a distinct trailing control places its value on the secondary line and gives
 the control a stable reading-family action label. Without a trailing control, the dynamic value is
@@ -968,14 +968,19 @@ the shared Liquid Glass action container below the confirmation content. Other
 top-left dismissal controls are reserved for navigation, not app-owned sheets. Settings containers and their nested font
 or model choices disclose as progressively stacked sub-sheets rather than
 horizontal navigation pushes; Appearance uses the custom Liquid Glass segmented
-color-mode control and keeps font axes directly beneath each font choice before its
-preview. Draft-backed settings save from a disabled-until-dirty leading toolbar
+color-mode control with a compact 40-point color-mode height and keeps font axes directly beneath each
+font choice before its preview. Text and code previews share the same 14-point row padding without an
+extra code-only minimum height. Draft-backed settings save from a disabled-until-dirty leading toolbar
 button rather than a trailing page action; its compact appearance uses the
 system toolbar glass without nesting a second button surface. Resource path
 editors share one padded, top-leading multiline field treatment, while numeric
-settings use the shared larger numeric scale. Connected-provider logout lives in the
-provider row's compact action menu while connection is a plain trailing affordance. All provider and
-model catalog projections use `ModelDisplayFormatting` at the UI boundary: identifiers such as
+settings use the shared larger numeric scale. Provider rows use icon-free trailing Connect or Configure text actions instead of local menus. Each action
+opens one medium/large standardized configuration sheet at normal inline-navigation content height:
+runtime-advertised API-key and account-login methods are presented together, configured providers expose
+replacement credential or alternate-account login plus credential clearing, and the same visible sheet owns
+the exact operation-keyed auth prompt/event lifecycle. API-key prompts replace the option list in place with
+a header, credential field, and value-gated Save action; they never present another page or sheet.
+All provider and model catalog projections use `ModelDisplayFormatting` at the UI boundary: identifiers such as
 `openai-codex` and `gpt-5.6-luna` render as “OpenAI Codex” and “GPT 5.6 Luna” without changing
 canonical IDs or search/mutation values. New Session quick selections are compound
 server/project identities, so selecting one switches the owning Gateway profile before

@@ -28,86 +28,100 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
-                    settingsLink(
-                        "Appearance",
-                        summary: "Theme, type scale, and visual preferences",
-                        icon: "circle.lefthalf.filled"
-                    ) { AppearanceSettingsView() }
-                    settingsLink(
-                        "Connections",
-                        summary: "Pair and manage Mac gateways",
-                        icon: "desktopcomputer"
-                    ) { ConnectionsSettingsView() }
-                    settingsLink(
-                        "Providers",
-                        summary: "Authentication and provider credentials",
-                        icon: "key"
-                    ) {
-                        ProvidersSettingsView(sessionID: projectSessionID)
-                    }
-                    settingsLink(
-                        "Models and Defaults",
-                        summary: "Default model, thinking, and selection policy",
-                        icon: "cpu"
-                    ) {
-                        AgentDefaultsSettingsView(
-                            allowsProjectScope: scope == .project,
-                            providerTarget: projectSessionID.map(ProviderCatalogTarget.session(id:)) ?? .global,
-                            projectCWD: projectCWD
-                        )
-                    }
-                    settingsLink(
-                        "Runtime Behavior",
-                        summary: "Prompt queue, retries, and compaction behavior",
-                        icon: "gearshape.2"
-                    ) {
-                        RuntimeBehaviorSettingsView(projectCWD: projectCWD)
-                    }
-                    settingsLink(
-                        "Resource Paths",
-                        summary: "Instructions, skills, and project resources",
-                        icon: "folder.badge.gearshape"
-                    ) {
-                        ResourceSettingsView(projectCWD: projectCWD)
-                    }
-                    settingsLink(
-                        "Packages and Resources",
-                        summary: "Installed packages and executable resources",
-                        icon: "shippingbox"
-                    ) {
-                        PackagesSettingsView(projectCWD: projectCWD)
-                    }
-                    if scope == .project {
-                        settingsLink(
-                            "Project Trust",
-                            summary: "Review executable workspace resource trust",
-                            icon: "checkmark.shield"
-                        ) {
-                            TrustSettingsView(
-                                target: projectCWD.flatMap(TrustTarget.init(cwd:))
-                            )
+                    TronGlassCard(accent: .tronEmerald) {
+                        VStack(spacing: 0) {
+                            settingsLink(
+                                "Appearance",
+                                summary: "Theme, type scale, and visual preferences",
+                                icon: "circle.lefthalf.filled"
+                            ) { AppearanceSettingsView() }
+                            settingsDivider()
+                            settingsLink(
+                                "Connections",
+                                summary: "Pair and manage Mac gateways",
+                                icon: "desktopcomputer"
+                            ) { ConnectionsSettingsView() }
+                            settingsDivider()
+                            settingsLink(
+                                "Providers",
+                                summary: "Authentication and provider credentials",
+                                icon: "key"
+                            ) {
+                                ProvidersSettingsView(sessionID: projectSessionID)
+                            }
+                            settingsDivider()
+                            settingsLink(
+                                "Models and Defaults",
+                                summary: "Default model, thinking, and selection policy",
+                                icon: "cpu"
+                            ) {
+                                AgentDefaultsSettingsView(
+                                    allowsProjectScope: scope == .project,
+                                    providerTarget: projectSessionID.map(ProviderCatalogTarget.session(id:)) ?? .global,
+                                    projectCWD: projectCWD
+                                )
+                            }
+                            settingsDivider()
+                            settingsLink(
+                                "Runtime Behavior",
+                                summary: "Prompt queue, retries, and compaction behavior",
+                                icon: "gearshape.2"
+                            ) {
+                                RuntimeBehaviorSettingsView(projectCWD: projectCWD)
+                            }
+                            settingsDivider()
+                            settingsLink(
+                                "Resource Paths",
+                                summary: "Instructions, skills, and project resources",
+                                icon: "folder.badge.gearshape"
+                            ) {
+                                ResourceSettingsView(projectCWD: projectCWD)
+                            }
+                            settingsDivider()
+                            settingsLink(
+                                "Packages and Resources",
+                                summary: "Installed packages and executable resources",
+                                icon: "shippingbox"
+                            ) {
+                                PackagesSettingsView(projectCWD: projectCWD)
+                            }
+                            if scope == .project {
+                                settingsDivider()
+                                settingsLink(
+                                    "Project Trust",
+                                    summary: "Review executable workspace resource trust",
+                                    icon: "checkmark.shield"
+                                ) {
+                                    TrustSettingsView(
+                                        target: projectCWD.flatMap(TrustTarget.init(cwd:))
+                                    )
+                                }
+                            }
+                            settingsDivider()
+                            settingsLink(
+                                "Custom Models",
+                                summary: "Saved model definitions and aliases",
+                                icon: "slider.horizontal.3"
+                            ) { CustomModelsSettingsView() }
+                            if scope == .dashboard {
+                                settingsDivider()
+                                settingsLink(
+                                    "Import",
+                                    summary: "Restore a session export",
+                                    icon: "tray.and.arrow.down"
+                                ) {
+                                    ImportSettingsView(onImported: onImported)
+                                }
+                            }
+                            settingsDivider()
+                            settingsLink(
+                                "Logs",
+                                summary: "Recent diagnostics from paired Mac gateways",
+                                icon: "text.alignleft"
+                            ) {
+                                GatewayLogsSettingsView()
+                            }
                         }
-                    }
-                    settingsLink(
-                        "Custom Models",
-                        summary: "Saved model definitions and aliases",
-                        icon: "slider.horizontal.3"
-                    ) { CustomModelsSettingsView() }
-                    if scope == .dashboard {
-                        settingsLink(
-                            "Import",
-                            summary: "Restore a session export",
-                            icon: "tray.and.arrow.down"
-                        ) {
-                            ImportSettingsView(onImported: onImported)
-                        }
-                    }
-                    settingsLink(
-                        "Logs",
-                        summary: "Recent diagnostics from paired Mac gateways",
-                        icon: "text.alignleft"
-                    ) {
-                        GatewayLogsSettingsView()
                     }
                 }
                 .padding(.horizontal, 20)
@@ -157,17 +171,19 @@ struct SettingsView: View {
         @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
         TronProgressiveSheetLink(accessibilityLabel: title, destination: destination) {
-            TronGlassCard(accent: .tronEmerald) {
-                TronSettingsRow(
-                    icon: icon,
-                    title: title,
-                    subtitle: summary,
-                    subtitleLineLimit: 2,
-                    subtitleColor: .tronTextSecondary
-                )
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            TronSettingsRow(
+                icon: icon,
+                title: title,
+                subtitle: summary,
+                subtitleLineLimit: 2,
+                subtitleColor: .tronTextSecondary
+            )
+            .contentShape(Rectangle())
         }
+    }
+
+    private func settingsDivider() -> some View {
+        TronSettingsDivider(accent: .tronEmerald)
     }
 }
 

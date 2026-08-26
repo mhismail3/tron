@@ -15,7 +15,8 @@ struct AppearanceSettingsView: View {
                     TronSegmentedControl(
                         options: AppearanceMode.allCases.map { (label: $0.label, value: $0) },
                         selection: $appearance.mode,
-                        accent: .tronEmerald
+                        accent: .tronEmerald,
+                        minimumHeight: 40
                     )
                     .frame(maxWidth: .infinity)
                     .accessibilityLabel("Color Mode")
@@ -93,7 +94,6 @@ struct AppearanceSettingsView: View {
                             .font(TronFont.mono(14))
                             .foregroundStyle(Color.tronAccentText)
                             .textSelection(.enabled)
-                            .frame(minHeight: 44, alignment: .leading)
                             .padding(14)
                     }
                 }

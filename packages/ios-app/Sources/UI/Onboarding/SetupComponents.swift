@@ -1,9 +1,62 @@
 import SwiftUI
 
+enum ProviderConfigurationPresentation {
+    static func isLoginMethod(_ method: String) -> Bool {
+        let normalized = method.lowercased().replacingOccurrences(of: "_", with: "-")
+        return normalized.contains("oauth") || normalized.contains("login") || normalized.contains("device-code")
+    }
+
+    static func actionTitle(method: String, configured: Bool) -> String {
+        if isLoginMethod(method) {
+            return configured ? "Log In with a Different Account" : "Log In"
+        }
+        return configured ? "Enter a New API Key" : "Enter API Key"
+    }
+
+    static func actionDetail(method: String, configured: Bool) -> String {
+        if isLoginMethod(method) {
+            return configured
+                ? "Replace the current login with another provider account."
+                : "Continue with the provider's account login flow."
+        }
+        return configured
+            ? "Store a replacement credential on the paired Mac."
+            : "Store the credential on the paired Mac."
+    }
+
+    static func clearTitle(for provider: ProviderSummary) -> String {
+        let authority = [provider.authSource, provider.credentialType]
+            .compactMap { $0?.lowercased() }
+            .joined(separator: " ")
+        return isLoginMethod(authority) ? "Clear Login Information" : "Clear API Key"
+    }
+
+    static func connectionDetail(for provider: ProviderSummary) -> String {
+        guard provider.configured else { return "Not configured" }
+        return "Connected - \(credentialLabel(for: provider))"
+    }
+
+    static func configurationDetail(for provider: ProviderSummary) -> String {
+        guard provider.configured else { return "Choose a connection method below." }
+        let label = credentialLabel(for: provider)
+        return label == "stored credential" ? "Stored credential" : label
+    }
+
+    private static func credentialLabel(for provider: ProviderSummary) -> String {
+        let source = provider.authSource?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = source?.lowercased().replacingOccurrences(of: "_", with: " ")
+        switch normalized {
+        case "oauth": return "OAuth"
+        case "stored credential", "stored cred", "api key", "credential": return "stored credential"
+        default: return (source?.isEmpty == false ? source : nil) ?? "stored credential"
+        }
+    }
+}
+
 struct ProviderSetupRow: View {
-    @Environment(AppModel.self) private var model
     let provider: ProviderSummary
     var sessionID: String? = nil
+    @State private var showsConfiguration = false
 
     private var providerTarget: ProviderCatalogTarget {
         sessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
@@ -21,49 +74,23 @@ struct ProviderSetupRow: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(1)
-                Text(connectionDetail)
+                Text(ProviderConfigurationPresentation.connectionDetail(for: provider))
                     .font(TronTypography.secondaryCodeDescription)
                     .foregroundStyle(Color.tronTextSecondary)
                     .lineLimit(1)
             }
             .layoutPriority(1)
             Spacer(minLength: 8)
-            if provider.configured {
-                Menu {
-                    Button("Log Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                        Task {
-                            do { try await model.logout(providerID: provider.id, target: providerTarget) }
-                            catch { model.presentError(error) }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                        .foregroundStyle(Color.tronEmerald)
-                        .frame(width: 36, height: 44, alignment: .center)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel("\(provider.displayName) provider actions")
-            } else {
-                Menu {
-                    ForEach(provider.authMethods, id: \.self) { method in
-                        Button(method == "oauth" ? "Sign in" : "Enter API key") {
-                            Task {
-                                do { try await model.beginAuth(providerID: provider.id, authType: method, target: providerTarget) }
-                                catch { model.presentError(error) }
-                            }
-                        }
-                    }
-                } label: {
-                    Text("Connect")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(Color.tronEmerald)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .frame(minHeight: 44, alignment: .center)
-                }
-                .accessibilityLabel("Connect \(provider.displayName)")
+            Button { showsConfiguration = true } label: {
+                Text(provider.configured ? "Configure" : "Connect")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                .foregroundStyle(Color.tronEmerald)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minHeight: 44, alignment: .center)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(provider.configured ? "Configure" : "Connect") \(provider.displayName)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -73,19 +100,182 @@ struct ProviderSetupRow: View {
             cornerRadius: 12,
             tintOpacity: provider.configured ? 0.14 : 0.08
         )
+        .sheet(isPresented: $showsConfiguration) {
+            ProviderConfigurationSheet(provider: provider, target: providerTarget)
+        }
+    }
+}
+
+private struct ProviderConfigurationSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let provider: ProviderSummary
+    let target: ProviderCatalogTarget
+    @State private var activeOperationID: String?
+    @State private var beginningMethod: String?
+    @State private var clearing = false
+
+    private var currentOperationID: String? {
+        model.authPrompt?.operationId ?? model.authEvent?.operationId
     }
 
-    private var connectionDetail: String {
-        guard provider.configured else { return "Not configured" }
-        let source = provider.authSource?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = source?.lowercased().replacingOccurrences(of: "_", with: " ")
-        let label: String
-        switch normalized {
-        case "oauth": label = "OAuth"
-        case "stored credential", "stored cred", "api key", "credential": label = "stored credential"
-        default: label = (source?.isEmpty == false ? source : nil) ?? "stored credential"
+    private var isPresentingOwnedAuth: Bool {
+        activeOperationID != nil && currentOperationID == activeOperationID
+    }
+
+    var body: some View {
+        NavigationStack {
+            configurationContent
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: provider.displayName, accent: .tronEmerald)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { close() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
+                    }
+                    .disabled(beginningMethod != nil || clearing)
+                    .accessibilityLabel("Done")
+                }
+            }
         }
-        return "Connected - \(label)"
+        .tronPresentation()
+        .tronScreenBackground()
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+        .interactiveDismissDisabled(isPresentingOwnedAuth || beginningMethod != nil)
+        .onChange(of: currentOperationID) { previous, current in
+            if let previous, previous == activeOperationID, current == nil {
+                activeOperationID = nil
+                dismiss()
+            } else if activeOperationID == nil, beginningMethod != nil, let current {
+                activeOperationID = current
+            }
+        }
+        .onDisappear {
+            guard let operationID = activeOperationID else { return }
+            activeOperationID = nil
+            Task { await model.cancelAuth(operationID: operationID) }
+        }
+    }
+
+    private var configurationContent: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+                TronGlassCard(accent: provider.configured ? .tronEmerald : .tronSlate) {
+                    TronSettingsRow(
+                        icon: provider.configured ? "checkmark.seal.fill" : "key",
+                        title: provider.configured ? "Connected" : "Not Configured",
+                        subtitle: ProviderConfigurationPresentation.configurationDetail(for: provider),
+                        subtitleRole: .dynamicValue,
+                        accent: provider.configured ? .tronEmerald : .tronSlate
+                    )
+                }
+
+                if isPresentingOwnedAuth {
+                    ProviderAuthFlowContent()
+                } else {
+                    if provider.authMethods.isEmpty {
+                        TronInfoCard(
+                            icon: "exclamationmark.triangle",
+                            text: "This provider does not advertise a supported connection method.",
+                            accent: .tronAmber
+                        )
+                    } else {
+                        TronSettingsGroup("Connection Options", accent: .tronEmerald) {
+                            VStack(spacing: 0) {
+                                ForEach(Array(provider.authMethods.enumerated()), id: \.offset) { index, method in
+                                    if index > 0 { TronSettingsDivider(accent: .tronEmerald) }
+                                    Button { begin(method) } label: {
+                                        HStack(spacing: 0) {
+                                            TronSettingsRow(
+                                                icon: ProviderConfigurationPresentation.isLoginMethod(method) ? "person.crop.circle.badge.checkmark" : "key.fill",
+                                                title: ProviderConfigurationPresentation.actionTitle(
+                                                    method: method,
+                                                    configured: provider.configured
+                                                ),
+                                                subtitle: ProviderConfigurationPresentation.actionDetail(
+                                                    method: method,
+                                                    configured: provider.configured
+                                                ),
+                                                accent: .tronEmerald
+                                            )
+                                            if beginningMethod == method {
+                                                ProgressView()
+                                                    .controlSize(.small)
+                                                    .tint(Color.tronEmerald)
+                                                    .padding(.trailing, 14)
+                                            }
+                                        }
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(beginningMethod != nil || clearing)
+                                }
+                            }
+                        }
+                    }
+
+                    if provider.configured {
+                        TronPrimaryActionButton(
+                            title: clearing ? "Clearing…" : ProviderConfigurationPresentation.clearTitle(for: provider),
+                            systemImage: "trash",
+                            isBusy: clearing,
+                            isEnabled: beginningMethod == nil && !clearing,
+                            role: .destructive
+                        ) { clearCredentials() }
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 20)
+        }
+        .tronScrollEdgeChrome()
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    private func begin(_ method: String) {
+        guard beginningMethod == nil, !clearing else { return }
+        beginningMethod = method
+        Task {
+            defer { beginningMethod = nil }
+            do {
+                try await model.beginAuth(providerID: provider.id, authType: method, target: target)
+                if let operationID = currentOperationID {
+                    activeOperationID = operationID
+                } else {
+                    dismiss()
+                }
+            } catch is CancellationError { }
+            catch { model.presentError(error) }
+        }
+    }
+
+    private func clearCredentials() {
+        guard !clearing, beginningMethod == nil else { return }
+        clearing = true
+        Task {
+            defer { clearing = false }
+            do {
+                try await model.logout(providerID: provider.id, target: target)
+                dismiss()
+            } catch is CancellationError { }
+            catch { model.presentError(error) }
+        }
+    }
+
+    private func close() {
+        let operationID = activeOperationID ?? currentOperationID
+        activeOperationID = nil
+        dismiss()
+        guard let operationID else { return }
+        Task { await model.cancelAuth(operationID: operationID) }
     }
 }
 

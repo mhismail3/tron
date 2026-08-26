@@ -26,9 +26,12 @@ hidden while the native upward sheet gesture remains available.
 6. **Anthropic** presents its runtime-reported authentication methods when the
    current runtime enables it.
 7. **OpenAI** does the same without assuming one credential type.
-8. **Other providers** presents the remaining dynamic provider catalog. API keys
-   and OAuth responses go directly to the Mac credential flow and are not
-   persisted by iOS.
+8. **Other providers** presents the remaining dynamic provider catalog. Connect
+   and Configure open the same standardized provider configuration sheet used by
+   Settings, with every runtime-advertised API-key and account-login method in
+   one place. API-key entry stays inline in that sheet with a value-gated Save
+   action. API keys and OAuth responses go directly to the Mac credential
+   flow and are not persisted by iOS.
 9. **Default model** chooses a provider-qualified model, records local setup
    completion, and dismisses the sheet to reveal the already-mounted shell and
    floating new-session action.

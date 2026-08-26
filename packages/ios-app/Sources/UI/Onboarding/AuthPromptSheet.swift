@@ -1,43 +1,22 @@
 import SwiftUI
 import UIKit
 
-/// One persistent sheet owns the complete provider-auth lifecycle. Provider
-/// data is arbitrary, but its presentation still uses Tron's established cards,
-/// fields, action hierarchy, and typography.
-struct ProviderAuthSheet: View {
+/// The visible provider configuration sheet owns this operation-keyed auth
+/// content so selecting a credential method never opens an unrelated presenter.
+struct ProviderAuthFlowContent: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if let prompt = model.authPrompt {
-                    AuthPromptContent(prompt: prompt)
-                } else if let event = model.authEvent {
-                    AuthEventContent(event: event)
-                } else {
-                    TronLoadingState(label: "Finishing provider login…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
-            .navigationTitle("")
-            .toolbar {
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Provider Login") }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { Task { await model.cancelAuth() } } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
-                    }
-                    .accessibilityLabel("Done")
-                }
+        Group {
+            if let prompt = model.authPrompt {
+                AuthPromptContent(prompt: prompt)
+            } else if let event = model.authEvent {
+                AuthEventContent(event: event)
+            } else {
+                TronLoadingState(label: "Finishing provider login…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .tronPresentation()
-        .tronScreenBackground()
-        .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .interactiveDismissDisabled()
     }
 }
 
@@ -48,69 +27,61 @@ private struct AuthPromptContent: View {
     @State private var submitting = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: TronSpacing.section) {
-                OnboardingCard {
-                    Text(prompt.message)
-                        .font(TronTypography.body)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        VStack(alignment: .leading, spacing: TronSpacing.section) {
+            Text(prompt.message)
+                .font(TronTypography.sheetSectionHeader)
+                .foregroundStyle(Color.tronTextPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
 
-                if prompt.kind == .select {
-                    ForEach(prompt.options) { option in
-                        Button {
-                            submit(option.id)
-                        } label: {
-                            HStack(alignment: .top, spacing: TronSpacing.md) {
-                                Image(systemName: "chevron.right.circle")
-                                    .foregroundStyle(Color.tronEmerald)
-                                    .accessibilityHidden(true)
-                                VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                                    Text(option.label)
-                                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                                        .foregroundStyle(Color.tronTextPrimary)
-                                    if let description = option.description {
-                                        Text(description)
-                                            .font(TronTypography.bodySM)
-                                            .foregroundStyle(Color.tronTextSecondary)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
+            if prompt.kind == .select {
+                ForEach(prompt.options) { option in
+                    Button {
+                        submit(option.id)
+                    } label: {
+                        HStack(alignment: .top, spacing: TronSpacing.md) {
+                            Image(systemName: "chevron.right.circle")
+                                .foregroundStyle(Color.tronEmerald)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                                Text(option.label)
+                                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                                    .foregroundStyle(Color.tronTextPrimary)
+                                if let description = option.description {
+                                    Text(description)
+                                        .font(TronTypography.bodySM)
+                                        .foregroundStyle(Color.tronTextSecondary)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
-                                Spacer(minLength: 0)
                             }
-                        }
-                        .buttonStyle(TronActionButtonStyle())
-                        .disabled(submitting)
-                    }
-                } else {
-                    Group {
-                        if prompt.kind == .secret {
-                            SecureField(prompt.placeholder ?? "Value", text: $value)
-                                .textContentType(.password)
-                        } else {
-                            TextField(prompt.placeholder ?? "Value", text: $value)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
+                            Spacer(minLength: 0)
                         }
                     }
-                    .tronField(monospaced: prompt.kind == .secret)
-
-                    TronPrimaryActionButton(
-                        title: submitting ? "Continuing…" : "Continue",
-                        systemImage: "arrow.right",
-                        isBusy: submitting,
-                        isEnabled: !value.isEmpty && !submitting
-                    ) { submit(value) }
+                    .buttonStyle(TronActionButtonStyle())
+                    .disabled(submitting)
                 }
+            } else {
+                Group {
+                    if prompt.kind == .secret {
+                        SecureField(prompt.placeholder ?? "Value", text: $value)
+                            .textContentType(.password)
+                    } else {
+                        TextField(prompt.placeholder ?? "Value", text: $value)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                }
+                .tronField(monospaced: prompt.kind == .secret)
+
+                TronPrimaryActionButton(
+                    title: submitting ? "Saving…" : "Save",
+                    systemImage: "square.and.arrow.down",
+                    isBusy: submitting,
+                    isEnabled: !value.isEmpty && !submitting
+                ) { submit(value) }
             }
-            .padding(.horizontal, TronSpacing.xlarge)
-            .padding(.vertical, TronSpacing.large)
-            .frame(maxWidth: 620)
-            .frame(maxWidth: .infinity)
         }
-        .tronScrollEdgeChrome()
-        .scrollDismissesKeyboard(.interactively)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: prompt.id) { _, _ in value = "" }
     }
 
@@ -131,27 +102,21 @@ private struct AuthEventContent: View {
     let event: AppModel.AuthEventState
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: TronSpacing.section) {
-                switch event.kind {
-                case .progress:
-                    OnboardingCard {
-                        TronLoadingState(label: event.message ?? "Waiting for the provider…")
-                    }
-                case .authURL:
-                    authURLContent
-                case .deviceCode:
-                    deviceCodeContent
-                case .info:
-                    infoContent
+        VStack(alignment: .leading, spacing: TronSpacing.section) {
+            switch event.kind {
+            case .progress:
+                OnboardingCard {
+                    TronLoadingState(label: event.message ?? "Waiting for the provider…")
                 }
+            case .authURL:
+                authURLContent
+            case .deviceCode:
+                deviceCodeContent
+            case .info:
+                infoContent
             }
-            .padding(.horizontal, TronSpacing.xlarge)
-            .padding(.vertical, TronSpacing.large)
-            .frame(maxWidth: 620)
-            .frame(maxWidth: .infinity)
         }
-        .tronScrollEdgeChrome()
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder private var authURLContent: some View {

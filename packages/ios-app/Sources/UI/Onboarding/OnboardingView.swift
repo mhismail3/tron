@@ -134,7 +134,6 @@ struct OnboardingView: View {
         .tronScreenBackground()
         .tronTopBlur(.sheet)
         .tint(.tronEmerald)
-        .providerAuthPresenter()
         .onDisappear { model.noticeCenter.retire(scope: noticeScope) }
         .sheet(isPresented: $showScanner) {
             NavigationStack {

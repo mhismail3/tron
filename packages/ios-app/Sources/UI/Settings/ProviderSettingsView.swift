@@ -39,9 +39,6 @@ struct ProvidersSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Providers")
-        // Provider login must be presented by the currently visible provider
-        // sheet, not by Settings or the dashboard underneath its sheet stack.
-        .providerAuthPresenter()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 TronReloadToolbarButton(isReloading: reloading, action: reload)

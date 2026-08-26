@@ -570,6 +570,7 @@ struct TronSegmentedControl<Value: Hashable>: View {
     let options: [(label: String, value: Value)]
     @Binding var selection: Value
     var accent: Color = .tronEmerald
+    var minimumHeight: CGFloat = 44
 
     var body: some View {
         GlassEffectContainer(spacing: TronSpacing.xs) {
@@ -586,7 +587,7 @@ struct TronSegmentedControl<Value: Hashable>: View {
                                 weight: selected ? .semibold : .medium
                             ))
                             .foregroundStyle(Color.tronAccentText)
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .frame(maxWidth: .infinity, minHeight: minimumHeight)
                             .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
                     }
                     .buttonStyle(.plain)
