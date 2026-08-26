@@ -85,6 +85,23 @@ describe("session process projection", () => {
     expect(rows).toEqual([]);
   });
 
+  it("does not project supervisor or control receipts without a delegated execution mode", () => {
+    expect(subagentProcessesFromActivity("session-1", {
+      ...subagent,
+      mode: undefined,
+      children: [],
+      currentTool: "subagent_supervisor",
+    })).toEqual([]);
+    expect(subagentProcessesFromActivity("session-1", {
+      ...subagent,
+      mode: undefined,
+      children: [{
+        id: "control-run", producerId: "control-run", label: "control", status: "completed",
+        lifecycle: "completed", currentTool: "subagent_supervisor",
+      }],
+    })).toEqual([]);
+  });
+
   it("keeps an async workflow active after its launcher tool has already settled", () => {
     const rows = subagentProcessesFromActivity("session-1", {
       ...subagent,

@@ -191,11 +191,15 @@ function childRows(
 }
 
 export function subagentProcessesFromActivity(sessionId: string, activity: ExtensionRunActivity): SessionProcessActivity[] {
+  const mode = subagentMode(activity.mode);
+  // Extension ownership and a run ID alone do not prove a delegated process:
+  // pi-subagents supervisor/control tools emit receipts too. Unknown execution
+  // modes fail closed so Gateway never authors an invalid subagent DTO.
+  if (mode === "unknown") return [];
   if (activity.children.length > 0) return childRows(sessionId, activity, activity.children);
   // Workflow roots are orchestration containers, not executable subagents.
   // A single/sync run still has exact run identity and remains a valid row.
   if (!activity.runId || activity.mode?.toLowerCase() === "workflow") return [];
-  const mode = subagentMode(activity.mode);
   const hasExecutionEvidence = activity.currentTool !== undefined
     || activity.output !== undefined || activity.toolCount !== undefined
     || activity.turnCount !== undefined || activity.lifecycle?.producerUpdatedAt !== undefined;

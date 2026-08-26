@@ -799,7 +799,8 @@ an empty page is omitted and reported in omission count/bytes. Cursors conflict 
 canonical generation changes. Old `tron.extension-activity.v1` entries remain readable by
 extension history;
 process history admits individual historical children only when the receipt records their
-exact producer ID. Newer receipts may add that identity and a validated opaque
+exact producer ID and a known synchronous or asynchronous execution mode. Supervisor/control
+receipts and unknown modes fail closed rather than authoring invalid process DTOs. Newer receipts may add that identity and a validated opaque
 child-session ID but continue to omit paths, task text, and output.
 
 The companion `process-history.v1` capability advertises canonical history reads.
