@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum ManageSessionDestination: String, Identifiable {
-    case agentContext, projectResources, history, extensionActivity, terminal
+    case agentContext, projectResources, history, processHistory, terminal
     var id: String { rawValue }
 }
 
@@ -210,7 +210,7 @@ struct SessionContextSheet: View {
                     if let snapshot = model.authoritativeSnapshot(for: sessionID) {
                         contextUsageCard(snapshot)
                         configurationSection(snapshot)
-                        extensionActivitySection(snapshot)
+                        processHistorySection(snapshot)
                         sessionSection(snapshot)
                     } else {
                         TronLoadingState(label: "Loading session…")
@@ -261,8 +261,8 @@ struct SessionContextSheet: View {
                         onForkCreated: handleForkCreated,
                         onNavigated: handleNavigation
                     )
-                case .extensionActivity:
-                    ExtensionActivityHistorySheet(sessionID: sessionID)
+                case .processHistory:
+                    ProcessHistorySheet(sessionID: sessionID)
                 case .terminal:
                     TerminalSheet(sessionID: sessionID)
                 }
@@ -471,31 +471,31 @@ struct SessionContextSheet: View {
     private var configurationRowAccent: Color { .tronPurple }
     private var sessionRowAccent: Color { .tronBlue }
 
-    @ViewBuilder
-    private func extensionActivitySection(_ snapshot: SessionSnapshot) -> some View {
-        let current = (snapshot.extensionActivities ?? []).filter(ExtensionActivityVisibilityPolicy.ambient).count
-        let durable = model.gatewayInfo?.capabilities.contains(ExtensionActivityAdmissionPolicy.capability) == true
-        let subtitle = durable
-            ? (current > 0 ? "Mounted activity · Canonical history" : "Canonical history available")
-            : "History unavailable on this Gateway"
-        TronSettingsGroup("Extension Activity", detail: "Lifecycle, status, widget, and service activity.", accent: .tronEmerald) {
+    private func processHistorySection(_ snapshot: SessionSnapshot) -> some View {
+        let overview = snapshot.processOverview
+        let durable = model.gatewayInfo?.capabilities.contains(SessionProcessAdmissionPolicy.historyCapability) == true
+        let subtitle: String
+        if let overview, overview.activeCount > 0 || overview.recentCount > 0 {
+            let parts = [
+                overview.activeCount > 0 ? "\(overview.activeCount) active" : nil,
+                overview.recentCount > 0 ? "\(overview.recentCount) recent" : nil,
+            ].compactMap { $0 }
+            subtitle = parts.joined(separator: " · ")
+        } else {
+            subtitle = durable ? "Canonical history available" : "History unavailable"
+        }
+        return TronSettingsGroup(
+            "Process History",
+            detail: "Commands and subagent sessions for this conversation.",
+            accent: .tronEmerald
+        ) {
             manageRow(
                 icon: "clock.arrow.circlepath",
-                title: "Extension Activity",
+                title: "Process History",
                 subtitle: subtitle,
                 accent: .tronEmerald
-            ) { destination = .extensionActivity }
+            ) { destination = .processHistory }
         }
-    }
-
-    private func extensionActivitySubtitle(_ group: ExtensionWidgetGroup) -> String {
-        let parts = [
-            group.activities.count > 0 ? "\(group.activities.count) completed runs" : nil,
-            group.services.count > 0 ? "\(group.services.count) tools" : nil,
-            group.items.count > 0 ? "\(group.items.count) widgets" : nil,
-            group.statuses.count > 0 ? "\(group.statuses.count) statuses" : nil,
-        ].compactMap { $0 }
-        return parts.isEmpty ? "View extension details" : parts.joined(separator: " · ")
     }
 
     private func configurationSection(_ snapshot: SessionSnapshot) -> some View {

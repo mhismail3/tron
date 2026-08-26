@@ -178,6 +178,9 @@ final class AppModel {
     var pushNotificationReadiness: PushReadiness = .unavailable
     var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
     private(set) var pushNavigationRequest: PushNavigationRequest?
+    /// Lease-scoped invalidation for a mounted read-only subagent transcript.
+    /// This does not participate in the parent session event cursor.
+    private(set) var processTranscriptInvalidation: ProcessTranscriptChanged?
     var actionablePushNavigationRequest: PushNavigationRequest? {
         guard didStart, sceneAllowsCatalogRefresh, pushNavigationActivationReady else { return nil }
         return pushNavigationRequest
@@ -2491,7 +2494,10 @@ final class AppModel {
 
     private func handle(_ event: GatewayEvent, connectionID: Int?) async {
         guard lifecycle.admitsEvent(connectionID: connectionID) else { return }
-        if event.topic.hasPrefix("session."), event.topic != "session.listChanged", event.topic != "session.summary" {
+        if event.topic.hasPrefix("session."),
+           event.topic != "session.listChanged",
+           event.topic != "session.summary",
+           event.topic != "session.processTranscript.changed" {
             await sessionPresentation.admit(event)
             return
         }
@@ -2543,6 +2549,10 @@ final class AppModel {
                 lifetime: event.topic == "packages.completed" ? .standard : .persistent,
                 priority: event.topic == "packages.completed" ? .normal : .low
             )
+        case "session.processTranscript.changed":
+            if case .processTranscriptChanged(let changed) = event.preparation {
+                processTranscriptInvalidation = changed
+            }
         case "terminal.output", "terminal.exit":
             guard let connectionID = gatewayConnectionID,
                   case .terminalEvent(let terminalEvent) = event.preparation else { break }

@@ -1,6 +1,8 @@
 # Session Process Activity Redesign Plan
 
-Status: Proposed
+Status: Implemented; focused Gateway/iOS validation and physical-device deployment passed.
+End-to-end live process lifecycle acceptance requires the updated Gateway payload to be
+installed through the maintainer-owned Mac update runbook.
 
 ## Objective
 

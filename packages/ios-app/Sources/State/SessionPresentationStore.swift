@@ -61,7 +61,8 @@ struct GatewaySessionOpenResponse: Decodable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         session = try container.decode(SessionSnapshot.self, forKey: .session)
         guard ExtensionPresentationPolicy.admit(session.extensionPresentation),
-              ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(session) else {
+              ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(session),
+              SessionProcessAdmissionPolicy.admitsSnapshotFacts(session) else {
             throw DecodingError.dataCorruptedError(forKey: .session, in: container, debugDescription: "Invalid extension presentation snapshot")
         }
         let decodedSyncToken = try container.decode(String.self, forKey: .syncToken)
@@ -1780,6 +1781,54 @@ final class SessionPresentationStore {
         return result
     }
 
+    private static func installingProcessActivities(
+        _ snapshot: SessionSnapshot,
+        preserving previous: [SessionProcessActivity],
+        previousOverview: SessionProcessOverview?
+    ) -> SessionSnapshot {
+        var result = snapshot
+        var admitted = SessionProcessAdmissionPolicy.admitted(snapshot.processActivities ?? [])
+        let stale = previousOverview.map { previous in
+            snapshot.processOverview.map { $0.revision < previous.revision } ?? true
+        } ?? false
+        if stale {
+            admitted = previous
+            result.processOverview = previousOverview
+        } else {
+            for prior in previous where prior.lifecycle.state.isTerminal {
+                guard let index = admitted.firstIndex(where: { $0.processId == prior.processId }) else { continue }
+                let candidate = admitted[index]
+                if !candidate.lifecycle.state.isTerminal
+                    || candidate.lifecycle.state != prior.lifecycle.state
+                    || candidate.lifecycle.sequence < prior.lifecycle.sequence {
+                    admitted[index] = prior
+                }
+            }
+        }
+        result.processActivities = snapshot.processActivities == nil && admitted.isEmpty
+            ? nil : SessionProcessAdmissionPolicy.admitted(admitted)
+        return result
+    }
+
+    private static func upsertingProcessActivity(
+        _ activity: SessionProcessActivity,
+        into activities: [SessionProcessActivity]
+    ) -> ([SessionProcessActivity], Bool) {
+        var result = activities
+        guard let index = result.firstIndex(where: { $0.processId == activity.processId }) else {
+            result.append(activity)
+            return (SessionProcessAdmissionPolicy.admitted(result), true)
+        }
+        let previous = result[index]
+        if previous.lifecycle.state.isTerminal {
+            guard activity.lifecycle.state.isTerminal,
+                  activity.lifecycle.state == previous.lifecycle.state else { return (activities, false) }
+        }
+        guard activity.lifecycle.sequence > previous.lifecycle.sequence else { return (activities, false) }
+        result[index] = activity
+        return (SessionProcessAdmissionPolicy.admitted(result), true)
+    }
+
     private static func upsertingExtensionActivity(
         _ activity: ExtensionRunActivity,
         into activities: [ExtensionRunActivity]
@@ -1928,9 +1977,9 @@ final class SessionPresentationStore {
             next.projection = nil
         }
         guard ExtensionPresentationPolicy.admit(next) else { return .resynchronize }
-        if previousSemantic.statuses != next.semanticState.statuses
-            || previousSemantic.working != next.semanticState.working
-            || previousSemantic.hiddenThinkingLabel != next.semanticState.hiddenThinkingLabel { chatTimelineChanged = true }
+        if previousSemantic.hiddenThinkingLabel != next.semanticState.hiddenThinkingLabel {
+            chatTimelineChanged = true
+        }
         snapshot.extensionPresentation = next
         if let notification = mutation.notification { effects.append(.notice(notification.message, type: notification.type.rawValue)) }
         return .applied
@@ -1960,13 +2009,17 @@ final class SessionPresentationStore {
                 incoming: incoming
             ) {
             case .install:
-                let admitted = Self.installingExtensionActivities(
+                let extensionAdmitted = Self.installingExtensionActivities(
                     incoming,
                     preserving: snapshot.extensionActivities ?? [],
                     previousLiveRevision: snapshot.liveActivityRevision,
                     previousActivityAsOf: snapshot.extensionActivityAsOf
                 )
-                snapshot = admitted
+                snapshot = Self.installingProcessActivities(
+                    extensionAdmitted,
+                    preserving: snapshot.processActivities ?? [],
+                    previousOverview: snapshot.processOverview
+                )
             case .ignore:
                 break
             case .resynchronize(let sessionID):
@@ -2071,6 +2124,37 @@ final class SessionPresentationStore {
             if changed { snapshot.extensionActivities = next }
             // This delta changes only the mounted extension hub. Deliberately
             // do not advance transcript projection or scrolling.
+            advance(&snapshot, envelope)
+        case "session.processActivity":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot),
+                  case .processActivity(let delta)? = event.preparedSessionEvent?.data else {
+                return resyncIfNeeded(event, snapshot: snapshot)
+            }
+            let previousRevision = snapshot.processOverview?.revision
+            if let previousRevision, delta.processRevision < previousRevision {
+                advance(&snapshot, envelope)
+                return nil
+            }
+            guard SessionProcessAdmissionPolicy.admits(delta) else { return snapshot.sessionId }
+
+            let removals = Set(delta.removedProcessIds ?? [])
+            var next = (snapshot.processActivities ?? []).filter { !removals.contains($0.processId) }
+            if let activity = delta.activity {
+                let result = Self.upsertingProcessActivity(activity, into: next)
+                // A newly authoritative aggregate cannot be installed around a
+                // stale/rejected row. Resynchronize rather than allowing the
+                // composer overview and mounted rows to split authority.
+                guard result.1 else { return snapshot.sessionId }
+                next = result.0
+            }
+            guard SessionProcessAdmissionPolicy.admitsMountedSubset(
+                next,
+                overview: delta.overview
+            ) else { return snapshot.sessionId }
+            snapshot.processOverview = delta.overview
+            snapshot.processActivities = next
+            // Process output and lifecycle never mutate transcript projection
+            // or issue a scroll command.
             advance(&snapshot, envelope)
         case "session.extensionPresentation":
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
@@ -2182,11 +2266,16 @@ final class SessionPresentationStore {
             incoming: incoming
         ) {
         case .install:
-            let admitted = Self.installingExtensionActivities(
+            let extensionAdmitted = Self.installingExtensionActivities(
                 incoming,
                 preserving: snapshot?.extensionActivities ?? [],
                 previousLiveRevision: snapshot?.liveActivityRevision,
                 previousActivityAsOf: snapshot?.extensionActivityAsOf
+            )
+            let admitted = Self.installingProcessActivities(
+                extensionAdmitted,
+                preserving: snapshot?.processActivities ?? [],
+                previousOverview: snapshot?.processOverview
             )
             mountedTranscriptWindow = reconcilePrefix(
                 mountedTranscriptWindow,
@@ -2273,11 +2362,16 @@ final class SessionPresentationStore {
                   current.sessionId == authoritative.sessionId,
                   current.runtimeGeneration == authoritative.runtimeGeneration else { return authoritative }
             guard authoritative.eventSequence >= current.eventSequence else { return current }
-            return installingExtensionActivities(
+            let extensionAdmitted = installingExtensionActivities(
                 authoritative,
                 preserving: current.extensionActivities ?? [],
                 previousLiveRevision: current.liveActivityRevision,
                 previousActivityAsOf: current.extensionActivityAsOf
+            )
+            return installingProcessActivities(
+                extensionAdmitted,
+                preserving: current.processActivities ?? [],
+                previousOverview: current.processOverview
             )
         }
     }

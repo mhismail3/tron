@@ -7,19 +7,6 @@ struct ChatHostedScrollState: Sendable {
     let isWaitingForPrependSemanticFrame: Bool
 }
 
-struct ExtensionActivityPillHostedSample: Sendable, Equatable {
-    let ownerID: String
-    let detail: String
-    let count: Int
-    let transitionToken: Int
-}
-
-struct ExtensionActivityPillExpirySample: Sendable, Equatable {
-    let ownerID: String
-    let bucket: ExtensionActivityVisibility
-    let remainingMs: Int?
-}
-
 struct ChatHostedGeometryTraceSample: Sendable, Equatable {
     let frame: Int
     let offsetY: CGFloat
@@ -31,9 +18,7 @@ struct ChatHostedGeometryTraceSample: Sendable, Equatable {
 struct ChatHostedObservation: Sendable {
     let revision: Int
     let geometryTrace: [ChatHostedGeometryTraceSample]
-    let extensionPillStates: [ExtensionActivityPillHostedSample]
-    let extensionRoutes: [String]
-    let extensionPillExpiries: [ExtensionActivityPillExpirySample]
+    let processRoutes: [String]
     let geometry: ChatTranscriptGeometry
     let visibleRowIDs: [String]
     let rowFrames: [String: CGRect]
@@ -88,9 +73,7 @@ final class ChatHostedProbe {
     private var geometry = ChatTranscriptGeometry.zero
     private var composerHeight: CGFloat = 0
     private var geometryTrace: [ChatHostedGeometryTraceSample] = []
-    private var extensionPillStates: [String: ExtensionActivityPillHostedSample] = [:]
-    private var extensionRoutes: [String] = []
-    private var extensionPillExpiries: [String: ExtensionActivityPillExpirySample] = [:]
+    private var processRoutes: [String] = []
     private var rowFrames: [String: CGRect] = [:]
     private var rowFrameOrder: [String] = []
     private var scrollSettledDistance: CGFloat?
@@ -156,9 +139,7 @@ final class ChatHostedProbe {
         return ChatHostedObservation(
             revision: revision,
             geometryTrace: geometryTrace,
-            extensionPillStates: extensionPillStates.values.sorted { $0.ownerID < $1.ownerID },
-            extensionRoutes: extensionRoutes,
-            extensionPillExpiries: extensionPillExpiries.values.sorted { $0.ownerID < $1.ownerID },
+            processRoutes: processRoutes,
             geometry: geometry,
             visibleRowIDs: visibleRowIDs,
             rowFrames: rowFrames,
@@ -192,25 +173,9 @@ final class ChatHostedProbe {
         )
     }
 
-    func recordExtensionPillState(_ state: ExtensionActivityPillVisualState, transitionToken: Int) {
-        extensionPillStates[state.ownerID] = ExtensionActivityPillHostedSample(
-            ownerID: state.ownerID,
-            detail: state.detail,
-            count: state.count,
-            transitionToken: transitionToken
-        )
-        revision &+= 1
-    }
-
-    func recordExtensionRoute(_ routeID: String) {
-        guard !routeID.isEmpty else { return }
-        extensionRoutes.append(routeID)
-        if extensionRoutes.count > 32 { extensionRoutes.removeFirst(extensionRoutes.count - 32) }
-        revision &+= 1
-    }
-
-    func recordExtensionPillExpiry(ownerID: String, bucket: ExtensionActivityVisibility, remainingMs: Int?) {
-        extensionPillExpiries[ownerID] = ExtensionActivityPillExpirySample(ownerID: ownerID, bucket: bucket, remainingMs: remainingMs)
+    func recordProcessRoute() {
+        processRoutes.append("processes")
+        if processRoutes.count > 32 { processRoutes.removeFirst(processRoutes.count - 32) }
         revision &+= 1
     }
 

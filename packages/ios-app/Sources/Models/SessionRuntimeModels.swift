@@ -384,6 +384,10 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     /// Optional keeps rolling compatibility with older Gateway snapshots.
     var liveActivityRevision: Int? = nil
     var extensionActivityAsOf: String? = nil
+    /// Atomic, disposable process projection. New Gateways provide both
+    /// fields; older Gateways omit both and never revive the retired hub.
+    var processOverview: SessionProcessOverview? = nil
+    var processActivities: [SessionProcessActivity]? = nil
     var extensionPresentation: ExtensionPresentationState
     var diagnostics: [RuntimeDiagnostic]
     /// Set only on the disposable offline cache projection. Gateway snapshots

@@ -45,6 +45,7 @@ enum PreparedSessionEventData: Sendable, Equatable {
     case compaction(TranscriptItem)
     case toolProgress(ToolExecutionState)
     case extensionActivity(ExtensionActivityDelta)
+    case processActivity(SessionProcessDelta)
     case extensionPresentation(ExtensionPresentationMutation)
     case raw
     case invalid
@@ -88,6 +89,7 @@ enum GatewayEventPreparation: Sendable, Equatable {
     case sessionSnapshot(SessionSnapshot)
     case sessionRebaseline(PreparedSessionRebaseline)
     case sessionEvent(PreparedSessionEvent)
+    case processTranscriptChanged(ProcessTranscriptChanged)
     case terminalEvent(PreparedTerminalEvent)
 }
 
@@ -142,7 +144,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
                 runtimeGeneration: event.envelope.runtimeGeneration,
                 eventSequence: event.envelope.eventSequence
             )
-        case .none, .sessionSummary, .terminalEvent:
+        case .none, .sessionSummary, .processTranscriptChanged, .terminalEvent:
             return nil
         }
     }
@@ -158,7 +160,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             return true
         case .none:
             return !topic.hasPrefix("session.")
-        case .sessionSummary, .terminalEvent:
+        case .sessionSummary, .processTranscriptChanged, .terminalEvent:
             return true
         }
     }
@@ -190,19 +192,25 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             guard let snapshot = try? adapter.decode(SessionSnapshot.self),
                   SessionSnapshotQueueAdmissionPolicy.admit(snapshot),
                   ExtensionPresentationPolicy.admit(snapshot.extensionPresentation),
-                  ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(snapshot) else { return .none }
+                  ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(snapshot),
+                  SessionProcessAdmissionPolicy.admitsSnapshotFacts(snapshot) else { return .none }
             return .sessionSnapshot(snapshot)
         case "session.rebaseline":
             guard let payload = try? adapter.decode(RebaselinePayload.self),
                   !payload.subscriptionToken.isEmpty,
                   SessionSnapshotQueueAdmissionPolicy.admit(payload.snapshot),
                   ExtensionPresentationPolicy.admit(payload.snapshot.extensionPresentation),
-                  ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(payload.snapshot) else { return .none }
+                  ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(payload.snapshot),
+                  SessionProcessAdmissionPolicy.admitsSnapshotFacts(payload.snapshot) else { return .none }
             return .sessionRebaseline(PreparedSessionRebaseline(snapshot: payload.snapshot, subscriptionToken: payload.subscriptionToken))
         case "terminal.output":
             return (try? adapter.decode(PreparedTerminalOutputEvent.self)).map { .terminalEvent(.output($0)) } ?? .none
         case "terminal.exit":
             return (try? adapter.decode(PreparedTerminalExitEvent.self)).map { .terminalEvent(.exit($0)) } ?? .none
+        case "session.processTranscript.changed":
+            guard let changed = try? adapter.decode(ProcessTranscriptChanged.self),
+                  SessionProcessAdmissionPolicy.admits(changed) else { return .none }
+            return .processTranscriptChanged(changed)
         case let topic where topic.hasPrefix("session.") && topic != "session.listChanged":
             guard let envelope = try? adapter.decode(SessionEventEnvelope.self) else { return .none }
             let preparedData: PreparedSessionEventData
@@ -225,6 +233,10 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             case "session.extensionActivity":
                 if let delta = try? envelope.data.decode(ExtensionActivityDelta.self),
                    ExtensionActivityAdmissionPolicy.admitsDelta(delta) { preparedData = .extensionActivity(delta) }
+                else { preparedData = .invalid }
+            case "session.processActivity":
+                if let delta = try? envelope.data.decode(SessionProcessDelta.self),
+                   SessionProcessAdmissionPolicy.admits(delta) { preparedData = .processActivity(delta) }
                 else { preparedData = .invalid }
             case "session.extensionPresentation":
                 if let mutation = try? envelope.data.decode(ExtensionPresentationMutation.self),

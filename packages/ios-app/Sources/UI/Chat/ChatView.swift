@@ -142,8 +142,7 @@ struct ChatView: View {
             photosPresented: attachmentPresentationBinding(for: .photos),
             photos: $sessionPresentation.photos,
             onCameraImage: { image in Task { await importCameraImage(image) } },
-            extensionHubPresented: extensionHubPresentationBinding,
-            extensionDetailsGroupID: sessionPresentation.extensionDetailsGroupID,
+            processesPresented: processPresentationBinding,
             interaction: interactionBinding,
             onInteractionClosed: { interaction in
                 sessionPresentation.suppressedInteractionScope = ExtensionInteractionScope(interaction)
@@ -648,7 +647,6 @@ struct ChatView: View {
         guard let snapshot = selectedAuthoritativeSnapshot else { return false }
         return ChatRuntimeWorkingPresentation(
             phase: snapshot.phase,
-            working: snapshot.extensionPresentation.semanticState.working,
             retry: snapshot.retry
         )?.usesAmbientBottomIndicator == true
     }
@@ -817,14 +815,13 @@ struct ChatView: View {
         )
     }
 
-    /// The ChatView owns one extension hub intent. Interaction and editor routes
-    /// have foreground priority; retaining this intent lets the hub resume
-    /// after either route settles without competing sheets.
-    private var extensionHubPresentationBinding: Binding<Bool> {
+    /// Interactive extension prompts and editors retain foreground priority.
+    /// A process-sheet intent resumes after those leased routes settle.
+    private var processPresentationBinding: Binding<Bool> {
         Binding(
-            get: { sessionPresentation.showExtensionDetails && extensionForegroundPresentation == .none },
+            get: { sessionPresentation.showProcesses && extensionForegroundPresentation == .none },
             set: { presented in
-                if !presented { sessionPresentation.showExtensionDetails = false }
+                if !presented { sessionPresentation.showProcesses = false }
             }
         )
     }
@@ -1577,25 +1574,10 @@ struct ChatView: View {
             attachmentActionsEnabled: attachmentActionsEnabled,
             skillPickerAvailable: skillPickerAvailable,
             glassNamespace: composerGlassNamespace,
-            onExtensionTap: { groupID in
-                sessionPresentation.extensionDetailsGroupID = groupID
-                sessionPresentation.showExtensionDetails = true
+            onProcessesTap: {
+                sessionPresentation.showProcesses = true
                 #if HOSTED_TEST
-                hostedProbe?.recordExtensionRoute(groupID)
-                #endif
-            },
-            onExtensionVisualState: { state, token in
-                #if HOSTED_TEST
-                hostedProbe?.recordExtensionPillState(state, transitionToken: token)
-                #endif
-            },
-            onExtensionExpiry: { ownerID, bucket, remainingMs in
-                #if HOSTED_TEST
-                hostedProbe?.recordExtensionPillExpiry(
-                    ownerID: ownerID,
-                    bucket: bucket,
-                    remainingMs: remainingMs
-                )
+                hostedProbe?.recordProcessRoute()
                 #endif
             },
             onRemoveAttachment: { id in

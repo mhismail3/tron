@@ -24,6 +24,10 @@ enum SessionRebaselineAdmission: Equatable, Sendable {
             guard let incomingLiveRevision = incoming.liveActivityRevision,
                   incomingLiveRevision >= currentLiveRevision else { return .resynchronize }
         }
+        if let currentProcessRevision = current.processOverview?.revision {
+            guard let incomingProcessRevision = incoming.processOverview?.revision,
+                  incomingProcessRevision >= currentProcessRevision else { return .resynchronize }
+        }
         return .install
     }
 }
@@ -55,6 +59,14 @@ enum SessionSnapshotEventAdmission: Equatable, Sendable {
         // Activity recency is a separate Gateway-owned projection. A delayed
         // snapshot must not resurrect an older current/recent frame even when
         // its session event sequence is otherwise admissible.
+        if let currentProcessRevision = current.processOverview?.revision {
+            guard let incomingProcessRevision = incoming.processOverview?.revision else {
+                return .resynchronize(eventSessionID)
+            }
+            if incomingProcessRevision < currentProcessRevision {
+                return .resynchronize(eventSessionID)
+            }
+        }
         if let currentLiveRevision = current.liveActivityRevision {
             guard let incomingLiveRevision = incoming.liveActivityRevision else {
                 // A missing revision cannot prove that an exact-next snapshot

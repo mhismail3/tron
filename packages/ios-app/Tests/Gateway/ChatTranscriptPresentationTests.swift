@@ -516,53 +516,6 @@ struct ChatTranscriptPresentationTests {
         #expect(!undersizedOvershoot.isAtCatchUpBoundary)
     }
 
-    @Test("extension widgets project into their generic composer slots")
-    func extensionWidgetPresentationIsVisible() {
-        let widgets = [
-            ExtensionWidget(key: "below-one", lines: ["One"], placement: .belowEditor),
-            ExtensionWidget(key: "above-one", lines: ["Two"], placement: .aboveEditor),
-            ExtensionWidget(key: "below-two", lines: ["Three"], placement: .belowEditor),
-            ExtensionWidget(key: "above-two", lines: ["Four"], placement: .aboveEditor),
-        ]
-
-        #expect(ChatExtensionChromePolicy.rendersWidgets)
-        #expect(ChatExtensionWidgetPolicy.visibleWidgets(widgets, placement: .aboveEditor).map(\.key) == ["above-one", "above-two"])
-        #expect(ChatExtensionWidgetPolicy.visibleWidgets(widgets, placement: .belowEditor).map(\.key) == ["below-one", "below-two"])
-    }
-
-    @Test("extension activity policy is bounded, deterministic, and summarizes service work")
-    func extensionActivityPolicy() throws {
-        var snapshot = try fixture(transcript: "[]")
-        snapshot.extensionPresentation.semanticState.statuses = [
-            "z": "Last status",
-            "a": String(repeating: "x", count: 700)
-        ]
-        snapshot.extensionPresentation.semanticState.widgets = [
-            ExtensionWidget(key: "widget", lines: ["detail"], placement: .aboveEditor)
-        ]
-        let service = ToolExecutionState(
-            toolCallId: "call-1", toolName: "subtask", order: 3, status: .running,
-            arguments: .null, partialResult: nil, result: nil,
-            isError: false, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
-            extensionOrigin: ExtensionToolOrigin(source: "public-source")
-        )
-        let summary = try #require(ChatExtensionWidgetPolicy.summary(snapshot.extensionPresentation, executions: [service]))
-        #expect(summary.runningServiceCount == 1)
-        #expect(summary.services.first?.source == "public-source")
-        #expect(summary.label == "Extension activity · 1 running")
-        #expect(ChatExtensionWidgetPolicy.admittedStatuses(snapshot.extensionPresentation.semanticState.statuses).count == 2)
-        #expect(ChatExtensionWidgetPolicy.admittedStatuses(snapshot.extensionPresentation.semanticState.statuses).allSatisfy { $0.value.count <= ChatExtensionWidgetPolicy.maximumStatusValueCharacters })
-        let descriptor = ChatToolDescriptor(ChatToolPresentation(
-            id: "call-1", title: "subtask", subtitle: "Running", request: nil, response: nil,
-            content: "", fallbackContent: nil, error: false, startedAt: nil, completedAt: nil,
-            durationMs: nil, lastProgressAt: nil, progressSequence: nil,
-            extensionOrigin: ExtensionToolOrigin(source: "public-source")
-        ))
-        let run = ChatToolRunPresentation(tools: [descriptor])
-        #expect(run.title == "subtask")
-        #expect(!run.title.contains("Extension activity"))
-    }
-
     @Test("finalized invocation groups keep complete membership and stable identity")
     func finalizedInvocationGroupIdentity() throws {
         var snapshot = try fixture(transcript: """
@@ -601,249 +554,6 @@ struct ChatTranscriptPresentationTests {
         #expect(completed.title == "Used 3 tools")
     }
 
-    @Test("composer pills keep only live extension work while Manage Session retains history")
-    func liveExtensionGroupsExcludeCompletedRuns() throws {
-        var snapshot = try fixture(transcript: "[]")
-        let completed = ExtensionRunActivity(
-            id: "completed", runId: "run-completed", toolCallId: "call-completed",
-            source: ExtensionToolOrigin(source: "subagent-source"), title: "subagent", mode: "single",
-            status: .completed, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:02Z",
-            completedAt: "2026-01-01T00:00:02Z", lastActivityAt: nil, currentTool: nil,
-            currentToolStartedAt: nil, currentPath: nil, toolCount: 3, turnCount: 1,
-            durationMs: 2_000, output: "done", children: []
-        )
-        let running = ExtensionRunActivity(
-            id: "running", runId: "run-running", toolCallId: "call-running",
-            source: ExtensionToolOrigin(source: "subagent-source"), title: "subagent", mode: "single",
-            status: .running, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:02Z",
-            completedAt: nil, lastActivityAt: "2026-01-01T00:00:02Z", currentTool: "read",
-            currentToolStartedAt: nil, currentPath: nil, toolCount: 4, turnCount: 2,
-            durationMs: 2_000, output: "working", children: []
-        )
-        snapshot.extensionActivities = [completed, running]
-        let frame = ExtensionFrame(
-            width: 8,
-            height: 1,
-            lines: [ExtensionFrameLine(plainText: "async subagent … background", runs: [])],
-            plainText: "async subagent … background"
-        )
-        snapshot.extensionPresentation.surfaces = [ExtensionSurface(
-            id: "surface",
-            kind: .widget,
-            placement: .belowEditor,
-            lifecycle: .retained,
-            targetId: nil,
-            provenance: .init(source: "subagent-source", path: nil),
-            revision: 1,
-            focused: false,
-            inputMode: .none,
-            frame: frame
-        )]
-        let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? [])
-        let live = ChatExtensionWidgetPolicy.liveGroups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? [])
-        #expect(groups.count == 1)
-        #expect(groups.first?.activities.count == 2)
-        #expect(live.count == 1)
-        #expect(live.first?.activities.map(\.id) == ["running"])
-        #expect(live.first?.items.isEmpty == true)
-        #expect(live.first?.liveActivityCount == 1)
-    }
-
-    @Test("distinct Gateway activity identities are not merged by run ID")
-    @MainActor
-    func distinctActivityIdentitiesRemainDeterministic() throws {
-        var snapshot = try fixture(transcript: "[]")
-        let local = ExtensionRunActivity(
-            id: "tool-call", runId: "run-shared", toolCallId: "tool-call",
-            source: ExtensionToolOrigin(source: "local"), title: "subagent", mode: "single",
-            status: .running, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
-            completedAt: nil, lastActivityAt: nil, currentTool: nil, currentToolStartedAt: nil,
-            currentPath: nil, toolCount: nil, turnCount: nil, durationMs: nil, output: nil, children: []
-        )
-        let artifact = ExtensionRunActivity(
-            id: "subagent:run-shared", runId: "run-shared", toolCallId: "subagent:run-shared",
-            source: ExtensionToolOrigin(source: "pi-subagents"), title: "subagent", mode: "single",
-            status: .running, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:02Z",
-            completedAt: nil, lastActivityAt: nil, currentTool: nil, currentToolStartedAt: nil,
-            currentPath: nil, toolCount: nil, turnCount: nil, durationMs: nil, output: nil, children: []
-        )
-        snapshot.extensionActivities = [local, artifact]
-        let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? [])
-        #expect(groups.count == 2)
-        #expect(groups.map(\.id) == ["source:local", "source:pi-subagents"])
-        #expect(groups.flatMap(\.activities).map(\.id) == ["tool-call", "subagent:run-shared"])
-        #expect(ExtensionRunDetailsSheet.resolveActivity(
-            activityID: "run-shared",
-            extensionActivities: [local, artifact],
-            toolExecutions: []
-        ) == nil)
-    }
-
-    @Test("activity groups put live runs before settled runs")
-    func activityGroupsPutLiveRunsFirst() throws {
-        var snapshot = try fixture(transcript: "[]")
-        let completed = ExtensionRunActivity(
-            id: "completed", runId: "completed", toolCallId: "completed",
-            source: ExtensionToolOrigin(source: "local"), title: "subagent", mode: "workflow",
-            status: .completed, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:03Z",
-            completedAt: "2026-01-01T00:00:03Z", lastActivityAt: "2026-01-01T00:00:03Z", currentTool: nil,
-            currentToolStartedAt: nil, currentPath: nil, toolCount: nil, turnCount: nil,
-            durationMs: 3_000, output: "done", children: []
-        )
-        let running = ExtensionRunActivity(
-            id: "running", runId: "running", toolCallId: "running",
-            source: ExtensionToolOrigin(source: "local"), title: "subagent", mode: "workflow",
-            status: .running, startedAt: "2026-01-01T00:00:01Z", updatedAt: "2026-01-01T00:00:02Z",
-            completedAt: nil, lastActivityAt: "2026-01-01T00:00:02Z", currentTool: "read",
-            currentToolStartedAt: nil, currentPath: nil, toolCount: 1, turnCount: 1,
-            durationMs: 1_000, output: nil, children: []
-        )
-        snapshot.extensionActivities = [completed, running]
-        let group = try #require(ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? []).first)
-        #expect(group.activities.map(\.id) == ["running", "completed"])
-    }
-
-    @Test("structured local subagent activity gets a native package label")
-    func structuredLocalSubagentActivityGetsNativeLabel() throws {
-        var snapshot = try fixture(transcript: "[]")
-        snapshot.extensionActivities = [ExtensionRunActivity(
-            id: "subagent:workflow", runId: "workflow", toolCallId: "subagent:workflow",
-            source: ExtensionToolOrigin(source: "local"), title: "subagent", mode: "workflow",
-            status: .running, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
-            completedAt: nil, lastActivityAt: "2026-01-01T00:00:01Z", currentTool: "read",
-            currentToolStartedAt: nil, currentPath: nil, toolCount: 2, turnCount: 1,
-            durationMs: 1_000, output: nil, children: []
-        )]
-        snapshot.extensionPresentation.surfaces = [ExtensionSurface(
-            id: "surface",
-            kind: .widget,
-            placement: .belowEditor,
-            lifecycle: .retained,
-            targetId: nil,
-            provenance: nil,
-            revision: 1,
-            focused: false,
-            inputMode: .none,
-            frame: ExtensionFrame(width: 4, height: 1, lines: [], plainText: "raw")
-        )]
-        let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? [])
-        #expect(groups.map(\.id) == ["source:local", "surface:surface"])
-        #expect(groups.first?.label == "Pi Subagents")
-        #expect(groups.last?.items.count == 1)
-    }
-
-    @Test("extension source labels omit package transport and versions")
-    func extensionSourceLabelsAreStable() {
-        #expect(ChatExtensionWidgetPolicy.humanizedSource("npm:pi-subagents@0.47.1") == "Pi Subagents")
-        #expect(ChatExtensionWidgetPolicy.humanizedSource("npm:@scope/example@1.2.3") == "Scope Example")
-    }
-
-    @Test("widget groups remain separate and deterministic with conservative activity fallback")
-    func widgetGroupsAreSeparate() throws {
-        var snapshot = try fixture(transcript: "[]")
-        snapshot.extensionPresentation.semanticState.widgets = [
-            ExtensionWidget(key: "second", lines: ["B"], placement: .belowEditor),
-            ExtensionWidget(key: "first", lines: ["A"], placement: .belowEditor)
-        ]
-        snapshot.extensionPresentation.semanticState.statuses = ["status": "live"]
-        let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation)
-        #expect(groups.map(\.id) == ["activity", "semantic:first", "semantic:second"])
-        #expect(groups.filter(\.isWidgetGroup).count == 2)
-        #expect(groups.first(where: { $0.id == "activity" })?.statuses.map(\.key) == ["status"])
-        snapshot.extensionPresentation.semanticState.statuses["first"] = "First status"
-        let matched = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation)
-        #expect(matched.first(where: { $0.id == "semantic:first" })?.statuses.map(\.key) == ["first"])
-        let frame = ExtensionFrame(width: 5, height: 1, lines: [ExtensionFrameLine(plainText: "Surface", runs: [ExtensionFrameRun(text: "Surface", style: ExtensionFrameStyle())])], plainText: "Surface")
-        snapshot.extensionPresentation.surfaces = [ExtensionSurface(id: "surface", kind: .widget, placement: .belowEditor, lifecycle: .retained, targetId: nil, provenance: .init(source: "public-source", path: nil), revision: 1, focused: false, inputMode: .none, frame: frame)]
-        let service = ToolExecutionState(toolCallId: "service", toolName: "tool", order: 1, status: .running, arguments: .null, partialResult: nil, result: nil, isError: false, startedAt: "now", updatedAt: "now", extensionOrigin: .init(source: "public-source"))
-        let sourced = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, executions: [service])
-        #expect(sourced.first(where: { $0.id == "source:public-source" })?.services.map(\.id) == ["service"])
-        snapshot.extensionPresentation.semanticState.widgets = []
-        snapshot.extensionPresentation.surfaces = []
-        #expect(ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation).count == 1)
-        #expect(ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation).first?.id == "activity")
-    }
-
-    @Test("owner provenance groups live semantic, surface, status, and service content")
-    func ownerProvenanceGroupsLiveExtension() throws {
-        var snapshot = try fixture(transcript: "[]")
-        let goal = ExtensionOwner(id: "/extensions/goal.ts", title: "Goal", source: "goal-source")
-        let subagent = ExtensionOwner(id: "/extensions/subagents.ts", title: "Subagents", source: "subagent-source")
-        snapshot.extensionPresentation.semanticState.widgets = [
-            ExtensionWidget(key: "goal", lines: ["Goal"], placement: .belowEditor, owner: goal),
-            ExtensionWidget(key: "subagent", lines: ["Subagent"], placement: .belowEditor, owner: subagent)
-        ]
-        snapshot.extensionPresentation.semanticState.statuses = ["goal-status": "Goal is live", "subagent": "Running"]
-        snapshot.extensionPresentation.semanticState.statusOwners = ["goal-status": goal, "subagent": subagent]
-        let longSource = String(repeating: "source/", count: 40)
-        let service = ToolExecutionState(toolCallId: "service", toolName: "subagent", order: 1, status: .running, arguments: .null, partialResult: nil, result: nil, isError: false, startedAt: "now", updatedAt: "now", extensionOrigin: .init(source: "subagent-source"))
-        let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, executions: [service])
-        #expect(groups.map(\.label) == ["Goal", "Subagents"])
-        #expect(groups.first(where: { $0.label == "Goal" })?.statuses.map(\.key) == ["goal-status"])
-        #expect(groups.first(where: { $0.label == "Subagents" })?.items.count == 1)
-        #expect(groups.first(where: { $0.label == "Subagents" })?.services.map(\.id) == ["service"])
-        let sourcedOwner = ExtensionOwner(id: "/extensions/long.ts", title: "Long", source: longSource)
-        snapshot.extensionPresentation.semanticState.widgets = [ExtensionWidget(key: "long", lines: ["Long"], placement: .belowEditor, owner: sourcedOwner)]
-        let longService = ToolExecutionState(toolCallId: "long-service", toolName: "long", order: 2, status: .running, arguments: .null, partialResult: nil, result: nil, isError: false, startedAt: "now", updatedAt: "now", extensionOrigin: .init(source: longSource))
-        let sourcedGroups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, executions: [service, longService])
-        #expect(sourcedGroups.first(where: { $0.label == "Long" })?.services.map(\.id) == ["long-service"])
-    }
-
-    @Test("semantic and surface representations share one canonical widget group")
-    func semanticSurfaceRepresentationsDeduplicate() throws {
-        var snapshot = try fixture(transcript: "[]")
-        snapshot.extensionPresentation.semanticState.widgets = [
-            ExtensionWidget(key: "goal", lines: ["Goal content"], placement: .belowEditor),
-            ExtensionWidget(key: "subagent", lines: ["Subagent content"], placement: .belowEditor)
-        ]
-        let encoded = Data("subagent".utf8).base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-        let frame = ExtensionFrame(width: 8, height: 1, lines: [ExtensionFrameLine(plainText: "Surface content", runs: [ExtensionFrameRun(text: "Surface content", style: ExtensionFrameStyle())])], plainText: "Surface content")
-        snapshot.extensionPresentation.surfaces = [ExtensionSurface(id: "mounted:\(encoded)", kind: .widget, placement: .belowEditor, lifecycle: .retained, targetId: nil, provenance: nil, revision: 1, focused: false, inputMode: .none, frame: frame)]
-        let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation)
-        #expect(groups.map(\.id) == ["semantic:goal", "semantic:subagent"])
-        #expect(groups.first(where: { $0.id == "semantic:subagent" })?.items.count == 2)
-        #expect(ChatExtensionWidgetPolicy.canonicalWidgetKey(for: "mounted:\(encoded)") == "subagent")
-    }
-
-    @Test("source labels are bounded provenance labels and unmatched activity remains fallback")
-    func extensionLabelsUseProvenance() throws {
-        var snapshot = try fixture(transcript: "[]")
-        let frame = ExtensionFrame(width: 4, height: 1, lines: [ExtensionFrameLine(plainText: "content-derived title", runs: [])], plainText: "content-derived title")
-        snapshot.extensionPresentation.surfaces = [ExtensionSurface(id: "unrelated", kind: .widget, placement: .belowEditor, lifecycle: .retained, targetId: nil, provenance: .init(source: "example-extension_source", path: nil), revision: 1, focused: false, inputMode: .none, frame: frame)]
-        snapshot.extensionPresentation.semanticState.statuses = ["other": "Unmatched"]
-        let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation)
-        #expect(groups.first(where: { $0.id == "source:example-extension_source" })?.label == "Example Extension Source")
-        #expect(groups.first(where: { $0.id == "source:example-extension_source" })?.label != "content-derived title")
-        #expect(groups.first(where: { $0.id == "activity" })?.label == "Extension activity")
-        #expect(groups.first(where: { $0.id == "source:example-extension_source" })?.label.count == 24)
-    }
-
-    @Test("native extension text strips complete terminal navigation hints only")
-    func nativeExtensionTextStripsTerminalChrome() {
-        #expect(NativeExtensionText.isDetailHint("Press ↓/← to inspect") == true)
-        #expect(NativeExtensionText.isDetailHint("↔ to inspect") == true)
-        #expect(NativeExtensionText.clean("Press ↓/← to inspect") == "")
-        #expect(NativeExtensionText.clean("  useful arrow status  ") == "useful arrow status")
-        #expect(NativeExtensionText.clean("Keyboard shortcuts: arrow keys move the cursor") == "Keyboard shortcuts: arrow keys move the cursor")
-    }
-
-    @Test("status identity remains complete when display keys share a long prefix")
-    func statusIdentityIsNotTruncated() {
-        let prefix = String(repeating: "k", count: 255)
-        let firstKey = prefix + "a"
-        let secondKey = prefix + "b"
-        let statuses = ChatExtensionWidgetPolicy.admittedStatuses([
-            firstKey: "one",
-            secondKey: "two"
-        ])
-        #expect(statuses.count == 2)
-        #expect(Set(statuses.map(\.id)) == Set([firstKey, secondKey]))
-        #expect(statuses.allSatisfy { $0.displayKey.count <= 128 })
-    }
-
     @Test("interaction and editor presentation use deterministic priority")
     func extensionPresentationArbiterPriority() {
         #expect(ChatExtensionPresentationArbiter.presentation(
@@ -858,40 +568,6 @@ struct ChatTranscriptPresentationTests {
         #expect(ChatExtensionPresentationArbiter.presentation(
             modelSettled: true, hasInteraction: false, hasEditorRequest: false
         ) == .none)
-    }
-
-    @Test("unknown tool provenance fails open and does not become extension activity")
-    func unknownToolProvenanceFailsOpen() throws {
-        var snapshot = try fixture(transcript: "[]")
-        let service = ToolExecutionState(
-            toolCallId: "call-unknown", toolName: "tool", order: 1, status: .completed,
-            arguments: .null, partialResult: nil, result: nil,
-            isError: false, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z"
-        )
-        #expect(ChatExtensionWidgetPolicy.serviceItems([service]).isEmpty)
-        #expect(!ChatExtensionWidgetPolicy.hasActivity(snapshot.extensionPresentation, executions: [service]))
-    }
-
-    @Test("semantic and remote widgets merge with stable namespaced order")
-    func mergedExtensionWidgetPolicyIsDeterministic() {
-        let widget = ExtensionWidget(key: "goal", lines: ["Goal"], placement: .belowEditor)
-        let frame = ExtensionFrame(width: 4, height: 1, lines: [ExtensionFrameLine(plainText: "run", runs: [ExtensionFrameRun(text: "run", style: ExtensionFrameStyle())])], plainText: "run")
-        let surface = ExtensionSurface(id: "widget:c3Vi", kind: .widget, placement: .belowEditor, lifecycle: .retained, targetId: nil, provenance: nil, revision: 1, focused: false, inputMode: .none, frame: frame)
-        let items = ChatExtensionWidgetPolicy.mergedItems(widgets: [widget], surfaces: [surface], placement: .belowEditor)
-        #expect(items.map(\.id) == ["semantic-widget:goal", "surface-widget:widget:c3Vi"])
-        #expect(items.count == 2)
-    }
-
-    @Test("only admitted read-only widget surfaces project into composer slots")
-    func extensionSurfaceWidgetPolicyIsBounded() {
-        let frame = ExtensionFrame(width: 4, height: 1, lines: [ExtensionFrameLine(plainText: "goal", runs: [ExtensionFrameRun(text: "goal", style: ExtensionFrameStyle())])], plainText: "goal")
-        let surfaces = [
-            ExtensionSurface(id: "widget:subagent", kind: .widget, placement: .belowEditor, lifecycle: .retained, targetId: nil, provenance: nil, revision: 1, focused: false, inputMode: .none, frame: frame),
-            ExtensionSurface(id: "overlay:blocked", kind: .overlay, placement: .overlay, lifecycle: .blocking, targetId: nil, provenance: nil, revision: 1, focused: true, inputMode: .keys, frame: frame),
-            ExtensionSurface(id: "widget:interactive", kind: .widget, placement: .aboveEditor, lifecycle: .retained, targetId: nil, provenance: nil, revision: 1, focused: false, inputMode: .keys, frame: frame),
-        ]
-        #expect(ChatExtensionWidgetPolicy.visibleSurfaces(surfaces, placement: .belowEditor).map(\.id) == ["widget:subagent"])
-        #expect(ChatExtensionWidgetPolicy.visibleSurfaces(surfaces, placement: .aboveEditor).isEmpty)
     }
 
     @Test("extreme frame colors fall back when contrast is unreadable")
@@ -948,19 +624,6 @@ struct ChatTranscriptPresentationTests {
     func failedInteractionResponseLeavesScopeAvailable() {
         let interaction = ExtensionInteraction(id: "failed", hostEpoch: "epoch", presentationRevision: 2, method: .confirm, title: "Continue?")
         #expect(ChatExtensionInteractionPolicy.presentedInteraction([interaction], suppressing: nil) == interaction)
-    }
-
-    @Test("extension statuses stay out of transcript notifications and drive the activity pill")
-    func extensionStatusesAreVisible() throws {
-        var snapshot = try fixture(transcript: "[]")
-        snapshot.phase = .running
-        snapshot.extensionPresentation.semanticState.statuses = ["goal": "Pursuing goal"]
-        snapshot.extensionPresentation.semanticState.working = .init(message: "Still working", visible: true)
-
-        let runtime = ChatNotificationPresentation.runtime(in: snapshot)
-        #expect(!ChatExtensionChromePolicy.rendersStatusPills)
-        #expect(runtime.map(\.id) == ["runtime-working"])
-        #expect(ChatExtensionWidgetPolicy.hasActivity(snapshot.extensionPresentation))
     }
 
     @Test("queued compaction is explicit until canonical compaction starts")
@@ -1066,138 +729,49 @@ struct ChatTranscriptPresentationTests {
         #expect(steer.transportActive)
     }
 
-    @Test("ordinary running state uses ambient bottom activity without a transcript row")
+    @Test("ordinary running state uses canonical phase activity without extension chrome")
     func ordinaryRunningUsesAmbientActivity() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
-        snapshot.extensionPresentation.semanticState.working = .init(message: nil, visible: true)
         snapshot.retry = nil
+        snapshot.extensionPresentation.semanticState.working = .init(
+            message: "Retired extension status",
+            visible: false
+        )
 
         let presentation = try #require(ChatRuntimeWorkingPresentation(
             phase: snapshot.phase,
-            working: snapshot.extensionPresentation.semanticState.working,
             retry: snapshot.retry
         ))
         #expect(presentation.message == "Tron is working")
         #expect(presentation.usesAmbientBottomIndicator)
         #expect(ChatNotificationPresentation.runtime(in: snapshot).isEmpty)
-
-        snapshot.extensionPresentation.semanticState.working.message = "Reading files"
-        let custom = try #require(ChatRuntimeWorkingPresentation(
-            phase: snapshot.phase,
-            working: snapshot.extensionPresentation.semanticState.working,
-            retry: snapshot.retry
-        ))
-        #expect(!custom.usesAmbientBottomIndicator)
-        #expect(ChatNotificationPresentation.runtime(in: snapshot).map(\.id) == ["runtime-working"])
     }
 
-    @Test("runtime working row follows phase, visibility, message, retry, and ambient policy")
+    @Test("runtime working presentation follows canonical phase and retry only")
     func runtimeWorkingRowPolicy() {
-        struct PolicyCase {
-            let name: String
-            let phase: SessionPhase
-            let visible: Bool
-            let message: String?
-            let retry: RetryState?
-            let expectedMessage: String?
-            let expectedRetryMessage: String?
-        }
-
-        let retryWithMaximum = RetryState(
+        let retry = RetryState(
             source: .agent,
             attempt: 2,
             maxAttempts: 4,
             delayMs: 500,
             errorMessage: "transient"
         )
-        let retryWithoutMaximum = RetryState(
-            source: .compaction,
-            attempt: 3,
-            maxAttempts: nil,
-            delayMs: nil,
-            errorMessage: nil
-        )
-        let cases = [
-            PolicyCase(
-                name: "running visible default message without retry",
-                phase: .running, visible: true, message: nil, retry: nil,
-                expectedMessage: "Tron is working", expectedRetryMessage: nil
-            ),
-            PolicyCase(
-                name: "running invisible custom message with retry maximum",
-                phase: .running, visible: false, message: "Reading files", retry: retryWithMaximum,
-                expectedMessage: nil, expectedRetryMessage: nil
-            ),
-            PolicyCase(
-                name: "compacting visible custom message with retry without maximum",
-                phase: .compacting, visible: true, message: "Trimming history", retry: retryWithoutMaximum,
-                expectedMessage: "Trimming history", expectedRetryMessage: "Attempt 3"
-            ),
-            PolicyCase(
-                name: "compacting invisible default message without retry",
-                phase: .compacting, visible: false, message: nil, retry: nil,
-                expectedMessage: nil, expectedRetryMessage: nil
-            ),
-            PolicyCase(
-                name: "retrying visible default message with retry maximum",
-                phase: .retrying, visible: true, message: nil, retry: retryWithMaximum,
-                expectedMessage: "Retrying provider", expectedRetryMessage: "Attempt 2 of 4"
-            ),
-            PolicyCase(
-                name: "retrying invisible custom message without retry",
-                phase: .retrying, visible: false, message: "Trying again", retry: nil,
-                expectedMessage: nil, expectedRetryMessage: nil
-            ),
-            PolicyCase(
-                name: "idle visible default message without retry",
-                phase: .idle, visible: true, message: nil, retry: nil,
-                expectedMessage: nil, expectedRetryMessage: nil
-            ),
-            PolicyCase(
-                name: "idle invisible custom message with retry without maximum",
-                phase: .idle, visible: false, message: "Ignored", retry: retryWithoutMaximum,
-                expectedMessage: nil, expectedRetryMessage: nil
-            ),
-            PolicyCase(
-                name: "interrupted visible custom message with retry maximum",
-                phase: .interrupted, visible: true, message: "Ignored", retry: retryWithMaximum,
-                expectedMessage: nil, expectedRetryMessage: nil
-            ),
-            PolicyCase(
-                name: "interrupted invisible default message without retry",
-                phase: .interrupted, visible: false, message: nil, retry: nil,
-                expectedMessage: nil, expectedRetryMessage: nil
-            ),
-        ]
+        let running = ChatRuntimeWorkingPresentation(phase: .running, retry: nil)
+        #expect(running?.message == "Tron is working")
+        #expect(running?.usesAmbientBottomIndicator == true)
 
-        for policyCase in cases {
-            let presentation = ChatRuntimeWorkingPresentation(
-                phase: policyCase.phase,
-                working: .init(message: policyCase.message, visible: policyCase.visible),
-                retry: policyCase.retry
-            )
-            #expect(
-                (presentation != nil) == (policyCase.expectedMessage != nil),
-                "unexpected visibility for \(policyCase.name)"
-            )
-            #expect(
-                presentation?.message == policyCase.expectedMessage,
-                "unexpected message for \(policyCase.name)"
-            )
-            #expect(
-                presentation?.retryMessage == policyCase.expectedRetryMessage,
-                "unexpected retry message for \(policyCase.name)"
-            )
-            let expectedAmbient = policyCase.phase == .running
-                && policyCase.visible
-                && policyCase.message == nil
-                && policyCase.retry == nil
-            #expect(
-                (presentation?.usesAmbientBottomIndicator ?? false) == expectedAmbient,
-                "unexpected ambient activity policy for \(policyCase.name)"
-            )
-        }
+        let compacting = ChatRuntimeWorkingPresentation(phase: .compacting, retry: nil)
+        #expect(compacting?.message == "Compacting context")
+        #expect(compacting?.usesAmbientBottomIndicator == false)
+
+        let retrying = ChatRuntimeWorkingPresentation(phase: .retrying, retry: retry)
+        #expect(retrying?.message == "Retrying provider")
+        #expect(retrying?.retryMessage == "Attempt 2 of 4")
+        #expect(retrying?.usesAmbientBottomIndicator == false)
+
+        #expect(ChatRuntimeWorkingPresentation(phase: .idle, retry: nil) == nil)
+        #expect(ChatRuntimeWorkingPresentation(phase: .interrupted, retry: retry) == nil)
     }
 
     @Test("zero and partial geometry never masquerade as bottom readiness")

@@ -33,6 +33,29 @@ struct ProcessActivityOrbTests {
         expect(moved[119], [16.910423, 13.076719, 1.985655, 0.519031, 0.423994, 0.776371])
     }
 
+    @Test("reduced motion and offscreen rendering pause deterministically")
+    func lifecyclePausePolicy() {
+        #expect(ProcessActivityOrbEngine.reducedMotionTime == 0.6)
+        #expect(ProcessActivityOrbEngine.animationPaused(
+            reduceMotion: true, isVisible: true, sceneActive: true
+        ))
+        #expect(ProcessActivityOrbEngine.animationPaused(
+            reduceMotion: false, isVisible: false, sceneActive: true
+        ))
+        #expect(ProcessActivityOrbEngine.animationPaused(
+            reduceMotion: false, isVisible: true, sceneActive: false
+        ))
+        #expect(!ProcessActivityOrbEngine.animationPaused(
+            reduceMotion: false, isVisible: true, sceneActive: true
+        ))
+        #expect(
+            ProcessActivityOrbEngine.frame(
+                mode: .breathing,
+                time: ProcessActivityOrbEngine.reducedMotionTime
+            ) == ProcessActivityOrbEngine.frame(mode: .breathing, time: 0.6)
+        )
+    }
+
     @Test("frames remain depth sorted for painter order")
     func depthOrder() {
         for mode in [ProcessActivityOrbMode.solving, .breathing] {

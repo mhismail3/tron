@@ -9,8 +9,7 @@ struct ChatSessionPresentationTests {
         let retired = ChatSessionPresentation(sessionID: "session-a")
         retired.showContext = true
         retired.showSettings = true
-        retired.showExtensionDetails = true
-        retired.extensionDetailsGroupID = "extension-a"
+        retired.showProcesses = true
         retired.modelPresentationGeneration = 7
         retired.canonicalSubmissionHandoffs.formUnion(["prompt-a"])
         retired.queueMutationCommandIsPending = true
@@ -25,8 +24,7 @@ struct ChatSessionPresentationTests {
         #expect(reopened.locallyMutatedQueueOperationIDs.isEmpty)
         #expect(!reopened.showContext)
         #expect(!reopened.showSettings)
-        #expect(!reopened.showExtensionDetails)
-        #expect(reopened.extensionDetailsGroupID == nil)
+        #expect(!reopened.showProcesses)
     }
 
     @Test("suspension abandons picker and import targets without changing presentation authority")

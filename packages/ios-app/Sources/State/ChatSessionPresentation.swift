@@ -17,8 +17,7 @@ final class ChatSessionPresentation {
     var queuedAttachmentDestination: ChatAttachmentDestination?
 
     var showContext = false
-    var showExtensionDetails = false
-    var extensionDetailsGroupID: String?
+    var showProcesses = false
     var showSettings = false
     var queuedMessageEditor: QueuedMessageEditorRoute?
     var suppressedInteractionScope: ExtensionInteractionScope?

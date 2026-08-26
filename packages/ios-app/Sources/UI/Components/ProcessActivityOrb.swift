@@ -19,6 +19,12 @@ struct ProcessActivityOrbDot: Equatable, Sendable {
 }
 
 enum ProcessActivityOrbEngine {
+    static let reducedMotionTime = 0.6
+
+    static func animationPaused(reduceMotion: Bool, isVisible: Bool, sceneActive: Bool) -> Bool {
+        reduceMotion || !isVisible || !sceneActive
+    }
+
     private struct Move: Sendable {
         let axis: Int
         let lower: Double
@@ -258,14 +264,24 @@ enum ProcessActivityOrbEngine {
 struct ProcessActivityOrb: View {
     let mode: ProcessActivityOrbMode
     var size: CGFloat = 20
+    var isVisible = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion || scenePhase != .active)) { _ in
+        TimelineView(.animation(
+            minimumInterval: 1 / 30,
+            paused: ProcessActivityOrbEngine.animationPaused(
+                reduceMotion: reduceMotion,
+                isVisible: isVisible,
+                sceneActive: scenePhase == .active
+            )
+        )) { _ in
             Canvas(rendersAsynchronously: true) { context, canvasSize in
-                let time = reduceMotion ? 0.6 : ProcessInfo.processInfo.systemUptime * speed
+                let time = reduceMotion
+                    ? ProcessActivityOrbEngine.reducedMotionTime
+                    : ProcessInfo.processInfo.systemUptime * speed
                 let dots = ProcessActivityOrbEngine.frame(mode: mode, time: time)
                 let scale = min(canvasSize.width, canvasSize.height) / 20
                 for dot in dots {

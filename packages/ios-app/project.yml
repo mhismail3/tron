@@ -55,6 +55,9 @@ targets:
       - path: Sources/Resources/Fonts
         type: folder
         buildPhase: resources
+      - path: Sources/Resources/ThirdPartyNotices
+        type: folder
+        buildPhase: resources
     preBuildScripts:
       - name: Validate product push configuration
         basedOnDependencyAnalysis: false

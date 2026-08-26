@@ -23,8 +23,7 @@ struct ChatRoutes: ViewModifier {
     @Binding var photosPresented: Bool
     @Binding var photos: [PhotosPickerItem]
     let onCameraImage: (UIImage) -> Void
-    @Binding var extensionHubPresented: Bool
-    let extensionDetailsGroupID: String?
+    @Binding var processesPresented: Bool
     @Binding var interaction: ExtensionInteraction?
     let onInteractionClosed: (ExtensionInteraction) -> Void
     @Binding var filesPresented: Bool
@@ -76,8 +75,8 @@ struct ChatRoutes: ViewModifier {
                 maxSelectionCount: ChatAttachmentImportPolicy.maximumPhotoSelection,
                 matching: .images
             )
-            .sheet(isPresented: $extensionHubPresented) {
-                ExtensionDetailsSheet(sessionID: sessionID, groupID: extensionDetailsGroupID)
+            .sheet(isPresented: $processesPresented) {
+                SessionProcessesSheet(sessionID: sessionID)
             }
             .sheet(item: $interaction) { value in
                 if value.questionnaire != nil {

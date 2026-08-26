@@ -55,7 +55,7 @@ struct AppModelEventTests {
                 "source": .string("npm:pi-subagents@test"),
                 "owner": .object([
                     "id": .string("extension:test"),
-                    "title": .string("Pi Subagents"),
+                    "title": .string("Subagents"),
                     "source": .string("npm:pi-subagents@test"),
                 ]),
             ]),
@@ -102,6 +102,135 @@ struct AppModelEventTests {
         await model.handle(snapshotEvent(staleFullFrame, sessionID: snapshot.sessionId))
         #expect(model.selectedSnapshot?.extensionActivities?.first?.stableID == "extension-activity:test")
         #expect(model.selectedSnapshot?.liveActivityRevision == 1)
+    }
+
+    @Test("process deltas atomically update overview without rebuilding chat")
+    func compactProcessDelta() async throws {
+        let snapshot = try loadSnapshot()
+        let model = AppModel()
+        model.installHostedSubscribedSnapshot(snapshot)
+        let initialProjection = try #require(model.chatProjectionGenerations(
+            for: snapshot.sessionId,
+            presentationGeneration: 1
+        ))
+        let processRevision = (snapshot.processOverview?.revision ?? 0) + 1
+        let previousProcessIDs = snapshot.processActivities?.map(\.processId) ?? []
+        let process: JSONValue = .object([
+            "version": .number(1),
+            "processId": .string("command:delta-call"),
+            "kind": .string("command"),
+            "executionMode": .string("foreground"),
+            "source": .string("mainAssistant"),
+            "lifecycle": .object([
+                "version": .number(1),
+                "state": .string("running"),
+                "attention": .string("none"),
+                "sequence": .number(10),
+                "observedAt": .string("2026-01-01T00:00:01Z"),
+            ]),
+            "visibility": .string("active"),
+            "title": .string("Command"),
+            "command": .string("npm test"),
+            "startedAt": .string("2026-01-01T00:00:00Z"),
+            "outputTail": .string("running"),
+            "outputTruncated": .bool(false),
+            "toolCallId": .string("delta-call"),
+        ])
+        let overview: JSONValue = .object([
+            "version": .number(1),
+            "revision": .number(Double(processRevision)),
+            "asOf": .string("2026-01-01T00:00:01Z"),
+            "activeCount": .number(1),
+            "recentCount": .number(0),
+            "problemCount": .number(0),
+            "visibility": .string("active"),
+        ])
+        await model.handle(event(
+            topic: "session.processActivity",
+            snapshot: snapshot,
+            sequence: snapshot.eventSequence + 1,
+            data: .object([
+                "activity": process,
+                "removedProcessIds": .array(previousProcessIDs.map(JSONValue.string)),
+                "processRevision": .number(Double(processRevision)),
+                "processAsOf": .string("2026-01-01T00:00:01Z"),
+                "overview": overview,
+            ])
+        ))
+        #expect(model.selectedSnapshot?.processOverview?.activeCount == 1)
+        #expect(model.selectedSnapshot?.processActivities?.map(\.processId) == ["command:delta-call"])
+        #expect(model.selectedSnapshot?.processActivities?.first?.command == "npm test")
+        let afterDelta = try #require(model.chatProjectionGenerations(
+            for: snapshot.sessionId,
+            presentationGeneration: 1
+        ))
+        #expect(afterDelta == initialProjection)
+    }
+
+    @Test("settled launcher removal keeps asynchronous child solving")
+    func settledLauncherKeepsAsyncChildActive() async throws {
+        let snapshot = try loadSnapshot()
+        let model = AppModel()
+        model.installHostedSubscribedSnapshot(snapshot)
+        let firstRevision = (snapshot.processOverview?.revision ?? 0) + 1
+        let previousProcessIDs = snapshot.processActivities?.map(\.processId) ?? []
+        let childID = "subagent:async-child"
+        let child: JSONValue = .object([
+            "version": .number(1),
+            "processId": .string(childID),
+            "kind": .string("subagent"),
+            "executionMode": .string("asynchronous"),
+            "source": .string("delegatedAgent"),
+            "lifecycle": .object([
+                "version": .number(1),
+                "state": .string("running"),
+                "attention": .string("none"),
+                "sequence": .number(4),
+                "observedAt": .string("2026-01-01T00:00:04Z"),
+            ]),
+            "visibility": .string("active"),
+            "title": .string("Subagent"),
+            "outputTruncated": .bool(false),
+            "runId": .string("async-child"),
+        ])
+        func overview(_ revision: Int) -> JSONValue {
+            .object([
+                "version": .number(1),
+                "revision": .number(Double(revision)),
+                "asOf": .string("2026-01-01T00:00:04Z"),
+                "activeCount": .number(1),
+                "recentCount": .number(0),
+                "problemCount": .number(0),
+                "visibility": .string("active"),
+            ])
+        }
+        await model.handle(event(
+            topic: "session.processActivity",
+            snapshot: snapshot,
+            sequence: snapshot.eventSequence + 1,
+            data: .object([
+                "activity": child,
+                "removedProcessIds": .array(previousProcessIDs.map(JSONValue.string)),
+                "processRevision": .number(Double(firstRevision)),
+                "processAsOf": .string("2026-01-01T00:00:04Z"),
+                "overview": overview(firstRevision),
+            ])
+        ))
+        let secondRevision = firstRevision + 1
+        await model.handle(event(
+            topic: "session.processActivity",
+            snapshot: snapshot,
+            sequence: snapshot.eventSequence + 2,
+            data: .object([
+                "removedProcessIds": .array([.string("command:settled-launcher")]),
+                "processRevision": .number(Double(secondRevision)),
+                "processAsOf": .string("2026-01-01T00:00:04Z"),
+                "overview": overview(secondRevision),
+            ])
+        ))
+        #expect(model.selectedSnapshot?.processOverview?.visibility == .active)
+        #expect(model.selectedSnapshot?.processActivities?.map(\.processId) == [childID])
+        #expect(model.selectedSnapshot?.processActivities?.first?.executionMode == .asynchronous)
     }
 
     @Test("portable tool and extension events update native session state in sequence")
@@ -680,6 +809,49 @@ struct AppModelEventTests {
         ))
         #expect(model.authEvent?.kind == .deviceCode)
         #expect(model.authEvent?.userCode == "ABCD-EFGH")
+    }
+
+    @Test("process transcript invalidation bypasses parent session cursor")
+    func processTranscriptInvalidationIsLeaseScoped() async throws {
+        let model = AppModel()
+        let snapshot = try loadSnapshot()
+        model.installHostedSubscribedSnapshot(snapshot)
+        let changed = GatewayEvent(
+            type: "event",
+            topic: "session.processTranscript.changed",
+            sessionId: snapshot.sessionId,
+            payload: .object([
+                "leaseId": .string("lease-1"),
+                "processId": .string("process-1"),
+                "revision": .string("revision-2"),
+                "total": .number(4),
+            ])
+        )
+        #expect(changed.sessionCursor == nil)
+        guard case .processTranscriptChanged(let prepared) = changed.preparation else {
+            Issue.record("expected lease-scoped process transcript invalidation")
+            return
+        }
+        #expect(prepared.revision == "revision-2")
+        await model.handle(changed)
+        #expect(model.processTranscriptInvalidation?.leaseId == "lease-1")
+
+        let closed = GatewayEvent(
+            type: "event",
+            topic: "session.processTranscript.changed",
+            sessionId: snapshot.sessionId,
+            payload: .object([
+                "leaseId": .string("lease-1"),
+                "processId": .string("process-1"),
+                "closed": .bool(true),
+                "reason": .string("observer closed"),
+            ])
+        )
+        guard case .processTranscriptChanged(let closeFrame) = closed.preparation else {
+            Issue.record("expected close invalidation without revision")
+            return
+        }
+        #expect(closeFrame.closed == true)
     }
 
     private func snapshotEvent(_ snapshot: SessionSnapshot, sessionID: String) -> GatewayEvent {

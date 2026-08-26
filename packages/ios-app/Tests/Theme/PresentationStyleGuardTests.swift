@@ -1278,7 +1278,28 @@ struct PresentationStyleGuardTests {
         let liveGroupProjectionCount = productionSources.reduce(0) { count, source in
             count + source.1.occurrences(of: "ChatExtensionWidgetPolicy.liveGroups")
         }
-        #expect(liveGroupProjectionCount == 2)
+        #expect(liveGroupProjectionCount == 0)
+        #expect(productionSources.contains { $0.1.contains("SessionProcessButton(") })
+        #expect(!productionSources.contains { $0.1.contains("ExtensionActivityPill(") })
+
+        let processSheets = try #require(
+            productionSources.first { $0.0.lastPathComponent == "SessionProcessSheets.swift" }?.1
+        )
+        #expect(processSheets.contains(".tronNavigationTitle(\"Processes\")"))
+        #expect(processSheets.contains(".tronNavigationTitle(\"Process History\")"))
+        #expect(processSheets.occurrences(of: ".tronTopBlur(.sheet)") == 2)
+        #expect(processSheets.occurrences(of: ".tronPresentation()") == 2)
+        #expect(processSheets.contains(".accessibilityAddTraits(.isHeader)"))
+        #expect(processSheets.contains(".accessibilityValue(accessibilityValue)"))
+        #expect(processSheets.contains("@State private var scrollPosition = ScrollPosition"))
+        #expect(!processSheets.contains("Image(systemName: \"chevron.right\")"))
+        #expect(!processSheets.contains(".navigationTitle("))
+
+        let orb = try #require(
+            productionSources.first { $0.0.lastPathComponent == "ProcessActivityOrb.swift" }?.1
+        )
+        #expect(orb.contains("var isVisible = true"))
+        #expect(orb.contains("reduceMotion || !isVisible || !sceneActive"))
     }
 
     @Test("composer owns capped UIKit scrolling and attachment photos keep stable previews")
@@ -1531,8 +1552,8 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolTechnicalDetailsSheet.swift"),
             encoding: .utf8
         )
-        let extensionWidgets = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatExtensionWidgetView.swift"),
+        let processSheets = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionProcessSheets.swift"),
             encoding: .utf8
         )
         let navigationChrome = try String(
@@ -1632,11 +1653,12 @@ struct PresentationStyleGuardTests {
         #expect(sheet.contains("changesButton(diff, title: \"View full diff\")"))
         #expect(!sheet.contains("Button(\"Open full diff\")"))
         let subagentSheet = try #require(
-            extensionWidgets.components(separatedBy: "private struct SubagentSessionChatView").dropFirst().first?
-                .components(separatedBy: "private struct ExtensionChildDisclosureView").first
+            processSheets.components(separatedBy: "struct ReadOnlySubagentSessionSheet").dropFirst().first
         )
-        #expect(subagentSheet.occurrences(of: ".frame(maxWidth: .infinity, alignment: .leading)") >= 4)
-        #expect(subagentSheet.contains(".padding(.leading, trailing ? 28 : 0)"))
+        #expect(subagentSheet.contains("TranscriptRow(item: item)"))
+        #expect(subagentSheet.contains("store.loadEarlier()"))
+        #expect(subagentSheet.contains("store?.close()"))
+        #expect(!subagentSheet.contains("ChatComposerView"))
         let technicalDetail = try #require(
             technicalSheet.components(separatedBy: "struct ToolTechnicalDetailsSheet").dropFirst().first?
                 .components(separatedBy: "private struct ToolTechnicalMetadataItem").first
@@ -1690,8 +1712,8 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolChangesSheet.swift"),
             encoding: .utf8
         )
-        let extensionWidgets = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatExtensionWidgetView.swift"),
+        let processSheets = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionProcessSheets.swift"),
             encoding: .utf8
         )
         #expect(sheet.occurrences(of: ".font(primaryValueFont)") == 3)
@@ -1716,11 +1738,12 @@ struct PresentationStyleGuardTests {
         )
         #expect(markdownResult.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
         let subagentSheet = try #require(
-            extensionWidgets.components(separatedBy: "private struct SubagentSessionChatView").dropFirst().first?
-                .components(separatedBy: "private struct ExtensionChildDisclosureView").first
+            processSheets.components(separatedBy: "struct ReadOnlySubagentSessionSheet").dropFirst().first
         )
-        #expect(subagentSheet.occurrences(of: ".frame(maxWidth: .infinity, alignment: .leading)") >= 4)
-        #expect(subagentSheet.contains(".padding(.leading, trailing ? 28 : 0)"))
+        #expect(subagentSheet.contains("TranscriptRow(item: item)"))
+        #expect(subagentSheet.contains("store.loadEarlier()"))
+        #expect(subagentSheet.contains("store?.close()"))
+        #expect(!subagentSheet.contains("ChatComposerView"))
     }
 
     @Test("camera keeps the historical three-control morphing sheet")

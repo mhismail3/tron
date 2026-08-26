@@ -16,17 +16,7 @@ struct ExtensionActivityModelsTests {
         )
         let activity = makeActivity(lifecycle: lifecycle)
         #expect(ExtensionActivityAdmissionPolicy.admits(activity))
-        #expect(ExtensionActivityVisibilityPolicy.ambient(activity))
         #expect(!activity.isLive)
-    }
-
-    @Test("ambiguous source fallback fails closed")
-    func ambiguousOwnerGrouping() {
-        let activity = makeActivity()
-        let first = ExtensionOwner(id: "one", title: "One", source: "shared")
-        let second = ExtensionOwner(id: "two", title: "Two", source: "shared")
-        #expect(ExtensionActivityGroupProjection.owner(for: activity, inventory: [first, second]) == nil)
-        #expect(ExtensionActivityGroupProjection.ambientGroups([activity], inventory: [first, second]).isEmpty)
     }
 
     @Test("receipt timelines fail closed for Gateway and legacy rows")
@@ -68,58 +58,6 @@ struct ExtensionActivityModelsTests {
     func strictActivityFields() {
         #expect(!ExtensionActivityAdmissionPolicy.admits(makeActivity(id: "", output: "ok")))
         #expect(!ExtensionActivityAdmissionPolicy.admits(makeActivity(runId: String(repeating: "x", count: 513), output: String(repeating: "x", count: 33 * 1_024))))
-    }
-
-    @Test("duration anchor is monotonic and never falls below Gateway observation")
-    func durationAnchorMonotonic() {
-        let anchor = ExtensionActivityDurationAnchor(
-            startedAt: "2026-01-01T00:00:00Z",
-            observedDurationMs: 1_000,
-            anchor: .now
-        )
-        #expect(anchor.durationMs(at: anchor.anchor) == 1_000)
-        #expect(anchor.durationMs(at: anchor.anchor.advanced(by: .milliseconds(250))) >= 1_000)
-    }
-
-    @Test("duration anchor clamps observed and elapsed overflow")
-    func durationAnchorOverflow() {
-        let observedMaximum = ExtensionActivityDurationAnchor(
-            startedAt: "2026-01-01T00:00:00Z",
-            observedDurationMs: Int.max,
-            anchor: .now
-        )
-        #expect(observedMaximum.durationMs(at: observedMaximum.anchor) == Int.max)
-
-        let elapsedMaximum = ExtensionActivityDurationAnchor(
-            startedAt: "2026-01-01T00:00:00Z",
-            observedDurationMs: 1_000,
-            anchor: .now
-        )
-        let distant = elapsedMaximum.anchor.advanced(by: .seconds(Int64.max))
-        #expect(elapsedMaximum.durationMs(at: distant) == Int.max)
-    }
-
-    @Test("visual deadline cannot promote an expired historical bucket")
-    func visualDeadlineExpiry() {
-        let deadline = ExtensionActivityVisualDeadline(bucket: .recent, remainingMs: 10, now: .now)
-        #expect(!deadline.expired(at: .now))
-        #expect(deadline.expired(at: .now.advanced(by: .milliseconds(11))))
-    }
-
-    @Test("composer pill groups admit one exact owner identity")
-    func composerOwnerGrouping() {
-        let owner = ExtensionOwner(id: "owner-a", title: "Owner A", source: "source-a")
-        let group = ExtensionWidgetGroup(id: "owner:\(owner.id)", label: owner.title, items: [], statuses: [], services: [], activities: [])
-        let duplicate = ExtensionWidgetGroup(id: group.id, label: owner.title, items: [], statuses: [], services: [], activities: [])
-        #expect(ExtensionActivityPillPolicy.composerGroups([group, duplicate]).map(\.id) == ["owner:owner-a"])
-    }
-
-    @Test("hub sections have the explicit presentation order")
-    func hubSectionOrder() {
-        #expect(ExtensionActivityHubSection.allCases.map(\.title) == [
-            "Overview", "Current Work", "Recently Finished", "Extension Updates",
-            "Service Activity", "View All Activity"
-        ])
     }
 
     @Test("history page omits malformed rows while admitting the page")

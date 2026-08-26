@@ -31,9 +31,7 @@ struct ChatComposerView: View {
     let skillPickerAvailable: Bool
     let glassNamespace: Namespace.ID
 
-    let onExtensionTap: (String) -> Void
-    let onExtensionVisualState: (ExtensionActivityPillVisualState, Int) -> Void
-    let onExtensionExpiry: (String, ExtensionActivityVisibility, Int?) -> Void
+    let onProcessesTap: () -> Void
     let onRemoveAttachment: (String) -> Void
     let onRemoveSkill: () -> Void
     let onSelectResource: (ComposerResourceEntry) -> Void
@@ -57,12 +55,19 @@ struct ChatComposerView: View {
             onHeightChange: onComposerHeight
         ) {
             VStack(spacing: 10) {
-                extensionPills
                 attachmentStrip
                 selectedSkillStrip
                 resourcePickerView
                 GlassEffectContainer(spacing: 8) {
                     HStack(alignment: .bottom, spacing: 8) {
+                        if let overview = snapshot?.processOverview {
+                            SessionProcessButton(
+                                overview: overview,
+                                glassNamespace: glassNamespace,
+                                reduceMotion: reduceMotion,
+                                onTap: onProcessesTap
+                            )
+                        }
                         inputBar
                         if showsCatchUp { catchUpButton }
                     }
@@ -72,6 +77,12 @@ struct ChatComposerView: View {
                         ? .easeOut(duration: 0.12)
                         : .spring(response: 0.32, dampingFraction: 0.82),
                     value: showsCatchUp
+                )
+                .animation(
+                    reduceMotion
+                        ? .easeOut(duration: 0.12)
+                        : .spring(response: 0.32, dampingFraction: 0.82),
+                    value: snapshot?.processOverview?.visibility
                 )
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
@@ -100,38 +111,6 @@ struct ChatComposerView: View {
             .offset(y: ChatBottomActivityBlurLayout.translation(keyboardVisible: keyboardVisible))
             .ignoresSafeArea(edges: .bottom)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: keyboardVisible)
-        }
-    }
-
-    @ViewBuilder
-    private var extensionPills: some View {
-        if let snapshot {
-            let groups = ExtensionActivityPillPolicy.composerGroups(
-                ChatExtensionWidgetPolicy.liveGroups(
-                    snapshot.extensionPresentation,
-                    executions: snapshot.toolExecutions,
-                    activities: snapshot.extensionActivities ?? []
-                )
-            )
-            if !groups.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(groups) { group in
-                            ExtensionActivityPill(
-                                group: group,
-                                onTap: { onExtensionTap(group.id) },
-                                onVisualState: onExtensionVisualState,
-                                onExpiry: onExtensionExpiry
-                            )
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.horizontal, 16)
-                }
-                .scrollClipDisabled()
-                .transition(.opacity)
-                .accessibilityElement(children: .contain)
-            }
         }
     }
 
