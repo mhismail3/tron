@@ -387,6 +387,9 @@ export class GatewayServer {
   /** Move connection-local ownership with the registry's canonical rekey. */
   rekeySession(previousSessionId: string, nextSessionId: string): void {
     if (previousSessionId === nextSessionId) return;
+    // Process identities include the canonical parent ID. Retire read-only
+    // child leases instead of silently carrying stale authorization across a fork.
+    this.options.service.releaseSessionProcessTranscripts(previousSessionId);
     for (const connection of this.clients.values()) {
       const sourceSynchronization = connection.synchronizations.get(previousSessionId);
       const sourceToken = connection.subscriptionTokens.get(previousSessionId);
@@ -969,6 +972,9 @@ export class GatewayServer {
         },
         detachTerminal: (terminalId) => connection.terminals.delete(terminalId),
         ownsTerminal: (terminalId) => connection.terminals.has(terminalId),
+        sendEvent: (topic, sessionId, payload) => {
+          this.send(connection, { type: "event", topic, sessionId, payload });
+        },
       };
       const result = await this.options.service.invoke(context, frame.method, frame.params ?? {});
       // Validate every synchronization created by this request before writing

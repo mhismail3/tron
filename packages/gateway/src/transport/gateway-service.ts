@@ -10,6 +10,8 @@ import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../sessions/extension-activity-history.js";
+import { PROCESS_ACTIVITY_HISTORY_CAPABILITY, PROCESS_TRANSCRIPT_CAPABILITY } from "../sessions/process-activity.js";
+import { ProcessTranscriptLeaseStore } from "./process-transcript-leases.js";
 import type { FilesystemService } from "../machine/filesystem-service.js";
 import { GitWorktreeService, type SessionSourceControlRequest } from "../machine/git-worktree-service.js";
 import type { UploadStore } from "../machine/upload-store.js";
@@ -72,7 +74,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 const restartDrainMethods = new Set([
   "system.info", "system.logs", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status",
   "session.list", "session.open", "session.sync", "session.close", "session.transcript", "session.attention.read",
-  "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.cancel",
+  "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
 ]);
 
@@ -87,6 +89,8 @@ export interface ClientContext {
   attachTerminal(terminalId: string): void;
   detachTerminal(terminalId: string): void;
   ownsTerminal(terminalId: string): boolean;
+  /** Direct connection-local event delivery for opaque read-only leases. */
+  sendEvent?(topic: string, sessionId: string, payload: JsonValue): void;
 }
 
 export interface GatewayServiceDependencies {
@@ -125,6 +129,7 @@ export class GatewayService {
   private readonly updateService: GatewayUpdateService;
   private readonly workRegistry: GatewayWorkRegistry | undefined;
   private readonly mobileIdentityLanes = new Map<string, MobileIdentityLane>();
+  private readonly processTranscriptLeases: ProcessTranscriptLeaseStore;
 
   constructor(private readonly dependencies: GatewayServiceDependencies) {
     this.updateService = dependencies.updateService ?? new GatewayUpdateService({
@@ -135,10 +140,16 @@ export class GatewayService {
       dependencies.config?.tronHome ?? process.env.TRON_HOME ?? process.cwd(),
     );
     this.workRegistry = dependencies.workRegistry ?? dependencies.sessions?.administrativeWorkRegistry;
+    this.processTranscriptLeases = new ProcessTranscriptLeaseStore(dependencies.sessions);
   }
 
   releaseClient(clientID: string): void {
     this.sessionListPages.releaseClient(clientID);
+    this.processTranscriptLeases.releaseClient(clientID);
+  }
+
+  releaseSessionProcessTranscripts(sessionID: string): void {
+    this.processTranscriptLeases.releaseSession(sessionID);
   }
 
   /**
@@ -181,6 +192,8 @@ export class GatewayService {
         "terminal.v1",
         "extension-presentation.v1",
         EXTENSION_ACTIVITY_HISTORY_CAPABILITY,
+        PROCESS_ACTIVITY_HISTORY_CAPABILITY,
+        PROCESS_TRANSCRIPT_CAPABILITY,
         "queue-management.v1",
         "skill-prompt.v1",
         "restart-drain.v1",
@@ -493,15 +506,78 @@ export class GatewayService {
         if (!activity) throw new GatewayError("not_found", "Extension activity is not available");
         return safeJson({ activity });
       }
+      case "session.processHistory.list": {
+        const slot = await this.openedSlot(client, params);
+        const cursor = optionalString(params.cursor, "cursor", 200);
+        const limit = params.limit === undefined ? 25 : integer(params.limit, "limit", 1, 50);
+        const kind = params.kind === undefined ? undefined : oneOf(params.kind, "kind", ["command", "subagent"] as const);
+        const state = params.state === undefined ? undefined : oneOf(params.state, "state", [
+          "queued", "running", "paused", "completed", "failed", "stopped", "rejected", "interrupted", "unknown",
+        ] as const);
+        try {
+          return safeJson(slot.processHistory(cursor, limit, {
+            ...(kind ? { kind } : {}),
+            ...(state ? { state } : {}),
+          }));
+        } catch (error) {
+          if (error instanceof Error && /cursor conflict/u.test(error.message)) {
+            throw new GatewayError("conflict", "Process history changed; restart paging", true);
+          }
+          throw new GatewayError("invalid_request", error instanceof Error ? error.message : "Invalid process history request");
+        }
+      }
+      case "session.processHistory.get": {
+        const slot = await this.openedSlot(client, params);
+        const processId = string(params.processId, "processId", { max: 256 });
+        const generation = optionalString(params.historyRevision, "historyRevision", 64);
+        const activity = slot.processDetail(processId, generation);
+        if (!activity) throw new GatewayError("not_found", "Process activity is unavailable");
+        return safeJson({ activity });
+      }
+      case "session.processTranscript.open": {
+        const slot = await this.openedSlot(client, params);
+        if (!client.sendEvent) throw new GatewayError("unsupported", "This connection cannot observe subagent transcripts");
+        const processId = string(params.processId, "processId", { max: 256 });
+        const childSessionRef = slot.processChildSessionRef(processId);
+        if (!childSessionRef) throw new GatewayError("not_found", "Subagent session is unavailable");
+        const live = slot.processChildSessionPath(processId);
+        return safeJson(await this.processTranscriptLeases.open(
+          client.id,
+          slot.id,
+          processId,
+          childSessionRef,
+          live?.path,
+          client.sendEvent,
+        ));
+      }
+      case "session.processTranscript.page": {
+        const leaseId = string(params.leaseId, "leaseId", { max: 200 });
+        const before = params.before === undefined ? undefined : integer(params.before, "before", 0, Number.MAX_SAFE_INTEGER);
+        const expectedNextEntryId = optionalString(params.expectedNextEntryId, "expectedNextEntryId", 200);
+        const expectedRevision = optionalString(params.expectedRevision, "expectedRevision", 64);
+        return safeJson(await this.processTranscriptLeases.page(
+          client.id,
+          leaseId,
+          before,
+          expectedNextEntryId,
+          expectedRevision,
+        ));
+      }
+      case "session.processTranscript.close": {
+        const leaseId = string(params.leaseId, "leaseId", { max: 200 });
+        return { closed: this.processTranscriptLeases.closeOwned(client.id, leaseId) };
+      }
       case "session.close": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
         const subscriptionToken = string(params.subscriptionToken, "subscriptionToken", { max: 200 });
+        this.processTranscriptLeases.releaseParent(client.id, sessionId);
         return { closed: client.unsubscribe(sessionId, subscriptionToken) };
       }
       case "session.delete":
         return this.mutation(client, method, params, async () => {
           const sessionId = string(params.sessionId, "sessionId", { max: 200 });
           client.unsubscribe(sessionId);
+          this.processTranscriptLeases.releaseSession(sessionId);
           await this.dependencies.sessions.delete(sessionId);
           this.dependencies.sessionDeleted(sessionId);
           await this.dependencies.uploads.removeSession(sessionId).catch(() => {});

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { copyFile, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { getExamplesPath, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -71,6 +71,26 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  });
+
+  it("pages a structurally indexed subagent without acquiring a writable runtime", async () => {
+    const fixture = await coldFixture("readonly-subagent", { nested: true, name: "subagent-worker" });
+    const sessionId = fixture.manager.getSessionId();
+    const path = await fixture.registry.resolveReadOnlySubagentPath(sessionId);
+    expect(path).toBe(await realpath(fixture.sessionFile));
+    const page = await fixture.registry.readOnlySubagentTranscriptPage(sessionId, path);
+    expect(page.total).toBeGreaterThan(0);
+    expect(page.revision).toMatch(/^[a-f0-9]{32}$/u);
+    await expect(fixture.registry.acquire(sessionId)).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("rejects a partial child-session append rather than parsing guessed JSONL", async () => {
+    const fixture = await coldFixture("readonly-partial", { nested: true, name: "subagent-worker" });
+    const sessionId = fixture.manager.getSessionId();
+    const path = await fixture.registry.resolveReadOnlySubagentPath(sessionId);
+    await writeFile(path, "{\"type\":\"message\"", { flag: "a" });
+    await expect(fixture.registry.readOnlySubagentTranscriptPage(sessionId, path))
+      .rejects.toMatchObject({ code: "busy", retryable: true });
   });
 
   it("announces a final successful Pi settlement through the inline notification hook", async () => {
@@ -1725,6 +1745,55 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(slot.snapshot().extensionActivities).toMatchObject([{ toolCallId, status: "completed" }]);
     await fixture.registry.waitUntilIdle();
     expect(receiptAppend.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("persists only a validated opaque child-session reference for process viewing", async () => {
+    const fixture = await coldFixture("validated-child-session");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const runId = "validated-child-run";
+    const toolCallId = "validated-child-tool";
+    const activityId = "validated-child-activity";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
+    const childDirectory = join(fixture.agentDir, "sessions", "workspace", "child");
+    await Promise.all([mkdir(asyncDir, { recursive: true }), mkdir(childDirectory, { recursive: true })]);
+    const childManager = SessionManager.create(fixture.cwd, childDirectory, { id: "validated-child-session" });
+    childManager.appendSessionInfo("subagent-worker");
+    childManager.appendMessage(fauxAssistantMessage("child transcript"));
+    const childFile = childManager.getSessionFile()!;
+    const startedAt = new Date(Date.now() - 1_000).toISOString();
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
+      refreshExtensionActivityFromArtifact: (toolCallId: string, asyncDir: string) => Promise<void>;
+    };
+    internal.extensionActivities.set(toolCallId, {
+      id: toolCallId, activityId, runId, toolCallId,
+      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      startedAt, updatedAt: startedAt, children: [],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
+    });
+    internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    const endedAt = Date.now();
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      runId,
+      state: "complete",
+      startedAt: Date.parse(startedAt),
+      endedAt,
+      lastUpdate: endedAt + 1,
+      results: [{ runId: "child-run", agent: "worker", status: "completed", sessionFile: childFile }],
+    }));
+
+    await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
+    const process = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
+    expect(process).toMatchObject({ title: "worker", childSessionRef: "validated-child-session" });
+    expect(JSON.stringify(process)).not.toContain(childFile);
+    expect(slot.processChildSessionPath(process!.processId)).toEqual({
+      ref: "validated-child-session",
+      path: await realpath(childFile),
+    });
+    await waitUntil(() => slot.processHistory(undefined, 25, { kind: "subagent" }).activities.length === 1);
+    expect(slot.processHistory(undefined, 25, { kind: "subagent" }).activities[0])
+      .toMatchObject({ childSessionRef: "validated-child-session" });
   });
 
   it("rejects canonical artifact paths outside the exact project run root", async () => {
@@ -3893,8 +3962,24 @@ export default function (pi) {
     expect(bashProgress.at(-1)!.progressSequence).toBeGreaterThan(2);
     expect(bashProgress.at(-1)!.durationMs).toBeGreaterThanOrEqual(300);
     expect(bashProgress.at(-1)!.completedAt).toBeTypeOf("string");
+    const processEvents = events
+      .filter((event) => event.topic === "session.processActivity")
+      .map((event) => event.payload.data as { activity: { kind: string; toolCallId?: string; visibility: string; outputTail?: string }; overview: { visibility: string } });
+    expect(processEvents.length).toBeGreaterThan(1);
+    expect(processEvents.every((event) => event.activity.kind === "command" && event.activity.toolCallId === "call-bash")).toBe(true);
+    expect(processEvents.some((event) => event.activity.visibility === "active" && event.overview.visibility === "active")).toBe(true);
+    expect(processEvents.at(-1)).toMatchObject({
+      activity: { visibility: "recent", outputTail: "startend" },
+      overview: { visibility: "recent" },
+    });
     const settled = slot.snapshot();
     expect(settled.toolExecutions).toEqual([]);
+    expect(settled.processOverview).toMatchObject({ visibility: "recent", activeCount: 0, recentCount: 1 });
+    expect(settled.processActivities).toEqual([
+      expect.objectContaining({ kind: "command", toolCallId: "call-bash", outputTail: "startend" }),
+    ]);
+    expect(slot.processHistory(undefined, 25, { kind: "command" }).activities)
+      .toEqual([expect.objectContaining({ kind: "command", toolCallId: "call-bash" })]);
     const canonicalAssistant = settled.transcript.find((item) => item.kind === "message" && item.role === "assistant");
     const canonicalCalls = canonicalAssistant?.kind === "message"
       ? canonicalAssistant.content.filter((part) => part.type === "toolCall")

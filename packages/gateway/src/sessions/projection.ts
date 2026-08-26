@@ -1,5 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { SessionEntry, SessionManager, SessionTreeNode as PiSessionTreeNode } from "@earendil-works/pi-coding-agent";
+
+type TranscriptSessionReader = Pick<SessionManager, "getBranch">;
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
@@ -417,6 +419,20 @@ export function fitSessionSnapshot(
       return metadata;
     }),
   };
+  if (frameBytes(projected) <= maximumBytes) return projected;
+
+  // Process output is a bounded convenience projection. Canonical command
+  // results and child transcripts remain available independently, so shed the
+  // duplicated tails before sacrificing transcript continuity or authority.
+  if (projected.processActivities?.length) {
+    projected = {
+      ...projected,
+      processActivities: projected.processActivities.map((activity) => {
+        const { outputTail: _outputTail, ...metadata } = activity;
+        return _outputTail === undefined ? activity : { ...metadata, outputTruncated: true };
+      }),
+    };
+  }
   if (frameBytes(projected) <= maximumBytes) return projected;
 
   // Retain a stable recent continuity floor even under active snapshot pressure.
@@ -1223,7 +1239,7 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
   return selected.reverse();
 }
 
-function projectableTranscriptEntries(manager: SessionManager): SessionEntry[] {
+function projectableTranscriptEntries(manager: TranscriptSessionReader): SessionEntry[] {
   return manager.getBranch().filter((entry) =>
     entry.type !== "session_info"
       && !(entry.type === "custom" && entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE)
@@ -1232,7 +1248,7 @@ function projectableTranscriptEntries(manager: SessionManager): SessionEntry[] {
 }
 
 export function projectTranscript(
-  manager: SessionManager,
+  manager: TranscriptSessionReader,
   blobs: BlobStore,
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
 ): TranscriptItem[] {
@@ -1256,7 +1272,7 @@ export interface TranscriptPage {
 }
 
 export function projectTranscriptPage(
-  manager: SessionManager,
+  manager: TranscriptSessionReader,
   blobs: BlobStore,
   before?: number,
   byteBudget = TRANSCRIPT_PAGE_BYTES,

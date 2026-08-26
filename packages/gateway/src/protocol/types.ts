@@ -214,6 +214,8 @@ export interface ExtensionRunLifecycle {
 export interface ExtensionRunChild {
   id: string;
   label: string;
+  /** Opaque validated child-session identity. Absolute paths never cross the wire. */
+  childSessionRef?: string;
   /** Coarse compatibility status retained for older native clients. */
   status: ExtensionRunStatus;
   /** Rich delegated-run state, independent of the parent tool status. */
@@ -262,6 +264,94 @@ export interface ExtensionActivityDelta {
   activity: ExtensionRunActivity;
   liveActivityRevision: number;
   extensionActivityAsOf: string;
+}
+
+export type SessionProcessKind = "command" | "subagent";
+export type SessionProcessExecutionMode = "foreground" | "background" | "synchronous" | "asynchronous" | "unknown";
+export type SessionProcessSource = "mainAssistant" | "delegatedAgent" | "admittedExtension";
+export type SessionProcessState =
+  | "queued" | "running" | "paused"
+  | "completed" | "failed" | "stopped" | "rejected" | "interrupted" | "unknown";
+export type SessionProcessAttention = "none" | "activeLongRunning" | "needsAttention";
+export type SessionProcessVisibility = "active" | "recent" | "historical" | "unknown";
+
+export interface SessionProcessLifecycle {
+  version: 1;
+  state: SessionProcessState;
+  attention: SessionProcessAttention;
+  /** Monotonic within one runtime's process projection. */
+  sequence: number;
+  observedAt: string;
+  producerUpdatedAt?: string;
+  terminalAt?: string;
+  recentUntil?: string;
+}
+
+/** Package-agnostic bounded projection of process activity Tron already observes.
+ * It never implies that Tron owns or can control the underlying process. */
+export interface SessionProcessActivity {
+  version: 1;
+  processId: string;
+  kind: SessionProcessKind;
+  executionMode: SessionProcessExecutionMode;
+  source: SessionProcessSource;
+  parentProcessId?: string;
+  lifecycle: SessionProcessLifecycle;
+  visibility: SessionProcessVisibility;
+  startedAt?: string;
+  title: string;
+  command?: string;
+  currentTool?: string;
+  currentPathBasename?: string;
+  outputTail?: string;
+  outputTruncated: boolean;
+  toolCount?: number;
+  turnCount?: number;
+  childCount?: number;
+  toolCallId?: string;
+  runId?: string;
+  childSessionRef?: string;
+}
+
+export interface SessionProcessOverview {
+  version: 1;
+  revision: number;
+  asOf: string;
+  activeCount: number;
+  recentCount: number;
+  problemCount: number;
+  visibility: "hidden" | "active" | "recent";
+  nearestExpiry?: string;
+  omissions?: { count: number; bytes: number; reason: "count" | "bytes" | "countAndBytes" };
+}
+
+export interface SessionProcessDelta {
+  activity: SessionProcessActivity;
+  processRevision: number;
+  processAsOf: string;
+  overview: SessionProcessOverview;
+}
+
+export interface SessionProcessHistoryPage {
+  activities: SessionProcessActivity[];
+  historyRevision: string;
+  nextCursor?: string;
+  omissions?: { count: number; bytes: number; reason: "bytes" | "countAndBytes" };
+}
+
+export interface ProcessTranscriptLease {
+  leaseId: string;
+  processId: string;
+  childSessionRef: string;
+  revision: string;
+  page: {
+    items: TranscriptItem[];
+    start: number;
+    end: number;
+    total: number;
+    nextEntryId?: string;
+    leafEntryId?: string;
+  };
 }
 
 export interface ToolExecutionState {
@@ -606,6 +696,9 @@ export interface SessionSnapshot {
   liveActivityRevision: number;
   /** Wall-clock observation time for the activity projection, including expiry. */
   extensionActivityAsOf: string;
+  /** Additive unified process projection. Old clients ignore these fields. */
+  processActivities?: SessionProcessActivity[];
+  processOverview?: SessionProcessOverview;
   extensionPresentation: ExtensionPresentationState;
   diagnostics: Array<{ type: string; message: string }>;
 }

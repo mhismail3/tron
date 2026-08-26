@@ -15,6 +15,39 @@ const client: ClientContext = {
 };
 
 describe("session transcript paging", () => {
+  it("routes bounded unified process history through an established parent session", async () => {
+    const processHistory = vi.fn(() => ({ activities: [], historyRevision: "revision" }));
+    const processDetail = vi.fn(() => ({
+      version: 1,
+      processId: "process:command:test",
+      kind: "command",
+      executionMode: "foreground",
+      source: "mainAssistant",
+      lifecycle: { version: 1, state: "completed", attention: "none", sequence: 0, observedAt: "2026-01-01T00:00:00.000Z", terminalAt: "2026-01-01T00:00:00.000Z" },
+      visibility: "historical",
+      title: "Command",
+      outputTruncated: false,
+    }));
+    const acquire = vi.fn(async () => ({ processHistory, processDetail }));
+    const service = new GatewayService({
+      sessions: { isSubscribed: () => true, acquire },
+    } as unknown as GatewayServiceDependencies);
+
+    await expect(service.invoke(client, "session.processHistory.list", {
+      sessionId: "session",
+      limit: 25,
+      kind: "command",
+    })).resolves.toEqual({ activities: [], historyRevision: "revision" });
+    expect(processHistory).toHaveBeenCalledWith(undefined, 25, { kind: "command" });
+
+    await expect(service.invoke(client, "session.processHistory.get", {
+      sessionId: "session",
+      processId: "process:command:test",
+      historyRevision: "revision",
+    })).resolves.toEqual({ activity: expect.objectContaining({ kind: "command" }) });
+    expect(processDetail).toHaveBeenCalledWith("process:command:test", "revision");
+  });
+
   it("returns a bounded page only for an established subscription without creating ownership", async () => {
     const transcriptPage = vi.fn(() => ({
       items: [{ id: "entry", type: "message", role: "user", text: "earlier" }],

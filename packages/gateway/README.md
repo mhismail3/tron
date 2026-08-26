@@ -735,6 +735,49 @@ credentials. Additional deterministic tests exercise interactive API-key and
 OAuth brokering, project trust, native local-package persistence, legacy import,
 and credential separation.
 
+## Unified session process activity
+
+The additive `process-history.v1` contract observes execution that already has an
+authoritative producer; it does not add another shell tool, detached executor,
+PTY, process supervisor, or event journal. The current producers are assistant-owned
+Pi `bash` tool executions and structured synchronous/asynchronous delegated runs.
+Direct user `!` bash, Terminal-sheet PTYs, ordinary tools, administrative work, and
+shell grandchildren inferred from command syntax are excluded. A future producer
+may join only with exact session/tool ownership, bounded lifecycle data, monotonic
+replacement evidence, and authoritative terminal evidence.
+
+`SessionProcessActivity` gives command and subagent rows a stable namespaced
+`processId`, typed source/mode/lifecycle, bounded command/current-tool/output facts,
+and an optional opaque validated child-session reference. Absolute session and
+artifact paths, PIDs, environment values, credentials, and unbounded task/output data
+never cross the wire. `SessionProcessOverview` is the shallow composer authority:
+active/recent/problem counts, revision, Gateway `asOf`, and nearest expiry. High-frequency
+output remains in bounded process deltas and does not require a transcript rebuild.
+
+The Gateway owns process recency for exactly five minutes from authoritative terminal
+admission. It converts that wall deadline to a monotonic in-process timer, emits a
+revisioned expiry snapshot even when no other session event occurs, and reconstructs
+recent commands from canonical Pi tool declarations/results plus recent subagents from
+their canonical receipts after runtime acquisition. Existing 15-minute extension
+compatibility fields do not extend the process deadline. Active work always outranks
+recent terminal work, and expiry removes only the disposable projection.
+
+`session.processHistory.list` and `.get` merge canonical assistant `bash` declarations/results
+with normalized subagent terminal receipts under one bounded branch-derived revision and
+opaque cursor. Ordinary synchronous command results do not receive duplicate custom
+receipts. Old `tron.extension-activity.v1` entries remain readable; newer receipts may
+add a validated opaque child-session ID but continue to omit paths, task text, and output.
+
+The `process-transcript.v1` capability authorizes `session.processTranscript.open`,
+`.page`, and `.close` through the exact parent process-to-child relationship. A
+connection-owned lease watches only the validated canonical child file, emits bounded
+invalidation events, and reopens it through a read-only projection for canonical paging.
+It never calls `RuntimeRegistry.acquire` for the child, exposes mutation methods, or
+keeps a second transcript mirror. Reads reject symlinks, identity/path replacement,
+foreign or ambiguous catalog identities, incomplete trailing JSONL appends, stale page
+anchors, and retired leases. Closing the parent presentation or client retires every
+owned child observer.
+
 ## Extension activity lifecycle and history
 
 Structured extension runs retain the legacy coarse `status` alongside the additive

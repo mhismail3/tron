@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { open, opendir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
+import { lstat, open, opendir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
@@ -27,9 +27,11 @@ import {
   type SessionBroadcast,
 } from "./runtime-slot.js";
 import { ExtensionActivityRecency } from "./extension-activity-recency.js";
+import { ProcessActivityRecency } from "./process-activity-recency.js";
 import { admitExtensionLifecycleArtifact } from "./extension-run-projection.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
+import { projectTranscriptPage, type TranscriptPage } from "./projection.js";
 
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 // MaximumLiveRuntimes is 16 and each slot retains at most 64 owned activity
@@ -44,6 +46,12 @@ const MAX_FORK_PROVENANCE_SUFFIX_BYTES = 64 * 1_024;
 
 function isMissingFilesystemError(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+}
+
+function assertProcessSessionRef(value: string): void {
+  if (!value || Buffer.byteLength(value) > 256 || /[\\/\0]/u.test(value)) {
+    throw new GatewayError("invalid_request", "Invalid subagent session reference");
+  }
 }
 
 const DEFAULT_CATALOG_DISCOVERY_LIMITS = {
@@ -84,6 +92,7 @@ interface CatalogAcquisitionEntry {
   cwd: string;
   canonicalCwd: string;
   structuralSubagent: boolean;
+  parentSessionId?: string;
 }
 
 interface CatalogAcquisitionResolution {
@@ -122,6 +131,7 @@ export class RuntimeRegistry {
   private readonly blobs: BlobStore;
   private readonly markers: RunMarkerStore;
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
+  private readonly processActivityRecency = new ProcessActivityRecency();
   private readonly attention: SessionAttentionStore;
   private readonly configuredSessionDir: string | undefined;
   private interrupted = new Set<string>();
@@ -411,6 +421,7 @@ export class RuntimeRegistry {
       blobs: this.blobs,
       markers: this.markers,
       extensionActivityRecency: this.extensionActivityRecency,
+      processActivityRecency: this.processActivityRecency,
       workRegistry: this.workRegistry,
       ...(this.options.machineId ? { machineId: this.options.machineId } : {}),
       ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
@@ -1067,6 +1078,7 @@ export class RuntimeRegistry {
       this.catalogCapacityExceeded();
     }
     const nestedOwners = this.nestedOwners(unambiguousSessions);
+    const sessionIDByPath = new Map(unambiguousSessions.map((session) => [resolve(session.path), session.id]));
     const configuredDirectory = this.configuredSessionDirectory();
     const catalogDirectory = await realpath(this.catalogDirectory()).catch(() => resolve(this.catalogDirectory()));
     const userDirectoryDepth = configuredDirectory ? 0 : 1;
@@ -1085,6 +1097,11 @@ export class RuntimeRegistry {
           || session.name?.startsWith("subagent-") === true
           || session.frozenForkSnapshot === true
           || directoryDepth > userDirectoryDepth,
+        ...(nestedOwners.get(sessionPath)
+          ?? (session.parentSessionPath ? sessionIDByPath.get(resolve(session.parentSessionPath)) : undefined)
+          ? { parentSessionId: nestedOwners.get(sessionPath)
+            ?? sessionIDByPath.get(resolve(session.parentSessionPath!))! }
+          : {}),
       };
       retainedBytes += Buffer.byteLength(JSON.stringify(entry));
       if (retainedBytes > limits.maximumAcquisitionBytes) this.catalogCapacityExceeded();
@@ -1371,6 +1388,91 @@ export class RuntimeRegistry {
       }
       finishAdmission();
     }
+  }
+
+  /** Resolves an opaque child-session identity without acquiring a runtime.
+   * A live producer-validated path may bridge the catalog's next invalidation;
+   * persisted history resolves only structurally indexed subagent sessions. */
+  async resolveReadOnlySubagentPath(childSessionRef: string, preferredPath?: string, expectedParentSessionId?: string): Promise<string> {
+    assertProcessSessionRef(childSessionRef);
+    if (preferredPath) {
+      const admitted = await this.validateReadOnlySubagentPath(childSessionRef, preferredPath, false);
+      if (admitted) return admitted;
+    }
+    const acquisition = await this.catalogAcquisition();
+    this.requireUnambiguousSessionId(childSessionRef, acquisition.ambiguousIDs);
+    const entry = acquisition.entriesByID.get(childSessionRef);
+    if (!entry || !entry.structuralSubagent
+      || (expectedParentSessionId !== undefined && entry.parentSessionId !== expectedParentSessionId)) {
+      throw new GatewayError("not_found", "Subagent session is unavailable");
+    }
+    const admitted = await this.validateReadOnlySubagentPath(childSessionRef, entry.path, true);
+    if (!admitted) throw new GatewayError("conflict", "Subagent session identity changed", true);
+    return admitted;
+  }
+
+  async readOnlySubagentTranscriptPage(
+    childSessionRef: string,
+    path: string,
+    before?: number,
+    expectedNextEntryId?: string,
+  ): Promise<TranscriptPage & { revision: string }> {
+    const admitted = await this.validateReadOnlySubagentPath(childSessionRef, path, false);
+    if (!admitted) throw new GatewayError("conflict", "Subagent session identity changed", true);
+    const handle = await open(admitted, "r");
+    try {
+      const metadata = await handle.stat();
+      if (!metadata.isFile()) throw new GatewayError("conflict", "Subagent session is no longer a regular file", true);
+      if (metadata.size > 0) {
+        const final = Buffer.alloc(1);
+        const { bytesRead } = await handle.read(final, 0, 1, metadata.size - 1);
+        if (bytesRead !== 1 || final[0] !== 0x0a) {
+          throw new GatewayError("busy", "Subagent session append is still in progress", true);
+        }
+      }
+      const manager = SessionManager.open(admitted);
+      if (manager.getSessionId() !== childSessionRef) throw new GatewayError("conflict", "Subagent session identity changed", true);
+      let page: TranscriptPage;
+      try {
+        page = projectTranscriptPage(manager, this.blobs, before, undefined, expectedNextEntryId);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("anchor changed")) {
+          throw new GatewayError("conflict", "Subagent transcript changed while loading history", true);
+        }
+        throw error;
+      }
+      const after = await stat(admitted);
+      if (after.dev !== metadata.dev || after.ino !== metadata.ino || after.size < metadata.size) {
+        throw new GatewayError("conflict", "Subagent session file changed during projection", true);
+      }
+      const leafEntryId = manager.getLeafId();
+      const revision = createHash("sha256")
+        .update(`${childSessionRef}\0${after.dev}\0${after.ino}\0${after.size}\0${after.mtimeMs}\0${leafEntryId ?? ""}`)
+        .digest("hex").slice(0, 32);
+      return { ...page, ...(leafEntryId ? { leafEntryId } : {}), revision };
+    } finally {
+      await handle.close();
+    }
+  }
+
+  private async validateReadOnlySubagentPath(childSessionRef: string, input: string, _catalogStructuralEvidence: boolean): Promise<string | undefined> {
+    let canonical: string;
+    try { canonical = await realpath(input); } catch { return undefined; }
+    const roots = await Promise.all([join(this.options.agentDir, "sessions"), this.catalogDirectory()]
+      .map(async (root) => realpath(root).catch(() => resolve(root))));
+    if (!roots.some((root) => canonical === root || canonical.startsWith(root + sep))) return undefined;
+    const canonicalInput = await realpath(input).catch(() => undefined);
+    if (!canonicalInput || canonicalInput !== canonical) return undefined;
+    try {
+      const metadata = await lstat(input);
+      if (!metadata.isFile() || metadata.isSymbolicLink()) return undefined;
+      const manager = SessionManager.open(canonical);
+      if (manager.getSessionId() !== childSessionRef) return undefined;
+      // Catalog callers establish structural subagent classification before
+      // this path/identity check. Live callers supply an exact producer-bound
+      // path that RuntimeSlot already admitted.
+      return canonical;
+    } catch { return undefined; }
   }
 
   async acquire(sessionId: string): Promise<RuntimeSlot> {

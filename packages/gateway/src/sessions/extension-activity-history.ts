@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ExtensionOwner, ExtensionRunActivity, ExtensionRunAttention, ExtensionRunLifecycleState, ExtensionToolOrigin } from "../protocol/types.js";
+import type { ExtensionOwner, ExtensionRunActivity, ExtensionRunAttention, ExtensionRunChild, ExtensionRunLifecycleState, ExtensionToolOrigin } from "../protocol/types.js";
 
 /** Reserved Pi custom-entry type. Custom entries are canonical JSONL facts but
  * are intentionally not transcript messages or model context. */
@@ -24,7 +24,7 @@ export interface ExtensionActivityReceipt {
   observedAt: string;
   durationMs?: number;
   /** Durable summaries intentionally exclude child task/output/path/timing data. */
-  summary?: { children?: Array<{ id: string; label: string; state: ExtensionRunLifecycleState; attention: ExtensionRunAttention }>; toolCount?: number; turnCount?: number };
+  summary?: { children?: Array<{ id: string; label: string; parentId?: string; state: ExtensionRunLifecycleState; attention: ExtensionRunAttention; childSessionRef?: string }>; toolCount?: number; turnCount?: number };
 }
 
 function bounded(value: unknown, max: number): string | undefined {
@@ -32,6 +32,11 @@ function bounded(value: unknown, max: number): string | undefined {
   const text = value.trim();
   if (Buffer.byteLength(text) > max) return undefined;
   return text;
+}
+
+function opaqueSessionRef(value: unknown): string | undefined {
+  const ref = bounded(value, 256);
+  return ref && !/[\\/\0]/u.test(ref) ? ref : undefined;
 }
 
 function finiteTime(value: unknown): value is string {
@@ -80,13 +85,21 @@ export function makeExtensionActivityReceipt(activity: ExtensionRunActivity, ses
   if (!state || !activityId || !bounded(sessionId, 256) || !bounded(activity.toolCallId, 256)
     || !finiteTime(terminalAt) || !finiteTime(activity.startedAt) || !finiteTime(observedAt)
     || !monotonicReceiptTimeline(activity.startedAt, terminalAt, observedAt)) return undefined;
-  const children: NonNullable<NonNullable<ExtensionActivityReceipt["summary"]>["children"]> = activity.children.slice(0, 32).flatMap((child) => {
-    const id = bounded(child.id, 256); const label = bounded(child.label, 256);
-    const state = child.lifecycle ?? (child.status === "failed" ? "failed" : child.status === "completed" ? "completed" : "running");
-    const childAttention = child.attention ?? "none";
-    if (!id || !label || !terminalOrLifecycleState(state) || !attentionState(childAttention)) return [];
-    return [{ id, label, state, attention: childAttention }];
-  });
+  const children: NonNullable<NonNullable<ExtensionActivityReceipt["summary"]>["children"]> = [];
+  const appendChildren = (values: readonly ExtensionRunActivity["children"][number][], parentId?: string, depth = 0): void => {
+    if (depth > 3) return;
+    for (const child of values.slice(0, 32)) {
+      if (children.length >= 64) return;
+      const id = bounded(child.id, 256); const label = bounded(child.label, 256);
+      const childState = child.lifecycle ?? (child.status === "failed" ? "failed" : child.status === "completed" ? "completed" : "running");
+      const childAttention = child.attention ?? "none";
+      if (!id || !label || !terminalOrLifecycleState(childState) || !attentionState(childAttention)) continue;
+      const childSessionRef = opaqueSessionRef(child.childSessionRef);
+      children.push({ id, label, ...(parentId ? { parentId } : {}), state: childState, attention: childAttention, ...(childSessionRef ? { childSessionRef } : {}) });
+      if (child.children?.length) appendChildren(child.children, id, depth + 1);
+    }
+  };
+  appendChildren(activity.children);
   const rawOwner = activity.source.owner;
   const owner = rawOwner === undefined ? undefined : ownerValue(rawOwner);
   if (rawOwner !== undefined && owner === undefined) return undefined;
@@ -147,15 +160,31 @@ export function admitExtensionActivityReceipt(value: unknown, expectedSessionId?
   const summaryValue = candidate.summary;
   const summary = summaryValue && typeof summaryValue === "object" && !Array.isArray(summaryValue) ? summaryValue as Record<string, unknown> : undefined;
   const rawChildren = summary?.children;
-  const children = Array.isArray(rawChildren) ? rawChildren.slice(0, 32).flatMap((value) => {
+  const children = Array.isArray(rawChildren) ? rawChildren.slice(0, 64).flatMap((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
     const child = value as Record<string, unknown>;
     const id = bounded(child.id, 256); const label = bounded(child.label, 256);
     const childState = child.state;
     const childAttention = child.attention === undefined ? "none" : child.attention;
     if (!id || !label || !terminalOrLifecycleState(childState) || !attentionState(childAttention)) return [];
-    return [{ id, label, state: childState, attention: childAttention }];
+    const childSessionRef = opaqueSessionRef(child.childSessionRef);
+    const parentId = bounded(child.parentId, 256);
+    return [{ id, label, ...(parentId ? { parentId } : {}), state: childState, attention: childAttention, ...(childSessionRef ? { childSessionRef } : {}) }];
   }) : undefined;
+  if (children) {
+    const childIDs = new Set(children.map((child) => child.id));
+    if (childIDs.size !== children.length
+      || children.some((child) => child.parentId === child.id || (child.parentId !== undefined && !childIDs.has(child.parentId)))) return undefined;
+    const parents = new Map(children.map((child) => [child.id, child.parentId]));
+    for (const child of children) {
+      const seen = new Set<string>();
+      let cursor: string | undefined = child.id;
+      while (cursor !== undefined) {
+        if (!seen.add(cursor)) return undefined;
+        cursor = parents.get(cursor);
+      }
+    }
+  }
   const toolCount = summary?.toolCount;
   const turnCount = summary?.turnCount;
   if ((toolCount !== undefined && (!Number.isSafeInteger(toolCount) || (toolCount as number) < 0))
@@ -282,15 +311,31 @@ export function extensionReceiptActivity(receipt: ExtensionActivityReceipt): Ext
   const source: ExtensionToolOrigin = owner
     ? { source: owner.source, owner }
     : { source: receipt.source ?? "unknown" };
-  const children = receipt.summary?.children?.map((child) => ({
-    id: child.id,
-    label: child.label,
-    status: child.state === "failed" ? "failed" as const
-      : child.state === "running" || child.state === "queued" || child.state === "paused" ? "running" as const
-        : "completed" as const,
-    lifecycle: child.state,
-    attention: child.attention,
-  })) ?? [];
+  const childNodes = new Map<string, ExtensionRunChild>();
+  for (const child of receipt.summary?.children ?? []) {
+    if (childNodes.has(child.id)) continue;
+    childNodes.set(child.id, {
+      id: child.id,
+      label: child.label,
+      status: child.state === "failed" ? "failed" as const
+        : child.state === "running" || child.state === "queued" || child.state === "paused" ? "running" as const
+          : "completed" as const,
+      lifecycle: child.state,
+      attention: child.attention,
+      ...(child.childSessionRef ? { childSessionRef: child.childSessionRef } : {}),
+    });
+  }
+  const children: ExtensionRunChild[] = [];
+  for (const child of receipt.summary?.children ?? []) {
+    const node = childNodes.get(child.id);
+    if (!node) continue;
+    const parent = child.parentId ? childNodes.get(child.parentId) : undefined;
+    if (!parent) {
+      children.push(node);
+      continue;
+    }
+    parent.children = [...(parent.children ?? []), node];
+  }
   return {
     id: receipt.activityId,
     activityId: receipt.activityId,

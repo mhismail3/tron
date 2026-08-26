@@ -33,13 +33,30 @@ describe("extension activity canonical receipts", () => {
       ...activity,
       toolCount: 4,
       turnCount: 2,
-      children: [{ id: "child", label: "worker", status: "completed", lifecycle: "paused", attention: "needsAttention", task: "private", output: "private", currentPath: "/private" }],
+      children: [{
+        id: "child", label: "worker", status: "completed", lifecycle: "paused", attention: "needsAttention",
+        childSessionRef: "opaque-child-session", task: "private", output: "private", currentPath: "/private",
+        children: [{ id: "nested", label: "reviewer", status: "completed", lifecycle: "completed", childSessionRef: "opaque-nested-session" }],
+      }],
     }, "session-1")!;
     expect(JSON.stringify(receipt)).not.toMatch(/task|output|currentPath|currentTool|lastActivityAt|durationMs/);
     const admitted = admitExtensionActivityReceipt(receipt, "session-1")!;
     const historical = extensionReceiptActivity(admitted);
-    expect(historical).toMatchObject({ toolCount: 4, turnCount: 2, children: [{ id: "child", label: "worker", status: "running", lifecycle: "paused", attention: "needsAttention" }] });
+    expect(historical).toMatchObject({
+      toolCount: 4,
+      turnCount: 2,
+      children: [{
+        id: "child", label: "worker", status: "running", lifecycle: "paused", attention: "needsAttention",
+        childSessionRef: "opaque-child-session",
+        children: [{ id: "nested", label: "reviewer", childSessionRef: "opaque-nested-session" }],
+      }],
+    });
     expect(historical.lifecycle?.visibility).toBe("historical");
+    const pathRef = makeExtensionActivityReceipt({
+      ...activity,
+      children: [{ id: "unsafe", label: "worker", status: "completed", childSessionRef: "/private/session.jsonl" }],
+    }, "session-1")!;
+    expect(JSON.stringify(pathRef)).not.toContain("/private/session.jsonl");
 
     const owned = makeExtensionActivityReceipt({ ...activity, source: { source: "package-source", owner: { id: "owner", title: "Owner", source: "package-source" } } }, "session-1")!;
     expect(extensionReceiptActivity(owned).source).toEqual({ source: "package-source", owner: owned.owner });
