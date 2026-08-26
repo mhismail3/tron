@@ -28,9 +28,13 @@ least one admitted current or recently finished subagent:
 
 Tapping the orb opens **Subagents**, with **Active** and **Recently finished** sections.
 Manage Session owns **Subagent History**, which adds canonical **Earlier** rows. Both sheets
-open at the large detent. Their Liquid Glass cards use the solving orb for active work and
-the thinking ribbon for terminal work, with canonical mode, duration, tool/path, counts,
-and bounded output presented as distinct metadata. A row with a validated child session
+open at the large detent. Rows keep the orb leading, place compact Liquid Glass lifecycle
+and mode pills beneath the title, and right-align plain duration text. The bounded active
+sheet retains Liquid Glass card containers; history uses the provider-settings
+scroll-optimized container surface for long lists. The solving orb represents active work,
+the thinking ribbon represents terminal work, and longer canonical durations produce
+progressively slower bounded orb animation. Tool/path, counts, and bounded output remain
+distinct metadata when supplied. A row with a validated child session
 presents a standardized large-detent bottom sheet containing the canonical-live, read-only
 transcript viewer; it never pushes a second navigation route. Short or empty transcript
 content aligns to the top while overflowing newest pages retain tail-opening intent. Rows
@@ -163,8 +167,9 @@ iOS checks must cover:
 - mixed legacy command/subagent input presents only subagents;
 - only synchronous/asynchronous subagent rows mount;
 - active extension lifecycle with omitted `remainingMs` admits while `current + 0` fails;
-- subagent-only composer gating, large-detent bottom sheets, Liquid Glass cards, orb state,
-  history filter, and accessibility copy; and
+- subagent-only composer gating, large-detent bottom sheets, compact Liquid Glass active
+  cards, scroll-optimized history rows, duration-scaled orb state, history filter, and
+  accessibility copy; and
 - read-only append merge, top alignment for undersized content, tail-opening intent, and
   route lifecycle.
 

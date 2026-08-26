@@ -43,15 +43,12 @@ struct NotificationInboxView: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: TronSpacing.lg) {
-                    filterCard
-                    if visibleNotifications.isEmpty {
-                        ContentUnavailableView(
-                            filter == .unread ? "No unread notifications" : "No notifications yet",
-                            systemImage: filter == .unread ? "bell.slash" : "bell",
-                            description: Text(emptyDescription)
-                        )
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 56)
+                    filterControl
+                    if model.notificationInbox.isLoading && model.notificationInbox.notifications.isEmpty {
+                        TronLoadingState(label: "Loading notifications from paired Gateways…", accent: .tronEmerald)
+                            .frame(maxWidth: .infinity, minHeight: 220)
+                    } else if visibleNotifications.isEmpty {
+                        emptyState
                     } else {
                         LazyVStack(spacing: TronSpacing.md) {
                             ForEach(visibleNotifications) { item in
@@ -116,19 +113,34 @@ struct NotificationInboxView: View {
         }
     }
 
-    private var filterCard: some View {
-        TronGlassCard(accent: .tronEmerald) {
-            VStack(alignment: .leading, spacing: TronSpacing.sm) {
-                TronTechnicalSectionLabel("Inbox")
-                TronSegmentedControl(
-                    options: NotificationInboxFilter.allCases.map { ($0.rawValue, $0) },
-                    selection: $filter
-                )
-                .accessibilityLabel("Notification filter")
-                .accessibilityValue(filter.rawValue)
-            }
-            .padding(TronSpacing.lg)
+    private var filterControl: some View {
+        TronSegmentedControl(
+            options: NotificationInboxFilter.allCases.map { ($0.rawValue, $0) },
+            selection: $filter
+        )
+        .accessibilityLabel("Notification filter")
+        .accessibilityValue(filter.rawValue)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: TronSpacing.md) {
+            Image(systemName: filter == .unread ? "bell.slash" : "bell")
+                .font(TronTypography.sans(size: 34, weight: .medium))
+                .foregroundStyle(Color.tronTextMuted)
+                .symbolRenderingMode(.hierarchical)
+            Text(filter == .unread ? "No unread notifications" : "No notifications yet")
+                .font(TronTypography.headline)
+                .foregroundStyle(Color.tronTextPrimary)
+                .multilineTextAlignment(.center)
+            Text(emptyDescription)
+                .font(TronTypography.bodySM)
+                .foregroundStyle(Color.tronTextSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, minHeight: 280)
+        .padding(.horizontal, TronSpacing.xl)
+        .accessibilityElement(children: .combine)
     }
 
     private func notificationRow(_ item: NotificationInboxItem) -> some View {
@@ -199,8 +211,7 @@ struct NotificationInboxView: View {
     }
 
     private var emptyDescription: String {
-        if model.notificationInbox.isLoading { return "Loading notifications from paired Gateways…" }
-        return filter == .unread
+        filter == .unread
             ? "New agent alerts will appear here until you mark them read."
             : "Agent alerts from paired Gateways will appear here."
     }

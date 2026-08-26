@@ -57,6 +57,20 @@ struct ProcessActivityOrbTests {
         )
     }
 
+    @Test("longer runs animate more slowly within a readable bound")
+    func durationSpeedScale() {
+        let short = ProcessActivityOrbEngine.durationSpeedScale(durationMs: 10_000)
+        let medium = ProcessActivityOrbEngine.durationSpeedScale(durationMs: 300_000)
+        let long = ProcessActivityOrbEngine.durationSpeedScale(durationMs: 3_600_000)
+
+        #expect(ProcessActivityOrbEngine.durationSpeedScale(durationMs: nil) == 1)
+        #expect(ProcessActivityOrbEngine.durationSpeedScale(durationMs: 0) == 1)
+        #expect(short < 1)
+        #expect(short > medium)
+        #expect(medium > long)
+        #expect(long == 0.45)
+    }
+
     @Test("frames remain depth sorted for painter order")
     func depthOrder() {
         for mode in [ProcessActivityOrbMode.solving, .thinking] {

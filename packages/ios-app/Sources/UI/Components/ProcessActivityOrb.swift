@@ -25,6 +25,14 @@ enum ProcessActivityOrbEngine {
         reduceMotion || !isVisible || !sceneActive
     }
 
+    /// Longer delegated runs animate more slowly without allowing very long
+    /// history items to become effectively static.
+    static func durationSpeedScale(durationMs: Int?) -> Double {
+        guard let durationMs, durationMs > 0 else { return 1 }
+        let durationMinutes = Double(durationMs) / 60_000
+        return max(0.45, 1 / (1 + durationMinutes * 0.08))
+    }
+
     private struct Move: Sendable {
         let axis: Int
         let lower: Double
@@ -296,6 +304,7 @@ struct ProcessActivityOrb: View {
     let mode: ProcessActivityOrbMode
     var size: CGFloat = 20
     var isVisible = true
+    var animationSpeedScale = 1.0
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -334,9 +343,10 @@ struct ProcessActivityOrb: View {
     }
 
     private var speed: Double {
-        switch mode {
+        let baseSpeed = switch mode {
         case .solving: 1.95
         case .thinking: 3.12
         }
+        return baseSpeed * max(0.1, animationSpeedScale)
     }
 }
