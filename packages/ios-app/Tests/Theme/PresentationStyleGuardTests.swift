@@ -1893,8 +1893,8 @@ struct PresentationStyleGuardTests {
         #expect(streamingReveal.contains("revealedIDs.formUnion(currentIDs)"))
     }
 
-    @Test("canonical prompt settlement is direct and has no replacement motion")
-    func canonicalPromptSettlementHasNoReplacementMotion() throws {
+    @Test("canonical prompt settlement keeps one causal physical row and focused motion")
+    func canonicalPromptSettlementKeepsPhysicalIdentity() throws {
         let chat = try chatCompositionSources()
         let entranceRows = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatEntranceRows.swift"),
@@ -1918,9 +1918,21 @@ struct PresentationStyleGuardTests {
         #expect(!entranceRows.contains("ChatPromptLifecycleReplacementEntranceRow"))
         #expect(!outgoingRows.contains("ChatPromptLifecycleCrossfadeRow"))
         #expect(!outgoingRows.contains("ChatPromptLifecycleTransitionSourceCard"))
-        #expect(!motion.contains("replacementAnimation"))
-        #expect(chat.contains("if canonicalSubmissionIDs.contains(item.id)"))
+        #expect(motion.contains("ChatPromptReplacementAnimationPolicy"))
+        #expect(motion.contains("admitsChatPromptReplacementAnimation"))
+        #expect(chat.contains("ChatPhysicalTranscriptReplacementHost"))
+        #expect(chat.contains(".contentTransition(reduceMotion ? .opacity : .interpolate)"))
+        #expect(chat.contains("withTransaction(transaction)"))
+        #expect(chat.contains("if canonicalSubmissionIDs.contains(semanticID)"))
         #expect(chat.contains("canonicalSubmissionIDs: sessionPresentation.canonicalSubmissionHandoffs.ids"))
+        #expect(chat.contains("canonicalSubmissionAliases: sessionPresentation.canonicalSubmissionAliases.aliases"))
+        #expect(chat.contains("ChatPhysicalTranscriptRowPolicy.rows("))
+        #expect(chat.contains("struct ChatPhysicalTranscriptRows: RandomAccessCollection"))
+        #expect(chat.contains("guard !candidates.isEmpty,"))
+        #expect(!chat.contains("var rows: [ChatPhysicalTranscriptRow]"))
+        #expect(chat.contains(".id(physicalID)"))
+        #expect(chat.contains("renderedID: semanticID"))
+        #expect(chat.contains("updateRowFrame(id: semanticID"))
         #expect(chat.contains("seedCanonicalMediaPreviews(from: receipt, in: snapshot)"))
         #expect(chat.contains("seedPreparedThumbnail(prepared, for: identity)"))
         #expect(chat.contains("excludedOperationIDs: sessionPresentation.locallyMutatedQueueOperationIDs"))
@@ -1958,7 +1970,8 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
             encoding: .utf8
         )
-        #expect(chat.contains("queuedRows(installed)"))
+        #expect(chat.contains("case .queued(let entry)"))
+        #expect(chat.contains("let message = installed.queuedMessages[index]"))
         #expect(chat.contains("let messages = installed.queuedMessages"))
         #expect(chat.contains("QueuedMessageManagementPolicy.availability("))
         #expect(chat.contains("model.replaceQueue("))

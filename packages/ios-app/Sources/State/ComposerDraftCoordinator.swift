@@ -164,7 +164,8 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
 struct CanonicalSubmissionHandoffReceipt: Equatable, Sendable {
     let canonicalID: String
     let attachments: [PendingAttachment]
-    /// Present only when this receipt descends from a Gateway queue operation.
+    /// Exact Gateway operation identity when transport admission completed.
+    /// Physical row aliasing requires this causal value for every prompt kind.
     let operationID: String?
     /// Presentation identity retained only until this one canonical replacement
     /// is installed. It never substitutes for the canonical transcript ID.
@@ -446,7 +447,10 @@ final class ComposerDraftCoordinator {
     private var editorRequestByTarget: [SessionPresentationIdentity: ComposerEditorRequest] = [:]
     private var uploadAdmissions = Set<UploadAdmission>()
     private var uploadTasks: [UploadAdmission: Task<String, Error>] = [:]
-    private var submissionByTarget: [SessionPresentationIdentity: SubmissionAdmission] = [:]
+    /// One admitted transport lifecycle per durable profile/session scope. The
+    /// snapshot retains its origin presentation only for source metadata; route
+    /// replacement never changes ownership or resends the operation.
+    private var submissionByScope: [ComposerDraftScope: SubmissionAdmission] = [:]
     /// Only the newest exact canonical handoff for the mounted presentation is
     /// retained. This bounds rich thumbnail payloads to one prompt lifecycle.
     private var canonicalHandoffReceipts: [SessionPresentationIdentity: CanonicalSubmissionHandoffReceipt] = [:]
@@ -549,12 +553,12 @@ final class ComposerDraftCoordinator {
             selectedSkillByScope[scope] = nil
             skillMutationRevisionByScope[scope, default: 0] &+= 1
         }
-        guard let target = lease?.target,
-              var admission = submissionByTarget[target],
+        guard let scope = lease?.scope,
+              var admission = submissionByScope[scope],
               let submitted = admission.submittedSkill,
               !Self.skillIsUnambiguous(submitted, in: commands) else { return }
         admission.canRestoreSubmittedSkill = false
-        submissionByTarget[target] = admission
+        submissionByScope[scope] = admission
     }
 
     private static func skillIsUnambiguous(_ selected: CommandInfo, in commands: [CommandInfo]) -> Bool {
@@ -623,6 +627,10 @@ final class ComposerDraftCoordinator {
         }
         revokePresentation()
         preparedOpenBySession[target.sessionID] = nil
+        if let stale = submissionByScope[prepared.scope],
+           stale.lifecycleGeneration != prepared.lifecycleGeneration {
+            retireSubmissionForLifecycleReset(stale)
+        }
         lease = PresentationLease(
             scope: prepared.scope,
             target: target,
@@ -650,8 +658,8 @@ final class ComposerDraftCoordinator {
     }
 
     func submittedAttachments(for target: SessionPresentationIdentity) -> [PendingAttachment] {
-        guard admits(target) else { return [] }
-        return submissionByTarget[target]?.submittedAttachments ?? []
+        guard let scope = scope(for: target) else { return [] }
+        return submissionByScope[scope]?.submittedAttachments ?? []
     }
 
     /// Reads the one-shot canonical replacement receipt without consuming it.
@@ -697,7 +705,8 @@ final class ComposerDraftCoordinator {
         target: SessionPresentationIdentity,
         canonicalTranscript: [TranscriptItem]
     ) -> Set<String> {
-        guard admits(target), let admission = submissionByTarget[target] else { return [] }
+        guard let scope = scope(for: target),
+              let admission = submissionByScope[scope] else { return [] }
         let exactMatches: [String] = admission.operationID.map { operationID in
             canonicalTranscript.compactMap { item in
                 guard item.kind == .message,
@@ -728,16 +737,16 @@ final class ComposerDraftCoordinator {
     }
 
     func isSending(target: SessionPresentationIdentity) -> Bool {
-        guard admits(target) else { return false }
-        return submissionByTarget[target]?.transportState == .sending
+        guard let scope = scope(for: target) else { return false }
+        return submissionByScope[scope]?.transportState == .sending
     }
 
     /// The outgoing row is intentionally separate from canonical transcript
     /// projection. It remains visible after transport acknowledgement until a
     /// matching canonical user message is observed for this exact target.
     func outgoingSubmission(for target: SessionPresentationIdentity) -> ComposerSubmissionSnapshot? {
-        guard admits(target) else { return nil }
-        return submissionByTarget[target]?.snapshot
+        guard let scope = scope(for: target) else { return nil }
+        return submissionByScope[scope]?.snapshot
     }
 
     /// Matches the Gateway's sole foreground pending admission to the retained
@@ -747,7 +756,8 @@ final class ComposerDraftCoordinator {
         target: SessionPresentationIdentity,
         pending: SessionSnapshot.PendingPrompt
     ) -> Bool {
-        guard admits(target), let admission = submissionByTarget[target] else { return false }
+        guard let scope = scope(for: target),
+              let admission = submissionByScope[scope] else { return false }
         if let operationID = admission.operationID { return operationID == pending.id }
         return admission.snapshot.outgoingText == pending.text
             && admission.snapshot.attachmentIDs.count == pending.attachmentCount
@@ -763,8 +773,8 @@ final class ComposerDraftCoordinator {
     /// Canonical identity remains authoritative and is exposed only after the
     /// exact reconciliation receipt has been created.
     func submissionLifecycle(for target: SessionPresentationIdentity) -> ChatSubmissionLifecycle {
-        guard admits(target) else { return .idle }
-        if let admission = submissionByTarget[target] {
+        guard let scope = scope(for: target) else { return .idle }
+        if let admission = submissionByScope[scope] {
             let phase: ChatSubmissionLifecycle.Phase
             if let canonicalID = admission.canonicalHandoffID {
                 phase = .canonical(canonicalID)
@@ -799,8 +809,8 @@ final class ComposerDraftCoordinator {
         target: SessionPresentationIdentity,
         message: SessionSnapshot.QueuedMessage
     ) -> String? {
-        guard admits(target) else { return nil }
-        if let admission = submissionByTarget[target],
+        guard let scope = scope(for: target) else { return nil }
+        if let admission = submissionByScope[scope],
            admission.snapshot.behavior != nil,
            !admission.snapshot.baselineQueuedMessageIDs.contains(message.id) {
             if admission.operationID == message.id
@@ -866,7 +876,8 @@ final class ComposerDraftCoordinator {
             // lifecycle row visible while recovery obtains a valid snapshot.
             return
         }
-        guard admits(target), var admission = submissionByTarget[target] else {
+        guard let scope = scope(for: target),
+              var admission = submissionByScope[scope] else {
             retireSettledQueueAliases(
                 target: target,
                 authoritativeQueueIDs: Set(queuedMessages.map(\.id)),
@@ -932,14 +943,14 @@ final class ComposerDraftCoordinator {
         if canonicalMatches.count > 1 {
             // Do not let an independent queue observation settle an admission
             // while canonical identity is ambiguous in this snapshot.
-            submissionByTarget[target] = admission
+            submissionByScope[scope] = admission
             return
         }
         let queuedObserved = admission.operationID.map {
             admission.observedQueuedCandidateIDs.contains($0)
         } ?? false
         guard transcriptObserved || queuedObserved else {
-            submissionByTarget[target] = admission
+            submissionByScope[scope] = admission
             return
         }
         let newlySettled = !admission.canonicalObserved
@@ -948,16 +959,16 @@ final class ComposerDraftCoordinator {
         if admission.transportState == .accepted {
             // Publish the enriched local admission before retirement so the
             // exact canonical ID receipt survives this synchronous boundary.
-            submissionByTarget[target] = admission
-            finishSubmission(admission)
+            submissionByScope[scope] = admission
+            finishSubmission(admission, settlementTarget: target)
         } else {
-            submissionByTarget[target] = admission
+            submissionByScope[scope] = admission
         }
     }
 
     func submissionSnapshot(for target: SessionPresentationIdentity) -> ComposerSubmissionSnapshot? {
-        guard admits(target) else { return nil }
-        return submissionByTarget[target]?.snapshot
+        guard let scope = scope(for: target) else { return nil }
+        return submissionByScope[scope]?.snapshot
     }
 
     func upload(
@@ -1149,10 +1160,15 @@ final class ComposerDraftCoordinator {
     /// Sends an already-admitted submission without changing its presentation
     /// shape. A late transport result can only settle this exact admission.
     func transmitSubmission(_ submission: ComposerSubmissionSnapshot) async throws {
-        guard let admission = submissionByTarget[submission.target],
-              admission.snapshot == submission else {
+        guard let admission = submissionByScope.values.first(where: {
+            $0.snapshot == submission
+        }) else {
             throw CancellationError()
         }
+        // Route remounts preserve the admission, but a profile/lifecycle
+        // replacement must stop it before any mutation can enter the new
+        // Gateway connection.
+        try requireOutcome(admission)
         let operationID: String
         do {
             operationID = try await sendOperation(
@@ -1230,7 +1246,7 @@ final class ComposerDraftCoordinator {
         selectedSkillByScope[scope] = nil
         skillMutationRevisionByScope[scope] = nil
         preparedOpenBySession[sessionID] = nil
-        submissionByTarget = submissionByTarget.filter { $0.value.scope != scope }
+        submissionByScope[scope] = nil
         if lease?.scope == scope { revokePresentation() }
         return enqueuePersistence { store in await store.remove(scope) }
     }
@@ -1256,7 +1272,7 @@ final class ComposerDraftCoordinator {
         selectedSkillByScope = selectedSkillByScope.filter { $0.key.profileID != profileID }
         skillMutationRevisionByScope = skillMutationRevisionByScope.filter { $0.key.profileID != profileID }
         preparedOpenBySession = preparedOpenBySession.filter { $0.value.scope.profileID != profileID }
-        submissionByTarget = submissionByTarget.filter { $0.value.scope.profileID != profileID }
+        submissionByScope = submissionByScope.filter { $0.key.profileID != profileID }
         if lease?.scope.profileID == profileID { revokePresentation() }
         return enqueuePersistence { store in await store.removeProfile(profileID) }
     }
@@ -1424,7 +1440,7 @@ final class ComposerDraftCoordinator {
 
     private func persistentValue(for scope: ComposerDraftScope) -> ComposerDraftStore.Value? {
         var text = drafts[scope]?.text ?? ""
-        let admission = submissionByTarget.values.first(where: { $0.scope == scope })
+        let admission = submissionByScope[scope]
         let retainsInFlightSubmission = admission.map {
             $0.transportState == .sending && !$0.canonicalObserved
         } ?? false
@@ -1509,9 +1525,7 @@ final class ComposerDraftCoordinator {
         canonicalTranscript: [TranscriptItem],
         queuedMessages: [SessionSnapshot.QueuedMessage]
     ) throws -> SubmissionAdmission {
-        guard let lease, admits(target), submissionByTarget[target] == nil else {
-            throw CancellationError()
-        }
+        guard let lease, admits(target) else { throw CancellationError() }
         guard !uploadAdmissions.contains(where: { $0.target == target }),
               restoredUploadTasks[target] == nil else {
             throw GatewayFailure(
@@ -1522,7 +1536,7 @@ final class ComposerDraftCoordinator {
             )
         }
         let scope = lease.scope
-        guard !submissionByTarget.values.contains(where: { $0.scope == scope }) else {
+        guard submissionByScope[scope] == nil else {
             throw GatewayFailure(
                 code: "submission_in_progress",
                 message: "The previous message is still reconciling. Wait for it to settle before sending again.",
@@ -1578,28 +1592,28 @@ final class ComposerDraftCoordinator {
         // unresolved consumed-queue heuristic from the prior lifecycle can no
         // longer claim a future same-text canonical row.
         settledQueueHandoffs[target] = nil
-        submissionByTarget[target] = admission
+        submissionByScope[scope] = admission
         setText("", for: scope)
         selectedSkillByScope[scope] = nil
         return admission
     }
 
     private func require(_ admission: SubmissionAdmission) throws {
-        guard submissionByTarget[admission.snapshot.target]?.id == admission.id,
-              admits(admission.snapshot.target),
-              lease?.lifecycleGeneration == admission.lifecycleGeneration else {
+        guard submissionByScope[admission.scope]?.id == admission.id,
+              admitsLifecycleGeneration(admission.lifecycleGeneration) else {
             throw CancellationError()
         }
     }
 
     private func requireOutcome(_ admission: SubmissionAdmission) throws {
-        guard submissionByTarget[admission.snapshot.target]?.id == admission.id else {
+        guard submissionByScope[admission.scope]?.id == admission.id,
+              admitsLifecycleGeneration(admission.lifecycleGeneration) else {
             throw CancellationError()
         }
     }
 
     private func restoreSubmission(_ admission: SubmissionAdmission) {
-        guard let currentAdmission = submissionByTarget[admission.snapshot.target],
+        guard let currentAdmission = submissionByScope[admission.scope],
               currentAdmission.id == admission.id else { return }
         let scope = currentAdmission.scope
         // A canonical event wins even if a late transport failure races it. A
@@ -1617,11 +1631,12 @@ final class ComposerDraftCoordinator {
             ),
             for: scope
         )
-        let submittedIDs = Set(currentAdmission.submittedAttachments.map(\.id))
-        if lease?.scope == scope {
-            let newerAttachments = attachmentsByScope[scope] ?? []
-            attachmentsByScope[scope] = currentAdmission.submittedAttachments
-                + newerAttachments.filter { !submittedIDs.contains($0.id) }
+        if let mounted = lease, mounted.scope == scope {
+            attachmentsByScope[scope] = Self.restoredAttachments(
+                captured: currentAdmission.submittedAttachments,
+                current: attachmentsByScope[scope] ?? [],
+                presentationWasReplaced: mounted.target != currentAdmission.snapshot.target
+            )
             schedulePersistence(for: scope)
         }
         if currentAdmission.canRestoreSubmittedSkill,
@@ -1630,11 +1645,11 @@ final class ComposerDraftCoordinator {
             selectedSkillByScope[scope] = currentAdmission.submittedSkill
         }
         if lease?.scope == scope {
-            submissionByTarget[currentAdmission.snapshot.target] = nil
+            submissionByScope[scope] = nil
         } else {
             var rejected = currentAdmission
             rejected.transportState = .rejected
-            submissionByTarget[currentAdmission.snapshot.target] = rejected
+            submissionByScope[scope] = rejected
         }
     }
 
@@ -1642,19 +1657,47 @@ final class ComposerDraftCoordinator {
         scope: ComposerDraftScope,
         target: SessionPresentationIdentity
     ) {
-        guard let rejected = submissionByTarget.values.first(where: {
-            $0.scope == scope && $0.transportState == .rejected
-        }) else { return }
-        let submittedIDs = Set(rejected.submittedAttachments.map(\.id))
-        let newerAttachments = attachmentsByScope[scope] ?? []
-        attachmentsByScope[scope] = rejected.submittedAttachments
-            + newerAttachments.filter { !submittedIDs.contains($0.id) }
-        submissionByTarget[rejected.snapshot.target] = nil
+        guard let rejected = submissionByScope[scope],
+              rejected.transportState == .rejected else { return }
+        attachmentsByScope[scope] = Self.restoredAttachments(
+            captured: rejected.submittedAttachments,
+            current: attachmentsByScope[scope] ?? [],
+            presentationWasReplaced: target != rejected.snapshot.target
+        )
+        submissionByScope[scope] = nil
         schedulePersistence(for: scope)
     }
 
+    /// Captured upload identities belong to the presentation that submitted
+    /// them. A newer chip with the same stable ID is authoritative, including
+    /// its fresh or deliberately absent upload ID. Only a missing chip is
+    /// restored from the capture, and route replacement makes that copy upload-
+    /// required before it can be sent again.
+    private static func restoredAttachments(
+        captured: [PendingAttachment],
+        current: [PendingAttachment],
+        presentationWasReplaced: Bool
+    ) -> [PendingAttachment] {
+        var currentByID = Dictionary(
+            current.map { ($0.id, $0) },
+            uniquingKeysWith: { _, newest in newest }
+        )
+        var restored: [PendingAttachment] = []
+        restored.reserveCapacity(captured.count + current.count)
+        for attachment in captured {
+            if let current = currentByID.removeValue(forKey: attachment.id) {
+                restored.append(current)
+            } else {
+                restored.append(presentationWasReplaced ? attachment.requiringUpload() : attachment)
+            }
+        }
+        let capturedIDs = Set(captured.map(\.id))
+        restored.append(contentsOf: current.filter { !capturedIDs.contains($0.id) })
+        return restored
+    }
+
     private func markOperationAccepted(_ operationID: String, admission: SubmissionAdmission) {
-        guard var current = submissionByTarget[admission.snapshot.target],
+        guard var current = submissionByScope[admission.scope],
               current.id == admission.id else { return }
         current.operationID = operationID
         if current.provisionalQueuedCandidateID != operationID {
@@ -1663,11 +1706,11 @@ final class ComposerDraftCoordinator {
         if current.observedQueuedCandidateIDs.contains(operationID) {
             current.canonicalObserved = true
         }
-        submissionByTarget[admission.snapshot.target] = current
+        submissionByScope[admission.scope] = current
     }
 
     private func markTransportAccepted(_ admission: SubmissionAdmission) {
-        guard var accepted = submissionByTarget[admission.snapshot.target],
+        guard var accepted = submissionByScope[admission.scope],
               accepted.id == admission.id else { return }
         accepted.transportState = .accepted
         schedulePersistence(for: accepted.scope)
@@ -1678,36 +1721,44 @@ final class ComposerDraftCoordinator {
         let retainedIDs = Set(retained.map(\.id))
         let captured = admission.submittedAttachments.filter { !retainedIDs.contains($0.id) }
         attachmentsByScope[admission.scope] = captured + retained
-        if accepted.canonicalObserved || lease?.target != admission.snapshot.target {
+        if accepted.canonicalObserved {
             finishSubmission(accepted)
         } else {
-            submissionByTarget[admission.snapshot.target] = accepted
+            submissionByScope[admission.scope] = accepted
         }
     }
 
-    private func finishSubmission(_ admission: SubmissionAdmission) {
-        let target = admission.snapshot.target
-        guard let current = submissionByTarget[target], current.id == admission.id else { return }
-        guard lease?.target == target else {
-            let submitted = Set(current.submittedAttachments.map(\.id))
-            attachmentsByScope[current.scope]?.removeAll { submitted.contains($0.id) }
-            if attachmentsByScope[current.scope]?.isEmpty == true { attachmentsByScope[current.scope] = nil }
-            submissionByTarget[target] = nil
-            schedulePersistence(for: current.scope)
-            return
+    private func retireSubmissionForLifecycleReset(_ admission: SubmissionAdmission) {
+        guard submissionByScope[admission.scope]?.id == admission.id else { return }
+        let submitted = Set(admission.submittedAttachments.map(\.id))
+        attachmentsByScope[admission.scope]?.removeAll { submitted.contains($0.id) }
+        if attachmentsByScope[admission.scope]?.isEmpty == true {
+            attachmentsByScope[admission.scope] = nil
         }
-        if let canonicalHandoffID = current.canonicalHandoffID {
-            canonicalHandoffReceipts[target] = CanonicalSubmissionHandoffReceipt(
-                canonicalID: canonicalHandoffID,
-                attachments: current.submittedAttachments.map { $0.frozenForHandoff() },
-                operationID: current.snapshot.behavior == nil ? nil : current.operationID,
-                submission: current.snapshot
-            )
-        }
-        if !current.transcriptObserved,
-           let operationID = current.operationID,
-           current.snapshot.behavior != nil {
-            if !current.snapshot.baselineQueuedMessageIDs.contains(operationID) {
+        submissionByScope[admission.scope] = nil
+        schedulePersistence(for: admission.scope)
+    }
+
+    private func finishSubmission(
+        _ admission: SubmissionAdmission,
+        settlementTarget: SessionPresentationIdentity? = nil
+    ) {
+        guard let current = submissionByScope[admission.scope],
+              current.id == admission.id else { return }
+        let target = settlementTarget ?? (lease?.scope == current.scope ? lease?.target : nil)
+        if let target, lease?.scope == current.scope {
+            if let canonicalHandoffID = current.canonicalHandoffID {
+                canonicalHandoffReceipts[target] = CanonicalSubmissionHandoffReceipt(
+                    canonicalID: canonicalHandoffID,
+                    attachments: current.submittedAttachments.map { $0.frozenForHandoff() },
+                    operationID: current.operationID,
+                    submission: current.snapshot
+                )
+            }
+            if !current.transcriptObserved,
+               let operationID = current.operationID,
+               current.snapshot.behavior != nil,
+               !current.snapshot.baselineQueuedMessageIDs.contains(operationID) {
                 var aliases = settledQueueAliases[target] ?? [:]
                 aliases[operationID] = SettledQueueAlias(
                     presentationID: current.snapshot.presentationID,
@@ -1727,8 +1778,10 @@ final class ComposerDraftCoordinator {
         }
         let submitted = Set(current.submittedAttachments.map(\.id))
         attachmentsByScope[current.scope]?.removeAll { submitted.contains($0.id) }
-        if attachmentsByScope[current.scope]?.isEmpty == true { attachmentsByScope[current.scope] = nil }
-        submissionByTarget[target] = nil
+        if attachmentsByScope[current.scope]?.isEmpty == true {
+            attachmentsByScope[current.scope] = nil
+        }
+        submissionByScope[current.scope] = nil
         schedulePersistence(for: current.scope)
     }
 
@@ -1846,10 +1899,9 @@ final class ComposerDraftCoordinator {
             schedulePersistence(for: lease.scope)
         }
         editorRequestByTarget[lease.target] = nil
-        // Keep an unresolved exact submission admission alive after route
-        // revocation so a definite transport rejection can restore its scoped
-        // draft. Accepted/possibly-sent outcomes are retired when no mounted
-        // presentation remains; they are never replayed.
+        // Transport ownership follows durable scope. Presentation revocation
+        // clears only target-routed receipts; sending and accepted admissions
+        // remain bounded local projections and are never replayed.
         canonicalHandoffReceipts[lease.target] = nil
         settledQueueAliases[lease.target] = nil
         settledQueueHandoffs[lease.target] = nil
@@ -1857,18 +1909,23 @@ final class ComposerDraftCoordinator {
             task.cancel()
         }
         uploadAdmissions = uploadAdmissions.filter { $0.target != lease.target }
-        let retiredSubmission = submissionByTarget[lease.target]
+        let retainedSubmission = submissionByScope[lease.scope]
         self.lease = nil
-        if let retiredSubmission,
-           retiredSubmission.transportState != .sending || retiredSubmission.canonicalObserved {
-            finishSubmission(retiredSubmission)
+        // Route replacement revokes presentation-only artifacts, never the
+        // durable scope-owned transport lifecycle. A sending or accepted
+        // admission is projected by the next lease without replaying transport;
+        // only already-observed canonical truth can retire it here.
+        if let retainedSubmission, retainedSubmission.canonicalObserved {
+            finishSubmission(retainedSubmission)
         }
         evictInactiveDraftsIfNeeded()
     }
 
     private func evictInactiveDraftsIfNeeded() {
-        let activeScope = lease?.scope
-        var inactive = Array(drafts.filter { $0.key != activeScope })
+        let protectedScopes = Set(submissionByScope.compactMap { scope, admission in
+            admission.transportState == .sending ? scope : nil
+        }).union(lease.map { [$0.scope] } ?? [])
+        var inactive = Array(drafts.filter { !protectedScopes.contains($0.key) })
         guard inactive.count > Self.maxInactiveDrafts else { return }
         inactive.sort {
             if $0.value.lastAccess != $1.value.lastAccess {
@@ -1886,6 +1943,11 @@ final class ComposerDraftCoordinator {
             enqueuePersistence { store in await store.remove(scope) }
             selectedSkillByScope[scope] = nil
             skillMutationRevisionByScope[scope] = nil
+            // Safe bounded eviction may retire an accepted presentation-only
+            // lifecycle, but never an unresolved transport operation.
+            if submissionByScope[scope]?.transportState != .sending {
+                submissionByScope[scope] = nil
+            }
         }
     }
 

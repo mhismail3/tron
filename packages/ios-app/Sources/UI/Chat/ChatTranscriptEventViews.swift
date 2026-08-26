@@ -43,6 +43,7 @@ struct ChatNotificationView: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+        .contentTransition(.interpolate)
         .accessibilityLabel(accessibilityLabel)
         .sheet(isPresented: $showingDetail) { detailSheet }
     }

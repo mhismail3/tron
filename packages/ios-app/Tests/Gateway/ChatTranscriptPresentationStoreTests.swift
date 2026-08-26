@@ -1290,6 +1290,17 @@ struct ChatTranscriptPresentationStoreTests {
             store.submit(snapshot: snapshot, tag: tag)
             let pending = try await store.waitForInstall(of: tag)
             let pendingID = try #require(pending.runtimeItems.first?.id)
+            let pendingRows = ChatPhysicalTranscriptRowPolicy.rows(
+                installed: pending,
+                canonicalAliases: [:]
+            )
+            let pendingPhysical = try #require(pendingRows.first { $0.id == pendingID })
+            guard case .transcript(.notification(let pendingNotification), _) = pendingPhysical.content else {
+                Issue.record("runtime compaction did not occupy the unified transcript owner")
+                return
+            }
+            #expect(pendingNotification.title == "Compacting context")
+            #expect(pendingNotification.showsProgress)
 
             snapshot.transcript.append(try compactionItem(id: "finished-compaction"))
             snapshot.transcriptTotal! += 1
@@ -1303,6 +1314,23 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(overlapping.runtimeItems.isEmpty)
             #expect(overlapping.timeline.items.last?.id == pendingID)
             #expect(overlapping.hasUniqueDisplayedIDs)
+            let overlappingRows = ChatPhysicalTranscriptRowPolicy.rows(
+                installed: overlapping,
+                canonicalAliases: [:]
+            )
+            let resolvedPhysical = try #require(overlappingRows.first { $0.id == pendingID })
+            guard case .transcript(.notification(let resolvedNotification), _) = resolvedPhysical.content else {
+                Issue.record("canonical compaction did not replace the unified physical row")
+                return
+            }
+            #expect(resolvedNotification.title == "Context compacted")
+            #expect(!resolvedNotification.showsProgress)
+            #expect(resolvedPhysical.replacementAnimationIdentity
+                != pendingPhysical.replacementAnimationIdentity)
+            #expect(ChatPhysicalTranscriptReplacementPolicy.replacement(
+                from: pendingPhysical,
+                to: resolvedPhysical
+            ) == .notification)
 
             snapshot.phase = .idle
             snapshot.extensionPresentation.semanticState.working.visible = false
@@ -1316,6 +1344,125 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(completed.timeline.items.last?.id == pendingID)
             #expect(completed.hasUniqueDisplayedIDs)
             #expect(store.pendingEntranceIDs.isEmpty)
+        }
+    }
+
+    @Test("causal submission alias retains one physical row and collisions fail closed")
+    func causalSubmissionPhysicalIdentity() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_239)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = snapshot.transcript.count
+            let target = SessionPresentationIdentity(
+                sessionID: snapshot.sessionId,
+                generation: 9
+            )
+            let submission = ComposerSubmissionSnapshot(
+                target: target,
+                textRevision: 1,
+                outgoingText: "queued during compaction",
+                attachmentIDs: [],
+                behavior: "steer",
+                localNonce: 44
+            )
+            let outgoing = ChatTranscriptHandoffCommit.outgoing(
+                presentation: ChatOutgoingSubmissionPresentation(
+                    snapshot: submission,
+                    transportActive: false
+                ),
+                attachments: []
+            )
+            let store = ChatTranscriptPresentationStore()
+            var tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 9,
+                handoff: outgoing
+            )
+            store.submit(snapshot: snapshot, handoff: outgoing, tag: tag)
+            let local = try await store.waitForInstall(of: tag)
+            let localRows = ChatPhysicalTranscriptRowPolicy.rows(
+                installed: local,
+                canonicalAliases: [:]
+            )
+            #expect(localRows.contains { $0.id == submission.presentationID })
+
+            let canonicalID = "canonical-owned"
+            let canonical = try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: Data("""
+                {"id":"canonical-owned","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","presentationId":"operation-owned","content":[{"id":"text","ordinal":0,"type":"text","text":"queued during compaction"}]}
+                """.utf8)
+            )
+            snapshot.transcript.append(canonical)
+            snapshot.transcriptTotal! += 1
+            snapshot.eventSequence += 1
+            snapshot.revision += 1
+            tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 9
+            )
+            store.submit(snapshot: snapshot, tag: tag)
+            let settled = try await store.waitForInstall(of: tag)
+            let aliased = ChatPhysicalTranscriptRowPolicy.rows(
+                installed: settled,
+                canonicalAliases: [canonicalID: submission.presentationID]
+            )
+            let replacement = try #require(aliased.first { $0.id == submission.presentationID })
+            guard case .transcript(let item, _) = replacement.content else {
+                Issue.record("canonical submission did not replace lifecycle content")
+                return
+            }
+            #expect(item.id == canonicalID)
+            #expect(replacement.semanticID == canonicalID)
+            #expect(replacement.id == submission.presentationID)
+            #expect(replacement.replacementAnimationIdentity != nil)
+            let outgoingPhysical = try #require(
+                localRows.first { $0.id == submission.presentationID }
+            )
+            #expect(ChatPhysicalTranscriptReplacementPolicy.replacement(
+                from: outgoingPhysical,
+                to: replacement
+            ) == .prompt)
+            #expect(ChatPromptReplacementAnimationPolicy.animates(reduceMotion: false))
+            #expect(!ChatPromptReplacementAnimationPolicy.animates(reduceMotion: true))
+
+            let existingPhysicalID = try #require(
+                settled.committedLedger.items.first { $0.id != canonicalID }?.id
+            )
+            let collision = ChatPhysicalTranscriptRowPolicy.rows(
+                installed: settled,
+                canonicalAliases: [canonicalID: existingPhysicalID]
+            )
+            #expect(collision.contains { $0.id == canonicalID })
+            #expect(collision.filter { $0.id == existingPhysicalID }.count == 1)
+
+            for reserved in ["transcript-bottom"] {
+                let markerCollision = ChatPhysicalTranscriptRowPolicy.rows(
+                    installed: settled,
+                    canonicalAliases: [canonicalID: reserved]
+                )
+                #expect(markerCollision.contains { $0.id == canonicalID })
+                #expect(!markerCollision.contains { $0.id == reserved })
+            }
+
+            var prefixedSnapshot = snapshot
+            prefixedSnapshot.transcriptStart = 1
+            prefixedSnapshot.transcriptTotal = prefixedSnapshot.transcript.count + 1
+            prefixedSnapshot.eventSequence += 1
+            prefixedSnapshot.revision += 1
+            let prefixedTag = ChatTranscriptProjectionTag(
+                snapshot: prefixedSnapshot,
+                presentationGeneration: 9
+            )
+            store.submit(snapshot: prefixedSnapshot, tag: prefixedTag)
+            let prefixed = try await store.waitForInstall(of: prefixedTag)
+            let earlierCollision = ChatPhysicalTranscriptRowPolicy.rows(
+                installed: prefixed,
+                canonicalAliases: [canonicalID: "earlier-messages"]
+            )
+            #expect(earlierCollision.contains { $0.id == canonicalID })
+            #expect(!earlierCollision.contains { $0.id == "earlier-messages" })
         }
     }
 

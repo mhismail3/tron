@@ -846,6 +846,31 @@ struct ChatPendingPromptPresentation: Equatable, Hashable, Identifiable, Sendabl
 /// same prompt. Legacy pending rows without a valid timestamp use one bounded
 /// candidate (the newest canonical user message), never an arbitrary history
 /// match for repeated text.
+struct ChatCanonicalSubmissionAlias: Equatable, Sendable {
+    let canonicalID: String
+    let presentationID: String
+}
+
+enum ChatCanonicalSubmissionAliasPolicy {
+    static func alias(
+        for receipt: CanonicalSubmissionHandoffReceipt,
+        in transcript: [TranscriptItem]
+    ) -> ChatCanonicalSubmissionAlias? {
+        guard let presentationID = receipt.submission?.presentationID,
+              let operationID = receipt.operationID,
+              transcript.contains(where: {
+                  $0.id == receipt.canonicalID
+                      && $0.kind == .message
+                      && $0.role == .user
+                      && $0.presentationId == operationID
+              }) else { return nil }
+        return ChatCanonicalSubmissionAlias(
+            canonicalID: receipt.canonicalID,
+            presentationID: presentationID
+        )
+    }
+}
+
 enum ChatPendingCanonicalSuppressionPolicy {
     /// Returns canonical IDs that replace this exact pending prompt. The IDs
     /// remain canonical; callers use them only in the existing entrance
@@ -903,6 +928,22 @@ enum ChatPendingCanonicalSuppressionPolicy {
             ),
             in: transcript
         )
+    }
+
+    /// Physical identity continuity is stricter than compatibility suppression:
+    /// only one canonical user row carrying the exact Gateway operation ID may
+    /// inherit the pending row's SwiftUI identity.
+    static func exactCanonicalID(
+        for pending: ChatPendingPromptPresentation,
+        in transcript: [TranscriptItem]
+    ) -> String? {
+        let matches = transcript.compactMap { item -> String? in
+            guard item.kind == .message,
+                  item.role == .user,
+                  item.presentationId == pending.id else { return nil }
+            return item.id
+        }
+        return matches.count == 1 ? matches[0] : nil
     }
 
     static func suppresses(

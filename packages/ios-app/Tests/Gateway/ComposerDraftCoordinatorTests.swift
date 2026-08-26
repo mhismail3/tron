@@ -1830,8 +1830,8 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
-    @Test("accepted submission retires with its presentation and does not block remount")
-    func acceptedSendRetiresOnPresentationRevocation() async throws {
+    @Test("accepted submission survives remount until exact canonical settlement")
+    func acceptedSendSurvivesPresentationRevocation() async throws {
         try await withTestWatchdog { @MainActor in
             let harness = ComposerHarness()
             let first = SessionPresentationIdentity(sessionID: "session", generation: 61)
@@ -1845,21 +1845,37 @@ struct ComposerDraftCoordinatorTests {
             try await harness.waitForSends(1)
             harness.completeSend(index: 0, result: .success(()))
             try await valueOfOwnedTask(firstSend)
-            #expect(harness.coordinator.outgoingSubmission(for: first) != nil)
+            let presentationID = try #require(
+                harness.coordinator.outgoingSubmission(for: first)?.presentationID
+            )
 
             harness.coordinator.revoke(first)
             let second = SessionPresentationIdentity(sessionID: "session", generation: 62)
             _ = harness.coordinator.installHostedPresentation(
                 profileID: "profile", target: second, lifecycleGeneration: 1
             )
+            #expect(harness.coordinator.outgoingSubmission(for: second)?.presentationID == presentationID)
+            #expect(harness.sendCalls.count == 1)
+
             harness.coordinator.setText("second", for: scope)
-            let secondSend = Task {
-                try await harness.coordinator.send(target: second, behavior: nil)
+            #expect(throws: GatewayFailure.self) {
+                try harness.coordinator.beginSubmission(target: second, behavior: nil)
             }
-            try await harness.waitForSends(2)
-            harness.completeSend(index: 1, result: .success(()))
-            try await valueOfOwnedTask(secondSend)
-            #expect(harness.coordinator.outgoingSubmission(for: second)?.outgoingText == "second")
+            harness.coordinator.reconcileSubmission(
+                target: second,
+                canonicalTranscript: [canonicalUser(
+                    id: "canonical-first",
+                    presentationID: "operation-0",
+                    text: "first"
+                )]
+            )
+            #expect(harness.coordinator.outgoingSubmission(for: second) == nil)
+            let receipt = try #require(
+                harness.coordinator.consumeCanonicalSubmissionHandoff(target: second)
+            )
+            #expect(receipt.submission?.presentationID == presentationID)
+            #expect(receipt.operationID == "operation-0")
+            #expect(harness.sendCalls.count == 1)
         }
     }
 
@@ -1945,7 +1961,7 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
-    @Test("presentation revocation retires accepted lifecycle without replay")
+    @Test("sending submission survives remount and transports exactly once")
     func lifecycleRevocation() async throws {
         try await withTestWatchdog { @MainActor in
             let harness = ComposerHarness()
@@ -1960,10 +1976,42 @@ struct ComposerDraftCoordinatorTests {
             let transport = Task { try await harness.coordinator.transmitSubmission(submission) }
             try await harness.waitForSends(1)
             harness.coordinator.revoke(target)
-            #expect(harness.coordinator.submissionLifecycle(for: target) == .idle)
+
+            let remounted = SessionPresentationIdentity(sessionID: "revoked", generation: 73)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile",
+                target: remounted,
+                lifecycleGeneration: 1
+            )
+            #expect(harness.coordinator.isSending(target: remounted))
+            #expect(harness.coordinator.outgoingSubmission(for: remounted)?.presentationID == submission.presentationID)
+            #expect(harness.sendCalls.count == 1)
+
             harness.completeSend(index: 0, result: .success(()))
             try await valueOfOwnedTask(transport)
-            #expect(harness.coordinator.submissionLifecycle(for: target) == .idle)
+            #expect(harness.coordinator.submissionLifecycle(for: remounted).phase == .transported)
+            #expect(harness.sendCalls.count == 1)
+        }
+    }
+
+    @Test("lifecycle replacement prevents admitted transport from entering a new Gateway")
+    func lifecycleReplacementStopsTransportBeforeSend() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "replaced-lifecycle", generation: 74)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile-a",
+                target: target,
+                lifecycleGeneration: 1,
+                initialText: "must stay on profile a"
+            )
+            let submission = try harness.coordinator.beginSubmission(target: target, behavior: nil)
+
+            harness.admission.generation = 2
+            await #expect(throws: CancellationError.self) {
+                try await harness.coordinator.transmitSubmission(submission)
+            }
+            #expect(harness.sendCalls.isEmpty)
         }
     }
 
@@ -1979,27 +2027,100 @@ struct ComposerDraftCoordinatorTests {
                 initialText: "recover me"
             )
             harness.coordinator.installHostedAttachment(
-                .init(id: "upload", name: "file.txt", mimeType: "text/plain", size: 4, previewData: nil),
+                .init(
+                    id: "upload",
+                    gatewayUploadID: "stale-old-upload",
+                    name: "file.txt",
+                    mimeType: "text/plain",
+                    size: 4,
+                    previewData: nil
+                ),
                 target: oldTarget
             )
             let submission = try harness.coordinator.beginSubmission(target: oldTarget, behavior: nil)
             let transport = Task { try await harness.coordinator.transmitSubmission(submission) }
             try await harness.waitForSends(1)
             harness.coordinator.revoke(oldTarget)
-            harness.completeSend(index: 0, result: .failure(ComposerSyntheticError.current))
-            await #expect(throws: ComposerSyntheticError.self) {
-                try await valueOfOwnedTask(transport)
-            }
-            #expect(harness.coordinator.text(for: scope) == "recover me")
-
             let newTarget = SessionPresentationIdentity(sessionID: oldTarget.sessionID, generation: 81)
             _ = harness.coordinator.installHostedPresentation(
                 profileID: "profile",
                 target: newTarget,
                 lifecycleGeneration: 1
             )
+            // Model the remount's fresh upload representation for the same
+            // stable chip before the old transport reports a definitive error.
+            harness.coordinator.removeAttachment("upload", target: newTarget)
+            harness.coordinator.installHostedAttachment(
+                .init(
+                    id: "upload",
+                    gatewayUploadID: "fresh-remount-upload",
+                    name: "file.txt",
+                    mimeType: "text/plain",
+                    size: 4,
+                    previewData: nil
+                ),
+                target: newTarget
+            )
+
+            harness.completeSend(index: 0, result: .failure(ComposerSyntheticError.current))
+            await #expect(throws: ComposerSyntheticError.self) {
+                try await valueOfOwnedTask(transport)
+            }
+            #expect(harness.coordinator.text(for: scope) == "recover me")
             #expect(harness.coordinator.pendingAttachments(for: newTarget).map(\.id) == ["upload"])
+            #expect(harness.coordinator.pendingAttachments(for: newTarget).first?.gatewayUploadID
+                == "fresh-remount-upload")
             #expect(harness.coordinator.outgoingSubmission(for: newTarget) == nil)
+
+            let retry = Task { try await harness.coordinator.send(target: newTarget, behavior: nil) }
+            try await harness.waitForSends(2)
+            #expect(harness.sendCalls[1].uploadIDs == ["fresh-remount-upload"])
+            harness.completeSend(index: 1, result: .success(()))
+            try await valueOfOwnedTask(retry)
+
+            let missing = ComposerHarness()
+            let missingOld = SessionPresentationIdentity(sessionID: "missing-copy", generation: 1)
+            _ = missing.coordinator.installHostedPresentation(
+                profileID: "profile",
+                target: missingOld,
+                lifecycleGeneration: 1,
+                initialText: "retry attachment"
+            )
+            missing.coordinator.installHostedAttachment(
+                .init(
+                    id: "stable-chip",
+                    gatewayUploadID: "stale-presentation-upload",
+                    name: "missing.txt",
+                    mimeType: "text/plain",
+                    size: 1,
+                    previewData: nil
+                ),
+                target: missingOld
+            )
+            let missingSubmission = try missing.coordinator.beginSubmission(
+                target: missingOld,
+                behavior: nil
+            )
+            let missingTransport = Task {
+                try await missing.coordinator.transmitSubmission(missingSubmission)
+            }
+            try await missing.waitForSends(1)
+            missing.coordinator.revoke(missingOld)
+            let missingNew = SessionPresentationIdentity(sessionID: "missing-copy", generation: 2)
+            _ = missing.coordinator.installHostedPresentation(
+                profileID: "profile",
+                target: missingNew,
+                lifecycleGeneration: 1
+            )
+            missing.coordinator.removeAttachment("stable-chip", target: missingNew)
+            missing.completeSend(index: 0, result: .failure(ComposerSyntheticError.current))
+            await #expect(throws: ComposerSyntheticError.self) {
+                try await valueOfOwnedTask(missingTransport)
+            }
+            #expect(missing.coordinator.pendingAttachments(for: missingNew).first?.id
+                == "stable-chip")
+            #expect(missing.coordinator.pendingAttachments(for: missingNew).first?.gatewayUploadID
+                == nil)
         }
     }
 
@@ -2020,14 +2141,18 @@ struct ComposerDraftCoordinatorTests {
         #expect(model.composerDrafts.text(for: scope) == "after")
     }
 
-    private func canonicalUser(id: String, text: String) -> TranscriptItem {
+    private func canonicalUser(
+        id: String,
+        presentationID: String? = nil,
+        text: String
+    ) -> TranscriptItem {
         .message(MessageTranscriptItem(
             id: id,
             parentId: nil,
             timestamp: "2026-01-01T00:00:00Z",
             kind: .message,
             role: .user,
-            presentationId: id,
+            presentationId: presentationID ?? id,
             content: [ContentPart(
                 id: "text",
                 ordinal: 0,

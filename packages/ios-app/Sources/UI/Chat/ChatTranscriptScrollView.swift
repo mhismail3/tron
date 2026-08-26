@@ -21,10 +21,284 @@ private struct ChatScrollGeometryObservation: Equatable {
     let presentationEpoch: Int
 }
 
-private struct ChatQueuedMessageRenderEntry: Identifiable {
+struct ChatQueuedMessageRenderEntry: Identifiable, Hashable {
     let id: String
     let index: Int
     let message: SessionSnapshot.QueuedMessage
+}
+
+/// One bounded physical row namespace for canonical, live/runtime, local
+/// submission, and authoritative queue presentation. `id` is SwiftUI identity;
+/// `semanticID` remains the canonical anchor/geometry identity.
+struct ChatPhysicalTranscriptRow: Identifiable, Hashable {
+    enum Content: Hashable {
+        case transcript(ChatTranscriptRenderItem, isCommitted: Bool)
+        case pending(ChatPendingPromptPresentation)
+        case outgoing(ChatOutgoingSubmissionPresentation, [PendingAttachment])
+        case queued(ChatQueuedMessageRenderEntry)
+    }
+
+    let id: String
+    let semanticID: String
+    let content: Content
+
+    var replacementAnimationIdentity: String? {
+        switch content {
+        case .pending(let pending):
+            return "pending:\(pending.id):\(pending.text):\(pending.promptBehavior.isQueuedKind)"
+        case .outgoing(let outgoing, _):
+            return "outgoing:\(outgoing.id):\(outgoing.text):\(outgoing.promptBehavior.isQueuedKind)"
+        case .queued(let queued):
+            return "queued:\(queued.id):\(queued.message.text)"
+        case .transcript(let item, _):
+            switch item {
+            case .transcript(let transcript) where transcript.role == .user:
+                return "canonical:\(transcript.id)"
+            case .message(let message) where message.item.role == .user:
+                return "canonical:\(message.semanticID)"
+            case .notification(let notification):
+                return "notification:\(notification.title):\(notification.showsProgress)"
+            case .transcript, .message, .toolRun:
+                return nil
+            }
+        }
+    }
+
+    var replacementContentIdentity: String {
+        if case .transcript(.notification, _) = content { return "stable:\(id)" }
+        return replacementAnimationIdentity ?? "stable:\(id)"
+    }
+
+    var isPromptLifecycle: Bool {
+        switch content {
+        case .pending, .outgoing, .queued: true
+        case .transcript: false
+        }
+    }
+
+    var isCanonicalUser: Bool {
+        guard case .transcript(let item, _) = content else { return false }
+        return switch item {
+        case .transcript(let transcript): transcript.role == .user
+        case .message(let message): message.item.role == .user
+        case .toolRun, .notification: false
+        }
+    }
+}
+
+/// Zero-copy row spine. Ordinary body evaluation constructs only this small
+/// adapter; committed/live arrays stay in their installed projection storage.
+struct ChatPhysicalTranscriptRows: RandomAccessCollection {
+    typealias Index = Int
+
+    let installed: InstalledChatTranscript
+    let canonicalAliases: [String: String]
+
+    var startIndex: Int { 0 }
+    var endIndex: Int {
+        installed.committedLedger.items.count
+            + installed.liveRegion.items.count
+            + handoffCount
+            + installed.queuedMessages.count
+    }
+
+    subscript(position: Int) -> ChatPhysicalTranscriptRow {
+        precondition(indices.contains(position))
+        var index = position
+        if index < installed.committedLedger.items.count {
+            return transcriptRow(installed.committedLedger.items[index], isCommitted: true)
+        }
+        index -= installed.committedLedger.items.count
+        if index < installed.liveRegion.items.count {
+            return transcriptRow(installed.liveRegion.items[index], isCommitted: false)
+        }
+        index -= installed.liveRegion.items.count
+        if handoffCount == 1 {
+            if index == 0 { return handoffRow }
+            index -= 1
+        }
+        let message = installed.queuedMessages[index]
+        let physicalID = installed.queuePresentationIDByOperationID[message.id]
+            ?? "queued-message-\(message.id)"
+        let entry = ChatQueuedMessageRenderEntry(
+            id: physicalID,
+            index: index,
+            message: message
+        )
+        return ChatPhysicalTranscriptRow(
+            id: physicalID,
+            semanticID: physicalID,
+            content: .queued(entry)
+        )
+    }
+
+    private var handoffCount: Int {
+        if case .none = installed.handoff { return 0 }
+        return 1
+    }
+
+    private var handoffRow: ChatPhysicalTranscriptRow {
+        switch installed.handoff {
+        case .none:
+            preconditionFailure("No lifecycle row exists")
+        case .pending(let pending):
+            let id = "pending-prompt-\(pending.id)"
+            return ChatPhysicalTranscriptRow(
+                id: id,
+                semanticID: id,
+                content: .pending(pending)
+            )
+        case .outgoing(let outgoing, let attachments):
+            return ChatPhysicalTranscriptRow(
+                id: outgoing.id,
+                semanticID: outgoing.id,
+                content: .outgoing(outgoing, attachments)
+            )
+        }
+    }
+
+    private func transcriptRow(
+        _ item: ChatTranscriptRenderItem,
+        isCommitted: Bool
+    ) -> ChatPhysicalTranscriptRow {
+        let canonicalID = ChatPhysicalTranscriptRowPolicy.canonicalSemanticID(item)
+        let alias = canonicalID.flatMap { canonicalAliases[$0] }
+        return ChatPhysicalTranscriptRow(
+            id: alias ?? item.id,
+            semanticID: alias == nil ? item.id : (canonicalID ?? item.id),
+            content: .transcript(item, isCommitted: isCommitted)
+        )
+    }
+}
+
+enum ChatPhysicalTranscriptRowPolicy {
+    static func rows(
+        installed: InstalledChatTranscript,
+        canonicalAliases: [String: String]
+    ) -> ChatPhysicalTranscriptRows {
+        ChatPhysicalTranscriptRows(
+            installed: installed,
+            canonicalAliases: admittedAliases(
+                installed: installed,
+                candidates: canonicalAliases
+            )
+        )
+    }
+
+    /// Empty aliases take the O(1) path. Nonempty aliases are page-bounded and
+    /// validated through the installed projection's prebuilt identity indexes.
+    static func admittedAliases(
+        installed: InstalledChatTranscript,
+        candidates: [String: String]
+    ) -> [String: String] {
+        guard !candidates.isEmpty,
+              candidates.count <= ChatTranscriptPageRequest.maximumItemCount,
+              Set(candidates.values).count == candidates.count else { return [:] }
+        var admitted: [String: String] = [:]
+        for (canonicalID, physicalID) in candidates {
+            guard let item = installed.displayedItem(for: canonicalID) else { continue }
+            guard isCanonicalUser(item),
+                  canonicalID != physicalID,
+                  !installed.containsUnaliasedPhysicalID(physicalID) else { return [:] }
+            admitted[canonicalID] = physicalID
+        }
+        return admitted
+    }
+
+    static func canonicalSemanticID(_ item: ChatTranscriptRenderItem) -> String? {
+        switch item {
+        case .transcript(let transcript): transcript.id
+        case .message(let message): message.semanticID
+        case .toolRun, .notification: nil
+        }
+    }
+
+    private static func isCanonicalUser(_ item: ChatTranscriptRenderItem) -> Bool {
+        switch item {
+        case .transcript(let transcript): transcript.role == .user
+        case .message(let message): message.item.role == .user
+        case .toolRun, .notification: false
+        }
+    }
+}
+
+enum ChatPhysicalTranscriptReplacementKind: Equatable {
+    case none
+    case prompt
+    case notification
+}
+
+enum ChatPhysicalTranscriptReplacementPolicy {
+    static func replacement(
+        from previous: ChatPhysicalTranscriptRow,
+        to next: ChatPhysicalTranscriptRow
+    ) -> ChatPhysicalTranscriptReplacementKind {
+        guard previous.id == next.id else { return .none }
+        if previous.isPromptLifecycle && next.isCanonicalUser { return .prompt }
+        if case .transcript(.notification(let old), _) = previous.content,
+           case .transcript(.notification(let new), _) = next.content,
+           old.showsProgress,
+           !new.showsProgress {
+            return .notification
+        }
+        return .none
+    }
+}
+
+/// A unified ForEach keeps this host alive while runtime/local content becomes
+/// canonical. Row state advances in one explicit, admitted transaction; the
+/// changed inner identity retains the outgoing card for a bounded overlap while
+/// its canonical successor is inserted.
+private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
+    let row: ChatPhysicalTranscriptRow
+    let reduceMotion: Bool
+    @ViewBuilder let content: (ChatPhysicalTranscriptRow) -> Content
+
+    @State private var displayed: ChatPhysicalTranscriptRow
+
+    init(
+        row: ChatPhysicalTranscriptRow,
+        reduceMotion: Bool,
+        @ViewBuilder content: @escaping (ChatPhysicalTranscriptRow) -> Content
+    ) {
+        self.row = row
+        self.reduceMotion = reduceMotion
+        self.content = content
+        _displayed = State(initialValue: row)
+    }
+
+    var body: some View {
+        content(displayed)
+            .id(displayed.replacementContentIdentity)
+            .contentTransition(reduceMotion ? .opacity : .interpolate)
+            .transition(transition)
+            .onChange(of: row) { _, next in retarget(next) }
+    }
+
+    /// The child always carries both halves of the prompt transition. The
+    /// explicit replacement transaction below is the sole animation admission,
+    /// so ordinary projection updates remain stable while an outgoing removal
+    /// and canonical insertion overlap continuously.
+    private var transition: AnyTransition {
+        if reduceMotion { return .opacity }
+        return .opacity.combined(with: .scale(scale: 0.985, anchor: .trailing))
+    }
+
+    private func retarget(_ next: ChatPhysicalTranscriptRow) {
+        let kind = ChatPhysicalTranscriptReplacementPolicy.replacement(
+            from: displayed,
+            to: next
+        )
+        var transaction = Transaction(
+            animation: kind == .none
+                ? nil
+                : reduceMotion
+                    ? .linear(duration: 0.10)
+                    : ChatPromptReplacementAnimationPolicy.animation(reduceMotion: false)
+        )
+        transaction.admitsChatPromptReplacementAnimation = kind != .none
+        withTransaction(transaction) { displayed = next }
+    }
 }
 
 /// The single physical transcript scroll owner. It renders one installed commit,
@@ -35,6 +309,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let performanceTracker: ChatPerformanceTracker
     let installed: InstalledChatTranscript?
     let canonicalSubmissionIDs: Set<String>
+    let canonicalSubmissionAliases: [String: String]
     let isReady: Bool
     let reduceMotion: Bool
     let presentationEpoch: Int
@@ -61,18 +336,26 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             LazyVStack(alignment: .leading, spacing: 8) {
                 if let installed {
                     if (installed.sourceWindow.originalStart ?? 0) > 0 {
-                        stableRow(id: "earlier-messages", installedTag: installed.tag, entranceState: .none) {
+                        stableRow(
+                            physicalID: "earlier-messages",
+                            semanticID: "earlier-messages",
+                            installedTag: installed.tag,
+                            entranceState: .none
+                        ) {
                             earlierRow(installed)
                         }
                     }
-                    ForEach(installed.committedLedger.items) { item in
-                        transcriptRow(item, installed: installed, isCommitted: true)
+                    ForEach(ChatPhysicalTranscriptRowPolicy.rows(
+                        installed: installed,
+                        canonicalAliases: canonicalSubmissionAliases
+                    )) { row in
+                        ChatPhysicalTranscriptReplacementHost(
+                            row: row,
+                            reduceMotion: reduceMotion
+                        ) { displayed in
+                            physicalRow(displayed, installed: installed)
+                        }
                     }
-                    ForEach(installed.liveRegion.items) { item in
-                        transcriptRow(item, installed: installed, isCommitted: false)
-                    }
-                    lifecycleRow(installed)
-                    queuedRows(installed)
                 }
                 tailMarker
             }
@@ -167,153 +450,180 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     }
 
     @ViewBuilder
-    private func lifecycleRow(_ installed: InstalledChatTranscript) -> some View {
-        let entranceSuppressed = transcriptPresentation.suppressesEntrances(for: installed.tag)
-        switch installed.handoff {
-        case .none:
-            EmptyView()
+    private func physicalRow(
+        _ row: ChatPhysicalTranscriptRow,
+        installed: InstalledChatTranscript
+    ) -> some View {
+        switch row.content {
+        case .transcript(let item, let isCommitted):
+            transcriptRow(
+                item,
+                physicalID: row.id,
+                semanticID: row.semanticID,
+                installed: installed,
+                isCommitted: isCommitted
+            )
         case .pending(let pending):
-            let renderedID = "pending-prompt-\(pending.id)"
-            stableRow(id: renderedID, installedTag: installed.tag, entranceState: .none) {
-                if pending.promptBehavior.isQueuedKind {
-                    ChatQueuedMessageEntranceRow(
-                        animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
-                            isReady: isReady,
-                            entranceSuppressed: entranceSuppressed,
-                            hasIdentityAlias: false
-                        ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
-                        reduceMotion: reduceMotion,
-                        onEntranceConsumed: {
-                            transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
-                        }
-                    ) { ChatPendingPromptRow(presentation: pending) }
-                } else {
-                    ChatOutgoingSubmissionEntranceRow(
-                        reduceMotion: reduceMotion,
-                        animatesEntrance: !entranceSuppressed
-                            && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
-                        kind: ChatPromptLifecycleTransitionPolicy.entranceKind(for: pending.promptBehavior),
-                        onEntranceConsumed: {
-                            transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
-                        }
-                    ) { ChatPendingPromptRow(presentation: pending) }
-                }
-            }
+            pendingRow(pending, renderedID: row.id, installed: installed)
         case .outgoing(let outgoing, let attachments):
-            stableRow(id: outgoing.id, installedTag: installed.tag, entranceState: .none) {
-                if outgoing.promptBehavior.isQueuedKind {
-                    ChatOutgoingSubmissionEntranceRow(
-                        reduceMotion: reduceMotion,
-                        animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
-                            isReady: isReady,
-                            entranceSuppressed: entranceSuppressed,
-                            hasIdentityAlias: false
-                        ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: outgoing.id),
-                        morphOwnership: morphRegistry.entranceOwnership(for: outgoing.id),
-                        kind: .queuedPrompt,
-                        onEntranceConsumed: {
-                            transcriptPresentation.consumeLifecycleEntrance(id: outgoing.id)
-                        }
-                    ) {
-                        ChatOutgoingSubmissionRow(
-                            presentation: outgoing,
-                            attachments: attachments,
-                            morphRegistry: morphRegistry
-                        )
-                    }
-                } else {
-                    ChatOutgoingSubmissionEntranceRow(
-                        reduceMotion: reduceMotion,
-                        animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateUserEntrance(
-                            isReady: isReady,
-                            entranceSuppressed: entranceSuppressed
-                        ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: outgoing.id),
-                        morphOwnership: morphRegistry.entranceOwnership(for: outgoing.id),
-                        kind: ChatPromptLifecycleTransitionPolicy.entranceKind(for: outgoing.promptBehavior),
-                        onEntranceConsumed: {
-                            transcriptPresentation.consumeLifecycleEntrance(id: outgoing.id)
-                        }
-                    ) {
-                        ChatOutgoingSubmissionRow(
-                            presentation: outgoing,
-                            attachments: attachments,
-                            morphRegistry: morphRegistry
-                        )
-                    }
-                }
-            }
+            outgoingRow(
+                outgoing,
+                attachments: attachments,
+                renderedID: row.id,
+                installed: installed
+            )
+        case .queued(let entry):
+            queuedRow(entry, renderedID: row.id, installed: installed)
         }
     }
 
-    @ViewBuilder
-    private func queuedRows(_ installed: InstalledChatTranscript) -> some View {
+    private func pendingRow(
+        _ pending: ChatPendingPromptPresentation,
+        renderedID: String,
+        installed: InstalledChatTranscript
+    ) -> some View {
         let entranceSuppressed = transcriptPresentation.suppressesEntrances(for: installed.tag)
-        let messages = installed.queuedMessages
-        let availability = QueuedMessageManagementPolicy.availability(
-            queueManagementCapability: installed.tag.queueManagementCapability,
-            queueRevision: installed.queueRevision,
-            hasAuthoritativeItems: installed.supportsQueueManagement
-        )
-        let entries = messages.enumerated().map { pair in
-            ChatQueuedMessageRenderEntry(
-                id: installed.queuePresentationIDByOperationID[pair.element.id]
-                    ?? "queued-message-\(pair.element.id)",
-                index: pair.offset,
-                message: pair.element
-            )
-        }
-        ForEach(entries) { entry in
-            let index = entry.index
-            let message = entry.message
-            let aliasID = installed.queuePresentationIDByOperationID[message.id]
-            let renderedID = aliasID ?? "queued-message-\(message.id)"
-            let suppressed = canonicalSubmissionIDs.contains(renderedID)
-            stableRow(id: renderedID, installedTag: installed.tag, entranceState: .none) {
+        return stableRow(
+            physicalID: renderedID,
+            semanticID: renderedID,
+            installedTag: installed.tag,
+            entranceState: .none
+        ) {
+            if pending.promptBehavior.isQueuedKind {
                 ChatQueuedMessageEntranceRow(
                     animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
                         isReady: isReady,
                         entranceSuppressed: entranceSuppressed,
-                        hasIdentityAlias: aliasID != nil || suppressed
+                        hasIdentityAlias: false
                     ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
                     reduceMotion: reduceMotion,
                     onEntranceConsumed: {
                         transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
                     }
-                ) {
-                    QueuedMessageRow(
-                        message: message,
-                        position: index + 1,
-                        total: messages.count,
-                        managementAvailability: availability,
-                        isMutating: !mutatingQueuedMessageIDs.isEmpty,
-                        onEdit: { onEditQueuedMessage(message.id) },
-                        onClear: onClearQueuedMessages,
-                        canMoveEarlier: index > 0 && messages[index - 1].behavior == message.behavior,
-                        canMoveLater: index + 1 < messages.count
-                            && messages[index + 1].behavior == message.behavior,
-                        onMove: { onMoveQueuedMessage(message.id, $0) }
+                ) { ChatPendingPromptRow(presentation: pending) }
+            } else {
+                ChatOutgoingSubmissionEntranceRow(
+                    reduceMotion: reduceMotion,
+                    animatesEntrance: !entranceSuppressed
+                        && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
+                    kind: ChatPromptLifecycleTransitionPolicy.entranceKind(for: pending.promptBehavior),
+                    onEntranceConsumed: {
+                        transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
+                    }
+                ) { ChatPendingPromptRow(presentation: pending) }
+            }
+        }
+    }
+
+    private func outgoingRow(
+        _ outgoing: ChatOutgoingSubmissionPresentation,
+        attachments: [PendingAttachment],
+        renderedID: String,
+        installed: InstalledChatTranscript
+    ) -> some View {
+        let entranceSuppressed = transcriptPresentation.suppressesEntrances(for: installed.tag)
+        return stableRow(
+            physicalID: renderedID,
+            semanticID: renderedID,
+            installedTag: installed.tag,
+            entranceState: .none
+        ) {
+            ChatOutgoingSubmissionEntranceRow(
+                reduceMotion: reduceMotion,
+                animatesEntrance: (outgoing.promptBehavior.isQueuedKind
+                    ? ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
+                        isReady: isReady,
+                        entranceSuppressed: entranceSuppressed,
+                        hasIdentityAlias: false
                     )
+                    : ChatPromptLifecycleTransitionPolicy.shouldAnimateUserEntrance(
+                        isReady: isReady,
+                        entranceSuppressed: entranceSuppressed
+                    )) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
+                morphOwnership: morphRegistry.entranceOwnership(for: outgoing.id),
+                kind: ChatPromptLifecycleTransitionPolicy.entranceKind(for: outgoing.promptBehavior),
+                onEntranceConsumed: {
+                    transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
                 }
+            ) {
+                ChatOutgoingSubmissionRow(
+                    presentation: outgoing,
+                    attachments: attachments,
+                    morphRegistry: morphRegistry
+                )
+            }
+        }
+    }
+
+    private func queuedRow(
+        _ entry: ChatQueuedMessageRenderEntry,
+        renderedID: String,
+        installed: InstalledChatTranscript
+    ) -> some View {
+        let entranceSuppressed = transcriptPresentation.suppressesEntrances(for: installed.tag)
+        let messages = installed.queuedMessages
+        let index = entry.index
+        let message = entry.message
+        let aliasID = installed.queuePresentationIDByOperationID[message.id]
+        let suppressed = canonicalSubmissionIDs.contains(renderedID)
+        let availability = QueuedMessageManagementPolicy.availability(
+            queueManagementCapability: installed.tag.queueManagementCapability,
+            queueRevision: installed.queueRevision,
+            hasAuthoritativeItems: installed.supportsQueueManagement
+        )
+        return stableRow(
+            physicalID: renderedID,
+            semanticID: renderedID,
+            installedTag: installed.tag,
+            entranceState: .none
+        ) {
+            ChatQueuedMessageEntranceRow(
+                animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
+                    isReady: isReady,
+                    entranceSuppressed: entranceSuppressed,
+                    hasIdentityAlias: aliasID != nil || suppressed
+                ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
+                reduceMotion: reduceMotion,
+                onEntranceConsumed: {
+                    transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
+                }
+            ) {
+                QueuedMessageRow(
+                    message: message,
+                    position: index + 1,
+                    total: messages.count,
+                    managementAvailability: availability,
+                    isMutating: !mutatingQueuedMessageIDs.isEmpty,
+                    onEdit: { onEditQueuedMessage(message.id) },
+                    onClear: onClearQueuedMessages,
+                    canMoveEarlier: index > 0 && messages[index - 1].behavior == message.behavior,
+                    canMoveLater: index + 1 < messages.count
+                        && messages[index + 1].behavior == message.behavior,
+                    onMove: { onMoveQueuedMessage(message.id, $0) }
+                )
             }
         }
     }
 
     private func transcriptRow(
         _ item: ChatTranscriptRenderItem,
+        physicalID: String,
+        semanticID: String,
         installed: InstalledChatTranscript,
         isCommitted: Bool
     ) -> some View {
         let kind = ChatContentEntranceKind.classify(item)
-        let state: ChatTranscriptEntranceState = canonicalSubmissionIDs.contains(item.id)
+        let state: ChatTranscriptEntranceState = canonicalSubmissionIDs.contains(semanticID)
             ? .none
-            : transcriptPresentation.entranceState(for: item.id)
+            : transcriptPresentation.entranceState(for: semanticID)
         return stableRow(
-            id: item.id,
+            physicalID: physicalID,
+            semanticID: semanticID,
             installedTag: installed.tag,
             entranceState: state,
             entranceKind: kind
         ) {
-            if canonicalSubmissionIDs.contains(item.id) {
+            if canonicalSubmissionIDs.contains(semanticID) {
                 renderRow(item, installed: installed, isCommitted: isCommitted)
             } else {
                 ChatTranscriptEntranceRow(
@@ -323,7 +633,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     reduceMotion: reduceMotion,
                     onFailsafeReveal: {
                         _ = transcriptPresentation.resolveEntrance(
-                            id: item.id,
+                            id: semanticID,
                             installationTag: installed.tag,
                             isVisible: false
                         )
@@ -357,7 +667,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     }
 
     private func stableRow<Content: View>(
-        id: String,
+        physicalID: String,
+        semanticID: String,
         installedTag: ChatTranscriptProjectionTag?,
         entranceState: ChatTranscriptEntranceState,
         entranceKind: ChatContentEntranceKind = .assistantContent,
@@ -368,7 +679,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         return content()
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .id(id)
+            .id(physicalID)
             .onGeometryChange(for: ChatSemanticFrameObservation.self) { value in
                 ChatSemanticFrameObservation(
                     layoutEpoch: rowLayoutEpoch,
@@ -377,16 +688,17 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 )
             } action: { sample in
                 scrollCoordinator.semanticFrameChanged(
-                    renderedID: id,
+                    renderedID: semanticID,
                     layoutEpoch: sample.layoutEpoch,
                     frame: sample.frame
                 )
                 let currentInstalled = transcriptPresentation.installed
-                let currentState = transcriptPresentation.entranceState(for: id)
+                let currentState = transcriptPresentation.entranceState(for: semanticID)
                 if ChatEntranceGeometryAdmissionPolicy.admits(
                     observation: sample,
                     installedTag: currentInstalled?.tag,
-                    installedContainsRenderedID: currentInstalled?.containsDisplayedID(id) == true,
+                    installedContainsRenderedID:
+                        currentInstalled?.containsDisplayedID(semanticID) == true,
                     currentLayoutEpoch: scrollCoordinator.layoutEpoch,
                     entranceState: currentState
                 ), let entranceTag = sample.entranceAdmissionTag {
@@ -395,7 +707,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         && sample.frame.minY < latestGeometry.containerHeight
                     let visible = intersects || scrollCoordinator.canAutomaticallyFollow
                     let animated = transcriptPresentation.resolveEntrance(
-                        id: id,
+                        id: semanticID,
                         installationTag: entranceTag,
                         isVisible: visible
                     )
@@ -403,9 +715,11 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         animated: animated,
                         sourceOrdinal: entranceTag.timelineGeneration
                     )
-                    if animated { scrollCoordinator.discreteContentInserted(renderedID: id) }
+                    if animated {
+                        scrollCoordinator.discreteContentInserted(renderedID: semanticID)
+                    }
                 }
-                hostedRecorder?.updateRowFrame(id: id, frame: sample.frame)
+                hostedRecorder?.updateRowFrame(id: semanticID, frame: sample.frame)
                 hostedRecorder?.recordMaximumSemanticExcursion(
                     scrollCoordinator.maximumPrependSemanticExcursion
                 )

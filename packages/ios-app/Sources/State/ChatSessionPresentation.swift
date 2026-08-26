@@ -34,6 +34,7 @@ final class ChatSessionPresentation {
     var open: ChatOpenPresentationState
     var modelPresentationGeneration: Int?
     var canonicalSubmissionHandoffs = BoundedChatIdentityLedger()
+    var canonicalSubmissionAliases = BoundedChatIdentityAliasLedger()
 
     @ObservationIgnored var photoImportTask: Task<Void, Never>?
     @ObservationIgnored var attachmentPresentationTask: Task<Void, Never>?
@@ -98,6 +99,33 @@ struct ChatTranscriptProjectionCapture: Sendable {
     let handoff: ChatTranscriptHandoffCommit
     let queuePresentationIDByOperationID: [String: String]
     let tag: ChatTranscriptProjectionTag
+}
+
+struct BoundedChatIdentityAliasLedger: Equatable {
+    private(set) var aliases: [String: String] = [:]
+    private var order: [String] = []
+
+    /// Installs only one-to-one causal aliases. Ambiguity fails closed without
+    /// changing an already admitted identity.
+    @discardableResult
+    mutating func insert(canonicalID: String, presentationID: String) -> Bool {
+        guard !canonicalID.isEmpty, !presentationID.isEmpty else { return false }
+        if let existing = aliases[canonicalID] { return existing == presentationID }
+        guard !aliases.values.contains(presentationID) else { return false }
+        aliases[canonicalID] = presentationID
+        order.append(canonicalID)
+        let excess = order.count - ChatTranscriptPageRequest.maximumItemCount
+        if excess > 0 {
+            for id in order.prefix(excess) { aliases[id] = nil }
+            order.removeFirst(excess)
+        }
+        return true
+    }
+
+    mutating func removeAll() {
+        aliases.removeAll(keepingCapacity: false)
+        order.removeAll(keepingCapacity: false)
+    }
 }
 
 struct BoundedChatIdentityLedger: Equatable {

@@ -291,6 +291,8 @@ struct InstalledChatTranscript: Hashable, Sendable {
     let sourceWindow: SourceWindow
     private let runtimeIDSet: Set<String>
     private let queueIDSet: Set<String>
+    private let displayedItemByID: [String: ChatTranscriptRenderItem]?
+    private let presentationOnlyIDSet: Set<String>
     private let toolDescriptorByID: [String: ChatToolDescriptor]?
 
     init(
@@ -332,6 +334,28 @@ struct InstalledChatTranscript: Hashable, Sendable {
         self.sourceWindow = sourceWindow
         runtimeIDSet = Set(runtimeItems.map(\.id))
         queueIDSet = Set(queuedMessages.map(\.id))
+        let displayed = Array(timeline.items) + runtimeItems
+        let displayedIndex = Dictionary(
+            displayed.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        displayedItemByID = displayedIndex.count == displayed.count ? displayedIndex : nil
+        var presentationOnlyIDs: Set<String> = ["transcript-bottom"]
+        if (sourceWindow.originalStart ?? 0) > 0 { presentationOnlyIDs.insert("earlier-messages") }
+        switch frozenHandoff {
+        case .none:
+            break
+        case .pending(let pending):
+            presentationOnlyIDs.insert("pending-prompt-\(pending.id)")
+        case .outgoing(let outgoing, _):
+            presentationOnlyIDs.insert(outgoing.id)
+        }
+        for message in queuedMessages {
+            presentationOnlyIDs.insert(
+                queuePresentationIDByOperationID[message.id] ?? "queued-message-\(message.id)"
+            )
+        }
+        presentationOnlyIDSet = presentationOnlyIDs
         let descriptors = timeline.items.flatMap { item -> [ChatToolDescriptor] in
             guard case .toolRun(let run) = item else { return [] }
             return run.tools
@@ -392,6 +416,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
     }
     var hasUniqueDisplayedIDs: Bool {
         guard timeline.isInternallyConsistent,
+              displayedItemByID != nil,
               toolDescriptorByID != nil,
               runtimeIDSet.count == runtimeItems.count,
               runtimeIDSet.allSatisfy({ !timeline.containsID($0) }),
@@ -429,6 +454,14 @@ struct InstalledChatTranscript: Hashable, Sendable {
     }
     func containsDisplayedID(_ id: String) -> Bool {
         timeline.containsID(id) || runtimeIDSet.contains(id)
+    }
+
+    func displayedItem(for id: String) -> ChatTranscriptRenderItem? {
+        displayedItemByID?[id]
+    }
+
+    func containsUnaliasedPhysicalID(_ id: String) -> Bool {
+        containsDisplayedID(id) || presentationOnlyIDSet.contains(id)
     }
 
     func resolveToolDetails(

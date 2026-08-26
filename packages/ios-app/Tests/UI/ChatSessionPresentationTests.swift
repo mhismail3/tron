@@ -79,6 +79,36 @@ struct ChatSessionPresentationTests {
         #expect(clock.activeSleeperCount() == 0)
     }
 
+    @Test("canonical alias ledger is causal one-to-one and bounded")
+    func boundedAliases() {
+        var ledger = BoundedChatIdentityAliasLedger()
+        let inserted = ledger.insert(canonicalID: "canonical-a", presentationID: "lifecycle-a")
+        let duplicate = ledger.insert(canonicalID: "canonical-a", presentationID: "lifecycle-a")
+        let conflictingCanonical = ledger.insert(
+            canonicalID: "canonical-a",
+            presentationID: "unrelated"
+        )
+        let conflictingPresentation = ledger.insert(
+            canonicalID: "canonical-b",
+            presentationID: "lifecycle-a"
+        )
+        #expect(inserted)
+        #expect(duplicate)
+        #expect(!conflictingCanonical)
+        #expect(!conflictingPresentation)
+        #expect(ledger.aliases == ["canonical-a": "lifecycle-a"])
+
+        var allInserted = true
+        for index in 0..<(ChatTranscriptPageRequest.maximumItemCount + 20) {
+            allInserted = ledger.insert(
+                canonicalID: "canonical-\(index)",
+                presentationID: "lifecycle-\(index)"
+            ) && allInserted
+        }
+        #expect(allInserted)
+        #expect(ledger.aliases.count == ChatTranscriptPageRequest.maximumItemCount)
+    }
+
     @Test("canonical handoff ledger is bounded")
     func boundedHandoffs() {
         var ledger = BoundedChatIdentityLedger()

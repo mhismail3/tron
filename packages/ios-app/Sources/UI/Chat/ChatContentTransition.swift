@@ -280,6 +280,10 @@ private enum ChatEntranceAnimationTransactionKey: TransactionKey {
     static let defaultValue = false
 }
 
+private enum ChatPromptReplacementAnimationTransactionKey: TransactionKey {
+    static let defaultValue = false
+}
+
 extension Transaction {
     var admitsChatToolChipAnimation: Bool {
         get { self[ChatToolChipAnimationTransactionKey.self] }
@@ -289,6 +293,23 @@ extension Transaction {
     var admitsChatEntranceAnimation: Bool {
         get { self[ChatEntranceAnimationTransactionKey.self] }
         set { self[ChatEntranceAnimationTransactionKey.self] = newValue }
+    }
+
+    var admitsChatPromptReplacementAnimation: Bool {
+        get { self[ChatPromptReplacementAnimationTransactionKey.self] }
+        set { self[ChatPromptReplacementAnimationTransactionKey.self] = newValue }
+    }
+}
+
+enum ChatPromptReplacementAnimationPolicy {
+    static func animates(reduceMotion: Bool) -> Bool { !reduceMotion }
+
+    static func animation(reduceMotion: Bool) -> Animation? {
+        guard animates(reduceMotion: reduceMotion) else { return nil }
+        return ChatContentTransitionPolicy.revealAnimation(
+            for: .queuedPrompt,
+            reduceMotion: false
+        )
     }
 }
 
@@ -301,6 +322,7 @@ private struct ChatStableTranscriptUpdateModifier: ViewModifier {
             // interactive glass jump to its pressed scale before its drag morph.
             if !transaction.admitsChatToolChipAnimation,
                !transaction.admitsChatEntranceAnimation,
+               !transaction.admitsChatPromptReplacementAnimation,
                !transaction.isContinuous {
                 transaction.animation = nil
             }

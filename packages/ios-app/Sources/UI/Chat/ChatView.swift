@@ -358,6 +358,7 @@ struct ChatView: View {
             transcriptPresentation.reset()
             sessionPresentation.earlierMessagesOperation.cancel()
             sessionPresentation.canonicalSubmissionHandoffs.removeAll()
+            sessionPresentation.canonicalSubmissionAliases.removeAll()
             retireQueueMutationPresentationState()
             performanceTracker.cancelAll()
             if let generation = sessionPresentation.modelPresentationGeneration {
@@ -373,6 +374,16 @@ struct ChatView: View {
 
     private func rememberCanonicalSubmissionHandoffs(_ ids: Set<String>) {
         sessionPresentation.canonicalSubmissionHandoffs.formUnion(ids)
+    }
+
+    private func rememberCanonicalSubmissionAlias(
+        canonicalID: String,
+        presentationID: String
+    ) {
+        _ = sessionPresentation.canonicalSubmissionAliases.insert(
+            canonicalID: canonicalID,
+            presentationID: presentationID
+        )
     }
 
     /// Keeps the installed queue boundary visible while a local queue command
@@ -486,6 +497,15 @@ struct ChatView: View {
                pendingReceipt.operationID.map({ sessionPresentation.locallyMutatedQueueOperationIDs.contains($0) }) != true,
                let receipt = model.composerDrafts.consumeCanonicalSubmissionHandoff(target: target) {
                 canonicalHandoffIDs.insert(receipt.canonicalID)
+                if let alias = ChatCanonicalSubmissionAliasPolicy.alias(
+                    for: receipt,
+                    in: snapshot.transcript
+                ) {
+                    rememberCanonicalSubmissionAlias(
+                        canonicalID: alias.canonicalID,
+                        presentationID: alias.presentationID
+                    )
+                }
                 seedCanonicalMediaPreviews(from: receipt, in: snapshot)
             }
             rememberCanonicalSubmissionHandoffs(canonicalHandoffIDs)
@@ -509,12 +529,20 @@ struct ChatView: View {
             // handoff against the incoming canonical facts before submit, so
             // the canonical row installs directly visible rather than
             // replaying its entrance entitlement.
-            rememberCanonicalSubmissionHandoffs(
-                ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
-                    for: previousPending,
-                    in: snapshot.transcript
-                )
+            let pendingCanonicalIDs = ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
+                for: previousPending,
+                in: snapshot.transcript
             )
+            rememberCanonicalSubmissionHandoffs(pendingCanonicalIDs)
+            if let canonicalID = ChatPendingCanonicalSuppressionPolicy.exactCanonicalID(
+                for: previousPending,
+                in: snapshot.transcript
+            ) {
+                rememberCanonicalSubmissionAlias(
+                    canonicalID: canonicalID,
+                    presentationID: "pending-prompt-\(previousPending.id)"
+                )
+            }
             if previousPending.promptBehavior.isQueuedKind,
                ChatPromptLifecycleTransitionPolicy.suppressesQueueReplacement(
                    pendingOperationID: previousPending.id,
@@ -578,6 +606,7 @@ struct ChatView: View {
             performanceTracker: performanceTracker,
             installed: transcriptPresentation.installed,
             canonicalSubmissionIDs: sessionPresentation.canonicalSubmissionHandoffs.ids,
+            canonicalSubmissionAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
             isReady: isTranscriptReady,
             reduceMotion: reduceMotion,
             presentationEpoch: sessionPresentation.open.epoch,

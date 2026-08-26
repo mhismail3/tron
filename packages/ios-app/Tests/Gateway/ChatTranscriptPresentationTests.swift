@@ -97,10 +97,55 @@ struct ChatTranscriptPresentationTests {
             for: pending,
             in: [unrelated, exact]
         ) == ["exact"])
+        let presentation = ChatPendingPromptPresentation(snapshot: pending, isCompacting: true)
+        #expect(ChatPendingCanonicalSuppressionPolicy.exactCanonicalID(
+            for: presentation,
+            in: [unrelated, exact]
+        ) == "exact")
+        #expect(ChatPendingCanonicalSuppressionPolicy.exactCanonicalID(
+            for: presentation,
+            in: [unrelated]
+        ) == nil)
         #expect(ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
             for: pending,
             in: [exact, exact]
         ).isEmpty)
+        #expect(ChatPendingCanonicalSuppressionPolicy.exactCanonicalID(
+            for: presentation,
+            in: [exact, exact]
+        ) == nil)
+
+        let submission = ComposerSubmissionSnapshot(
+            target: .init(sessionID: "session", generation: 1),
+            textRevision: 1,
+            outgoingText: "same",
+            attachmentIDs: [],
+            behavior: nil,
+            localNonce: 1
+        )
+        let exactReceipt = CanonicalSubmissionHandoffReceipt(
+            canonicalID: exact.id,
+            attachments: [],
+            operationID: pending.id,
+            submission: submission
+        )
+        #expect(ChatCanonicalSubmissionAliasPolicy.alias(
+            for: exactReceipt,
+            in: [unrelated, exact]
+        ) == ChatCanonicalSubmissionAlias(
+            canonicalID: exact.id,
+            presentationID: submission.presentationID
+        ))
+        let unrelatedReceipt = CanonicalSubmissionHandoffReceipt(
+            canonicalID: unrelated.id,
+            attachments: [],
+            operationID: pending.id,
+            submission: submission
+        )
+        #expect(ChatCanonicalSubmissionAliasPolicy.alias(
+            for: unrelatedReceipt,
+            in: [unrelated, exact]
+        ) == nil)
     }
 
     @Test("previous installed pending handoff suppresses replacement when new snapshot omits pending")
@@ -124,6 +169,12 @@ struct ChatTranscriptPresentationTests {
             for: pending,
             in: [canonical]
         ) == ["canonical-2"])
+        // Same-text compatibility suppression avoids a duplicate entrance but
+        // cannot transfer physical identity without exact operation causality.
+        #expect(ChatPendingCanonicalSuppressionPolicy.exactCanonicalID(
+            for: pending,
+            in: [canonical]
+        ) == nil)
         #expect(!ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
             isReady: true,
             entranceSuppressed: false,
