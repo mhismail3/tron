@@ -69,33 +69,16 @@ struct AgentDefaultsSettingsView: View {
                 }
                 TronSettingsGroup("Default Model", accent: .tronPurple) {
                     VStack(spacing: 0) {
-                        TronProgressiveSheetLink(accessibilityLabel: "Default Model") {
-                            ModelPicker(
-                                selection: $draft.selectedModel,
-                                models: model.providerCatalog(for: catalogTarget)?.models.filter(\.available) ?? []
-                            )
-                                .tronNavigationTitle("Default Model", accent: .tronPurple)
-                        } label: {
-                            TronValueRow(
-                                icon: "cpu",
-                                title: "Model",
-                                value: draft.selectedModel?.displayDescription ?? "Choose model",
-                                accent: .tronPurple
-                            )
-                        }
+                        TronModelSelectionRow(
+                            selection: $draft.selectedModel,
+                            models: model.providerCatalog(for: catalogTarget)?.models.filter(\.available) ?? [],
+                            navigationTitle: "Default Model"
+                        )
                         TronSettingsDivider(accent: .tronPurple)
-                        TronValueRow(
-                            icon: "brain",
-                            title: "Thinking",
-                            value: draft.thinking.capitalized,
-                            accent: .tronPurple
-                        ) {
-                            TronInlineMenu("Change", accent: .tronPurple) {
-                                ForEach(["off", "minimal", "low", "medium", "high", "xhigh", "max"], id: \.self) { level in
-                                    Button(level.capitalized) { draft.thinking = level }
-                                }
-                            }
-                        }
+                        TronThinkingSelectionRow(
+                            selection: $draft.thinking,
+                            levels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+                        )
                     }
                 }
                 TronSettingsGroup("Context", accent: .tronTeal) {

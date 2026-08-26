@@ -501,55 +501,36 @@ struct SessionContextSheet: View {
     private func configurationSection(_ snapshot: SessionSnapshot) -> some View {
         TronSettingsGroup("Configuration", accent: .tronPurple) {
             VStack(spacing: 0) {
-                Menu {
-                    ForEach(
-                        model.providerCatalog(for: .session(id: sessionID))?.models.filter(\.available) ?? [],
-                        id: \.ref
-                    ) { candidate in
-                        Button {
+                TronModelSelectionRow(
+                    selection: Binding(
+                        get: { snapshot.model },
+                        set: { selection in
+                            guard let selection, selection != snapshot.model else { return }
                             Task {
-                                do { try await model.setModel(candidate.ref, sessionID: sessionID) }
+                                do { try await model.setModel(selection, sessionID: sessionID) }
                                 catch { surfaceActionError(error) }
                             }
-                        } label: {
-                            if snapshot.model == candidate.ref { Label(candidate.displayName, systemImage: "checkmark") }
-                            else { Text(candidate.displayName) }
                         }
-                    }
-                } label: {
-                    TronValueRow(
-                        icon: "cpu",
-                        title: "Model",
-                        value: snapshot.model?.displayDescription ?? "Not selected",
-                        accent: configurationRowAccent
-                    )
-                    .accessibilityHidden(true)
-                }
-                .accessibilityLabel("Model: \(snapshot.model?.displayDescription ?? "Not selected")")
+                    ),
+                    models: model.providerCatalog(for: .session(id: sessionID))?.models.filter(\.available) ?? [],
+                    navigationTitle: "Session Model",
+                    accent: configurationRowAccent
+                )
                 TronSettingsDivider(accent: .tronPurple)
-                Menu {
-                    ForEach(snapshot.availableThinkingLevels, id: \.self) { level in
-                        Button {
+                TronThinkingSelectionRow(
+                    selection: Binding(
+                        get: { snapshot.thinkingLevel },
+                        set: { level in
+                            guard level != snapshot.thinkingLevel else { return }
                             Task {
                                 do { try await model.setThinking(level, sessionID: sessionID) }
                                 catch { surfaceActionError(error) }
                             }
-                        } label: {
-                            if snapshot.thinkingLevel == level { Label(level.capitalized, systemImage: "checkmark") }
-                            else { Text(level.capitalized) }
                         }
-                    }
-                } label: {
-                    TronValueRow(
-                        icon: "brain",
-                        title: "Thinking",
-                        detail: "Reasoning effort for this session",
-                        value: snapshot.thinkingLevel.capitalized,
-                        accent: configurationRowAccent
-                    )
-                    .accessibilityHidden(true)
-                }
-                .accessibilityLabel("Thinking: \(snapshot.thinkingLevel.capitalized)")
+                    ),
+                    levels: snapshot.availableThinkingLevels,
+                    accent: configurationRowAccent
+                )
                 TronSettingsDivider(accent: .tronPurple)
                 manageRow(
                     icon: "shippingbox",

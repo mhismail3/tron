@@ -19,6 +19,7 @@ struct ContentPart: Codable, Hashable, Sendable, Identifiable {
     let blobId: String?
     let toolCallId: String?
     let name: String?
+    let label: String?
     let arguments: JSONValue?
     let groupId: String?
     let groupIndex: Int?
@@ -52,6 +53,7 @@ extension ContentPart {
         self.blobId = blobId
         self.toolCallId = toolCallId
         self.name = name
+        label = nil
         self.arguments = arguments
         groupId = nil
         groupIndex = nil
@@ -61,7 +63,7 @@ extension ContentPart {
 
     private enum CodingKeys: String, CodingKey {
         case id, ordinal, thinkingRunOrdinal, type, text, attachment, redacted,
-             mimeType, blobId, toolCallId, name, arguments,
+             mimeType, blobId, toolCallId, name, label, arguments,
              groupId, groupIndex, groupCount, groupFinalized
     }
 
@@ -87,6 +89,7 @@ extension ContentPart {
         blobId = try values.decodeIfPresent(String.self, forKey: .blobId)
         toolCallId = try values.decodeIfPresent(String.self, forKey: .toolCallId)
         name = try values.decodeIfPresent(String.self, forKey: .name)
+        label = try values.decodeIfPresent(String.self, forKey: .label)
         arguments = try values.decodeIfPresent(JSONValue.self, forKey: .arguments)
         groupId = try values.decodeIfPresent(String.self, forKey: .groupId)
         groupIndex = try values.decodeIfPresent(Int.self, forKey: .groupIndex)
@@ -128,6 +131,7 @@ extension ContentPart {
         try values.encodeIfPresent(blobId, forKey: .blobId)
         try values.encodeIfPresent(toolCallId, forKey: .toolCallId)
         try values.encodeIfPresent(name, forKey: .name)
+        try values.encodeIfPresent(label, forKey: .label)
         try values.encodeIfPresent(arguments, forKey: .arguments)
         try values.encodeIfPresent(groupId, forKey: .groupId)
         try values.encodeIfPresent(groupIndex, forKey: .groupIndex)
@@ -192,6 +196,7 @@ struct MessageTranscriptItem: TranscriptPayload {
     let errorMessage: String?
     let toolCallId: String?
     let toolName: String?
+    let toolLabel: String?
     let isError: Bool?
     let details: JSONValue?
     let usage: JSONValue?
@@ -204,7 +209,7 @@ struct MessageTranscriptItem: TranscriptPayload {
 
     private enum CodingKeys: String, CodingKey {
         case id, parentId, timestamp, kind, role, presentationId, content, provider, modelId, stopReason,
-             errorMessage, toolCallId, toolName, isError, details, usage, startedAt,
+             errorMessage, toolCallId, toolName, toolLabel, isError, details, usage, startedAt,
              completedAt, durationMs, lastProgressAt, progressSequence, extensionOrigin
     }
 
@@ -212,14 +217,14 @@ struct MessageTranscriptItem: TranscriptPayload {
         id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind, role: TranscriptItem.Role,
         presentationId: String, content: [ContentPart], provider: String? = nil, modelId: String? = nil,
         stopReason: String? = nil, errorMessage: String? = nil, toolCallId: String? = nil, toolName: String? = nil,
-        isError: Bool? = nil, details: JSONValue? = nil, usage: JSONValue? = nil, startedAt: String? = nil,
+        toolLabel: String? = nil, isError: Bool? = nil, details: JSONValue? = nil, usage: JSONValue? = nil, startedAt: String? = nil,
         completedAt: String? = nil, durationMs: Int? = nil, lastProgressAt: String? = nil,
         progressSequence: Int? = nil, extensionOrigin: ExtensionToolOrigin? = nil
     ) {
         self.id = id; self.parentId = parentId; self.timestamp = timestamp; self.kind = kind; self.role = role
         self.presentationId = presentationId; self.content = content; self.provider = provider; self.modelId = modelId
         self.stopReason = stopReason; self.errorMessage = errorMessage; self.toolCallId = toolCallId; self.toolName = toolName
-        self.isError = isError; self.details = details; self.usage = usage; self.startedAt = startedAt; self.completedAt = completedAt
+        self.toolLabel = toolLabel; self.isError = isError; self.details = details; self.usage = usage; self.startedAt = startedAt; self.completedAt = completedAt
         self.durationMs = durationMs; self.lastProgressAt = lastProgressAt; self.progressSequence = progressSequence
         self.extensionOrigin = extensionOrigin
     }
@@ -252,6 +257,7 @@ struct MessageTranscriptItem: TranscriptPayload {
         errorMessage = try values.decodeIfPresent(String.self, forKey: .errorMessage)
         toolCallId = try values.decodeIfPresent(String.self, forKey: .toolCallId)
         toolName = try values.decodeIfPresent(String.self, forKey: .toolName)
+        toolLabel = try values.decodeIfPresent(String.self, forKey: .toolLabel)
         isError = try values.decodeIfPresent(Bool.self, forKey: .isError)
         details = try values.decodeIfPresent(JSONValue.self, forKey: .details)
         usage = try values.decodeIfPresent(JSONValue.self, forKey: .usage)
@@ -456,6 +462,7 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
     var errorMessage: String? { if case .message(let value) = self { value.errorMessage } else { nil } }
     var toolCallId: String? { if case .message(let value) = self { value.toolCallId } else { nil } }
     var toolName: String? { if case .message(let value) = self { value.toolName } else { nil } }
+    var toolLabel: String? { if case .message(let value) = self { value.toolLabel } else { nil } }
     var extensionOrigin: ExtensionToolOrigin? { if case .message(let value) = self { value.extensionOrigin } else { nil } }
     var isError: Bool? { if case .message(let value) = self { value.isError } else { nil } }
     var details: JSONValue? {

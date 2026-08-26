@@ -1064,7 +1064,8 @@ enum ChatTranscriptProjectionKernel {
         let liveOutput = live.output.flatMap { $0.isEmpty ? nil : $0 }
         let content = liveOutput ?? canonical.content
         return ChatToolPresentation(
-            id: canonical.id, title: canonical.title == "Tool" ? live.toolName : canonical.title,
+            id: canonical.id,
+            title: live.toolLabel ?? (canonical.title == "Tool" ? live.toolName : canonical.title),
             subtitle: liveToolSubtitle(live.status), request: canonical.request ?? live.arguments,
             response: response, content: content,
             fallbackContent: liveOutput == nil && content.isEmpty
@@ -1087,7 +1088,7 @@ enum ChatTranscriptProjectionKernel {
     private static func livePresentation(_ tool: ToolExecutionState) -> ChatToolPresentation {
         let response = tool.result ?? tool.partialResult
         return ChatToolPresentation(
-            id: tool.toolCallId, title: tool.toolName, subtitle: liveToolSubtitle(tool.status),
+            id: tool.toolCallId, title: tool.toolLabel ?? tool.toolName, subtitle: liveToolSubtitle(tool.status),
             request: tool.arguments, response: response, content: tool.output ?? "",
             fallbackContent: tool.output == nil ? (response ?? tool.arguments) : nil,
             error: tool.isError, startedAt: tool.startedAt, completedAt: tool.completedAt,
@@ -1151,7 +1152,8 @@ enum ChatTranscriptProjectionKernel {
                 guard part.type == .toolCall else { return nil }
                 if let callID = part.toolCallId, let result = results[callID] {
                     return ChatToolPresentation(
-                        id: part.toolCallId ?? part.id, title: part.name ?? result.toolName ?? "Tool",
+                        id: part.toolCallId ?? part.id,
+                        title: part.label ?? result.toolLabel ?? part.name ?? result.toolName ?? "Tool",
                         subtitle: result.isError == true ? "Failed" : "Completed", request: part.arguments,
                         response: result.details, content: result.text,
                         fallbackContent: result.text.isEmpty ? result.details : nil,
@@ -1165,7 +1167,7 @@ enum ChatTranscriptProjectionKernel {
                     )
                 }
                 return ChatToolPresentation(
-                    id: part.toolCallId ?? part.id, title: part.name ?? "Tool", subtitle: "Invocation",
+                    id: part.toolCallId ?? part.id, title: part.label ?? part.name ?? "Tool", subtitle: "Invocation",
                     request: part.arguments, response: nil, content: "", fallbackContent: part.arguments,
                     error: false, startedAt: item.timestamp, completedAt: nil, durationMs: nil,
                     lastProgressAt: item.timestamp, progressSequence: nil, extensionOrigin: nil,
@@ -1180,7 +1182,7 @@ enum ChatTranscriptProjectionKernel {
 
     private static func toolResultPresentation(_ item: TranscriptItem) -> ChatToolPresentation {
         ChatToolPresentation(
-            id: item.toolCallId ?? item.id, title: item.toolName ?? "Tool result",
+            id: item.toolCallId ?? item.id, title: item.toolLabel ?? item.toolName ?? "Tool result",
             subtitle: item.isError == true ? "Failed" : "Completed", request: nil,
             response: item.details, content: item.text, fallbackContent: item.text.isEmpty ? item.details : nil,
             error: item.isError == true, startedAt: item.startedAt,

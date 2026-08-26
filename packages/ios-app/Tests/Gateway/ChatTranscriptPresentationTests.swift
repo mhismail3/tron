@@ -1877,7 +1877,7 @@ struct ChatTranscriptPresentationTests {
     func idleRunningToolIsInterrupted() throws {
         var snapshot = try fixture(transcript: """
         [
-          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"call","type":"toolCall","toolCallId":"wait","name":"subagent_wait","arguments":{}}]}
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"call","type":"toolCall","toolCallId":"wait","name":"subagent_wait","label":"Subagent Wait","arguments":{}}]}
         ]
         """)
         snapshot.toolExecutions = [tool("wait", "subagent_wait", startedAt: "2026-01-01T00:00:01Z")]

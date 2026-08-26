@@ -4541,7 +4541,10 @@ export default function (pi) {
       expect.objectContaining({ name: "review-skill", description: "Inspect a code change", scope: "project" }),
     ]));
     expect(resources.tools).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "project_echo", description: "Echo project text", scope: "project" }),
+      expect.objectContaining({
+        name: "project_echo", label: "Project echo",
+        description: "Echo project text", scope: "project",
+      }),
     ]));
 
     resourceEvents.length = 0;

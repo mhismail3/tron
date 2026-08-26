@@ -50,7 +50,7 @@ struct TranscriptRow: View, Equatable {
     @ViewBuilder private var message: some View {
         if item.role == .toolResult {
             ToolCard(
-                title: item.toolName ?? "Tool result",
+                title: item.toolLabel ?? item.toolName ?? "Tool result",
                 subtitle: item.isError == true ? "Failed" : "Completed",
                 content: item.text,
                 error: item.isError == true,
@@ -104,7 +104,7 @@ struct TranscriptRow: View, Equatable {
                             if rendersToolCalls {
                                 if let callID = part.toolCallId, let result = toolResults[callID] {
                                     ToolCard(
-                                        title: part.name ?? result.toolName ?? "Tool",
+                                        title: part.label ?? result.toolLabel ?? part.name ?? result.toolName ?? "Tool",
                                         subtitle: result.isError == true ? "Failed" : "Completed",
                                         content: result.text,
                                         error: result.isError == true,
@@ -114,7 +114,7 @@ struct TranscriptRow: View, Equatable {
                                     )
                                 } else {
                                     ToolCard(
-                                        title: part.name ?? "Tool",
+                                        title: part.label ?? part.name ?? "Tool",
                                         subtitle: "Invocation",
                                         content: "",
                                         request: part.arguments,

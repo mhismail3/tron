@@ -324,7 +324,7 @@ struct ProjectResourcesView: View {
     private func resourceTitle(_ value: JSONValue, fallback: String) -> String {
         if let text = value.stringValue { return text }
         guard let object = value.objectValue else { return fallback }
-        for key in ["name", "title", "path", "id"] {
+        for key in ["label", "name", "title", "path", "id"] {
             if let text = object[key]?.stringValue, !text.isEmpty {
                 return key == "path" ? URL(fileURLWithPath: text).lastPathComponent : text
             }

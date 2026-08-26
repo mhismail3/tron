@@ -1202,6 +1202,7 @@ export class RuntimeSlot {
       undefined,
       this.streamPresentationId,
       false,
+      this.toolLabels(),
     );
     this.emit("session.progress", safeJson({
       message: projected === undefined ? undefined : boundStreamingProgressItem(projected),
@@ -1226,6 +1227,7 @@ export class RuntimeSlot {
       undefined,
       this.streamPresentationId,
       true,
+      this.toolLabels(),
     );
     if (!projected || projected.kind !== "message") return;
     this.finalizedStreamPresentationId = this.streamPresentationId;
@@ -1842,12 +1844,14 @@ export class RuntimeSlot {
           performance.now()
         );
         const extensionOrigin = this.extensionToolOrigin(event.toolName);
+        const toolLabel = existing?.toolLabel ?? this.toolLabel(event.toolName);
         const extensionActivity = this.updateExtensionActivity(
           event.toolCallId, event.toolName, extensionOrigin, "running", startedAt, now, undefined, undefined, durationMs
         );
         const state: ToolExecutionState = {
           toolCallId: event.toolCallId,
           toolName: event.toolName,
+          ...(toolLabel ? { toolLabel } : {}),
           order: existing?.order ?? this.nextToolOrder++,
           status: "running",
           arguments: projectJson(event.args),
@@ -1881,12 +1885,14 @@ export class RuntimeSlot {
           performance.now()
         );
         const extensionOrigin = this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin;
+        const toolLabel = existing?.toolLabel ?? this.toolLabel(event.toolName);
         const extensionActivity = this.updateExtensionActivity(
           event.toolCallId, event.toolName, extensionOrigin, "running", startedAt, now, event.partialResult, undefined, durationMs
         );
         const state: ToolExecutionState = {
           toolCallId: event.toolCallId,
           toolName: event.toolName,
+          ...(toolLabel ? { toolLabel } : {}),
           order: existing?.order ?? this.nextToolOrder++,
           status: "running",
           arguments: projectJson(event.args),
@@ -1926,12 +1932,14 @@ export class RuntimeSlot {
         );
         const output = projectToolOutput(event.result);
         const extensionOrigin = this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin;
+        const toolLabel = existing?.toolLabel ?? this.toolLabel(event.toolName);
         const extensionActivity = this.updateExtensionActivity(
           event.toolCallId, event.toolName, extensionOrigin, event.isError ? "failed" : "completed", startedAt, now, event.result, now, durationMs
         );
         const state: ToolExecutionState = {
           toolCallId: event.toolCallId,
           toolName: event.toolName,
+          ...(toolLabel ? { toolLabel } : {}),
           order: existing?.order ?? this.nextToolOrder++,
           status: event.isError ? "failed" : "completed",
           arguments: existing?.arguments ?? null,
@@ -2846,7 +2854,7 @@ export class RuntimeSlot {
       activityId: activityKey,
       toolCallId,
       source: extensionOrigin,
-      title: toolName,
+      title: this.toolLabel(toolName) ?? toolName,
       ...(asyncDir ? { mode: "asynchronous" } : {}),
       status: current?.lifecycle && terminalStates.includes(current.lifecycle.state) ? current.status : effectiveStatus,
       authoritativeStatus: invalidDetachedDirectory || reportedTerminal || Boolean(current?.lifecycle && terminalStates.includes(current.lifecycle.state)),
@@ -2888,7 +2896,7 @@ export class RuntimeSlot {
         activityId: activityKey,
         toolCallId,
         source: extensionOrigin,
-        title: toolName,
+        title: this.toolLabel(toolName) ?? toolName,
         ...(asyncDir ? { mode: "asynchronous" } : {}),
         status,
         startedAt,
@@ -3013,6 +3021,30 @@ export class RuntimeSlot {
     this.activityHeartbeat = undefined;
   }
 
+  private toolLabel(toolName: string): string | undefined {
+    const label = this.runtime?.session.extensionRunner.getToolDefinition(toolName)?.label.trim();
+    if (!label || Buffer.byteLength(label) > 256
+      || [...label].some((character) => {
+        const code = character.codePointAt(0)!;
+        return code < 0x20 || code === 0x7f;
+      })) return undefined;
+    return label;
+  }
+
+  private toolLabels(): ReadonlyMap<string, string> {
+    const labels = new Map<string, string>();
+    for (const tool of this.runtime?.session.getAllTools() ?? []) {
+      const label = this.toolLabel(tool.name);
+      if (label) labels.set(tool.name, label);
+    }
+    return labels;
+  }
+
+  toolPresentationLabels(): ReadonlyMap<string, string> {
+    this.assertNoTrustReload();
+    return this.toolLabels();
+  }
+
   private extensionToolOrigin(toolName: string): ExtensionToolOrigin | undefined {
     const session = this.runtime?.session;
     if (!session) return undefined;
@@ -3040,6 +3072,7 @@ export class RuntimeSlot {
       ...(state.groupCount === undefined ? {} : { groupCount: state.groupCount }),
       ...(state.groupFinalized ? { groupFinalized: true } : {}),
       ...(state.extensionOrigin ? { extensionOrigin: state.extensionOrigin } : {}),
+      ...(state.toolLabel ? { toolLabel: state.toolLabel } : {}),
     });
     while (this.toolMetadata.size > 2_048) {
       const oldest = this.toolMetadata.keys().next().value as string | undefined;
@@ -3279,6 +3312,7 @@ export class RuntimeSlot {
           undefined,
           this.streamPresentationId,
           this.finalizedStreamPresentationId === this.streamPresentationId,
+          this.toolLabels(),
         );
       })()
       : undefined;
@@ -3382,6 +3416,7 @@ export class RuntimeSlot {
           expectedNextEntryId,
           this.toolMetadata,
           this.presentationIDs,
+          this.toolLabels(),
         ),
         runtimeGeneration: this.runtimeGeneration,
         ...(leafEntryId ? { leafEntryId } : {}),
@@ -4236,6 +4271,7 @@ export class RuntimeSlot {
     return {
       tools: session.getAllTools().map((tool) => ({
         name: tool.name,
+        ...(this.toolLabel(tool.name) ? { label: this.toolLabel(tool.name)! } : {}),
         description: tool.description,
         scope: tool.sourceInfo.scope,
         source: tool.sourceInfo.source,

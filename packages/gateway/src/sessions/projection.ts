@@ -705,7 +705,14 @@ function decorateToolGroups(parts: ContentPart[], presentationId: string, finali
   return parts;
 }
 
-function projectContent(content: ProjectableContent, blobs: BlobStore, ownerId: string, extractAttachments = false, finalizedToolGroups = false): ContentPart[] {
+function projectContent(
+  content: ProjectableContent,
+  blobs: BlobStore,
+  ownerId: string,
+  extractAttachments = false,
+  finalizedToolGroups = false,
+  toolLabels?: ReadonlyMap<string, string>,
+): ContentPart[] {
   const source = typeof content === "string" ? [{ type: "text" as const, text: content }] : content;
   const projected: ContentPart[] = [];
   let bytes = 2;
@@ -750,7 +757,16 @@ function projectContent(content: ProjectableContent, blobs: BlobStore, ownerId: 
       }
       case "toolCall": {
         const ordinal = nextIndex();
-        candidates = [{ id: `${ownerId}:${ordinal}`, ordinal, type: "toolCall", toolCallId: part.id, name: part.name, arguments: projectJson(part.arguments) }];
+        const label = toolLabels?.get(part.name);
+        candidates = [{
+          id: `${ownerId}:${ordinal}`,
+          ordinal,
+          type: "toolCall",
+          toolCallId: part.id,
+          name: part.name,
+          ...(label ? { label } : {}),
+          arguments: projectJson(part.arguments),
+        }];
         break;
       }
     }
@@ -784,6 +800,7 @@ export interface ToolProjectionMetadata {
   lastProgressAt: string;
   progressSequence: number;
   extensionOrigin?: ExtensionToolOrigin;
+  toolLabel?: string;
 }
 
 export function projectMessage(
@@ -795,6 +812,7 @@ export function projectMessage(
   toolMetadata?: ToolProjectionMetadata,
   presentationId = id,
   finalizedToolGroups = true,
+  toolLabels?: ReadonlyMap<string, string>,
 ): TranscriptItem | undefined {
   switch (message.role) {
     case "user":
@@ -810,7 +828,7 @@ export function projectMessage(
         kind: "message",
         role: "assistant",
         presentationId,
-        content: projectContent(message.content, blobs, presentationId, false, finalizedToolGroups),
+        content: projectContent(message.content, blobs, presentationId, false, finalizedToolGroups, toolLabels),
         provider: message.provider,
         modelId: message.model,
         stopReason: message.stopReason,
@@ -828,6 +846,7 @@ export function projectMessage(
         content: projectContent(message.content, blobs, presentationId),
         toolCallId: message.toolCallId,
         toolName: message.toolName,
+        ...(toolLabels?.get(message.toolName) ? { toolLabel: toolLabels.get(message.toolName)! } : {}),
         isError: message.isError,
         ...(message.details === undefined ? {} : { details: projectJson(message.details) }),
         ...(message.usage === undefined ? {} : { usage: projectJson(message.usage) }),
@@ -838,6 +857,7 @@ export function projectMessage(
           lastProgressAt: toolMetadata.lastProgressAt,
           progressSequence: toolMetadata.progressSequence,
           ...(toolMetadata.extensionOrigin ? { extensionOrigin: toolMetadata.extensionOrigin } : {}),
+          ...(toolMetadata.toolLabel ? { toolLabel: toolMetadata.toolLabel } : {}),
           ...(toolMetadata.groupId ? { groupId: toolMetadata.groupId } : {}),
           ...(toolMetadata.groupIndex === undefined ? {} : { groupIndex: toolMetadata.groupIndex }),
           ...(toolMetadata.groupCount === undefined ? {} : { groupCount: toolMetadata.groupCount }),
@@ -895,6 +915,7 @@ export function projectEntry(
   blobs: BlobStore,
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
   presentationIDs?: ReadonlyMap<string, string>,
+  toolLabels?: ReadonlyMap<string, string>,
 ): TranscriptItem | undefined {
   switch (entry.type) {
     case "message":
@@ -907,6 +928,7 @@ export function projectEntry(
         entry.message.role === "toolResult" ? toolMetadata?.get(entry.message.toolCallId) : undefined,
         presentationIDs?.get(entry.id) ?? entry.id,
         entry.message.role === "assistant",
+        toolLabels,
       );
     case "custom_message":
       if (!entry.display) return undefined;
@@ -1251,9 +1273,10 @@ export function projectTranscript(
   manager: TranscriptSessionReader,
   blobs: BlobStore,
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
+  toolLabels?: ReadonlyMap<string, string>,
 ): TranscriptItem[] {
   return projectableTranscriptEntries(manager).map((entry) => {
-    const projected = projectEntry(entry, blobs, toolMetadata);
+    const projected = projectEntry(entry, blobs, toolMetadata, undefined, toolLabels);
     if (!projected) throw new Error("projectable transcript entry produced no item");
     return projected;
   });
@@ -1279,6 +1302,7 @@ export function projectTranscriptPage(
   expectedNextEntryId?: string,
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
   presentationIDs?: ReadonlyMap<string, string>,
+  toolLabels?: ReadonlyMap<string, string>,
 ): TranscriptPage {
   const entries = projectableTranscriptEntries(manager);
   const end = Math.max(0, Math.min(before ?? entries.length, entries.length));
@@ -1289,7 +1313,7 @@ export function projectTranscriptPage(
   let bytes = 2;
   const selected: TranscriptItem[] = [];
   while (start > 0 && selected.length < TRANSCRIPT_PAGE_ITEMS) {
-    const item = projectEntry(entries[start - 1]!, blobs, toolMetadata, presentationIDs);
+    const item = projectEntry(entries[start - 1]!, blobs, toolMetadata, presentationIDs, toolLabels);
     if (!item) throw new Error("projectable transcript entry produced no item");
     const itemBytes = Buffer.byteLength(JSON.stringify(item)) + 1;
     if (bytes + itemBytes > byteBudget && selected.length > 0) break;

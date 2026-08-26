@@ -92,6 +92,8 @@ export type ContentPart =
       type: "toolCall";
       toolCallId: string;
       name: string;
+      /** Extension-authored human-readable label from Pi's registered tool definition. */
+      label?: string;
       arguments: JsonValue;
       /** Disposable declaration metadata; never persisted to Pi JSONL. */
       groupId?: string;
@@ -119,6 +121,8 @@ export type TranscriptItem =
       errorMessage?: string;
       toolCallId?: string;
       toolName?: string;
+      /** Extension-authored human-readable label from the mounted runtime. */
+      toolLabel?: string;
       isError?: boolean;
       details?: JsonValue;
       usage?: JsonValue;
@@ -364,6 +368,8 @@ export interface ProcessTranscriptLease {
 export interface ToolExecutionState {
   toolCallId: string;
   toolName: string;
+  /** Extension-authored human-readable label from Pi's registered tool definition. */
+  toolLabel?: string;
   /** Monotonic within one active run; authoritative tie-breaker for parallel calls. */
   order: number;
   status: "running" | "completed" | "failed";

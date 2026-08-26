@@ -165,6 +165,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     enum Status: String, Codable, Sendable { case running, completed, failed }
     let toolCallId: String
     let toolName: String
+    let toolLabel: String?
     let order: Int?
     let status: Status
     let arguments: JSONValue
@@ -190,7 +191,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     var id: String { toolCallId }
 
     init(
-        toolCallId: String, toolName: String, order: Int? = nil, status: Status,
+        toolCallId: String, toolName: String, toolLabel: String? = nil, order: Int? = nil, status: Status,
         arguments: JSONValue, partialResult: JSONValue?, result: JSONValue?,
         output: String? = nil, outputTruncated: Bool? = nil,
         isError: Bool, startedAt: String, updatedAt: String,
@@ -203,6 +204,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     ) {
         self.toolCallId = toolCallId
         self.toolName = toolName
+        self.toolLabel = toolLabel
         self.order = order
         self.status = status
         self.arguments = arguments
@@ -228,7 +230,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case toolCallId, toolName, order, status, arguments, partialResult, result,
+        case toolCallId, toolName, toolLabel, order, status, arguments, partialResult, result,
              output, outputTruncated, isError, startedAt, updatedAt, lastProgressAt,
              completedAt, durationMs, progressSequence, extensionOrigin, extensionActivity,
              liveActivityRevision, extensionActivityAsOf, groupId, groupIndex, groupCount, groupFinalized
@@ -238,6 +240,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         toolCallId = try values.decode(String.self, forKey: .toolCallId)
         toolName = try values.decode(String.self, forKey: .toolName)
+        toolLabel = try values.decodeIfPresent(String.self, forKey: .toolLabel)
         order = try values.decodeIfPresent(Int.self, forKey: .order)
         status = try values.decode(Status.self, forKey: .status)
         arguments = try values.decode(JSONValue.self, forKey: .arguments)
@@ -279,6 +282,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(toolCallId, forKey: .toolCallId)
         try values.encode(toolName, forKey: .toolName)
+        try values.encodeIfPresent(toolLabel, forKey: .toolLabel)
         try values.encodeIfPresent(order, forKey: .order)
         try values.encode(status, forKey: .status)
         try values.encode(arguments, forKey: .arguments)

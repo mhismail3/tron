@@ -84,6 +84,49 @@ describe("transcript projection", () => {
     expect(projected).toMatchObject({ extensionOrigin: { source: "public-source" } });
   });
 
+  it("projects extension-authored tool labels without replacing canonical tool names", () => {
+    const labels = new Map([["subagent_wait", "Subagent Wait"]]);
+    const assistant = projectMessage(
+      "assistant",
+      null,
+      "2026-01-01T00:00:00Z",
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "wait", name: "subagent_wait", arguments: {} }],
+        api: "openai-responses",
+        provider: "test",
+        model: "test",
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        stopReason: "toolUse",
+        timestamp: 1,
+      },
+      new BlobStore(),
+      undefined,
+      "assistant",
+      true,
+      labels,
+    );
+    const result = projectMessage(
+      "result",
+      "assistant",
+      "2026-01-01T00:00:01Z",
+      {
+        role: "toolResult", toolCallId: "wait", toolName: "subagent_wait",
+        content: [{ type: "text", text: "done" }], isError: false, timestamp: 2,
+      },
+      new BlobStore(),
+      undefined,
+      "result",
+      true,
+      labels,
+    );
+
+    expect(assistant).toMatchObject({
+      content: [expect.objectContaining({ name: "subagent_wait", label: "Subagent Wait" })],
+    });
+    expect(result).toMatchObject({ toolName: "subagent_wait", toolLabel: "Subagent Wait" });
+  });
+
   it("projects contiguous finalized groups with stable declaration metadata", () => {
     const message: AgentMessage = {
       role: "assistant",

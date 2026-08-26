@@ -531,7 +531,9 @@ mounted synchronization path must observe the newer queue revision before local 
 state retires. Tool calls, progress, and results join by `toolCallId`; collapsed rows retain structured
 request/response values without eagerly formatting JSON strings. Opening a detail sheet derives a
 bounded semantic presentation only for that selected tool: exact lowercase built-ins foreground their file,
-command, query, diff, and readable result, while arbitrary extension tools may foreground only the first
+command, query, diff, and readable result. Extension-authored Pi tool labels are projected separately from canonical
+invocation names and become the native row/detail title (for example, `subagent_wait` displays as **Subagent Wait**),
+while arbitrary extension tools may foreground only the first
 trusted common string key and otherwise lead with their result. Bash commands wrap to the available width
 using word-preserving line breaks while outputs and other string metadata wrap; all previews bound pathological
 line count, total characters, and per-line length with explicit head/tail omission markers. Small numeric
@@ -1168,7 +1170,9 @@ alive. Canonical settings determine the default model; catalog order is never a
 default-selection policy. Dashboard Settings explicitly exposes only global configuration; project scope,
 trust, and project package actions appear only when Settings is opened from a
 project session. Manage Session has two primary groups: Configuration owns the
-model, thinking level, peer-presented Project Resources sheet, and final Rename action;
+model, thinking level, peer-presented Project Resources sheet, and final Rename action. Its model row uses the same
+progressive searchable `ModelPicker` sheet as Models and Defaults, and its thinking row uses that settings surface's
+shared inline Change control while retaining the session's authoritative available-level list and immediate mutations;
 Session owns Agent Context, recent history/audit actions, terminal, Git evidence, and
 exports. Configuration row icons use the section's purple palette, while every Session row
 icon—including Git states, exports, sharing, and diagnostics—uses the section's blue palette.

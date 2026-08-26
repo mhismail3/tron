@@ -913,6 +913,14 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ProjectResourcesView.swift"),
             encoding: .utf8
         )
+        let agentConfiguration = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/AgentConfigurationControls.swift"),
+            encoding: .utf8
+        )
+        let agentDefaults = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/AgentDefaultsSettingsView.swift"),
+            encoding: .utf8
+        )
         let history = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionTreeSheet.swift"),
             encoding: .utf8
@@ -950,9 +958,17 @@ struct PresentationStyleGuardTests {
             encoding: .utf8
         )
         #expect(context.contains("ProjectResourcesView(sessionID: sessionID)"))
-        #expect(context.contains("case agentContext, projectResources, history, terminal"))
+        #expect(context.contains("case agentContext, projectResources, history, processHistory, terminal"))
         #expect(context.contains("destination = .projectResources"))
         #expect(context.contains("TronSettingsGroup(\"Configuration\""))
+        #expect(context.contains("TronModelSelectionRow("))
+        #expect(context.contains("navigationTitle: \"Session Model\""))
+        #expect(context.contains("TronThinkingSelectionRow("))
+        #expect(agentConfiguration.contains("TronProgressiveSheetLink(accessibilityLabel: navigationTitle)"))
+        #expect(agentConfiguration.contains("ModelPicker(selection: $selection, models: models)"))
+        #expect(agentConfiguration.contains("TronInlineMenu(\"Change\", accent: accent)"))
+        #expect(agentDefaults.contains("TronModelSelectionRow("))
+        #expect(agentDefaults.contains("TronThinkingSelectionRow("))
         #expect(context.contains("TronSettingsGroup(\"Session\""))
         let configurationSection = (context.components(separatedBy: "private func configurationSection").dropFirst().first ?? "")
             .components(separatedBy: "private func sessionSection").first ?? ""
@@ -1061,6 +1077,7 @@ struct PresentationStyleGuardTests {
         }
         #expect(resources.contains("struct ProjectResourceDetailPresentation: Equatable"))
         #expect(resources.contains("ProjectResourceTextPresentation.readableDescription"))
+        #expect(resources.contains("for key in [\"label\", \"name\", \"title\", \"path\", \"id\"]"))
         #expect(resources.contains("TronSettingsGroup(\"At a Glance\""))
         #expect(resources.contains("private func capabilityCollection("))
         #expect(resources.contains("LazyVGrid("))

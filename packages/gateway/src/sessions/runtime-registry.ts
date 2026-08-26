@@ -1572,7 +1572,17 @@ export class RuntimeRegistry {
       }
       let page: TranscriptPage;
       try {
-        page = projectTranscriptPage({ getBranch: () => parsed.branch }, this.blobs, before, undefined, expectedNextEntryId);
+        const toolLabels = this.slots.get(expectedParentSessionId)?.toolPresentationLabels();
+        page = projectTranscriptPage(
+          { getBranch: () => parsed.branch },
+          this.blobs,
+          before,
+          undefined,
+          expectedNextEntryId,
+          undefined,
+          undefined,
+          toolLabels,
+        );
       } catch (error) {
         if (error instanceof Error && error.message.includes("anchor changed")) {
           throw new GatewayError("conflict", "Subagent transcript changed while loading history", true);
