@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity } from "./extension-run-projection.js";
+import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity } from "./extension-run-projection.js";
 
 const base = {
   id: "tool-call",
@@ -85,6 +85,34 @@ describe("projectExtensionRunActivity", () => {
     expect(hasStructuredExtensionRunActivity({ details: { asyncId: "run-1", results: [] } })).toBe(true);
     expect(hasStructuredExtensionRunActivity({ details: { results: [{ runId: "run-1", status: "running" }] } })).toBe(true);
     expect(hasStructuredExtensionRunActivity({ lifecycleArtifactVersion: 3, runId: "run-2" })).toBe(true);
+  });
+
+  it("recognizes only the bounded foreground pi-subagents progress shape", () => {
+    const update = {
+      details: {
+        mode: "single",
+        results: [{
+          index: 0,
+          agent: "reviewer",
+          progress: { index: 0, agent: "reviewer", status: "running", currentTool: "read", toolCount: 1 },
+        }],
+        progress: [{ index: 0, agent: "reviewer", status: "running", currentTool: "read", toolCount: 1 }],
+      },
+    };
+    expect(hasForegroundSubagentRunActivity(update)).toBe(true);
+    expect(hasStructuredExtensionRunActivity(update)).toBe(false);
+    expect(projectExtensionRunActivity(update, base).children).toEqual([
+      expect.objectContaining({ producerId: "foreground-index:0", label: "reviewer", lifecycle: "running" }),
+    ]);
+    expect(hasForegroundSubagentRunActivity({ details: { ...update.details, mode: "management" } })).toBe(false);
+    expect(hasForegroundSubagentRunActivity({ details: { mode: "single", results: [] } })).toBe(false);
+    expect(hasForegroundSubagentRunActivity({ details: { mode: "single", results: [{ agent: "reviewer", status: "running" }] } })).toBe(false);
+    expect(hasForegroundSubagentRunActivity({ details: { mode: "single", results: [{ index: Number.MAX_SAFE_INTEGER, agent: "reviewer", status: "running" }] } })).toBe(false);
+    expect(hasForegroundSubagentRunActivity({ details: { mode: "parallel", results: [
+      { index: 0, agent: "reviewer", status: "running" },
+      { index: 0, agent: "worker", status: "running" },
+    ] } })).toBe(false);
+    expect(hasForegroundSubagentRunActivity({ details: { mode: "single", results: [{ index: 0, agent: "reviewer", status: "ordinary" }] } })).toBe(false);
   });
 
   it("keeps detached async launch receipts current until lifecycle termination", () => {

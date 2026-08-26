@@ -262,16 +262,16 @@ final class ReadOnlySubagentSessionStore {
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
                     guard let self,
-                          let page = response.page,
                           self.generation == ownedGeneration,
                           self.leaseID == leaseID,
-                          self.revision == revision,
+                          self.revision == revision else { return }
+                    guard let page = response.page,
                           response.revision == revision,
                           page.end == before,
                           page.total == self.transcriptTotal,
                           page.nextEntryId == expectedNext,
                           page.items.allSatisfy({ !existingIDs.contains($0.id) }) else {
-                        self?.status = .reconnecting
+                        self.reopenCanonicalTail(ownedGeneration: ownedGeneration)
                         return
                     }
                     self.items = page.items + self.items
@@ -285,7 +285,7 @@ final class ReadOnlySubagentSessionStore {
                 await MainActor.run { [weak self] in
                     guard let self, self.generation == ownedGeneration else { return }
                     if let failure = error as? GatewayFailure, failure.code == "conflict" {
-                        self.status = .reconnecting
+                        self.reopenCanonicalTail(ownedGeneration: ownedGeneration)
                     } else {
                         self.status = .failed(error.localizedDescription)
                     }
@@ -365,8 +365,10 @@ final class ReadOnlySubagentSessionStore {
                 await MainActor.run { [weak self] in
                     guard let self, self.generation == ownedGeneration else { return }
                     self.refreshTask = nil
-                    if let failure = error as? GatewayFailure,
-                       ["not_found", "unavailable", "unsupported"].contains(failure.code) {
+                    if let failure = error as? GatewayFailure, failure.code == "conflict" {
+                        self.reopenCanonicalTail(ownedGeneration: ownedGeneration)
+                    } else if let failure = error as? GatewayFailure,
+                              ["not_found", "unavailable", "unsupported"].contains(failure.code) {
                         self.status = .unavailable
                     } else {
                         self.status = .failed(error.localizedDescription)
@@ -374,6 +376,18 @@ final class ReadOnlySubagentSessionStore {
                 }
             }
         }
+    }
+
+    private func reopenCanonicalTail(ownedGeneration: Int) {
+        guard generation == ownedGeneration,
+              let parentSessionID,
+              let processID,
+              let presentationGeneration else { return }
+        open(
+            parentSessionID: parentSessionID,
+            processID: processID,
+            presentationGeneration: presentationGeneration
+        )
     }
 
     func updateLiveActivity(_ activity: SessionProcessActivity?) {

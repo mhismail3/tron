@@ -1740,6 +1740,93 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(slot.snapshot().processActivities ?? []).toEqual([]);
   });
 
+  it("admits exact pi-subagents foreground progress beside asynchronous work and settles it independently", async () => {
+    const fixture = await coldFixture("foreground-subagent-progress");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const owner = { id: "extension:pi-subagents", title: "Subagents", source: "project" };
+    const origin: ExtensionToolOrigin = { source: "project", owner };
+    const internal = slot as unknown as {
+      subagentExtensionOrigin: () => ExtensionToolOrigin;
+      updateExtensionActivity: (
+        toolCallId: string, toolName: string, origin: ExtensionToolOrigin,
+        status: "running" | "completed" | "failed", startedAt: string,
+        updatedAt: string, value: unknown, completedAt?: string, durationMs?: number,
+      ) => ExtensionRunActivity | undefined;
+      syncSubagentProcesses: (activity: ExtensionRunActivity) => void;
+    };
+    vi.spyOn(internal, "subagentExtensionOrigin").mockReturnValue(origin);
+    const startedAt = new Date(Date.now() - 1_000).toISOString();
+    const runningAt = new Date().toISOString();
+    const progress = {
+      details: {
+        mode: "single",
+        results: [{
+          index: 0, agent: "reviewer", task: "Review",
+          progress: { index: 0, agent: "reviewer", status: "running", currentTool: "read", toolCount: 2, durationMs: 1_000 },
+        }],
+        progress: [{ index: 0, agent: "reviewer", status: "running", currentTool: "read", toolCount: 2, durationMs: 1_000 }],
+      },
+    };
+
+    expect(internal.updateExtensionActivity(
+      "sync-tool", "subagent", origin, "running", startedAt, runningAt, progress, undefined, 1_000,
+    )).toMatchObject({ toolCallId: "sync-tool", status: "running" });
+    expect(slot.snapshot().processActivities).toEqual([expect.objectContaining({
+      executionMode: "synchronous",
+      title: "reviewer",
+      visibility: "active",
+      currentTool: "read",
+      lifecycle: expect.objectContaining({ state: "running" }),
+    })]);
+
+    internal.syncSubagentProcesses({
+      id: "async-tool", activityId: "async-activity", runId: "async-root", toolCallId: "async-tool",
+      source: origin, title: "Subagent", mode: "asynchronous", status: "running", startedAt, updatedAt: runningAt,
+      children: [{
+        id: "async-child", producerId: "async-child", label: "worker",
+        status: "running", lifecycle: "running", currentTool: "bash",
+      }],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: runningAt },
+    });
+    expect(slot.snapshot().processActivities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ executionMode: "synchronous", title: "reviewer", visibility: "active" }),
+      expect.objectContaining({ executionMode: "asynchronous", title: "worker", visibility: "active" }),
+    ]));
+
+    const unrelatedOwner: ExtensionToolOrigin = {
+      source: "project",
+      owner: { id: "extension:other", title: "Other", source: "project" },
+    };
+    expect(internal.updateExtensionActivity(
+      "other-tool", "subagent", unrelatedOwner, "running", startedAt, runningAt, progress,
+    )).toBeUndefined();
+
+    const completedAt = new Date().toISOString();
+    const terminal = {
+      details: {
+        mode: "single",
+        runId: "sync-root",
+        results: [{
+          index: 0, agent: "reviewer", task: "Review", exitCode: 0, finalOutput: "Complete",
+          progress: { index: 0, agent: "reviewer", status: "completed", toolCount: 3, durationMs: 1_200 },
+        }],
+      },
+    };
+    expect(internal.updateExtensionActivity(
+      "sync-tool", "subagent", origin, "completed", startedAt, completedAt, terminal, completedAt, 1_200,
+    )).toMatchObject({ toolCallId: "sync-tool", status: "completed", runId: "sync-root" });
+    expect(slot.snapshot().processActivities).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        executionMode: "synchronous", title: "reviewer", visibility: "recent",
+        lifecycle: expect.objectContaining({ state: "completed" }),
+      }),
+      expect.objectContaining({
+        executionMode: "asynchronous", title: "worker", visibility: "active",
+        lifecycle: expect.objectContaining({ state: "running" }),
+      }),
+    ]));
+  });
+
   it("emits exact removals when process producer identity is replaced", async () => {
     const fixture = await coldFixture("process-removal-delta");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());

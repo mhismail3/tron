@@ -3,6 +3,7 @@ import { watch, type FSWatcher } from "node:fs";
 import type { JsonValue, ProcessTranscriptLease } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { AsyncMutex } from "../util/async-mutex.js";
 
 const MAX_LEASES_PER_CLIENT = 8;
 const MAX_LEASES_PER_CLIENT_SESSION = 2;
@@ -26,6 +27,7 @@ type Lease = {
   invalidationTimer: NodeJS.Timeout | undefined;
   timeout: NodeJS.Timeout;
   notify: (topic: string, sessionId: string, payload: JsonValue) => void;
+  pageMutex: AsyncMutex;
 };
 
 /** Connection-owned, disposable observer of a validated canonical child file.
@@ -92,6 +94,7 @@ export class ProcessTranscriptLeaseStore {
       invalidationTimer: undefined,
       timeout,
       notify,
+      pageMutex: new AsyncMutex(),
     };
     watcher.on("error", () => this.closeOwned(clientId, id, "observer closed"));
     this.leases.set(id, lease);
@@ -119,43 +122,50 @@ export class ProcessTranscriptLeaseStore {
     expectedNextEntryId?: string,
     expectedRevision?: string,
   ): Promise<ProcessTranscriptLease["page"] & { revision: string }> {
-    const lease = this.owned(clientId, leaseId);
-    if (expectedRevision !== undefined && expectedRevision !== lease.revision) {
-      throw new GatewayError("conflict", "Subagent transcript changed; refresh the viewer", true);
-    }
-    // A watcher announces pendingRevision without advancing the client's
-    // acknowledged revision. This lets the mounted read-only viewer refresh
-    // the newest page on the same lease using the revision it actually owns.
-    const pendingAtStart = lease.pendingRevision;
-    let page: Awaited<ReturnType<RuntimeRegistry["readOnlySubagentTranscriptPage"]>>;
-    try {
-      page = await this.sessions.readOnlySubagentTranscriptPage(
-        lease.childSessionRef,
-        lease.path,
-        lease.parentSessionId,
-        lease.processId,
-        lease.runId,
-        before,
-        expectedNextEntryId,
-        lease.fileIdentity,
-      );
-    } catch (error) {
-      if (!(error instanceof GatewayError && error.code === "busy" && error.retryable)) {
-        this.closeOwned(clientId, leaseId, "session unavailable");
+    const admittedLease = this.owned(clientId, leaseId);
+    return admittedLease.pageMutex.run(async () => {
+      // Revalidate ownership and the expected generation inside the per-lease
+      // lane. A canceled mobile request may still finish at the Gateway, so
+      // concurrent prepend/refresh reads must not both advance one revision.
+      const lease = this.owned(clientId, leaseId);
+      if (lease !== admittedLease) throw new GatewayError("conflict", "Subagent transcript lease changed", true);
+      if (expectedRevision !== undefined && expectedRevision !== lease.revision) {
+        throw new GatewayError("conflict", "Subagent transcript changed; refresh the viewer", true);
       }
-      throw error;
-    }
-    lease.revision = page.revision;
-    if (lease.pendingRevision === pendingAtStart) delete lease.pendingRevision;
-    return {
-      items: page.items,
-      start: page.start,
-      end: page.end,
-      total: page.total,
-      ...(page.nextEntryId ? { nextEntryId: page.nextEntryId } : {}),
-      ...(page.leafEntryId ? { leafEntryId: page.leafEntryId } : {}),
-      revision: page.revision,
-    };
+      // A watcher announces pendingRevision without advancing the client's
+      // acknowledged revision. This lets the mounted read-only viewer refresh
+      // the newest page on the same lease using the revision it actually owns.
+      const pendingAtStart = lease.pendingRevision;
+      let page: Awaited<ReturnType<RuntimeRegistry["readOnlySubagentTranscriptPage"]>>;
+      try {
+        page = await this.sessions.readOnlySubagentTranscriptPage(
+          lease.childSessionRef,
+          lease.path,
+          lease.parentSessionId,
+          lease.processId,
+          lease.runId,
+          before,
+          expectedNextEntryId,
+          lease.fileIdentity,
+        );
+      } catch (error) {
+        if (!(error instanceof GatewayError && error.code === "busy" && error.retryable)) {
+          this.closeOwned(clientId, leaseId, "session unavailable");
+        }
+        throw error;
+      }
+      lease.revision = page.revision;
+      if (lease.pendingRevision === pendingAtStart) delete lease.pendingRevision;
+      return {
+        items: page.items,
+        start: page.start,
+        end: page.end,
+        total: page.total,
+        ...(page.nextEntryId ? { nextEntryId: page.nextEntryId } : {}),
+        ...(page.leafEntryId ? { leafEntryId: page.leafEntryId } : {}),
+        revision: page.revision,
+      };
+    });
   }
 
   closeOwned(clientId: string, leaseId: string, reason?: string): boolean {

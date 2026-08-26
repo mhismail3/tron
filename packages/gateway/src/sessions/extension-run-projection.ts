@@ -334,7 +334,15 @@ function child(
       ?? source.output
       ?? source.error
   );
-  const producerId = text(source.runId ?? source.id ?? source.asyncId, 256);
+  const stableIndex = number(source.index ?? progress?.index);
+  // Foreground pi-subagents progress has no child run ID until persistence,
+  // but its producer-authored index is stable for the entire tool call. The
+  // process ID also includes the canonical parent toolCallId, so this bounded
+  // identity cannot collide across calls.
+  const producerId = text(source.runId ?? source.id ?? source.asyncId, 256)
+    ?? (stableIndex !== undefined && stableIndex >= 0 && stableIndex < MAX_CHILDREN_TOTAL
+      ? `foreground-index:${stableIndex}`
+      : undefined);
   return {
     id: producerId ?? `${label}:${index}`,
     ...(producerId ? { producerId } : {}),
@@ -358,6 +366,32 @@ function child(
 function detailsFrom(value: unknown): Record<string, unknown> | undefined {
   const root = record(value);
   return record(root?.details) ?? root;
+}
+
+/** Exact current foreground pi-subagents progress convention. RuntimeSlot
+ * applies this only after proving the canonical tool belongs to the installed
+ * pi-subagents extension; generic extensions must keep using the stricter
+ * runId/asyncId convention below. */
+export function hasForegroundSubagentRunActivity(value: unknown): boolean {
+  const details = detailsFrom(value);
+  if (!details || !["single", "parallel", "chain"].includes(text(details.mode, 32) ?? "")) return false;
+  const progress = Array.isArray(details.progress) ? details.progress : [];
+  const results = Array.isArray(details.results) ? details.results : [];
+  const candidates = progress.length > 0 ? progress : results;
+  if (candidates.length === 0 || candidates.length > MAX_CHILDREN) return false;
+  const indexes = new Set<number>();
+  return candidates.every((candidate) => {
+    const source = record(candidate);
+    const projected = progressRecord(candidate);
+    if (!source || !projected) return false;
+    const index = number(source.index ?? projected.index);
+    const agent = text(projected.agent ?? source.agent, 256);
+    const state = projected.status ?? projected.state ?? source.status ?? source.state;
+    if (index === undefined || index < 0 || index >= MAX_CHILDREN_TOTAL || indexes.has(index)) return false;
+    indexes.add(index);
+    return agent !== undefined
+      && ["pending", "queued", "running", "paused", "completed", "failed", "detached"].includes(String(state));
+  });
 }
 
 /** Generic extension tools remain ordinary service/tool activity. Only an

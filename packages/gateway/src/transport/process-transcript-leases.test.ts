@@ -41,6 +41,41 @@ describe("ProcessTranscriptLeaseStore", () => {
     await expect(store.page("client-1", opened.leaseId)).rejects.toMatchObject({ code: "not_found" });
   });
 
+  it("serializes same-lease page and refresh revisions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-process-page-lane-"));
+    roots.push(root);
+    const path = join(root, "child.jsonl");
+    await writeFile(path, "{}\n");
+    let releaseFirstPage: (() => void) | undefined;
+    let reads = 0;
+    const sessions = {
+      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
+      readOnlySubagentTranscriptPage: vi.fn(async () => {
+        reads += 1;
+        if (reads === 1) return page("revision-1");
+        if (reads === 2) {
+          await new Promise<void>((resolve) => { releaseFirstPage = resolve; });
+          return page("revision-2", 1);
+        }
+        return page("revision-3", 2);
+      }),
+    } as unknown as RuntimeRegistry;
+    const store = new ProcessTranscriptLeaseStore(sessions);
+    const opened = await store.open(
+      "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn(),
+    );
+    const first = store.page("client-1", opened.leaseId, undefined, undefined, "revision-1");
+    await vi.waitFor(() => expect(reads).toBe(2));
+    const staleConcurrent = store.page("client-1", opened.leaseId, undefined, undefined, "revision-1");
+    await Promise.resolve();
+    expect(reads).toBe(2);
+    releaseFirstPage?.();
+    await expect(first).resolves.toMatchObject({ revision: "revision-2" });
+    await expect(staleConcurrent).rejects.toMatchObject({ code: "conflict", retryable: true });
+    expect(reads).toBe(2);
+    store.releaseClient("client-1");
+  });
+
   it("releases every child observer with its parent presentation", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-process-parent-"));
     roots.push(root);

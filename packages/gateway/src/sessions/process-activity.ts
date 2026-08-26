@@ -108,7 +108,8 @@ function extensionState(value: unknown): SessionProcessState {
 function subagentMode(mode: string | undefined): SessionProcessActivity["executionMode"] {
   const normalized = mode?.toLowerCase();
   if (normalized?.includes("async") || normalized?.includes("background") || normalized?.includes("detached")) return "asynchronous";
-  if (normalized?.includes("sync") || normalized === "workflow" || normalized === "single") return "synchronous";
+  if (normalized?.includes("sync") || normalized === "workflow" || normalized === "single"
+    || normalized === "parallel" || normalized === "chain") return "synchronous";
   return "unknown";
 }
 

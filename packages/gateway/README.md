@@ -747,7 +747,14 @@ this surface and continue through their existing transcript/tool presentation.
 `SessionProcessActivity` gives subagent rows a stable namespaced `processId`, typed
 source/mode/lifecycle, bounded current-tool/output facts,
 an optional bounded `durationMs` derived only from existing producer timing or canonical
-start/terminal timestamps, and an optional opaque validated child-session reference. Absolute session and
+start/terminal timestamps, and an optional opaque validated child-session reference. The
+installed pi-subagents foreground producer emits progress before its terminal root `runId`;
+Gateway admits that shape only when the exact `subagent` tool owner matches the installed
+pi-subagents extension and every bounded child carries its stable safe-integer index, agent,
+and recognized lifecycle state. That producer index is scoped by the canonical parent tool
+call and may identify only a disposable live process row; it cannot authorize a child file.
+Generic extension tools continue to require explicit structured `runId`/`asyncId` evidence.
+Absolute session and
 artifact paths, PIDs, environment values, and unbounded task/output data never cross
 the wire. Bounded delegated-output previews conservatively mask environment assignments,
 headers/cookies, long and short credential flags, JSON/query keys, URL userinfo, PEM
@@ -782,7 +789,9 @@ The `process-transcript.v1` capability authorizes `session.processTranscript.ope
 connection-owned lease watches only the validated canonical child file, installs that
 watch before capturing its initial page, latches any append in the baseline-publication
 window, emits bounded invalidation events, and reopens it through a read-only projection
-for canonical paging.
+for canonical paging. Page and live-refresh requests serialize per lease and recheck the
+client's expected revision inside that lane, so a canceled mobile prepend cannot race a
+refresh and advance the same lease generation out of order.
 Open, page, and invalidation reads each revalidate the exact live parent process/tool/run
 binding, structural subagent marker, canonical path, and original file identity. A child
 with a parent header must bind it to the exact parent. The current producer shape may omit

@@ -777,7 +777,7 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -only-testing:TronMobileTests/ChatSessionPresentationTests
 ```
 
-On a physical device verify solving-to-thinking-to-hidden expiry, simultaneous leading subagent/trailing catch-up controls, current output updates without transcript movement, canonical history paging, read-only subagent transcript refresh, VoiceOver, large Dynamic Type, and Reduce Motion. Assistant bash—including `nohup x &`—remains ordinary transcript/tool activity and never appears in Subagents.
+On a physical device verify solving-to-thinking-to-hidden expiry, simultaneous synchronous and asynchronous rows, and live-to-terminal updates. Confirm Subagents, Subagent History, and a tapped child transcript all open at the large detent; row taps present a bottom sheet instead of a rightward push; active/completed cards use solving/thinking orbs and readable metadata; short/empty child transcripts stay top-aligned while long newest pages open at the tail; and canonical history paging, transcript refresh, VoiceOver, large Dynamic Type, and Reduce Motion remain correct. Assistant bash—including `nohup x &`—remains ordinary transcript/tool activity and never appears in Subagents.
 
 ## Manual iOS release validation and delivery
 

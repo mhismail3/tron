@@ -62,7 +62,7 @@ import {
 } from "./projection.js";
 import type { RunMarkerEvidence, RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, extensionOwnerFor } from "../extensions/owner-attribution.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates, type ExtensionArtifactRejectionReason } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates, type ExtensionArtifactRejectionReason } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import { ProcessActivityRecency, type ProcessActivityExpiryFrame } from "./process-activity-recency.js";
@@ -785,7 +785,10 @@ export class RuntimeSlot {
         .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
       const rawLabel = [progress?.agent, record.agent]
         .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
-      const projectionID = childID ?? `${rawLabel ?? `Child ${index + 1}`}:${index}`;
+      const stableIndex = [record.index, progress?.index]
+        .find((item): item is number => typeof item === "number" && Number.isSafeInteger(item) && item >= 0 && item < 64);
+      const projectionID = childID
+        ?? (stableIndex === undefined ? `${rawLabel ?? `Child ${index + 1}`}:${index}` : `foreground-index:${stableIndex}`);
       const sessionFile = [record.sessionFile, progress?.sessionFile]
         .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
       if (isChild && sessionFile && childID !== activity.runId) {
@@ -2084,6 +2087,12 @@ export class RuntimeSlot {
     return { source: "pi-subagents" };
   }
 
+  private isForegroundSubagentTool(toolName: string, origin: ExtensionToolOrigin | undefined): boolean {
+    if (toolName !== "subagent" || !origin?.owner) return false;
+    const installedOwner = this.subagentExtensionOrigin().owner;
+    return installedOwner !== undefined && installedOwner.id === origin.owner.id;
+  }
+
   private async openOwnedExtensionArtifact(
     asyncDir: string,
     name: "status.json" | "events.jsonl",
@@ -2818,7 +2827,9 @@ export class RuntimeSlot {
   ): ExtensionRunActivity | undefined {
     if (!extensionOrigin) return undefined;
     const current = this.extensionActivities.get(toolCallId);
-    if (!current && !hasStructuredExtensionRunActivity(value)) return undefined;
+    const admittedForegroundSubagent = this.isForegroundSubagentTool(toolName, extensionOrigin)
+      && hasForegroundSubagentRunActivity(value);
+    if (!current && !hasStructuredExtensionRunActivity(value) && !admittedForegroundSubagent) return undefined;
     const activityKey = current?.activityId ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
     const terminalStates = ["completed", "failed", "stopped", "rejected"];
     if (current?.lifecycle && terminalStates.includes(current.lifecycle.state)) {

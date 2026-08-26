@@ -67,6 +67,13 @@ describe("session process projection", () => {
     expect(rows[0]?.lifecycle.recentUntil).toBe("2026-01-01T00:05:02.000Z");
   });
 
+  it("keeps foreground parallel and chain children synchronous", () => {
+    for (const mode of ["parallel", "chain"]) {
+      const rows = subagentProcessesFromActivity("session-1", { ...subagent, mode });
+      expect(rows).toEqual([expect.objectContaining({ executionMode: "synchronous", title: "worker" })]);
+    }
+  });
+
   it("does not turn compatibility label/index child IDs into process ownership", () => {
     const rows = subagentProcessesFromActivity("session-1", {
       ...subagent,

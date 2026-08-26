@@ -23,13 +23,18 @@ The composer shows one emerald orb only when the mounted authoritative projectio
 least one admitted current or recently finished subagent:
 
 - **Solving** while any subagent is queued, running, or paused.
-- **Breathing** while only terminal subagents remain in the five-minute recent window.
+- **Thinking** while only terminal subagents remain in the five-minute recent window.
 - Hidden when neither partition contains a subagent.
 
 Tapping the orb opens **Subagents**, with **Active** and **Recently finished** sections.
-Manage Session owns **Subagent History**, which adds canonical **Earlier** rows. A row with
-a validated child session opens a canonical-live, read-only transcript viewer. Rows without
-a validated child session remain informative and expose no mutation controls.
+Manage Session owns **Subagent History**, which adds canonical **Earlier** rows. Both sheets
+open at the large detent. Their Liquid Glass cards use the solving orb for active work and
+the thinking ribbon for terminal work, with canonical mode, duration, tool/path, counts,
+and bounded output presented as distinct metadata. A row with a validated child session
+presents a standardized large-detent bottom sheet containing the canonical-live, read-only
+transcript viewer; it never pushes a second navigation route. Short or empty transcript
+content aligns to the top while overflowing newest pages retain tail-opening intent. Rows
+without a validated child session remain informative and expose no mutation controls.
 
 Accessibility uses “Subagents” and “Subagent History.” Reduce Motion uses the deterministic
 orb frame, and scene/offscreen state pauses animation.
@@ -66,7 +71,10 @@ terminal countdown. Ambient extension pills/widgets/services are retired.
 
 The outer `subagent` tool result binds an exact parent session, tool call, workflow run ID,
 and admitted async artifact directory. The artifact is enrichment only; it cannot claim a
-parent independently.
+parent independently. Foreground pi-subagents progress arrives before its terminal root
+`runId`; Gateway admits that live shape only for the exact installed `subagent` tool owner
+and only when every bounded child has the producer-authored stable index, agent, and known
+lifecycle state. Generic extensions keep requiring the explicit run ID convention.
 
 Current pi-subagents status can represent a child step with `sessionFile` but no step
 `runId`, and its Pi child header can omit `parentSession`. Tron therefore supports two
@@ -79,11 +87,13 @@ fail-closed child schemes:
    `<child-run>/run-N/session.jsonl`, and the bounded structural session marker ends with
    the same `subagent-…-<child-run>-N` token.
 
-The second scheme derives the producer ID only after canonical path, regular-file,
-non-symlink, inode, containment, status ownership, structural marker, and ambiguity checks.
-Labels and array indexes never become producer identity. A conflicting explicit child ID,
-wrong token, foreign path, wrong parent, duplicate identity, symlink, replacement, or
-malformed append fails closed.
+The second scheme derives the persistent child producer ID only after canonical path,
+regular-file, non-symlink, inode, containment, status ownership, structural marker, and
+ambiguity checks. Before that path exists, a bounded producer-authored foreground index may
+identify a disposable live row only inside its canonical parent tool call; labels and array
+position never authorize a child session. A conflicting explicit child ID, wrong token,
+foreign path, wrong parent, duplicate identity, symlink, replacement, or malformed append
+fails closed.
 
 Async artifact observation installs a directory watcher and performs bounded retries when
 an atomic status replacement overlaps the initial read. An admitted async directory
@@ -120,8 +130,10 @@ Open, page, refresh, and invalidation revalidate:
 - stable page anchors/revisions.
 
 The watcher is installed before the initial baseline read and latches changes during lease
-publication. Same-lease refresh preserves earlier pages, merges append-only overlap with
-stable IDs, and closes on replacement, ambiguity, authorization loss, or parent dismissal.
+publication. Gateway serializes page and refresh reads per lease and rechecks the expected
+revision inside that lane, so cancellation cannot leave two requests racing to advance one
+lease generation. Same-lease refresh preserves earlier pages, merges append-only overlap
+with stable IDs, and closes on replacement, ambiguity, authorization loss, or parent dismissal.
 
 ## Privacy and bounds
 
@@ -135,13 +147,15 @@ Runtime JSONL and bounded terminal receipts remain canonical; iOS state is dispo
 Gateway checks must cover:
 
 - real status shape with a child `sessionFile`, no step ID, and no parent header;
+- active synchronous producer-index progress plus stable terminal transition;
 - active asynchronous projection, stable terminal transition, and exact five-minute expiry;
 - no command process events/history from assistant bash;
 - active extension lifecycle serialization without `remainingMs`;
 - receipt-backed restart history;
 - read-only transcript opening without acquiring a child runtime;
 - wrong token/path/run, symlink, ambiguity, append race, replacement, and byte bounds; and
-- watcher retry across initial atomic status replacement.
+- watcher retry across initial atomic status replacement; and
+- same-lease prepend/refresh serialization with stale expected-revision rejection.
 
 iOS checks must cover:
 
@@ -149,8 +163,10 @@ iOS checks must cover:
 - mixed legacy command/subagent input presents only subagents;
 - only synchronous/asynchronous subagent rows mount;
 - active extension lifecycle with omitted `remainingMs` admits while `current + 0` fails;
-- subagent-only composer gating, sheets, history filter, and accessibility copy; and
-- read-only append merge and route lifecycle.
+- subagent-only composer gating, large-detent bottom sheets, Liquid Glass cards, orb state,
+  history filter, and accessibility copy; and
+- read-only append merge, top alignment for undersized content, tail-opening intent, and
+  route lifecycle.
 
 Device acceptance after rebuilding the Gateway:
 
