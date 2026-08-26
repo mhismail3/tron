@@ -125,6 +125,23 @@ struct ChatMorphFlightTests {
         #expect(suppressed.flight == nil)
     }
 
+    @Test("a valid destination may retarget while the keyboard settles")
+    func validDestinationRetargetsContinuously() throws {
+        let registry = ChatMorphFrameRegistry()
+        registry.recordDraftPrompt(frame: promptFrame)
+        let lifecycle = lifecycle(nonce: 17, attachment: nil)
+        #expect(registry.stage(lifecycle: lifecycle, generation: 13, suppress: false))
+        let id = try #require(registry.flight?.elements.first?.id)
+        let initial = CGRect(x: 40, y: 100, width: 250, height: 52)
+        let settled = CGRect(x: 40, y: 92, width: 250, height: 52)
+        registry.recordDestination(id: id, frame: initial)
+        #expect(registry.beginAnimation(lifecycleID: lifecycle.id ?? "") != nil)
+        registry.recordDestination(id: id, frame: settled)
+        #expect(registry.flight?.phase == .animating)
+        #expect(registry.flight?.destinationFrames[id] == settled)
+        #expect(registry.consumeAbandonedGeneration() == nil)
+    }
+
     @Test("invalid destination after animation starts fails open")
     func invalidDestinationAfterStart() throws {
         let registry = ChatMorphFrameRegistry()

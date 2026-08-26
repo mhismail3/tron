@@ -1327,10 +1327,15 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(!resolvedNotification.showsProgress)
             #expect(resolvedPhysical.replacementAnimationIdentity
                 != pendingPhysical.replacementAnimationIdentity)
+            #expect(resolvedPhysical.replacementContentIdentity
+                != pendingPhysical.replacementContentIdentity)
             #expect(ChatPhysicalTranscriptReplacementPolicy.replacement(
                 from: pendingPhysical,
                 to: resolvedPhysical
             ) == .notification)
+            #expect(ChatContentTransitionPolicy.notificationReplacementAnimation(
+                reduceMotion: false
+            ) != nil)
 
             snapshot.phase = .idle
             snapshot.extensionPresentation.semanticState.working.visible = false

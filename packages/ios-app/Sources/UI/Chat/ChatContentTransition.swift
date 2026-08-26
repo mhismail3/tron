@@ -161,6 +161,11 @@ struct ChatContentEntranceTransform: Equatable, Sendable {
 }
 
 enum ChatContentTransitionPolicy {
+    static let promptEntranceDuration: TimeInterval = 0.24
+    static let promptFlightDuration: TimeInterval = 0.26
+    static let promptReplacementDuration: TimeInterval = 0.18
+    static let notificationReplacementDuration: TimeInterval = 0.22
+
     static func hiddenTransform(
         for kind: ChatContentEntranceKind,
         reduceMotion: Bool
@@ -169,16 +174,16 @@ enum ChatContentTransitionPolicy {
         switch kind {
         case .userPrompt:
             return ChatContentEntranceTransform(
-                scale: 0.955,
-                offsetX: 8,
-                offsetY: 18,
+                scale: 0.98,
+                offsetX: 4,
+                offsetY: 10,
                 anchor: .trailing
             )
         case .queuedPrompt:
             return ChatContentEntranceTransform(
-                scale: 0.95,
-                offsetX: 8,
-                offsetY: 20,
+                scale: 0.978,
+                offsetX: 4,
+                offsetY: 12,
                 anchor: .trailing
             )
         case .leadingActivity:
@@ -212,7 +217,7 @@ enum ChatContentTransitionPolicy {
         if reduceMotion { return .easeOut(duration: 0.12) }
         switch kind {
         case .userPrompt, .queuedPrompt:
-            return .spring(response: 0.40, dampingFraction: 0.86, blendDuration: 0.08)
+            return .smooth(duration: promptEntranceDuration)
         case .leadingActivity, .centeredActivity:
             return .spring(response: 0.34, dampingFraction: 0.84, blendDuration: 0.06)
         case .assistantContent:
@@ -223,7 +228,15 @@ enum ChatContentTransitionPolicy {
     static func attachmentAnimation(reduceMotion: Bool) -> Animation {
         reduceMotion
             ? .easeOut(duration: 0.12)
-            : .spring(response: 0.34, dampingFraction: 0.86, blendDuration: 0.06)
+            : .smooth(duration: 0.20)
+    }
+
+    static func promptFlightAnimation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .smooth(duration: promptFlightDuration)
+    }
+
+    static func notificationReplacementAnimation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? .linear(duration: 0.10) : .smooth(duration: notificationReplacementDuration)
     }
 
     static func composerSurfaceAnimation(reduceMotion: Bool) -> Animation {
@@ -306,10 +319,7 @@ enum ChatPromptReplacementAnimationPolicy {
 
     static func animation(reduceMotion: Bool) -> Animation? {
         guard animates(reduceMotion: reduceMotion) else { return nil }
-        return ChatContentTransitionPolicy.revealAnimation(
-            for: .queuedPrompt,
-            reduceMotion: false
-        )
+        return .smooth(duration: ChatContentTransitionPolicy.promptReplacementDuration)
     }
 }
 

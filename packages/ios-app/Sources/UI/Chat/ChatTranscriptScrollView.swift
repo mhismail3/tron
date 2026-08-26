@@ -65,8 +65,7 @@ struct ChatPhysicalTranscriptRow: Identifiable, Hashable {
     }
 
     var replacementContentIdentity: String {
-        if case .transcript(.notification, _) = content { return "stable:\(id)" }
-        return replacementAnimationIdentity ?? "stable:\(id)"
+        replacementAnimationIdentity ?? "stable:\(id)"
     }
 
     var isPromptLifecycle: Bool {
@@ -281,7 +280,10 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     /// and canonical insertion overlap continuously.
     private var transition: AnyTransition {
         if reduceMotion { return .opacity }
-        return .opacity.combined(with: .scale(scale: 0.985, anchor: .trailing))
+        if case .transcript(.notification, _) = displayed.content {
+            return .opacity.combined(with: .scale(scale: 0.97, anchor: .center))
+        }
+        return .opacity.combined(with: .scale(scale: 0.992, anchor: .trailing))
     }
 
     private func retarget(_ next: ChatPhysicalTranscriptRow) {
@@ -289,13 +291,19 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
             from: displayed,
             to: next
         )
-        var transaction = Transaction(
-            animation: kind == .none
-                ? nil
-                : reduceMotion
-                    ? .linear(duration: 0.10)
-                    : ChatPromptReplacementAnimationPolicy.animation(reduceMotion: false)
-        )
+        let animation: Animation? = switch kind {
+        case .none:
+            nil
+        case .prompt:
+            reduceMotion
+                ? .linear(duration: 0.10)
+                : ChatPromptReplacementAnimationPolicy.animation(reduceMotion: false)
+        case .notification:
+            ChatContentTransitionPolicy.notificationReplacementAnimation(
+                reduceMotion: reduceMotion
+            )
+        }
+        var transaction = Transaction(animation: animation)
         transaction.admitsChatPromptReplacementAnimation = kind != .none
         withTransaction(transaction) { displayed = next }
     }

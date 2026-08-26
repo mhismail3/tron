@@ -69,9 +69,16 @@ struct ChatContentTransitionTests {
         #expect(user.anchor == .trailing)
         #expect(user.offsetX > 0)
         #expect(user.offsetY > 0)
-        #expect(user.scale < 1)
+        #expect(user.scale == 0.98)
+        #expect(user.offsetX == 4)
+        #expect(user.offsetY == 10)
         #expect(queued.anchor == .trailing)
-        #expect(queued.offsetY >= user.offsetY)
+        #expect(queued.scale == 0.978)
+        #expect(queued.offsetY == 12)
+        #expect(ChatContentTransitionPolicy.promptEntranceDuration == 0.24)
+        #expect(ChatContentTransitionPolicy.promptFlightDuration == 0.26)
+        #expect(ChatContentTransitionPolicy.promptReplacementDuration == 0.18)
+        #expect(ChatContentTransitionPolicy.notificationReplacementDuration == 0.22)
     }
 
     @Test("activity remains role-aligned rather than flying across the transcript")
@@ -98,6 +105,9 @@ struct ChatContentTransitionTests {
         #expect(ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: false)
             != ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: true))
         #expect(ChatContentTransitionPolicy.composerSurfaceRemovalEdge == .bottom)
+        #expect(ChatContentTransitionPolicy.promptFlightAnimation(reduceMotion: false) != nil)
+        #expect(ChatContentTransitionPolicy.promptFlightAnimation(reduceMotion: true) == nil)
+        #expect(ChatContentTransitionPolicy.notificationReplacementAnimation(reduceMotion: false) != nil)
         #expect(ChatComposerStructuralTransitionPolicy.admitsHeightChange(
             current: 44,
             measured: 88

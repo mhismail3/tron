@@ -164,16 +164,9 @@ final class ChatMorphFrameRegistry {
             readinessRevision &+= 1
             return
         }
-        // Endpoints are immutable once motion starts. Keyboard or viewport
-        // relayout during a flight abandons spatial motion rather than bending
-        // its path or revealing at a different endpoint.
-        if flight.phase == .animating {
-            guard flight.destinationFrames[id] != frame else { return }
-            abandonedGeneration = flight.generation
-            self.flight = nil
-            readinessRevision &+= 1
-            return
-        }
+        // The keyboard and bottom inset may still be settling when the row is
+        // first measured. Retarget the endpoint in place so the flight remains
+        // visually continuous instead of abandoning into a mid-animation jump.
         guard flight.destinationFrames[id] != frame else { return }
         flight.destinationFrames[id] = frame
         self.flight = flight
@@ -319,46 +312,46 @@ struct ChatMorphFlightLayer: View {
 
     var body: some View {
         GeometryReader { geometry in
-            if let flight = registry.flight, flight.phase == .animating {
+            if let flight = registry.flight {
                 let layerFrame = geometry.frame(in: .global)
                 ZStack {
                     ForEach(flight.elements) { element in
-                        if let destination = flight.destinationFrames[element.id] {
-                            flightElement(element, progress: progress)
-                                .frame(
-                                    width: interpolate(
-                                        element.sourceFrame.width,
-                                        destination.width,
-                                        progress
-                                    ),
-                                    height: interpolate(
-                                        element.sourceFrame.height,
-                                        destination.height,
-                                        progress
-                                    )
+                        let destination = flight.destinationFrames[element.id] ?? element.sourceFrame
+                        flightElement(element, progress: progress)
+                            .frame(
+                                width: interpolate(
+                                    element.sourceFrame.width,
+                                    destination.width,
+                                    progress
+                                ),
+                                height: interpolate(
+                                    element.sourceFrame.height,
+                                    destination.height,
+                                    progress
                                 )
-                                // The interpolated frame is the hard visual
-                                // boundary. This prevents a long or late
-                                // measured text layout from escaping over the
-                                // composer and keyboard.
-                                .clipShape(RoundedRectangle(
-                                    cornerRadius: element.text == nil ? 14 : 22,
-                                    style: .continuous
-                                ))
-                                .clipped()
-                                .position(
-                                    x: interpolate(
-                                        element.sourceFrame.midX,
-                                        destination.midX,
-                                        progress
-                                    ) - layerFrame.minX,
-                                    y: interpolate(
-                                        element.sourceFrame.midY,
-                                        destination.midY,
-                                        progress
-                                    ) - layerFrame.minY
-                                )
-                        }
+                            )
+                            // The interpolated frame is the hard visual
+                            // boundary. During destination measurement this
+                            // paints the source at progress zero, eliminating
+                            // the blank frame between composer removal and
+                            // flight admission.
+                            .clipShape(RoundedRectangle(
+                                cornerRadius: element.text == nil ? 14 : 22,
+                                style: .continuous
+                            ))
+                            .clipped()
+                            .position(
+                                x: interpolate(
+                                    element.sourceFrame.midX,
+                                    destination.midX,
+                                    progress
+                                ) - layerFrame.minX,
+                                y: interpolate(
+                                    element.sourceFrame.midY,
+                                    destination.midY,
+                                    progress
+                                ) - layerFrame.minY
+                            )
                     }
                 }
             }
@@ -439,7 +432,9 @@ struct ChatMorphFlightLayer: View {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) { progress = 0 }
-        guard let animation = layoutTransaction.animation else {
+        guard let animation = ChatContentTransitionPolicy.promptFlightAnimation(
+            reduceMotion: reduceMotion
+        ) else {
             progress = 1
             finish(flight)
             return

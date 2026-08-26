@@ -16,11 +16,12 @@ struct SessionProcessesSheet: View {
                 if !sections.active.isEmpty || !sections.recent.isEmpty {
                     processList(activities: snapshot?.processActivities ?? [])
                 } else {
-                    ContentUnavailableView(
-                        "No active subagents",
-                        systemImage: "person.2",
-                        description: Text("Active and recently finished subagents appear here.")
+                    SessionProcessPlaceholder(
+                        title: "No active subagents",
+                        detail: "Active and recently finished subagents appear here.",
+                        icon: "person.2"
                     )
+                    .padding(18)
                 }
             }
             .tronNavigationTitle("Subagents")
@@ -166,15 +167,14 @@ struct ProcessHistorySheet: View {
 
                 switch store.status {
                 case .conflict:
-                    ContentUnavailableView(
-                        "History changed",
-                        systemImage: "arrow.triangle.2.circlepath",
-                        description: Text("Reload to continue from the latest canonical page.")
-                    )
-                    Button("Reload history") {
+                    SessionProcessPlaceholder(
+                        title: "History changed",
+                        detail: "Reload to continue from the latest canonical page.",
+                        icon: "arrow.triangle.2.circlepath",
+                        actionTitle: "Reload History"
+                    ) {
                         store.retryReload(sessionID: sessionID, presentationGeneration: generation)
                     }
-                    .frame(maxWidth: .infinity)
                 case .unavailable:
                     unavailable(
                         "History unavailable",
@@ -194,10 +194,10 @@ struct ProcessHistorySheet: View {
                 case .idle, .loading where earlier.isEmpty && !hasMounted:
                     TronLoadingState(label: "Loading subagent history…")
                 case .loaded where earlier.isEmpty && !hasMounted:
-                    ContentUnavailableView(
-                        "No recorded subagents",
-                        systemImage: "clock.arrow.circlepath",
-                        description: Text("Completed subagent sessions will appear here.")
+                    SessionProcessPlaceholder(
+                        title: "No recorded subagents",
+                        detail: "Completed subagent sessions will appear here.",
+                        icon: "clock.arrow.circlepath"
                     )
                 default:
                     EmptyView()
@@ -230,7 +230,57 @@ struct ProcessHistorySheet: View {
     }
 
     private func unavailable(_ title: String, detail: String, icon: String) -> some View {
-        ContentUnavailableView(title, systemImage: icon, description: Text(detail))
+        SessionProcessPlaceholder(title: title, detail: detail, icon: icon)
+    }
+}
+
+private struct SessionProcessPlaceholder: View {
+    let title: String
+    let detail: String
+    let icon: String
+    var actionTitle: String?
+    var action: (() -> Void)?
+
+    init(
+        title: String,
+        detail: String,
+        icon: String,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) {
+        self.title = title
+        self.detail = detail
+        self.icon = icon
+        self.actionTitle = actionTitle
+        self.action = action
+    }
+
+    var body: some View {
+        TronGlassCard(accent: .tronSlate) {
+            VStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(TronTypography.sans(size: TronTypography.sizeXXL, weight: .semibold))
+                    .foregroundStyle(Color.tronTextMuted)
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .multilineTextAlignment(.center)
+                Text(detail)
+                    .font(TronTypography.bodySM)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let actionTitle, let action {
+                    Button(actionTitle, action: action)
+                        .buttonStyle(TronActionButtonStyle(expands: false))
+                }
+            }
+            .padding(TronSpacing.xl)
+            .frame(maxWidth: .infinity)
+        }
+        .accessibilityElement(children: action == nil ? .combine : .contain)
+        .accessibilityLabel(action == nil ? "\(title). \(detail)" : title)
     }
 }
 
@@ -371,17 +421,19 @@ struct ReadOnlySubagentSessionSheet: View {
         case .idle, .opening:
             TronLoadingState(label: "Opening read-only session…")
         case .unavailable:
-            ContentUnavailableView(
-                "Session unavailable",
-                systemImage: "doc.text.magnifyingglass",
-                description: Text("This subagent did not persist an authorized canonical session.")
+            SessionProcessPlaceholder(
+                title: "Session unavailable",
+                detail: "This subagent did not persist an authorized canonical session.",
+                icon: "doc.text.magnifyingglass"
             )
+            .padding(18)
         case .failed(let message):
-            ContentUnavailableView(
-                "Unable to load session",
-                systemImage: "exclamationmark.triangle",
-                description: Text(message)
+            SessionProcessPlaceholder(
+                title: "Unable to load session",
+                detail: message,
+                icon: "exclamationmark.triangle"
             )
+            .padding(18)
         case .open, .loadingEarlier, .reconnecting:
             transcript(store)
         }
