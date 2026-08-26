@@ -324,9 +324,11 @@ private struct TechnicalJSONSheet: View {
                 }
                 if let onEdit {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button("Edit") {
+                        Button {
                             dismiss()
                             onEdit()
+                        } label: {
+                            TronToolbarTextLabel("Edit", systemImage: "pencil")
                         }
                         .tronToolbarAction(accent: .tronEmerald)
                     }

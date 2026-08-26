@@ -118,16 +118,12 @@ struct NewSessionSheet: View {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "New Session") }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { beginCreation() } label: {
-                        HStack(spacing: 6) {
-                            if creating || configurationLoading {
-                                ProgressView().controlSize(.mini)
-                            } else {
-                                Image(systemName: "checkmark")
-                            }
-                            Text(creationActionTitle)
-                        }
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(Color.tronEmerald)
+                        TronToolbarTextLabel(
+                            creationActionTitle,
+                            systemImage: "checkmark",
+                            isWorking: creating || configurationLoading
+                        )
+                        .tronToolbarAction()
                     }
                     .disabled(creating || !configurationReady)
                 }

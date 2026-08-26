@@ -213,10 +213,11 @@ struct SessionTreeSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: reload) {
-                        HStack(spacing: 6) {
-                            if reloading { ProgressView().controlSize(.small) }
-                            Text("Reload")
-                        }
+                        TronToolbarTextLabel(
+                            "Reload",
+                            systemImage: "arrow.clockwise",
+                            isWorking: reloading
+                        )
                         .tronToolbarAction()
                     }
                     .disabled(reloading)

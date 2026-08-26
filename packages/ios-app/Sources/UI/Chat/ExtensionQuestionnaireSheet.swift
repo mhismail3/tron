@@ -54,22 +54,26 @@ struct ExtensionQuestionnaireSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(expired ? "Close" : "Cancel", action: close)
-                        .foregroundStyle(Color.tronTextMuted)
-                        .disabled(submitting)
+                    Button(action: close) {
+                        TronToolbarTextLabel(
+                            expired ? "Close" : "Cancel",
+                            systemImage: "xmark"
+                        )
+                    }
+                    .tronToolbarAction(accent: .tronTextMuted)
+                    .disabled(submitting)
                 }
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: "Question", accent: .tronAmber)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: submit) {
-                        HStack(spacing: 5) {
-                            if submitting { ProgressView().controlSize(.mini) }
-                            Image(systemName: "paperplane.fill")
-                            Text("Submit")
-                        }
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                        .foregroundStyle(canSubmit ? Color.tronAmber : Color.tronTextMuted)
+                        TronToolbarTextLabel(
+                            "Submit",
+                            systemImage: "paperplane.fill",
+                            isWorking: submitting
+                        )
+                        .tronToolbarAction(accent: canSubmit ? .tronAmber : .tronTextMuted)
                     }
                     .disabled(!canSubmit)
                     .accessibilityLabel("Submit answer")

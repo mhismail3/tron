@@ -182,6 +182,15 @@ struct ExtensionToolOrigin: Codable, Hashable, Sendable {
     }
 }
 
+struct SessionInputMetadata: Codable, Hashable, Sendable {
+    enum Source: String, Codable, Sendable { case `extension` }
+    enum Trigger: String, Codable, Sendable { case turn }
+
+    let source: Source
+    let trigger: Trigger
+    let origin: ExtensionToolOrigin?
+}
+
 struct MessageTranscriptItem: TranscriptPayload {
     let id: String
     let parentId: String?
@@ -292,6 +301,7 @@ struct CustomMessageTranscriptItem: TranscriptPayload {
     let customType: String
     let content: [ContentPart]
     let details: JSONValue?
+    let sessionInput: SessionInputMetadata?
 }
 
 struct CustomEntryTranscriptItem: TranscriptPayload {
@@ -497,6 +507,9 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
         case .customEntry(let value): value.customType
         default: nil
         }
+    }
+    var sessionInput: SessionInputMetadata? {
+        if case .customMessage(let value) = self { value.sessionInput } else { nil }
     }
     var customData: JSONValue? { if case .customEntry(let value) = self { value.data } else { nil } }
     var summary: String? { if case .summary(let value) = self { value.summary } else { nil } }

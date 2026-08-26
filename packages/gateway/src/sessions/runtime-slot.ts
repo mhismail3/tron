@@ -14,6 +14,7 @@ import {
   type AgentSessionEvent,
   type CreateAgentSessionRuntimeFactory,
   type ExtensionCommandContextActions,
+  type Extension,
   type ModelRuntime,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
@@ -61,9 +62,10 @@ import {
   type TranscriptPage,
 } from "./projection.js";
 import type { RunMarkerEvidence, RunMarkerStore } from "./run-markers.js";
-import { attributeExtensions, extensionOwnerFor } from "../extensions/owner-attribution.js";
+import { attributeExtensions, currentExtensionOwner, extensionOwnerFor } from "../extensions/owner-attribution.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates, type ExtensionArtifactRejectionReason } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
+import { SESSION_INPUT_RECEIPT_TYPE, makeSessionInputReceipt } from "./session-input-receipts.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import { ProcessActivityRecency, type ProcessActivityExpiryFrame } from "./process-activity-recency.js";
 import {
@@ -350,6 +352,11 @@ export class RuntimeSlot {
   private pendingPrompt: PendingPromptState | undefined;
   /** Exact Pi message object claimed by the foreground pending prompt. */
   private pendingPromptMessage: AgentMessage | undefined;
+  /** Exact custom messages observed inside an active agent run. Their producer
+   * receipt is appended only after Pi persists that same message object. */
+  private readonly pendingSessionInputMessages = new WeakMap<AgentMessage, {
+    origin?: ExtensionToolOrigin;
+  }>();
   private pendingManualCompaction: PendingManualCompaction | undefined;
   private manualCompactionClaim: symbol | undefined;
   private queuedManualCompactionInFlight = false;
@@ -1804,6 +1811,18 @@ export class RuntimeSlot {
           // Foreground admission is serialized. Claim the exact Pi object;
           // repeated text and crossing user callbacks cannot impersonate it.
           this.pendingPromptMessage = event.message;
+        } else if (event.message.role === "custom" && this.hasActiveAgentRun) {
+          // A displayed custom message is not necessarily session input. Only
+          // the exact message object delivered inside an active run receives a
+          // durable trigger receipt; type, title, text, and display flags never
+          // classify it.
+          const callbackOwner = currentExtensionOwner();
+          const origin = callbackOwner
+            ? { source: callbackOwner.source, owner: callbackOwner }
+            : this.extensionMessageOrigin(event.message.customType);
+          this.pendingSessionInputMessages.set(event.message, {
+            ...(origin ? { origin } : {}),
+          });
         }
         break;
       }
@@ -1973,6 +1992,30 @@ export class RuntimeSlot {
         if (event.message.role === "assistant") {
           this.finalizeToolInvocationGroups(event.message);
           this.bindCanonicalPresentation(event.message);
+        } else if (event.message.role === "custom") {
+          const input = this.pendingSessionInputMessages.get(event.message);
+          if (input) {
+            this.pendingSessionInputMessages.delete(event.message);
+            const parentBeforePersistence = this.sessionManager.getLeafId();
+            const message = event.message;
+            queueMicrotask(() => {
+              const canonicalID = this.sessionManager.getLeafId();
+              const candidate = canonicalID ? this.sessionManager.getEntry(canonicalID) : undefined;
+              const matches = candidate?.type === "custom_message"
+                ? candidate.customType === message.customType
+                  && candidate.parentId === parentBeforePersistence
+                : candidate?.type === "message"
+                  && candidate.message.role === "custom"
+                  && candidate.message === message
+                  && candidate.parentId === parentBeforePersistence;
+              if (!matches || !canonicalID) return;
+              this.sessionManager.appendCustomEntry(
+                SESSION_INPUT_RECEIPT_TYPE,
+                makeSessionInputReceipt(canonicalID, input.origin),
+              );
+              this.scheduleSnapshot();
+            });
+          }
         } else if (event.message.role === "user"
           && this.pendingPrompt
           && this.pendingPromptMessage === event.message) {
@@ -3049,9 +3092,22 @@ export class RuntimeSlot {
     if (extensions.length !== 1) return undefined;
     const extension = extensions[0]!;
     if (tool.sourceInfo.path !== extension.path && tool.sourceInfo.path !== extension.resolvedPath) return undefined;
-    const extensionOwner = extensionOwnerFor(extension);
-    const source = extensionOwner.source.trim().slice(0, 256);
-    return source ? { source, owner: extensionOwner } : undefined;
+    return this.projectExtensionOrigin(extension);
+  }
+
+  private extensionMessageOrigin(customType: string): ExtensionToolOrigin | undefined {
+    const session = this.runtime?.session;
+    if (!session) return undefined;
+    const extensions = session.resourceLoader.getExtensions().extensions.filter(
+      extension => extension.messageRenderers.has(customType),
+    );
+    return extensions.length === 1 ? this.projectExtensionOrigin(extensions[0]!) : undefined;
+  }
+
+  private projectExtensionOrigin(extension: Extension): ExtensionToolOrigin | undefined {
+    const owner = extensionOwnerFor(extension);
+    const source = owner.source.trim().slice(0, 256);
+    return source ? { source, owner } : undefined;
   }
 
   private rememberToolMetadata(toolCallId: string, state: ToolExecutionState): void {

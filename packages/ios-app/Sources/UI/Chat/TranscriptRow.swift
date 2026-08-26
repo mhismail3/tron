@@ -10,7 +10,7 @@ struct TranscriptRow: View, Equatable {
     var showsMessageFooter = true
 
     var body: some View {
-        VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 4) {
+        VStack(alignment: isTrailingSessionMessage ? .trailing : .leading, spacing: 4) {
             switch item.kind {
             case .message:
                 message
@@ -23,13 +23,17 @@ struct TranscriptRow: View, Equatable {
                     outputTruncated: item.truncated == true
                 )
             case .customMessage:
-                ToolCard(
-                    title: item.customType ?? "Extension",
-                    subtitle: "Extension message",
-                    content: item.text,
-                    response: item.details,
-                    fallbackContent: item.text.isEmpty ? item.details : nil
-                )
+                if item.sessionInput != nil {
+                    SessionInputMessageView(item: item)
+                } else {
+                    ToolCard(
+                        title: item.customType ?? "Extension",
+                        subtitle: "Extension message",
+                        content: item.text,
+                        response: item.details,
+                        fallbackContent: item.text.isEmpty ? item.details : nil
+                    )
+                }
             case .customEntry:
                 ToolCard(
                     title: item.customType ?? "Extension state",
@@ -44,7 +48,11 @@ struct TranscriptRow: View, Equatable {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
+        .frame(maxWidth: .infinity, alignment: isTrailingSessionMessage ? .trailing : .leading)
+    }
+
+    private var isTrailingSessionMessage: Bool {
+        item.role == .user || item.sessionInput != nil
     }
 
     @ViewBuilder private var message: some View {

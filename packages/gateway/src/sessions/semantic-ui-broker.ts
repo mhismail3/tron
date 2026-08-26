@@ -81,11 +81,17 @@ function requireBoundedString(value: string, maximumBytes: number, field: string
 function stripTerminalPresentation(value: string): string { return stripTerminalControls(value, true); }
 function boundedWidgetLines(content: unknown): string[] | undefined {
   if (!Array.isArray(content) || !content.every((line) => typeof line === "string") || content.length > MAX_WIDGET_LINES) return undefined;
-  return content.map((source) => {
+  const lines: string[] = [];
+  for (const source of content) {
     const line = stripTerminalPresentation(source);
-    if (Buffer.byteLength(line) > MAX_WIDGET_LINE_BYTES) throw new GatewayError("conflict", "Extension UI widget line exceeds its bounded capacity");
-    return line;
-  });
+    // setWidget is a presentation-only, void producer callback. Reject an
+    // oversized update atomically instead of throwing into an extension-owned
+    // timer/event callback, where Pi has no caller awaiting the failure and the
+    // exception would otherwise terminate the Gateway process.
+    if (Buffer.byteLength(line) > MAX_WIDGET_LINE_BYTES) return undefined;
+    lines.push(line);
+  }
+  return lines;
 }
 
 /** Implements semantic Pi UI methods while the injected store exclusively owns presentation state. */

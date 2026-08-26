@@ -878,7 +878,10 @@ private struct AgentContextSheet: View {
                         .toolbar {
                             ToolbarItem(placement: .principal) { TronSheetTitle(title: "Instructions", accent: .tronPurple) }
                             ToolbarItem(placement: .confirmationAction) {
-                                Button("Done") { showInstructions = false }.tronToolbarAction()
+                                Button { showInstructions = false } label: {
+                                    TronToolbarTextLabel("Done", systemImage: "checkmark")
+                                }
+                                .tronToolbarAction()
                             }
                         }
                 }

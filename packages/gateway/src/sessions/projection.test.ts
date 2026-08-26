@@ -4,6 +4,7 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { BlobStore } from "./blob-store.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
+import { SESSION_INPUT_RECEIPT_TYPE, makeSessionInputReceipt } from "./session-input-receipts.js";
 import type { SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import {
   admitCommandCatalog,
@@ -222,6 +223,42 @@ describe("transcript projection", () => {
     expect(transcript[2]).toMatchObject({ kind: "modelChange", modelRef: { provider: "provider", id: "next-model" } });
     expect(transcript[3]).toMatchObject({ kind: "customEntry", customType: "state", data: { count: 1 } });
     expect(transcript[4]).toMatchObject({ kind: "label", targetId: assistant, label: "checkpoint" });
+  });
+
+  it("projects only receipt-backed triggered custom messages as session input", () => {
+    const manager = SessionManager.inMemory("/tmp/project");
+    manager.appendCustomMessageEntry("hidden-status", [{ type: "text", text: "not delivered" }], false);
+    const input = manager.appendCustomMessageEntry(
+      "subagent-notify",
+      [{ type: "text", text: "Background worker finished" }],
+      false,
+      { runId: "run-1" },
+    );
+    manager.appendCustomEntry(SESSION_INPUT_RECEIPT_TYPE, makeSessionInputReceipt(input, {
+      source: "npm:pi-subagents",
+      owner: { id: "extension:opaque", title: "Pi Subagents", source: "npm:pi-subagents" },
+    }));
+
+    const transcript = projectTranscript(manager, new BlobStore());
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0]).toMatchObject({
+      id: input,
+      kind: "customMessage",
+      customType: "subagent-notify",
+      content: [{ text: "Background worker finished" }],
+      details: { runId: "run-1" },
+      sessionInput: {
+        source: "extension",
+        trigger: "turn",
+        origin: {
+          source: "npm:pi-subagents",
+          owner: { id: "extension:opaque", title: "Pi Subagents", source: "npm:pi-subagents" },
+        },
+      },
+    });
+    const page = projectTranscriptPage(manager, new BlobStore());
+    expect(page).toMatchObject({ start: 0, end: 1, total: 1, items: [{ id: input }] });
+    expect(transcript.some((item) => item.customType === SESSION_INPUT_RECEIPT_TYPE)).toBe(false);
   });
 
   it("omits oversized or capacity-excess images without failing the snapshot", () => {
@@ -690,7 +727,7 @@ describe("transcript projection", () => {
     expect(fitted.extensionPresentation.diagnostics.at(-1)?.code).toContain("projection.");
   });
 
-  it("retains the revisioned editor baseline when decorative presentation is omitted", () => {
+  it("retains the editor baseline and clears status ownership atomically under pressure", () => {
     const editorText = "draft\n".repeat(1_000);
     const snapshot: SessionSnapshot = {
       sessionId: "editor-pressure", runtimeGeneration: "generation", revision: 1, eventSequence: 1,
@@ -703,6 +740,9 @@ describe("transcript projection", () => {
         version: 2, hostEpoch: "host", revision: 9, capabilities: [], diagnostics: [],
         semanticState: {
           statuses: { decorative: "x".repeat(40_000) },
+          statusOwners: {
+            decorative: { id: "extension:subagents", title: "Subagents", source: "npm:pi-subagents" },
+          },
           working: { visible: false, indicator: { kind: "default", frames: [] } },
           widgets: [], toolsExpanded: false, editorRevision: 7, editorText,
         },
@@ -712,6 +752,7 @@ describe("transcript projection", () => {
 
     const fitted = fitSessionSnapshot(snapshot, 16_000);
     expect(fitted.extensionPresentation.semanticState.statuses).toEqual({});
+    expect(fitted.extensionPresentation.semanticState.statusOwners).toEqual({});
     expect(fitted.extensionPresentation.semanticState.editorRevision).toBe(7);
     expect(fitted.extensionPresentation.semanticState.editorText).toBe(editorText);
     expect(fitted.extensionPresentation.projection?.omitted).not.toContain("editorText");

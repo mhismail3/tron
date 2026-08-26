@@ -502,6 +502,32 @@ struct SessionPresentationStoreTests {
         #expect(!ExtensionPresentationPolicy.admit(snapshot.extensionPresentation))
     }
 
+    @Test("session-open diagnostics identify the rejected projection")
+    func sessionOpenDiagnosticPath() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 8_813).openingTail(targetEncodedBytes: 4_096)
+        snapshot.extensionPresentation.semanticState.statuses = [:]
+        snapshot.extensionPresentation.semanticState.statusOwners = [
+            "orphan": ExtensionOwner(id: "extension:subagents", title: "Subagents", source: "npm:pi-subagents")
+        ]
+        let snapshotValue = try JSONDecoder.gateway.decode(
+            JSONValue.self,
+            from: JSONEncoder.gateway.encode(snapshot)
+        )
+        let payload = try JSONEncoder.gateway.encode(JSONValue.object([
+            "session": snapshotValue,
+            "syncToken": .string("sync-token"),
+            "subscriptionToken": .string("subscription-token"),
+            "completionRevision": .number(0),
+        ]))
+
+        do {
+            _ = try JSONDecoder.gateway.decode(GatewaySessionOpenResponse.self, from: payload)
+            Issue.record("Malformed status ownership unexpectedly passed session-open admission")
+        } catch DecodingError.dataCorrupted(let context) {
+            #expect(context.codingPath.map(\.stringValue) == ["session", "extensionPresentation"])
+        }
+    }
+
     @Test("full input leases require bounded identities and valid timestamps")
     func inputLeaseAdmission() throws {
         var snapshot = try SessionScenarioBuilder(seed: 8_812).openingTail(targetEncodedBytes: 4_096)

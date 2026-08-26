@@ -155,6 +155,9 @@ export type TranscriptItem =
       customType: string;
       content: ContentPart[];
       details?: JsonValue;
+      /** Producer-authored evidence that this custom message was delivered as
+       * session input and caused or continued an agent turn. */
+      sessionInput?: SessionInputMetadata;
     }
   | TranscriptBase & {
       kind: "customEntry";
@@ -188,6 +191,14 @@ export interface ExtensionToolOrigin {
   source: string;
   /** Exact opaque owner attribution captured at the extension boundary. */
   owner?: ExtensionOwner;
+}
+
+export interface SessionInputMetadata {
+  source: "extension";
+  trigger: "turn";
+  /** Exact extension attribution when the callback or registered renderer
+   * supplied one. Absence remains unknown rather than inferred from text. */
+  origin?: ExtensionToolOrigin;
 }
 
 export type ExtensionRunStatus = "running" | "completed" | "failed";

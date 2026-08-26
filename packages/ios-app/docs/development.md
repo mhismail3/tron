@@ -169,7 +169,9 @@ SwiftUI directly with it, so refresh, enablement, and late-response admission do
 callback or accidentally adopt an edit as a new baseline; a successful exact-draft save installs the resulting
 baseline and disables Save again, while edits made during the request stay dirty.
 Custom-model field bindings advance their revision in the same setter transaction and apply the same exact-revision
-completion rule. Custom provider editors keep their three dense text fields together before the API-format row
+completion rule. Every textual toolbar action uses the shared system-weight label with a leading SF Symbol (or its
+in-progress indicator); toolbar typography does not impose bold, semibold, or medium text. The dashboard Settings
+action is deliberately icon-only and retains an explicit accessibility label. Custom provider editors keep their three dense text fields together before the API-format row
 and use the standard settings-group header treatment. Provider and model catalogs use the shared
 `ModelDisplayFormatting` projections everywhere they are shown; canonical IDs remain unchanged for
 search, persistence, and mutation while labels use product casing such as “OpenAI Codex / GPT 5.6 Luna”.

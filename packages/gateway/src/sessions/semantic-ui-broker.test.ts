@@ -291,7 +291,39 @@ describe("SemanticUIBroker", () => {
 
     context.setWidget("plain", Array.from({ length: 12 }, (_, index) => `line ${index}`));
     expect(broker.state().semanticState.widgets[0]).toMatchObject({ key: "plain", revision: 1, placement: "aboveEditor" });
-    expect(() => context.setWidget("oversized", ["x".repeat(513)])).toThrow(expect.objectContaining({ code: "conflict" }));
+
+    const beforeOversizedUpdate = broker.state();
+    expect(() => context.setWidget("oversized", ["x".repeat(513)])).not.toThrow();
+    expect(broker.state()).toEqual(beforeOversizedUpdate);
+
+    expect(() => context.setWidget("plain", ["x".repeat(513)])).not.toThrow();
+    expect(broker.state().semanticState.widgets[0]).toMatchObject({
+      key: "plain",
+      revision: 1,
+      lines: Array.from({ length: 12 }, (_, index) => `line ${index}`),
+    });
+  });
+
+  it("drops oversized RPC widget snapshots without escaping an extension callback", async () => {
+    const broker = brokerWith(() => {});
+    const context = broker.context();
+    const snapshot = `PI_SUBAGENT_ASYNC_JSON:${JSON.stringify({
+      kind: "pi-subagents.async-status-snapshot",
+      version: 1,
+      runs: [{ id: "run", label: "x".repeat(1_024), state: "running" }],
+    })}`;
+
+    await expect(new Promise<void>((resolve, reject) => {
+      setImmediate(() => {
+        try {
+          context.setWidget("pi-subagents-async", [snapshot]);
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      });
+    })).resolves.toBeUndefined();
+    expect(broker.state().semanticState.widgets).toEqual([]);
   });
 
   it("strips complete C0/C1 terminal protocol families from semantic projections", async () => {

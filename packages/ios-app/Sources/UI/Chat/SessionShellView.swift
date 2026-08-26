@@ -419,8 +419,11 @@ struct SessionShellView: View {
                     .foregroundStyle(Color.tronEmerald)
             }
             .accessibilityLabel(serverFilter.accessibilityLabel)
-            Button("Settings", systemImage: "gearshape") { showSettings = true }
-                .tronToolbarAction(accent: .tronEmerald)
+            Button { showSettings = true } label: {
+                Image(systemName: "gearshape")
+                    .foregroundStyle(Color.tronEmerald)
+            }
+            .accessibilityLabel("Settings")
         }
     }
 

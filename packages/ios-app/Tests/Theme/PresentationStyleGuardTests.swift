@@ -39,6 +39,98 @@ struct PresentationStyleGuardTests {
             .compactMap { url in String(data: (try? Data(contentsOf: url)) ?? Data(), encoding: .utf8).map { (url, $0) } }
     }
 
+    private func toolbarItemBlocks(in source: String) -> [String] {
+        var blocks: [String] = []
+        var searchStart = source.startIndex
+        while let item = source.range(of: "ToolbarItem", range: searchStart..<source.endIndex),
+              let opening = source[item.lowerBound...].firstIndex(of: "{") {
+            var depth = 0
+            var cursor = opening
+            repeat {
+                if source[cursor] == "{" { depth += 1 }
+                if source[cursor] == "}" { depth -= 1 }
+                cursor = source.index(after: cursor)
+            } while cursor < source.endIndex && depth > 0
+            guard depth == 0 else { break }
+            blocks.append(String(source[item.lowerBound..<cursor]))
+            searchStart = cursor
+        }
+        return blocks
+    }
+
+    @Test("text toolbar actions use a leading icon and the system toolbar weight")
+    func textToolbarActionsUseIconsAndDefaultWeight() throws {
+        for (url, source) in uiSources {
+            for block in toolbarItemBlocks(in: source) where block.contains("Button") {
+                let hasInlineText = block.contains("Text(")
+                    || block.contains("Label(")
+                    || block.contains("Button(\"")
+                guard hasInlineText else { continue }
+                #expect(
+                    block.contains("TronToolbarTextLabel"),
+                    "\(url.lastPathComponent) contains a textual toolbar button outside TronToolbarTextLabel"
+                )
+                #expect(!block.contains("weight: .bold"), "\(url.lastPathComponent) bolds toolbar text")
+                #expect(!block.contains("weight: .semibold"), "\(url.lastPathComponent) semibolds toolbar text")
+                #expect(!block.contains("weight: .medium"), "\(url.lastPathComponent) medium-weights toolbar text")
+            }
+        }
+
+        let presentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Theme/TronPresentation.swift"),
+            encoding: .utf8
+        )
+        let label = (presentation.components(separatedBy: "struct TronToolbarTextLabel").dropFirst().first ?? "")
+            .components(separatedBy: "struct TronSaveToolbarButton").first ?? ""
+        #expect(label.contains("Image(systemName: systemImage)"))
+        #expect(label.contains("Text(title)"))
+        #expect(!label.contains(".font("))
+        let action = (presentation.components(separatedBy: "func tronToolbarAction").dropFirst().first ?? "")
+            .components(separatedBy: "func tronNavigationTitle").first ?? ""
+        #expect(!action.contains("font("))
+    }
+
+    @Test("triggered session messages are trailing tappable conversation rows")
+    func triggeredSessionMessagesAreTrailingAndTappable() throws {
+        let row = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
+            encoding: .utf8
+        )
+        let message = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionInputMessageView.swift"),
+            encoding: .utf8
+        )
+        let kernel = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptProjectionKernel.swift"),
+            encoding: .utf8
+        )
+
+        #expect(row.contains("item.role == .user || item.sessionInput != nil"))
+        #expect(row.contains("SessionInputMessageView(item: item)"))
+        #expect(message.contains("Button { showingDetails = true }"))
+        #expect(message.contains("UserPromptText(text: messageText)"))
+        #expect(message.contains("Color.tronCyan.opacity(0.14)).interactive()"))
+        #expect(message.contains("SessionInputDetailsSheet(item: item)"))
+        #expect(message.contains("detailGroup(\"Origin\")"))
+        #expect(message.contains("detailGroup(\"Producer details\")"))
+        #expect(kernel.contains("guard item.sessionInput == nil else { return [] }"))
+    }
+
+    @Test("dashboard settings action is icon-only and accessible")
+    func dashboardSettingsActionIsIconOnlyAndAccessible() throws {
+        let shell = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionShellView.swift"),
+            encoding: .utf8
+        )
+        let toolbar = (shell.components(separatedBy: "private var dashboardToolbar").dropFirst().first ?? "")
+            .components(separatedBy: "private var renameConfirmationPresented").first ?? ""
+
+        #expect(toolbar.contains("Image(systemName: \"gearshape\")"))
+        #expect(toolbar.contains(".accessibilityLabel(\"Settings\")"))
+        #expect(!toolbar.contains("TronToolbarTextLabel(\"Settings\""))
+        #expect(!toolbar.contains("Text(\"Settings\")"))
+    }
+
     @Test("shared toggles own accessible motion while tool chips retain native glass interaction")
     func sharedToggleMotionAndNativeToolChipInteraction() throws {
         let presentation = try String(
@@ -896,6 +988,7 @@ struct PresentationStyleGuardTests {
         #expect(saveToolbarButton.contains(".tronToolbarAction(accent: actionColor)"))
         #expect(saveToolbarButton.contains("Color.tronTextMuted"))
         #expect(saveToolbarButton.contains("private var actionColor"))
+        #expect(saveToolbarButton.contains("systemImage: \"square.and.arrow.down\""))
         #expect(saveToolbarButton.contains(".tint(actionColor)"))
         #expect(!saveToolbarButton.contains(".tronToolbarAction()"))
         #expect(!saveToolbarButton.contains(".foregroundStyle(actionColor)"))

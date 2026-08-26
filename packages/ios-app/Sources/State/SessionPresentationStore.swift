@@ -56,14 +56,27 @@ struct GatewaySessionOpenResponse: Decodable {
     let completionRevision: Int
 
     private enum CodingKeys: String, CodingKey { case session, syncToken, subscriptionToken, completionRevision }
+    private enum SessionDiagnosticKeys: String, CodingKey {
+        case extensionPresentation, extensionActivities, processOverview
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         session = try container.decode(SessionSnapshot.self, forKey: .session)
-        guard ExtensionPresentationPolicy.admit(session.extensionPresentation),
-              ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(session),
-              SessionProcessAdmissionPolicy.admitsSnapshotFacts(session) else {
-            throw DecodingError.dataCorruptedError(forKey: .session, in: container, debugDescription: "Invalid extension presentation snapshot")
+        func invalidSessionProjection(_ key: SessionDiagnosticKeys, _ description: String) -> DecodingError {
+            .dataCorrupted(.init(
+                codingPath: container.codingPath + [CodingKeys.session, key],
+                debugDescription: description
+            ))
+        }
+        guard ExtensionPresentationPolicy.admit(session.extensionPresentation) else {
+            throw invalidSessionProjection(.extensionPresentation, "Invalid extension presentation snapshot")
+        }
+        guard ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(session) else {
+            throw invalidSessionProjection(.extensionActivities, "Invalid extension activity snapshot")
+        }
+        guard SessionProcessAdmissionPolicy.admitsSnapshotFacts(session) else {
+            throw invalidSessionProjection(.processOverview, "Invalid process activity snapshot")
         }
         let decodedSyncToken = try container.decode(String.self, forKey: .syncToken)
         let decodedSubscriptionToken = try container.decode(String.self, forKey: .subscriptionToken)

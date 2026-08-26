@@ -7,7 +7,8 @@ import { GatewayError } from "../errors.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { BlobStore } from "./blob-store.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
-import type { CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
+import type { CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, SessionInputMetadata, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
+import { SESSION_INPUT_RECEIPT_TYPE, sessionInputMetadataByEntry } from "./session-input-receipts.js";
 
 const MAX_TEXT = 64_000;
 const MAX_SKILL_INVOCATION_BYTES = 4 * 1_048_576;
@@ -499,6 +500,11 @@ export function fitSessionSnapshot(
       semanticState: {
         ...projected.extensionPresentation.semanticState,
         statuses: {},
+        // Status attribution is structurally owned by the corresponding
+        // status key. Clear both halves atomically under wire pressure;
+        // retaining an orphan owner makes the authoritative snapshot invalid
+        // to native admission and can strand an otherwise healthy session.
+        statusOwners: {},
         widgets: [],
       },
       diagnostics: [
@@ -813,6 +819,7 @@ export function projectMessage(
   presentationId = id,
   finalizedToolGroups = true,
   toolLabels?: ReadonlyMap<string, string>,
+  sessionInput?: SessionInputMetadata,
 ): TranscriptItem | undefined {
   switch (message.role) {
     case "user":
@@ -884,7 +891,7 @@ export function projectMessage(
         ...(message.excludeFromContext === undefined ? {} : { excludeFromContext: message.excludeFromContext }),
       };
     case "custom":
-      if (!message.display) return undefined;
+      if (!message.display && !sessionInput) return undefined;
       return {
         id,
         parentId,
@@ -893,6 +900,7 @@ export function projectMessage(
         customType: message.customType,
         content: projectContent(message.content, blobs, id),
         ...(message.details === undefined ? {} : { details: projectJson(message.details) }),
+        ...(sessionInput ? { sessionInput } : {}),
       };
     case "branchSummary":
       return { id, parentId, timestamp, kind: "branchSummary", summary: boundedText(message.summary) };
@@ -916,6 +924,7 @@ export function projectEntry(
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
   presentationIDs?: ReadonlyMap<string, string>,
   toolLabels?: ReadonlyMap<string, string>,
+  sessionInput?: SessionInputMetadata,
 ): TranscriptItem | undefined {
   switch (entry.type) {
     case "message":
@@ -929,9 +938,10 @@ export function projectEntry(
         presentationIDs?.get(entry.id) ?? entry.id,
         entry.message.role === "assistant",
         toolLabels,
+        sessionInput,
       );
     case "custom_message":
-      if (!entry.display) return undefined;
+      if (!entry.display && !sessionInput) return undefined;
       return {
         id: entry.id,
         parentId: entry.parentId,
@@ -940,11 +950,13 @@ export function projectEntry(
         customType: entry.customType,
         content: projectContent(entry.content, blobs, entry.id),
         ...(entry.details === undefined ? {} : { details: projectJson(entry.details) }),
+        ...(sessionInput ? { sessionInput } : {}),
       };
     case "custom":
       // Canonical lifecycle receipts are session audit facts, not transcript,
       // tree, or model-visible conversation entries.
-      if (entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE) return undefined;
+      if (entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE
+          || entry.customType === SESSION_INPUT_RECEIPT_TYPE) return undefined;
       return {
         id: entry.id,
         parentId: entry.parentId,
@@ -1165,8 +1177,9 @@ function projectedTreeNode(
   blobs: BlobStore,
   depth: number,
   currentPath: Set<string>,
+  sessionInput?: SessionInputMetadata,
 ): SessionTreeNode {
-  const item = projectEntry(node.entry, blobs);
+  const item = projectEntry(node.entry, blobs, undefined, undefined, undefined, sessionInput);
   return {
     id: node.entry.id,
     parentId: node.entry.parentId,
@@ -1209,6 +1222,7 @@ function validateSourceTreeNode(source: PiSessionTreeNode, expectedParentId: str
 export function projectTree(manager: SessionManager, blobs: BlobStore): SessionTreeNode[] {
   const canonicalRoots = manager.getTree();
   const currentPath = new Set(manager.getBranch().map((entry) => entry.id));
+  const sessionInputs = sessionInputMetadataByEntry(manager.getEntries());
   const byId = new Map<string, TreeProjectionRef>();
   const seenSourceIDs = new Set<string>();
   const work: Array<{ source: PiSessionTreeNode; depth: number; parentId: string | null }> = [];
@@ -1221,7 +1235,10 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
     const id = source.entry.id;
     if (seenSourceIDs.has(id)) throw new GatewayError("conflict", "Session tree contains a duplicate canonical entry ID");
     seenSourceIDs.add(id);
-    const isReceipt = source.entry.type === "custom" && source.entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE;
+    const isReceipt = source.entry.type === "custom" && (
+      source.entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE
+      || source.entry.customType === SESSION_INPUT_RECEIPT_TYPE
+    );
     if (!isReceipt) byId.set(id, { source, depth });
     // Preserve descendants while omitting reserved audit nodes themselves.
     for (let index = source.children.length - 1; index >= 0; index -= 1) {
@@ -1235,7 +1252,10 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
     validateCanonicalEntry(entry);
     if (canonicalEntryIDs.has(entry.id)) throw new GatewayError("conflict", "Session tree contains a duplicate canonical entry ID");
     canonicalEntryIDs.add(entry.id);
-    const omittedReceipt = entry.type === "custom" && entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE;
+    const omittedReceipt = entry.type === "custom" && (
+      entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE
+      || entry.customType === SESSION_INPUT_RECEIPT_TYPE
+    );
     if (!omittedReceipt && !byId.has(entry.id)) {
       throw new GatewayError("conflict", "Session tree omits a canonical entry");
     }
@@ -1249,11 +1269,15 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
   for (let index = entries.length - 1; index >= 0 && selected.length < MAX_TREE_NODES; index -= 1) {
     const ref = byId.get(entries[index]!.id);
     if (!ref) continue;
-    const candidate = projectedTreeNode(ref.source, treeProjectionProbe, ref.depth, currentPath);
+    const candidate = projectedTreeNode(
+      ref.source, treeProjectionProbe, ref.depth, currentPath, sessionInputs.get(ref.source.entry.id),
+    );
     validateProjectedTreeNode(candidate);
     const nodeBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
     if (bytes + nodeBytes > TREE_PROJECTION_BYTES) break;
-    const admitted = projectedTreeNode(ref.source, blobs, ref.depth, currentPath);
+    const admitted = projectedTreeNode(
+      ref.source, blobs, ref.depth, currentPath, sessionInputs.get(ref.source.entry.id),
+    );
     validateProjectedTreeNode(admitted);
     bytes += Buffer.byteLength(JSON.stringify(admitted)) + 1;
     selected.push(admitted);
@@ -1261,12 +1285,24 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
   return selected.reverse();
 }
 
-function projectableTranscriptEntries(manager: TranscriptSessionReader): SessionEntry[] {
-  return manager.getBranch().filter((entry) =>
-    entry.type !== "session_info"
-      && !(entry.type === "custom" && entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE)
-      && !(entry.type === "custom_message" && !entry.display)
-      && !(entry.type === "message" && entry.message.role === "custom" && !entry.message.display));
+function projectableTranscriptEntries(manager: TranscriptSessionReader): {
+  entries: SessionEntry[];
+  sessionInputs: ReadonlyMap<string, SessionInputMetadata>;
+} {
+  const branch = manager.getBranch();
+  const sessionInputs = sessionInputMetadataByEntry(branch);
+  return {
+    entries: branch.filter((entry) =>
+      entry.type !== "session_info"
+        && !(entry.type === "custom" && (
+          entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE
+          || entry.customType === SESSION_INPUT_RECEIPT_TYPE
+        ))
+        && !(entry.type === "custom_message" && !entry.display && !sessionInputs.has(entry.id))
+        && !(entry.type === "message" && entry.message.role === "custom"
+          && !entry.message.display && !sessionInputs.has(entry.id))),
+    sessionInputs,
+  };
 }
 
 export function projectTranscript(
@@ -1275,8 +1311,11 @@ export function projectTranscript(
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
   toolLabels?: ReadonlyMap<string, string>,
 ): TranscriptItem[] {
-  return projectableTranscriptEntries(manager).map((entry) => {
-    const projected = projectEntry(entry, blobs, toolMetadata, undefined, toolLabels);
+  const { entries, sessionInputs } = projectableTranscriptEntries(manager);
+  return entries.map((entry) => {
+    const projected = projectEntry(
+      entry, blobs, toolMetadata, undefined, toolLabels, sessionInputs.get(entry.id),
+    );
     if (!projected) throw new Error("projectable transcript entry produced no item");
     return projected;
   });
@@ -1304,7 +1343,7 @@ export function projectTranscriptPage(
   presentationIDs?: ReadonlyMap<string, string>,
   toolLabels?: ReadonlyMap<string, string>,
 ): TranscriptPage {
-  const entries = projectableTranscriptEntries(manager);
+  const { entries, sessionInputs } = projectableTranscriptEntries(manager);
   const end = Math.max(0, Math.min(before ?? entries.length, entries.length));
   if (expectedNextEntryId !== undefined && entries[end]?.id !== expectedNextEntryId) {
     throw new Error("session transcript anchor changed");
@@ -1313,7 +1352,10 @@ export function projectTranscriptPage(
   let bytes = 2;
   const selected: TranscriptItem[] = [];
   while (start > 0 && selected.length < TRANSCRIPT_PAGE_ITEMS) {
-    const item = projectEntry(entries[start - 1]!, blobs, toolMetadata, presentationIDs, toolLabels);
+    const entry = entries[start - 1]!;
+    const item = projectEntry(
+      entry, blobs, toolMetadata, presentationIDs, toolLabels, sessionInputs.get(entry.id),
+    );
     if (!item) throw new Error("projectable transcript entry produced no item");
     const itemBytes = Buffer.byteLength(JSON.stringify(item)) + 1;
     if (bytes + itemBytes > byteBudget && selected.length > 0) break;

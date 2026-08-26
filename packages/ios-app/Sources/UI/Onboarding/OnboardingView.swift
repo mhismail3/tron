@@ -97,10 +97,9 @@ struct OnboardingView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     if mode == .setup && step != .welcome {
                         Button { goBack() } label: {
-                            Label("Back", systemImage: "chevron.left")
-                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                .foregroundStyle(Color.tronEmerald)
+                            TronToolbarTextLabel("Back", systemImage: "chevron.left")
                         }
+                        .tronToolbarAction()
                         .accessibilityLabel("Back")
                     }
                 }
@@ -110,22 +109,21 @@ struct OnboardingView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     if step == .pair {
                         Button { connectManually() } label: {
-                            if pairing {
-                                ProgressView().controlSize(.small).tint(.tronEmerald)
-                            } else {
-                                Text("Connect")
-                                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                            }
+                            TronToolbarTextLabel(
+                                pairing ? "Connecting…" : "Connect",
+                                systemImage: "link",
+                                isWorking: pairing
+                            )
                         }
+                        .tronToolbarAction()
                         .disabled(!canAttemptPairing)
                         .opacity(canAttemptPairing ? 1 : 0.45)
                         .accessibilityLabel(pairing ? "Connecting" : "Connect to Mac")
                     } else if step != .model {
                         Button { goForward() } label: {
-                            Label("Next", systemImage: "chevron.right")
-                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                .foregroundStyle(Color.tronEmerald)
+                            TronToolbarTextLabel("Next", systemImage: "chevron.right")
                         }
+                        .tronToolbarAction()
                         .disabled(!canAdvance || finishing)
                         .accessibilityLabel("Next")
                     }

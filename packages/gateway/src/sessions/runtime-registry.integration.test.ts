@@ -2897,6 +2897,33 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await expect(registry.acquire(sessionID)).rejects.toMatchObject({ code: "not_found" });
   });
 
+  it("keeps the Gateway alive when an extension timer emits an oversized string widget", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-rpc-oversized-widget-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await mkdir(extensionDir, { recursive: true });
+    await writeFile(join(extensionDir, "oversized-widget.ts"), `export default function (pi) {
+      pi.on("session_start", (_event, ctx) => {
+        setImmediate(() => {
+          ctx.ui.setWidget("async-status", ["PI_SUBAGENT_ASYNC_JSON:" + "x".repeat(1_024)]);
+          ctx.ui.setStatus("oversized-widget-callback", "completed");
+        });
+      });
+    }\n`);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    await waitUntil(() => slot.snapshot().extensionPresentation.semanticState.statuses["oversized-widget-callback"] === "completed");
+    expect(slot.snapshot().extensionPresentation.semanticState.widgets).toEqual([]);
+  });
+
   it("projects retained component widgets through the RPC-bound host without enabling TUI mode", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-rpc-factory-dormant-"));
     const agentDir = join(root, "agent");
@@ -3082,7 +3109,17 @@ export default function (pi) {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(snapshots.slice(continuationSnapshotIndex).every((snapshot) => snapshot.phase === "running" && snapshot.operation)).toBe(true);
     await waitUntil(() => !slot.isBusy);
-    expect(slot.snapshot()).toMatchObject({ phase: "idle" });
+    const settled = slot.snapshot();
+    expect(settled).toMatchObject({ phase: "idle" });
+    expect(settled.transcript.find((item) => item.kind === "customMessage")).toMatchObject({
+      customType: "test-continuation",
+      content: [{ type: "text", text: "continue" }],
+      sessionInput: {
+        source: "extension",
+        trigger: "turn",
+        origin: { owner: { id: expect.stringMatching(/^extension:/) } },
+      },
+    });
     expect(registry.attentionProjection(slot.id).completionRevision).toBe(2);
     const completionIds = complete.mock.calls.map(([, completionId]) => completionId);
     expect(completionIds).toHaveLength(3);

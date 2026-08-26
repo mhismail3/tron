@@ -448,6 +448,26 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(tool.title == "Subagent")
     }
 
+    @Test("triggered extension messages remain trailing conversation input instead of tool runs")
+    func triggeredExtensionMessageIsConversationInput() throws {
+        var snapshot = try fixture(transcript: """
+        [{"id":"notice","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customMessage","customType":"subagent-notify","content":[{"id":"text","ordinal":0,"type":"text","text":"Background worker finished"}],"details":{"runId":"run-1"},"sessionInput":{"source":"extension","trigger":"turn","origin":{"source":"npm:pi-subagents","owner":{"id":"extension:opaque","title":"Pi Subagents","source":"npm:pi-subagents"}}}}]
+        """)
+        snapshot.transcriptTotal = 1
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(candidate.timeline.items.count == 1)
+        guard case .transcript(let item) = candidate.timeline.items.first else {
+            Issue.record("Expected a session-input transcript row")
+            return
+        }
+        #expect(item.id == "notice")
+        #expect(item.text == "Background worker finished")
+        #expect(item.sessionInput?.trigger == .turn)
+        #expect(item.sessionInput?.origin?.owner?.title == "Pi Subagents")
+        #expect(candidate.toolPayloads.callIDs.isEmpty)
+    }
+
     @Test("canonical result changes always globally assemble")
     func canonicalResultChangeAssembles() throws {
         var snapshot = try fixture(transcript: """

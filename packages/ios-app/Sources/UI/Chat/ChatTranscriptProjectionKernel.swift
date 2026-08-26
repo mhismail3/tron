@@ -1129,6 +1129,7 @@ enum ChatTranscriptProjectionKernel {
         case .bash:
             return []
         case .customMessage:
+            guard item.sessionInput == nil else { return [] }
             return [ChatToolPresentation(
                 id: item.id, title: item.customType ?? "Extension", subtitle: "Extension message",
                 request: nil, response: item.details, content: item.text,

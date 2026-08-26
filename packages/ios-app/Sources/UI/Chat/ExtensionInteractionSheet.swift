@@ -73,13 +73,12 @@ struct ExtensionInteractionSheet: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: submit) {
-                        HStack(spacing: 4) {
-                            if submitting { ProgressView().controlSize(.mini) }
-                            Image(systemName: "paperplane.fill")
-                            Text("Submit")
-                        }
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                        .foregroundStyle(canSubmit ? Color.tronAmber : Color.tronTextMuted)
+                        TronToolbarTextLabel(
+                            "Submit",
+                            systemImage: "paperplane.fill",
+                            isWorking: submitting
+                        )
+                        .tronToolbarAction(accent: canSubmit ? .tronAmber : .tronTextMuted)
                     }
                     .accessibilityLabel("Submit answer")
                     .disabled(!canSubmit || submitting || isExpired)

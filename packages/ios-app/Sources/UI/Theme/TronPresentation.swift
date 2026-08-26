@@ -190,8 +190,7 @@ extension View {
     }
 
     func tronToolbarAction(accent: Color = .tronEmerald) -> some View {
-        font(TronTypography.buttonSM)
-            .foregroundStyle(accent)
+        foregroundStyle(accent)
     }
 
     func tronNavigationTitle(_ title: String, accent: Color = .tronEmerald) -> some View {
@@ -730,9 +729,11 @@ struct TronConfirmationSheet: View {
                 .tronNavigationTitle("Confirm", accent: .tronEmerald)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
-                        Button(secondaryTitle ?? "Cancel") {
+                        Button {
                             dismiss()
                             onSecondary?()
+                        } label: {
+                            TronToolbarTextLabel(secondaryTitle ?? "Cancel", systemImage: "xmark")
                         }
                         .tronToolbarAction(accent: .tronTextSecondary)
                         .accessibilityIdentifier("confirmation-cancel")
@@ -753,13 +754,41 @@ struct TronConfirmationSheet: View {
     }
 
     private var confirmButton: some View {
-        Button(confirmTitle, role: destructive ? .destructive : nil) {
+        Button(role: destructive ? .destructive : nil) {
             dismiss()
             onConfirm()
+        } label: {
+            TronToolbarTextLabel(
+                confirmTitle,
+                systemImage: destructive ? "trash" : "checkmark"
+            )
         }
     }
 
     private var accent: Color { destructive ? .tronError : .tronEmerald }
+}
+
+struct TronToolbarTextLabel: View {
+    let title: String
+    let systemImage: String
+    let isWorking: Bool
+
+    init(_ title: String, systemImage: String, isWorking: Bool = false) {
+        self.title = title
+        self.systemImage = systemImage
+        self.isWorking = isWorking
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if isWorking {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: systemImage)
+            }
+            Text(title)
+        }
+    }
 }
 
 struct TronSaveToolbarButton: View {
@@ -773,14 +802,11 @@ struct TronSaveToolbarButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                if isSaving {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(actionColor)
-                }
-                Text(isSaving ? "Saving…" : "Save")
-            }
+            TronToolbarTextLabel(
+                isSaving ? "Saving…" : "Save",
+                systemImage: "square.and.arrow.down",
+                isWorking: isSaving
+            )
             .tronToolbarAction(accent: actionColor)
         }
         .tint(actionColor)

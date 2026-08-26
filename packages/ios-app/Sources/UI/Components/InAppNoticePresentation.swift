@@ -34,7 +34,10 @@ struct InAppNoticeHost: View {
                 GatewayLogsSettingsView()
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { showLogs = false }
+                            Button { showLogs = false } label: {
+                                TronToolbarTextLabel("Done", systemImage: "checkmark")
+                            }
+                            .tronToolbarAction()
                         }
                     }
             }

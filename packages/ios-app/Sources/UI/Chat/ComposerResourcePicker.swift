@@ -427,7 +427,10 @@ private struct ComposerResourceDetailSheet: View {
             .background(Color.tronBackground)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }.foregroundStyle(Color.tronEmerald)
+                    Button { dismiss() } label: {
+                        TronToolbarTextLabel("Done", systemImage: "checkmark")
+                    }
+                    .tronToolbarAction()
                 }
             }
         }

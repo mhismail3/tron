@@ -232,13 +232,11 @@ struct ProjectResourcesView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: reload) {
-                        HStack(spacing: 6) {
-                            if loading || reloading {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                            Text("Reload")
-                        }
+                        TronToolbarTextLabel(
+                            "Reload",
+                            systemImage: "arrow.clockwise",
+                            isWorking: loading || reloading
+                        )
                         .tronToolbarAction()
                     }
                     .disabled(loading || reloading)
