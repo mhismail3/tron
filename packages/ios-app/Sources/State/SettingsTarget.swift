@@ -58,6 +58,14 @@ struct ScopedSettingsDraftStore<Draft: Equatable> {
         entries[target]?.isDirty == true
     }
 
+    /// Compares the value currently presented by the sheet directly with the
+    /// installed baseline. This deliberately does not depend on a later
+    /// SwiftUI `onChange` callback having copied the value into the store.
+    func hasChanges(_ presented: Draft, for target: SettingsTarget) -> Bool {
+        guard let entry = entries[target] else { return false }
+        return !entry.hasBaseline || presented != entry.baseline
+    }
+
     func revision(for target: SettingsTarget) -> Int? {
         entries[target]?.revision
     }
@@ -95,14 +103,31 @@ struct ScopedSettingsDraftStore<Draft: Equatable> {
     @discardableResult
     mutating func install(_ draft: Draft, for target: SettingsTarget) -> Bool {
         guard entries[target]?.isDirty != true else { return false }
-        let revision = (entries[target]?.revision ?? 0) &+ 1
-        entries[target] = Entry(
-            baseline: draft,
-            current: draft,
-            isDirty: false,
-            revision: revision,
-            hasBaseline: true
-        )
+        replaceWithInstalled(draft, for: target)
+        return true
+    }
+
+    /// Seeds the disabled initial state exactly once. A later refresh must not
+    /// redefine a currently presented edit as the baseline merely because its
+    /// `onChange` callback has not run yet.
+    @discardableResult
+    mutating func seedBaselineIfMissing(_ draft: Draft, for target: SettingsTarget) -> Bool {
+        guard entries[target] == nil else { return false }
+        replaceWithInstalled(draft, for: target)
+        return true
+    }
+
+    /// Installs an asynchronous projection only when the value still visible
+    /// in the sheet matches its baseline. This closes the render/onChange gap
+    /// without allowing a late response to erase an edit.
+    @discardableResult
+    mutating func install(
+        _ draft: Draft,
+        for target: SettingsTarget,
+        ifCurrent presented: Draft
+    ) -> Bool {
+        guard !hasChanges(presented, for: target) else { return false }
+        replaceWithInstalled(draft, for: target)
         return true
     }
 
@@ -117,6 +142,17 @@ struct ScopedSettingsDraftStore<Draft: Equatable> {
             resulting: draft,
             for: target,
             expectedRevision: expectedRevision
+        )
+    }
+
+    private mutating func replaceWithInstalled(_ draft: Draft, for target: SettingsTarget) {
+        let revision = (entries[target]?.revision ?? 0) &+ 1
+        entries[target] = Entry(
+            baseline: draft,
+            current: draft,
+            isDirty: false,
+            revision: revision,
+            hasBaseline: true
         )
     }
 

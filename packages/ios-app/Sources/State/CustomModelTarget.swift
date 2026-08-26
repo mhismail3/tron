@@ -13,6 +13,16 @@ struct CustomModelDraftOwner: Equatable, Sendable {
         revision &+= 1
     }
 
+    /// Advances ownership only for a real user-visible value change. Editors
+    /// call this from their Binding setter so Save state changes in the same
+    /// transaction as the field, rather than waiting for SwiftUI `onChange`.
+    @discardableResult
+    mutating func markEdited<Value: Equatable>(from current: Value, to next: Value) -> Bool {
+        guard current != next else { return false }
+        markEdited()
+        return true
+    }
+
     mutating func markInstalled() {
         installedRevision = revision
     }

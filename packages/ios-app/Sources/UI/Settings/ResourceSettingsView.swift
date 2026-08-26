@@ -334,7 +334,7 @@ struct ResourceSettingsView: View {
 
     private var hasUnsavedChanges: Bool {
         guard let target = settingsTarget else { return false }
-        return drafts.isDirty(target)
+        return drafts.hasChanges(draft, for: target)
     }
 
     private func selectScope(_ newScope: SettingsScope) {
@@ -354,12 +354,12 @@ struct ResourceSettingsView: View {
         guard let target = settingsTarget else { return }
         // Establish a clean snapshot before awaiting the gateway; a real edit
         // during the request still marks the draft dirty and rejects stale data.
-        _ = drafts.install(draft, for: target)
+        _ = drafts.seedBaselineIfMissing(draft, for: target)
         guard await model.refreshSettings(target: target),
               target == settingsTarget,
               editor == nil,
               let loaded = projectionDraft(target: target),
-              drafts.install(loaded, for: target) else { return }
+              drafts.install(loaded, for: target, ifCurrent: draft) else { return }
         draft = loaded
     }
 
@@ -394,7 +394,7 @@ struct ResourceSettingsView: View {
         let patch = savingDraft.patch(comparedTo: baseline)
         do {
             try await model.updateSettings(patch, target: target)
-            guard target == settingsTarget else { return }
+            guard target == settingsTarget, draft == savingDraft else { return }
             let resultingDraft = projectionDraft(target: target)
                 ?? savingDraft.afterSuccessfulSave()
             if drafts.markSaved(

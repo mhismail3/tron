@@ -274,7 +274,7 @@ struct RuntimeBehaviorSettingsView: View {
 
     private var hasUnsavedChanges: Bool {
         guard let target = settingsTarget else { return false }
-        return drafts.isDirty(target)
+        return drafts.hasChanges(draft, for: target)
     }
 
     private func selectScope(_ newScope: SettingsScope) {
@@ -294,11 +294,11 @@ struct RuntimeBehaviorSettingsView: View {
         guard let target = settingsTarget else { return }
         // Keep the toolbar disabled while the initial response is pending, but
         // preserve any edit that arrives before that response.
-        _ = drafts.install(draft, for: target)
+        _ = drafts.seedBaselineIfMissing(draft, for: target)
         guard await model.refreshSettings(target: target),
               target == settingsTarget,
               let loaded = projectionDraft(target: target),
-              drafts.install(loaded, for: target) else { return }
+              drafts.install(loaded, for: target, ifCurrent: draft) else { return }
         draft = loaded
     }
 
@@ -363,7 +363,7 @@ struct RuntimeBehaviorSettingsView: View {
         let patch = savingDraft.patch(comparedTo: baseline)
         do {
             try await model.updateSettings(patch, target: target)
-            guard target == settingsTarget else { return }
+            guard target == settingsTarget, draft == savingDraft else { return }
             _ = drafts.markSaved(
                 savingDraft,
                 for: target,

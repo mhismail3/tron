@@ -781,8 +781,7 @@ struct TronSaveToolbarButton: View {
                 }
                 Text(isSaving ? "Saving…" : "Save")
             }
-            .tronToolbarAction()
-            .foregroundStyle(actionColor)
+            .tronToolbarAction(accent: actionColor)
         }
         .tint(actionColor)
         .disabled(isSaving || !isEnabled)

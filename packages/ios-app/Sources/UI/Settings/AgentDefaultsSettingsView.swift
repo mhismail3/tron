@@ -156,7 +156,7 @@ struct AgentDefaultsSettingsView: View {
 
     private var hasUnsavedChanges: Bool {
         guard let target = settingsTarget else { return false }
-        return drafts.isDirty(target)
+        return drafts.hasChanges(draft, for: target)
     }
 
     private func selectScope(_ newScope: SettingsScope) {
@@ -177,7 +177,7 @@ struct AgentDefaultsSettingsView: View {
         // Establish a clean local snapshot before the first async response. If the
         // user edits while the response is in flight, update() marks the draft dirty
         // and the late response is correctly rejected.
-        _ = drafts.install(draft, for: target)
+        _ = drafts.seedBaselineIfMissing(draft, for: target)
         let requestedCatalogTarget = catalogTarget
         async let settingsReady = model.refreshSettings(target: target)
         async let catalogReady = model.refreshProviders(target: requestedCatalogTarget)
@@ -206,7 +206,7 @@ struct AgentDefaultsSettingsView: View {
             retry: value["retry"]?.objectValue?["enabled"]?.boolValue ?? true,
             trust: value["defaultProjectTrust"]?.stringValue ?? "ask"
         )
-        if drafts.install(projected, for: target) {
+        if drafts.install(projected, for: target, ifCurrent: draft) {
             draft = projected
         } else if let saved = drafts.draft(for: target) {
             draft = saved
@@ -225,7 +225,7 @@ struct AgentDefaultsSettingsView: View {
         defer { saving = false }
         do {
             try await model.updateSettings(patch, target: target)
-            guard target == settingsTarget else { return }
+            guard target == settingsTarget, draft == savingDraft else { return }
             _ = drafts.markSaved(
                 savingDraft,
                 for: target,

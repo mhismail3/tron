@@ -94,6 +94,31 @@ struct SettingsDraftStoreTests {
         #expect(store.isDirty(target))
     }
 
+    @Test("the presented draft closes the SwiftUI onChange gap")
+    func presentedDraftOwnsDirtyStateAndLatePublicationAdmission() {
+        var store = ScopedSettingsDraftStore<String>()
+        let target = SettingsTarget.global
+        let installed = store.install("loaded", for: target)
+        #expect(installed)
+        #expect(!store.isDirty(target))
+
+        // The field has changed, but SwiftUI has not delivered onChange yet.
+        let presented = "edited"
+        #expect(store.hasChanges(presented, for: target))
+        #expect(!store.isDirty(target))
+        let reseededDuringRefresh = store.seedBaselineIfMissing(presented, for: target)
+        #expect(!reseededDuringRefresh)
+        let installedLateResponse = store.install("late response", for: target, ifCurrent: presented)
+        #expect(!installedLateResponse)
+        #expect(store.baseline(for: target) == "loaded")
+
+        store.update(presented, for: target)
+        let revision = store.revision(for: target)!
+        let markedSaved = store.markSaved(presented, for: target, expectedRevision: revision)
+        #expect(markedSaved)
+        #expect(!store.hasChanges(presented, for: target))
+    }
+
     @Test("runtime drafts preserve independent global and project edits")
     func runtimeDraftTargets() {
         let project = SettingsTarget.project(cwd: "/workspace/project")

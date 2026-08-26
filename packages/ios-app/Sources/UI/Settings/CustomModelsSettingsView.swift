@@ -15,7 +15,6 @@ struct CustomModelsSettingsView: View {
     @State private var rebuildGeneration = 0
     @State private var rebuildTask: Task<Void, Never>?
     @State private var localTransformationTask: Task<Void, Never>?
-    @FocusState private var advancedEditorFocused: Bool
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -116,18 +115,11 @@ struct CustomModelsSettingsView: View {
 
     private var advancedEditorSheet: some View {
         NavigationStack {
-            TextEditor(text: $document)
+            TextEditor(text: editedAdvancedDocumentBinding)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .tronTextEditor(monospaced: true)
                 .padding(18)
-                .focused($advancedEditorFocused)
-                .onChange(of: document) { _, _ in
-                    if advancedEditorFocused {
-                        advancedDocumentEdited = true
-                        draftOwner.markEdited()
-                    }
-                }
                 .tronScrollEdgeChrome()
                 .tronNavigationTitle("Advanced JSON")
                 .toolbar {
@@ -238,7 +230,7 @@ struct CustomModelsSettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     editorSectionHeader("Connection")
                     fieldLabel("Provider identifier")
-                    TextField("ollama", text: provider.identifier)
+                    TextField("ollama", text: editedProviderBinding(provider.identifier))
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .tronField(
                             monospaced: true,
@@ -248,7 +240,7 @@ struct CustomModelsSettingsView: View {
                             border: Color.tronEmerald.opacity(0.42)
                         )
                     fieldLabel("Base URL")
-                    TextField("https://example.com/v1", text: provider.baseURL)
+                    TextField("https://example.com/v1", text: editedProviderBinding(provider.baseURL))
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .tronField(
                             monospaced: true,
@@ -264,7 +256,7 @@ struct CustomModelsSettingsView: View {
                         "Models",
                         detail: "Add one model ID per line. These names appear in model selection."
                     )
-                    TextField("llama3:8b", text: provider.models, axis: .vertical)
+                    TextField("llama3:8b", text: editedProviderBinding(provider.models), axis: .vertical)
                         .lineLimit(2...8)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .tronField(
@@ -288,11 +280,11 @@ struct CustomModelsSettingsView: View {
                         accent: .tronEmerald
                     ) {
                         TronInlineMenu("Change", accent: .tronEmerald) {
-                            Button("Inherited / per model") { provider.wrappedValue.api = "" }
-                            Button("OpenAI Chat Completions") { provider.wrappedValue.api = "openai-completions" }
-                            Button("OpenAI Responses") { provider.wrappedValue.api = "openai-responses" }
-                            Button("Anthropic Messages") { provider.wrappedValue.api = "anthropic-messages" }
-                            Button("Google Generative AI") { provider.wrappedValue.api = "google-generative-ai" }
+                            Button("Inherited / per model") { updateProviderAPI(provider, to: "") }
+                            Button("OpenAI Chat Completions") { updateProviderAPI(provider, to: "openai-completions") }
+                            Button("OpenAI Responses") { updateProviderAPI(provider, to: "openai-responses") }
+                            Button("Anthropic Messages") { updateProviderAPI(provider, to: "anthropic-messages") }
+                            Button("Google Generative AI") { updateProviderAPI(provider, to: "google-generative-ai") }
                         }
                     }
                     .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
@@ -303,10 +295,35 @@ struct CustomModelsSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle(provider.wrappedValue.identifier.isEmpty ? "New Provider" : provider.wrappedValue.identifier)
-        .onChange(of: provider.wrappedValue) { _, _ in
-            draftOwner.markEdited()
-            rebuildDocument()
-        }
+    }
+
+    private var editedAdvancedDocumentBinding: Binding<String> {
+        Binding(
+            get: { document },
+            set: { value in
+                guard draftOwner.markEdited(from: document, to: value) else { return }
+                document = value
+                advancedDocumentEdited = true
+            }
+        )
+    }
+
+    private func editedProviderBinding<Value: Equatable>(_ binding: Binding<Value>) -> Binding<Value> {
+        Binding(
+            get: { binding.wrappedValue },
+            set: { value in
+                guard draftOwner.markEdited(from: binding.wrappedValue, to: value) else { return }
+                binding.wrappedValue = value
+                rebuildDocument()
+            }
+        )
+    }
+
+    private func updateProviderAPI(_ provider: Binding<CustomModelProviderDraft>, to value: String) {
+        let binding = provider.api
+        guard draftOwner.markEdited(from: binding.wrappedValue, to: value) else { return }
+        binding.wrappedValue = value
+        rebuildDocument()
     }
 
     private func editorSectionHeader(_ title: String, detail: String? = nil) -> some View {

@@ -162,8 +162,14 @@ Resolved package JSON is constructed only inside its progressive detail destinat
 constant-depth top-level count instead of recursively rendering a potentially large resource tree. Package reload
 refreshes the inventory and update projection together: SwiftUI’s structured `.task(id:)` owns and awaits automatic
 refresh, target/invalidation changes reject stale completions, and confirmed mutation reloads have priority over
-ordinary refresh. Installation controls live in a medium/large
-progressive sheet. Custom provider editors keep their three dense text fields together before the API-format row
+ordinary refresh. Installation controls live in a medium/large progressive sheet. Explicit Save toolbars in Models
+and Defaults, Runtime Behavior, Resource Locations, and Custom Models are disabled against the installed baseline.
+The three scoped settings sheets seed each target baseline only once and compare the value currently presented by
+SwiftUI directly with it, so refresh, enablement, and late-response admission do not wait for a subsequent `onChange`
+callback or accidentally adopt an edit as a new baseline; a successful exact-draft save installs the resulting
+baseline and disables Save again, while edits made during the request stay dirty.
+Custom-model field bindings advance their revision in the same setter transaction and apply the same exact-revision
+completion rule. Custom provider editors keep their three dense text fields together before the API-format row
 and use the standard settings-group header treatment. Provider and model catalogs use the shared
 `ModelDisplayFormatting` projections everywhere they are shown; canonical IDs remain unchanged for
 search, persistence, and mutation while labels use product casing such as “OpenAI Codex / GPT 5.6 Luna”.

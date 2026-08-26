@@ -299,10 +299,15 @@ struct CustomModelConfigurationCoordinatorTests {
         #expect(model.visibleNotices.last?.title == "current failure")
     }
 
-    @Test("draft save admission clears only the exact submitted revision")
+    @Test("draft save admission changes synchronously and clears only the exact submitted revision")
     func draftRevision() {
         var owner = CustomModelDraftOwner()
-        owner.markEdited()
+        let ignoredUnchangedValue = owner.markEdited(from: "same", to: "same")
+        #expect(!ignoredUnchangedValue)
+        #expect(!owner.isDirty)
+        let admittedEdit = owner.markEdited(from: "before", to: "after")
+        #expect(admittedEdit)
+        #expect(owner.isDirty)
         let submitted = owner.beginSave()
         owner.markEdited()
         let staleCompleted = owner.completeSave(revision: submitted)
