@@ -62,8 +62,8 @@ struct InAppNoticeCenterTests {
         #expect(center.markForegroundAnnounced(id))
     }
 
-    @Test("semantic duplicate refreshes automatic lifetime without duplicating")
-    func duplicateRefreshesAutomaticLifetime() async throws {
+    @Test("semantic duplicates coalesce without extending an automatic deadline")
+    func duplicateDoesNotExtendAutomaticLifetime() async throws {
         let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
         let first = notice("syncing", lifetime: .automatic(.seconds(5)))
         let id = center.post(first)
@@ -72,12 +72,30 @@ struct InAppNoticeCenterTests {
         let duplicateID = center.post(notice("syncing", id: UUID(), lifetime: .automatic(.seconds(5))))
         #expect(duplicateID == id)
         #expect(center.notices.count == 1)
-        await Task.yield()
-        try await clock.waitUntilSleeping(count: 1)
-        clock.advance(by: .seconds(2)); await Task.yield()
-        #expect(center.notices.count == 1)
-        clock.advance(by: .seconds(3)); await Task.yield(); await Task.yield()
+        #expect(clock.recordedSleeps() == [.seconds(5)])
+        clock.advance(by: .seconds(1)); await Task.yield(); await Task.yield()
         #expect(center.notices.isEmpty)
+    }
+
+    @Test("a single passive persistent notice is bounded to a standard dwell")
+    func passivePersistentNoticeExpires() async throws {
+        let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
+        center.post(notice("passive"))
+        #expect(center.notices.first?.lifetime == .standard)
+        try await clock.waitUntilSleeping(count: 1)
+        clock.advance(by: .seconds(4)); await Task.yield(); await Task.yield()
+        #expect(center.notices.isEmpty)
+    }
+
+    @Test("an actionable persistent notice remains available")
+    func actionablePersistentNoticeRemains() async {
+        let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
+        let action = InAppNoticeCenter.Action(id: "open", title: "Open", role: .normal)
+        center.post(notice("actionable", actions: [action]))
+        clock.advance(by: .seconds(30)); await Task.yield()
+        #expect(center.notices.first?.lifetime == .persistent)
+        #expect(center.notices.count == 1)
+        #expect(clock.activeSleeperCount() == 0)
     }
 
     @Test("hidden automatic notices wait until foreground")
@@ -174,14 +192,40 @@ struct InAppNoticePresentationGuardTests {
         #expect(!onboarding.contains("InAppNoticeHost"))
     }
 
+    @Test("horizontal dismissal accepts easy swipes in both directions and rejects vertical drags")
+    func horizontalDismissalPolicy() {
+        #expect(InAppNoticeSwipePolicy.shouldDismiss(
+            translation: CGSize(width: 40, height: 4),
+            predicted: CGSize(width: 48, height: 5)
+        ))
+        #expect(InAppNoticeSwipePolicy.shouldDismiss(
+            translation: CGSize(width: -40, height: 4),
+            predicted: CGSize(width: -52, height: 6)
+        ))
+        #expect(!InAppNoticeSwipePolicy.shouldDismiss(
+            translation: CGSize(width: 20, height: -60),
+            predicted: CGSize(width: 28, height: -90)
+        ))
+        #expect(!InAppNoticeSwipePolicy.shouldDismiss(
+            translation: CGSize(width: 30, height: 2),
+            predicted: CGSize(width: 32, height: 3)
+        ))
+    }
+
     @Test("notice cards retain glass, actions, stacking, motion, and accessibility semantics")
     func noticeCardContract() throws {
         let presentation = try source("Sources/UI/Components/InAppNoticePresentation.swift")
         #expect(presentation.contains("GlassEffectContainer(spacing: 8)"))
         #expect(presentation.contains("horizontalControlReservation: CGFloat = 80"))
+        #expect(presentation.contains("NoticeToolbarAlignmentReader"))
+        #expect(presentation.contains("UINavigationBar"))
+        #expect(!presentation.contains("toolbarReservation"))
+        #expect(presentation.contains("Color.tronSurfaceElevated.opacity(index == 0 ? 0.88 : 0.76)"))
         #expect(presentation.contains("dynamicTypeSize.isAccessibilitySize"))
         #expect(presentation.contains("model.noticeCenter.performAction"))
-        #expect(presentation.contains("DragGesture(minimumDistance: 16)"))
+        #expect(presentation.contains("DragGesture(minimumDistance: 12)"))
+        #expect(presentation.contains("InAppNoticeSwipePolicy.shouldDismiss"))
+        #expect(!presentation.contains("dragY"))
         #expect(presentation.contains(".accessibilityAction(named: \"Dismiss notification\")"))
         #expect(presentation.contains(".accessibilityHidden(index != 0)"))
         #expect(presentation.contains("AccessibilityNotification.Announcement"))

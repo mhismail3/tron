@@ -7,9 +7,26 @@ struct InAppNoticeHost: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showLogs = false
+    @State private var toolbarCenterY: CGFloat?
 
     var body: some View {
-        InAppNoticeStack(notices: model.visibleNotices, reduceMotion: reduceMotion)
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                InAppNoticeStack(notices: model.visibleNotices, reduceMotion: reduceMotion)
+                    .frame(width: proxy.size.width)
+                    .position(
+                        x: proxy.size.width / 2,
+                        y: toolbarCenterY ?? proxy.safeAreaInsets.top + InAppNoticeLayout.fallbackToolbarHalfHeight
+                    )
+                NoticeToolbarAlignmentReader { centerY in
+                    guard toolbarCenterY.map({ abs($0 - centerY) > 0.5 }) ?? true else { return }
+                    toolbarCenterY = centerY
+                }
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
+            }
+        }
+        .ignoresSafeArea()
         .onAppear { consumeLogsIfOwner() }
         .onChange(of: model.logsPresentationRequested) { _, _ in consumeLogsIfOwner() }
         .sheet(isPresented: $showLogs) {
@@ -32,9 +49,21 @@ struct InAppNoticeHost: View {
 }
 
 private enum InAppNoticeLayout {
-    // Leaves enough room for the shell's leading/trailing toolbar controls
-    // without drawing glass inside system toolbar chrome.
+    // Leaves enough room for the shell's leading/trailing toolbar controls.
     static let horizontalControlReservation: CGFloat = 80
+    static let fallbackToolbarHalfHeight: CGFloat = 22
+}
+
+enum InAppNoticeSwipePolicy {
+    static let dismissalDistance: CGFloat = 36
+    static let horizontalDominance: CGFloat = 1.15
+
+    static func shouldDismiss(translation: CGSize, predicted: CGSize) -> Bool {
+        let horizontal = max(abs(translation.width), abs(predicted.width))
+        let vertical = max(abs(translation.height), abs(predicted.height))
+        return horizontal >= dismissalDistance
+            && horizontal > vertical * horizontalDominance
+    }
 }
 
 private enum NoticeOverlayCoordinateSpace {
@@ -87,10 +116,7 @@ private struct InAppNoticeStack: View {
             }
         }
         .frame(maxWidth: .infinity)
-        // Conservative reservation for the dashboard/chat top controls. The
-        // exact safe-area/toolbar relationship still needs device validation.
         .padding(.horizontal, InAppNoticeLayout.horizontalControlReservation)
-        .padding(.top, 8)
         .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: notices)
     }
 }
@@ -102,7 +128,7 @@ private struct InAppNoticeCard: View {
     let notice: InAppNoticeCenter.Notice
     let index: Int
     let reduceMotion: Bool
-    @State private var dragY: CGFloat = 0
+    @State private var dragX: CGFloat = 0
     @GestureState private var interactionActive = false
 
     private var accent: Color {
@@ -165,9 +191,16 @@ private struct InAppNoticeCard: View {
         .padding(.horizontal, 13)
         .padding(.vertical, 9)
         .frame(maxWidth: 420, minHeight: 44, alignment: .leading)
-        .glassEffect(.regular.tint(accent.opacity(index == 0 ? 0.16 : 0.08)), in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .background(
+            Color.tronSurfaceElevated.opacity(index == 0 ? 0.88 : 0.76),
+            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        )
+        .glassEffect(
+            .regular.tint(accent.opacity(index == 0 ? 0.26 : 0.16)),
+            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        )
         .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .offset(y: dragY)
+        .offset(x: dragX)
         .simultaneousGesture(index == 0 ? swipeGesture : nil)
         .allowsHitTesting(index == 0)
         .accessibilityHidden(index != 0)
@@ -191,7 +224,7 @@ private struct InAppNoticeCard: View {
         }
         .onChange(of: index) { _, _ in announceIfNeeded() }
         .onChange(of: notice) { _, _ in
-            dragY = 0
+            dragX = 0
             announceIfNeeded()
         }
         .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
@@ -212,16 +245,26 @@ private struct InAppNoticeCard: View {
     }
 
     private var swipeGesture: some Gesture {
-        DragGesture(minimumDistance: 16)
+        DragGesture(minimumDistance: 12)
             .updating($interactionActive) { _, active, _ in active = true }
             .onChanged { value in
-                dragY = min(0, value.translation.height)
+                guard abs(value.translation.width) > abs(value.translation.height) else {
+                    dragX = 0
+                    return
+                }
+                dragX = value.translation.width
             }
             .onEnded { value in
-                if value.translation.height < -28 || value.predictedEndTranslation.height < -55 {
+                if InAppNoticeSwipePolicy.shouldDismiss(
+                    translation: value.translation,
+                    predicted: value.predictedEndTranslation
+                ) {
                     model.noticeCenter.dismiss(notice.id)
-                } else if reduceMotion { dragY = 0 }
-                else { withAnimation(.smooth(duration: 0.18)) { dragY = 0 } }
+                } else if reduceMotion {
+                    dragX = 0
+                } else {
+                    withAnimation(.smooth(duration: 0.18)) { dragX = 0 }
+                }
             }
     }
 
@@ -230,6 +273,79 @@ private struct InAppNoticeCard: View {
         AccessibilityNotification.Announcement(
             [notice.title, notice.message].compactMap { $0 }.joined(separator: ". ")
         ).post()
+    }
+}
+
+private struct NoticeToolbarAlignmentReader: UIViewRepresentable {
+    let onChange: @MainActor (CGFloat) -> Void
+
+    func makeUIView(context: Context) -> ProbeView {
+        ProbeView(onChange: onChange)
+    }
+
+    func updateUIView(_ view: ProbeView, context: Context) {
+        view.onChange = onChange
+        view.refresh()
+    }
+
+    @MainActor
+    final class ProbeView: UIView {
+        var onChange: @MainActor (CGFloat) -> Void
+        private var lastCenterY: CGFloat?
+
+        init(onChange: @escaping @MainActor (CGFloat) -> Void) {
+            self.onChange = onChange
+            super.init(frame: .zero)
+            isUserInteractionEnabled = false
+            backgroundColor = .clear
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { nil }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            refresh()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            refresh()
+        }
+
+        func refresh() {
+            guard let overlayWindow = window, let scene = overlayWindow.windowScene else { return }
+            let centerY = Self.toolbarCenter(in: scene, excluding: overlayWindow)
+                ?? overlayWindow.safeAreaInsets.top + InAppNoticeLayout.fallbackToolbarHalfHeight
+            guard lastCenterY.map({ abs($0 - centerY) > 0.5 }) ?? true else { return }
+            lastCenterY = centerY
+            onChange(centerY)
+        }
+
+        private static func toolbarCenter(in scene: UIWindowScene, excluding overlayWindow: UIWindow) -> CGFloat? {
+            let windows = scene.windows
+                .filter { $0 !== overlayWindow && !$0.isHidden && $0.alpha > 0.01 }
+                .sorted { $0.windowLevel.rawValue > $1.windowLevel.rawValue }
+            for sourceWindow in windows {
+                let centers = navigationBars(in: sourceWindow)
+                    .filter { !$0.isHidden && $0.alpha > 0.01 && $0.window === sourceWindow }
+                    .map { bar -> CGFloat in
+                        let frame = bar.convert(bar.bounds, to: sourceWindow)
+                        return sourceWindow.convert(frame, to: overlayWindow).midY
+                    }
+                if let center = centers.max() { return center }
+            }
+            return nil
+        }
+
+        private static func navigationBars(in view: UIView) -> [UINavigationBar] {
+            var result: [UINavigationBar] = []
+            if let bar = view as? UINavigationBar { result.append(bar) }
+            for child in view.subviews where !child.isHidden && child.alpha > 0.01 {
+                result.append(contentsOf: navigationBars(in: child))
+            }
+            return result
+        }
     }
 }
 
@@ -308,11 +424,7 @@ struct InAppNoticeWindowInstaller: UIViewRepresentable {
 
         private func updateRootView() {
             hostingController.rootView = AnyView(
-                VStack(spacing: 0) {
-                    InAppNoticeHost()
-                    Spacer(minLength: 0)
-                }
-                .safeAreaPadding(.top, NoticeOverlayWindow.toolbarReservation)
+                InAppNoticeHost()
                 .coordinateSpace(name: NoticeOverlayCoordinateSpace.name)
                 .environment(model)
                 .environment(\.noticeOverlayInteractionRegistry, interactionRegistry)
@@ -336,7 +448,6 @@ final class NoticeWindowAnchorView: UIView {
 
 @MainActor
 private final class NoticeOverlayWindow: UIWindow {
-    static let toolbarReservation: CGFloat = 52
     weak var model: AppModel?
     var interactionRegistry: NoticeOverlayInteractionRegistry?
 

@@ -123,14 +123,10 @@ final class InAppNoticeCenter {
            }) {
             // A duplicate with a new handler is still a duplicate only when its
             // action shape is identical; replace the closure map rather than lose it.
+            // Do not refresh an automatic deadline here: repeated identical
+            // failures must not pin one passive card indefinitely. Producers
+            // that intentionally refresh status use a keyed replacement.
             if !handlers.isEmpty { self.handlers[duplicate.id] = handlers }
-            if case .automatic(let duration) = bounded.lifetime, duration > .zero {
-                // Coalescing keeps one card but gives a current automatic
-                // status notice a fresh lifetime.
-                cancelTimer(for: duplicate.id)
-                remaining[duplicate.id] = duration
-                reconcileTimers()
-            }
             return duplicate.id
         }
         notices.append(bounded)
@@ -166,9 +162,17 @@ final class InAppNoticeCenter {
         remove(id); handler()
     }
     private func bounded(_ notice: Notice) -> Notice {
-        Notice(id: notice.id, replacement: notice.replacement, scope: notice.scope, role: notice.role,
-               priority: notice.priority, title: Self.bound(notice.title), message: notice.message.map(Self.bound),
-               lifetime: notice.lifetime, actions: notice.actions)
+        // A passive card must never become permanent UI. Persistent lifetime
+        // is reserved for notices with an explicit action the user may need
+        // time to reach; keyed progress can repost to refresh its short dwell.
+        let lifetime: Lifetime = if notice.actions.isEmpty, notice.lifetime == .persistent {
+            .standard
+        } else {
+            notice.lifetime
+        }
+        return Notice(id: notice.id, replacement: notice.replacement, scope: notice.scope, role: notice.role,
+                      priority: notice.priority, title: Self.bound(notice.title), message: notice.message.map(Self.bound),
+                      lifetime: lifetime, actions: notice.actions)
     }
     private func enforceBounds() {
         while notices.count > Self.maximumCount || totalBytes > Self.maximumTotalBytes {

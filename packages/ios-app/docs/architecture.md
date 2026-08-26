@@ -936,16 +936,19 @@ notification projection is disposable and bounded to eight entries, 4 KiB per me
 `InAppNoticeCenter` is the single AppModel-owned, monotonic-clock-driven center: it coalesces keyed
 progress, orders foreground cards by priority while preserving FIFO ties, stacks at most three visible cards,
 starts automatic dwell only when a card is foremost, and pauses timers while inactive, backgrounded, or interacted
-with. Typed app, presentation, and exact session scopes retire with their owner. The content-layer
-One non-key, transparent, pass-through window per app scene owns `InAppNoticeHost` above app sheets, so notice
-coordinates never transfer into a presented sheet or follow its interactive drag. Content and blur modifiers do not
-install notice hosts. The window receives the existing AppModel-owned center, forwards touches outside the bounded
-notice region, and is retired with its scene; it never creates another notice store. Notices use regular Liquid Glass
-below the safe area and toolbar reservation, keep 80 points clear on each horizontal edge, and accept input only on
-the foremost card. Accessibility Dynamic
-Type uses a vertical action layout. Passive errors expire after roughly eight seconds, while action-bearing errors are
-persistent and expose native actions. Persistent restart, update, rollback, and package-progress cards are low priority
-until completion returns them to normal priority. A session opening assigns notices to its pending presentation generation,
+with. Unkeyed semantic duplicates coalesce without extending the original deadline, so repeated identical failures
+cannot pin a passive card. Passive cards are always normalized to a short automatic dwell; persistent lifetime is
+reserved for cards with an explicit action. Typed app, presentation, and exact session scopes retire with their owner. One non-key, transparent,
+pass-through window per app scene owns `InAppNoticeHost` above app sheets, so notice coordinates never transfer into
+a presented sheet or follow its interactive drag. Content and blur modifiers do not install notice hosts. The window
+receives the existing AppModel-owned center, forwards touches outside the bounded notice region, and is retired with
+its scene; it never creates another notice store. The host discovers the foremost visible navigation bar in the scene
+and aligns the card center with that toolbar while retaining 80 points for its leading and trailing controls. Notices use
+an opaque surface backing under regular tinted Liquid Glass, accept input only on the foremost card, and dismiss with
+an easy horizontal swipe in either direction; vertical swipes never dismiss. Accessibility Dynamic Type uses a vertical
+action layout. Passive errors expire after roughly eight seconds, while action-bearing errors are persistent and expose
+native actions. Keyed restart, update, rollback, and package-progress cards refresh their short dwell when replacement
+status arrives. A session opening assigns notices to its pending presentation generation,
 then retires the previous exact session scope when replacement mounts. Destructive,
 security, text-entry, and ambiguous decisions remain modal.
 Replaceable package, restart, and catch-up progress coalesces by owner, and profile teardown clears it. Dashboard search autofocuses in a

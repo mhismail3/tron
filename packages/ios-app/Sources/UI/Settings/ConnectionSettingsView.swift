@@ -470,12 +470,13 @@ struct GatewayConnectionDetailView: View {
                             gatewayUpdateStatusRow(updateStatus)
                             if let error = updateStatus.error {
                                 TronSettingsDivider(accent: .tronError)
-                                Text(String(error.prefix(2_048)))
-                                    .font(TronTypography.caption)
-                                    .foregroundStyle(Color.tronError)
-                                    .textSelection(.enabled)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
+                                TronValueRow(
+                                    icon: "exclamationmark.triangle",
+                                    title: "Deployment error",
+                                    detail: String(error.prefix(2_048)),
+                                    accent: .tronError
+                                )
+                                .textSelection(.enabled)
                             }
                         }
                         if let drainSnapshot {
@@ -721,7 +722,7 @@ struct GatewayConnectionDetailView: View {
                 ? "checkmark.seal.fill"
                 : (updateStatus.state == "rolled-back" ? "arrow.uturn.backward.circle" : "arrow.down.circle"),
             title: "Gateway Deployment · \(updateStatus.channel.capitalized)",
-            value: acceptedOperationLabel ?? updateStatus.presentationTitle,
+            detail: acceptedOperationLabel ?? updateStatus.presentationTitle,
             accent: accent
         ) {
             if active {
@@ -731,21 +732,16 @@ struct GatewayConnectionDetailView: View {
     }
 
     private func administrativeDrainRow(_ snapshot: AdministrativeDrainSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            TronValueRow(
-                icon: snapshot.phase == .failed ? "exclamationmark.triangle" : "hourglass",
-                title: "Restart drain",
-                value: AdministrativeDrainPresentation.summary(snapshot),
-                accent: snapshot.phase == .failed ? .tronError : .tronAmber
-            )
-            if let suspect = AdministrativeDrainPresentation.suspectSummary(snapshot) {
-                Text(suspect)
-                    .font(TronTypography.caption)
-                    .foregroundStyle(Color.tronTextMuted)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 6)
-            }
-        }
+        let detail = [
+            AdministrativeDrainPresentation.summary(snapshot),
+            AdministrativeDrainPresentation.suspectSummary(snapshot),
+        ].compactMap { $0 }.joined(separator: "\n")
+        return TronValueRow(
+            icon: snapshot.phase == .failed ? "exclamationmark.triangle" : "hourglass",
+            title: "Restart drain",
+            detail: detail,
+            accent: snapshot.phase == .failed ? .tronError : .tronAmber
+        )
     }
 
     private func gatewayUpdateGroup(config: GatewayUpdateConfig?) -> some View {

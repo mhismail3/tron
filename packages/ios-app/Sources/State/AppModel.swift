@@ -1388,7 +1388,7 @@ final class AppModel {
             // admitted. Enter restarting when the Gateway emits
             // system.stopping, so an accepted update cannot make iOS look
             // offline while the old process is still serving sessions.
-            postNotice("Gateway update accepted. Tron will reconnect automatically.", replacing: .gatewayRestart, role: .progress, lifetime: .persistent, priority: .low)
+            postNotice("Gateway update accepted. Tron will reconnect automatically.", replacing: .gatewayRestart, role: .progress, lifetime: .standard, priority: .low)
             return commandID
         } catch {
             guard admitsLifecycle(admission) else { return nil }
@@ -1420,7 +1420,7 @@ final class AppModel {
             }
             try acknowledgement.require(commandID: commandID)
             try requireLifecycle(admission)
-            postNotice("Gateway rollback accepted. Tron will reconnect automatically.", replacing: .gatewayRestart, role: .progress, lifetime: .persistent, priority: .low)
+            postNotice("Gateway rollback accepted. Tron will reconnect automatically.", replacing: .gatewayRestart, role: .progress, lifetime: .standard, priority: .low)
             return commandID
         } catch {
             guard admitsLifecycle(admission) else { return nil }
@@ -2280,11 +2280,11 @@ final class AppModel {
                 "Gateway restart scheduled\(detail).",
                 replacing: .gatewayRestart,
                 role: .progress,
-                lifetime: .persistent,
+                lifetime: .standard,
                 priority: .low
             )
         } else {
-            postNotice("Gateway is restarting. Tron will reconnect automatically.", replacing: .gatewayRestart, role: .progress, lifetime: .persistent, priority: .low)
+            postNotice("Gateway is restarting. Tron will reconnect automatically.", replacing: .gatewayRestart, role: .progress, lifetime: .standard, priority: .low)
         }
         return response
     }
@@ -2546,7 +2546,7 @@ final class AppModel {
                 event.topic == "packages.completed" ? "Package operation completed" : "Updating agent package…",
                 replacing: .packageProgress,
                 role: event.topic == "packages.completed" ? .success : .progress,
-                lifetime: event.topic == "packages.completed" ? .standard : .persistent,
+                lifetime: .standard,
                 priority: event.topic == "packages.completed" ? .normal : .low
             )
         case "session.processTranscript.changed":
