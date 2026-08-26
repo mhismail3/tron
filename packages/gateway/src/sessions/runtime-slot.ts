@@ -127,6 +127,7 @@ const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
  * because each payload fully replaces the client's streaming bubble.
  */
 const STREAMING_PROGRESS_FLUSH_MS = 150;
+const DEFAULT_RUNTIME_DISPOSAL_GRACE_MS = 5_000;
 const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 const MAX_EXTENSION_EVENT_TAIL_BYTES = 64 * 1_024;
@@ -211,6 +212,9 @@ export interface RuntimeSlotDependencies {
   machineId?: string;
   notifications?: NotificationService;
   extensionArtifactWarning?: (warning: { reason: ExtensionArtifactRejectionReason; owner: string }) => void;
+  /** Extension cleanup is advisory once runtime disposal begins. A handler that
+   * never settles must not strand the canonical session behind idle eviction. */
+  runtimeDisposalTimedOut?: (graceMs: number) => void;
 }
 
 type CompletionOwnershipItem = {
@@ -337,6 +341,10 @@ export class RuntimeSlot {
   private readonly toolMetadata = new Map<string, ToolProjectionMetadata>();
   private nextToolOrder = 0;
   private lastPublishedSummary: SessionSummaryUpdate | undefined;
+  /** Disposable live activity overlays the canonical tail timestamp in catalog
+   * summaries. It is never written into Pi JSONL; the registry may retain the
+   * last published summary for revision continuity until Gateway restart. */
+  private latestDashboardActivityAt: string | undefined;
   private summaryContentDirty = true;
   private cachedSummaryContent: {
     name?: string;
@@ -524,9 +532,16 @@ export class RuntimeSlot {
     return this.dependencies.workRegistry.hasSessionWork(this.id)
       // Detached nonterminal extension work remains the explicit compatibility
       // authority until the extension host offers direct registration tokens.
-      || [...this.extensionActivities.values()].some((activity) => activity.lifecycle?.state === "queued"
-        || activity.lifecycle?.state === "running"
-        || activity.lifecycle?.state === "paused");
+      || this.hasDetachedDashboardWork();
+  }
+
+  /** User-visible detached activity only. Durable receipt persistence and other
+   * administrative work can keep operational drain busy but must not leave a
+   * dashboard row stuck in the running phase. */
+  private hasDetachedDashboardWork(): boolean {
+    return [...this.extensionActivities.values()].some((activity) => activity.lifecycle?.state === "queued"
+      || activity.lifecycle?.state === "running"
+      || activity.lifecycle?.state === "paused");
   }
 
   /** AgentSession can start an extension-triggered continuation while an older
@@ -542,6 +557,30 @@ export class RuntimeSlot {
     return this.phase;
   }
 
+  /** Dashboard activity includes detached extension work even after the
+   * foreground Pi turn settles. Chat snapshots retain the narrower foreground
+   * phase; only the catalog projection widens idle/interrupted to running. */
+  private get dashboardPhase(): SessionPhase {
+    const phase = this.effectivePhase;
+    return (phase === "idle" || phase === "interrupted") && this.hasDetachedDashboardWork()
+      ? "running"
+      : phase;
+  }
+
+  private hasCurrentDashboardWork(): boolean {
+    const phase = this.dashboardPhase;
+    return phase === "running" || phase === "compacting" || phase === "retrying";
+  }
+
+  private noteDashboardActivity(at = new Date().toISOString()): void {
+    const candidate = Date.parse(at);
+    if (!Number.isFinite(candidate)) return;
+    const current = this.latestDashboardActivityAt === undefined
+      ? Number.NEGATIVE_INFINITY
+      : Date.parse(this.latestDashboardActivityAt);
+    if (!Number.isFinite(current) || candidate > current) this.latestDashboardActivityAt = at;
+  }
+
   private ensureAgentProjection(): void {
     if (!this.hasActiveAgentRun) return;
     if (this.phase === "idle" || this.phase === "interrupted") this.phase = "running";
@@ -554,7 +593,7 @@ export class RuntimeSlot {
   /** Lightweight dashboard projection. Catalog listing must not construct a
    * transcript-bearing session snapshot merely to read runtime activity. */
   get catalogPhase(): SessionPhase {
-    return this.effectivePhase;
+    return this.dashboardPhase;
   }
 
   get touchedAt(): number {
@@ -1349,11 +1388,20 @@ export class RuntimeSlot {
       };
       this.summaryContentDirty = false;
     }
+    const canonical = this.cachedSummaryContent;
+    const canonicalTime = Date.parse(canonical.updatedAt);
+    const liveTime = this.latestDashboardActivityAt === undefined
+      ? Number.NEGATIVE_INFINITY
+      : Date.parse(this.latestDashboardActivityAt);
+    const updatedAt = Number.isFinite(liveTime) && (!Number.isFinite(canonicalTime) || liveTime > canonicalTime)
+      ? this.latestDashboardActivityAt!
+      : canonical.updatedAt;
     return {
       sessionId: this.id,
       summaryRevision: 0,
-      phase: this.effectivePhase,
-      ...this.cachedSummaryContent,
+      phase: this.dashboardPhase,
+      ...canonical,
+      updatedAt,
     };
   }
 
@@ -1580,6 +1628,9 @@ export class RuntimeSlot {
   private onEvent(event: AgentSessionEvent): void {
     this.revision += 1;
     this.touch();
+    this.noteDashboardActivity(event.type === "entry_appended"
+      ? event.entry.timestamp
+      : new Date().toISOString());
     switch (event.type) {
       case "agent_start": {
         const continuationFromSettlement = this.pendingAssistantCompletion !== undefined;
@@ -1670,7 +1721,7 @@ export class RuntimeSlot {
         this.toolInvocationGroups.clear();
         this.toolStartedAtMonotonicMs.clear();
         this.nextToolOrder = 0;
-        this.stopActivityHeartbeat();
+        if (!this.hasCurrentDashboardWork()) this.stopActivityHeartbeat();
         this.clearToolProgressTimers();
         if (this.pendingManualCompaction) {
           // The independently admitted compaction token already owns the queued
@@ -3024,12 +3075,18 @@ export class RuntimeSlot {
    * changes. Avoid rebuilding and sending the canonical transcript for every
    * status artifact heartbeat. */
   private publishExtensionActivity(activity: ExtensionRunActivity): void {
+    this.noteDashboardActivity(this.extensionActivityAsOf);
+    if (this.hasDetachedDashboardWork() && !this.activityHeartbeat) this.startActivityHeartbeat();
     this.emit("session.extensionActivity", safeJson({
       activity: this.extensionActivityWire(activity),
       liveActivityRevision: this.liveActivityRevision,
       extensionActivityAsOf: this.extensionActivityAsOf,
     }));
     this.publishProcessesForToolCall(activity.toolCallId);
+    // Detached lifecycle updates do not rebuild the full transcript snapshot,
+    // but they are authoritative live catalog activity and must reorder rows.
+    this.publishSummary();
+    if (!this.hasCurrentDashboardWork()) this.stopActivityHeartbeat();
   }
 
   private clearToolProgressTimers(): void {
@@ -3041,17 +3098,26 @@ export class RuntimeSlot {
 
   private startActivityHeartbeat(): void {
     this.stopActivityHeartbeat();
-    this.activityHeartbeat = setInterval(() => {
-      if (this.disposed || !this.isBusy) return;
-      this.emit("session.heartbeat", safeJson({
-        phase: this.effectivePhase,
-        ...(this.activeOperationId ? { operationId: this.activeOperationId } : {}),
-        activeToolCallIds: [...this.toolExecutions.values()]
-          .filter((tool) => tool.status === "running")
-          .map((tool) => tool.toolCallId),
-      }));
-    }, 10_000);
+    this.activityHeartbeat = setInterval(() => this.publishActivityHeartbeat(), 10_000);
     this.activityHeartbeat.unref();
+  }
+
+  private publishActivityHeartbeat(): void {
+    if (this.disposed || !this.hasCurrentDashboardWork()) {
+      this.stopActivityHeartbeat();
+      return;
+    }
+    this.noteDashboardActivity();
+    this.emit("session.heartbeat", safeJson({
+      phase: this.effectivePhase,
+      ...(this.activeOperationId ? { operationId: this.activeOperationId } : {}),
+      activeToolCallIds: [...this.toolExecutions.values()]
+        .filter((tool) => tool.status === "running")
+        .map((tool) => tool.toolCallId),
+    }));
+    // Heartbeats keep a legitimately active foreground or detached session's
+    // catalog timestamp current without rebuilding its transcript snapshot.
+    this.publishSummary();
   }
 
   private stopActivityHeartbeat(): void {
@@ -4107,8 +4173,11 @@ export class RuntimeSlot {
         work,
       );
     }
+    const startedAt = new Date().toISOString();
     this.phase = "compacting";
-    this.operation = { ...(operationId ? { id: operationId } : {}), kind: "compaction", startedAt: new Date().toISOString(), reason: "manual" };
+    this.operation = { ...(operationId ? { id: operationId } : {}), kind: "compaction", startedAt, reason: "manual" };
+    this.noteDashboardActivity(startedAt);
+    if (!this.activityHeartbeat) this.startActivityHeartbeat();
     this.revision += 1;
     this.publishSnapshot();
     try {
@@ -4130,6 +4199,8 @@ export class RuntimeSlot {
     this.phase = "idle";
     this.operation = undefined;
     this.retry = undefined;
+    this.noteDashboardActivity();
+    if (!this.hasCurrentDashboardWork()) this.stopActivityHeartbeat();
     this.revision += 1;
     this.publishSnapshot();
     if (operationError !== undefined) throw operationError;
@@ -4153,8 +4224,11 @@ export class RuntimeSlot {
           () => this.retryDurableWrite(`marker:mark:${operationId}`, () => this.dependencies.markers.mark(this.id, operationId)),
           work,
         );
+        const startedAt = new Date().toISOString();
         this.phase = "running";
-        this.operation = { id: operationId, kind: "bash", startedAt: new Date().toISOString() };
+        this.operation = { id: operationId, kind: "bash", startedAt };
+        this.noteDashboardActivity(startedAt);
+        if (!this.activityHeartbeat) this.startActivityHeartbeat();
         this.revision += 1;
         this.publishSnapshot();
         try {
@@ -4163,6 +4237,8 @@ export class RuntimeSlot {
           await this.clearMarkerOwnership(operationId, work);
           this.phase = "idle";
           this.operation = undefined;
+          this.noteDashboardActivity();
+          if (!this.hasCurrentDashboardWork()) this.stopActivityHeartbeat();
           this.revision += 1;
           this.publishSnapshot();
         }
@@ -4510,12 +4586,16 @@ export class RuntimeSlot {
    */
   async disposeIf(shouldDispose: () => boolean): Promise<boolean> {
     if (this.disposed) return false;
-    await this.waitForReceiptWrites();
     return this.lane.run(async () => {
-      if (this.disposed || !shouldDispose()) return false;
-      if (this.isBusy || this.trustReloadPending) {
+      if (this.disposed) return false;
+      // Automatic eviction never waits behind canonical receipt persistence.
+      // Receipt work protects the existing slot; a later idle pass may retry
+      // only after that authority settles. Explicit shutdown/delete continues
+      // to join receipt writes through dispose()/performShutdown().
+      if (this.isBusy || this.pendingReceiptWrites.size > 0 || this.trustReloadPending) {
         throw new GatewayError("busy", "Cannot dispose a busy session runtime");
       }
+      if (!shouldDispose()) return false;
       await this.disposeRuntime();
       return true;
     });
@@ -4618,11 +4698,41 @@ export class RuntimeSlot {
     this.unsubscribe?.();
     this.ui.cancelAll();
     this.extensionHost.retire("Session runtime disposed");
-    await this.runtime.dispose();
+    await this.disposeAgentRuntime();
     for (const operationId of [...this.operationWork.keys()]) this.settleOperationWork(operationId);
     this.lifecycle.retire();
     this.ui.retire();
     this.disposed = true;
+  }
+
+  /** Pi gives extensions a session-shutdown callback before invalidating their
+   * context. That callback is third-party cleanup, not canonical authority. If
+   * it never settles, force-invalidating the AgentSession after a bounded grace
+   * keeps idle eviction from making every later session.open wait forever. */
+  private async disposeAgentRuntime(): Promise<void> {
+    const graceMs = DEFAULT_RUNTIME_DISPOSAL_GRACE_MS;
+    const disposal = this.runtime.dispose();
+    let timer: NodeJS.Timeout | undefined;
+    const outcome = await Promise.race([
+      disposal.then(
+        () => ({ state: "settled" as const }),
+        (error: unknown) => ({ state: "failed" as const, error }),
+      ),
+      new Promise<{ state: "timedOut" }>((resolveTimeout) => {
+        timer = setTimeout(() => resolveTimeout({ state: "timedOut" }), graceMs);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (outcome.state === "failed") throw outcome.error;
+    if (outcome.state === "settled") return;
+
+    // Observability must never become another disposal barrier.
+    try { this.dependencies.runtimeDisposalTimedOut?.(graceMs); } catch { /* advisory instrumentation */ }
+    // AgentSession.dispose() is synchronous and invalidates every extension
+    // context before disconnecting listeners. A timed-out shutdown promise may
+    // later unwind and dispose idempotently, but can no longer mutate the slot.
+    this.runtime.session.dispose();
+    void disposal.catch(() => {});
   }
 
   private assertNoTrustReload(): void {

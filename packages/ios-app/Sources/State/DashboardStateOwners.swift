@@ -33,6 +33,12 @@ enum DashboardSessionActivity: Equatable, Sendable {
     case interrupted
 }
 
+enum DashboardActivityClock {
+    /// Relative labels age while the dashboard is otherwise idle. Gateway live
+    /// summaries still drive exact activity timestamps and row reordering.
+    static let refreshInterval: TimeInterval = 30
+}
+
 enum DashboardServerConnectionState: Equatable, Sendable {
     case connecting
     case reconnecting

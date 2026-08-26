@@ -2256,6 +2256,10 @@ struct PresentationStyleGuardTests {
         #expect(!shell.contains("HistoricalSessionRow(session: session, selected:"))
         #expect(!shell.contains("let selected: Bool"))
         #expect(shell.contains(".foregroundStyle(Color.tronEmerald)"))
+        #expect(shell.contains("TimelineView(.periodic(from: .now, by: DashboardActivityClock.refreshInterval))"))
+        #expect(shell.contains("SessionSummary.orderedByRecency(filteredSessions)"))
+        #expect(shell.contains("SessionSummary.orderedByRecency(group.sessions)"))
+        #expect(!shell.contains("$0.updatedAt > $1.updatedAt"))
     }
 
     @Test("tool runs, transcript notices, and small labels retain compact readable presentation")

@@ -686,7 +686,7 @@ struct SessionShellView: View {
     }
 
     private var recentSessions: [SessionSummary] {
-        filteredSessions.sorted { $0.updatedAt > $1.updatedAt }
+        SessionSummary.orderedByRecency(filteredSessions)
     }
 
     private var workspaceGroups: [SessionListWorkspaceGroup] {
@@ -697,7 +697,7 @@ struct SessionShellView: View {
                     name: group.name,
                     profileID: group.profileID,
                     profileLabel: group.profileLabel,
-                    sessions: group.sessions.sorted { $0.updatedAt > $1.updatedAt }
+                    sessions: SessionSummary.orderedByRecency(group.sessions)
                 )
             }
             .sorted {
@@ -922,7 +922,14 @@ private struct HistoricalSessionRow: View {
     let showsContext: Bool
 
     var body: some View {
-        HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
+        TimelineView(.periodic(from: .now, by: DashboardActivityClock.refreshInterval)) { timeline in
+            row(relativeTo: timeline.date)
+        }
+    }
+
+    private func row(relativeTo now: Date) -> some View {
+        let relativeActivity = session.relativeActivityDescription(relativeTo: now)
+        return HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
             Group {
                 if activity == .active || activity == .resuming {
                     ProgressView().controlSize(.small).tint(.tronEmerald)
@@ -952,7 +959,7 @@ private struct HistoricalSessionRow: View {
 
             Spacer(minLength: 10)
 
-            Text(session.relativeActivityDescription())
+            Text(relativeActivity)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                 .foregroundStyle(Color.tronTextMuted)
                 .lineLimit(1)
@@ -967,7 +974,7 @@ private struct HistoricalSessionRow: View {
             interactive: true
         )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(session.title), \(activity.accessibilityDescription)\(session.isUnread ? ", unread" : ""), \(session.relativeActivityDescription())")
+        .accessibilityLabel("\(session.title), \(activity.accessibilityDescription)\(session.isUnread ? ", unread" : ""), \(relativeActivity)")
     }
 
     private var projectServerContext: String {

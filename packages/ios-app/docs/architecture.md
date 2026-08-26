@@ -96,7 +96,7 @@ rejects more than 50 pages/25,000 identities, duplicate IDs, cursor cycles, and 
 publishes only a complete catalog. A mixed revision from an older Gateway or an expired continuation lease restarts silently once from a nil
 cursor; it is expected optimistic invalidation, not the former actionable “Sessions changed while loading
 the dashboard” alert. Known revisioned `session.summary` events apply synchronously without a list read,
-and mounted transcript snapshots cannot overwrite those global row fields. Completion attention is one
+and mounted transcript snapshots cannot overwrite those global row fields. Dashboard recency orders parsed Gateway instants with profile-qualified identity as the deterministic tie-breaker, so equivalent whole/fractional ISO representations never become chronology. Visible rows use a 30-second `TimelineView` cadence to age relative labels even when no catalog event occurs; live Gateway summary heartbeats independently advance active foreground and detached-extension timestamps and row order. Completion attention is one
 of those Gateway-canonical row fields: only final settled prompt responses advance it, Mark Read/Unread
 uses an absolute command-receipt mutation, and a successful open acknowledges only its returned
 completion revision after the snapshot installs. That acknowledgement retries transient failures against

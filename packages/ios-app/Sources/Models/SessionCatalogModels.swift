@@ -127,6 +127,26 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     static func dashboardSessions(_ sessions: [SessionSummary]) -> [SessionSummary] {
         sessions.filter { $0.kind == .user }
     }
+
+    static func orderedByRecency(_ sessions: [SessionSummary]) -> [SessionSummary] {
+        sessions
+            .map { (summary: $0, instant: GatewayTimestamp.parse($0.updatedAt)) }
+            .sorted { left, right in
+                switch (left.instant, right.instant) {
+                case let (leftDate?, rightDate?) where leftDate != rightDate:
+                    return leftDate > rightDate
+                case (_?, nil):
+                    return true
+                case (nil, _?):
+                    return false
+                default:
+                    // Equivalent instants may use different ISO precision. Keep
+                    // row order deterministic without treating text shape as chronology.
+                    return left.summary.dashboardID < right.summary.dashboardID
+                }
+            }
+            .map(\.summary)
+    }
 }
 
 struct SessionSummaryUpdate: Codable, Hashable, Sendable {

@@ -216,8 +216,8 @@ The gateway sends WebSocket ping control frames every 25 seconds and terminates
 connections that fail the next heartbeat, so half-open Tailscale/iOS paths are
 observable. Pong, ping, and application frames all refresh liveness; mobile clients also issue an application-level probe before that interval for compatibility with URLSession paths that do not reliably surface automatic pong handling. Heartbeat timeouts and bounded WebSocket close codes/reasons are recorded without device credentials so transient transport failures remain diagnosable. Reconnect and foreground activation converge through an authoritative
 snapshot. `session.summary` is a bounded, per-session revisioned global projection
-of phase, name, activity time, message count, and first-message title. It updates every connected
-dashboard immediately without broadcasting full transcripts; clients subscribe
+of phase, name, activity time, message count, and first-message title. Live activity time overlays the canonical tail with foreground agent events, detached extension lifecycle observations, and a ten-second heartbeat while either remains active; administrative receipt persistence does not make a row active. Catalog ordering compares parsed instants rather than ISO text precision, and Gateway restart naturally falls back to canonical persistence time. Summary updates reach every connected
+dashboard immediately without broadcasting full transcripts or changing the structural list revision; clients subscribe
 to `session.snapshot`, progress, tool, queue, and extension events only for chats
 they actually open. Streaming progress republishes the cumulative live message, so
 updates are coalesced to one frame per short window (the first update stays
@@ -255,6 +255,12 @@ eviction only; it cannot deadlock trust revocation or explicit deletion. Adminis
 drain establishes a cutoff, repeatedly clears newly added queues, and aborts
 extension continuations that begin after that cutoff. `ctx.shutdown()` waits for Pi's
 `session_shutdown` before reporting closure and closes only the owning runtime slot.
+Automatic eviction skips slots with unsettled canonical receipt persistence rather
+than committing an eviction that waits behind them. Runtime disposal then gives
+extension `session_shutdown` cleanup a five-second grace before synchronously
+invalidating the Pi extension context and retiring the slot. Cleanup and disposal
+instrumentation are advisory after disposal begins: they cannot strand a canonical
+session behind committed idle eviction or make later `session.open` calls time out.
 
 `ExtensionPresentationStore` is the sole owner of an extension host epoch and its
 aggregate presentation revision. It atomically retains semantic state, actionable

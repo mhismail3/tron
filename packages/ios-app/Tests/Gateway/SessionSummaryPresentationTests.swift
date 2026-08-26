@@ -44,6 +44,27 @@ struct SessionSummaryPresentationTests {
         #expect(session.relativeActivityDescription(relativeTo: now).contains("2"))
     }
 
+    @Test("recency ordering compares parsed instants instead of ISO text precision")
+    func parsedRecencyOrdering() {
+        let wholeSecond = session("whole", updatedAt: "2026-01-01T00:00:00Z")
+        let laterFraction = session("fraction", updatedAt: "2026-01-01T00:00:00.900Z")
+        let equivalentFraction = session("equivalent", updatedAt: "2026-01-01T00:00:00.000Z")
+
+        #expect(SessionSummary.orderedByRecency([wholeSecond, laterFraction]).map(\.id) == ["fraction", "whole"])
+        #expect(SessionSummary.orderedByRecency([wholeSecond, equivalentFraction]).map(\.id) == ["equivalent", "whole"])
+    }
+
+    @Test("relative activity changes as the dashboard clock advances")
+    func relativeTimestampAges() {
+        let value = session("aging", updatedAt: "2026-01-01T00:00:00Z")
+        let oneMinute = GatewayTimestamp.parse("2026-01-01T00:01:00Z")!
+        let twoHours = GatewayTimestamp.parse("2026-01-01T02:00:00Z")!
+
+        #expect(value.relativeActivityDescription(relativeTo: oneMinute)
+            != value.relativeActivityDescription(relativeTo: twoHours))
+        #expect(DashboardActivityClock.refreshInterval == 30)
+    }
+
     @Test("missing kind decodes as a user session")
     func legacyKindCompatibility() throws {
         let json = """

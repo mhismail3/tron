@@ -66,6 +66,21 @@ function assertProcessSessionRef(value: string): void {
   }
 }
 
+function orderSessionSummariesByRecency(summaries: SessionSummary[]): SessionSummary[] {
+  return summaries
+    .map((summary) => ({ summary, instant: Date.parse(summary.updatedAt) }))
+    .sort((left, right) => {
+      const leftValid = Number.isFinite(left.instant);
+      const rightValid = Number.isFinite(right.instant);
+      if (leftValid && rightValid && left.instant !== right.instant) return right.instant - left.instant;
+      if (leftValid !== rightValid) return rightValid ? 1 : -1;
+      // Equivalent instants can use different valid ISO precision. Identity,
+      // not textual timestamp shape, is the deterministic pagination tie-breaker.
+      return left.summary.id.localeCompare(right.summary.id);
+    })
+    .map(({ summary }) => summary);
+}
+
 function branchFromParsedSession(entries: FileEntry[]): {
   sessionId: string;
   parentSession?: string;
@@ -499,6 +514,9 @@ export class RuntimeRegistry {
       ...(this.options.machineId ? { machineId: this.options.machineId } : {}),
       ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
+      ...(this.options.stageTiming ? {
+        runtimeDisposalTimedOut: (graceMs: number) => this.options.stageTiming!("runtime.dispose-timeout", graceMs, "failure"),
+      } : {}),
     };
   }
 
@@ -1363,8 +1381,7 @@ export class RuntimeRegistry {
         ...this.attention.projection(id),
       }];
     });
-    return [...persisted, ...liveOnly]
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    return orderSessionSummariesByRecency([...persisted, ...liveOnly]);
   }
 
   private async projectTrustReloading(cwdInput: string): Promise<boolean> {

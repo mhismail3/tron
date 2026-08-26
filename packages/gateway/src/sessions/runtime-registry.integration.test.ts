@@ -43,6 +43,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     if (options.name) manager.appendSessionInfo(options.name);
     const runtimeFactory = vi.fn(async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }));
     const events: Array<{ topic: string; payload: any }> = [];
+    const summaries: SessionSummaryUpdate[] = [];
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
@@ -52,7 +53,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       modelRuntimeFactory: runtimeFactory,
       trust: new TrustService(agentDir),
       broadcast: (_sessionId, topic, payload) => events.push({ topic, payload }),
-      sessionSummaryChanged: () => {},
+      sessionSummaryChanged: (summary) => summaries.push(summary),
       sessionListChanged: () => {},
     });
     registries.push(registry);
@@ -65,6 +66,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       registry,
       runtimeFactory,
       events,
+      summaries,
       sessionFile: manager.getSessionFile()!,
     };
   }
@@ -1537,6 +1539,52 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
   });
 
+  it("orders catalog summaries by parsed instants across ISO precision", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-time-precision-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const sessionDirectory = join(agentDir, "sessions", "workspace");
+    await Promise.all([mkdir(sessionDirectory, { recursive: true }), mkdir(cwd)]);
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const whole = SessionManager.create(cwd, sessionDirectory);
+    whole.appendMessage(fauxAssistantMessage("whole"));
+    const fraction = SessionManager.create(cwd, sessionDirectory);
+    fraction.appendMessage(fauxAssistantMessage("fraction"));
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const internals = registry as unknown as {
+      latestSummaries: Map<string, SessionSummaryUpdate>;
+    };
+    const summary = (sessionId: string, updatedAt: string): SessionSummaryUpdate => ({
+      sessionId,
+      summaryRevision: 1,
+      phase: "idle",
+      updatedAt,
+      messageCount: 1,
+      firstMessage: "",
+      completionRevision: 0,
+      attentionRevision: 0,
+      isUnread: false,
+    });
+    internals.latestSummaries.set(whole.getSessionId(), summary(whole.getSessionId(), "2026-01-01T00:00:00Z"));
+    internals.latestSummaries.set(fraction.getSessionId(), summary(fraction.getSessionId(), "2026-01-01T00:00:00.900Z"));
+
+    const catalog = await registry.catalog("user");
+    expect(catalog.sessions.map((session) => session.id).slice(0, 2)).toEqual([
+      fraction.getSessionId(),
+      whole.getSessionId(),
+    ]);
+  });
+
   it("never stamps captured stale catalog fields with a newer summary revision", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-summary-race-"));
     const agentDir = join(root, "agent");
@@ -1661,7 +1709,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
     const faux = fauxProvider({ provider: "tron-test", tokensPerSecond: 10_000 });
     const runtimes: ModelRuntime[] = [];
-    const summaryUpdates: Array<{ sessionId: string; phase: string }> = [];
+    const summaryUpdates: SessionSummaryUpdate[] = [];
     const createModels = async () => {
       const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
       runtime.registerNativeProvider(faux.provider);
@@ -1701,6 +1749,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       expect.objectContaining({ sessionId: first.id, phase: "running" }),
       expect.objectContaining({ sessionId: second.id, phase: "running" }),
     ]));
+    const beforeHeartbeat = summaryUpdates.findLast((update) => update.sessionId === first.id)!;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    (first as unknown as { publishActivityHeartbeat: () => void }).publishActivityHeartbeat();
+    const afterHeartbeat = summaryUpdates.findLast((update) => update.sessionId === first.id)!;
+    expect(Date.parse(afterHeartbeat.updatedAt)).toBeGreaterThan(Date.parse(beforeHeartbeat.updatedAt));
 
     registry.unsubscribeClient("phone");
     expect(first.isBusy).toBe(true);
@@ -1870,6 +1923,80 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await expect(slot.prompt("post-cutoff prompt")).rejects.toMatchObject({ code: "busy" });
     expect(slot.snapshot().queuedItems).toEqual([]);
     expect(registry.administrativeDrainSnapshot()).toMatchObject({ phase: "complete", blockerCount: 0 });
+  });
+
+  it("publishes detached extension work as current dashboard activity", async () => {
+    const fixture = await coldFixture("detached-dashboard-activity");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const beforeActivity = await fixture.registry.catalog("user");
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      upsertExtensionActivity: (activity: ExtensionRunActivity) => unknown;
+      publishExtensionActivity: (activity: ExtensionRunActivity) => void;
+      publishActivityHeartbeat: () => void;
+    };
+    const startedAt = new Date(Date.now() - 2_000).toISOString();
+    const running: ExtensionRunActivity = {
+      id: "async-tool",
+      activityId: "async-activity",
+      runId: "async-run",
+      toolCallId: "async-tool",
+      source: { source: "pi-subagents" },
+      title: "Pi Subagents",
+      mode: "asynchronous",
+      status: "running",
+      startedAt,
+      updatedAt: startedAt,
+      children: [],
+      lifecycle: {
+        version: 1,
+        state: "running",
+        attention: "none",
+        sequence: 1,
+        observedAt: startedAt,
+      },
+    };
+    internal.extensionActivities.set(running.toolCallId, running);
+    internal.upsertExtensionActivity(running);
+    internal.publishExtensionActivity(running);
+
+    const active = fixture.summaries.at(-1)!;
+    expect(active).toMatchObject({ sessionId: slot.id, phase: "running" });
+    expect(Date.parse(active.updatedAt)).toBeGreaterThan(Date.parse(startedAt));
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    internal.publishActivityHeartbeat();
+    const heartbeat = fixture.summaries.at(-1)!;
+    expect(Date.parse(heartbeat.updatedAt)).toBeGreaterThan(Date.parse(active.updatedAt));
+    const activeCatalog = await fixture.registry.catalog("user");
+    expect(activeCatalog.listRevision).toBe(beforeActivity.listRevision);
+    expect(activeCatalog.sessions[0]).toMatchObject({
+      id: slot.id,
+      phase: "running",
+      updatedAt: heartbeat.updatedAt,
+    });
+
+    const terminalAt = new Date().toISOString();
+    const completed: ExtensionRunActivity = {
+      ...running,
+      status: "completed",
+      updatedAt: terminalAt,
+      completedAt: terminalAt,
+      lifecycle: {
+        version: 1,
+        state: "completed",
+        attention: "none",
+        sequence: 2,
+        observedAt: terminalAt,
+        terminalAt,
+        recentUntil: new Date(Date.parse(terminalAt) + 900_000).toISOString(),
+      },
+    };
+    internal.extensionActivities.set(completed.toolCallId, completed);
+    internal.upsertExtensionActivity(completed);
+    internal.publishExtensionActivity(completed);
+    expect(fixture.summaries.at(-1)).toMatchObject({ sessionId: slot.id, phase: "idle" });
+    expect(Date.parse(fixture.summaries.at(-1)!.updatedAt))
+      .toBeGreaterThanOrEqual(Date.parse(heartbeat.updatedAt));
   });
 
   it.each(["complete", "failed"] as const)("reconciles an exact-owned historical %s artifact during administrative drain", async (terminalState) => {
@@ -5228,9 +5355,11 @@ export default function (pi) {
   it("admits direct Bash after proving idle without tripping on its own work token", async () => {
     const { manager, registry } = await coldFixture("bash-work-registry");
     const slot = await registry.acquire(manager.getSessionId());
-    const session = (slot as unknown as {
+    const internal = slot as unknown as {
       runtime: { session: { executeBash: (...arguments_: unknown[]) => Promise<unknown> } };
-    }).runtime.session;
+      activityHeartbeat?: NodeJS.Timeout;
+    };
+    const session = internal.runtime.session;
     let releaseBash!: () => void;
     const bashBarrier = new Promise<void>((resolve) => { releaseBash = resolve; });
     const execute = vi.spyOn(session, "executeBash").mockImplementation(async () => {
@@ -5244,6 +5373,7 @@ export default function (pi) {
 
     const bash = slot.executeBash("printf ok", true);
     await waitUntil(() => execute.mock.calls.length === 1);
+    expect(internal.activityHeartbeat).toBeDefined();
     expect(slot.snapshot().processActivities ?? []).toEqual([]);
     const markerPath = join((registry as unknown as { options: { tronHome: string } }).options.tronHome,
       "gateway", "runtime-markers", `${slot.id}.json`);
@@ -5258,8 +5388,66 @@ export default function (pi) {
     expect(clearMarker.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(execute).toHaveBeenCalledTimes(1);
     expect(registry.administrativeWorkRegistry.size).toBe(0);
+    expect(internal.activityHeartbeat).toBeUndefined();
     expect(slot.snapshot()).toMatchObject({ phase: "idle" });
     expect(slot.snapshot().processActivities ?? []).toEqual([]);
+  });
+
+  it("does not commit idle eviction while canonical receipt persistence is unsettled", async () => {
+    const { manager, registry } = await coldFixture("idle-eviction-receipt-barrier");
+    const sessionId = manager.getSessionId();
+    const slot = await registry.acquire(sessionId);
+    vi.spyOn(slot, "touchedAt", "get").mockReturnValue(0);
+
+    let settleReceipt!: () => void;
+    const receipt = new Promise<void>((resolve) => { settleReceipt = resolve; });
+    const internals = slot as unknown as { pendingReceiptWrites: Set<Promise<void>> };
+    internals.pendingReceiptWrites.add(receipt);
+
+    const eviction = (registry as unknown as { evictIdle: () => Promise<void> }).evictIdle();
+    const outcome = await Promise.race([
+      eviction.then(() => "settled" as const),
+      new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 100)),
+    ]);
+    settleReceipt();
+    internals.pendingReceiptWrites.delete(receipt);
+    await eviction;
+
+    expect(outcome).toBe("settled");
+    expect(await registry.acquire(sessionId)).toBe(slot);
+    expect(slot.isDisposed).toBe(false);
+  });
+
+  it("force-invalidates an extension runtime whose idle-eviction shutdown never settles", async () => {
+    const { manager, registry } = await coldFixture("idle-eviction-shutdown-timeout");
+    const sessionId = manager.getSessionId();
+    const slot = await registry.acquire(sessionId);
+    vi.spyOn(slot, "touchedAt", "get").mockReturnValue(0);
+
+    const internals = slot as unknown as {
+      runtime: { dispose: () => Promise<void>; session: { dispose: () => void } };
+      dependencies: { runtimeDisposalTimedOut?: (graceMs: number) => void };
+    };
+    const timedOut = vi.fn(() => { throw new Error("instrumentation failed"); });
+    internals.dependencies.runtimeDisposalTimedOut = timedOut;
+    const gracefulDispose = vi.spyOn(internals.runtime, "dispose")
+      .mockImplementation(() => new Promise<void>(() => {}));
+    const forceDispose = vi.spyOn(internals.runtime.session, "dispose");
+
+    const eviction = (registry as unknown as { evictIdle: () => Promise<void> }).evictIdle();
+    await waitUntil(() => gracefulDispose.mock.calls.length === 1);
+    let acquisitionSettled = false;
+    const acquisition = registry.acquire(sessionId).finally(() => { acquisitionSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(acquisitionSettled).toBe(false);
+
+    await eviction;
+    const reopened = await acquisition;
+    expect(timedOut).toHaveBeenCalledWith(5_000);
+    expect(forceDispose).toHaveBeenCalledOnce();
+    expect(slot.isDisposed).toBe(true);
+    expect(reopened).not.toBe(slot);
+    expect(reopened.id).toBe(sessionId);
   });
 
   it("cancels an idle eviction when a selected slot is acquired or subscribed before disposal", async () => {
