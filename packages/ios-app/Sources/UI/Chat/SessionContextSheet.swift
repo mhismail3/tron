@@ -485,13 +485,13 @@ struct SessionContextSheet: View {
             subtitle = durable ? "Canonical history available" : "History unavailable"
         }
         return TronSettingsGroup(
-            "Process History",
-            detail: "Commands and subagent sessions for this conversation.",
+            "Subagent History",
+            detail: "Delegated sessions for this conversation.",
             accent: .tronEmerald
         ) {
             manageRow(
                 icon: "clock.arrow.circlepath",
-                title: "Process History",
+                title: "Subagent History",
                 subtitle: subtitle,
                 accent: .tronEmerald
             ) { destination = .processHistory }

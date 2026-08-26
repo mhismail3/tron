@@ -11,15 +11,18 @@ struct SessionProcessPresentationGuardTests {
             .deletingLastPathComponent()
     }
 
-    @Test("process surfaces use one Tron route and no ambient extension hub")
+    @Test("subagent surfaces use one Tron route with no command or ambient extension presentation")
     func processSurfaces() throws {
         let sheets = try source("Sources/UI/Chat/SessionProcessSheets.swift")
         let composer = try source("Sources/UI/Chat/ChatComposerView.swift")
         let routes = try source("Sources/UI/Chat/ChatRoutes.swift")
         let chat = try source("Sources/UI/Chat/ChatView.swift")
 
-        #expect(sheets.contains(".tronNavigationTitle(\"Processes\")"))
-        #expect(sheets.contains(".tronNavigationTitle(\"Process History\")"))
+        #expect(sheets.contains(".tronNavigationTitle(\"Subagents\")"))
+        #expect(sheets.contains(".tronNavigationTitle(\"Subagent History\")"))
+        #expect(!sheets.contains("process.kind == .command"))
+        #expect(!sheets.contains("Assistant commands"))
+        #expect(composer.contains("$0.kind == .subagent"))
         #expect(sheets.components(separatedBy: ".tronTopBlur(.sheet)").count - 1 == 2)
         #expect(sheets.components(separatedBy: ".tronPresentation()").count - 1 == 2)
         #expect(sheets.contains(".accessibilityAddTraits(.isHeader)"))

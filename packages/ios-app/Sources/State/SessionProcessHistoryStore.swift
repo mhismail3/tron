@@ -88,7 +88,9 @@ final class SessionProcessHistoryStore {
 
     init(client: GatewayClient) { self.client = client }
 
-    var processes: [SessionProcessActivity] { pages.flatMap(\.activities) }
+    var processes: [SessionProcessActivity] {
+        SessionProcessAdmissionPolicy.admitted(pages.flatMap(\.activities))
+    }
 
     var supportsHistory: Bool {
         get async {
@@ -138,7 +140,12 @@ final class SessionProcessHistoryStore {
                     }
                     return
                 }
-                struct Params: Encodable { let sessionId: String; let cursor: String?; let limit: Int }
+                struct Params: Encodable {
+                    let sessionId: String
+                    let cursor: String?
+                    let limit: Int
+                    let kind = "subagent"
+                }
                 let page: SessionProcessHistoryPage = try await client.request(
                     "session.processHistory.list",
                     Params(sessionId: sessionID, cursor: cursor, limit: 50),

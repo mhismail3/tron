@@ -19,10 +19,10 @@ function activity(state: SessionProcessActivity["lifecycle"]["state"], sequence 
   const terminalAt = "2026-01-01T00:00:00.000Z";
   return {
     version: 1,
-    processId: "process:command:test",
-    kind: "command",
-    executionMode: "foreground",
-    source: "mainAssistant",
+    processId: "process:subagent:test",
+    kind: "subagent",
+    executionMode: "asynchronous",
+    source: "delegatedAgent",
     lifecycle: {
       version: 1,
       state,
@@ -32,7 +32,7 @@ function activity(state: SessionProcessActivity["lifecycle"]["state"], sequence 
       ...(terminal ? { terminalAt, recentUntil: new Date(Date.parse(terminalAt) + 900_000).toISOString() } : {}),
     },
     visibility: terminal ? "recent" : "active",
-    title: "Command",
+    title: "worker",
     outputTruncated: false,
   };
 }
@@ -111,6 +111,6 @@ describe("ProcessActivityRecency", () => {
     clock.advance(PROCESS_ACTIVITY_RECENT_MS);
     clock.callback?.();
     expect(callback).toHaveBeenCalledOnce();
-    expect(callback.mock.calls[0]?.[0].expiredProcessIds).toEqual(["process:command:test"]);
+    expect(callback.mock.calls[0]?.[0].expiredProcessIds).toEqual(["process:subagent:test"]);
   });
 });

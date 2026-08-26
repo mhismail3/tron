@@ -60,7 +60,10 @@ struct ChatComposerView: View {
                 resourcePickerView
                 GlassEffectContainer(spacing: 8) {
                     HStack(alignment: .bottom, spacing: 8) {
-                        if let overview = snapshot?.processOverview {
+                        if let overview = snapshot?.processOverview,
+                           snapshot?.processActivities?.contains(where: {
+                               $0.kind == .subagent && SessionProcessAdmissionPolicy.admits($0)
+                           }) == true {
                             SessionProcessButton(
                                 overview: overview,
                                 glassNamespace: glassNamespace,

@@ -12,11 +12,10 @@ describe("shared protocol-v3 fixtures", () => {
     expect(snapshot.transcriptTotal).toBe(11);
     expect(snapshot.extensionPresentation).toBeDefined();
     expect(snapshot.toolExecutions).toBeDefined();
-    expect(snapshot.processOverview).toMatchObject({ revision: 5, visibility: "active", activeCount: 1, recentCount: 1 });
-    expect(snapshot.processActivities).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: "command", toolCallId: "live-tool", visibility: "active" }),
+    expect(snapshot.processOverview).toMatchObject({ revision: 5, visibility: "recent", activeCount: 0, recentCount: 1 });
+    expect(snapshot.processActivities).toEqual([
       expect.objectContaining({ kind: "subagent", childSessionRef: "fixture-child-session", visibility: "recent" }),
-    ]));
+    ]);
     expect(JSON.stringify(snapshot.processActivities)).not.toContain("sessionFile");
     expect(snapshot.diagnostics).toBeDefined();
     expect(new Set(snapshot.transcript.map((item) => item.kind))).toEqual(new Set([

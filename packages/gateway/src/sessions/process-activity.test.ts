@@ -1,33 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { ExtensionRunActivity, ToolExecutionState } from "../protocol/types.js";
+import type { ExtensionRunActivity } from "../protocol/types.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import {
   boundProcessActivities,
   canonicalProcessHistory,
-  commandProcessFromTool,
   listProcessHistory,
   processOverview,
   redactProcessText,
   subagentProcessesFromActivity,
 } from "./process-activity.js";
-
-function tool(name = "bash"): ToolExecutionState {
-  return {
-    toolCallId: "call-1",
-    toolName: name,
-    order: 0,
-    status: "running",
-    arguments: { command: "printf hello" },
-    output: "hello",
-    isError: false,
-    startedAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-01-01T00:00:01.000Z",
-    lastProgressAt: "2026-01-01T00:00:01.000Z",
-    durationMs: 1_000,
-    progressSequence: 2,
-  };
-}
 
 const subagent: ExtensionRunActivity = {
   id: "tool-subagent",
@@ -63,32 +45,9 @@ const subagent: ExtensionRunActivity = {
 };
 
 describe("session process projection", () => {
-  it("admits only the assistant bash tool adapter", () => {
-    const projected = commandProcessFromTool("session-1", tool());
-    expect(projected).toMatchObject({
-      kind: "command", executionMode: "foreground", command: "printf hello", durationMs: 1_000,
-    });
-    expect(commandProcessFromTool("session-1", tool("read"))).toBeUndefined();
-    expect(commandProcessFromTool("session-1", {
-      ...tool(),
-      extensionOrigin: { source: "project", owner: { id: "extension:1", title: "Override", source: "project" } },
-    })).toBeUndefined();
-  });
-
-  it("redacts common credential forms only in process previews", () => {
-    const projected = commandProcessFromTool("session-1", {
-      ...tool(),
-      arguments: { command: "API_KEY=top-secret curl -H 'Authorization: Bearer abc123' https://user:pass@example.test" },
-      output: "{\"access_token\":\"response-secret\"}\npassword=hunter2\nAWS_SECRET_ACCESS_KEY=aws-secret\n-----BEGIN PRIVATE KEY-----\nprivate-material\n-----END PRIVATE KEY-----\nghp_1234567890abcdefghijklmnop",
-    });
-    expect(projected?.command).not.toContain("top-secret");
-    expect(projected?.command).not.toContain("abc123");
-    expect(projected?.command).not.toContain(":pass@");
-    expect(projected?.outputTail).not.toContain("response-secret");
-    expect(projected?.outputTail).not.toContain("hunter2");
-    expect(projected?.outputTail).not.toContain("aws-secret");
-    expect(projected?.outputTail).not.toContain("private-material");
-    expect(projected?.outputTail).not.toContain("1234567890abcdefghijklmnop");
+  it("redacts delegated output previews", () => {
+    const secret = "API_KEY=top-secret curl -H 'Authorization: Bearer abc123' https://user:pass@example.test";
+    expect(redactProcessText(secret)).not.toMatch(/top-secret|abc123|:pass@/u);
     expect(redactProcessText("curl -H 'X-Api-Key: header-secret' -b cookie-secret -p short-secret"))
       .not.toMatch(/header-secret|cookie-secret|short-secret/u);
     expect(redactProcessText("ordinary output remains")).toBe("ordinary output remains");
@@ -189,7 +148,7 @@ describe("session process projection", () => {
     });
   });
 
-  it("merges canonical assistant command results and subagent receipts", () => {
+  it("keeps canonical bash in JSONL but exposes only receipt-backed subagents", () => {
     const manager = SessionManager.inMemory("/tmp/process-test", { id: "session-1" });
     manager.appendMessage({
       role: "assistant",
@@ -214,18 +173,15 @@ describe("session process projection", () => {
     manager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, receipt);
 
     const history = canonicalProcessHistory(manager);
-    expect(history.map((row) => row.kind).sort()).toEqual(["command", "subagent"]);
-    expect(history.find((row) => row.kind === "command")).toMatchObject({ outputTail: "hello", durationMs: 1_000 });
-    expect(history.find((row) => row.kind === "subagent")).toMatchObject({
+    expect(history.map((row) => row.kind)).toEqual(["subagent"]);
+    expect(history[0]).toMatchObject({
       childSessionRef: "child-session-1",
       durationMs: 2_000,
       visibility: "historical",
     });
 
-    const first = listProcessHistory(manager, undefined, 1);
-    expect(first.activities).toHaveLength(1);
-    expect(first.nextCursor).toBeDefined();
-    expect(listProcessHistory(manager, first.nextCursor, 1).activities).toHaveLength(1);
+    expect(listProcessHistory(manager, undefined, 25).activities).toHaveLength(1);
+    expect(listProcessHistory(manager, undefined, 25, { kind: "command" }).activities).toEqual([]);
     expect(() => listProcessHistory(manager, "stale:1", 1)).toThrow(/cursor conflict/u);
   });
 
@@ -254,44 +210,27 @@ describe("session process projection", () => {
     expect(canonicalProcessHistory(manager).filter((row) => row.kind === "command")).toEqual([]);
   });
 
-  it("keeps byte-deferred history rows reachable from the next stable cursor", () => {
-    const manager = SessionManager.inMemory("/tmp/process-byte-pages", { id: "session-byte-pages" });
+  it("keeps subagent history rows reachable across stable cursors", () => {
+    const manager = SessionManager.inMemory("/tmp/process-pages", { id: "session-pages" });
     for (let index = 0; index < 12; index += 1) {
-      const toolCallId = `byte-call-${index}`;
-      manager.appendMessage({
-        role: "assistant",
-        content: [{ type: "toolCall", id: toolCallId, name: "bash", arguments: { command: `printf ${index}` } }],
-        api: "anthropic-messages",
-        provider: "test",
-        model: "test",
-        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-        stopReason: "toolUse",
-        timestamp: Date.parse("2026-01-01T00:00:00.000Z") + index * 2_000,
-      } as never);
-      manager.appendMessage({
-        role: "toolResult",
-        toolCallId,
-        toolName: "bash",
-        content: [{ type: "text", text: `${index}:${"x".repeat(40 * 1_024)}` }],
-        isError: false,
-        timestamp: Date.parse("2026-01-01T00:00:01.000Z") + index * 2_000,
-      });
+      const receipt = makeExtensionActivityReceipt({
+        ...subagent,
+        activityId: `activity-${index}`,
+        toolCallId: `call-${index}`,
+        children: [{
+          ...subagent.children[0]!,
+          id: `child-${index}`,
+          producerId: `child-${index}`,
+          childSessionRef: `session-${index}`,
+        }],
+      }, "session-pages")!;
+      manager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, receipt);
     }
-
     const expected = canonicalProcessHistory(manager).map((activity) => activity.processId);
-    const reached: string[] = [];
-    let cursor: string | undefined;
-    let pages = 0;
-    do {
-      const page = listProcessHistory(manager, cursor, 50);
-      reached.push(...page.activities.map((activity) => activity.processId));
-      expect(page.omissions).toBeUndefined();
-      cursor = page.nextCursor;
-      pages += 1;
-    } while (cursor);
-
-    expect(pages).toBeGreaterThan(1);
-    expect(reached).toEqual(expected);
+    const first = listProcessHistory(manager, undefined, 5);
+    const second = listProcessHistory(manager, first.nextCursor, 50);
+    expect(first.activities.map((activity) => activity.processId)
+      .concat(second.activities.map((activity) => activity.processId))).toEqual(expected);
   });
 
   it("reads subagent receipts only from the selected canonical branch", () => {
@@ -319,11 +258,21 @@ describe("session process projection", () => {
     expect(history.map((row) => row.title)).toEqual(["selected"]);
   });
 
-  it("bounds ambient rows and authors a shallow aggregate", () => {
-    const rows = Array.from({ length: 40 }, (_, index) => ({
-      ...commandProcessFromTool("session-1", { ...tool(), toolCallId: `call-${index}`, progressSequence: index + 1 })!,
-      processId: `process-${index}`,
-    }));
+  it("bounds subagent rows and authors a shallow aggregate", () => {
+    const rows = Array.from({ length: 40 }, (_, index) => subagentProcessesFromActivity("session-1", {
+      ...subagent,
+      toolCallId: `call-${index}`,
+      status: "running",
+      completedAt: undefined,
+      lifecycle: {
+        version: 1, state: "running", attention: "none", sequence: index + 1,
+        observedAt: "2026-01-01T00:00:01.000Z",
+      },
+      children: [{
+        id: `child-${index}`, producerId: `child-${index}`, label: "worker",
+        status: "running", lifecycle: "running", currentTool: "read",
+      }],
+    })[0]!);
     const bounded = boundProcessActivities(rows);
     expect(bounded.activities).toHaveLength(32);
     const overview = processOverview(bounded.activities, 7, "2026-01-01T00:00:02.000Z", {

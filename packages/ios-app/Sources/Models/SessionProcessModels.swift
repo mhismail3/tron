@@ -234,6 +234,17 @@ enum SessionProcessAdmissionPolicy {
               [process.durationMs, process.toolCount, process.turnCount, process.childCount]
                 .allSatisfy({ $0.map { $0 >= 0 } ?? true }),
               admits(process.lifecycle, visibility: process.visibility) else { return false }
+        switch process.kind {
+        case .subagent:
+            guard process.executionMode == .synchronous || process.executionMode == .asynchronous,
+                  process.command == nil else { return false }
+        case .command:
+            // Decode and validate legacy Gateway rows so an older authoritative
+            // snapshot can still open, but never admit them to presentation.
+            guard process.executionMode == .foreground,
+                  process.source == .mainAssistant,
+                  process.command != nil else { return false }
+        }
         if let startedAt = process.startedAt,
            let started = GatewayTimestamp.parse(startedAt),
            let observed = GatewayTimestamp.parse(process.lifecycle.observedAt), observed < started { return false }
@@ -244,7 +255,7 @@ enum SessionProcessAdmissionPolicy {
     static func admitted(_ processes: [SessionProcessActivity]) -> [SessionProcessActivity] {
         var seen = Set<String>()
         return Array(processes
-            .filter { admits($0) && seen.insert($0.processId).inserted }
+            .filter { $0.kind == .subagent && admits($0) && seen.insert($0.processId).inserted }
             .sorted(by: SessionProcessProjection.precedes)
             .prefix(maximumActivities))
     }
@@ -321,7 +332,7 @@ enum SessionProcessAdmissionPolicy {
         }
         let activities = snapshot.processActivities ?? []
         guard admits(overview), activities.count <= maximumActivities,
-              admitted(activities).count == activities.count else { return false }
+              activities.allSatisfy(admits) else { return false }
         if (overview.activeCount > 0 || overview.recentCount > 0), snapshot.processActivities == nil { return false }
         guard admitsMountedSubset(activities, overview: overview) else { return false }
         let active = activities.filter { $0.visibility == .active }.count

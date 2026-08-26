@@ -46,9 +46,9 @@ struct SessionProcessButton: View {
                             .combined(with: .scale(scale: 0.82, anchor: .trailing))
                             .combined(with: .opacity)
                 )
-                .accessibilityLabel("Processes")
+                .accessibilityLabel("Subagents")
                 .accessibilityValue(accessibilityValue)
-                .accessibilityHint("Shows current and recent processes")
+                .accessibilityHint("Shows current and recently finished subagents")
             }
         }
         .task(id: expiryTaskIdentity) {

@@ -413,6 +413,8 @@ export function projectExtensionRunActivity(
     toolCallId: string;
     source: ExtensionToolOrigin;
     title: string;
+    /** Gateway-owned execution mode override after filesystem ownership admission. */
+    mode?: string;
     status: ExtensionRunStatus;
     /** Lifecycle terminal events outrank advisory artifact/detail state. */
     authoritativeStatus?: boolean;
@@ -490,7 +492,7 @@ export function projectExtensionRunActivity(
       ?? details?.summary
       ?? details?.error
   ) ?? previous?.output;
-  const mode = text(details?.mode, 64) ?? previous?.mode;
+  const mode = text(base.mode, 64) ?? text(details?.mode, 64) ?? previous?.mode;
 
   return {
     id: base.id,

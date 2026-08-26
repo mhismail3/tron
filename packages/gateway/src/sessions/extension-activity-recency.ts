@@ -21,7 +21,7 @@ export const systemExtensionActivityClock: ExtensionActivityClock = {
 
 export interface ActivityVisibility {
   visibility: ExtensionRunVisibility;
-  remainingMs: number;
+  remainingMs?: number;
   terminalAt?: string;
   recentUntil?: string;
   /** Internal admission fact; never serialized on the wire. */
@@ -98,12 +98,12 @@ export class ExtensionActivityRecency {
     const terminalAt = lifecycle?.terminalAt;
     const recentUntil = lifecycle?.recentUntil;
     if (!terminalAt && (!lifecycle || !["completed", "failed", "stopped", "rejected"].includes(lifecycle.state))) {
-      return { visibility: lifecycle?.state === "unknown" ? "unknown" : "current", remainingMs: 0 };
+      return { visibility: lifecycle?.state === "unknown" ? "unknown" : "current" };
     }
     const terminalMs = terminalAt === undefined ? Number.NaN : Date.parse(terminalAt);
     const expiryMs = recentUntil === undefined ? Number.NaN : Date.parse(recentUntil);
     if (!Number.isFinite(terminalMs) || !Number.isFinite(expiryMs) || expiryMs <= terminalMs) {
-      return { visibility: "unknown", remainingMs: 0, ...(terminalAt ? { terminalAt } : {}), ...(recentUntil ? { recentUntil } : {}) };
+      return { visibility: "unknown", ...(terminalAt ? { terminalAt } : {}), ...(recentUntil ? { recentUntil } : {}) };
     }
     const remainingMs = Math.max(0, expiryMs - wallNow);
     return {

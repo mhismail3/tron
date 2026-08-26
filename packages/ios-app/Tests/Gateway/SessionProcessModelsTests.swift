@@ -4,7 +4,7 @@ import Testing
 
 @Suite("Session process models")
 struct SessionProcessModelsTests {
-    @Test("exact Gateway command and subagent shapes decode")
+    @Test("legacy command shapes validate but only subagents enter presentation")
     func wireShapes() throws {
         let command = try JSONDecoder.gateway.decode(SessionProcessActivity.self, from: Data(#"""
         {
@@ -25,6 +25,7 @@ struct SessionProcessModelsTests {
         """#.utf8))
         #expect(SessionProcessAdmissionPolicy.admits(subagent))
         #expect(subagent.childSessionRef == "child-session-id")
+        #expect(SessionProcessProjection.sections([command, subagent]).recent.map(\.processId) == [subagent.processId])
     }
 
     @Test("canonical history uses the Gateway activities key")
@@ -32,15 +33,15 @@ struct SessionProcessModelsTests {
         let data = Data(#"""
         {
           "activities":[{
-            "version":1,"processId":"process:command:abc","kind":"command","executionMode":"foreground","source":"mainAssistant",
+            "version":1,"processId":"process:subagent:abc","kind":"subagent","executionMode":"asynchronous","source":"delegatedAgent",
             "lifecycle":{"version":1,"state":"completed","attention":"none","sequence":0,"observedAt":"2026-01-01T00:00:01Z","terminalAt":"2026-01-01T00:00:01Z","recentUntil":"2026-01-01T00:05:01Z"},
-            "visibility":"historical","title":"Command","command":"true","outputTruncated":false,"toolCallId":"call-1"
+            "visibility":"historical","title":"worker","outputTruncated":false,"toolCallId":"call-1","runId":"run-1","childSessionRef":"child-1"
           }],
           "historyRevision":"revision-1"
         }
         """#.utf8)
         let page = try JSONDecoder.gateway.decode(SessionProcessHistoryPage.self, from: data)
-        #expect(page.activities.map(\.processId) == ["process:command:abc"])
+        #expect(page.activities.map(\.processId) == ["process:subagent:abc"])
     }
 
     @Test("canonical history rejects malformed rows instead of silently dropping them")
@@ -248,16 +249,17 @@ struct SessionProcessModelsTests {
         outputTail: String? = "output"
     ) -> SessionProcessActivity {
         SessionProcessActivity(
-            processId: "process-\(sequence)-\(state.rawValue)", kind: .command,
-            executionMode: .foreground, source: .mainAssistant,
+            processId: "process-\(sequence)-\(state.rawValue)", kind: .subagent,
+            executionMode: .asynchronous, source: .delegatedAgent,
             lifecycle: SessionProcessLifecycle(
                 state: state, sequence: sequence,
                 observedAt: terminalAt ?? "2026-01-01T00:00:02Z",
                 terminalAt: terminalAt, recentUntil: recentUntil
             ),
             visibility: visibility,
-            startedAt: "2026-01-01T00:00:00Z", title: "Command", command: "npm test",
-            currentPathBasename: currentPathBasename, outputTail: outputTail, toolCallId: "call-1"
+            startedAt: "2026-01-01T00:00:00Z", title: "worker",
+            currentPathBasename: currentPathBasename, outputTail: outputTail,
+            toolCallId: "call-1", runId: "run-1"
         )
     }
 }

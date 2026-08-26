@@ -65,10 +65,16 @@ function assertProcessSessionRef(value: string): void {
   }
 }
 
+function subagentNameBindsProducer(name: string, producerId: string): boolean {
+  const escaped = producerId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(`-${escaped}(?:-\\d+)?$`, "u").test(name);
+}
+
 function branchFromParsedSession(entries: FileEntry[]): {
   sessionId: string;
   parentSession?: string;
   structuralSubagent: boolean;
+  subagentName?: string;
   branch: SessionEntry[];
   leafEntryId?: string;
 } | undefined {
@@ -86,12 +92,18 @@ function branchFromParsedSession(entries: FileEntry[]): {
     cursor = cursor.parentId === null ? undefined : byID.get(cursor.parentId);
     if (reversed[reversed.length - 1]!.parentId !== null && cursor === undefined) return undefined;
   }
-  const structuralSubagent = sessionEntries.some((entry) =>
-    entry.type === "session_info" && entry.name?.startsWith("subagent-"));
+  let subagentName: string | undefined;
+  for (const entry of sessionEntries) {
+    if (entry.type === "session_info" && entry.name?.startsWith("subagent-")) {
+      subagentName = entry.name;
+      break;
+    }
+  }
   return {
     sessionId: header.id,
     ...(header.parentSession ? { parentSession: header.parentSession } : {}),
-    structuralSubagent,
+    structuralSubagent: subagentName !== undefined,
+    ...(subagentName ? { subagentName } : {}),
     branch: reversed.reverse(),
     ...(leaf ? { leafEntryId: leaf.id } : {}),
   };
@@ -1501,10 +1513,12 @@ export class RuntimeRegistry {
         expectedParentSessionId,
         expectedParentPath,
         expectedRunId,
+        binding.producerId,
       );
       if (!admitted) continue;
       if (entry) {
-        if (!entry.structuralSubagent || entry.parentSessionId !== expectedParentSessionId
+        if (!entry.structuralSubagent
+          || (entry.parentSessionId !== undefined && entry.parentSessionId !== expectedParentSessionId)
           || indexedChildPath !== admitted.path) {
           throw new GatewayError("conflict", "Subagent session identity is ambiguous", true);
         }
@@ -1590,8 +1604,10 @@ export class RuntimeRegistry {
     expectedParentSessionId: string,
     expectedParentPath: string,
     expectedRunId: string,
+    expectedProducerId: string,
   ): Promise<ReadOnlySubagentAdmission | undefined> {
-    if (!expectedRunId || /[\\/\0]/u.test(expectedRunId)) return undefined;
+    if (!expectedRunId || /[\\/\0]/u.test(expectedRunId)
+      || !expectedProducerId || /[\\/\0]/u.test(expectedProducerId)) return undefined;
     let canonical: string;
     let metadata: Awaited<ReturnType<typeof lstat>>;
     try {
@@ -1610,7 +1626,8 @@ export class RuntimeRegistry {
     const ownedRelative = relative(childRoot, canonical);
     const parts = ownedRelative.split(sep);
     if (ownedRelative === "" || ownedRelative === ".." || ownedRelative.startsWith(`..${sep}`)
-      || isAbsolute(ownedRelative) || parts[0] !== expectedRunId || parts.length < 3) return undefined;
+      || isAbsolute(ownedRelative) || parts[0] !== expectedProducerId || parts.length < 3) return undefined;
+    const pathProducerId = parts[0];
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
       handle = await open(canonical, "r");
@@ -1622,9 +1639,14 @@ export class RuntimeRegistry {
         if (read.bytesRead !== 1 || final[0] !== 0x0a) return undefined;
       }
       const parsed = await readOpenedSession(handle, opened.size);
-      if (!parsed?.structuralSubagent || parsed.sessionId !== childSessionRef || !parsed.parentSession) return undefined;
-      const headerParent = await realpath(parsed.parentSession).catch(() => undefined);
-      if (headerParent !== parentCanonical) return undefined;
+      if (!parsed?.structuralSubagent || parsed.sessionId !== childSessionRef) return undefined;
+      if (parsed.parentSession) {
+        const headerParent = await realpath(parsed.parentSession).catch(() => undefined);
+        if (headerParent !== parentCanonical) return undefined;
+      } else if (!pathProducerId || !parsed.subagentName
+        || !subagentNameBindsProducer(parsed.subagentName, pathProducerId)) {
+        return undefined;
+      }
       const after = await lstat(canonical);
       if (!after.isFile() || after.isSymbolicLink() || after.dev !== opened.dev || after.ino !== opened.ino) return undefined;
       const afterOpened = await handle.stat();

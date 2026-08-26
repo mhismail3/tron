@@ -19,6 +19,25 @@ struct ExtensionActivityModelsTests {
         #expect(!activity.isLive)
     }
 
+    @Test("active lifecycle omits terminal recency")
+    func activeLifecycleAdmission() {
+        let active = ExtensionActivityLifecycle(
+            state: .running,
+            sequence: 1,
+            observedAt: "2026-01-01T00:00:01Z",
+            visibility: .current
+        )
+        #expect(ExtensionActivityAdmissionPolicy.admits(makeActivity(lifecycle: active)))
+        let malformed = ExtensionActivityLifecycle(
+            state: .running,
+            sequence: 1,
+            observedAt: "2026-01-01T00:00:01Z",
+            visibility: .current,
+            remainingMs: 0
+        )
+        #expect(!ExtensionActivityAdmissionPolicy.admits(makeActivity(lifecycle: malformed)))
+    }
+
     @Test("receipt timelines fail closed for Gateway and legacy rows")
     func receiptTimeline() {
         let malformedGateway = ExtensionActivityLifecycle(

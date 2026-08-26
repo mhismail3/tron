@@ -757,9 +757,9 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -only-testing:TronMobileTests/PushNotificationCoordinatorTests
 ```
 
-## Session process activity
+## Session subagent activity
 
-Process activity is observation-only. iOS must not add a command executor, infer a detached child from shell text, enumerate OS processes, or acquire a writable child runtime. Activity support is detected from the additive snapshot pair; the bundled Gateway advertises `process-activity.v1`, `process-history.v1`, and `process-transcript.v1` for live projection, canonical history, and child viewing. Missing fields or capabilities hide the composer affordance or present an explicit unavailable history/viewer state rather than reviving Extension Activity.
+Subagent activity is observation-only and admits only structured synchronous/asynchronous delegated runs. iOS must not add a command executor, treat assistant bash as subagent activity, infer a detached child from shell text, enumerate OS processes, or acquire a writable child runtime. Activity support is detected from the additive snapshot pair; the bundled Gateway advertises `process-activity.v1`, `process-history.v1`, and `process-transcript.v1` for live projection, canonical history, and child viewing. Missing fields or capabilities hide the composer affordance or present an explicit unavailable history/viewer state rather than reviving Extension Activity.
 
 The native orb ports only the upstream 20-point solving and breathing geometry. Upstream switches those modes directly; the composer's matched-geometry glass transition owns the button's morph-away instead of inventing cross-mode geometry. Keep `Sources/Resources/ThirdPartyNotices/thinking-orbs-LICENSE.txt` in the application resources and preserve numeric golden-vector coverage. Emerald paint intentionally differs from upstream monochrome; geometry, radius, depth order, and source opacity inputs remain the parity boundary. Reduce Motion renders a deterministic frame, and explicit visibility plus scene inactivity pause the `TimelineView`.
 
@@ -777,7 +777,7 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -only-testing:TronMobileTests/ChatSessionPresentationTests
 ```
 
-On a physical device verify solving-to-breathing-to-hidden expiry, simultaneous leading process/trailing catch-up controls, current output updates without transcript movement, canonical history paging, read-only subagent transcript refresh, VoiceOver, large Dynamic Type, and Reduce Motion. A shell command that launches `nohup x &` remains only the encompassing command row after its tool lifecycle ends.
+On a physical device verify solving-to-breathing-to-hidden expiry, simultaneous leading subagent/trailing catch-up controls, current output updates without transcript movement, canonical history paging, read-only subagent transcript refresh, VoiceOver, large Dynamic Type, and Reduce Motion. Assistant bash—including `nohup x &`—remains ordinary transcript/tool activity and never appears in Subagents.
 
 ## Manual iOS release validation and delivery
 

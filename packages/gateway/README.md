@@ -735,25 +735,21 @@ credentials. Additional deterministic tests exercise interactive API-key and
 OAuth brokering, project trust, native local-package persistence, legacy import,
 and credential separation.
 
-## Unified session process activity
+## Session subagent activity
 
-The additive `process-activity.v1` projection observes execution that already has an
-authoritative producer; it does not add another shell tool, detached executor,
-PTY, process supervisor, or event journal. The current producers are assistant-owned
-Pi `bash` tool executions and structured synchronous/asynchronous delegated runs.
-Direct user `!` bash, Terminal-sheet PTYs, ordinary tools, administrative work, and
-shell grandchildren inferred from command syntax are excluded. The canonical `bash`
-tool name is reserved against extension registration, and live command admission also
-rejects any tool state carrying extension origin. A future producer
-may join only with exact session/tool ownership, bounded lifecycle data, monotonic
-replacement evidence, and authoritative terminal evidence.
+The additive `process-activity.v1` projection observes only structured synchronous and
+asynchronous delegated subagents that already have an authoritative producer. It does
+not add another shell tool, detached executor, PTY, process supervisor, or event journal.
+Assistant `bash`, direct user `!` bash, Terminal-sheet PTYs, ordinary tools,
+administrative work, and shell grandchildren inferred from command syntax remain outside
+this surface and continue through their existing transcript/tool presentation.
 
-`SessionProcessActivity` gives command and subagent rows a stable namespaced
-`processId`, typed source/mode/lifecycle, bounded command/current-tool/output facts,
+`SessionProcessActivity` gives subagent rows a stable namespaced `processId`, typed
+source/mode/lifecycle, bounded current-tool/output facts,
 an optional bounded `durationMs` derived only from existing producer timing or canonical
 start/terminal timestamps, and an optional opaque validated child-session reference. Absolute session and
 artifact paths, PIDs, environment values, and unbounded task/output data never cross
-the wire. Bounded command/output previews conservatively mask environment assignments,
+the wire. Bounded delegated-output previews conservatively mask environment assignments,
 headers/cookies, long and short credential flags, JSON/query keys, URL userinfo, PEM
 blocks, recognizable provider tokens, JWTs, and high-entropy bearer-like strings without
 modifying canonical JSONL. `SessionProcessOverview` is the shallow composer authority:
@@ -763,21 +759,19 @@ output remains in bounded process deltas and does not require a transcript rebui
 The Gateway owns process recency for exactly five minutes from authoritative terminal
 admission. It converts that wall deadline to a monotonic in-process timer, emits a
 revisioned expiry snapshot even when no other session event occurs, and reconstructs
-recent commands from canonical Pi tool declarations/results plus recent subagents from
-their canonical receipts after runtime acquisition. Existing 15-minute extension
+recent subagents from their canonical receipts after runtime acquisition. Existing 15-minute extension
 compatibility fields do not extend the process deadline. Active work always outranks
 recent terminal work. Expiry removes only the disposable projection while retaining a
 bounded terminal tombstone so late advisory artifacts cannot resurrect the same process.
 Process replacement deltas carry exact removed process IDs, including removal-only frames,
 so a re-keyed or retired producer row cannot remain mounted on iOS.
 
-`session.processHistory.list` and `.get` merge canonical assistant `bash` declarations/results
-with normalized subagent terminal receipts under one bounded branch-derived revision and
-opaque cursor. Pagination stops before a row that exhausts the current page's byte
+`session.processHistory.list` and `.get` page only normalized subagent terminal receipts
+under one bounded branch-derived revision and opaque cursor. Pagination stops before a row that exhausts the current page's byte
 remainder so that row remains reachable at the next cursor; only a row that cannot fit
 an empty page is omitted and reported in omission count/bytes. Cursors conflict when the
-canonical generation changes. Ordinary synchronous command results do not receive duplicate custom
-receipts. Old `tron.extension-activity.v1` entries remain readable by extension history;
+canonical generation changes. Old `tron.extension-activity.v1` entries remain readable by
+extension history;
 process history admits individual historical children only when the receipt records their
 exact producer ID. Newer receipts may add that identity and a validated opaque
 child-session ID but continue to omit paths, task text, and output.
@@ -790,8 +784,11 @@ watch before capturing its initial page, latches any append in the baseline-publ
 window, emits bounded invalidation events, and reopens it through a read-only projection
 for canonical paging.
 Open, page, and invalidation reads each revalidate the exact live parent process/tool/run
-binding, required parent header, structural subagent marker, canonical path, and original
-file identity; replacement or ambiguity closes/fails the lease. Transcript projection
+binding, structural subagent marker, canonical path, and original file identity. A child
+with a parent header must bind it to the exact parent. The current producer shape may omit
+that header only when its tool-owned status artifact, `<child-run>/run-N` topology, and
+anchored `subagent-…-<child-run>-N` marker all bind the same child identity. Replacement
+or ambiguity closes/fails the lease. Transcript projection
 parses the already-open, identity-pinned descriptor through a pure read-only branch adapter
 under an explicit 64 MiB per-session parse budget, so a replace/read/swap-back race cannot
 redirect parsing to another inode and a legitimate but unbounded child file cannot exhaust
@@ -799,8 +796,8 @@ Gateway memory.
 It never calls `RuntimeRegistry.acquire` for the child, exposes mutation methods, or
 keeps a second transcript mirror. Producer admission requires the exact owning tool/run,
 a unique child identity, and a regular session file structurally nested beneath the
-canonical parent session's exact run directory; persisted reopening repeats the
-parent/run/catalog checks. Reads reject missing ownership, symlinks, oversized headers,
+canonical parent session's child root; persisted reopening repeats the parent/process/run,
+producer-token, and catalog checks. Reads reject missing ownership, symlinks, oversized headers,
 identity/path replacement, foreign or ambiguous catalog identities, incomplete trailing
 JSONL appends, stale page anchors, and retired leases. Leases are bounded per connection
 and per parent session. Closing the parent presentation or client retires every owned
@@ -812,8 +809,9 @@ Structured extension runs retain the legacy coarse `status` alongside the additi
 versioned lifecycle record (`queued`, `running`, `paused`, `completed`, `failed`,
 `stopped`, `rejected`, or `unknown`). Gateway projection sequence and terminal
 latches own ordering; producer timestamps are display evidence only. Terminal
-activities receive Gateway-owned `terminalAt`/`recentUntil` facts and are current
-or recent for exactly 15 minutes. A single coalesced expiry deadline republishes
+activities receive Gateway-owned `terminalAt`/`recentUntil` facts and are recent for
+exactly 15 minutes. Active lifecycle rows use `visibility: current` without a terminal
+`remainingMs`; only recent/historical terminal rows carry that countdown. A single coalesced expiry deadline republishes
 visibility; history is not deleted at expiry. Live artifact heartbeats publish one
 `session.extensionActivity` delta with the exact activity and live revision; they do
 not rebuild or broadcast the full transcript snapshot. Reconnect/open snapshots remain

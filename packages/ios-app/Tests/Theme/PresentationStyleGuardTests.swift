@@ -1285,8 +1285,8 @@ struct PresentationStyleGuardTests {
         let processSheets = try #require(
             productionSources.first { $0.0.lastPathComponent == "SessionProcessSheets.swift" }?.1
         )
-        #expect(processSheets.contains(".tronNavigationTitle(\"Processes\")"))
-        #expect(processSheets.contains(".tronNavigationTitle(\"Process History\")"))
+        #expect(processSheets.contains(".tronNavigationTitle(\"Subagents\")"))
+        #expect(processSheets.contains(".tronNavigationTitle(\"Subagent History\")"))
         #expect(processSheets.occurrences(of: ".tronTopBlur(.sheet)") == 2)
         #expect(processSheets.occurrences(of: ".tronPresentation()") == 2)
         #expect(processSheets.contains(".accessibilityAddTraits(.isHeader)"))

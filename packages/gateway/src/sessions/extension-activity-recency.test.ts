@@ -44,12 +44,16 @@ describe("ExtensionActivityRecency", () => {
     expect(recency.visibility(activity("2026-01-01T00:00:00.000Z"))).toMatchObject({ visibility: "recent", remainingMs: 600_000 });
   });
 
-  it("does not expire current work when the wall clock jumps", () => {
+  it("does not serialize terminal recency onto current work", () => {
     const testClock = clock();
     const recency = new ExtensionActivityRecency(testClock.value);
-    recency.upsert(activity());
+    expect(recency.upsert(activity())).toEqual({
+      visibility: "current",
+      accepted: true,
+    });
     testClock.setWall(Date.parse("2030-01-01T00:00:00.000Z"));
     expect(recency.currentAndRecent().activities).toHaveLength(1);
+    expect(recency.visibility(activity())).toEqual({ visibility: "current" });
   });
 
   it("keeps a scheduled recent deadline monotonic across a wall-clock jump", () => {

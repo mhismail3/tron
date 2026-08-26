@@ -1,7 +1,6 @@
 import SwiftUI
 
 private enum SessionProcessDestination: Hashable {
-    case detail(SessionProcessActivity)
     case transcript(SessionProcessActivity)
 }
 
@@ -13,18 +12,18 @@ struct SessionProcessesSheet: View {
     var body: some View {
         NavigationStack {
             Group {
-                if let overview = snapshot?.processOverview,
-                   overview.visibility != .hidden {
+                let sections = SessionProcessProjection.sections(snapshot?.processActivities ?? [])
+                if !sections.active.isEmpty || !sections.recent.isEmpty {
                     processList(activities: snapshot?.processActivities ?? [])
                 } else {
                     ContentUnavailableView(
-                        "No active processes",
-                        systemImage: "terminal",
-                        description: Text("Active and recently finished commands and subagents appear here.")
+                        "No active subagents",
+                        systemImage: "person.2",
+                        description: Text("Active and recently finished subagents appear here.")
                     )
                 }
             }
-            .tronNavigationTitle("Processes")
+            .tronNavigationTitle("Subagents")
             .toolbar { doneToolbar }
             .navigationDestination(for: SessionProcessDestination.self) { destination in
                 processDestination(destination)
@@ -87,8 +86,6 @@ struct SessionProcessesSheet: View {
     @ViewBuilder
     private func processDestination(_ destination: SessionProcessDestination) -> some View {
         switch destination {
-        case .detail(let process):
-            SessionProcessDetailView(process: process)
         case .transcript(let process):
             ReadOnlySubagentSessionSheet(parentSessionID: sessionID, process: process)
         }
@@ -106,13 +103,12 @@ struct ProcessHistorySheet: View {
         NavigationStack {
             Group {
                 if let store { history(store) }
-                else { TronLoadingState(label: "Preparing process history…") }
+                else { TronLoadingState(label: "Preparing subagent history…") }
             }
-            .tronNavigationTitle("Process History")
+            .tronNavigationTitle("Subagent History")
             .toolbar { doneToolbar }
             .navigationDestination(for: SessionProcessDestination.self) { destination in
                 switch destination {
-                case .detail(let process): SessionProcessDetailView(process: process)
                 case .transcript(let process): ReadOnlySubagentSessionSheet(parentSessionID: sessionID, process: process)
                 }
             }
@@ -183,25 +179,25 @@ struct ProcessHistorySheet: View {
                     unavailable(
                         "History unavailable",
                         detail: hasMounted
-                            ? "Current and recent process activity remains available above."
-                            : "Update Tron on your Mac to load canonical process history.",
+                            ? "Current and recent subagent activity remains available above."
+                            : "Update Tron on your Mac to load canonical subagent history.",
                         icon: "externaldrive.badge.questionmark"
                     )
                 case .disconnected:
                     unavailable(
                         "Gateway disconnected",
-                        detail: "Reconnect to load canonical process history.",
+                        detail: "Reconnect to load canonical subagent history.",
                         icon: "wifi.slash"
                     )
                 case .failed(let message):
                     unavailable("Unable to load history", detail: message, icon: "exclamationmark.triangle")
                 case .idle, .loading where earlier.isEmpty && !hasMounted:
-                    TronLoadingState(label: "Loading process history…")
+                    TronLoadingState(label: "Loading subagent history…")
                 case .loaded where earlier.isEmpty && !hasMounted:
                     ContentUnavailableView(
-                        "No recorded processes",
+                        "No recorded subagents",
                         systemImage: "clock.arrow.circlepath",
-                        description: Text("Assistant commands and subagent sessions will appear here.")
+                        description: Text("Completed subagent sessions will appear here.")
                     )
                 default:
                     EmptyView()
@@ -244,11 +240,8 @@ private struct SessionProcessRow: View {
 
     var body: some View {
         Group {
-            if process.kind == .subagent, process.childSessionRef != nil {
+            if process.childSessionRef != nil {
                 NavigationLink(value: SessionProcessDestination.transcript(process)) { rowContent }
-                    .buttonStyle(.plain)
-            } else if process.kind == .command {
-                NavigationLink(value: SessionProcessDestination.detail(process)) { rowContent }
                     .buttonStyle(.plain)
             } else {
                 rowContent
@@ -268,7 +261,7 @@ private struct SessionProcessRow: View {
                     .frame(width: 22, alignment: .center)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(rowTitle)
-                        .font(process.kind == .command ? TronTypography.code(size: 12, weight: .semibold) : TronTypography.body)
+                        .font(TronTypography.body)
                         .foregroundStyle(Color.tronTextPrimary)
                         .lineLimit(2)
                     Text(summary)
@@ -290,7 +283,7 @@ private struct SessionProcessRow: View {
                         .foregroundStyle(Color.tronTextMuted)
                         .accessibilityHidden(true)
                 }
-            } else if process.kind == .subagent, process.childSessionRef == nil {
+            } else if process.childSessionRef == nil {
                 Text(process.lifecycle.state.isActive ? "Session preparing" : "Session unavailable")
                     .font(TronTypography.caption)
                     .foregroundStyle(Color.tronTextMuted)
@@ -302,11 +295,10 @@ private struct SessionProcessRow: View {
         .tronScrollSurface(accent: accent, tintOpacity: 0.08)
     }
 
-    private var rowTitle: String { process.command ?? process.title }
+    private var rowTitle: String { process.title }
 
     private var icon: String {
         if process.lifecycle.state.isProblem { return "exclamationmark.circle" }
-        if process.kind == .command { return process.lifecycle.state.isActive ? "terminal.fill" : "terminal" }
         return process.lifecycle.state.isActive ? "circle.dotted" : "checkmark.circle"
     }
 
@@ -325,59 +317,8 @@ private struct SessionProcessRow: View {
     private var accessibilityValue: String { summaryParts.joined(separator: ", ") }
 
     private var accessibilityHint: String {
-        if process.kind == .command { return "Opens command details" }
         if process.childSessionRef != nil { return "Opens the read-only subagent session" }
         return process.lifecycle.state.isActive ? "Session is preparing" : "Session is unavailable"
-    }
-}
-
-private struct SessionProcessDetailView: View {
-    let process: SessionProcessActivity
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                detail("Status", process.lifecycle.state.displayName)
-                if !process.executionMode.displayName.isEmpty {
-                    detail("Execution", process.executionMode.displayName)
-                }
-                if let durationMs = process.durationMs {
-                    detail("Duration", ToolTiming.format(milliseconds: durationMs))
-                }
-                if let command = process.command {
-                    labeledCode("Command", command)
-                }
-                if let output = process.outputTail, !output.isEmpty {
-                    labeledCode(process.outputTruncated ? "Recent output" : "Output", output)
-                }
-                if let path = process.currentPathBasename {
-                    detail("Current file", path)
-                }
-            }
-            .padding(18)
-        }
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle(process.kind == .command ? "Command" : "Subagent")
-    }
-
-    private func detail(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted)
-            Text(value).font(TronTypography.body).foregroundStyle(Color.tronTextPrimary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func labeledCode(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted)
-            Text(value)
-                .font(TronTypography.code(size: 12, weight: .semibold))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .tronScrollSurface(accent: .tronEmerald, tintOpacity: 0.07)
-        }
     }
 }
 

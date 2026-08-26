@@ -329,27 +329,6 @@
   "processActivities": [
     {
       "version": 1,
-      "processId": "process:command:fixture",
-      "kind": "command",
-      "executionMode": "foreground",
-      "source": "mainAssistant",
-      "lifecycle": {
-        "version": 1,
-        "state": "running",
-        "attention": "none",
-        "sequence": 2,
-        "observedAt": "2026-01-01T00:00:11Z"
-      },
-      "visibility": "active",
-      "startedAt": "2026-01-01T00:00:10Z",
-      "title": "Command",
-      "command": "build",
-      "outputTail": "working\nstep two",
-      "outputTruncated": false,
-      "toolCallId": "live-tool"
-    },
-    {
-      "version": 1,
       "processId": "process:subagent:fixture",
       "kind": "subagent",
       "executionMode": "asynchronous",
@@ -376,10 +355,10 @@
     "version": 1,
     "revision": 5,
     "asOf": "2026-01-01T00:00:11Z",
-    "activeCount": 1,
+    "activeCount": 0,
     "recentCount": 1,
     "problemCount": 0,
-    "visibility": "active",
+    "visibility": "recent",
     "nearestExpiry": "2026-01-01T00:05:10Z"
   },
   "extensionPresentation": {

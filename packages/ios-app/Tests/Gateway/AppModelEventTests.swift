@@ -117,10 +117,10 @@ struct AppModelEventTests {
         let previousProcessIDs = snapshot.processActivities?.map(\.processId) ?? []
         let process: JSONValue = .object([
             "version": .number(1),
-            "processId": .string("command:delta-call"),
-            "kind": .string("command"),
-            "executionMode": .string("foreground"),
-            "source": .string("mainAssistant"),
+            "processId": .string("subagent:delta-call"),
+            "kind": .string("subagent"),
+            "executionMode": .string("asynchronous"),
+            "source": .string("delegatedAgent"),
             "lifecycle": .object([
                 "version": .number(1),
                 "state": .string("running"),
@@ -129,12 +129,12 @@ struct AppModelEventTests {
                 "observedAt": .string("2026-01-01T00:00:01Z"),
             ]),
             "visibility": .string("active"),
-            "title": .string("Command"),
-            "command": .string("npm test"),
+            "title": .string("worker"),
             "startedAt": .string("2026-01-01T00:00:00Z"),
             "outputTail": .string("running"),
             "outputTruncated": .bool(false),
             "toolCallId": .string("delta-call"),
+            "runId": .string("run-1"),
         ])
         let overview: JSONValue = .object([
             "version": .number(1),
@@ -158,8 +158,8 @@ struct AppModelEventTests {
             ])
         ))
         #expect(model.selectedSnapshot?.processOverview?.activeCount == 1)
-        #expect(model.selectedSnapshot?.processActivities?.map(\.processId) == ["command:delta-call"])
-        #expect(model.selectedSnapshot?.processActivities?.first?.command == "npm test")
+        #expect(model.selectedSnapshot?.processActivities?.map(\.processId) == ["subagent:delta-call"])
+        #expect(model.selectedSnapshot?.processActivities?.first?.title == "worker")
         let afterDelta = try #require(model.chatProjectionGenerations(
             for: snapshot.sessionId,
             presentationGeneration: 1

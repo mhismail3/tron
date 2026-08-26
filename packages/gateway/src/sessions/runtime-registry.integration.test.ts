@@ -1803,6 +1803,51 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(receiptAppend.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("retries an initial atomic async status replacement before projecting activity", async () => {
+    const fixture = await coldFixture("async-status-initial-retry");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const runId = "retry-run";
+    const toolCallId = "retry-tool";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
+    await mkdir(asyncDir, { recursive: true });
+    const startedAt = new Date(Date.now() - 1_000).toISOString();
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      runId,
+      state: "running",
+      startedAt: Date.parse(startedAt),
+      lastUpdate: Date.now(),
+      mode: "workflow",
+      steps: [{ runId: "retry-child", agent: "worker", status: "running", currentTool: "bash" }],
+    }));
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
+      readExtensionStatusArtifact: (asyncDir: string) => Promise<Record<string, unknown> | undefined>;
+      startExtensionActivityWatcher: (toolCallId: string, asyncDir: string) => void;
+    };
+    internal.extensionActivities.set(toolCallId, {
+      id: toolCallId, activityId: "retry-activity", runId, toolCallId,
+      source: { source: "pi-subagents" }, title: "Subagents", mode: "asynchronous", status: "running",
+      startedAt, updatedAt: startedAt, children: [],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
+    });
+    internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    const originalRead = internal.readExtensionStatusArtifact.bind(slot);
+    let reads = 0;
+    internal.readExtensionStatusArtifact = async (directory) => {
+      reads += 1;
+      return reads === 1 ? undefined : originalRead(directory);
+    };
+    internal.startExtensionActivityWatcher(toolCallId, asyncDir);
+    await waitUntil(() => reads >= 2 && (slot.snapshot().processActivities?.length ?? 0) === 1);
+    expect(slot.snapshot().processActivities?.[0]).toMatchObject({
+      kind: "subagent",
+      executionMode: "asynchronous",
+      visibility: "active",
+      currentTool: "bash",
+    });
+  });
+
   it("persists only a validated opaque child-session reference for process viewing", async () => {
     const fixture = await coldFixture("validated-child-session");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
@@ -1811,13 +1856,15 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const activityId = "validated-child-activity";
     const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
     const parentFile = slot.sessionFile!;
-    const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), runId, "run-0");
+    const childProducerId = "child-run";
+    const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), childProducerId, "run-0");
     await Promise.all([mkdir(asyncDir, { recursive: true }), mkdir(childDirectory, { recursive: true })]);
+    // Match the deployed pi-subagents producer: the canonical child path and
+    // structural name carry the child run while the header omits parentSession.
     const childManager = SessionManager.create(fixture.cwd, childDirectory, {
       id: "validated-child-session",
-      parentSession: parentFile,
     });
-    childManager.appendSessionInfo("subagent-worker");
+    childManager.appendSessionInfo(`subagent-worker-${childProducerId}-1`);
     childManager.appendMessage(fauxAssistantMessage("child transcript"));
     const childFile = childManager.getSessionFile()!;
     const startedAt = new Date(Date.now() - 1_000).toISOString();
@@ -1833,6 +1880,30 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
     });
     internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      runId,
+      state: "running",
+      startedAt: Date.parse(startedAt),
+      lastUpdate: Date.now(),
+      mode: "workflow",
+      steps: [{ agent: "worker", status: "running", sessionFile: childFile }],
+    }));
+    await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
+    const activeSnapshot = slot.snapshot();
+    const activeProcess = activeSnapshot.processActivities?.find((activity) => activity.kind === "subagent");
+    expect(activeSnapshot.extensionActivities?.[0]?.lifecycle).toMatchObject({
+      state: "running",
+      visibility: "current",
+    });
+    expect(activeSnapshot.extensionActivities?.[0]?.lifecycle).not.toHaveProperty("remainingMs");
+    expect(activeProcess).toMatchObject({
+      title: "worker",
+      childSessionRef: "validated-child-session",
+      executionMode: "asynchronous",
+      visibility: "active",
+      lifecycle: { state: "running" },
+    });
+
     const endedAt = Date.now();
     await writeFile(join(asyncDir, "status.json"), JSON.stringify({
       runId,
@@ -1840,15 +1911,21 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       startedAt: Date.parse(startedAt),
       endedAt,
       lastUpdate: endedAt + 1,
-      results: [{ runId: "child-run", agent: "worker", status: "completed", sessionFile: childFile }],
+      mode: "workflow",
+      steps: [{ agent: "worker", status: "completed", sessionFile: childFile }],
     }));
 
     await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
     const process = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
-    expect(process).toMatchObject({ title: "worker", childSessionRef: "validated-child-session" });
+    expect(process).toMatchObject({
+      title: "worker",
+      childSessionRef: "validated-child-session",
+      executionMode: "asynchronous",
+    });
     expect(JSON.stringify(process)).not.toContain(childFile);
     expect(slot.processChildSessionPath(process!.processId)).toEqual({
       ref: "validated-child-session",
+      producerId: childProducerId,
       runId,
       path: await realpath(childFile),
     });
@@ -1919,7 +1996,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
     expect(oversized.children[0]?.childSessionRef).toBeUndefined();
 
-    const missingParentDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "expected-run", "run-missing-parent");
+    const missingParentDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "child-run", "run-missing-parent");
     await mkdir(missingParentDirectory, { recursive: true });
     const missingParent = SessionManager.create(fixture.cwd, missingParentDirectory, { id: "missing-parent-child" });
     missingParent.appendSessionInfo("subagent-worker");
@@ -4109,26 +4186,12 @@ export default function (pi) {
     expect(bashProgress.at(-1)!.progressSequence).toBeGreaterThan(2);
     expect(bashProgress.at(-1)!.durationMs).toBeGreaterThanOrEqual(300);
     expect(bashProgress.at(-1)!.completedAt).toBeTypeOf("string");
-    const processEvents = events
-      .filter((event) => event.topic === "session.processActivity")
-      .map((event) => event.payload.data as { activity: { kind: string; toolCallId?: string; visibility: string; outputTail?: string }; overview: { visibility: string } });
-    expect(processEvents.length).toBeGreaterThan(1);
-    expect(processEvents.every((event) => event.activity.kind === "command" && event.activity.toolCallId === "call-bash")).toBe(true);
-    expect(processEvents.some((event) => event.activity.visibility === "active" && event.overview.visibility === "active")).toBe(true);
-    expect(processEvents.at(-1)).toMatchObject({
-      activity: { visibility: "recent", outputTail: "startend" },
-      overview: { visibility: "recent" },
-    });
+    expect(events.filter((event) => event.topic === "session.processActivity")).toEqual([]);
     const settled = slot.snapshot();
     expect(settled.toolExecutions).toEqual([]);
-    expect(settled.processOverview).toMatchObject({ visibility: "recent", activeCount: 0, recentCount: 1 });
-    expect(settled.processActivities).toEqual([
-      expect.objectContaining({ kind: "command", toolCallId: "call-bash", outputTail: "startend" }),
-    ]);
-    const commandHistory = slot.processHistory(undefined, 25, { kind: "command" }).activities;
-    expect(commandHistory).toEqual([expect.objectContaining({ kind: "command", toolCallId: "call-bash" })]);
-    expect(settled.processActivities?.[0]?.lifecycle.terminalAt)
-      .toBe(commandHistory[0]?.lifecycle.terminalAt);
+    expect(settled.processOverview).toMatchObject({ visibility: "hidden", activeCount: 0, recentCount: 0 });
+    expect(settled.processActivities ?? []).toEqual([]);
+    expect(slot.processHistory(undefined, 25, { kind: "command" }).activities).toEqual([]);
     const canonicalAssistant = settled.transcript.find((item) => item.kind === "message" && item.role === "assistant");
     const canonicalCalls = canonicalAssistant?.kind === "message"
       ? canonicalAssistant.content.filter((part) => part.type === "toolCall")
