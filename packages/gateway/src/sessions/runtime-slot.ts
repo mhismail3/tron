@@ -1776,8 +1776,13 @@ export class RuntimeSlot {
           // callback unwinds. Preserve and immediately commit the prior exact
           // completion, then give the continuation a distinct marker owner so
           // cleanup from the older settlement cannot erase the newer run.
-          void this.beginAttentionSettlement(this.pendingAssistantCompletion)
-            .catch(() => this.runtime.session.abort());
+          // Attention is ordered durable presentation state, not authorization
+          // to continue already-accepted canonical agent work. A failed queue
+          // head remains marked/interrupted and blocks later attention commits,
+          // while the continuation may finish and stamp its own completion for
+          // ordered restart recovery. Aborting here would silently discard that
+          // accepted continuation and strand its durable ownership test.
+          void this.beginAttentionSettlement(this.pendingAssistantCompletion).catch(() => {});
           this.activeOperationId = undefined;
           this.operation = undefined;
         }

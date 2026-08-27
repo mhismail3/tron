@@ -3630,19 +3630,19 @@ export default function (pi) {
       attention: { complete: (sessionId: string, completionId: string) => Promise<unknown> };
       markers: {
         evidenceFor: (sessionId: string) => Promise<Array<{ assistantCompletionId?: string }>>;
-        markAssistantCompletion: (
+        reassertAssistantCompletion: (
           sessionId: string, operationId: string, completionId: string, completedAt: string,
         ) => Promise<void>;
       };
     };
     vi.spyOn(internals.attention, "complete").mockRejectedValue(new Error("injected persistent attention failure"));
-    const originalStamp = internals.markers.markAssistantCompletion.bind(internals.markers);
+    const originalStamp = internals.markers.reassertAssistantCompletion.bind(internals.markers);
     let secondStampEntered!: () => void;
     let releaseSecondStamp!: () => void;
     const secondStampEntry = new Promise<void>((resolve) => { secondStampEntered = resolve; });
     const secondStampBarrier = new Promise<void>((resolve) => { releaseSecondStamp = resolve; });
     let stampCount = 0;
-    vi.spyOn(internals.markers, "markAssistantCompletion").mockImplementation(async (...arguments_) => {
+    vi.spyOn(internals.markers, "reassertAssistantCompletion").mockImplementation(async (...arguments_) => {
       stampCount += 1;
       if (stampCount === 2) {
         secondStampEntered();
