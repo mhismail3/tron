@@ -479,7 +479,9 @@ The random-access row collection is a flat immutable canonical base with direct 
 tiny live suffix. A global assembly resets overrides; repeated runtime payload updates share the base
 and replace only affected tool-run rows rather than chaining overlays or copying 10,000 descriptors.
 Canonical and runtime ownership is preserved through assembly: only canonical rows enter
-`ChatCommittedLedger`; streaming and runtime-only rows enter `ChatLiveRegion`. A finalized group's
+`ChatCommittedLedger`; streaming and runtime-only rows enter `ChatLiveRegion`. Matching group or
+producer-segment metadata may preserve identity only within one of those ownership regions and can
+never move canonical history into the live suffix or runtime calls into the ledger. A finalized group's
 reported member count is declaration completeness, never execution liveness, so a partial historical
 page cannot create a spinner. Runtime patch sites carry their canonical/live region and exact row index.
 Rendered identity spines and sets are cached/split so ordinary text/thinking/image streaming updates

@@ -4966,6 +4966,7 @@ export default function (pi) {
         timestamp: Date.now(),
       },
     });
+    await Promise.resolve();
     expect(internal.toolExecutions.has("canonical-old")).toBe(false);
     expect(internal.toolMetadata.get("canonical-old")).toEqual(metadata);
     internal.onEvent({
@@ -4977,6 +4978,25 @@ export default function (pi) {
       startedAt: expect.any(String), completedAt: expect.any(String), progressSequence: expect.any(Number),
     });
     expect(slot.snapshot().toolExecutions).toEqual([]);
+
+    const notPersisted = {
+      toolCallId: "not-persisted", toolName: "read", order: 1, status: "completed",
+      arguments: null, isError: false, startedAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(), lastProgressAt: new Date(0).toISOString(),
+      progressSequence: 1,
+    };
+    internal.toolExecutions.set("not-persisted", notPersisted);
+    internal.onEvent({
+      type: "message_end",
+      message: {
+        role: "toolResult", toolCallId: "not-persisted", toolName: "read",
+        content: [{ type: "text", text: "append failed" }], isError: false,
+        timestamp: Date.now(),
+      },
+    });
+    await Promise.resolve();
+    expect(internal.toolExecutions.get("not-persisted")).toEqual(notPersisted);
+    internal.toolExecutions.delete("not-persisted");
     streaming.mockRestore();
   });
 

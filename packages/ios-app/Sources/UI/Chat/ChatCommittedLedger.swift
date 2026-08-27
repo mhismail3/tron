@@ -1,10 +1,10 @@
 import Foundation
 
 /// Frozen canonical rows inside one complete installed transcript. The revision
-/// is local presentation lineage: equal canonical rows reuse it across live
-/// updates and compatible foreground replacement, while any canonical append,
-/// prepend, or replacement advances it exactly once. A cold owner starts at one
-/// deterministically from the authoritative snapshot.
+/// is local structural lineage: an unchanged canonical identity/membership spine
+/// reuses it across live payload updates, while any canonical append, prepend,
+/// replacement, or tool-membership change advances it exactly once. A cold owner
+/// starts at one deterministically from the authoritative snapshot.
 struct ChatCommittedLedger: Hashable, Sendable {
     let revision: UInt64
     let items: [ChatTranscriptRenderItem]
@@ -20,8 +20,33 @@ struct ChatCommittedLedger: Hashable, Sendable {
     ) -> Self {
         guard let previous else { return Self(items: items) }
         guard previous.items != items else { return previous }
+        if hasSameStructuralSpine(previous.items, items) {
+            // Canonical rows can be enriched by disposable execution timing,
+            // output, and status. Install the newest value without claiming a
+            // canonical append/prepend or replaying scroll/entrance ownership.
+            return Self(items: items, revision: previous.revision)
+        }
         let nextRevision = previous.revision == .max ? UInt64.max : previous.revision + 1
         return Self(items: items, revision: nextRevision)
+    }
+
+    private static func hasSameStructuralSpine(
+        _ previous: [ChatTranscriptRenderItem],
+        _ incoming: [ChatTranscriptRenderItem]
+    ) -> Bool {
+        guard previous.count == incoming.count else { return false }
+        return zip(previous, incoming).allSatisfy { old, new in
+            guard old.id == new.id else { return false }
+            switch (old, new) {
+            case (.transcript, .transcript), (.message, .message), (.notification, .notification):
+                return true
+            case let (.toolRun(oldRun), .toolRun(newRun)):
+                return oldRun.tools.map(\.id) == newRun.tools.map(\.id)
+                    && oldRun.groupIDs == newRun.groupIDs
+            default:
+                return false
+            }
+        }
     }
 }
 

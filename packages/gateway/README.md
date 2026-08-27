@@ -252,8 +252,9 @@ canonical entry IDs and JSONL remain authoritative and unmodified. Active operat
 a long tool with no output remains distinguishable from a broken mobile stream.
 Tool lifecycle state is a disposable overlay, not a second transcript: Pi 0.84.1's ordinary
 `toolResult` persistence is observed at its exact `message_end` handoff (not only through
-`entry_appended`), so the matching runtime call ID is retired while timing, grouping, and
-provenance metadata remain available for canonical projection. Late terminal callbacks cannot
+`entry_appended`) and verified against canonical ownership in the following microtask, so a
+failed append cannot create a projection gap. The matching runtime call ID is then retired while
+timing, grouping, and provenance metadata remain available for canonical projection. Late terminal callbacks cannot
 resurrect that ID. Snapshot admission also checks the full canonical branch, rather than only
 the bounded transcript tail, and omits any runtime state whose exact call ID already has a
 canonical result. This keeps long turns and paged-out history free of duplicate or phantom

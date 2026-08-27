@@ -316,6 +316,34 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(candidate.isValid)
     }
 
+    @Test("matching producer segments never merge canonical and runtime ownership")
+    func producerSegmentDoesNotCrossOwnershipRegions() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"canonical-part","type":"toolCall","toolCallId":"canonical-call","name":"read","arguments":{},"toolSegmentId":"tool-segment:turn","groupId":"canonical-group","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
+        ]
+        """)
+        snapshot.phase = .running
+        snapshot.transcriptTotal = 1
+        snapshot.toolExecutions = [runtimeTool(
+            id: "runtime-call", order: 1, toolSegmentId: "tool-segment:turn"
+        )]
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        let canonicalTools = candidate.timeline.items.canonical.compactMap { item -> [String]? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run.tools.map(\.id)
+        }
+        let liveTools = candidate.timeline.items.live.compactMap { item -> [String]? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run.tools.map(\.id)
+        }
+
+        #expect(canonicalTools == [["canonical-call"]])
+        #expect(liveTools == [["runtime-call"]])
+        #expect(candidate.isValid)
+    }
+
     @Test("foreground catch-up replaces one immutable ledger value without adding physical rows")
     func foregroundCatchUpPreservesCommittedLedgerIntegrity() throws {
         var snapshot = try fixture(transcript: "[]")
@@ -984,6 +1012,37 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(flipped.workReport.mode == .toolPayloadPatch)
         #expect(flipped.timeline.ids == ["user", "stream", "tool-run-one"])
         #expect(flipped.timeline == ChatTranscriptProjectionKernel.cold(snapshot: placement).timeline)
+    }
+
+    @Test("live payload changes do not advance committed structural revision")
+    func livePayloadPatchPreservesCommittedRevision() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"part","type":"toolCall","toolCallId":"call","name":"read","arguments":{}}]}
+        ]
+        """)
+        snapshot.phase = .running
+        snapshot.transcriptTotal = 1
+        snapshot.toolExecutions = [runtimeTool(id: "call", order: 0)]
+        let running = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        let initialLedger = ChatCommittedLedger(items: running.timeline.items.canonical)
+
+        snapshot.toolExecutions = [updatedTool(
+            snapshot.toolExecutions[0], status: .completed, output: "done"
+        )]
+        let completed = ChatTranscriptProjectionKernel.incremental(
+            snapshot: snapshot,
+            previous: running,
+            canonicalSourceUnchanged: true
+        )
+        let reconciled = ChatCommittedLedger.reconcile(
+            items: completed.timeline.items.canonical,
+            previous: initialLedger
+        )
+
+        #expect(reconciled.revision == initialLedger.revision)
+        #expect(reconciled.items != initialLedger.items)
+        #expect(completed.workReport.mode == .toolPayloadPatch)
     }
 
     @Test("one producer segment keeps one row through mixed terminal settlement")

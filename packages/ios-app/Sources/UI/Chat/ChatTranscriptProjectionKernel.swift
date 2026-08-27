@@ -886,6 +886,18 @@ enum ChatTranscriptProjectionKernel {
             allowsLegacyContinuation: Bool
         ) {
             if let first = pendingTools.first {
+                let existingIsCanonical = first.classification == .canonical
+                    && pendingTools.allSatisfy { $0.classification == .canonical }
+                let incomingIsCanonical = tool.classification == .canonical
+                // Segment/group identity can preserve one physical row only
+                // inside one ownership region. Never pull a runtime-only call
+                // into the committed ledger, or demote canonical history into
+                // the live suffix, merely because producer metadata matches.
+                if existingIsCanonical != incomingIsCanonical {
+                    flushTools()
+                }
+            }
+            if let first = pendingTools.first {
                 let existingGroup = finalizedGroupID(first)
                 let incomingGroup = finalizedGroupID(tool)
                 let segmentIDs = Set(pendingTools.compactMap(\.presentation.toolSegmentId))
@@ -1218,10 +1230,10 @@ enum ChatTranscriptProjectionKernel {
         )
     }
 
-    /// A finalized producer group can be split across canonical, streaming,
-    /// and runtime sources during handoff. Merge only adjacent tool runs that
-    /// carry the same exact group. A canonical/barrier row or an unrelated
-    /// group between members makes the evidence unsafe to relocate.
+    /// A finalized producer group can be split across streaming and runtime
+    /// sources during handoff. Merge only adjacent tool runs that carry the
+    /// same exact group and ownership origin. Canonical/live ownership, a
+    /// barrier row, or an unrelated group makes relocation unsafe.
     private struct MergedToolRuns {
         let items: [ChatTranscriptRenderItem]
         let origins: [ChatTranscriptRowOrigin]
@@ -1234,6 +1246,7 @@ enum ChatTranscriptProjectionKernel {
         precondition(items.count == origins.count)
         struct GroupSignature {
             var count: Int?
+            var origin: ChatTranscriptRowOrigin?
             var indexOwner: [Int: String] = [:]
             var memberIDs: Set<String> = []
         }
@@ -1241,7 +1254,7 @@ enum ChatTranscriptProjectionKernel {
         var signatures: [String: GroupSignature] = [:]
         var groupForCall: [String: String] = [:]
         var invalidGroups = Set<String>()
-        for item in items {
+        for (itemIndex, item) in items.enumerated() {
             guard case .toolRun(let run) = item else { continue }
             for tool in run.tools where tool.groupFinalized == true {
                 guard let groupID = tool.groupId,
@@ -1255,6 +1268,12 @@ enum ChatTranscriptProjectionKernel {
                 if signature.count != nil && signature.count != tool.groupCount {
                     invalidGroups.insert(groupID)
                 }
+                if let origin = signature.origin, origin != origins[itemIndex] {
+                    // Canonical and live ownership may never be merged. Exact
+                    // producer identity is insufficient permission to move a
+                    // canonical row into the mutable suffix or vice versa.
+                    invalidGroups.insert(groupID)
+                }
                 let index = groupIndex
                 // A protocol call ID is an exact identity, not a merge key.
                 // Repeating it in another group slot (or repeating a slot)
@@ -1266,6 +1285,7 @@ enum ChatTranscriptProjectionKernel {
                     invalidGroups.insert(groupID)
                 }
                 if signature.count == nil { signature.count = groupCount }
+                if signature.origin == nil { signature.origin = origins[itemIndex] }
                 signatures[groupID] = signature
                 if let priorGroup = groupForCall[tool.id], priorGroup != groupID {
                     invalidGroups.insert(priorGroup)
@@ -1304,14 +1324,7 @@ enum ChatTranscriptProjectionKernel {
         guard !ownerByGroup.isEmpty else { return MergedToolRuns(items: items, origins: origins) }
 
         var result = items
-        var resultOrigins = origins
-        var originByCallID: [String: ChatTranscriptRowOrigin] = [:]
-        for (index, item) in items.enumerated() {
-            guard case .toolRun(let run) = item else { continue }
-            for tool in run.tools {
-                originByCallID[tool.id] = origins[index]
-            }
-        }
+        let resultOrigins = origins
         var additions: [Int: [ChatToolDescriptor]] = [:]
         var removalsByIndex: [Int: Set<String>] = [:]
         for (index, item) in items.enumerated() {
@@ -1346,10 +1359,6 @@ enum ChatTranscriptProjectionKernel {
                 }
             }
             result[index] = .toolRun(ChatToolRunPresentation(tools: merged, anchorID: run.anchorID))
-            if origins[index] == .live
-                || tools.contains(where: { originByCallID[$0.id] == .live }) {
-                resultOrigins[index] = .live
-            }
         }
 
         var removedIndices = Set<Int>()

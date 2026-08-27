@@ -2203,10 +2203,11 @@ export class RuntimeSlot {
         break;
       case "message_end":
         if (event.message.role === "toolResult") {
-          // Pi 0.84.1 emits message_end, not entry_appended, for ordinary
-          // tool-result persistence. This is the exact call-ID handoff from
-          // disposable lifecycle state to canonical JSONL ownership.
-          this.markCanonicalToolResultHandoff(event.message.toolCallId);
+          // Pi 0.84.1 invokes listeners immediately before appending this exact
+          // object. Verify canonical call-ID ownership in the next microtask;
+          // a failed persistence attempt must not create a runtime/canonical
+          // gap merely because message_end was observed.
+          this.observeCanonicalToolResultHandoff(event.message);
         } else if (event.message.role === "assistant") {
           this.finalizeToolInvocationGroups(event.message);
           this.bindCanonicalPresentation(event.message);
@@ -3350,6 +3351,23 @@ export class RuntimeSlot {
     // canonical while its row is paged out. Consult the full current branch as
     // the authoritative, order-independent backstop.
     return canonicalToolResultCallIDs(this.runtime.session.sessionManager).has(toolCallId);
+  }
+
+  private observeCanonicalToolResultHandoff(
+    message: Extract<AgentMessage, { role: "toolResult" }>,
+  ): void {
+    queueMicrotask(() => {
+      // Canonical JSONL is the authority. Exact object identity proves the
+      // current Pi handoff; exact call identity is the forward-compatible
+      // fallback if a future SDK persists a cloned message value.
+      const owned = this.runtime.session.sessionManager.getBranch().some((entry) =>
+        entry.type === "message"
+          && entry.message.role === "toolResult"
+          && (entry.message === message || entry.message.toolCallId === message.toolCallId));
+      if (!owned) return;
+      this.markCanonicalToolResultHandoff(message.toolCallId);
+      this.scheduleSnapshot();
+    });
   }
 
   private markCanonicalToolResultHandoff(toolCallId: string): void {

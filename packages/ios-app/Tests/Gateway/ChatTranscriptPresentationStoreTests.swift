@@ -1169,8 +1169,8 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
-    @Test("runtime-only updates reuse projection while hiding statuses and preserving working")
-    func runtimeUpdatesReuseProjection() async throws {
+    @Test("retired extension working state reuses projection without creating transcript rows")
+    func retiredExtensionStateDoesNotCreateRuntimeRows() async throws {
         try await withTestWatchdog { @MainActor in
             var snapshot = try SessionScenarioBuilder(seed: 1_213)
                 .openingTail(targetEncodedBytes: 8_000)
@@ -1198,16 +1198,15 @@ struct ChatTranscriptPresentationStoreTests {
             store.submit(snapshot: snapshot, tag: tag)
             let installed = try await store.waitForInstall(of: tag)
 
-            #expect(installed.runtimeItems.map(\.id) == ["runtime-working"])
+            #expect(installed.runtimeItems.isEmpty)
             #expect(signposts.events().filter { $0 == .begin(.chatProjection) }.count == 1)
-            #expect(store.pendingEntranceIDs == ["runtime-working"])
-            #expect(store.entranceState(for: "runtime-working") == .pending)
+            #expect(store.pendingEntranceIDs.isEmpty)
+            #expect(store.entranceState(for: "runtime-working") == .none)
             #expect(!store.resolveEntrance(
                 id: "runtime-working",
                 installationTag: tag,
                 isVisible: false
             ))
-            #expect(store.entranceState(for: "runtime-working") == .none)
         }
     }
 

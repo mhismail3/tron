@@ -1590,14 +1590,15 @@ struct ChatTranscriptItems: RandomAccessCollection, Hashable, Sendable {
     var canonicalCount: Int { canonicalBase.count }
     var sparseOverrideCount: Int { canonicalOverrides.count + liveOverrides.count }
     var startIndex: Int { 0 }
-    var endIndex: Int { canonicalBase.count + live.count }
+    var endIndex: Int { canonicalBase.count + liveBase.count }
 
     subscript(position: Int) -> ChatTranscriptRenderItem {
         precondition(indices.contains(position))
         if position < canonicalBase.count {
             return canonicalOverrides[position] ?? canonicalBase[position]
         }
-        return live[position - canonicalBase.count]
+        let liveIndex = position - canonicalBase.count
+        return liveOverrides[liveIndex] ?? liveBase[liveIndex]
     }
 
     func replacingCanonical(
