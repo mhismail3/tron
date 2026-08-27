@@ -58,6 +58,7 @@ import {
   projectToolOutput,
   projectToolResult,
   projectTranscriptPage,
+  canonicalToolResultCallIDs,
   projectTree,
   toolSegmentId,
   safeJson,
@@ -297,6 +298,11 @@ export class RuntimeSlot {
   private trustReloadPending = false;
   private trustReloadWork: GatewayWorkHandle | undefined;
   private readonly toolExecutions = new Map<string, ToolExecutionState>();
+  /** Tool-result message_end is Pi's ordinary persistence handoff. Keep a
+   * bounded exact-ID latch across continuation/settlement callbacks so a late
+   * terminal lifecycle event cannot resurrect a runtime row after that handoff.
+   * Canonical branch ownership is the durable backstop used by snapshots. */
+  private readonly canonicalToolResultHandoffs = new Set<string>();
   /** Latched declaration facts keyed by exact Pi tool call ID. Runtime-only;
    * never persisted to canonical Pi JSONL. */
   private readonly toolInvocationGroups = new Map<string, Pick<
@@ -2029,6 +2035,7 @@ export class RuntimeSlot {
       }
       case "tool_execution_start": {
         if (!this.hasActiveAgentRun) break;
+        if (this.canonicalToolResultHandoffs.has(event.toolCallId)) break;
         this.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
@@ -2074,6 +2081,7 @@ export class RuntimeSlot {
       }
       case "tool_execution_update": {
         if (!this.hasActiveAgentRun) break;
+        if (this.canonicalToolResultHandoffs.has(event.toolCallId)) break;
         this.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
@@ -2165,9 +2173,17 @@ export class RuntimeSlot {
           ...(extensionOrigin ? { extensionOrigin } : {}),
           ...(extensionActivity ? { extensionActivity } : {}),
         };
-        this.toolExecutions.set(event.toolCallId, state);
         this.rememberToolMetadata(event.toolCallId, state);
         this.toolStartedAtMonotonicMs.delete(event.toolCallId);
+        // A tool-result message_end can precede this terminal callback in Pi.
+        // Keep its timing/lineage metadata for canonical enrichment, but never
+        // re-admit the exact call to the disposable runtime overlay.
+        if (this.isCanonicalToolResultOwned(event.toolCallId)) {
+          this.toolExecutions.delete(event.toolCallId);
+          this.scheduleSnapshot();
+          break;
+        }
+        this.toolExecutions.set(event.toolCallId, state);
         this.publishToolProgress(state, true);
         this.scheduleSnapshot();
         break;
@@ -2178,15 +2194,20 @@ export class RuntimeSlot {
       case "entry_appended":
         this.summaryContentDirty = true;
         if (event.entry.type === "message" && event.entry.message.role === "toolResult") {
-          // Canonical transcript projection owns settled tool output. Process
-          // activity is deliberately subagent-only.
-          this.toolExecutions.delete(event.entry.message.toolCallId);
+          // Keep this compatibility path for extension/custom persistence, but
+          // ordinary Pi tool results arrive through message_end below.
+          this.markCanonicalToolResultHandoff(event.entry.message.toolCallId);
         }
         this.emit("session.structureChanged", { branchChanged: false });
         this.scheduleSnapshot();
         break;
       case "message_end":
-        if (event.message.role === "assistant") {
+        if (event.message.role === "toolResult") {
+          // Pi 0.84.1 emits message_end, not entry_appended, for ordinary
+          // tool-result persistence. This is the exact call-ID handoff from
+          // disposable lifecycle state to canonical JSONL ownership.
+          this.markCanonicalToolResultHandoff(event.message.toolCallId);
+        } else if (event.message.role === "assistant") {
           this.finalizeToolInvocationGroups(event.message);
           this.bindCanonicalPresentation(event.message);
         } else if (event.message.role === "custom") {
@@ -3323,6 +3344,30 @@ export class RuntimeSlot {
     return source ? { source, owner } : undefined;
   }
 
+  private isCanonicalToolResultOwned(toolCallId: string): boolean {
+    if (this.canonicalToolResultHandoffs.has(toolCallId)) return true;
+    // The bounded transcript tail is not sufficient evidence: a result can be
+    // canonical while its row is paged out. Consult the full current branch as
+    // the authoritative, order-independent backstop.
+    return canonicalToolResultCallIDs(this.runtime.session.sessionManager).has(toolCallId);
+  }
+
+  private markCanonicalToolResultHandoff(toolCallId: string): void {
+    if (!toolCallId) return;
+    this.canonicalToolResultHandoffs.delete(toolCallId);
+    this.canonicalToolResultHandoffs.add(toolCallId);
+    while (this.canonicalToolResultHandoffs.size > 4_096) {
+      const oldest = this.canonicalToolResultHandoffs.values().next().value as string | undefined;
+      if (!oldest) break;
+      this.canonicalToolResultHandoffs.delete(oldest);
+    }
+    // Metadata deliberately survives this transition: Pi does not persist
+    // timing, grouping, or extension provenance in JSONL, so canonical
+    // projection still needs the bounded enrichment map.
+    this.toolExecutions.delete(toolCallId);
+    this.toolStartedAtMonotonicMs.delete(toolCallId);
+  }
+
   private rememberToolMetadata(toolCallId: string, state: ToolExecutionState): void {
     this.toolMetadata.delete(toolCallId);
     this.toolMetadata.set(toolCallId, {
@@ -3592,6 +3637,9 @@ export class RuntimeSlot {
       })()
       : undefined;
     const transcriptPage = this.transcriptPage();
+    // transcriptPage is intentionally bounded; use the full canonical branch
+    // for ownership so paged-out results cannot leave a duplicate runtime row.
+    const canonicalToolResultIDs = canonicalToolResultCallIDs(session.sessionManager);
     const queuedItems = this.projectedQueue();
     const processProjection = this.currentProcessProjection();
     return fitSessionSnapshot({
@@ -3632,6 +3680,7 @@ export class RuntimeSlot {
       ...(this.pendingExtensionCommand ? { extensionCommand: this.pendingExtensionCommand } : {}),
       ...(this.retry ? { retry: this.retry } : {}),
       toolExecutions: [...this.toolExecutions.values()]
+        .filter((tool) => !canonicalToolResultIDs.has(tool.toolCallId))
         .filter((tool) => this.effectivePhase === "running" || tool.status !== "running")
         .sort((left, right) => left.order - right.order),
       ...(() => {

@@ -250,6 +250,14 @@ new canonical entry in the following microtask before publishing the settled
 snapshot. The binding ledger is capped beyond the maximum mobile transcript page;
 canonical entry IDs and JSONL remain authoritative and unmodified. Active operations also emit a bounded sequenced heartbeat, so
 a long tool with no output remains distinguishable from a broken mobile stream.
+Tool lifecycle state is a disposable overlay, not a second transcript: Pi 0.84.1's ordinary
+`toolResult` persistence is observed at its exact `message_end` handoff (not only through
+`entry_appended`), so the matching runtime call ID is retired while timing, grouping, and
+provenance metadata remain available for canonical projection. Late terminal callbacks cannot
+resurrect that ID. Snapshot admission also checks the full canonical branch, rather than only
+the bounded transcript tail, and omits any runtime state whose exact call ID already has a
+canonical result. This keeps long turns and paged-out history free of duplicate or phantom
+terminal tool rows while preserving running calls and canonical enrichment.
 The embedded runtime's active-run flag outranks an older settlement callback when
 an extension completion immediately triggers a continuation, so phase, operation,
 and Stop controls cannot become idle while a newer turn is executing. Extension

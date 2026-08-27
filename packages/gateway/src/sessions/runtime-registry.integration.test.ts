@@ -4925,6 +4925,61 @@ export default function (pi) {
     if (index >= 0) registries.splice(index, 1);
   });
 
+  it("omits a terminal runtime overlay when its canonical result is outside the bounded tail", async () => {
+    const fixture = await coldFixture("canonical-tool-ownership-backstop");
+    fixture.manager.appendMessage({
+      role: "toolResult",
+      toolCallId: "canonical-old",
+      toolName: "read",
+      content: [{ type: "text", text: "canonical result" }],
+      isError: true,
+      timestamp: Date.now(),
+    });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      toolExecutions: Map<string, unknown>;
+      toolMetadata: Map<string, unknown>;
+      onEvent: (event: unknown) => void;
+      runtime: { session: { readonly isStreaming: boolean } };
+    };
+    internal.toolExecutions.set("canonical-old", {
+      toolCallId: "canonical-old", toolName: "read", order: 0, status: "failed",
+      arguments: null, isError: true, startedAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(), lastProgressAt: new Date(0).toISOString(),
+      progressSequence: 1,
+    });
+    const metadata = { startedAt: new Date(0).toISOString(), lastProgressAt: new Date(0).toISOString(), progressSequence: 3 };
+    internal.toolMetadata.set("canonical-old", metadata);
+    // The full-branch backstop removes the live row even before the lifecycle
+    // handoff reaches this slot; ownership does not depend on the bounded
+    // transcript page containing the result.
+    expect(slot.snapshot().toolExecutions).toEqual([]);
+    const streaming = vi.spyOn(internal.runtime.session, "isStreaming", "get").mockReturnValue(true);
+    // The handoff removes the live row immediately while preserving the
+    // metadata map for canonical enrichment. A later terminal callback cannot
+    // re-admit the exact ID.
+    internal.onEvent({
+      type: "message_end",
+      message: {
+        role: "toolResult", toolCallId: "canonical-old", toolName: "read",
+        content: [{ type: "text", text: "canonical result" }], isError: true,
+        timestamp: Date.now(),
+      },
+    });
+    expect(internal.toolExecutions.has("canonical-old")).toBe(false);
+    expect(internal.toolMetadata.get("canonical-old")).toEqual(metadata);
+    internal.onEvent({
+      type: "tool_execution_end", toolCallId: "canonical-old", toolName: "read",
+      result: { content: [{ type: "text", text: "late terminal" }] }, isError: true,
+    });
+    expect(internal.toolExecutions.has("canonical-old")).toBe(false);
+    expect(internal.toolMetadata.get("canonical-old")).toMatchObject({
+      startedAt: expect.any(String), completedAt: expect.any(String), progressSequence: expect.any(Number),
+    });
+    expect(slot.snapshot().toolExecutions).toEqual([]);
+    streaming.mockRestore();
+  });
+
   it("projects stable ordinals for parallel tools from start through completion", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-tool-order-integration-"));
     const agentDir = join(root, "agent");
@@ -5057,6 +5112,13 @@ export default function (pi) {
         item.kind === "message" && item.role === "toolResult" && item.toolCallId === "call-read");
       const runtimeRead = snapshot.toolExecutions?.some((tool) => tool.toolCallId === "call-read");
       return canonicalRead === true || runtimeRead === true;
+    })).toBe(true);
+    expect(activeSnapshots.every((snapshot) => {
+      const canonicalIDs = new Set((snapshot.transcript ?? [])
+        .filter((item) => item.kind === "message" && item.role === "toolResult")
+        .map((item) => item.toolCallId)
+        .filter((id): id is string => typeof id === "string"));
+      return !(snapshot.toolExecutions ?? []).some((tool) => canonicalIDs.has(tool.toolCallId));
     })).toBe(true);
     const settled = slot.snapshot();
     expect(settled.toolExecutions).toEqual([]);

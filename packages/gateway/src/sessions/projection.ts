@@ -2,6 +2,22 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { SessionEntry, SessionManager, SessionTreeNode as PiSessionTreeNode } from "@earendil-works/pi-coding-agent";
 
 type TranscriptSessionReader = Pick<SessionManager, "getBranch">;
+
+/**
+ * Returns exact tool-call IDs whose results are already owned by the current
+ * canonical branch. Runtime tool state is a disposable overlay; once Pi has
+ * persisted this exact result, callers must not publish a second runtime copy,
+ * even when the result is outside the bounded transcript tail.
+ */
+export function canonicalToolResultCallIDs(manager: TranscriptSessionReader): ReadonlySet<string> {
+  const result = new Set<string>();
+  for (const entry of manager.getBranch()) {
+    if (entry.type === "message" && entry.message.role === "toolResult") {
+      result.add(entry.message.toolCallId);
+    }
+  }
+  return result;
+}
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";

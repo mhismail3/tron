@@ -10,6 +10,7 @@ import {
   admitCommandCatalog,
   boundCommandContent,
   boundStreamingProgressItem,
+  canonicalToolResultCallIDs,
   COMMAND_CATALOG_BYTES,
   COMMAND_CATALOG_ITEMS,
   COMMAND_CATALOG_STRING_BYTES,
@@ -32,6 +33,21 @@ import {
   TREE_PROJECTION_BYTES,
   toolSegmentId,
 } from "./projection.js";
+
+describe("canonical tool ownership", () => {
+  it("recognizes exact tool-result call IDs across the full branch", () => {
+    const manager = {
+      getBranch: () => [
+        { type: "message", message: { role: "toolResult", toolCallId: "call-old" } },
+        { type: "message", message: { role: "toolResult", toolCallId: "call-error" } },
+        { type: "message", message: { role: "assistant", content: [] } },
+      ] as any,
+    };
+    expect([...canonicalToolResultCallIDs(manager)]).toEqual(["call-old", "call-error"]);
+    expect(canonicalToolResultCallIDs(manager).has("call-old")).toBe(true);
+    expect(canonicalToolResultCallIDs(manager).has("call-missing")).toBe(false);
+  });
+});
 
 describe("catalog projection admission", () => {
   it("admits command catalogs atomically without changing their order", () => {
