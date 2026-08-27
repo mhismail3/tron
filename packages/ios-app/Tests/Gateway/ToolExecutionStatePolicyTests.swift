@@ -31,11 +31,13 @@ struct ToolExecutionStatePolicyTests {
     func replacingLiveOutput() {
         let first = tool(
             id: "call", updatedAt: "1", sequence: 1,
-            output: "Waiting\nworker: thinking", outputTruncated: true
+            output: "Waiting\nworker: thinking", outputTruncated: true,
+            toolSegmentId: "tool-segment:turn"
         )
         let empty = ToolExecutionStatePolicy.newest(first, tool(id: "call", updatedAt: "2", sequence: 2))
         #expect(empty.output == first.output)
         #expect(empty.outputTruncated == true)
+        #expect(empty.toolSegmentId == "tool-segment:turn")
         let shorter = ToolExecutionStatePolicy.newest(
             empty,
             tool(id: "call", updatedAt: "3", sequence: 3, output: "Waiting")
@@ -110,6 +112,7 @@ struct ToolExecutionStatePolicyTests {
         sequence: Int? = nil,
         output: String? = nil,
         outputTruncated: Bool? = nil,
+        toolSegmentId: String? = nil,
         groupIndex: Int? = nil
     ) -> ToolExecutionState {
         ToolExecutionState(
@@ -126,6 +129,7 @@ struct ToolExecutionStatePolicyTests {
             startedAt: startedAt,
             updatedAt: updatedAt,
             progressSequence: sequence,
+            toolSegmentId: toolSegmentId,
             groupId: groupIndex == nil ? nil : "group",
             groupIndex: groupIndex,
             groupCount: groupIndex == nil ? nil : 3,

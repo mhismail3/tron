@@ -686,10 +686,19 @@ export function toolGroupId(presentationId: string, firstOrdinal: number): strin
   return `tool-group:${JSON.stringify([presentationId, firstOrdinal])}`;
 }
 
-function decorateToolGroups(parts: ContentPart[], presentationId: string, finalized: boolean): ContentPart[] {
+export function toolSegmentId(ownerId: string): string {
+  return `tool-segment:${JSON.stringify(ownerId)}`;
+}
+
+function decorateToolGroups(
+  parts: ContentPart[],
+  presentationId: string,
+  finalized: boolean,
+  segmentId?: string,
+): ContentPart[] {
   if (!finalized) {
     return parts.map((part) => part.type === "toolCall"
-      ? { ...part, groupFinalized: false }
+      ? { ...part, ...(segmentId ? { toolSegmentId: segmentId } : {}), groupFinalized: false }
       : part);
   }
   let index = 0;
@@ -704,7 +713,14 @@ function decorateToolGroups(parts: ContentPart[], presentationId: string, finali
     for (let offset = 0; offset < count; offset += 1) {
       const part = parts[start + offset]!;
       if (part.type === "toolCall") {
-        parts[start + offset] = { ...part, groupId, groupIndex: offset, groupCount: count, groupFinalized: true };
+        parts[start + offset] = {
+          ...part,
+          ...(segmentId ? { toolSegmentId: segmentId } : {}),
+          groupId,
+          groupIndex: offset,
+          groupCount: count,
+          groupFinalized: true,
+        };
       }
     }
   }
@@ -718,6 +734,7 @@ function projectContent(
   extractAttachments = false,
   finalizedToolGroups = false,
   toolLabels?: ReadonlyMap<string, string>,
+  segmentId?: string,
 ): ContentPart[] {
   const source = typeof content === "string" ? [{ type: "text" as const, text: content }] : content;
   const projected: ContentPart[] = [];
@@ -780,22 +797,23 @@ function projectContent(
       if (projected.length >= MAX_CONTENT_PARTS - 1) {
         const ordinal = nextIndex();
         projected.push({ id: `${ownerId}:truncated:${ordinal}`, ordinal, type: "text", text: "… additional content omitted from this mobile projection" });
-        return decorateToolGroups(projected, ownerId, finalizedToolGroups);
+        return decorateToolGroups(projected, ownerId, finalizedToolGroups, segmentId);
       }
       const candidateBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
       if (bytes + candidateBytes > MAX_CONTENT_BYTES) {
         const ordinal = nextIndex();
         projected.push({ id: `${ownerId}:truncated:${ordinal}`, ordinal, type: "text", text: "… additional content omitted from this mobile projection" });
-        return decorateToolGroups(projected, ownerId, finalizedToolGroups);
+        return decorateToolGroups(projected, ownerId, finalizedToolGroups, segmentId);
       }
       projected.push(candidate);
       bytes += candidateBytes;
     }
   }
-  return decorateToolGroups(projected, ownerId, finalizedToolGroups);
+  return decorateToolGroups(projected, ownerId, finalizedToolGroups, segmentId);
 }
 
 export interface ToolProjectionMetadata {
+  toolSegmentId?: string;
   groupId?: string;
   groupIndex?: number;
   groupCount?: number;
@@ -820,6 +838,7 @@ export function projectMessage(
   finalizedToolGroups = true,
   toolLabels?: ReadonlyMap<string, string>,
   sessionInput?: SessionInputMetadata,
+  segmentId?: string,
 ): TranscriptItem | undefined {
   switch (message.role) {
     case "user":
@@ -835,7 +854,15 @@ export function projectMessage(
         kind: "message",
         role: "assistant",
         presentationId,
-        content: projectContent(message.content, blobs, presentationId, false, finalizedToolGroups, toolLabels),
+        content: projectContent(
+          message.content,
+          blobs,
+          presentationId,
+          false,
+          finalizedToolGroups,
+          toolLabels,
+          segmentId,
+        ),
         provider: message.provider,
         modelId: message.model,
         stopReason: message.stopReason,
@@ -865,6 +892,7 @@ export function projectMessage(
           progressSequence: toolMetadata.progressSequence,
           ...(toolMetadata.extensionOrigin ? { extensionOrigin: toolMetadata.extensionOrigin } : {}),
           ...(toolMetadata.toolLabel ? { toolLabel: toolMetadata.toolLabel } : {}),
+          ...(toolMetadata.toolSegmentId ? { toolSegmentId: toolMetadata.toolSegmentId } : {}),
           ...(toolMetadata.groupId ? { groupId: toolMetadata.groupId } : {}),
           ...(toolMetadata.groupIndex === undefined ? {} : { groupIndex: toolMetadata.groupIndex }),
           ...(toolMetadata.groupCount === undefined ? {} : { groupCount: toolMetadata.groupCount }),
@@ -925,6 +953,7 @@ export function projectEntry(
   presentationIDs?: ReadonlyMap<string, string>,
   toolLabels?: ReadonlyMap<string, string>,
   sessionInput?: SessionInputMetadata,
+  segmentId?: string,
 ): TranscriptItem | undefined {
   switch (entry.type) {
     case "message":
@@ -939,6 +968,7 @@ export function projectEntry(
         entry.message.role === "assistant",
         toolLabels,
         sessionInput,
+        segmentId,
       );
     case "custom_message":
       if (!entry.display && !sessionInput) return undefined;
@@ -1319,24 +1349,69 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
   return selected.reverse();
 }
 
-function projectableTranscriptEntries(manager: TranscriptSessionReader): {
+/** Filter the canonical branch and derive tool segments in the same pass. The
+ * identity begins at exact conversation input, survives tool-only assistant and
+ * result entries, and retires at visible or non-conversation barriers. This
+ * keeps cold reopen and live delivery equivalent without adding another O(N)
+ * transcript walk or persisting presentation metadata to Pi JSONL. */
+function projectableTranscriptEntries(
+  manager: TranscriptSessionReader,
+  presentationIDs?: ReadonlyMap<string, string>,
+): {
   entries: SessionEntry[];
   sessionInputs: ReadonlyMap<string, SessionInputMetadata>;
+  toolSegmentIDs: ReadonlyMap<string, string>;
 } {
   const branch = manager.getBranch();
   const sessionInputs = sessionInputMetadataByEntry(branch);
-  return {
-    entries: branch.filter((entry) =>
-      entry.type !== "session_info"
-        && !(entry.type === "custom" && (
-          entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE
-          || entry.customType === SESSION_INPUT_RECEIPT_TYPE
-        ))
-        && !(entry.type === "custom_message" && !entry.display && !sessionInputs.has(entry.id))
-        && !(entry.type === "message" && entry.message.role === "custom"
-          && !entry.message.display && !sessionInputs.has(entry.id))),
-    sessionInputs,
-  };
+  const entries: SessionEntry[] = [];
+  const toolSegmentIDs = new Map<string, string>();
+  let ownerId: string | undefined;
+  for (const entry of branch) {
+    const projectable = entry.type !== "session_info"
+      && !(entry.type === "custom" && (
+        entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE
+        || entry.customType === SESSION_INPUT_RECEIPT_TYPE
+      ))
+      && !(entry.type === "custom_message" && !entry.display && !sessionInputs.has(entry.id))
+      && !(entry.type === "message" && entry.message.role === "custom"
+        && !entry.message.display && !sessionInputs.has(entry.id));
+    if (!projectable) continue;
+    entries.push(entry);
+
+    const presentationId = presentationIDs?.get(entry.id) ?? entry.id;
+    if (sessionInputs.has(entry.id)) {
+      ownerId = presentationId;
+      continue;
+    }
+    if (entry.type !== "message") {
+      ownerId = undefined;
+      continue;
+    }
+    if (entry.message.role === "user") {
+      ownerId = presentationId;
+      continue;
+    }
+    if (entry.message.role === "toolResult") continue;
+    if (entry.message.role !== "assistant") {
+      ownerId = undefined;
+      continue;
+    }
+    const content = typeof entry.message.content === "string"
+      ? [{ type: "text" as const, text: entry.message.content }]
+      : entry.message.content;
+    const lastToolIndex = content.findLastIndex((part) => part.type === "toolCall");
+    if (lastToolIndex >= 0) {
+      ownerId ??= presentationId;
+      toolSegmentIDs.set(entry.id, toolSegmentId(ownerId));
+    }
+    // A barrier after the final declaration retires the segment. Content before
+    // a declaration starts that displayed run and must not split later tool-only
+    // continuations from the same producer turn on cold reconstruction.
+    const lastBarrierIndex = content.findLastIndex((part) => part.type !== "toolCall");
+    if (lastToolIndex < 0 || lastBarrierIndex > lastToolIndex) ownerId = undefined;
+  }
+  return { entries, sessionInputs, toolSegmentIDs };
 }
 
 export function projectTranscript(
@@ -1345,10 +1420,16 @@ export function projectTranscript(
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
   toolLabels?: ReadonlyMap<string, string>,
 ): TranscriptItem[] {
-  const { entries, sessionInputs } = projectableTranscriptEntries(manager);
+  const { entries, sessionInputs, toolSegmentIDs } = projectableTranscriptEntries(manager);
   return entries.map((entry) => {
     const projected = projectEntry(
-      entry, blobs, toolMetadata, undefined, toolLabels, sessionInputs.get(entry.id),
+      entry,
+      blobs,
+      toolMetadata,
+      undefined,
+      toolLabels,
+      sessionInputs.get(entry.id),
+      toolSegmentIDs.get(entry.id),
     );
     if (!projected) throw new Error("projectable transcript entry produced no item");
     return projected;
@@ -1377,7 +1458,10 @@ export function projectTranscriptPage(
   presentationIDs?: ReadonlyMap<string, string>,
   toolLabels?: ReadonlyMap<string, string>,
 ): TranscriptPage {
-  const { entries, sessionInputs } = projectableTranscriptEntries(manager);
+  const { entries, sessionInputs, toolSegmentIDs } = projectableTranscriptEntries(
+    manager,
+    presentationIDs,
+  );
   const end = Math.max(0, Math.min(before ?? entries.length, entries.length));
   if (expectedNextEntryId !== undefined && entries[end]?.id !== expectedNextEntryId) {
     throw new Error("session transcript anchor changed");
@@ -1388,7 +1472,13 @@ export function projectTranscriptPage(
   while (start > 0 && selected.length < TRANSCRIPT_PAGE_ITEMS) {
     const entry = entries[start - 1]!;
     const item = projectEntry(
-      entry, blobs, toolMetadata, presentationIDs, toolLabels, sessionInputs.get(entry.id),
+      entry,
+      blobs,
+      toolMetadata,
+      presentationIDs,
+      toolLabels,
+      sessionInputs.get(entry.id),
+      toolSegmentIDs.get(entry.id),
     );
     if (!item) throw new Error("projectable transcript entry produced no item");
     const itemBytes = Buffer.byteLength(JSON.stringify(item)) + 1;

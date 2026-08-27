@@ -187,6 +187,7 @@ The route identity is mostly stable, but summary and resolved detail data should
 
 At finalized assistant `message_end`, Gateway must own:
 
+- stable active-turn `toolSegmentId` shared across its tool-only assistant messages;
 - stable group identity;
 - complete ordered call membership;
 - call index and count;
@@ -201,7 +202,7 @@ The projection kernel owns:
 
 - exact placement relative to text, thinking, and transcript barriers;
 - joining canonical calls, live execution state, and canonical results;
-- consolidation of adjacent tool-only invocation groups when preserving current UX;
+- consolidation of adjacent tool-only invocation groups only under one equal nonempty Gateway-owned segment identity;
 - stable display-run identity based on the first owning finalized group, not the first currently visible call;
 - sparse payload/status updates when topology remains unchanged.
 
@@ -313,12 +314,12 @@ Update `ChatTranscriptProjectionKernel` and `ChatToolRunPresentation` so that:
 - a finalized group enters with complete declared membership;
 - the display-run ID is based on the first finalized owning group ID;
 - later members never re-anchor the row;
-- unanchored runtime states join by group ID rather than a timing heuristic;
+- unanchored runtime states join by exact group or `toolSegmentId` rather than adjacency or timing heuristics;
 - canonical placement can move payload ownership without replacing semantic run identity;
 - every call ID still routes to the same run;
 - the preferred semantic ID is the stable run/group identity;
 - text, thinking, notification, and transcript barriers still split separate runs;
-- current adjacent tool-only turn consolidation is preserved unless intentionally changed by a separately approved product decision.
+- adjacent tool-only groups consolidate only when producer segment identity proves they belong to the same turn; missing or conflicting identity fails closed to separate rows.
 
 Do not weaken current sparse patch guards. Membership changes should become topology-preserving only after an assembler-proven stable group identity exists.
 
@@ -468,7 +469,7 @@ Add focused tests asserting:
 5. Multi-tool extension-owned runs use **Using N tools** and **Used N tools**, never **Extension activity**.
 6. A newly earlier `order` cannot remount a group whose canonical group order is already finalized.
 7. Thinking and text barriers still split presentation runs.
-8. Adjacent tool-only turn consolidation preserves its first stable group-based run ID.
+8. Same-segment adjacent tool-only consolidation preserves its first stable group-based run ID, while missing or different segments remain separate.
 9. Rapid target updates leave at most one active transition token and settle to the newest target.
 10. Duration/progress updates do not increment the structural animation revision.
 11. Reduce Motion uses the approved non-spatial transition.

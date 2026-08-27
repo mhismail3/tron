@@ -30,6 +30,7 @@ import {
   TRANSCRIPT_PAGE_BYTES,
   TRANSCRIPT_PAGE_ITEMS,
   TREE_PROJECTION_BYTES,
+  toolSegmentId,
 } from "./projection.js";
 
 describe("catalog projection admission", () => {
@@ -163,15 +164,24 @@ describe("transcript projection", () => {
       usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
       stopReason: "toolUse", timestamp: 2,
     };
-    const live = projectMessage("streaming", null, "2026-01-01T00:00:00Z", message, new BlobStore(), undefined, "stream:turn", false);
-    const settled = projectMessage("canonical", null, "2026-01-01T00:00:00Z", message, new BlobStore(), undefined, "stream:turn");
+    const segmentId = toolSegmentId("operation-1");
+    const live = projectMessage(
+      "streaming", null, "2026-01-01T00:00:00Z", message, new BlobStore(),
+      undefined, "stream:turn", false, undefined, undefined, segmentId,
+    );
+    const settled = projectMessage(
+      "canonical", null, "2026-01-01T00:00:00Z", message, new BlobStore(),
+      undefined, "stream:turn", true, undefined, undefined, segmentId,
+    );
     if (live?.kind !== "message" || settled?.kind !== "message") throw new Error("expected messages");
-    expect(live.content.filter((part) => part.type === "toolCall").every((part) => !part.groupFinalized)).toBe(true);
+    expect(live.content.filter((part) => part.type === "toolCall").every((part) =>
+      !part.groupFinalized && part.toolSegmentId === segmentId
+    )).toBe(true);
     const calls = settled.content.filter((part) => part.type === "toolCall");
     expect(calls).toMatchObject([
-      { toolCallId: "call-a", groupIndex: 0, groupCount: 2, groupFinalized: true },
-      { toolCallId: "call-b", groupIndex: 1, groupCount: 2, groupFinalized: true },
-      { toolCallId: "call-c", groupIndex: 0, groupCount: 1, groupFinalized: true },
+      { toolCallId: "call-a", toolSegmentId: segmentId, groupIndex: 0, groupCount: 2, groupFinalized: true },
+      { toolCallId: "call-b", toolSegmentId: segmentId, groupIndex: 1, groupCount: 2, groupFinalized: true },
+      { toolCallId: "call-c", toolSegmentId: segmentId, groupIndex: 0, groupCount: 1, groupFinalized: true },
     ]);
     expect(calls[0]?.type === "toolCall" && calls[1]?.type === "toolCall" ? calls[0].groupId : undefined)
       .toBe(calls[1]?.type === "toolCall" ? calls[1].groupId : undefined);
@@ -186,6 +196,54 @@ describe("transcript projection", () => {
       const members = retained.filter((part) => part.type === "toolCall" && part.groupId === groupId);
       expect(members).toHaveLength(members[0]?.type === "toolCall" ? members[0].groupCount : 0);
     }
+  });
+
+  it("derives one canonical tool segment per exact conversation turn", () => {
+    const manager = SessionManager.inMemory("/tmp/project");
+    const usage = {
+      input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    };
+    const appendTool = (id: string, leadingThinking = false) => manager.appendMessage({
+      role: "assistant",
+      content: [
+        ...(leadingThinking ? [{ type: "thinking" as const, thinking: "planning" }] : []),
+        { type: "toolCall", id, name: "read", arguments: { path: id } } as const,
+      ],
+      api: "openai-responses",
+      provider: "test",
+      model: "model",
+      usage,
+      stopReason: "toolUse",
+      timestamp: Date.now(),
+    });
+    const firstInput = manager.appendMessage({ role: "user", content: "first", timestamp: 1 });
+    appendTool("call-a", true);
+    manager.appendMessage({
+      role: "toolResult", toolCallId: "call-a", toolName: "read",
+      content: [{ type: "text", text: "a" }], isError: false, timestamp: 2,
+    });
+    appendTool("call-b");
+    manager.appendMessage({
+      role: "assistant", content: [{ type: "text", text: "done" }],
+      api: "openai-responses", provider: "test", model: "model", usage,
+      stopReason: "stop", timestamp: Date.now(),
+    });
+    appendTool("call-after-barrier");
+    const secondInput = manager.appendMessage({ role: "user", content: "second", timestamp: 3 });
+    appendTool("call-c");
+
+    const transcript = projectTranscript(manager, new BlobStore());
+    const segmentByCall = new Map(transcript.flatMap((item) => item.kind === "message"
+      ? item.content.flatMap((part) => part.type === "toolCall"
+        ? [[part.toolCallId, part.toolSegmentId] as const]
+        : [])
+      : []));
+    expect(segmentByCall.get("call-a")).toBe(toolSegmentId(firstInput));
+    expect(segmentByCall.get("call-b")).toBe(toolSegmentId(firstInput));
+    expect(segmentByCall.get("call-after-barrier")).not.toBe(toolSegmentId(firstInput));
+    expect(segmentByCall.get("call-c")).toBe(toolSegmentId(secondInput));
+    expect(segmentByCall.get("call-c")).not.toBe(segmentByCall.get("call-b"));
   });
 
   it("keeps presentation and ordinal identity across live and canonical owners", () => {

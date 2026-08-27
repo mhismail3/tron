@@ -184,6 +184,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     let extensionActivity: ExtensionRunActivity?
     let liveActivityRevision: Int?
     let extensionActivityAsOf: String?
+    let toolSegmentId: String?
     let groupId: String?
     let groupIndex: Int?
     let groupCount: Int?
@@ -199,7 +200,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         durationMs: Int? = nil, progressSequence: Int? = nil,
         extensionOrigin: ExtensionToolOrigin? = nil, extensionActivity: ExtensionRunActivity? = nil,
         liveActivityRevision: Int? = nil, extensionActivityAsOf: String? = nil,
-        groupId: String? = nil, groupIndex: Int? = nil,
+        toolSegmentId: String? = nil, groupId: String? = nil, groupIndex: Int? = nil,
         groupCount: Int? = nil, groupFinalized: Bool? = nil
     ) {
         self.toolCallId = toolCallId
@@ -223,6 +224,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         self.extensionActivity = extensionActivity
         self.liveActivityRevision = liveActivityRevision
         self.extensionActivityAsOf = extensionActivityAsOf
+        self.toolSegmentId = toolSegmentId
         self.groupId = groupId
         self.groupIndex = groupIndex
         self.groupCount = groupCount
@@ -233,7 +235,8 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         case toolCallId, toolName, toolLabel, order, status, arguments, partialResult, result,
              output, outputTruncated, isError, startedAt, updatedAt, lastProgressAt,
              completedAt, durationMs, progressSequence, extensionOrigin, extensionActivity,
-             liveActivityRevision, extensionActivityAsOf, groupId, groupIndex, groupCount, groupFinalized
+             liveActivityRevision, extensionActivityAsOf, toolSegmentId,
+             groupId, groupIndex, groupCount, groupFinalized
     }
 
     init(from decoder: Decoder) throws {
@@ -259,6 +262,14 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         extensionActivity = try values.decodeIfPresent(ExtensionRunActivity.self, forKey: .extensionActivity)
         liveActivityRevision = try values.decodeIfPresent(Int.self, forKey: .liveActivityRevision)
         extensionActivityAsOf = try values.decodeIfPresent(String.self, forKey: .extensionActivityAsOf)
+        toolSegmentId = try values.decodeIfPresent(String.self, forKey: .toolSegmentId)
+        if let toolSegmentId, toolSegmentId.isEmpty {
+            throw DecodingError.dataCorruptedError(
+                forKey: .toolSegmentId,
+                in: values,
+                debugDescription: "Tool segment identity must be nonempty"
+            )
+        }
         groupId = try values.decodeIfPresent(String.self, forKey: .groupId)
         groupIndex = try values.decodeIfPresent(Int.self, forKey: .groupIndex)
         groupCount = try values.decodeIfPresent(Int.self, forKey: .groupCount)
@@ -301,6 +312,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         try values.encodeIfPresent(extensionActivity, forKey: .extensionActivity)
         try values.encodeIfPresent(liveActivityRevision, forKey: .liveActivityRevision)
         try values.encodeIfPresent(extensionActivityAsOf, forKey: .extensionActivityAsOf)
+        try values.encodeIfPresent(toolSegmentId, forKey: .toolSegmentId)
         try values.encodeIfPresent(groupId, forKey: .groupId)
         try values.encodeIfPresent(groupIndex, forKey: .groupIndex)
         try values.encodeIfPresent(groupCount, forKey: .groupCount)

@@ -125,13 +125,15 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   Gateway snapshots require a still-owned live presentation identity before projecting Pi's
   streaming message; canonical settlement cannot rotate a stale SDK frame into a duplicate group.
   Exact call membership also lets canonical projection suppress that one transient handoff frame
-  if presentation binding and persistence are observed in opposite order. Only calls in one exact
-  finalized producer group consolidate. An assistant-message
-  boundary always flushes the displayed run even when thinking is empty or hidden;
-  distinct finalized group IDs can never accumulate in the newest chip. Missing group
-  metadata cannot authorize a speculative cross-source aggregate, so unanchored runtime
-  calls remain separate. Thinking or other canonical content also flushes the group and
-  remains in exact transcript order.
+  if presentation binding and persistence are observed in opposite order. Gateway-owned `toolSegmentId`
+  identifies one exact active conversation turn across live execution, canonical tool-only messages,
+  and foreground catch-up. Equal nonempty segment IDs authorize consecutive producer groups to share
+  one display run under its first finalized group ID; missing or different IDs fail closed to separate
+  rows. Every call and source group remains independently indexed for detail, payload, and canonical-
+  result ownership. Visible thinking, text, user input, notifications, and other transcript barriers
+  flush the run in exact order even inside one segment. The Gateway retires runtime segment membership
+  at agent settlement and deterministically reconstructs canonical segment boundaries on cold reopen,
+  so continuous delivery and catch-up assemble the same bounded physical rows without cross-turn merges.
   The Gateway supplies monotonic duration samples while a call is running and the
   authoritative final call-to-return duration when it completes; chips display those
   samples without deriving normal timing from the device wall clock. The runtime-only

@@ -126,6 +126,7 @@
           "arguments": {
             "path": "README.md"
           },
+          "toolSegmentId": "tool-segment:fixture-turn",
           "groupId": "tool-group:[\"assistant-entry\",2]",
           "groupIndex": 0,
           "groupCount": 1,
@@ -320,6 +321,7 @@
       "updatedAt": "2026-01-01T00:00:11Z",
       "lastProgressAt": "2026-01-01T00:00:11Z",
       "progressSequence": 2,
+      "toolSegmentId": "tool-segment:fixture-turn",
       "groupId": "tool-group:[\"assistant-entry\",2]",
       "groupIndex": 0,
       "groupCount": 1,

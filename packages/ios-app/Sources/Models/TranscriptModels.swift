@@ -21,6 +21,7 @@ struct ContentPart: Codable, Hashable, Sendable, Identifiable {
     let name: String?
     let label: String?
     let arguments: JSONValue?
+    let toolSegmentId: String?
     let groupId: String?
     let groupIndex: Int?
     let groupCount: Int?
@@ -55,6 +56,7 @@ extension ContentPart {
         self.name = name
         label = nil
         self.arguments = arguments
+        toolSegmentId = nil
         groupId = nil
         groupIndex = nil
         groupCount = nil
@@ -64,7 +66,7 @@ extension ContentPart {
     private enum CodingKeys: String, CodingKey {
         case id, ordinal, thinkingRunOrdinal, type, text, attachment, redacted,
              mimeType, blobId, toolCallId, name, label, arguments,
-             groupId, groupIndex, groupCount, groupFinalized
+             toolSegmentId, groupId, groupIndex, groupCount, groupFinalized
     }
 
     init(from decoder: Decoder) throws {
@@ -91,10 +93,18 @@ extension ContentPart {
         name = try values.decodeIfPresent(String.self, forKey: .name)
         label = try values.decodeIfPresent(String.self, forKey: .label)
         arguments = try values.decodeIfPresent(JSONValue.self, forKey: .arguments)
+        toolSegmentId = try values.decodeIfPresent(String.self, forKey: .toolSegmentId)
         groupId = try values.decodeIfPresent(String.self, forKey: .groupId)
         groupIndex = try values.decodeIfPresent(Int.self, forKey: .groupIndex)
         groupCount = try values.decodeIfPresent(Int.self, forKey: .groupCount)
         groupFinalized = try values.decodeIfPresent(Bool.self, forKey: .groupFinalized)
+        if let toolSegmentId, type != .toolCall || toolSegmentId.isEmpty {
+            throw DecodingError.dataCorruptedError(
+                forKey: .toolSegmentId,
+                in: values,
+                debugDescription: "Tool segment identity must be nonempty and owned by a tool call"
+            )
+        }
         let identityFieldsPresent = [groupId != nil, groupIndex != nil, groupCount != nil]
         if identityFieldsPresent.contains(true) || groupFinalized == true {
             guard type == .toolCall,
@@ -133,6 +143,7 @@ extension ContentPart {
         try values.encodeIfPresent(name, forKey: .name)
         try values.encodeIfPresent(label, forKey: .label)
         try values.encodeIfPresent(arguments, forKey: .arguments)
+        try values.encodeIfPresent(toolSegmentId, forKey: .toolSegmentId)
         try values.encodeIfPresent(groupId, forKey: .groupId)
         try values.encodeIfPresent(groupIndex, forKey: .groupIndex)
         try values.encodeIfPresent(groupCount, forKey: .groupCount)
@@ -214,12 +225,13 @@ struct MessageTranscriptItem: TranscriptPayload {
     let durationMs: Int?
     let lastProgressAt: String?
     let progressSequence: Int?
+    let toolSegmentId: String?
     var extensionOrigin: ExtensionToolOrigin? = nil
 
     private enum CodingKeys: String, CodingKey {
         case id, parentId, timestamp, kind, role, presentationId, content, provider, modelId, stopReason,
              errorMessage, toolCallId, toolName, toolLabel, isError, details, usage, startedAt,
-             completedAt, durationMs, lastProgressAt, progressSequence, extensionOrigin
+             completedAt, durationMs, lastProgressAt, progressSequence, toolSegmentId, extensionOrigin
     }
 
     init(
@@ -228,13 +240,15 @@ struct MessageTranscriptItem: TranscriptPayload {
         stopReason: String? = nil, errorMessage: String? = nil, toolCallId: String? = nil, toolName: String? = nil,
         toolLabel: String? = nil, isError: Bool? = nil, details: JSONValue? = nil, usage: JSONValue? = nil, startedAt: String? = nil,
         completedAt: String? = nil, durationMs: Int? = nil, lastProgressAt: String? = nil,
-        progressSequence: Int? = nil, extensionOrigin: ExtensionToolOrigin? = nil
+        progressSequence: Int? = nil, toolSegmentId: String? = nil,
+        extensionOrigin: ExtensionToolOrigin? = nil
     ) {
         self.id = id; self.parentId = parentId; self.timestamp = timestamp; self.kind = kind; self.role = role
         self.presentationId = presentationId; self.content = content; self.provider = provider; self.modelId = modelId
         self.stopReason = stopReason; self.errorMessage = errorMessage; self.toolCallId = toolCallId; self.toolName = toolName
         self.toolLabel = toolLabel; self.isError = isError; self.details = details; self.usage = usage; self.startedAt = startedAt; self.completedAt = completedAt
         self.durationMs = durationMs; self.lastProgressAt = lastProgressAt; self.progressSequence = progressSequence
+        self.toolSegmentId = toolSegmentId
         self.extensionOrigin = extensionOrigin
     }
 
@@ -250,7 +264,10 @@ struct MessageTranscriptItem: TranscriptPayload {
         let grouped = Dictionary(grouping: decodedContent.filter { $0.groupId != nil }, by: { $0.groupId! })
         for parts in grouped.values {
             guard let expectedCount = parts.first?.groupCount,
-                  parts.allSatisfy({ $0.groupCount == expectedCount }),
+                  parts.allSatisfy({
+                      $0.groupCount == expectedCount
+                          && $0.toolSegmentId == parts.first?.toolSegmentId
+                  }),
                   parts.count == expectedCount,
                   Set(parts.compactMap(\.groupIndex)) == Set(0..<expectedCount) else {
                 throw DecodingError.dataCorruptedError(
@@ -275,6 +292,14 @@ struct MessageTranscriptItem: TranscriptPayload {
         durationMs = try values.decodeIfPresent(Int.self, forKey: .durationMs)
         lastProgressAt = try values.decodeIfPresent(String.self, forKey: .lastProgressAt)
         progressSequence = try values.decodeIfPresent(Int.self, forKey: .progressSequence)
+        toolSegmentId = try values.decodeIfPresent(String.self, forKey: .toolSegmentId)
+        if let toolSegmentId, role != .toolResult || toolSegmentId.isEmpty {
+            throw DecodingError.dataCorruptedError(
+                forKey: .toolSegmentId,
+                in: values,
+                debugDescription: "Only a tool result may carry nonempty tool segment identity"
+            )
+        }
         extensionOrigin = try values.decodeIfPresent(ExtensionToolOrigin.self, forKey: .extensionOrigin)
     }
 }
@@ -418,6 +443,7 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
         }, by: { $0.groupId! })
         for parts in grouped.values {
             guard let expectedCount = parts.first?.groupCount,
+                  parts.allSatisfy({ $0.toolSegmentId == parts.first?.toolSegmentId }),
                   parts.count == expectedCount,
                   Set(parts.compactMap(\.groupIndex)) == Set(0..<expectedCount) else { return false }
             let positions = parts.compactMap { part in
@@ -474,6 +500,7 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
     var toolName: String? { if case .message(let value) = self { value.toolName } else { nil } }
     var toolLabel: String? { if case .message(let value) = self { value.toolLabel } else { nil } }
     var extensionOrigin: ExtensionToolOrigin? { if case .message(let value) = self { value.extensionOrigin } else { nil } }
+    var toolSegmentId: String? { if case .message(let value) = self { value.toolSegmentId } else { nil } }
     var isError: Bool? { if case .message(let value) = self { value.isError } else { nil } }
     var details: JSONValue? {
         switch self {

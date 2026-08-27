@@ -122,8 +122,8 @@ struct GatewayProtocolContractTests {
             "timestamp": "2026-01-01T00:00:00Z", "kind": "message", "role": "assistant",
             "presentationId": "stream:turn",
             "content": [
-                ["id": "stream:turn:0", "ordinal": 0, "type": "toolCall", "toolCallId": "a", "name": "read", "arguments": [:], "groupId": "stream:turn:tool-group:0", "groupIndex": 0, "groupCount": 2, "groupFinalized": true],
-                ["id": "stream:turn:1", "ordinal": 1, "type": "toolCall", "toolCallId": "b", "name": "bash", "arguments": [:], "groupId": "stream:turn:tool-group:0", "groupIndex": 1, "groupCount": 2, "groupFinalized": true],
+                ["id": "stream:turn:0", "ordinal": 0, "type": "toolCall", "toolCallId": "a", "name": "read", "arguments": [:], "toolSegmentId": "tool-segment:turn", "groupId": "stream:turn:tool-group:0", "groupIndex": 0, "groupCount": 2, "groupFinalized": true],
+                ["id": "stream:turn:1", "ordinal": 1, "type": "toolCall", "toolCallId": "b", "name": "bash", "arguments": [:], "toolSegmentId": "tool-segment:turn", "groupId": "stream:turn:tool-group:0", "groupIndex": 1, "groupCount": 2, "groupFinalized": true],
             ],
         ]
         func decode(_ object: [String: Any]) throws {
@@ -134,11 +134,32 @@ struct GatewayProtocolContractTests {
         }
         try decode(valid)
 
+        var emptySegment = valid
+        var emptySegmentContent = try #require(emptySegment["content"] as? [[String: Any]])
+        emptySegmentContent[0]["toolSegmentId"] = ""
+        emptySegment["content"] = emptySegmentContent
+        #expect(throws: DecodingError.self) { try decode(emptySegment) }
+
+        var segmentOnText = valid
+        var segmentOnTextContent = try #require(segmentOnText["content"] as? [[String: Any]])
+        segmentOnTextContent.append([
+            "id": "stream:turn:2", "ordinal": 2, "type": "text", "text": "barrier",
+            "toolSegmentId": "tool-segment:turn",
+        ])
+        segmentOnText["content"] = segmentOnTextContent
+        #expect(throws: DecodingError.self) { try decode(segmentOnText) }
+
         var incomplete = valid
         var incompleteContent = try #require(incomplete["content"] as? [[String: Any]])
         incompleteContent[0].removeValue(forKey: "groupCount")
         incomplete["content"] = incompleteContent
         #expect(throws: DecodingError.self) { try decode(incomplete) }
+
+        var conflictingSegment = valid
+        var conflictingSegmentContent = try #require(conflictingSegment["content"] as? [[String: Any]])
+        conflictingSegmentContent[1]["toolSegmentId"] = "tool-segment:other-turn"
+        conflictingSegment["content"] = conflictingSegmentContent
+        #expect(throws: DecodingError.self) { try decode(conflictingSegment) }
 
         var duplicateIndex = valid
         var duplicateContent = try #require(duplicateIndex["content"] as? [[String: Any]])

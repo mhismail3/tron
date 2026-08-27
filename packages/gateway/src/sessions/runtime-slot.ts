@@ -59,6 +59,7 @@ import {
   projectToolResult,
   projectTranscriptPage,
   projectTree,
+  toolSegmentId,
   safeJson,
   type ToolProjectionMetadata,
   type TranscriptPage,
@@ -297,7 +298,10 @@ export class RuntimeSlot {
   private readonly toolExecutions = new Map<string, ToolExecutionState>();
   /** Latched declaration facts keyed by exact Pi tool call ID. Runtime-only;
    * never persisted to canonical Pi JSONL. */
-  private readonly toolInvocationGroups = new Map<string, Pick<ToolProjectionMetadata, "groupId" | "groupIndex" | "groupCount" | "groupFinalized">>();
+  private readonly toolInvocationGroups = new Map<string, Pick<
+    ToolProjectionMetadata,
+    "toolSegmentId" | "groupId" | "groupIndex" | "groupCount" | "groupFinalized"
+  >>();
   /** Bounded, disposable extension-owned run projections retain completed work
    * for Manage Session while the owning tool carries the live copy. */
   private readonly extensionActivities = new Map<string, ExtensionRunActivity>();
@@ -1243,6 +1247,8 @@ export class RuntimeSlot {
       this.streamPresentationId,
       false,
       this.toolLabels(),
+      undefined,
+      this.activeOperationId ? toolSegmentId(this.activeOperationId) : undefined,
     );
     this.emit("session.progress", safeJson({
       message: projected === undefined ? undefined : boundStreamingProgressItem(projected),
@@ -1268,6 +1274,8 @@ export class RuntimeSlot {
       this.streamPresentationId,
       true,
       this.toolLabels(),
+      undefined,
+      this.activeOperationId ? toolSegmentId(this.activeOperationId) : undefined,
     );
     if (!projected || projected.kind !== "message") return;
     this.finalizedStreamPresentationId = this.streamPresentationId;
@@ -1275,6 +1283,7 @@ export class RuntimeSlot {
       if (part.type !== "toolCall" || !part.groupFinalized || !part.groupId
         || part.groupIndex === undefined || part.groupCount === undefined) continue;
       this.toolInvocationGroups.set(part.toolCallId, {
+        ...(part.toolSegmentId ? { toolSegmentId: part.toolSegmentId } : {}),
         groupId: part.groupId,
         groupIndex: part.groupIndex,
         groupCount: part.groupCount,
@@ -1926,6 +1935,7 @@ export class RuntimeSlot {
           lastProgressAt: now,
           durationMs,
           progressSequence,
+          toolSegmentId: toolSegmentId(this.activeOperationId!),
           ...(this.toolInvocationGroups.get(event.toolCallId) ?? {}),
           ...(extensionOrigin ? { extensionOrigin } : {}),
           ...(extensionActivity ? { extensionActivity } : {}),
@@ -1974,6 +1984,7 @@ export class RuntimeSlot {
           lastProgressAt: now,
           durationMs,
           progressSequence: (existing?.progressSequence ?? 0) + 1,
+          toolSegmentId: existing?.toolSegmentId ?? toolSegmentId(this.activeOperationId!),
           ...(this.toolInvocationGroups.get(event.toolCallId) ?? {}),
           ...(extensionOrigin ? { extensionOrigin } : {}),
           ...(extensionActivity ? { extensionActivity } : {}),
@@ -2023,6 +2034,7 @@ export class RuntimeSlot {
           completedAt: now,
           durationMs,
           progressSequence: (existing?.progressSequence ?? 0) + 1,
+          toolSegmentId: existing?.toolSegmentId ?? toolSegmentId(this.activeOperationId!),
           ...(this.toolInvocationGroups.get(event.toolCallId) ?? {}),
           ...(extensionOrigin ? { extensionOrigin } : {}),
           ...(extensionActivity ? { extensionActivity } : {}),
@@ -3192,6 +3204,7 @@ export class RuntimeSlot {
       ...(state.durationMs === undefined ? {} : { durationMs: state.durationMs }),
       lastProgressAt: state.lastProgressAt,
       progressSequence: state.progressSequence,
+      ...(state.toolSegmentId ? { toolSegmentId: state.toolSegmentId } : {}),
       ...(state.groupId ? { groupId: state.groupId } : {}),
       ...(state.groupIndex === undefined ? {} : { groupIndex: state.groupIndex }),
       ...(state.groupCount === undefined ? {} : { groupCount: state.groupCount }),
@@ -3446,6 +3459,8 @@ export class RuntimeSlot {
           this.streamPresentationId,
           this.finalizedStreamPresentationId === this.streamPresentationId,
           this.toolLabels(),
+          undefined,
+          this.activeOperationId ? toolSegmentId(this.activeOperationId) : undefined,
         );
       })()
       : undefined;

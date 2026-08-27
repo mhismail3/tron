@@ -957,6 +957,7 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     let progressSequence: Int?
     let outputTruncated: Bool
     let extensionOrigin: ExtensionToolOrigin?
+    let toolSegmentId: String?
     let groupId: String?
     let groupIndex: Int?
     let groupCount: Int?
@@ -974,6 +975,7 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
         progressSequence = tool.progressSequence
         outputTruncated = tool.outputTruncated
         extensionOrigin = tool.extensionOrigin
+        toolSegmentId = tool.toolSegmentId
         groupId = tool.groupId
         groupIndex = tool.groupIndex
         groupCount = tool.groupCount
@@ -1040,6 +1042,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     let progressSequence: Int?
     let outputTruncated: Bool
     let extensionOrigin: ExtensionToolOrigin?
+    let toolSegmentId: String?
     let groupId: String?
     let groupIndex: Int?
     let groupCount: Int?
@@ -1061,6 +1064,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         progressSequence: Int?,
         outputTruncated: Bool = false,
         extensionOrigin: ExtensionToolOrigin? = nil,
+        toolSegmentId: String? = nil,
         groupId: String? = nil,
         groupIndex: Int? = nil,
         groupCount: Int? = nil,
@@ -1081,6 +1085,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         self.progressSequence = progressSequence
         self.outputTruncated = outputTruncated || response?.hasToolOutputTruncationMetadata == true
         self.extensionOrigin = extensionOrigin
+        self.toolSegmentId = toolSegmentId
         self.groupId = groupId
         self.groupIndex = groupIndex
         self.groupCount = groupCount
@@ -1103,6 +1108,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         progressSequence = descriptor.progressSequence
         outputTruncated = descriptor.outputTruncated
         extensionOrigin = descriptor.extensionOrigin
+        toolSegmentId = descriptor.toolSegmentId
         groupId = descriptor.groupId
         groupIndex = descriptor.groupIndex
         groupCount = descriptor.groupCount

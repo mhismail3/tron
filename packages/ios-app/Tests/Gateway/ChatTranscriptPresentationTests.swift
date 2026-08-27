@@ -1417,9 +1417,9 @@ struct ChatTranscriptPresentationTests {
     func groupsConsecutiveToolCalls() throws {
         let snapshot = try fixture(transcript: """
         [
-          {"id":"assistant-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call-part-1","type":"toolCall","toolCallId":"call-1","name":"read","arguments":{"path":"one"}}]},
+          {"id":"assistant-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call-part-1","type":"toolCall","toolCallId":"call-1","name":"read","arguments":{"path":"one"},"toolSegmentId":"tool-segment:turn"}]},
           {"id":"result-1","parentId":"assistant-1","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"result-text-1","type":"text","text":"one"}],"toolCallId":"call-1","toolName":"read","isError":false},
-          {"id":"assistant-2","parentId":"result-1","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"call-part-2","type":"toolCall","toolCallId":"call-2","name":"bash","arguments":{"command":"pwd"}}]},
+          {"id":"assistant-2","parentId":"result-1","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"call-part-2","type":"toolCall","toolCallId":"call-2","name":"bash","arguments":{"command":"pwd"},"toolSegmentId":"tool-segment:turn"}]},
           {"id":"result-2","parentId":"assistant-2","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"toolResult","content":[{"id":"result-text-2","type":"text","text":"/workspace"}],"toolCallId":"call-2","toolName":"bash","isError":false}
         ]
         """)
@@ -1448,13 +1448,13 @@ struct ChatTranscriptPresentationTests {
         let snapshot = try fixture(transcript: """
         [
           {"id":"assistant-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
-            {"id":"a","ordinal":0,"type":"toolCall","toolCallId":"a","name":"read","arguments":{},"groupId":"group-1","groupIndex":0,"groupCount":2,"groupFinalized":true},
-            {"id":"b","ordinal":1,"type":"toolCall","toolCallId":"b","name":"bash","arguments":{},"groupId":"group-1","groupIndex":1,"groupCount":2,"groupFinalized":true}
+            {"id":"a","ordinal":0,"type":"toolCall","toolCallId":"a","name":"read","arguments":{},"toolSegmentId":"tool-segment:turn","groupId":"group-1","groupIndex":0,"groupCount":2,"groupFinalized":true},
+            {"id":"b","ordinal":1,"type":"toolCall","toolCallId":"b","name":"bash","arguments":{},"toolSegmentId":"tool-segment:turn","groupId":"group-1","groupIndex":1,"groupCount":2,"groupFinalized":true}
           ]},
           {"id":"result-a","parentId":"assistant-1","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"ra","ordinal":0,"type":"text","text":"a"}],"toolCallId":"a","toolName":"read","isError":false},
           {"id":"result-b","parentId":"result-a","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"rb","ordinal":0,"type":"text","text":"b"}],"toolCallId":"b","toolName":"bash","isError":false},
           {"id":"assistant-2","parentId":"result-b","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[
-            {"id":"c","ordinal":0,"type":"toolCall","toolCallId":"c","name":"edit","arguments":{},"groupId":"group-2","groupIndex":0,"groupCount":1,"groupFinalized":true}
+            {"id":"c","ordinal":0,"type":"toolCall","toolCallId":"c","name":"edit","arguments":{},"toolSegmentId":"tool-segment:turn","groupId":"group-2","groupIndex":0,"groupCount":1,"groupFinalized":true}
           ]},
           {"id":"result-c","parentId":"assistant-2","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"toolResult","content":[{"id":"rc","ordinal":0,"type":"text","text":"c"}],"toolCallId":"c","toolName":"edit","isError":false}
         ]
@@ -1480,7 +1480,7 @@ struct ChatTranscriptPresentationTests {
           {"id":"result-a","parentId":"assistant-1","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"ra","ordinal":0,"type":"text","text":"a"}],"toolCallId":"a","toolName":"read","isError":false},
           {"id":"assistant-2","parentId":"result-a","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[
             {"id":"thinking","ordinal":0,"thinkingRunOrdinal":0,"type":"thinking","text":"Planning the edit"},
-            {"id":"b","ordinal":1,"type":"toolCall","toolCallId":"b","name":"edit","arguments":{},"groupId":"group-2","groupIndex":0,"groupCount":1,"groupFinalized":true}
+            {"id":"b","ordinal":1,"type":"toolCall","toolCallId":"b","name":"edit","arguments":{},"toolSegmentId":"tool-segment:turn","groupId":"group-2","groupIndex":0,"groupCount":1,"groupFinalized":true}
           ]},
           {"id":"result-b","parentId":"assistant-2","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"toolResult","content":[{"id":"rb","ordinal":0,"type":"text","text":"b"}],"toolCallId":"b","toolName":"edit","isError":false}
         ]
@@ -1501,11 +1501,11 @@ struct ChatTranscriptPresentationTests {
         })
     }
 
-    @Test("page prepend preserves each tool-only assistant boundary")
-    func pagePrependPreservesToolRunBoundaries() throws {
+    @Test("page prepend reanchors one adjacent tool display run without losing calls")
+    func semanticAnchorSurvivesPageBoundaryRegrouping() throws {
         let current = try fixture(transcript: """
         [
-          {"id":"assistant-2","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"call-part-2","type":"toolCall","toolCallId":"call-2","name":"bash","arguments":{"command":"pwd"}}]},
+          {"id":"assistant-2","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"call-part-2","type":"toolCall","toolCallId":"call-2","name":"bash","arguments":{"command":"pwd"},"toolSegmentId":"tool-segment:turn"}]},
           {"id":"result-2","parentId":"assistant-2","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"toolResult","content":[{"id":"result-text-2","type":"text","text":"/workspace"}],"toolCallId":"call-2","toolName":"bash","isError":false}
         ]
         """)
@@ -1515,16 +1515,16 @@ struct ChatTranscriptPresentationTests {
 
         let prepended = try fixture(transcript: """
         [
-          {"id":"assistant-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call-part-1","type":"toolCall","toolCallId":"call-1","name":"read","arguments":{"path":"one"}}]},
+          {"id":"assistant-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call-part-1","type":"toolCall","toolCallId":"call-1","name":"read","arguments":{"path":"one"},"toolSegmentId":"tool-segment:turn"}]},
           {"id":"result-1","parentId":"assistant-1","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"result-text-1","type":"text","text":"one"}],"toolCallId":"call-1","toolName":"read","isError":false},
-          {"id":"assistant-2","parentId":"result-1","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"call-part-2","type":"toolCall","toolCallId":"call-2","name":"bash","arguments":{"command":"pwd"}}]},
+          {"id":"assistant-2","parentId":"result-1","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"call-part-2","type":"toolCall","toolCallId":"call-2","name":"bash","arguments":{"command":"pwd"},"toolSegmentId":"tool-segment:turn"}]},
           {"id":"result-2","parentId":"assistant-2","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"toolResult","content":[{"id":"result-text-2","type":"text","text":"/workspace"}],"toolCallId":"call-2","toolName":"bash","isError":false}
         ]
         """)
         let after = ChatTranscriptPresentation.timeline(in: prepended)
-        #expect(after.ids == ["tool-run-call-1", "tool-run-call-2"])
+        #expect(after.ids == ["tool-run-call-1"])
         #expect(after.renderedIDBySemanticID["call-1"] == "tool-run-call-1")
-        #expect(after.renderedIDBySemanticID["call-2"] == "tool-run-call-2")
+        #expect(after.renderedIDBySemanticID["call-2"] == "tool-run-call-1")
     }
 
     @Test("parallel live tools keep one stable canonical row through settlement")
@@ -1547,9 +1547,9 @@ struct ChatTranscriptPresentationTests {
         ]}
         """)
         snapshot.toolExecutions = [
-            tool(callOne, "bash", startedAt: "2026-01-01T00:00:01Z"),
-            tool(callTwo, "read", startedAt: "2026-01-01T00:00:01Z"),
-            tool(callThree, "subagent", startedAt: "2026-01-01T00:00:01Z"),
+            tool(callOne, "bash", startedAt: "2026-01-01T00:00:01Z", toolSegmentId: "tool-segment:turn"),
+            tool(callTwo, "read", startedAt: "2026-01-01T00:00:01Z", toolSegmentId: "tool-segment:turn"),
+            tool(callThree, "subagent", startedAt: "2026-01-01T00:00:01Z", toolSegmentId: "tool-segment:turn"),
         ]
 
         let live = ChatTranscriptPresentation.timeline(in: snapshot)
@@ -1794,16 +1794,19 @@ struct ChatTranscriptPresentationTests {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
         snapshot.toolExecutions = [
-            tool("later", "read", startedAt: "2026-01-01T00:00:01Z", order: 2),
-            tool("same-b", "bash", startedAt: "2026-01-01T00:00:01Z", order: 1),
-            tool("same-a", "find", startedAt: "2026-01-01T00:00:01Z", order: 0),
+            tool("later", "read", startedAt: "2026-01-01T00:00:01Z", order: 2, toolSegmentId: "tool-segment:turn"),
+            tool("same-b", "bash", startedAt: "2026-01-01T00:00:01Z", order: 1, toolSegmentId: "tool-segment:turn"),
+            tool("same-a", "find", startedAt: "2026-01-01T00:00:01Z", order: 0, toolSegmentId: "tool-segment:turn"),
         ]
         let timeline = ChatTranscriptPresentation.timeline(in: snapshot)
         let runs = timeline.items.compactMap { item -> ChatToolRunPresentation? in
             guard case .toolRun(let run) = item else { return nil }
             return run
         }
-        #expect(runs.map { $0.tools.map(\.id) } == [["same-a"], ["same-b"], ["later"]])
+        #expect(runs.map { $0.tools.map(\.id) } == [["same-a", "same-b", "later"]])
+        #expect(timeline.renderedIDBySemanticID["same-a"] == "tool-run-same-a")
+        #expect(timeline.renderedIDBySemanticID["same-b"] == "tool-run-same-a")
+        #expect(timeline.renderedIDBySemanticID["later"] == "tool-run-same-a")
     }
 
     @Test("live output, monotonic progress, and execution timing stay auditable")
@@ -2155,6 +2158,7 @@ struct ChatTranscriptPresentationTests {
         startedAt: String,
         order: Int? = nil,
         output: String? = nil,
+        toolSegmentId: String? = nil,
         groupId: String? = nil,
         groupIndex: Int? = nil,
         groupCount: Int? = nil
@@ -2175,6 +2179,7 @@ struct ChatTranscriptPresentationTests {
             completedAt: status == .running ? nil : startedAt,
             durationMs: status == .running ? nil : 0,
             progressSequence: 1,
+            toolSegmentId: toolSegmentId,
             groupId: groupId,
             groupIndex: groupIndex,
             groupCount: groupCount,

@@ -4879,6 +4879,7 @@ export default function (pi) {
         progressSequence: number;
         durationMs?: number;
         completedAt?: string;
+        toolSegmentId?: string;
         groupId?: string;
         groupIndex?: number;
         groupCount?: number;
@@ -4904,6 +4905,8 @@ export default function (pi) {
     const grouped = progress.filter((event) => event.groupFinalized === true);
     expect(grouped.length).toBeGreaterThanOrEqual(2);
     expect(new Set(grouped.map((event) => event.groupId)).size).toBe(1);
+    expect(new Set(grouped.map((event) => event.toolSegmentId)).size).toBe(1);
+    expect(grouped.every((event) => event.toolSegmentId?.startsWith("tool-segment:") === true)).toBe(true);
     expect(new Set(grouped.map((event) => event.groupCount))).toEqual(new Set([2]));
     expect(new Map(grouped.map((event) => [event.toolCallId, event.groupIndex])))
       .toEqual(new Map([["call-read", 0], ["call-bash", 1]]));
@@ -4968,6 +4971,11 @@ export default function (pi) {
     expect(canonicalCalls).toHaveLength(2);
     expect(canonicalCalls.every((part) => part.type === "toolCall" && part.groupFinalized === true)).toBe(true);
     expect(new Set(canonicalCalls.flatMap((part) => part.type === "toolCall" ? [part.groupId] : [])).size).toBe(1);
+    const canonicalSegmentIDs = new Set(canonicalCalls.flatMap((part) =>
+      part.type === "toolCall" ? [part.toolSegmentId] : []
+    ));
+    expect(canonicalSegmentIDs.size).toBe(1);
+    expect(canonicalSegmentIDs).toEqual(new Set(grouped.map((event) => event.toolSegmentId)));
     expect(settled.transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "call-bash"))
       .toMatchObject({ durationMs: expect.any(Number), startedAt: expect.any(String), completedAt: expect.any(String) });
     expect(slot.sessionFile?.startsWith(sessionDir)).toBe(true);

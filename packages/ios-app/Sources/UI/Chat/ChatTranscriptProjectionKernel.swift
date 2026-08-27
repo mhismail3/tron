@@ -622,6 +622,7 @@ enum ChatTranscriptProjectionKernel {
             guard let old = oldStates[callID], let new = newStates[callID],
                   old.order == new.order,
                   old.startedAt == new.startedAt,
+                  old.toolSegmentId == new.toolSegmentId,
                   old.groupId == new.groupId,
                   old.groupIndex == new.groupIndex,
                   old.groupCount == new.groupCount,
@@ -837,20 +838,34 @@ enum ChatTranscriptProjectionKernel {
             return tool.presentation.groupId
         }
 
-        /// One chip may contain only one exact finalized producer group. Legacy
-        /// ungrouped calls may coalesce only inside the same source fragment;
-        /// they never accumulate across assistant-message/runtime boundaries.
+        /// Segment identity is the Gateway-owned authority for cross-message
+        /// aggregation. Exact finalized groups may join without it, while
+        /// legacy ungrouped calls may join only inside one source fragment.
+        /// Missing or conflicting segment identity fails closed to a new row.
         func appendToolRunMember(
             _ tool: PreparedTool,
-            allowsUngroupedContinuation: Bool
+            allowsLegacyContinuation: Bool
         ) {
             if let first = pendingTools.first {
                 let existingGroup = finalizedGroupID(first)
                 let incomingGroup = finalizedGroupID(tool)
-                let continuesExactGroup = existingGroup != nil && existingGroup == incomingGroup
-                let continuesLocalLegacyRun = existingGroup == nil && incomingGroup == nil
-                    && allowsUngroupedContinuation
-                if !continuesExactGroup && !continuesLocalLegacyRun { flushTools() }
+                let segmentIDs = Set(pendingTools.compactMap(\.presentation.toolSegmentId))
+                let existingSegment = segmentIDs.count == 1
+                    && pendingTools.allSatisfy({ $0.presentation.toolSegmentId != nil })
+                    ? segmentIDs.first : nil
+                let incomingSegment = tool.presentation.toolSegmentId
+                let continuesExactSegment = existingSegment != nil
+                    && existingSegment == incomingSegment
+                let continuesExactGroup = existingGroup != nil
+                    && existingGroup == incomingGroup
+                let continuesLocalLegacyRun = existingGroup == nil
+                    && incomingGroup == nil
+                    && existingSegment == nil
+                    && incomingSegment == nil
+                    && allowsLegacyContinuation
+                if !continuesExactSegment && !continuesExactGroup && !continuesLocalLegacyRun {
+                    flushTools()
+                }
             }
             appendTools([tool])
         }
@@ -914,9 +929,8 @@ enum ChatTranscriptProjectionKernel {
                     rendered.append(.transcript(item))
                 } else {
                     for tool in tools {
-                        appendToolRunMember(tool, allowsUngroupedContinuation: false)
+                        appendToolRunMember(tool, allowsLegacyContinuation: true)
                     }
-                    flushTools()
                 }
                 return
             }
@@ -942,7 +956,7 @@ enum ChatTranscriptProjectionKernel {
                 if case .content(let canonical) = part, canonical.type == .toolCall,
                    let tool = toolsByID[canonical.toolCallId ?? canonical.id] {
                     flushContent(showsFooter: false)
-                    appendToolRunMember(tool, allowsUngroupedContinuation: true)
+                    appendToolRunMember(tool, allowsLegacyContinuation: true)
                 } else {
                     if !pendingTools.isEmpty { flushTools() }
                     content.append(part)
@@ -953,13 +967,9 @@ enum ChatTranscriptProjectionKernel {
                 flushTools()
                 appendMessage(item, parts: [], streaming: streaming, slice: slice, showsFooter: true)
             }
-            // Canonical assistant message boundaries are producer run
-            // boundaries. A following tool-only message must not inherit this
-            // chip merely because empty/hidden thinking left no visible row.
-            // Unfinalized tool calls declared by this one streaming source
-            // fragment may remain one provisional local run until the Gateway
-            // publishes exact group metadata.
-            if !streaming || pendingTools.allSatisfy({ $0.presentation.groupFinalized == true }) {
+            // Only exact Gateway segment identity may continue into a later
+            // assistant fragment. Legacy groups remain locally bounded.
+            if pendingTools.contains(where: { $0.presentation.toolSegmentId == nil }) {
                 flushTools()
             }
         }
@@ -1015,16 +1025,11 @@ enum ChatTranscriptProjectionKernel {
             appendFragment(streamingFragment, tools: streamingTools, streaming: true)
         } else {
             for tool in streamingTools {
-                appendToolRunMember(tool, allowsUngroupedContinuation: false)
+                appendToolRunMember(tool, allowsLegacyContinuation: false)
             }
-            flushTools()
         }
         for tool in unanchoredLive {
-            // Without exact finalized metadata there is no authority to merge
-            // independent calls. Keep one physical chip per call; bounded lazy
-            // rendering is cheaper and safer than a speculative aggregate that
-            // grows until abort clears runtime state.
-            appendToolRunMember(tool, allowsUngroupedContinuation: false)
+            appendToolRunMember(tool, allowsLegacyContinuation: false)
         }
         flushTools()
 
@@ -1268,6 +1273,7 @@ enum ChatTranscriptProjectionKernel {
             progressSequence: live.progressSequence,
             outputTruncated: live.outputTruncated == true || canonical.outputTruncated,
             extensionOrigin: live.extensionOrigin ?? canonical.extensionOrigin,
+            toolSegmentId: canonical.toolSegmentId ?? live.toolSegmentId,
             groupId: canonical.groupId ?? live.groupId,
             groupIndex: canonical.groupIndex ?? live.groupIndex,
             groupCount: canonical.groupCount ?? live.groupCount,
@@ -1285,7 +1291,7 @@ enum ChatTranscriptProjectionKernel {
             error: tool.isError, startedAt: tool.startedAt, completedAt: tool.completedAt,
             durationMs: tool.durationMs, lastProgressAt: tool.lastProgressAt ?? tool.updatedAt,
             progressSequence: tool.progressSequence, outputTruncated: tool.outputTruncated == true,
-            extensionOrigin: tool.extensionOrigin,
+            extensionOrigin: tool.extensionOrigin, toolSegmentId: tool.toolSegmentId,
             groupId: tool.groupId, groupIndex: tool.groupIndex,
             groupCount: tool.groupCount, groupFinalized: tool.groupFinalized
         )
@@ -1309,7 +1315,7 @@ enum ChatTranscriptProjectionKernel {
             error: true, startedAt: tool.startedAt, completedAt: tool.completedAt,
             durationMs: tool.durationMs, lastProgressAt: tool.lastProgressAt,
             progressSequence: tool.progressSequence, outputTruncated: tool.outputTruncated,
-            extensionOrigin: tool.extensionOrigin,
+            extensionOrigin: tool.extensionOrigin, toolSegmentId: tool.toolSegmentId,
             groupId: tool.groupId, groupIndex: tool.groupIndex,
             groupCount: tool.groupCount, groupFinalized: tool.groupFinalized
         )
@@ -1354,6 +1360,7 @@ enum ChatTranscriptProjectionKernel {
                         durationMs: ToolTiming.observedDuration(callTimestamp: item.timestamp, result: result),
                         lastProgressAt: result.lastProgressAt, progressSequence: result.progressSequence,
                         extensionOrigin: result.extensionOrigin,
+                        toolSegmentId: part.toolSegmentId ?? result.toolSegmentId,
                         groupId: part.groupId, groupIndex: part.groupIndex,
                         groupCount: part.groupCount, groupFinalized: part.groupFinalized
                     )
@@ -1363,6 +1370,7 @@ enum ChatTranscriptProjectionKernel {
                     request: part.arguments, response: nil, content: "", fallbackContent: part.arguments,
                     error: false, startedAt: item.timestamp, completedAt: nil, durationMs: nil,
                     lastProgressAt: item.timestamp, progressSequence: nil, extensionOrigin: nil,
+                    toolSegmentId: part.toolSegmentId,
                     groupId: part.groupId, groupIndex: part.groupIndex,
                     groupCount: part.groupCount, groupFinalized: part.groupFinalized
                 )
@@ -1380,7 +1388,7 @@ enum ChatTranscriptProjectionKernel {
             error: item.isError == true, startedAt: item.startedAt,
             completedAt: item.completedAt ?? item.timestamp, durationMs: item.durationMs,
             lastProgressAt: item.lastProgressAt, progressSequence: item.progressSequence,
-            extensionOrigin: item.extensionOrigin
+            extensionOrigin: item.extensionOrigin, toolSegmentId: item.toolSegmentId
         )
     }
 }

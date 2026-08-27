@@ -42,6 +42,7 @@ enum ToolExecutionStatePolicy {
             extensionActivity: candidate.extensionActivity ?? (candidate.status == .running ? current.extensionActivity : nil),
             liveActivityRevision: candidate.liveActivityRevision ?? current.liveActivityRevision,
             extensionActivityAsOf: candidate.extensionActivityAsOf ?? current.extensionActivityAsOf,
+            toolSegmentId: candidate.toolSegmentId ?? current.toolSegmentId,
             groupId: candidate.groupId ?? current.groupId,
             groupIndex: candidate.groupIndex ?? current.groupIndex,
             groupCount: candidate.groupCount ?? current.groupCount,

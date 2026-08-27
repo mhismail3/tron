@@ -545,12 +545,16 @@ visual continuity for a later live row. Queue mutation responses are confirmatio
 mounted synchronization path must observe the newer queue revision before local mutation presentation
 state retires. Producer-triggered extension/session-input messages occupy one compact
 status row in the transcript and retain their full message, origin, canonical identity, and
-JSON payloads in the existing detail sheet. Tool calls, progress, and results join by `toolCallId`. One chip may contain
-only one exact finalized producer group: every assistant-message boundary flushes the run,
-including tool-only messages whose thinking is empty or hidden, so unrelated groups cannot
-accumulate in the newest chip. A bounded previous-install call/group lineage aliases only
-the physical SwiftUI host when finalized grouping arrives after execution starts; semantic
-run IDs remain producer-owned. Running/completed status changes keep one capsule and one
+JSON payloads in the existing detail sheet. Tool calls, progress, and results join by `toolCallId`.
+The Gateway stamps every live and canonical declaration with a producer-owned `toolSegmentId` for one exact
+conversation turn. Only equal nonempty segment IDs authorize distinct finalized groups to share one consecutive
+tool-only display run; missing or conflicting identity fails closed to separate rows. The run stays anchored to
+its first finalized group while every group remains independently validated and indexed. Visible thinking, text,
+user input, notifications, and transcript barriers end the physical run even inside one segment. Cold canonical
+projection derives segment boundaries from authoritative conversation input, so foreground catch-up and continuous
+delivery reduce identically without speculative adjacency. A bounded previous-install call/group lineage aliases
+only the physical SwiftUI host when finalized grouping arrives after execution starts or a bounded page boundary
+changes the first visible group; semantic run IDs remain producer-owned. Running/completed status changes keep one capsule and one
 stable glass surface while shallow icon, text, and timing slots animate in place. Collapsed rows retain structured
 request/response values without eagerly formatting JSON strings. Opening a detail sheet derives a
 bounded semantic presentation only for that selected tool: exact lowercase built-ins foreground their file,
@@ -1126,8 +1130,9 @@ one progressively updated chip when both are in the bounded transcript page; an
 unmatched result remains visible when its call is outside that page. Unanchored runtime tools always follow
 non-tool streaming content regardless of running/completed status; isolated streaming-suffix projection is
 permitted only when every runtime tool has a canonical call anchor. Consecutive
-tool-only entries collapse into a single compact run chip whose sub-sheet keeps
-every tool and its individual detail available. Each exact installed projection builds one
+tool-only entries with one equal nonempty Gateway-owned segment identity collapse
+into a single compact run chip whose sub-sheet keeps every tool and its individual
+detail available; missing or conflicting identity remains separate. Each exact installed projection builds one
 unique call-ID descriptor index, so live detail refresh resolves from bounded installed state
 without rescanning the full timeline. The run, individual tool, Changes, and
 Technical details sheets share one inline navigation-chrome policy; principal toolbar titles

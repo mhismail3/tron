@@ -208,7 +208,7 @@ struct ChatTranscriptProjectionKernelTests {
         ])
     }
 
-    @Test("100 and 256 ungrouped runtime tools remain distinct and deterministic", arguments: [100, 256])
+    @Test("100 and 256 legacy unanchored tools fail closed to distinct deterministic rows", arguments: [100, 256])
     func largeToolBursts(count: Int) throws {
         let builder = SessionScenarioBuilder(seed: 1_301 + count)
         var snapshot = try builder.openingTail(targetEncodedBytes: 8_000)
@@ -224,13 +224,13 @@ struct ChatTranscriptProjectionKernelTests {
             return run
         }
         #expect(runs.count == count)
-        #expect(runs.allSatisfy { $0.tools.count == 1 && $0.displayCount == 1 })
+        #expect(runs.allSatisfy { $0.tools.count == 1 })
         #expect(runs.flatMap(\.tools).map(\.id) == builder.liveToolBurst(count: count).map(\.toolCallId))
         #expect(candidate.workReport.toolsInspected == count)
         #expect(candidate.isValid)
     }
 
-    @Test("duplicate runtime identities resolve newest while independent calls stay separate")
+    @Test("duplicate runtime identities resolve newest while legacy calls stay separate")
     func duplicateToolOrderAndReplacement() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
@@ -269,32 +269,101 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(!candidate.isValid)
     }
 
-    @Test("tool-only assistant messages retain separate exact producer groups")
-    func sequentialToolMessagesDoNotAccumulateInNewestChip() throws {
+    @Test("adjacent canonical groups compact without losing exact membership")
+    func sequentialToolMessagesShareDisplayRun() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
         snapshot.transcript = try (0..<15).map { index in
             try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
-            {"id":"assistant-\(index)","parentId":null,"presentationId":"turn-\(index)","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"part-\(index)","ordinal":0,"type":"toolCall","toolCallId":"call-\(index)","name":"read","arguments":{},"groupId":"group-\(index)","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
+            {"id":"assistant-\(index)","parentId":null,"presentationId":"turn-\(index)","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"part-\(index)","ordinal":0,"type":"toolCall","toolCallId":"call-\(index)","name":"read","arguments":{},"toolSegmentId":"tool-segment:turn-0","groupId":"group-\(index)","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
             """.utf8))
         }
         snapshot.transcriptTotal = snapshot.transcript.count
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        guard case .toolRun(let run) = candidate.timeline.items.first else {
+            Issue.record("Expected one adjacent canonical display run")
+            return
+        }
+        #expect(candidate.fragments.count == 15)
+        #expect(candidate.timeline.items.count == 1)
+        #expect(run.id == "tool-run-group-0")
+        #expect(run.groupIDs == (0..<15).map { "group-\($0)" })
+        #expect(run.tools.map(\.id) == (0..<15).map { "call-\($0)" })
+        #expect(run.displayCount == 15)
+        #expect(run.title == "Using 15 tools")
+        #expect(candidate.toolPayloads.callIDs == Set((0..<15).map { "call-\($0)" }))
+        #expect(candidate.isValid)
+    }
+
+    @Test("adjacent groups from different producer segments remain separate")
+    func producerSegmentsDoNotCrossTurns() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant-a","parentId":null,"presentationId":"assistant-a","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"part-a","ordinal":0,"type":"toolCall","toolCallId":"call-a","name":"read","arguments":{},"toolSegmentId":"tool-segment:turn-a","groupId":"group-a","groupIndex":0,"groupCount":1,"groupFinalized":true}]},
+          {"id":"assistant-b","parentId":"assistant-a","presentationId":"assistant-b","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"part-b","ordinal":0,"type":"toolCall","toolCallId":"call-b","name":"read","arguments":{},"toolSegmentId":"tool-segment:turn-b","groupId":"group-b","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
+        ]
+        """)
+        snapshot.transcriptTotal = 2
 
         let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
         let runs = candidate.timeline.items.compactMap { item -> ChatToolRunPresentation? in
             guard case .toolRun(let run) = item else { return nil }
             return run
         }
-
-        #expect(runs.count == 15)
-        #expect(runs.map(\.id) == (0..<15).map { "tool-run-group-\($0)" })
-        #expect(runs.allSatisfy { $0.displayCount == 1 })
-        #expect(runs.allSatisfy { !$0.title.hasPrefix("Using ") })
+        #expect(runs.map(\.id) == ["tool-run-group-a", "tool-run-group-b"])
+        #expect(runs.map { $0.tools.map(\.id) } == [["call-a"], ["call-b"]])
         #expect(candidate.isValid)
     }
 
-    @Test("retained runtime activity keeps distinct finalized groups in distinct chips")
-    func runtimeGroupsDoNotAccumulateUntilAbort() throws {
+    @Test("foreground catch-up replaces one immutable ledger value without adding physical rows")
+    func foregroundCatchUpPreservesCommittedLedgerIntegrity() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
+        snapshot.transcript = [try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+        {"id":"assistant-0","parentId":null,"presentationId":"turn-0","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"part-0","ordinal":0,"type":"toolCall","toolCallId":"call-0","name":"read","arguments":{},"toolSegmentId":"tool-segment:turn-0","groupId":"group-0","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
+        """.utf8))]
+        snapshot.transcriptTotal = 1
+
+        let before = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        let frozen = ChatCommittedLedger(items: before.timeline.items.canonical)
+        #expect(before.timeline.ids == ["tool-run-group-0"])
+
+        snapshot.transcript.append(contentsOf: try (1..<15).map { index in
+            try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+            {"id":"assistant-\(index)","parentId":null,"presentationId":"turn-\(index)","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"part-\(index)","ordinal":0,"type":"toolCall","toolCallId":"call-\(index)","name":"read","arguments":{},"toolSegmentId":"tool-segment:turn-0","groupId":"group-\(index)","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
+            """.utf8))
+        })
+        snapshot.transcriptTotal = snapshot.transcript.count
+        snapshot.eventSequence += 1
+        let caughtUp = ChatTranscriptProjectionKernel.incremental(
+            snapshot: snapshot,
+            previous: before,
+            canonicalSourceUnchanged: false
+        )
+        let installed = ChatCommittedLedger.reconcile(
+            items: caughtUp.timeline.items.canonical,
+            previous: frozen
+        )
+
+        guard case .toolRun(let frozenRun) = frozen.items.first,
+              case .toolRun(let installedRun) = installed.items.first else {
+            Issue.record("Expected one immutable display run in both ledger values")
+            return
+        }
+        #expect(frozen.revision == 1)
+        #expect(frozenRun.tools.map(\.id) == ["call-0"])
+        #expect(installed.revision == 2)
+        #expect(installed.items.count == 1)
+        #expect(installedRun.id == frozenRun.id)
+        #expect(installedRun.tools.map(\.id) == (0..<15).map { "call-\($0)" })
+        #expect(caughtUp.timeline.ids == before.timeline.ids)
+        #expect(caughtUp.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
+        #expect(caughtUp.isValid)
+    }
+
+    @Test("retained runtime groups compact under the first exact group identity")
+    func runtimeGroupsShareDisplayRun() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
         snapshot.toolExecutions = (0..<15).map { index in
@@ -309,14 +378,16 @@ struct ChatTranscriptProjectionKernelTests {
         }
 
         let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
-        let runs = candidate.timeline.items.compactMap { item -> ChatToolRunPresentation? in
-            guard case .toolRun(let run) = item else { return nil }
-            return run
+        guard case .toolRun(let run) = candidate.timeline.items.first else {
+            Issue.record("Expected one retained runtime display run")
+            return
         }
-        #expect(runs.count == 15)
-        #expect(runs.last?.id == "tool-run-runtime-group-14")
-        #expect(runs.last?.displayCount == 1)
-        #expect(runs.last?.title == "Read file")
+        #expect(candidate.timeline.items.count == 1)
+        #expect(run.id == "tool-run-runtime-group-0")
+        #expect(run.tools.map(\.id) == (0..<15).map { "runtime-\($0)" })
+        #expect(run.groupIDs == (0..<15).map { "runtime-group-\($0)" })
+        #expect(run.displayCount == 15)
+        #expect(run.title == "Using 15 tools")
         #expect(candidate.isValid)
     }
 
@@ -461,30 +532,30 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(!candidate.isValid)
     }
 
-    @Test("streaming anchors and ungrouped runtime calls retain distinct ordered rows")
+    @Test("streaming anchors and unanchored runtime calls share one ordered tail run")
     func streamingAndUnanchoredTools() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
         snapshot.streaming = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
         {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
           {"id":"thinking","type":"thinking","text":"Working"},
-          {"id":"call-part","type":"toolCall","toolCallId":"anchored","name":"read","arguments":{}}
+          {"id":"call-part","type":"toolCall","toolCallId":"anchored","name":"read","arguments":{},"toolSegmentId":"tool-segment:turn"}
         ]}
         """.utf8))
         snapshot.toolExecutions = [
-            runtimeTool(id: "unanchored", order: 1),
-            runtimeTool(id: "anchored", order: 0),
+            runtimeTool(id: "unanchored", order: 1, toolSegmentId: "tool-segment:turn"),
+            runtimeTool(id: "anchored", order: 0, toolSegmentId: "tool-segment:turn"),
         ]
 
         let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
-        #expect(candidate.timeline.ids == ["streaming", "tool-run-anchored", "tool-run-unanchored"])
+        #expect(candidate.timeline.ids == ["streaming", "tool-run-anchored"])
         let runs = candidate.timeline.items.compactMap { item -> ChatToolRunPresentation? in
             guard case .toolRun(let run) = item else { return nil }
             return run
         }
-        #expect(runs.map { $0.tools.map(\.id) } == [["anchored"], ["unanchored"]])
+        #expect(runs.map { $0.tools.map(\.id) } == [["anchored", "unanchored"]])
         #expect(candidate.timeline.renderedIDBySemanticID["anchored"] == "tool-run-anchored")
-        #expect(candidate.timeline.renderedIDBySemanticID["unanchored"] == "tool-run-unanchored")
+        #expect(candidate.timeline.renderedIDBySemanticID["unanchored"] == "tool-run-anchored")
         #expect(candidate.isValid)
     }
 
@@ -915,26 +986,30 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(flipped.timeline == ChatTranscriptProjectionKernel.cold(snapshot: placement).timeline)
     }
 
-    @Test("ungrouped runtime calls stay distinct through mixed terminal settlement")
-    func ungroupedRuntimeLifecycle() throws {
+    @Test("one producer segment keeps one row through mixed terminal settlement")
+    func segmentedRuntimeLifecycle() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
-        snapshot.toolExecutions = [runtimeTool(id: "one", order: 0)]
+        snapshot.toolExecutions = [runtimeTool(
+            id: "one", order: 0, toolSegmentId: "tool-segment:turn"
+        )]
         let first = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
         #expect(first.timeline.ids == ["tool-run-one"])
 
-        snapshot.toolExecutions.append(runtimeTool(id: "two", order: 1))
+        snapshot.toolExecutions.append(runtimeTool(
+            id: "two", order: 1, toolSegmentId: "tool-segment:turn"
+        ))
         let second = ChatTranscriptProjectionKernel.incremental(
             snapshot: snapshot,
             previous: first,
             canonicalSourceUnchanged: true
         )
-        #expect(second.timeline.ids == ["tool-run-one", "tool-run-two"])
+        #expect(second.timeline.ids == ["tool-run-one"])
 
         snapshot.toolExecutions = [
             updatedTool(snapshot.toolExecutions[0], status: .completed, output: "done"),
             updatedTool(snapshot.toolExecutions[1], status: .failed, output: "failed"),
-            runtimeTool(id: "three", order: 2),
+            runtimeTool(id: "three", order: 2, toolSegmentId: "tool-segment:turn"),
         ]
         let mixed = ChatTranscriptProjectionKernel.incremental(
             snapshot: snapshot,
@@ -945,9 +1020,10 @@ struct ChatTranscriptProjectionKernelTests {
             guard case .toolRun(let run) = item else { return nil }
             return run
         }
-        #expect(runs.map(\.id) == ["tool-run-one", "tool-run-two", "tool-run-three"])
-        #expect(runs.map(\.isRunning) == [false, false, true])
-        #expect(runs[1].tools.first?.subtitle == "Failed")
+        #expect(runs.map(\.id) == ["tool-run-one"])
+        #expect(runs.first?.tools.map(\.id) == ["one", "two", "three"])
+        #expect(runs.first?.isRunning == true)
+        #expect(runs.first?.tools[1].subtitle == "Failed")
         #expect(mixed.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
         #expect(mixed.isValid)
     }
@@ -1263,7 +1339,12 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(assembled.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
     }
 
-    private func runtimeTool(id: String, order: Int, output: String? = nil) -> ToolExecutionState {
+    private func runtimeTool(
+        id: String,
+        order: Int,
+        output: String? = nil,
+        toolSegmentId: String? = nil
+    ) -> ToolExecutionState {
         ToolExecutionState(
             toolCallId: id,
             toolName: "read",
@@ -1277,7 +1358,8 @@ struct ChatTranscriptProjectionKernelTests {
             startedAt: "2026-01-01T00:00:00Z",
             updatedAt: "2026-01-01T00:00:00Z",
             lastProgressAt: "2026-01-01T00:00:00Z",
-            progressSequence: 1
+            progressSequence: 1,
+            toolSegmentId: toolSegmentId
         )
     }
 
@@ -1287,7 +1369,8 @@ struct ChatTranscriptProjectionKernelTests {
         count: Int,
         status: ToolExecutionState.Status,
         groupID: String = "group",
-        order: Int? = nil
+        order: Int? = nil,
+        toolSegmentId: String = "tool-segment:turn"
     ) -> ToolExecutionState {
         ToolExecutionState(
             toolCallId: id,
@@ -1305,6 +1388,7 @@ struct ChatTranscriptProjectionKernelTests {
             completedAt: status == .running ? nil : "2026-01-01T00:00:01Z",
             durationMs: status == .running ? nil : 1_000,
             progressSequence: status == .running ? 1 : 2,
+            toolSegmentId: toolSegmentId,
             groupId: groupID,
             groupIndex: index,
             groupCount: count,
@@ -1335,7 +1419,12 @@ struct ChatTranscriptProjectionKernelTests {
             lastProgressAt: "2026-01-01T00:00:01Z",
             completedAt: status == .completed ? "2026-01-01T00:00:01Z" : tool.completedAt,
             durationMs: tool.durationMs,
-            progressSequence: (tool.progressSequence ?? 0) + 1
+            progressSequence: (tool.progressSequence ?? 0) + 1,
+            toolSegmentId: tool.toolSegmentId,
+            groupId: tool.groupId,
+            groupIndex: tool.groupIndex,
+            groupCount: tool.groupCount,
+            groupFinalized: tool.groupFinalized
         )
     }
 

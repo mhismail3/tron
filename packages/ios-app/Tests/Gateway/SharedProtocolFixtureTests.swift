@@ -27,6 +27,7 @@ struct SharedProtocolFixtureTests {
         #expect(assistant?.presentationId == "assistant-entry")
         #expect(assistant?.content?.first?.thinkingRunOrdinal == 0)
         let fixtureToolCall = assistant?.content?.first { $0.type == .toolCall }
+        #expect(fixtureToolCall?.toolSegmentId == "tool-segment:fixture-turn")
         #expect(fixtureToolCall?.groupId == "tool-group:[\"assistant-entry\",2]")
         #expect(fixtureToolCall?.groupIndex == 0)
         #expect(fixtureToolCall?.groupCount == 1)
@@ -39,6 +40,7 @@ struct SharedProtocolFixtureTests {
         #expect(snapshot.toolExecutions.first?.order == 0)
         #expect(snapshot.toolExecutions.first?.output == "working\nstep two")
         #expect(snapshot.toolExecutions.first?.progressSequence == 2)
+        #expect(snapshot.toolExecutions.first?.toolSegmentId == fixtureToolCall?.toolSegmentId)
         #expect(snapshot.toolExecutions.first?.groupId == fixtureToolCall?.groupId)
         #expect(snapshot.toolExecutions.first?.groupFinalized == true)
         #expect(snapshot.transcript.first(where: { $0.toolCallId == "tool-call" })?.durationMs == 1_000)

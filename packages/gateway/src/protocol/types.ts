@@ -95,6 +95,8 @@ export type ContentPart =
       /** Extension-authored human-readable label from Pi's registered tool definition. */
       label?: string;
       arguments: JsonValue;
+      /** Gateway-owned active-turn identity. Equal values may share one display run. */
+      toolSegmentId?: string;
       /** Disposable declaration metadata; never persisted to Pi JSONL. */
       groupId?: string;
       groupIndex?: number;
@@ -135,6 +137,8 @@ export type TranscriptItem =
       progressSequence?: number;
       /** Disposable provenance derived from public Pi sourceInfo; absent means unknown/ambiguous. */
       extensionOrigin?: ExtensionToolOrigin | undefined;
+      /** Gateway-owned active-turn identity for an orphan canonical result. */
+      toolSegmentId?: string;
       groupId?: string;
       groupIndex?: number;
       groupCount?: number;
@@ -400,6 +404,8 @@ export interface ToolExecutionState {
   progressSequence: number;
   /** Disposable provenance derived from public Pi sourceInfo; absent means unknown/ambiguous. */
   extensionOrigin?: ExtensionToolOrigin | undefined;
+  /** Gateway-owned active-turn identity. Equal values may share one display run. */
+  toolSegmentId?: string;
   /** Finalized declaration metadata, bounded to the active Gateway runtime. */
   groupId?: string;
   groupIndex?: number;
