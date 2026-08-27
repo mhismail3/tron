@@ -321,14 +321,12 @@ struct ChatView: View {
                 clearSettledQueueMutationPresentationState()
             }
             // Layout-equivalent authority updates install metadata without
-            // arming scroll settlement. Only an actual local lifecycle graft
-            // follows the tail; a changed bounded layout identity enters the
-            // ordinary projection mutation owner.
+            // arming scroll settlement. Semantic restoration is only needed
+            // when the installed transcript changes its projection payload.
             if let previousTag, let installed,
                previousTag.matchesProjectionPayload(of: installed.tag) {
-                if previousTag.handoffIdentity != installed.tag.handoffIdentity {
-                    scrollCoordinator.installedLifecycleChanged(installed)
-                }
+                // Native anchoring owns the unchanged pinned layout.
+                _ = installed
             } else {
                 scrollCoordinator.installedTranscriptChanged(installed)
             }
@@ -1215,24 +1213,17 @@ struct ChatView: View {
                     load: {
                         do { try await probe.waitForPrependPageRelease() }
                         catch { return nil }
-                        let result = await model.loadEarlierTranscript(
-                            sessionID: sessionID,
-                            presentationGeneration: generation
-                        )
-                        guard result == .installed,
-                              sessionPresentation.modelPresentationGeneration == generation else { return nil }
-                        guard let anchor else {
-                            _ = try? await installCurrentTranscriptProjection(
-                                presentationGeneration: generation
-                            )
-                            return nil
-                        }
-                        guard let current = try? await installCurrentTranscriptProjection(
-                            presentationGeneration: generation
-                        ),
-                              let renderedID = current.timeline.renderedIDBySemanticID[anchor.semanticID] else {
-                            return nil
-                        }
+                        // The hosted boundary owns no Gateway transport. Model
+                        // an admitted exact page installation by advancing the
+                        // real coordinator/layout epoch around the current
+                        // semantic anchor; Gateway pagination contracts are
+                        // covered by their focused store tests.
+                        guard sessionPresentation.modelPresentationGeneration == generation,
+                              let anchor,
+                              let current = transcriptPresentation.installed,
+                              current.tag == transcriptProjectionSource,
+                              let renderedID = current.timeline
+                                .renderedIDBySemanticID[anchor.semanticID] else { return nil }
                         let installedLayout = scrollCoordinator.beginInstalledLayoutEpoch()
                         return ChatPrependPage(
                             renderedAnchorID: renderedID,
@@ -1334,9 +1325,9 @@ struct ChatView: View {
     }
 
     private func physicalOpeningTailID(for installed: InstalledChatTranscript) -> String? {
-        installed.displayedItems.isEmpty && installed.queuedMessages.isEmpty
-            ? nil
-            : "transcript-bottom"
+        // The marker is always mounted, including empty and queue-only
+        // presentations, so opening never falls back to an implicit top offset.
+        "transcript-bottom"
     }
 
     @MainActor
@@ -1362,6 +1353,13 @@ struct ChatView: View {
         performanceTracker.beginScrollCommand()
         let update = {
             switch command.destination {
+            case .tail where command.origin == .physicalTailRepair:
+                // A native viewport mutation can leave ScrollPosition logically
+                // at `.bottom` while UIScrollView is physically displaced. An
+                // edge-to-edge rewrite may then compare equal and become a
+                // no-op. Repair against the exact mounted tail marker so this
+                // bounded fallback has a distinct semantic target.
+                transcriptScrollPosition.scrollTo(id: "transcript-bottom", anchor: .bottom)
             case .tail, .openingTail:
                 transcriptScrollPosition.scrollTo(edge: .bottom)
             case .offsetY(let offsetY):
@@ -1385,7 +1383,8 @@ struct ChatView: View {
         #if HOSTED_TEST
         hostedProbe?.recordScrollCommand(
             isAutomatic: false,
-            isSmooth: command.animation != .disabled
+            isSmooth: command.animation != .disabled,
+            origin: command.origin
         )
         #endif
         // The coordinator keeps this exact token installed through its native

@@ -79,7 +79,7 @@ struct ToolExecutionStatePolicyTests {
         #expect(terminal.output == merged.output)
     }
 
-    @Test("explicit order, missing order, start time, and call ID preserve established sorting")
+    @Test("producer order, group order, missing order, and call ID preserve deterministic sorting")
     func ordering() {
         let explicitFirst = tool(id: "z", order: 1, startedAt: "later")
         let explicitSecond = tool(id: "a", order: 2, startedAt: "earlier")
@@ -87,12 +87,17 @@ struct ToolExecutionStatePolicyTests {
         #expect(ToolExecutionStatePolicy.orderedBefore(explicitFirst, explicitSecond))
         #expect(ToolExecutionStatePolicy.orderedBefore(explicitSecond, unordered))
 
+        // Timestamps are freshness metadata, never a placement tie-breaker.
         let earlier = tool(id: "z", startedAt: "2026-01-01T00:00:00Z")
         let later = tool(id: "a", startedAt: "2026-01-01T00:00:01Z")
-        #expect(ToolExecutionStatePolicy.orderedBefore(earlier, later))
+        #expect(!ToolExecutionStatePolicy.orderedBefore(earlier, later))
         #expect(ToolExecutionStatePolicy.orderedBefore(
-            tool(id: "a", startedAt: "same"),
-            tool(id: "b", startedAt: "same")
+            tool(id: "a", startedAt: "later"),
+            tool(id: "b", startedAt: "earlier")
+        ))
+        #expect(ToolExecutionStatePolicy.orderedBefore(
+            tool(id: "late", groupIndex: 1),
+            tool(id: "early", groupIndex: 2)
         ))
     }
 
@@ -104,7 +109,8 @@ struct ToolExecutionStatePolicyTests {
         updatedAt: String = "2026-01-01T00:00:00Z",
         sequence: Int? = nil,
         output: String? = nil,
-        outputTruncated: Bool? = nil
+        outputTruncated: Bool? = nil,
+        groupIndex: Int? = nil
     ) -> ToolExecutionState {
         ToolExecutionState(
             toolCallId: id,
@@ -119,7 +125,11 @@ struct ToolExecutionStatePolicyTests {
             isError: status == .failed,
             startedAt: startedAt,
             updatedAt: updatedAt,
-            progressSequence: sequence
+            progressSequence: sequence,
+            groupId: groupIndex == nil ? nil : "group",
+            groupIndex: groupIndex,
+            groupCount: groupIndex == nil ? nil : 3,
+            groupFinalized: groupIndex != nil
         )
     }
 }

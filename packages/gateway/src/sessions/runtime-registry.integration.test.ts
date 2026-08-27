@@ -4778,6 +4778,42 @@ export default function (pi) {
     expect(bashProgress.at(-1)!.durationMs).toBeGreaterThanOrEqual(300);
     expect(bashProgress.at(-1)!.completedAt).toBeTypeOf("string");
     expect(events.filter((event) => event.topic === "session.processActivity")).toEqual([]);
+    const activeSnapshots = events
+      .filter((event) => event.topic === "session.snapshot")
+      .map((event) => (event.payload?.data ?? event.payload) as {
+        phase?: string;
+        transcript?: Array<{ kind?: string; role?: string; toolCallId?: string }>;
+        toolExecutions?: Array<{ toolCallId: string }>;
+      })
+      .filter((snapshot) => snapshot.phase === "running");
+    // A sibling remains authoritative while one call transfers from terminal
+    // runtime evidence to its canonical toolResult. There must be no active
+    // snapshot in which the settled call is absent from both sources.
+    expect(activeSnapshots.some((snapshot) => {
+      const runtimeRead = snapshot.toolExecutions?.some((tool) => tool.toolCallId === "call-read");
+      const runtimeBash = snapshot.toolExecutions?.some((tool) => tool.toolCallId === "call-bash");
+      return runtimeRead === true && runtimeBash === true;
+    })).toBe(true);
+    expect(activeSnapshots.some((snapshot) => {
+      const canonicalRead = snapshot.transcript?.some((item) =>
+        item.kind === "message" && item.role === "toolResult" && item.toolCallId === "call-read");
+      const canonicalBash = snapshot.transcript?.some((item) =>
+        item.kind === "message" && item.role === "toolResult" && item.toolCallId === "call-bash");
+      return canonicalRead === true && canonicalBash === true;
+    })).toBe(true);
+    const snapshotsAfterAdmission = activeSnapshots.filter((snapshot) => {
+      const canonicalRead = snapshot.transcript?.some((item) =>
+        item.kind === "message" && item.role === "toolResult" && item.toolCallId === "call-read");
+      const runtimeRead = snapshot.toolExecutions?.some((tool) => tool.toolCallId === "call-read");
+      return canonicalRead === true || runtimeRead === true;
+    });
+    expect(snapshotsAfterAdmission.length).toBeGreaterThan(0);
+    expect(snapshotsAfterAdmission.every((snapshot) => {
+      const canonicalRead = snapshot.transcript?.some((item) =>
+        item.kind === "message" && item.role === "toolResult" && item.toolCallId === "call-read");
+      const runtimeRead = snapshot.toolExecutions?.some((tool) => tool.toolCallId === "call-read");
+      return canonicalRead === true || runtimeRead === true;
+    })).toBe(true);
     const settled = slot.snapshot();
     expect(settled.toolExecutions).toEqual([]);
     expect(settled.processOverview).toMatchObject({ visibility: "hidden", activeCount: 0, recentCount: 0 });

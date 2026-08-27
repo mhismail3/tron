@@ -25,8 +25,10 @@ enum ToolExecutionStatePolicy {
             order: candidate.order,
             status: candidate.status,
             arguments: candidate.arguments,
-            partialResult: candidate.partialResult ?? (candidate.status == .running ? current.partialResult : nil),
-            result: candidate.result,
+            // An empty terminal frame is an update to status, not proof that
+            // previously readable live/partial evidence was withdrawn.
+            partialResult: candidate.partialResult ?? current.partialResult,
+            result: candidate.result ?? current.result,
             output: output,
             outputTruncated: outputTruncated,
             isError: candidate.isError,
@@ -61,6 +63,8 @@ enum ToolExecutionStatePolicy {
     }
 
     static func orderedBefore(_ left: ToolExecutionState, _ right: ToolExecutionState) -> Bool {
+        // Runtime order is identity/protocol evidence. Timestamps are mutable
+        // freshness metadata and must not relocate or group invocations.
         if left.groupFinalized == true, right.groupFinalized == true,
            left.groupId == right.groupId,
            let leftIndex = left.groupIndex, let rightIndex = right.groupIndex,
@@ -72,7 +76,6 @@ enum ToolExecutionStatePolicy {
         }
         if left.order != nil, right.order == nil { return true }
         if left.order == nil, right.order != nil { return false }
-        if left.startedAt != right.startedAt { return left.startedAt < right.startedAt }
         return left.toolCallId < right.toolCallId
     }
 

@@ -215,7 +215,8 @@ struct ChatCompactPillLabel<Trailing: View>: View {
             Text(title)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: titleWeight))
                 .foregroundStyle(tone.primaryColor)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(1)
+                .truncationMode(.tail)
             if let detail, !detail.isEmpty {
                 Text(detail)
                     .font(detailStyle == .summary
@@ -223,7 +224,8 @@ struct ChatCompactPillLabel<Trailing: View>: View {
                         : TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
                     .foregroundStyle(detailStyle == .summary
                         ? Color.tronTextSecondary : tone.secondaryColor)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
             trailing
         }

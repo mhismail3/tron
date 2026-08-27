@@ -587,7 +587,8 @@ enum ChatTranscriptProjectionKernel {
         performanceSignposts: any PerformanceSignposting,
         workRecorder: ChatTranscriptProjectionWorkRecorder?
     ) -> ChatTranscriptProjectionCandidate? {
-        guard snapshot.phase == previous.phase,
+        guard previous.isValid,
+              snapshot.phase == previous.phase,
               snapshot.streaming == previous.streamingFragment?.source,
               snapshot.toolExecutions != previous.toolExecutions else { return nil }
 
@@ -608,14 +609,11 @@ enum ChatTranscriptProjectionKernel {
                   old.groupFinalized == new.groupFinalized else { return nil }
         }
         for callID in changed {
+            // Runtime-only calls retain their physical tail site through
+            // terminal settlement. Canonical ownership, when it arrives,
+            // takes over through the full assembler; status-only changes patch
+            // the existing row in place.
             guard previous.patchMetadata.sitesByCallID[callID]?.count == 1 else { return nil }
-            if previous.patchMetadata.sitesByCallID[callID]![0].classification == .unanchoredRuntime,
-               newStates[callID]?.status != .running {
-                // Terminal runtime-only rows leave the overlay entirely; they
-                // cannot be patched in place because the next assembly removes
-                // the duplicate tail row instead of retaining its old position.
-                return nil
-            }
         }
         return measured(performanceSignposts: performanceSignposts, workRecorder: workRecorder) {
             var runsByIndex: [Int: ChatToolRunPresentation] = [:]
@@ -780,7 +778,17 @@ enum ChatTranscriptProjectionKernel {
                 anchoredCallIDs.insert(value.presentation.id)
                 payloadsByCallID[value.presentation.id] = value.presentation.payload
                 if let index = pendingToolIndexByCallID[value.presentation.id] {
-                    pendingTools[index] = value
+                    // Ordinary source overlap for one call resolves to the
+                    // newest evidence. A repeated exact identity carrying
+                    // finalized group metadata is different: it may represent
+                    // two malformed group slots and must survive assembly so
+                    // mergeFinalizedToolRuns can fail the candidate closed.
+                    if pendingTools[index].presentation.groupFinalized == true
+                        || value.presentation.groupFinalized == true {
+                        pendingTools.append(value)
+                    } else {
+                        pendingTools[index] = value
+                    }
                 } else {
                     pendingToolIndexByCallID[value.presentation.id] = pendingTools.count
                     pendingTools.append(value)
@@ -920,7 +928,7 @@ enum ChatTranscriptProjectionKernel {
 
         let streamingTools = streamingFragment.map { fragment in
             toolPresentations(in: fragment.source, results: results)
-                .filter { $0.groupFinalized != false && !anchoredCallIDs.contains($0.id) }
+                .filter { !anchoredCallIDs.contains($0.id) }
                 .map { canonical in
                     PreparedTool(
                         presentation: resolved(canonical, live: liveByID[canonical.id]),
@@ -931,17 +939,13 @@ enum ChatTranscriptProjectionKernel {
         } ?? []
         toolsInspected += streamingTools.count
         let streamingCallIDs = Set(streamingTools.map { $0.presentation.id })
-        // The runtime-only tail is an admission surface for current work, not a
-        // second history surface. Terminal calls without a canonical/streaming
-        // declaration are stale overlay evidence: once they settle, their
-        // authoritative position is the transcript (or they are intentionally
-        // omitted by the bounded window). Keeping them here duplicates the same
-        // calls at the bottom before a later snapshot relocates them.
+        // Runtime evidence remains displayable through terminal settlement.
+        // Canonical/streaming ownership wins atomically when it appears, while
+        // a terminal runtime-only call is still an admitted exact call rather
+        // than stale data eligible for silent dropping.
         let unanchoredLive = liveByID.values
             .filter {
-                $0.status == .running
-                    && ($0.groupFinalized == true || $0.groupId == nil)
-                    && !anchoredCallIDs.contains($0.toolCallId)
+                !anchoredCallIDs.contains($0.toolCallId)
                     && !streamingCallIDs.contains($0.toolCallId)
             }
             .sorted(by: ToolExecutionStatePolicy.orderedBefore)
@@ -972,9 +976,16 @@ enum ChatTranscriptProjectionKernel {
             }
             switch original {
             case .message(let message):
+                // Message slices are presentation rows derived from one
+                // canonical message, not protocol call identities. Preserve
+                // their established source-derived disambiguation so thinking
+                // and content barriers retain stable physical IDs.
                 var disambiguated = "\(message.id)#\(message.item.id)"
                 if seenRenderedIDs.contains(disambiguated) { disambiguated += "#\(index)" }
-                guard seenRenderedIDs.insert(disambiguated).inserted else { continue }
+                guard seenRenderedIDs.insert(disambiguated).inserted else {
+                    collisionSafe.append(original)
+                    continue
+                }
                 collisionSafe.append(.message(ChatMessagePresentation(
                     id: disambiguated,
                     semanticID: message.semanticID,
@@ -983,31 +994,19 @@ enum ChatTranscriptProjectionKernel {
                     streaming: message.streaming,
                     showsFooter: message.showsFooter
                 )))
-            case .notification(let notification):
-                var disambiguated = "\(notification.id)#\(notification.semanticID ?? String(index))"
-                if seenRenderedIDs.contains(disambiguated) { disambiguated += "#\(index)" }
-                guard seenRenderedIDs.insert(disambiguated).inserted else { continue }
-                collisionSafe.append(.notification(ChatNotificationPresentation(
-                    id: disambiguated,
-                    semanticID: notification.semanticID,
-                    icon: notification.icon,
-                    title: notification.title,
-                    detail: notification.detail,
-                    body: notification.body,
-                    tone: notification.tone,
-                    material: notification.material
-                )))
-            case .transcript, .toolRun:
-                // Canonical entry and tool-call IDs are protocol identities.
-                // Malformed duplicates fail closed instead of reaching SwiftUI.
-                continue
+            case .transcript, .toolRun, .notification:
+                // Canonical transcript, notification, and tool IDs are exact
+                // identities. Keep malformed duplicates in the candidate so
+                // installation fails closed instead of fabricating an alias.
+                collisionSafe.append(original)
             }
         }
-        rendered = collisionSafe
+        rendered = mergeFinalizedToolRuns(in: collisionSafe)
 
-        // Collision admission can remove malformed canonical rows. Patch sites
-        // are recorded while assembling, so rebase them onto the admitted row
-        // spine before a later sparse tool update indexes the timeline.
+        // Patch sites are recorded while assembling, so rebase them onto the
+        // unchanged row spine before a later sparse tool update indexes the
+        // timeline. Invalid duplicate identities remain visible to admission
+        // rather than being silently removed.
         var rebasedSitesByCallID: [String: [ChatToolPatchSite]] = [:]
         for (renderedIndex, item) in rendered.enumerated() {
             guard case .toolRun(let run) = item else { continue }
@@ -1033,7 +1032,7 @@ enum ChatTranscriptProjectionKernel {
                 preferredSemanticIDByRenderedID[item.id] = message.semanticID
                 renderedIDBySemanticID[message.semanticID] = item.id
             case .toolRun(let run):
-                let semanticID = run.groupIDs.isEmpty ? (run.tools.first?.id ?? run.id) : run.id
+                let semanticID = run.groupIDs.isEmpty ? (run.tools.last?.id ?? run.id) : run.id
                 preferredSemanticIDByRenderedID[item.id] = semanticID
                 renderedIDBySemanticID[semanticID] = item.id
                 for tool in run.tools { renderedIDBySemanticID[tool.id] = item.id }
@@ -1055,6 +1054,136 @@ enum ChatTranscriptProjectionKernel {
         )
     }
 
+    /// A finalized producer group can be split across canonical, streaming,
+    /// and runtime sources during handoff. Merge only adjacent tool runs that
+    /// carry the same exact group. A canonical/barrier row or an unrelated
+    /// group between members makes the evidence unsafe to relocate.
+    private static func mergeFinalizedToolRuns(
+        in items: [ChatTranscriptRenderItem]
+    ) -> [ChatTranscriptRenderItem] {
+        struct GroupSignature {
+            var count: Int?
+            var indexOwner: [Int: String] = [:]
+            var memberIDs: Set<String> = []
+        }
+
+        var signatures: [String: GroupSignature] = [:]
+        var groupForCall: [String: String] = [:]
+        var invalidGroups = Set<String>()
+        for item in items {
+            guard case .toolRun(let run) = item else { continue }
+            for tool in run.tools where tool.groupFinalized == true {
+                guard let groupID = tool.groupId,
+                      let groupCount = tool.groupCount,
+                      let groupIndex = tool.groupIndex,
+                      groupCount > 0, groupIndex >= 0, groupIndex < groupCount else {
+                    if let groupID = tool.groupId { invalidGroups.insert(groupID) }
+                    continue
+                }
+                var signature = signatures[groupID] ?? GroupSignature()
+                if signature.count != nil && signature.count != tool.groupCount {
+                    invalidGroups.insert(groupID)
+                }
+                let index = groupIndex
+                // A protocol call ID is an exact identity, not a merge key.
+                // Repeating it in another group slot (or repeating a slot)
+                // makes this finalized group malformed. Do not filter the
+                // duplicate while assembling: leave the candidate invalid so
+                // the owner refuses to expose it to SwiftUI.
+                if signature.indexOwner.updateValue(tool.id, forKey: index) != nil
+                    || !signature.memberIDs.insert(tool.id).inserted {
+                    invalidGroups.insert(groupID)
+                }
+                if signature.count == nil { signature.count = groupCount }
+                signatures[groupID] = signature
+                if let priorGroup = groupForCall[tool.id], priorGroup != groupID {
+                    invalidGroups.insert(priorGroup)
+                    invalidGroups.insert(groupID)
+                } else {
+                    groupForCall[tool.id] = groupID
+                }
+            }
+        }
+
+        var locationsByGroup: [String: [Int]] = [:]
+        for (index, item) in items.enumerated() {
+            guard case .toolRun(let run) = item else { continue }
+            for tool in run.tools where tool.groupFinalized == true {
+                guard let groupID = tool.groupId,
+                      !invalidGroups.contains(groupID) else { continue }
+                locationsByGroup[groupID, default: []].append(index)
+            }
+        }
+        for groupID in locationsByGroup.keys {
+            locationsByGroup[groupID] = Array(Set(locationsByGroup[groupID]!)).sorted()
+        }
+
+        var ownerByGroup: [String: Int] = [:]
+        var groupsByOwner: [Int: Set<String>] = [:]
+        for (groupID, locations) in locationsByGroup {
+            guard let first = locations.first, locations.count > 1,
+                  locations.last! - first + 1 == locations.count,
+                  locations.allSatisfy({
+                      guard case .toolRun(let run) = items[$0] else { return false }
+                      return run.tools.contains { $0.groupId == groupID }
+                  }) else { continue }
+            ownerByGroup[groupID] = first
+            groupsByOwner[first, default: []].insert(groupID)
+        }
+        guard !ownerByGroup.isEmpty else { return items }
+
+        var result = items
+        var additions: [Int: [ChatToolDescriptor]] = [:]
+        var removalsByIndex: [Int: Set<String>] = [:]
+        for (index, item) in items.enumerated() {
+            guard case .toolRun(let run) = item else { continue }
+            for tool in run.tools {
+                guard let groupID = tool.groupId,
+                      let owner = ownerByGroup[groupID], owner != index else { continue }
+                additions[owner, default: []].append(tool)
+                removalsByIndex[index, default: []].insert(groupID)
+            }
+        }
+
+        for (index, tools) in additions {
+            guard case .toolRun(let run) = result[index] else { continue }
+            var merged = run.tools
+            let existing = Set(merged.map(\.id))
+            let newTools = tools.filter { !existing.contains($0.id) }
+            merged.append(contentsOf: newTools)
+            for groupID in groupsByOwner[index] ?? [] {
+                let memberIDs = Set(merged.filter { $0.groupId == groupID }.map(\.id))
+                let ordered = merged.filter { $0.groupId == groupID }.sorted {
+                    switch ($0.groupIndex, $1.groupIndex) {
+                    case let (left?, right?) where left != right: return left < right
+                    default: return false
+                    }
+                }
+                var orderedIndex = ordered.startIndex
+                for slot in merged.indices where memberIDs.contains(merged[slot].id) {
+                    guard orderedIndex < ordered.endIndex else { break }
+                    merged[slot] = ordered[orderedIndex]
+                    orderedIndex += 1
+                }
+            }
+            result[index] = .toolRun(ChatToolRunPresentation(tools: merged, anchorID: run.anchorID))
+        }
+
+        var removedIndices = Set<Int>()
+        for (index, groups) in removalsByIndex {
+            guard case .toolRun(let run) = result[index] else { continue }
+            let remaining = run.tools.filter { tool in
+                guard let groupID = tool.groupId else { return true }
+                return !groups.contains(groupID)
+            }
+            if remaining.isEmpty { removedIndices.insert(index) }
+            else { result[index] = .toolRun(ChatToolRunPresentation(tools: remaining, anchorID: run.anchorID)) }
+        }
+        return result.enumerated().compactMap { index, item in
+            removedIndices.contains(index) ? nil : item
+        }
+    }
+
     private static func resolved(_ canonical: ChatToolPresentation, live: ToolExecutionState?) -> ChatToolPresentation {
         guard let live else { return canonical }
         let response = live.result ?? live.partialResult ?? canonical.response
@@ -1068,8 +1197,8 @@ enum ChatTranscriptProjectionKernel {
             title: live.toolLabel ?? (canonical.title == "Tool" ? live.toolName : canonical.title),
             subtitle: liveToolSubtitle(live.status), request: canonical.request ?? live.arguments,
             response: response, content: content,
-            fallbackContent: liveOutput == nil && content.isEmpty
-                ? (canonical.fallbackContent ?? response ?? canonical.request ?? live.arguments) : nil,
+            fallbackContent: live.output == nil && content.isEmpty && response == nil
+                ? (canonical.fallbackContent ?? canonical.request ?? live.arguments) : nil,
             error: live.isError, startedAt: live.startedAt,
             completedAt: live.completedAt ?? canonical.completedAt,
             durationMs: live.durationMs ?? canonical.durationMs,
@@ -1090,7 +1219,7 @@ enum ChatTranscriptProjectionKernel {
         return ChatToolPresentation(
             id: tool.toolCallId, title: tool.toolLabel ?? tool.toolName, subtitle: liveToolSubtitle(tool.status),
             request: tool.arguments, response: response, content: tool.output ?? "",
-            fallbackContent: tool.output == nil ? (response ?? tool.arguments) : nil,
+            fallbackContent: tool.output == nil && response == nil ? tool.arguments : nil,
             error: tool.isError, startedAt: tool.startedAt, completedAt: tool.completedAt,
             durationMs: tool.durationMs, lastProgressAt: tool.lastProgressAt ?? tool.updatedAt,
             progressSequence: tool.progressSequence, outputTruncated: tool.outputTruncated == true,

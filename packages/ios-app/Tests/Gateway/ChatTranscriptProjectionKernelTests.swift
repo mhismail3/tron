@@ -54,8 +54,8 @@ struct ChatTranscriptProjectionKernelTests {
             .messagePart(streamingParts[1]),
         ])
         #expect(candidate.timeline.ids == [
-            "assistant", "tool-run-call", "assistant-slice-content-answer", "bash",
-            "notification-compaction-slot-4", "streaming",
+            "assistant", "tool-run-call", "assistant-slice-content-2", "bash",
+            "notification-compaction-slot-4", "streaming-source",
         ])
         guard case .toolRun(let run) = candidate.timeline.items[1] else {
             Issue.record("Expected canonical joined tool run")
@@ -222,6 +222,147 @@ struct ChatTranscriptProjectionKernelTests {
             guard case .toolRun(let run) = item else { return nil }
             return run
         }.flatMap(\.tools).map(\.id) == ["duplicate", "duplicate"])
+        #expect(!candidate.isValid)
+    }
+
+    @Test("duplicate exact IDs in finalized group slots remain invalid instead of being filtered")
+    func duplicateFinalizedGroupIDsFailClosed() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.transcript = [
+            try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+            {"id":"assistant-one","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"part-one","ordinal":0,"type":"toolCall","toolCallId":"duplicate","name":"read","arguments":{},"groupId":"group","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
+            """.utf8)),
+            try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+            {"id":"assistant-two","parentId":"assistant-one","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"part-two","ordinal":0,"type":"toolCall","toolCallId":"duplicate","name":"read","arguments":{},"groupId":"group","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
+            """.utf8)),
+        ]
+        snapshot.transcriptTotal = 2
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        let tools = candidate.timeline.items.compactMap { item -> [ChatToolDescriptor]? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run.tools
+        }.flatMap { $0 }
+        #expect(tools.map(\.id) == ["duplicate", "duplicate"])
+        #expect(!candidate.isValid)
+    }
+
+    @Test("finalized streaming and runtime siblings form one exact producer-ordered group")
+    func finalizedStreamingRuntimeGroupContinuity() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
+        snapshot.streaming = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+          {"id":"call-one-part","ordinal":0,"type":"toolCall","toolCallId":"call-one","name":"read","arguments":{}}
+        ]}
+        """.utf8))
+        snapshot.toolExecutions = [
+            groupedRuntimeTool(id: "call-two", index: 1, count: 2, status: .running),
+            groupedRuntimeTool(id: "call-one", index: 0, count: 2, status: .completed),
+        ]
+
+        let cold = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        let incremental = ChatTranscriptProjectionKernel.incremental(
+            snapshot: snapshot,
+            previous: ChatTranscriptProjectionKernel.cold(snapshot: try fixture(transcript: "[]")),
+            canonicalSourceUnchanged: false
+        )
+        let runs = cold.timeline.items.compactMap { item -> ChatToolRunPresentation? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run
+        }
+        #expect(runs.count == 1)
+        #expect(runs[0].tools.map(\.id) == ["call-one", "call-two"])
+        #expect(runs[0].isRunning)
+        #expect(Set(runs[0].tools.map(\.id)).count == 2)
+        #expect(cold.timeline.renderedIDBySemanticID["call-one"] == "tool-run-group")
+        #expect(cold.timeline.renderedIDBySemanticID["call-two"] == "tool-run-group")
+        #expect(incremental.timeline == cold.timeline)
+        #expect(incremental.toolPayloads == cold.toolPayloads)
+        #expect(cold.isValid)
+    }
+
+    @Test("canonical takeover keeps mixed terminal siblings atomic until runtime retirement")
+    func canonicalGroupTakeoverAndRetirement() throws {
+        var runtime = try fixture(transcript: "[]")
+        runtime.phase = .running
+        runtime.toolExecutions = [
+            groupedRuntimeTool(id: "call-two", index: 1, count: 2, status: .failed),
+            groupedRuntimeTool(id: "call-one", index: 0, count: 2, status: .completed),
+        ]
+        let runtimeCandidate = ChatTranscriptProjectionKernel.cold(snapshot: runtime)
+
+        var canonical = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+            {"id":"call-one-part","ordinal":0,"type":"toolCall","toolCallId":"call-one","name":"read","arguments":{},"groupId":"group","groupIndex":0,"groupCount":2,"groupFinalized":true},
+            {"id":"call-two-part","ordinal":1,"type":"toolCall","toolCallId":"call-two","name":"read","arguments":{},"groupId":"group","groupIndex":1,"groupCount":2,"groupFinalized":true}
+          ]}
+        ]
+        """)
+        canonical.transcriptTotal = canonical.transcript.count
+        canonical.phase = .idle
+        canonical.toolExecutions = runtime.toolExecutions
+        let takeover = ChatTranscriptProjectionKernel.incremental(
+            snapshot: canonical,
+            previous: runtimeCandidate,
+            canonicalSourceUnchanged: false
+        )
+        guard case .toolRun(let mixedRun) = takeover.timeline.items.first else {
+            Issue.record("Expected one canonical group")
+            return
+        }
+        #expect(takeover.timeline.items.count == 1)
+        #expect(mixedRun.tools.map(\.id) == ["call-one", "call-two"])
+        #expect(mixedRun.failureCount == 1)
+        #expect(!mixedRun.isRunning)
+        #expect(takeover.timeline == ChatTranscriptProjectionKernel.cold(snapshot: canonical).timeline)
+        #expect(takeover.isValid)
+
+        canonical.toolExecutions = []
+        let retired = ChatTranscriptProjectionKernel.incremental(
+            snapshot: canonical,
+            previous: takeover,
+            canonicalSourceUnchanged: true
+        )
+        guard case .toolRun(let canonicalRun) = retired.timeline.items.first else {
+            Issue.record("Expected canonical group after runtime retirement")
+            return
+        }
+        #expect(canonicalRun.tools.map(\.id) == ["call-one", "call-two"])
+        #expect(Set(canonicalRun.tools.map(\.id)).count == 2)
+        #expect(retired.timeline == ChatTranscriptProjectionKernel.cold(snapshot: canonical).timeline)
+        #expect(retired.isValid)
+    }
+
+    @Test("a visible barrier prevents unsafe finalized-group relocation")
+    func finalizedGroupBarrierFailsClosed() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+            {"id":"call-one-part","ordinal":0,"type":"toolCall","toolCallId":"call-one","name":"read","arguments":{}}
+          ]},
+          {"id":"user","parentId":"assistant","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"user","content":[{"id":"text","ordinal":0,"type":"text","text":"barrier"}]}
+        ]
+        """)
+        snapshot.transcriptTotal = snapshot.transcript.count
+        snapshot.phase = .running
+        snapshot.toolExecutions = [
+            groupedRuntimeTool(id: "call-one", index: 0, count: 2, status: .completed),
+            groupedRuntimeTool(id: "call-two", index: 1, count: 2, status: .running),
+        ]
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        let runs = candidate.timeline.items.compactMap { item -> ChatToolRunPresentation? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run
+        }
+        #expect(runs.count == 2)
+        #expect(runs.flatMap(\.tools).map(\.id) == ["call-one", "call-two"])
+        #expect(candidate.timeline.items.contains { item in
+            if case .message(let message) = item { return message.item.id == "user" }
+            return false
+        })
         #expect(!candidate.isValid)
     }
 
@@ -497,8 +638,8 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(run.tools.first.flatMap(incremental.toolPayloads.resolving)?.content == "new")
     }
 
-    @Test("collision admission rebases later sparse tool patch sites")
-    func collisionAdmissionRebasesToolPatch() throws {
+    @Test("duplicate canonical IDs fail admission and prevent sparse tool patching")
+    func duplicateCanonicalIDsFailAdmission() throws {
         var snapshot = try fixture(transcript: """
         [
           {"id":"duplicate","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"bash","command":"one","output":"","cancelled":false,"truncated":false},
@@ -508,7 +649,8 @@ struct ChatTranscriptProjectionKernelTests {
         snapshot.phase = .running
         snapshot.toolExecutions = [runtimeTool(id: "live", order: 0, output: "old")]
         let previous = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
-        #expect(previous.timeline.ids == ["duplicate", "tool-run-live"])
+        #expect(previous.timeline.ids == ["duplicate", "duplicate", "tool-run-live"])
+        #expect(!previous.isValid)
 
         snapshot.toolExecutions = [updatedTool(snapshot.toolExecutions[0], output: "new")]
         let incremental = ChatTranscriptProjectionKernel.incremental(
@@ -516,7 +658,7 @@ struct ChatTranscriptProjectionKernelTests {
             previous: previous,
             canonicalSourceUnchanged: true
         )
-        #expect(incremental.workReport.mode == .toolPayloadPatch)
+        #expect(incremental.workReport.mode != .toolPayloadPatch)
         #expect(incremental.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
     }
 
@@ -667,18 +809,18 @@ struct ChatTranscriptProjectionKernelTests {
             output: "running"
         )]
         let completedIDs = completed.timeline.ids
-        #expect(completedIDs == ["user", "stream"])
+        #expect(completedIDs == ["user", "stream", "tool-run-one"])
         let flipped = ChatTranscriptProjectionKernel.incremental(
             snapshot: placement,
             previous: completed,
             canonicalSourceUnchanged: true
         )
-        #expect(flipped.workReport.mode != .toolPayloadPatch)
+        #expect(flipped.workReport.mode == .toolPayloadPatch)
         #expect(flipped.timeline.ids == ["user", "stream", "tool-run-one"])
         #expect(flipped.timeline == ChatTranscriptProjectionKernel.cold(snapshot: placement).timeline)
     }
 
-    @Test("unanchored tools stay visible only while they are running")
+    @Test("unanchored tools remain visible through terminal settlement")
     func stableUnanchoredStreamingPlacement() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
@@ -707,8 +849,8 @@ struct ChatTranscriptProjectionKernelTests {
             previous: grouped,
             canonicalSourceUnchanged: true
         )
-        #expect(completed.workReport.mode != .toolPayloadPatch)
-        #expect(completed.timeline.items.isEmpty)
+        #expect(completed.workReport.mode == .toolPayloadPatch)
+        #expect(completed.timeline.ids == ["tool-run-one"])
         #expect(completed.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
     }
 
@@ -728,8 +870,8 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(run.isRunning)
     }
 
-    @Test("terminal unanchored tools do not synthesize a bottom aggregate")
-    func terminalUnanchoredToolsDoNotRenderTailAggregate() throws {
+    @Test("terminal unanchored tools remain in the current-work aggregate")
+    func terminalUnanchoredToolsRemainInTailAggregate() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
         let completed = updatedTool(runtimeTool(id: "completed", order: 0), status: .completed, output: "done")
@@ -737,9 +879,13 @@ struct ChatTranscriptProjectionKernelTests {
         snapshot.toolExecutions = [completed, failed]
 
         let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
-        #expect(candidate.timeline.items.isEmpty)
-        #expect(candidate.timeline.renderedIDBySemanticID["completed"] == nil)
-        #expect(candidate.timeline.renderedIDBySemanticID["failed"] == nil)
+        #expect(candidate.timeline.ids == ["tool-run-completed"])
+        #expect(candidate.timeline.renderedIDBySemanticID["completed"] != nil)
+        #expect(candidate.timeline.renderedIDBySemanticID["failed"] != nil)
+        #expect(candidate.timeline.items.compactMap { item -> ChatToolRunPresentation? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run
+        }.flatMap(\.tools).map(\.id) == ["completed", "failed"])
     }
 
     @Test("canonical positioned terminal tools preserve thinking and tool order")
@@ -770,7 +916,7 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(!run.isRunning)
     }
 
-    @Test("mixed stale terminal and running unanchored tools show only current work")
+    @Test("mixed terminal and running unanchored tools remain represented")
     func mixedTerminalAndRunningUnanchoredTools() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
@@ -780,12 +926,12 @@ struct ChatTranscriptProjectionKernelTests {
         ]
 
         let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
-        #expect(candidate.timeline.ids == ["tool-run-current"])
+        #expect(candidate.timeline.ids == ["tool-run-stale"])
         guard case .toolRun(let run) = candidate.timeline.items.first else {
-            Issue.record("Expected only the current running overlay")
+            Issue.record("Expected admitted runtime overlay")
             return
         }
-        #expect(run.tools.map(\.id) == ["current"])
+        #expect(run.tools.map(\.id) == ["stale", "current"])
         #expect(run.isRunning)
     }
 
@@ -951,7 +1097,7 @@ struct ChatTranscriptProjectionKernelTests {
             canonicalSourceUnchanged: true
         )
 
-        #expect(cold.timeline.ids == ["user", "streaming", "tool-run-stream-call"])
+        #expect(cold.timeline.ids == ["user", "stream-source", "tool-run-stream-call"])
         #expect(incremental.timeline == cold.timeline)
         #expect(incremental.toolPayloads == cold.toolPayloads)
         #expect(incremental.workReport.mode == .fragmentReuse)
@@ -1001,7 +1147,7 @@ struct ChatTranscriptProjectionKernelTests {
             canonicalSourceUnchanged: true
         )
 
-        #expect(cold.timeline.ids == ["user", "streaming"])
+        #expect(cold.timeline.ids == ["user", "stream-source"])
         #expect(coldWorker.timeline == cold.timeline)
         #expect(coldWorker.timeline.items.live.isEmpty)
         #expect(incremental.timeline == cold.timeline)
@@ -1087,6 +1233,35 @@ struct ChatTranscriptProjectionKernelTests {
             updatedAt: "2026-01-01T00:00:00Z",
             lastProgressAt: "2026-01-01T00:00:00Z",
             progressSequence: 1
+        )
+    }
+
+    private func groupedRuntimeTool(
+        id: String,
+        index: Int,
+        count: Int,
+        status: ToolExecutionState.Status
+    ) -> ToolExecutionState {
+        ToolExecutionState(
+            toolCallId: id,
+            toolName: "read",
+            order: count - index,
+            status: status,
+            arguments: .object([:]),
+            partialResult: status == .running ? .object(["progress": .number(Double(index))]) : nil,
+            result: status == .completed ? .object(["ok": .bool(true)]) : nil,
+            output: status == .failed ? "failed" : (status == .completed ? "done" : "running"),
+            isError: status == .failed,
+            startedAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:01Z",
+            lastProgressAt: "2026-01-01T00:00:01Z",
+            completedAt: status == .running ? nil : "2026-01-01T00:00:01Z",
+            durationMs: status == .running ? nil : 1_000,
+            progressSequence: status == .running ? 1 : 2,
+            groupId: "group",
+            groupIndex: index,
+            groupCount: count,
+            groupFinalized: true
         )
     }
 

@@ -660,6 +660,66 @@ struct ChatRuntimeWorkingPresentation: Equatable {
     }
 }
 
+enum ChatPhysicalTailClassification: Equatable, Sendable {
+    case aligned
+    case belowViewport
+    case aboveViewport
+    case incomplete
+    case stale
+}
+
+/// Presentation-only physical proof for the mounted tail marker. It is never
+/// a second scroll position: the native scroll anchor remains the routine
+/// owner and this evidence only permits a bounded repair of proven drift.
+struct ChatPhysicalTailEvidence: Equatable, Sendable {
+    let presentationEpoch: Int
+    let layoutEpoch: Int
+    let semanticFrameRevision: Int
+    let markerFrame: CGRect
+    let visibleBounds: CGRect
+    let signedDisplacement: CGFloat
+    let classification: ChatPhysicalTailClassification
+
+    static func make(
+        presentationEpoch: Int,
+        layoutEpoch: Int,
+        semanticFrameRevision: Int,
+        markerFrame: CGRect?,
+        visibleBounds: CGRect?,
+        tolerance: CGFloat = 2
+    ) -> Self {
+        guard let markerFrame, let visibleBounds,
+              markerFrame.minX.isFinite, markerFrame.maxX.isFinite,
+              markerFrame.minY.isFinite, markerFrame.maxY.isFinite,
+              visibleBounds.minX.isFinite, visibleBounds.maxX.isFinite,
+              visibleBounds.minY.isFinite, visibleBounds.maxY.isFinite else {
+            return Self(
+                presentationEpoch: presentationEpoch,
+                layoutEpoch: layoutEpoch,
+                semanticFrameRevision: semanticFrameRevision,
+                markerFrame: markerFrame ?? .zero,
+                visibleBounds: visibleBounds ?? .zero,
+                signedDisplacement: .nan,
+                classification: .incomplete
+            )
+        }
+        let displacement = markerFrame.maxY - visibleBounds.maxY
+        let classification: ChatPhysicalTailClassification
+        if abs(displacement) <= tolerance { classification = .aligned }
+        else if displacement < 0 { classification = .belowViewport }
+        else { classification = .aboveViewport }
+        return Self(
+            presentationEpoch: presentationEpoch,
+            layoutEpoch: layoutEpoch,
+            semanticFrameRevision: semanticFrameRevision,
+            markerFrame: markerFrame,
+            visibleBounds: visibleBounds,
+            signedDisplacement: displacement,
+            classification: classification
+        )
+    }
+}
+
 struct ChatTranscriptGeometry: Equatable {
     let offsetY: CGFloat
     let contentHeight: CGFloat
@@ -698,7 +758,9 @@ struct ChatTranscriptGeometry: Equatable {
     }
 
     static let zero = ChatTranscriptGeometry(offsetY: 0, contentHeight: 0, containerHeight: 0)
-    var isValid: Bool { contentHeight > 0 && containerHeight > 0 }
+    // Zero-height content is a valid empty pinned presentation. The mounted
+    // tail marker supplies the physical proof once SwiftUI has laid it out.
+    var isValid: Bool { contentHeight >= 0 && containerHeight > 0 }
     var distanceFromBottom: CGFloat {
         // `visibleRect` is SwiftUI's native, atomically derived content-space
         // viewport. Do not reconstruct it from offset/container/inset fields,
@@ -712,17 +774,16 @@ struct ChatTranscriptGeometry: Equatable {
         return max(0, rawDistance)
     }
     static let catchUpDistance: CGFloat = 16
-    /// A structural shrink can leave SwiftUI's visible rect beyond the new
-    /// content edge while `distanceFromBottom` clamps the negative distance to
-    /// zero. That is not settled bottom geometry and requires one tail clamp.
+    /// A marker frame, rather than clamped distance, is authoritative for
+    /// short content. Under-sized content is bottom-aligned by the native
+    /// anchor, so blank space after its edge is expected rather than drift.
     var isPastBottomEdge: Bool {
         guard isValid else { return false }
         let contentBottom = contentHeight + bottomInset
         guard contentBottom.isFinite, offsetY.isFinite else { return false }
-        if contentBottom <= containerHeight + 2 {
-            if let visibleTopY { return visibleTopY.isFinite && visibleTopY > 2 }
-            return offsetY > 2
-        }
+        // A visible edge beyond a short content edge is normal bottom-aligned
+        // blank space. Physical tail evidence handles deliberate overshoot.
+        if contentBottom <= containerHeight + 2 { return false }
         if let visibleBottomY {
             return visibleBottomY.isFinite && visibleBottomY > contentBottom + 2
         }
@@ -738,25 +799,14 @@ struct ChatTranscriptGeometry: Equatable {
         isValid && !isPastBottomEdge && distanceFromBottom <= Self.catchUpDistance
     }
 
-    /// Opening placement must reject a transient native offset beyond an
-    /// overflowing content edge. `distanceFromBottom` intentionally clamps
-    /// negative values for ordinary scrolling, so it cannot distinguish that
-    /// overshoot from a real tail boundary on its own.
+    /// Opening accepts short content at the native bottom anchor. For overflow
+    /// content the visible tail edge still rejects a transient overshoot.
     var isPlausibleOpeningViewport: Bool {
         guard isValid else { return false }
         let contentBottom = contentHeight + bottomInset
         guard contentBottom.isFinite, offsetY.isFinite else { return false }
-        if contentBottom <= containerHeight + 2 {
-            // Undersized transcripts must be top aligned; clamped bottom distance
-            // would otherwise accept a transient positive or negative overshoot.
-            if let visibleTopY {
-                return visibleTopY.isFinite && abs(visibleTopY) <= 2
-            }
-            return abs(offsetY) <= 2
-        }
+        if contentBottom <= containerHeight + 2 { return true }
         if let visibleBottomY {
-            // Native visible geometry is atomically derived and already accounts
-            // for top/safe-area scroll insets that are absent from `offsetY`.
             return visibleBottomY.isFinite && visibleBottomY <= contentBottom + 2
         }
         let maximumOffset = contentBottom - containerHeight
@@ -1329,42 +1379,14 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
 }
 
 enum ChatToolInvocationOrdering {
-    /// Detail surfaces intentionally reverse the canonical invocation order:
-    /// the newest tool is always the first row. If every row has usable
-    /// invocation metadata, timestamps determine the order. Otherwise the
-    /// canonical array order is used as one consistent fallback; mixing those
-    /// policies pair-by-pair would produce an unstable, non-transitive sort.
+    /// Detail surfaces reverse canonical/group order only at the final
+    /// presentation boundary. Mutable timestamps never relocate an invocation.
     static func reverseChronological(_ tools: [ChatToolDescriptor]) -> [ChatToolDescriptor] {
-        reverseChronological(tools, descriptor: { $0 })
+        tools.reversed()
     }
 
     static func reverseChronological(_ tools: [ChatToolPresentation]) -> [ChatToolPresentation] {
-        reverseChronological(tools, descriptor: \.descriptor)
-    }
-
-    private static func reverseChronological<Element>(
-        _ tools: [Element],
-        descriptor: (Element) -> ChatToolDescriptor
-    ) -> [Element] {
-        let indexed = tools.enumerated()
-        let dates = indexed.map { invocationDate(for: descriptor($0.element)) }
-        let allHaveDates = dates.allSatisfy { $0 != nil }
-
-        return indexed.sorted { left, right in
-            if allHaveDates,
-               let leftDate = dates[left.offset],
-               let rightDate = dates[right.offset],
-               leftDate != rightDate {
-                return leftDate > rightDate
-            }
-            return left.offset > right.offset
-        }.map(\.element)
-    }
-
-    private static func invocationDate(for tool: ChatToolDescriptor) -> Date? {
-        ToolTiming.date(tool.startedAt)
-            ?? ToolTiming.date(tool.completedAt)
-            ?? ToolTiming.date(tool.lastProgressAt)
+        tools.reversed()
     }
 }
 

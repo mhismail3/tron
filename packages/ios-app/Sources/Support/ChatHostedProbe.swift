@@ -24,6 +24,7 @@ struct ChatHostedObservation: Sendable {
     let rowFrames: [String: CGRect]
     let scrollSettledDistance: CGFloat?
     let scrollCommandCount: Int
+    let physicalTailRepairCommandCount: Int
     let automaticScrollCommandCount: Int
     let smoothAutomaticScrollCommandCount: Int
     let animatedEntranceCount: Int
@@ -76,8 +77,11 @@ final class ChatHostedProbe {
     private var processRoutes: [String] = []
     private var rowFrames: [String: CGRect] = [:]
     private var rowFrameOrder: [String] = []
+    private var rowFrameGeneration: Int?
+    private var pendingRowFramesByGeneration: [Int: [String: CGRect]] = [:]
     private var scrollSettledDistance: CGFloat?
     private var scrollCommandCount = 0
+    private var physicalTailRepairCommandCount = 0
     private var automaticScrollCommandCount = 0
     private var smoothAutomaticScrollCommandCount = 0
     private var animatedEntranceCount = 0
@@ -145,6 +149,7 @@ final class ChatHostedProbe {
             rowFrames: rowFrames,
             scrollSettledDistance: scrollSettledDistance,
             scrollCommandCount: scrollCommandCount,
+            physicalTailRepairCommandCount: physicalTailRepairCommandCount,
             automaticScrollCommandCount: automaticScrollCommandCount,
             smoothAutomaticScrollCommandCount: smoothAutomaticScrollCommandCount,
             animatedEntranceCount: animatedEntranceCount,
@@ -213,8 +218,42 @@ final class ChatHostedProbe {
         }
     }
 
-    func updateRowFrame(id: String, frame: CGRect) {
+    func updateRowFrame(id: String, frame: CGRect, generation: Int? = nil) {
+        if let generation {
+            if let current = rowFrameGeneration {
+                if generation < current { return }
+                if generation > current {
+                    bufferFutureRowFrame(id: id, frame: frame, generation: generation)
+                    return
+                }
+            } else {
+                bufferFutureRowFrame(id: id, frame: frame, generation: generation)
+                return
+            }
+        }
+        admitCurrentRowFrame(id: id, frame: frame)
+    }
+
+    private func bufferFutureRowFrame(id: String, frame: CGRect, generation: Int) {
+        var frames = pendingRowFramesByGeneration[generation, default: [:]]
+        frames[id] = frame
+        if frames.count > 256 {
+            for key in frames.keys.sorted().prefix(frames.count - 256) { frames[key] = nil }
+        }
+        pendingRowFramesByGeneration[generation] = frames
+        let retainedGenerations = Set(pendingRowFramesByGeneration.keys.sorted().suffix(4))
+        pendingRowFramesByGeneration = pendingRowFramesByGeneration
+            .filter { retainedGenerations.contains($0.key) }
         semanticFrameCallbackCount &+= 1
+        revision &+= 1
+    }
+
+    private func admitCurrentRowFrame(
+        id: String,
+        frame: CGRect,
+        recordsCallback: Bool = true
+    ) {
+        if recordsCallback { semanticFrameCallbackCount &+= 1 }
         rowFrames[id] = frame
         rowFrameOrder.removeAll { $0 == id }
         rowFrameOrder.append(id)
@@ -235,8 +274,13 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
-    func recordScrollCommand(isAutomatic: Bool, isSmooth: Bool) {
+    func recordScrollCommand(
+        isAutomatic: Bool,
+        isSmooth: Bool,
+        origin: ChatScrollCommand.Origin? = nil
+    ) {
         scrollCommandCount &+= 1
+        if origin == .physicalTailRepair { physicalTailRepairCommandCount &+= 1 }
         if isAutomatic {
             automaticScrollCommandCount &+= 1
             if isSmooth { smoothAutomaticScrollCommandCount &+= 1 }
@@ -289,7 +333,29 @@ final class ChatHostedProbe {
                 remountedWhileSemanticIDDisplayed &+= 1
             }
         }
+        let previousPhysicalIDs = Set(renderedIDBySemanticID.values)
+        let nextPhysicalIDs = Set(nextRenderedIDBySemanticID.values)
+        let preservesLayout = rowFrameGeneration != nil
+            && rowCount == installedProjectionRowCount
+            && previousPhysicalIDs == nextPhysicalIDs
+            && renderedIDBySemanticID.allSatisfy {
+                nextRenderedIDBySemanticID[$0.key] == $0.value
+            }
+        let retainedFrames = preservesLayout ? rowFrames : [:]
+        let retainedOrder = preservesLayout ? rowFrameOrder : []
         renderedIDBySemanticID = nextRenderedIDBySemanticID
+        if rowFrameGeneration != sourceOrdinal {
+            rowFrames = retainedFrames
+            rowFrameOrder = retainedOrder
+            rowFrameGeneration = sourceOrdinal
+            if let pending = pendingRowFramesByGeneration.removeValue(forKey: sourceOrdinal) {
+                for (id, frame) in pending {
+                    admitCurrentRowFrame(id: id, frame: frame, recordsCallback: false)
+                }
+            }
+            pendingRowFramesByGeneration = pendingRowFramesByGeneration
+                .filter { $0.key > sourceOrdinal }
+        }
         projectionInstallCount &+= 1
         installedProjectionRowCount = max(0, rowCount)
         installedProjectionSourceOrdinal = max(0, sourceOrdinal)

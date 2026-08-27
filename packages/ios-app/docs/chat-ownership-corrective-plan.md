@@ -149,7 +149,7 @@ Exit: attachment-only steer/follow-up settles, its empty container disappears, a
 
 - Keep Gateway finalized invocation groups and canonical thinking/content barriers.
 - Canonical declaration owns position/group identity; execution updates only decorate that declaration.
-- Running runtime-only work remains visible through an explicit anchor; terminal unanchored work is removed until canonical placement arrives.
+- Every admitted runtime-only call remains visible through exact canonical transfer or authoritative retirement; terminal status never silently removes it.
 - Maintain one extension-activity body map; progress and tool projections reference activity IDs.
 - Preserve current-frame output replacement and terminal latching.
 

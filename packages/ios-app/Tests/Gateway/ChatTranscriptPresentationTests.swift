@@ -441,8 +441,8 @@ struct ChatTranscriptPresentationTests {
         #expect(!overshootWithinInsetMagnitude.isAtCatchUpBoundary)
         #expect(!undersized.isPastBottomEdge)
         #expect(undersized.isAtCatchUpBoundary)
-        #expect(undersizedOvershoot.isPastBottomEdge)
-        #expect(!undersizedOvershoot.isAtCatchUpBoundary)
+        #expect(!undersizedOvershoot.isPastBottomEdge)
+        #expect(undersizedOvershoot.isAtCatchUpBoundary)
     }
 
     @Test("past-bottom fallback uses offset when native visible edges are unavailable")
@@ -471,7 +471,7 @@ struct ChatTranscriptPresentationTests {
         #expect(!bottom.isPastBottomEdge)
         #expect(overshoot.isPastBottomEdge)
         #expect(!undersized.isPastBottomEdge)
-        #expect(undersizedOvershoot.isPastBottomEdge)
+        #expect(!undersizedOvershoot.isPastBottomEdge)
     }
 
     @Test("opening plausibility distinguishes a physical tail from overflow overshoot")
@@ -511,9 +511,42 @@ struct ChatTranscriptPresentationTests {
         #expect(!overshoot.isAtCatchUpBoundary)
         #expect(undersized.isPlausibleOpeningViewport)
         #expect(!undersized.isPastBottomEdge)
-        #expect(!undersizedOvershoot.isPlausibleOpeningViewport)
-        #expect(undersizedOvershoot.isPastBottomEdge)
-        #expect(!undersizedOvershoot.isAtCatchUpBoundary)
+        #expect(undersizedOvershoot.isPlausibleOpeningViewport)
+        #expect(!undersizedOvershoot.isPastBottomEdge)
+        #expect(undersizedOvershoot.isAtCatchUpBoundary)
+    }
+
+    @Test("physical tail evidence uses signed marker displacement")
+    func physicalTailEvidenceClassification() {
+        let aligned = ChatPhysicalTailEvidence.make(
+            presentationEpoch: 4,
+            layoutEpoch: 9,
+            semanticFrameRevision: 12,
+            markerFrame: CGRect(x: 0, y: 388, width: 1, height: 12),
+            visibleBounds: CGRect(x: 0, y: 0, width: 1, height: 400)
+        )
+        #expect(aligned.classification == .aligned)
+        #expect(aligned.signedDisplacement == 0)
+
+        let below = ChatPhysicalTailEvidence.make(
+            presentationEpoch: 4,
+            layoutEpoch: 9,
+            semanticFrameRevision: 13,
+            markerFrame: CGRect(x: 0, y: 300, width: 1, height: 12),
+            visibleBounds: CGRect(x: 0, y: 0, width: 1, height: 400)
+        )
+        #expect(below.classification == .belowViewport)
+        #expect(below.signedDisplacement < 0)
+
+        let above = ChatPhysicalTailEvidence.make(
+            presentationEpoch: 4,
+            layoutEpoch: 9,
+            semanticFrameRevision: 14,
+            markerFrame: CGRect(x: 0, y: 500, width: 1, height: 12),
+            visibleBounds: CGRect(x: 0, y: 0, width: 1, height: 400)
+        )
+        #expect(above.classification == .aboveViewport)
+        #expect(above.signedDisplacement > 0)
     }
 
     @Test("finalized invocation groups keep complete membership and stable identity")
@@ -1190,7 +1223,7 @@ struct ChatTranscriptPresentationTests {
         ])
     }
 
-    @Test("duplicate canonical IDs fail safe without ordinal construction trap")
+    @Test("duplicate canonical IDs remain invalid without ordinal construction trap")
     func duplicateCompactionIDsFailSafe() throws {
         var snapshot = try fixture(transcript: """
         [
@@ -1203,7 +1236,7 @@ struct ChatTranscriptPresentationTests {
         let ids = ChatTranscriptPresentation.timeline(in: snapshot).items.map(\.id)
         #expect(ids == [
             "notification-compaction-duplicate",
-            "notification-compaction-duplicate#duplicate",
+            "notification-compaction-duplicate",
         ])
     }
 

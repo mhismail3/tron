@@ -126,8 +126,8 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   The Gateway supplies monotonic duration samples while a call is running and the
   authoritative final call-to-return duration when it completes; chips display those
   samples without deriving normal timing from the device wall clock. The runtime-only
-  tail overlay admits current running executions only. Terminal unanchored executions
-  are not synthesized into a duplicate bottom aggregate; they appear only through their
+  tail overlay admits every authoritative execution without canonical or streaming placement. Terminal unanchored executions
+  remain visible until exact canonical transfer or authoritative operation retirement; they appear only through their
   canonical or streaming transcript position, while anchored terminal calls remain visible.
   Older Gateways
   without live duration samples use a bounded local monotonic fallback. The open detail
@@ -210,9 +210,9 @@ cancels that arm. The composer
 remains visible throughout opening, while sending stays disabled until readiness. Opening tail
 positioning and post-reveal settlement are owned by the coordinator's mutually exclusive opening
 phase; ordinary pinned growth, shrink, and discrete insertion create no command ownership. Explicit
-opening, catch-up, semantic restore, and prepend remain command owners; after they release, pinned mode
-keeps `ScrollPosition` target-free and uses the native bottom size-change anchor with no recurring command stream.
-Short-content alignment remains top-owned. Editor-only composer height changes install atomically;
+opening, catch-up, semantic restore, prepend, and the bounded physical-tail repair remain distinct command owners; after they release, pinned mode
+keeps `ScrollPosition` target-free and uses the native bottom size-change anchor with no recurring command stream. Repair is admitted only from current signed marker evidence and is cancelled by interaction or a newer layout epoch.
+Short-content alignment remains bottom-owned by the native anchor; blank space stays above the tail. Editor-only composer height changes install atomically;
 attachment, selected-skill, and resource-result identity changes use one value-scoped 240 ms smooth
 host-height transition, disabled under Reduce Motion. Direct user movement away from the tail and
 anchored mode select top retention and remain target-free. A pinned bottom rubber band remains pinned:

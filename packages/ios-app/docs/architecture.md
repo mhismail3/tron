@@ -208,13 +208,14 @@ One deterministic `ChatTranscriptProjectionKernel` converts exact canonical entr
 raw atoms and then globally assembles call/result joins, bootstrap filtering, barriers, grouping,
 and semantic maps. Message presentation IDs and required content/thinking-run ordinals arrive from
 the Gateway and are never rewritten: the same semantic row, thinking run, and prepared-text source
-therefore survive live-to-canonical settlement even though the canonical entry ID changes. Rendered
-IDs are deterministically collision-disambiguated only for SwiftUI uniqueness; semantic identity
+therefore survive live-to-canonical settlement even though the canonical entry ID changes. Duplicate
+render IDs remain invalid and fail closed rather than being collision-disambiguated; semantic identity
 continues to own entrance and resilience state. The projection worker prepares immutable row-local
 markdown/thinking slices with entry-local revision tokens, so render rows perform only cheap revision
 equality and never reslice the transcript-wide cache. `ToolExecutionStatePolicy` is shared with
-`SessionPresentationStore`, so progress-sequence, timestamp, status-tie, explicit-order, start-time,
-and call-ID rules cannot drift between canonical event reduction and sparse rendering. Raw fragments retain the complete
+`SessionPresentationStore`, so progress-sequence, status-tie, producer-order/group-order, and call-ID
+rules cannot drift between canonical event reduction and sparse rendering. Timestamps are freshness
+metadata only and never establish identity, membership, or placement. Raw fragments retain the complete
 currently visible disposable history—even beyond one 512-item page—because explicitly loaded
 history cannot be evicted until forward reload exists. Projection instrumentation reports only a closed privacy-safe mode (`cold`, `fragmentReuse`,
 `toolPayloadPatch`, or `isolatedStreamingSuffix`) and aggregate entry/fragment/tool/atom/rendered
@@ -234,8 +235,7 @@ command when the marker is not yet realized, rejects native overflow overshoot a
 bottom boundary, and retains that command through animation completion plus two
 unchanged presented frames before releasing the binding. Ordinary pinned resizing then
 belongs to the native size-change anchor; detached readers remain unpositioned.
-Short-content alignment is always top-owned, so keyboard contraction cannot bodily
-translate the transcript.
+Short-content alignment is always bottom-owned by the native anchor, so keyboard contraction cannot leave blank past-tail space; a bounded signed-marker repair is used only when native settling proves physical drift.
 Test builds can admit one synthetic authoritative
 snapshot through the same read gate and skip only the network opening handshake.
 The hosted harness still mounts the production chat, lazy transcript, composer
@@ -514,8 +514,7 @@ proxy architecture. Explicit scroll commands keep their exact target until their
 semantic-restore, or prepend settlement evidence arrives, then release only that token on the next presented frame; submission retires a still-applied app target
 before changing layout. One mode-qualified native size-change anchor solely owns
 continuous streaming, keyboard, composer, and discrete pinned growth; no persistent
-`ScrollPosition` target or insertion callback competes for the same viewport delta.
-`discreteContentInserted` therefore emits no physical write. A retained presentation reconciles its first native geometry sample so a view physically at the tail regains pinned authority while a genuinely displaced reader remains anchored
+`ScrollPosition` target competes for the same viewport delta. A retained presentation reconciles its first native geometry sample so a view physically at the tail regains pinned authority; only current signed tail-marker drift may admit one bounded repair, while a genuinely displaced reader remains anchored
 in an order native anchoring cannot retain; anchored readers receive no automatic follow. Compact
 measured prompts may use one clipped composer-to-row morph; long prompts fail over to the shorter, subtler row-local
 fade/slide entrance. The unified notification row changes inner identity when active compaction becomes canonical
@@ -570,7 +569,7 @@ Subagent activity is a separate package-neutral, disposable projection. Only adm
 
 One leading subagent control inside the composer's existing `GlassEffectContainer` replaces every per-extension pill. It renders the emerald solving orb while any admitted subagent is active and the dotted spherical thinking ribbon while only recent terminal subagents remain. The **Subagents** sheet reads mounted active/recent rows only. Manage Session owns **Subagent History**, whose cancellation-owned store pages only terminal subagent receipts through `session.processHistory.list/get` with `kind: subagent`. Both lists open at the large detent and use compact orb-led rows with small Liquid Glass lifecycle/mode pills and right-aligned plain duration text. The mounted **Subagents** list retains Liquid Glass card containers because it is naturally bounded, while the potentially long **Subagent History** list uses the provider-settings scroll-optimized container surface. Terminal orb speed decreases as canonical duration increases, within a bounded readable range; active rows use the solving orb and terminal rows use the thinking ribbon. A validated row presents its read-only child transcript as another standardized large-detent bottom sheet rather than pushing the list's navigation stack. Empty, unavailable, conflict, and child-session failure states use the same Tron glass-card typography as other sheet placeholders rather than stock system unavailable content. iOS keeps no durable process mirror and cached projections never own recency.
 
-A subagent row can open a canonical-live read-only transcript only when the Gateway supplies an opaque, validated child-session reference. `ReadOnlySubagentSessionStore` owns a connection-scoped `session.processTranscript.open/page/close` lease, exact revision and page anchors, and bounded same-lease invalidation refresh. Gateway serializes page/refresh reads per lease and rechecks the expected generation inside the lane, because canceling the iOS task does not prove its already-sent request stopped. The newest page is reconciled by exact canonical overlap, preserving loaded earlier pages and stable scroll identities for append-only growth; incompatible branch replacement falls back to the new canonical tail. The transcript keeps newest-page tail-opening intent for overflowing content, explicitly aligns undersized content to the top, and presents an authored placeholder rather than an empty sheet when no messages are present. It never acquires another runtime, exposes a path, embeds writable `ChatView`, or fabricates transient activity as a canonical transcript row. Completed child JSONL entries render through native transcript rows; current tool/output appears in a separate live activity surface. Token-by-token child assistant text is intentionally outside this canonical-live contract.
+A subagent row can open a canonical-live read-only transcript only when the Gateway supplies an opaque, validated child-session reference. `ReadOnlySubagentSessionStore` owns a connection-scoped `session.processTranscript.open/page/close` lease, exact revision and page anchors, and bounded same-lease invalidation refresh. Gateway serializes page/refresh reads per lease and rechecks the expected generation inside the lane, because canceling the iOS task does not prove its already-sent request stopped. The newest page is reconciled by exact canonical overlap, preserving loaded earlier pages and stable scroll identities for append-only growth; incompatible branch replacement falls back to the new canonical tail. The transcript keeps newest-page tail-opening intent for every presentation, and the physical tail marker is bottom-aligned for empty, short, and overflowing content alike. It presents an authored placeholder rather than an empty sheet when no messages are present. It never acquires another runtime, exposes a path, embeds writable `ChatView`, or fabricates transient activity as a canonical transcript row. Completed child JSONL entries render through native transcript rows; current tool/output appears in a separate live activity surface. Token-by-token child assistant text is intentionally outside this canonical-live contract.
 
 Offline cache strips all extension surfaces, interactions, lease/focus, capabilities/diagnostics, and ephemeral semantic values; it also never persists process overview, current/recent rows, history pages, or child transcript leases.
 Native safe-area layout pushes the transcript exactly once and reverses naturally when
@@ -580,15 +579,15 @@ selects the native bottom size-change anchor as the sole physical size/inset own
 native ownership preserves the reader's position.
 Transcript growth, keyboard frames, and composer measurements are not mode inputs. Consequently pinned content
 and inset growth require zero app offset writes, and detached growth cannot pull the reader.
-Short and empty transcripts retain top alignment.
+Short and empty transcripts remain physically bottom-aligned; blank space belongs above the newest content.
 
 Mode changes come only from explicit intent: native/direct/accessibility movement away from the
 tail anchors; a bottom-starting pull that remains within the tail boundary or native past-bottom
 rubber band stays pinned and never exposes catch-up. A physically observed direct return, catch-up, or opening pins; submission and prepend preserve
 the current mode; a fresh presentation reset pins while a retained same-session reset preserves
 reader authority. `ChatScrollCoordinator` owns the reducer, raw geometry and semantic frames,
-unread state, and four bounded command purposes only: exact opening-tail realization, catch-up,
-semantic-anchor correction, and prepend correction. Automatic growth follow, tail-correction arbitration, and callback-order compatibility flags no longer exist.
+unread state, and five bounded command purposes only: exact opening-tail realization, catch-up,
+semantic-anchor correction, prepend correction, and a token-guarded physical-tail repair. Automatic growth follow, tail-correction arbitration, and callback-order compatibility flags no longer exist.
 
 Opening still keeps the opaque surface until the exact physical marker after transcript and
 queue rows is positioned. It permits one bounded bottom-edge realization command and a
@@ -1042,7 +1041,7 @@ an old flight or delay current rows. Each complete installed transcript exposes 
 one `ChatLiveRegion`. The ledger contains only the frozen canonical prefix and retains its local monotonic revision
 across streaming, handoff, queue, compatible reconnect, and foreground-reconciliation installs when those canonical
 rows are equal. Canonical append, prepend, or replacement advances that revision once; a cold owner deterministically
-rebuilds the same rows at revision one from the authoritative snapshot. The live region carries streaming/runtime, handoff, and queue facts in the same atomic commit, never as a mirror or second store. Rendering uses one bounded physical `ForEach` namespace spanning committed, live/runtime, local lifecycle, and authoritative queue rows; this lets a global-ordinal compaction spinner become its canonical pill and lets a causal prompt alias replace lifecycle content without crossing lazy collection owners. Installed base IDs remain validated once, while the zero-copy random-access row adapter takes an O(1) no-alias path and checks only bounded aliases against prebuilt transcript/presentation indexes. Alias collisions fail closed without changing canonical semantic geometry/anchor IDs. `ChatCommittedLedger`, equatable rows, sparse tool payload revisions, and row-scoped text preparation still keep a full streaming turn from re-evaluating settled history. Hidden thinking labels are
+rebuilds the same rows at revision one from the authoritative snapshot. The live region carries streaming/runtime, handoff, and queue facts in the same atomic commit, never as a mirror or second store. Rendering uses one bounded eager stack and one physical `ForEach` namespace spanning committed, live/runtime, local lifecycle, and authoritative queue rows. The authoritative page bound keeps realization finite, while the eager tail guarantees that native bottom anchoring can measure a newly inserted or regrouped tool row; no second scroll owner is introduced. This lets a global-ordinal compaction spinner become its canonical pill and lets a causal prompt alias replace lifecycle content without crossing collection owners. Installed base IDs remain validated once, while the zero-copy random-access row adapter takes an O(1) no-alias path and checks only bounded aliases against prebuilt transcript/presentation indexes. Alias collisions fail closed without changing canonical semantic geometry/anchor IDs. `ChatCommittedLedger`, equatable rows, sparse tool payload revisions, and row-scoped text preparation still keep a full streaming turn from re-evaluating settled history. Hidden thinking labels are
 attached only to preparation slices that render thinking, and tool rows compare a payload-only revision instead of an
 ambient installation tag. Foreground active and passive sessions therefore converge through the same complete commit:
 live work may be replaced, entrance suppression is consumed once, and neither history revision nor morph entitlement
@@ -1079,8 +1078,8 @@ row height. Only pending rows include the tag
 in their geometry observation, allowing an installed replacement to re-emit exact evidence without
 invalidating every realized row. Visible/pinned discrete rows fade with a small non-layout transform
 exactly once, realized offscreen rows become visible without replay, and direct interaction discards
-unresolved candidates. `ChatScrollCoordinator` records admitted discrete insertion semantics but emits no physical
-viewport write; native pinned size-change anchoring absorbs the installed row's growth. Its bounded
+unresolved candidates. Native pinned size-change anchoring absorbs installed discrete row growth without a coordinator
+viewport write. Its bounded
 rendered-ID entitlement is intersected only on actual installed transitions, so a surviving tool/group
 row retains the same one-shot entrance through completion while replacement removes it.
 Continuity-preserved assistant/tool rows do not manufacture a new entrance. A newly admitted visible

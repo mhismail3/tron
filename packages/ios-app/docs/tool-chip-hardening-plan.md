@@ -173,7 +173,7 @@ The current hosted probes observe projection installs, entrance resolution, scro
 
 ### 8. Scroll-animation policy is explicit
 
-`ChatView` calls `discreteContentInserted(renderedID:)` without choosing motion; `ChatScrollCoordinator` owns the default short smooth pinned-tail follow and coalesces it with streamed growth. Chip-local semantic motion and transcript scrolling remain separate owners: the chip animates only its own visual state, while the coordinator alone writes the viewport. Detached readers receive no automatic write, Reduce Motion executes the admitted command without spatial animation, and physical overshoot clamps remain animation-disabled. Source guards, hosted tests, and coordinator documentation assert that same policy.
+Native size-change anchoring owns routine pinned growth and chip-local semantic motion remains separate from transcript scrolling. The coordinator writes only explicit opening/catch-up/semantic/prepend commands or a token-guarded, frame-coalesced physical-tail repair admitted from signed marker evidence. Detached readers receive no automatic write, Reduce Motion executes admitted commands without spatial animation, and repair is cancelled by interaction or a newer layout epoch.
 
 ### 9. Detail surfaces can briefly combine generations
 

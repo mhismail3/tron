@@ -8,7 +8,7 @@ protocol ChatTranscriptHostedRecording: AnyObject {
     func recordToolChip(_ sample: ToolChipInstrumentationSample)
     func recordCommittedHistoryRowEvaluation()
     func recordEntranceResolution(animated: Bool, sourceOrdinal: Int)
-    func updateRowFrame(id: String, frame: CGRect)
+    func updateRowFrame(id: String, frame: CGRect, generation: Int?)
     func recordMaximumSemanticExcursion(_ value: CGFloat)
 }
 
@@ -19,6 +19,13 @@ extension ChatHostedProbe: ChatTranscriptHostedRecording {}
 private struct ChatScrollGeometryObservation: Equatable {
     let geometry: ChatTranscriptGeometry
     let presentationEpoch: Int
+}
+
+private enum ChatTranscriptLayoutConstants {
+    static let rowSpacing: CGFloat = 8
+    /// The marker owns the final composer affordance; stack spacing is zero so
+    /// it cannot silently add another tail gap.
+    static let tailAffordanceHeight: CGFloat = 12
 }
 
 struct ChatQueuedMessageRenderEntry: Identifiable, Hashable {
@@ -341,7 +348,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 0) {
                 if let installed {
                     if (installed.sourceWindow.originalStart ?? 0) > 0 {
                         stableRow(
@@ -374,10 +381,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             .accessibilityHidden(!isReady)
             .allowsHitTesting(isReady)
         }
-        .defaultScrollAnchor(.top, for: .initialOffset)
-        .defaultScrollAnchor(.top, for: .alignment)
+        // Pinned presentations are bottom-owned even when the transcript is
+        // empty or shorter than the viewport. Anchored readers retain their
+        // semantic position through the coordinator's restore transaction.
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.bottom, for: .alignment)
         .defaultScrollAnchor(
-            isReady && scrollCoordinator.usesBottomSizeChangeAnchor ? .bottom : .top,
+            isReady && scrollCoordinator.usesPinnedSizeChangeAnchor ? .bottom : .top,
             for: .sizeChanges
         )
         // Native size-change anchoring owns ordinary pinned layout changes.
@@ -687,6 +697,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         return content()
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
             .id(physicalID)
             .onGeometryChange(for: ChatSemanticFrameObservation.self) { value in
                 ChatSemanticFrameObservation(
@@ -723,11 +734,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         animated: animated,
                         sourceOrdinal: entranceTag.timelineGeneration
                     )
-                    if animated {
-                        scrollCoordinator.discreteContentInserted(renderedID: semanticID)
-                    }
                 }
-                hostedRecorder?.updateRowFrame(id: semanticID, frame: sample.frame)
+                hostedRecorder?.updateRowFrame(
+                    id: semanticID, frame: sample.frame, generation: installedTag?.timelineGeneration
+                )
                 hostedRecorder?.recordMaximumSemanticExcursion(
                     scrollCoordinator.maximumPrependSemanticExcursion
                 )
@@ -737,7 +747,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     private var tailMarker: some View {
         let rowLayoutEpoch = scrollCoordinator.layoutEpoch
         return Color.clear
-            .frame(height: 12)
+            .frame(height: ChatTranscriptLayoutConstants.tailAffordanceHeight)
             .id("transcript-bottom")
             .accessibilityHidden(true)
             .onGeometryChange(for: ChatSemanticFrameObservation.self) { value in
@@ -752,7 +762,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     layoutEpoch: sample.layoutEpoch,
                     frame: sample.frame
                 )
-                hostedRecorder?.updateRowFrame(id: "transcript-bottom", frame: sample.frame)
+                hostedRecorder?.updateRowFrame(
+                    id: "transcript-bottom", frame: sample.frame,
+                    generation: transcriptPresentation.installed?.tag.timelineGeneration
+                )
             }
     }
 }

@@ -41,12 +41,20 @@ struct ChatViewScrollHarnessTests {
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.geometry.containerHeight < initialHeight - 100
                 }
+                for _ in 0..<20 where try harness.nativeTranscriptDistanceFromTail() > 2 {
+                    try await harness.driveFrameBoundary()
+                    await Task.yield()
+                }
                 let shrunkenTailError = try harness.nativeTranscriptSignedTailError()
                 #expect(shrunkenTailError <= max(2, baselineTailError + 2))
 
                 harness.resize(height: 844)
                 _ = try await harness.recorder.waitUntil {
                     abs($0.observation.geometry.containerHeight - initialHeight) <= 2
+                }
+                for _ in 0..<20 where try harness.nativeTranscriptDistanceFromTail() > 2 {
+                    try await harness.driveFrameBoundary()
+                    await Task.yield()
                 }
                 let expandedTailError = try harness.nativeTranscriptSignedTailError()
                 // Returning from a keyboard-sized contraction must restore the
@@ -144,6 +152,41 @@ struct ChatViewScrollHarnessTests {
             nextRenderedIDBySemanticID: ["stream:turn": "assistant-final"]
         )
         #expect(probe.observation.remountedWhileSemanticIDDisplayed == 1)
+    }
+
+    @Test("hosted row evidence promotes future callbacks and rejects stale generations")
+    func hostedRowEvidenceGenerationFence() {
+        let probe = ChatHostedProbe()
+        let first = CGRect(x: 0, y: 10, width: 10, height: 10)
+        let future = CGRect(x: 0, y: 20, width: 10, height: 10)
+        let stale = CGRect(x: 0, y: 30, width: 10, height: 10)
+
+        probe.updateRowFrame(id: "row", frame: first, generation: 1)
+        #expect(probe.observation.rowFrames["row"] == nil)
+        probe.recordProjectionInstall(
+            rowCount: 1,
+            sourceOrdinal: 1,
+            nextRenderedIDBySemanticID: ["row": "row"]
+        )
+        #expect(probe.observation.rowFrames["row"] == first)
+
+        probe.updateRowFrame(id: "row", frame: future, generation: 2)
+        #expect(probe.observation.rowFrames["row"] == first)
+        probe.recordProjectionInstall(
+            rowCount: 1,
+            sourceOrdinal: 2,
+            nextRenderedIDBySemanticID: ["row": "row"]
+        )
+        #expect(probe.observation.rowFrames["row"] == future)
+
+        probe.updateRowFrame(id: "row", frame: stale, generation: 1)
+        #expect(probe.observation.rowFrames["row"] == future)
+        probe.recordProjectionInstall(
+            rowCount: 2,
+            sourceOrdinal: 3,
+            nextRenderedIDBySemanticID: ["row": "row", "new": "new"]
+        )
+        #expect(probe.observation.rowFrames.isEmpty)
     }
 
     @Test("harness renders the production scroll view and semantic row geometry")
@@ -288,7 +331,7 @@ struct ChatViewScrollHarnessTests {
     func displacedRetainedResume() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_207) { harness in
-                _ = try await harness.recorder.waitUntil {
+                let ready = try await harness.recorder.waitUntil {
                     $0.observation.readyFrameCompletionCount == 1
                         && $0.observation.visibleRowIDs.contains(harness.lastTranscriptID)
                 }
@@ -301,7 +344,9 @@ struct ChatViewScrollHarnessTests {
                     await Task.yield()
                 }
                 #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
-                #expect(harness.probeObservation.scrollCommandCount == 0)
+                let repairCommands = harness.probeObservation.physicalTailRepairCommandCount
+                    - ready.observation.physicalTailRepairCommandCount
+                #expect(repairCommands == 1)
             }
         }
     }
