@@ -95,6 +95,24 @@ struct GatewayPayloadStoreTests {
                 dependencyTreeCoverage: manifest.dependencyTreeCoverage
             )
         }
+        try rewriteManifest(
+            GatewayPayloadManifest(
+                channel: manifest.channel,
+                version: manifest.version,
+                gatewayVersion: manifest.gatewayVersion,
+                nodeVersion: manifest.nodeVersion,
+                sourceRevision: manifest.sourceRevision,
+                runtimeEpoch: manifest.runtimeEpoch,
+                payloadFingerprint: manifest.payloadFingerprint,
+                dependencyTreeCoverage: nil
+            ),
+            at: manifestURL
+        )
+        guard case .failure(.invalidManifest) = GatewayPayloadValidator.validateSelection(store: store) else {
+            Issue.record("missing fingerprint coverage contract was admitted")
+            return
+        }
+
         let overLimitValues = [
             ("gatewayVersion", String(repeating: "é", count: 64)),
             ("nodeVersion", String(repeating: "é", count: 64)),
@@ -163,6 +181,72 @@ struct GatewayPayloadStoreTests {
         guard case .failure(.incomplete("app/PushService.xcconfig")) = GatewayPayloadValidator.validate(payloadRoot: symlinkRoot, expectedChannel: "stable") else {
             Issue.record("symlinked stable push configuration was admitted")
             return
+        }
+    }
+
+    @Test("runtime Node and Pi aliases are exact required command links")
+    func runtimeNodeAliasAdmission() throws {
+        let temporary = try TemporaryPayloadDirectory()
+        defer { temporary.cleanup() }
+        for kind in ["missing", "regular", "wrong-target", "absolute-target"] {
+            let root = temporary.root.appendingPathComponent("alias-\(kind)", isDirectory: true)
+            try makePayload(root: root, channel: "stable", version: kind, fingerprint: String(repeating: "a", count: 64))
+            let directory = root.appendingPathComponent("runtime/bin-arm64", isDirectory: true)
+            let alias = directory.appendingPathComponent("node", isDirectory: false)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.appendingPathComponent("runtime").path)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+            try FileManager.default.removeItem(at: alias)
+            switch kind {
+            case "regular":
+                try Data("#!/bin/sh\nexit 0\n".utf8).write(to: alias)
+                try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: alias.path)
+            case "wrong-target":
+                try FileManager.default.createSymbolicLink(atPath: alias.path, withDestinationPath: "../node-x64")
+            case "absolute-target":
+                try FileManager.default.createSymbolicLink(
+                    atPath: alias.path,
+                    withDestinationPath: root.appendingPathComponent("runtime/node-arm64").path
+                )
+            default: break
+            }
+            try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+            try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.appendingPathComponent("runtime").path)
+            try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+            guard case .failure(.incomplete) = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: "stable") else {
+                Issue.record("invalid runtime Node alias was admitted: \(kind)")
+                continue
+            }
+        }
+        for kind in ["missing", "regular", "wrong-target", "absolute-target"] {
+            let root = temporary.root.appendingPathComponent("pi-alias-\(kind)", isDirectory: true)
+            try makePayload(root: root, channel: "stable", version: "pi-\(kind)", fingerprint: String(repeating: "a", count: 64))
+            let directory = root.appendingPathComponent("runtime/bin-arm64", isDirectory: true)
+            let alias = directory.appendingPathComponent("pi", isDirectory: false)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.appendingPathComponent("runtime").path)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+            try FileManager.default.removeItem(at: alias)
+            switch kind {
+            case "regular":
+                try Data("#!/bin/sh\nexit 0\n".utf8).write(to: alias)
+                try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: alias.path)
+            case "wrong-target":
+                try FileManager.default.createSymbolicLink(atPath: alias.path, withDestinationPath: "../node-arm64")
+            case "absolute-target":
+                try FileManager.default.createSymbolicLink(
+                    atPath: alias.path,
+                    withDestinationPath: root.appendingPathComponent(GatewayPayloadStore.piCLIRelativePath).path
+                )
+            default: break
+            }
+            try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+            try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.appendingPathComponent("runtime").path)
+            try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+            guard case .failure(.incomplete) = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: "stable") else {
+                Issue.record("invalid runtime Pi alias was admitted: \(kind)")
+                continue
+            }
         }
     }
 
@@ -262,24 +346,51 @@ struct GatewayPayloadStoreTests {
         try fm.createDirectory(at: dependencies, withIntermediateDirectories: true)
         let runtimeDirectory = root.appendingPathComponent("runtime", isDirectory: true)
         try fm.createDirectory(at: runtimeDirectory, withIntermediateDirectories: true)
+        let piCLI = root.appendingPathComponent(GatewayPayloadStore.piCLIRelativePath, isDirectory: false)
+        try fm.createDirectory(at: piCLI.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("#!/usr/bin/env node\n".utf8).write(to: piCLI)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: piCLI.path)
         for architecture in ["arm64", "x64"] {
             let runtime = runtimeDirectory.appendingPathComponent("node-\(architecture)", isDirectory: false)
             try Data(repeating: 0x7f, count: 1_048_576).write(to: runtime)
             try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: runtime.path)
+            let aliasDirectory = runtimeDirectory.appendingPathComponent("bin-\(architecture)", isDirectory: true)
+            try fm.createDirectory(at: aliasDirectory, withIntermediateDirectories: true)
+            try fm.createSymbolicLink(
+                atPath: aliasDirectory.appendingPathComponent("node").path,
+                withDestinationPath: "../node-\(architecture)"
+            )
+            try fm.createSymbolicLink(
+                atPath: aliasDirectory.appendingPathComponent("pi").path,
+                withDestinationPath: GatewayPayloadStore.piAliasTarget
+            )
         }
         var lines = Data()
         let resolvedRoot = root.resolvingSymlinksInPath().standardizedFileURL
         func relativePath(_ url: URL) -> String {
-            String(url.resolvingSymlinksInPath().standardizedFileURL.path.dropFirst(resolvedRoot.path.count + 1))
+            String(url.standardizedFileURL.path.dropFirst(resolvedRoot.path.count + 1))
         }
-        let payloadFiles = try fm.enumerator(at: root, includingPropertiesForKeys: nil)!.compactMap { $0 as? URL }
+        let payloadFiles: [(URL, String?)] = fm.enumerator(at: root, includingPropertiesForKeys: nil)!
+            .compactMap { $0 as? URL }
             .filter { $0.path.contains("/app/") || $0.path.contains("/runtime/") }
-            .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
-            .sorted { Data(relativePath($0).utf8).lexicographicallyPrecedes(Data(relativePath($1).utf8)) }
-        for file in payloadFiles {
+            .compactMap { url in
+                var info = stat()
+                guard lstat(url.path, &info) == 0 else { return nil }
+                if (info.st_mode & S_IFMT) == S_IFLNK {
+                    return (url, try? fm.destinationOfSymbolicLink(atPath: url.path))
+                }
+                return (info.st_mode & S_IFMT) == S_IFREG ? (url, nil) : nil
+            }
+            .sorted { Data(relativePath($0.0).utf8).lexicographicallyPrecedes(Data(relativePath($1.0).utf8)) }
+        for (file, linkTarget) in payloadFiles {
             let relative = relativePath(file)
-            let digest = SHA256.hash(data: try Data(contentsOf: file)).map { String(format: "%02x", $0) }.joined()
-            lines.append(contentsOf: Data("\(digest)  \(relative)\n".utf8))
+            if let linkTarget {
+                let digest = SHA256.hash(data: Data((linkTarget + "\n").utf8)).map { String(format: "%02x", $0) }.joined()
+                lines.append(contentsOf: Data("symlink:\(digest)  \(relative)\n".utf8))
+            } else {
+                let digest = SHA256.hash(data: try Data(contentsOf: file)).map { String(format: "%02x", $0) }.joined()
+                lines.append(contentsOf: Data("\(digest)  \(relative)\n".utf8))
+            }
         }
         let actualFingerprint = SHA256.hash(data: lines).map { String(format: "%02x", $0) }.joined()
         try write(
@@ -291,7 +402,7 @@ struct GatewayPayloadStoreTests {
                 sourceRevision: sourceRevision,
                 runtimeEpoch: runtimeEpoch,
                 payloadFingerprint: actualFingerprint,
-                dependencyTreeCoverage: "app/** and runtime/** files and internal symlinks"
+                dependencyTreeCoverage: GatewayPayloadStore.fingerprintCoverage
             ),
             to: root.appendingPathComponent("manifest.json")
         )

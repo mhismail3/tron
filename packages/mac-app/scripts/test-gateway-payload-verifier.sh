@@ -95,6 +95,36 @@ cp "$PAYLOAD/runtime/node-arm64" "$PAYLOAD/runtime/node-x64"
 chmod a-w "$PAYLOAD/runtime/node-x64"
 expect_rejected wrong-runtime-architecture
 
+for invalid_alias in missing regular wrong-target absolute-target; do
+    reset_fixture
+    make_writable "$PAYLOAD/runtime/bin-arm64"
+    alias="$PAYLOAD/runtime/bin-arm64/node"
+    rm "$alias"
+    case "$invalid_alias" in
+        missing) ;;
+        regular) printf '#!/bin/sh\nexit 0\n' > "$alias"; chmod 755 "$alias" ;;
+        wrong-target) ln -s ../node-x64 "$alias" ;;
+        absolute-target) ln -s "$PAYLOAD/runtime/node-arm64" "$alias" ;;
+    esac
+    chmod -R a-w "$PAYLOAD" "$APP"
+    expect_rejected "invalid-node-alias-$invalid_alias"
+done
+
+for invalid_alias in missing regular wrong-target absolute-target; do
+    reset_fixture
+    make_writable "$PAYLOAD/runtime/bin-arm64"
+    alias="$PAYLOAD/runtime/bin-arm64/pi"
+    rm "$alias"
+    case "$invalid_alias" in
+        missing) ;;
+        regular) printf '#!/bin/sh\nexit 0\n' > "$alias"; chmod 755 "$alias" ;;
+        wrong-target) ln -s ../node-arm64 "$alias" ;;
+        absolute-target) ln -s "$PAYLOAD/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" "$alias" ;;
+    esac
+    chmod -R a-w "$PAYLOAD" "$APP"
+    expect_rejected "invalid-pi-alias-$invalid_alias"
+done
+
 reset_fixture
 chmod u+w "$PAYLOAD/app"
 expect_rejected writable-payload-tree
@@ -162,4 +192,4 @@ printf '{"schema":1,"kind":"forged"}\n' > "$PAYLOAD/manifest.json"
 chmod -R a-w "$PAYLOAD" "$APP"
 expect_rejected malformed-manifest
 
-printf 'payload verifier fixtures: valid, tampered app, forged helper, wrong runtime hash/version/architecture, writable tree, symlink escapes, valid identity tampering, and malformed manifest rejected\n'
+printf 'payload verifier fixtures: valid, tampered app, forged helper, wrong runtime hash/version/architecture/aliases, writable tree, symlink escapes, valid identity tampering, and malformed manifest rejected\n'

@@ -25,9 +25,14 @@ import { NotificationGrantStore } from "./notifications/grant-store.js";
 import { PushRelayClient } from "./notifications/relay-client.js";
 import { NotificationService } from "./notifications/notification-service.js";
 import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
+import { configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
 
 const config = await loadConfig();
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
+// Pi installs its private agent-bin projection while loading settings. Apply
+// the supervised immutable command contract afterward, before extension or
+// model discovery, so that mutable projection cannot precede bundled commands.
+configureSupervisedNodeCommandEnvironment();
 const releaseAgentRuntimeLock = await acquireAgentRuntimeLocks([
   config.agentDir,
   ...(configuredSessionDir ? [configuredSessionDir] : []),

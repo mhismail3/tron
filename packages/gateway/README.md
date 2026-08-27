@@ -49,6 +49,18 @@ never persisted by Gateway.
 
 ## Runtime and state
 
+A supervised payload validates its architecture-specific immutable `node` and
+technical `pi` command aliases before model services or extension packages load.
+The aliases must have exact relative target text, remain inside
+`TRON_GATEWAY_PAYLOAD_ROOT`, and resolve respectively to the running Node file and
+the payload's executable Pi SDK CLI. Stable makes those selected bundled commands
+deterministic; Debug preserves a valid developer Node first and adds the payload
+commands as fallback. Invalid aliases fail startup rather than silently consulting
+Homebrew, NVM, or a mutable user shim. Unsupervised source/test execution retains
+its supplied environment. Extension-owned void presentation callbacks are
+transactional best-effort projections: malformed or over-budget updates are
+rejected with bounded diagnostics and can never become an uncaught process exit.
+
 - Agent state: `PI_CODING_AGENT_DIR`, default `~/.pi/agent`; the isolated Xcode
   Dev LaunchAgent sets `TRON_AGENT_DIR_NAME=agent-dev`, so Dev sessions live in
   `~/.pi/agent-dev` and never share production JSONL with `~/.pi/agent`

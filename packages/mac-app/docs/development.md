@@ -48,8 +48,10 @@ The script:
 3. downloads exact Node 22.22.0 arm64 and x64 archives;
 4. checks hard-coded SHA-256 values;
 5. compiles `tron-gateway-launcher.c` as a universal macOS executable;
-6. stages the launcher into the single Stable Login Item skeleton;
-7. hashes every regular file and safe internal symlink under `app/**` (including
+6. creates exact relative `runtime/bin-{arm64,x64}` command aliases for the
+   corresponding checked Node binaries and the bundled backing SDK CLI;
+7. stages the launcher into the single Stable Login Item skeleton;
+8. hashes every regular file and safe internal symlink under `app/**` (including
    the complete production `node_modules` tree) and `runtime/**` with the
    launcher's bounded in-process hasher, then writes that fingerprint into the
    bundled `manifest.json` and stamps a runtime epoch. The shell hash helper
@@ -74,8 +76,11 @@ architectures, required paths, safe symlinks, immutable publication modes,
 exact source/package manifest identity, and byte equality with a freshly
 compiled unsigned universal helper. Staged runtimes are never executed during
 validation; only the host build Node selected by `.node-version` is executed.
-A failed check triggers one
-explicit rebuild and a second verification; malformed or tampered output is never silently accepted. `runtimeEpoch` is a freshness nonce bound by the immutable payload tree and its
+Verification also requires every runtime command alias to be an exact symlink
+with exact relative target text resolving to its signed architecture runtime or
+bundled SDK CLI. Missing, substituted, dangling, absolute, wrong-target, or
+escaping aliases fail closed. A failed check triggers one explicit rebuild and a second verification;
+malformed or tampered output is never silently accepted. `runtimeEpoch` is a freshness nonce bound by the immutable payload tree and its
 subsequent Xcode code signature; it is not an externally reproducible source
 input or a standalone secret. This milestone binds all other deterministic
 identity fields to source/build inputs
@@ -126,9 +131,12 @@ xcodebuild build -project TronMac.xcodeproj -scheme TronMac \
 
 The build fails closed if staging cannot complete (for example, if the
 machine lacks the development Node/npm toolchain or network access). A
-completed app contains the Gateway entrypoint, production `node_modules`, and
-both arm64/x64 Node runtimes, so the installed app does not consult `PATH`, a
-user's nvm installation, or a global Pi command. Release validation must also
+completed app contains the Gateway entrypoint, production `node_modules`, both
+arm64/x64 Node runtimes, and fingerprinted architecture-specific `node` command
+aliases. Stable adds only its selected immutable alias to `PATH` before extension
+discovery, so it never consults a user's nvm/Homebrew installation or a global Pi
+command. Debug preserves an already-resolving developer Node and uses the payload
+alias only as fallback. Release validation must also
 execute the signed embedded runtime, not only check that the binary is present;
 a hardened Node runtime without its JIT entitlement exits before the Gateway
 can bind its port.

@@ -135,6 +135,12 @@ struct MacSourceGuardTests {
         #expect(bundleScript.contains("tron-gateway-payload"))
         #expect(bundleScript.contains("node-arm64"))
         #expect(bundleScript.contains("node-x64"))
+        #expect(bundleScript.contains("bin-$arch"))
+        #expect(bundleScript.contains("$alias_dir/node"))
+        #expect(bundleScript.contains("safe_remove_tree \"$alias_dir\"\n    mkdir -p \"$alias_dir\""))
+        #expect(bundleScript.contains("../node-$arch"))
+        #expect(bundleScript.contains("$alias_dir/pi"))
+        #expect(bundleScript.contains("pi-coding-agent/dist/cli.js"))
         #expect(bundleScript.contains("node_modules"))
         #expect(bundleScript.contains("NODE_VERSION_FILE=\"$REPO_ROOT/.node-version\""))
         #expect(bundleScript.contains("NODE_VERSION=\"$(<\"$NODE_VERSION_FILE\")\""))
@@ -180,7 +186,7 @@ struct MacSourceGuardTests {
         #expect(!launchdFixture.contains("~/.tron"))
 
         let verifierScript = try Self.read(macRoot, "scripts/verify-gateway-payload.sh")
-        for required in ["--verify-payload", "NODE_ARM64_SHA256", "NODE_X64_SHA256", "payload tree is writable", "Mach-O", "lipo -archs", "realpath", "-arch arm64 -arch x86_64", "cmp -s", "GATEWAY_VERSION", "SOURCE_REVISION"] {
+        for required in ["--verify-payload", "NODE_ARM64_SHA256", "NODE_X64_SHA256", "payload tree is writable", "Mach-O", "lipo -archs", "realpath", "runtime/bin-", "alias target is not exact", "-arch arm64 -arch x86_64", "cmp -s", "GATEWAY_VERSION", "SOURCE_REVISION"] {
             #expect(verifierScript.contains(required), "payload verifier missing marker: \(required)")
         }
 
@@ -190,7 +196,7 @@ struct MacSourceGuardTests {
         #expect(hashScript.contains("shasum -a 256"))
 
         let launcher = try Self.read(macRoot, "scripts/tron-gateway-launcher.c")
-        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_UPDATE_HELPER", "gateway-payload-deploy.mjs", "immutable_tree", "CC_SHA256", "S_IWUSR", "--verify-payload", "nodeVersion"] {
+        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_UPDATE_HELPER", "gateway-payload-deploy.mjs", "immutable_tree", "required_runtime_alias", "required_pi_alias", "../node-%s", "pi-coding-agent/dist/cli.js", "CC_SHA256", "S_IWUSR", "--verify-payload", "nodeVersion"] {
             #expect(launcher.contains(required), "launcher missing external payload safety marker: \(required)")
         }
 

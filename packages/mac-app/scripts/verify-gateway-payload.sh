@@ -56,7 +56,7 @@ fi
 
 for required_directory in \
     "$PAYLOAD_DIR/app/dist" "$PAYLOAD_DIR/app/scripts" "$PAYLOAD_DIR/app/node_modules" \
-    "$PAYLOAD_DIR/runtime"; do
+    "$PAYLOAD_DIR/runtime" "$PAYLOAD_DIR/runtime/bin-arm64" "$PAYLOAD_DIR/runtime/bin-x64"; do
     [[ -d "$required_directory" && ! -L "$required_directory" ]] || fail "required directory missing: $required_directory"
 done
 if [[ "$EXPECTED_CHANNEL" == dev ]]; then
@@ -90,6 +90,30 @@ validate_runtime() {
 }
 validate_runtime arm64 "$NODE_ARM64_SHA256"
 validate_runtime x64 "$NODE_X64_SHA256"
+validate_runtime_alias() {
+    local architecture="$1" directory="$PAYLOAD_DIR/runtime/bin-$1" alias expected runtime
+    alias="$directory/node"
+    expected="../node-$architecture"
+    runtime="$PAYLOAD_DIR/runtime/node-$architecture"
+    [[ -d "$directory" && ! -L "$directory" ]] || fail "Node $architecture alias directory is missing or symlinked"
+    [[ -L "$alias" ]] || fail "Node $architecture alias is not a symlink"
+    [[ "$(readlink "$alias")" == "$expected" ]] || fail "Node $architecture alias target is not exact"
+    [[ "$(realpath "$alias")" == "$(realpath "$runtime")" ]] || fail "Node $architecture alias does not resolve to its runtime"
+    [[ -x "$alias" ]] || fail "Node $architecture alias target is not executable"
+}
+validate_runtime_alias arm64
+validate_runtime_alias x64
+validate_pi_alias() {
+    local architecture="$1" directory="$PAYLOAD_DIR/runtime/bin-$1" alias="$PAYLOAD_DIR/runtime/bin-$1/pi"
+    local cli="$PAYLOAD_DIR/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+    local expected="../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+    [[ -f "$cli" && ! -L "$cli" && -x "$cli" ]] || fail "payload Pi CLI is missing, symlinked, or non-executable"
+    [[ -d "$directory" && ! -L "$directory" && -L "$alias" ]] || fail "Pi $architecture alias is missing or substituted"
+    [[ "$(readlink "$alias")" == "$expected" ]] || fail "Pi $architecture alias target is not exact"
+    [[ "$(realpath "$alias")" == "$(realpath "$cli")" ]] || fail "Pi $architecture alias does not resolve to the payload CLI"
+}
+validate_pi_alias arm64
+validate_pi_alias x64
 
 # The helper must remain unsigned until Xcode's signing phases. This keeps the
 # deterministic pre-signing byte comparison meaningful and makes signing the

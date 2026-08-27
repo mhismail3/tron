@@ -56,7 +56,7 @@ verify_app_bundle() {
     local required_file
     local required_directory
     local manifest="$root/$gateway_root/manifest.json"
-    local expected_fingerprint actual_fingerprint runtime expected_arch actual_arch entitlements helper_archs node_version
+    local expected_fingerprint actual_fingerprint runtime expected_arch actual_arch entitlements helper_archs node_version alias pi_alias pi_cli
     local required_files=(
         "$helper"
         "$launch_agent"
@@ -68,7 +68,11 @@ verify_app_bundle() {
         "$gateway_root/runtime/node-arm64"
         "$gateway_root/runtime/node-x64"
     )
-    local required_directories=("$gateway_root/app/node_modules")
+    local required_directories=(
+        "$gateway_root/app/node_modules"
+        "$gateway_root/runtime/bin-arm64"
+        "$gateway_root/runtime/bin-x64"
+    )
 
     for required_file in "${required_files[@]}"; do
         [ -f "$root/$required_file" ] || die "app bundle is missing required Gateway file: $root/$required_file"
@@ -101,11 +105,16 @@ verify_app_bundle() {
     [[ "$actual_fingerprint" == "$expected_fingerprint" ]] \
         || die "Gateway payload fingerprint does not match its authoritative manifest"
 
+    pi_cli="$root/$gateway_root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+    [[ -f "$pi_cli" && ! -L "$pi_cli" && -x "$pi_cli" ]] || die "Gateway payload Pi CLI is invalid"
     for expected_arch in arm64 x86_64; do
+        local runtime_arch
         if [[ "$expected_arch" == arm64 ]]; then
             runtime="$root/$gateway_root/runtime/node-arm64"
+            runtime_arch=arm64
         else
             runtime="$root/$gateway_root/runtime/node-x64"
+            runtime_arch=x64
         fi
         [ -x "$runtime" ] || die "Node $expected_arch runtime is not executable"
         if [[ "$expected_arch" == arm64 ]]; then expected_sha="$NODE_ARM64_SHA256"; else expected_sha="$NODE_X64_SHA256"; fi
@@ -120,6 +129,14 @@ verify_app_bundle() {
         actual_arch="$(lipo -archs "$runtime" 2>/dev/null || true)"
         [[ "$actual_arch" == "$expected_arch" ]] \
             || die "Node runtime architecture mismatch: expected $expected_arch, got $actual_arch"
+        alias="$root/$gateway_root/runtime/bin-$runtime_arch/node"
+        [[ -L "$alias" && "$(readlink "$alias")" == "../node-$runtime_arch" \
+            && "$(realpath "$alias")" == "$(realpath "$runtime")" && -x "$alias" ]] \
+            || die "Node $runtime_arch command alias is invalid"
+        pi_alias="$root/$gateway_root/runtime/bin-$runtime_arch/pi"
+        [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" \
+            && "$(realpath "$pi_alias")" == "$(realpath "$pi_cli")" && -x "$pi_alias" ]] \
+            || die "Pi $runtime_arch command alias is invalid"
     done
 }
 

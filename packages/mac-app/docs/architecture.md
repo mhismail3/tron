@@ -2,7 +2,10 @@
 
 `Tron.app` is the installer, supervisor, pairing surface, and menu-bar status UI
 for the always-running Tron agent. The Login Item launches a minimal universal C
-shim, which execs the exact bundled Node runtime and Tron Gateway payload.
+shim, which execs the exact bundled Node runtime and Tron Gateway payload. Each
+immutable payload also carries exact architecture-specific command directories.
+Their `node` aliases resolve to those same runtime binaries, while their technical
+`pi` aliases resolve to the executable CLI in the pinned backing SDK package.
 
 User-facing terminology is Tron or Tron Agent. Historical `com.tron.server`
 launchd labels remain stable internal identifiers so upgrades do not orphan old
@@ -176,7 +179,12 @@ runtime epoch, and the complete fingerprint coverage declaration. Staging,
 promotion, and the Swift payload validator verify every regular file and
 internal symlink under `app/` and `runtime/`; links must resolve to regular
 files/directories beneath the payload root, and their targets are covered by
-the deterministic fingerprint. The small C launcher also recomputes the complete
+the deterministic fingerprint. The runtime `node` and technical `pi` aliases are stronger required entries:
+every validator requires exact relative target text and exact resolution to the
+corresponding architecture runtime or payload CLI. Manifest schema 1 retains
+its historical `dependencyTreeCoverage` string so the immediately preceding
+signed launcher can admit a new payload; the canonical fingerprint algorithm
+nevertheless includes internal symlink paths and target text. The small C launcher also recomputes the complete
 fingerprint before exporting identity; it bounds manifest reads, rejects
 escaping/dangling/special links and writable payload entries, resolves every
 executable/resource path with `realpath`, and exports provenance before `exec`. Invalid or absent external
@@ -187,8 +195,18 @@ artifact promotion is wired, and source builds read only the validated
 `gateway/update-config.json` projection. Source mode compiles with the repository's
 local TypeScript compiler into a private temporary output directory, never the trusted
 repository's `packages/gateway/dist`, and copies only verified output into the candidate.
-No payload selection code writes
-canonical sessions or credentials.
+The existing trusted Gateway postinstall helper also supplies the exact runtime
+and CLI aliases while assembling a source candidate inherited from a predecessor
+payload that predates this contract. Workspace installs have no sibling payload
+runtime and remain unchanged; new payload admission still requires immutable exact
+links.
+Before package or extension discovery, the supervised Gateway validates the
+selected alias against payload containment, executable identity, and the running
+Node file. Stable places that immutable command first on `PATH`; Debug preserves
+an already-working developer Node and supplies the payload command as fallback.
+This keeps Stable independent of Homebrew/NVM while avoiding a Debug toolchain
+regression. Alias failure aborts startup before third-party code loads. No payload
+selection code writes canonical sessions or credentials.
 
 The Mac menu Restart action authenticates to the Gateway WebSocket, validates
 protocol identity, and calls `gateway.restart` with a bounded command ID. The

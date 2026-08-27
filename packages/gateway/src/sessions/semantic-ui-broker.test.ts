@@ -91,7 +91,8 @@ describe("SemanticUIBroker", () => {
     broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision, true, false);
     await expect(result).resolves.toBe(true);
     broker.retire();
-    expect(() => context.setStatus("late", "ignored")).toThrow(expect.objectContaining({ code: "conflict" }));
+    expect(() => context.setStatus("late", "ignored")).not.toThrow();
+    expect(broker.state().semanticState.statuses.late).toBeUndefined();
   });
 
   it("applies native editor updates only at the authoritative epoch and base revision", () => {
@@ -193,13 +194,8 @@ describe("SemanticUIBroker", () => {
     for (let index = 0; index < 32; index += 1) context.setStatus(`status-${index}`, `value-${index}`);
 
     expect(Object.keys(broker.state().semanticState.statuses)).toHaveLength(32);
-    expect(() => context.setStatus("overflow", "value")).toThrow(expect.objectContaining({
-      code: "busy",
-      retryable: true,
-    }));
-    expect(() => context.setStatus("status-0", "x".repeat(4 * 1_024))).toThrow(expect.objectContaining({
-      code: "conflict",
-    }));
+    expect(() => context.setStatus("overflow", "value")).not.toThrow();
+    expect(() => context.setStatus("status-0", "x".repeat(4 * 1_024))).not.toThrow();
     expect(broker.state().semanticState.statuses["status-0"]).toBe("value-0");
 
     context.setStatus("status-0", "updated");
@@ -235,12 +231,9 @@ describe("SemanticUIBroker", () => {
 
     await expect((context.select as unknown as (title: string, options: unknown) => Promise<unknown>)("Choose", null))
       .rejects.toMatchObject({ code: "conflict" });
-    expect(() => (context.setWorkingVisible as unknown as (visible: unknown) => void)("yes"))
-      .toThrow(expect.objectContaining({ code: "conflict" }));
-    expect(() => (context.pasteToEditor as unknown as (text: unknown) => void)(42))
-      .toThrow(expect.objectContaining({ code: "conflict" }));
-    expect(() => context.setWidget("bad-placement", ["line"], { placement: "sideways" as "aboveEditor" }))
-      .toThrow(expect.objectContaining({ code: "conflict" }));
+    expect(() => (context.setWorkingVisible as unknown as (visible: unknown) => void)("yes")).not.toThrow();
+    expect(() => (context.pasteToEditor as unknown as (text: unknown) => void)(42)).not.toThrow();
+    expect(() => context.setWidget("bad-placement", ["line"], { placement: "sideways" as "aboveEditor" })).not.toThrow();
     expect(broker.state().semanticState.working.visible).toBe(true);
     expect(broker.state().semanticState.editorText).toBe("");
     expect(broker.interactions()).toEqual([]);
@@ -273,9 +266,7 @@ describe("SemanticUIBroker", () => {
 
     expect(admitted.semanticState.editorText).toBe(initial + suffix);
     expect(admitted.semanticState.editorRevision).toBe(2);
-    expect(() => context.pasteToEditor("c".repeat(40 * 1_024))).toThrow(expect.objectContaining({
-      code: "conflict",
-    }));
+    expect(() => context.pasteToEditor("c".repeat(40 * 1_024))).not.toThrow();
     expect(broker.state().semanticState.editorText).toBe(admitted.semanticState.editorText);
     expect(broker.state().semanticState.editorRevision).toBe(admitted.semanticState.editorRevision);
     expect(Math.max(...events.map((event) => Buffer.byteLength(JSON.stringify(event.payload))))).toBeLessThan(768 * 1_024);
@@ -326,6 +317,19 @@ describe("SemanticUIBroker", () => {
     expect(broker.state().semanticState.widgets).toEqual([]);
   });
 
+  it("contains a quote-dense async widget at the broker/store byte-boundary", async () => {
+    const broker = brokerWith(() => {});
+    const context = broker.context();
+    const snapshot = `PI_SUBAGENT_ASYNC_JSON:${'"x",'.repeat(115)}`;
+    expect(Buffer.byteLength(snapshot)).toBeLessThanOrEqual(512);
+    expect(Buffer.byteLength(JSON.stringify(snapshot))).toBeGreaterThan(512);
+
+    await expect(new Promise<void>((resolve) => {
+      setImmediate(() => { context.setWidget("subagent-async", [snapshot]); resolve(); });
+    })).resolves.toBeUndefined();
+    expect(broker.state().semanticState.widgets).toEqual([]);
+  });
+
   it("strips complete C0/C1 terminal protocol families from semantic projections", async () => {
     const events: unknown[] = [];
     const broker = brokerWith((_topic, payload) => events.push(payload));
@@ -349,12 +353,12 @@ describe("SemanticUIBroker", () => {
     const context = broker.context();
     for (let index = 0; index < 24; index += 1) context.setWidget(`widget-${index}`, ["line"]);
 
-    expect(() => context.setWidget("overflow", ["line"])).toThrow(expect.objectContaining({ code: "busy" }));
+    expect(() => context.setWidget("overflow", ["line"])).not.toThrow();
     expect(() => context.setWidget("unsupported", {})).not.toThrow();
     expect(() => context.setWidget("widget-0", {})).not.toThrow();
     expect(broker.state().semanticState.widgets.find((widget) => widget.key === "widget-0")?.lines).toEqual(["line"]);
-    expect(() => context.setTitle("x".repeat(4 * 1_024))).toThrow(expect.objectContaining({ code: "conflict" }));
-    expect(() => context.notify("x".repeat(32 * 1_024), "info")).toThrow(expect.objectContaining({ code: "conflict" }));
+    expect(() => context.setTitle("x".repeat(4 * 1_024))).not.toThrow();
+    expect(() => context.notify("x".repeat(32 * 1_024), "info")).not.toThrow();
     expect(broker.state().semanticState.widgets).toHaveLength(24);
     expect(broker.state().semanticState.title).toBeUndefined();
     expect(events.every((event) => Buffer.byteLength(JSON.stringify(event.payload)) < 768 * 1_024)).toBe(true);

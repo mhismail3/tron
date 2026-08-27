@@ -49,6 +49,9 @@ const MAX_PUSH_CONFIG_BYTES = 4 * 1024;
 const SCHEMA = 1;
 const KIND = "tron-gateway-payload";
 const SELECTION_KIND = "tron-gateway-selection";
+const PAYLOAD_FINGERPRINT_COVERAGE = "app/** and runtime/** regular files";
+const PAYLOAD_PI_CLI = "app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js";
+const PAYLOAD_PI_ALIAS_TARGET = "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js";
 const PROTOCOL_VERSION = 3;
 const LOCAL_CREDENTIAL_MAX_BYTES = 64 * 1024;
 const MAX_RETAINED_VERSIONS = 8;
@@ -160,6 +163,37 @@ async function validatePayloadSymlink(root, path, relativePath) {
   return readlink(path);
 }
 
+async function validateRuntimeNodeAlias(root, architecture) {
+  const directory = join(root, "runtime", `bin-${architecture}`);
+  const alias = join(directory, "node");
+  const runtime = join(root, "runtime", `node-${architecture}`);
+  const directoryInfo = await lstat(directory);
+  if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()) throw new Error(`runtime Node alias directory is not regular: ${architecture}`);
+  const aliasInfo = await lstat(alias);
+  if (!aliasInfo.isSymbolicLink()) throw new Error(`runtime Node alias is not a symlink: ${architecture}`);
+  const expectedTarget = `../node-${architecture}`;
+  if (await readlink(alias) !== expectedTarget) throw new Error(`runtime Node alias target is invalid: ${architecture}`);
+  const [resolvedAlias, resolvedRuntime] = await Promise.all([
+    realpath(alias).catch(() => { throw new Error(`runtime Node alias is dangling: ${architecture}`); }),
+    realpath(runtime),
+  ]);
+  if (!under(root, resolvedAlias) || resolvedAlias !== resolvedRuntime) throw new Error(`runtime Node alias does not resolve to its architecture runtime: ${architecture}`);
+  const runtimeInfo = await stat(resolvedRuntime);
+  if (!runtimeInfo.isFile() || (runtimeInfo.mode & 0o111) === 0) throw new Error(`runtime Node alias target is not executable: ${architecture}`);
+}
+
+async function validateRuntimePiAlias(root, architecture) {
+  const directory = join(root, "runtime", `bin-${architecture}`);
+  const alias = join(directory, "pi");
+  const cli = join(root, PAYLOAD_PI_CLI);
+  const [cliInfo, aliasInfo] = await Promise.all([lstat(cli), lstat(alias)]);
+  if (!cliInfo.isFile() || cliInfo.isSymbolicLink() || (cliInfo.mode & 0o111) === 0) throw new Error("payload Pi CLI is not a regular executable");
+  if (!aliasInfo.isSymbolicLink()) throw new Error(`runtime Pi alias is not a symlink: ${architecture}`);
+  if (await readlink(alias) !== PAYLOAD_PI_ALIAS_TARGET) throw new Error(`runtime Pi alias target is invalid: ${architecture}`);
+  const [resolvedAlias, resolvedCli] = await Promise.all([realpath(alias), realpath(cli)]);
+  if (!under(root, resolvedAlias) || resolvedAlias !== resolvedCli) throw new Error(`runtime Pi alias does not resolve to the payload CLI: ${architecture}`);
+}
+
 async function completePayload(root) {
   const requested = resolve(root);
   if ((await lstat(requested)).isSymbolicLink()) throw new Error("payload root must not be a symlink");
@@ -183,6 +217,10 @@ async function completePayload(root) {
       throw new Error(`runtime is not executable: ${path}`);
     }
   }
+  await validateRuntimeNodeAlias(resolved, "arm64");
+  await validateRuntimeNodeAlias(resolved, "x64");
+  await validateRuntimePiAlias(resolved, "arm64");
+  await validateRuntimePiAlias(resolved, "x64");
 }
 
 async function regularFiles(root, prefix) {
@@ -305,7 +343,8 @@ function payloadManifest(value, expected = {}) {
     || value.schema !== SCHEMA || value.kind !== KIND
     || !validComponent(value.channel, 64) || !validComponent(value.version, 128)
     || !safeIdentity(value.gatewayVersion) || !safeIdentity(value.nodeVersion)
-    || !safeIdentity(value.sourceRevision) || !validComponent(value.runtimeEpoch, 128) || !fingerprint(value.payloadFingerprint)) {
+    || !safeIdentity(value.sourceRevision) || !validComponent(value.runtimeEpoch, 128) || !fingerprint(value.payloadFingerprint)
+    || value.dependencyTreeCoverage !== PAYLOAD_FINGERPRINT_COVERAGE) {
     throw new Error("payload manifest identity is invalid");
   }
   for (const [key, expectedValue] of Object.entries(expected)) {

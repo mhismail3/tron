@@ -25,12 +25,20 @@ make_payload() {
   printf '%s\n' 'TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test' > "$root/app/PushService.xcconfig"
   printf '%s\n' '// fixture helper' > "$root/app/scripts/ensure-node-pty-helper.mjs"
   printf '%s\n' '// fixture updater' > "$root/app/scripts/gateway-payload-deploy.mjs"
+  mkdir -p "$root/app/node_modules/@earendil-works/pi-coding-agent/dist"
+  printf '%s\n' '#!/usr/bin/env node' > "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+  chmod 755 "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   printf '%s\n' '#!/bin/sh' 'printf "%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"' 'exit 0' > "$root/runtime/node-arm64"
   # Keep each fake runtime over the canonical minimum size without embedding
   # NUL bytes that would make the shell fixture itself invalid.
   dd if=/dev/zero bs=1024 count=1025 2>/dev/null | tr '\\0' '#' >> "$root/runtime/node-arm64"
   cp "$root/runtime/node-arm64" "$root/runtime/node-x64"
   chmod 755 "$root/runtime/node-arm64" "$root/runtime/node-x64"
+  mkdir -p "$root/runtime/bin-arm64" "$root/runtime/bin-x64"
+  ln -s ../node-arm64 "$root/runtime/bin-arm64/node"
+  ln -s ../node-x64 "$root/runtime/bin-x64/node"
+  ln -s ../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js "$root/runtime/bin-arm64/pi"
+  ln -s ../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js "$root/runtime/bin-x64/pi"
   fingerprint="$("$HASH" "$root")"
   printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"fixture","nodeVersion":"fixture","sourceRevision":"0123456789abcdef0123456789abcdef01234567","runtimeEpoch":"01234567-89ab-cdef-0123-456789abcdef","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' "$version" "$fingerprint" > "$root/manifest.json"
   chmod -R a-w "$root"
@@ -57,6 +65,40 @@ for invalid_kind in missing empty malformed symlink; do
   chmod -R a-w "$INVALID"
   if "$HELPER" --verify-payload "$INVALID" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; then
     echo "launcher admitted $invalid_kind stable PushService.xcconfig" >&2; exit 1
+  fi
+done
+for invalid_alias in missing regular wrong-target absolute-target; do
+  INVALID="$TMP/invalid-node-alias-$invalid_alias"
+  cp -R "$BUNDLE" "$INVALID"
+  chmod -R u+w "$INVALID"
+  alias="$INVALID/runtime/bin-arm64/node"
+  rm "$alias"
+  case "$invalid_alias" in
+    missing) ;;
+    regular) printf '#!/bin/sh\nexit 0\n' > "$alias"; chmod 755 "$alias" ;;
+    wrong-target) ln -s ../node-x64 "$alias" ;;
+    absolute-target) ln -s "$INVALID/runtime/node-arm64" "$alias" ;;
+  esac
+  chmod -R a-w "$INVALID"
+  if "$HELPER" --verify-payload "$INVALID" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; then
+    echo "launcher admitted invalid runtime Node alias: $invalid_alias" >&2; exit 1
+  fi
+done
+for invalid_alias in missing regular wrong-target absolute-target; do
+  INVALID="$TMP/invalid-pi-alias-$invalid_alias"
+  cp -R "$BUNDLE" "$INVALID"
+  chmod -R u+w "$INVALID"
+  alias="$INVALID/runtime/bin-arm64/pi"
+  rm "$alias"
+  case "$invalid_alias" in
+    missing) ;;
+    regular) printf '#!/bin/sh\nexit 0\n' > "$alias"; chmod 755 "$alias" ;;
+    wrong-target) ln -s ../node-arm64 "$alias" ;;
+    absolute-target) ln -s "$INVALID/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" "$alias" ;;
+  esac
+  chmod -R a-w "$INVALID"
+  if "$HELPER" --verify-payload "$INVALID" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; then
+    echo "launcher admitted invalid runtime Pi alias: $invalid_alias" >&2; exit 1
   fi
 done
 EXTERNAL="$TMP/home/.tron/gateway/payloads/stable/versions/v2"
@@ -107,6 +149,29 @@ tampered_status=$?
 set -e
 [[ "$tampered_status" -eq 0 ]] || { echo "tampered existing external payload did not use bundled fallback: $tampered_status" >&2; exit 1; }
 [[ "$tampered_result" == "$BUNDLE_REAL" ]] || { echo "tampered external payload did not fall back to bundled payload: $tampered_result" >&2; exit 1; }
+# A payload from before the runtime alias contract can still be present at
+# rollout. Even with a self-consistent legacy fingerprint it must be rejected
+# as the selected external payload and use the trusted new bundled fallback.
+chmod -R u+w "$TMP/home"
+LEGACY="$TMP/home/.tron/gateway/payloads/stable/versions/legacy"
+make_payload "$LEGACY" legacy legacy
+chmod -R u+w "$LEGACY"
+rm -rf "$LEGACY/runtime/bin-arm64" "$LEGACY/runtime/bin-x64"
+LEGACY_FINGERPRINT="$("$HELPER" --fingerprint "$LEGACY")"
+python3 - "$LEGACY/manifest.json" "$LEGACY_FINGERPRINT" <<'PY'
+import json, sys
+path, fingerprint = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    manifest = json.load(handle)
+manifest["payloadFingerprint"] = fingerprint
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(manifest, handle, separators=(",", ":"))
+    handle.write("\n")
+PY
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"legacy","payloadFingerprint":"%s"}\n' "$LEGACY_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
+chmod -R a-w "$TMP/home"
+legacy_result="$(HOME="$TMP/home" "$HELPER" --version 2> "$TMP/legacy-error")"
+[[ "$legacy_result" == "$BUNDLE_REAL" ]] || { echo "legacy external payload without aliases did not use bundled fallback: $legacy_result" >&2; exit 1; }
 # A published candidate gets one launch attempt. A second launch with the
 # still-pending marker must restore the validated previous selection atomically.
 chmod -R u+w "$TMP/home"

@@ -88,7 +88,7 @@ function boundedWidgetLines(content: unknown): string[] | undefined {
     // oversized update atomically instead of throwing into an extension-owned
     // timer/event callback, where Pi has no caller awaiting the failure and the
     // exception would otherwise terminate the Gateway process.
-    if (Buffer.byteLength(line) > MAX_WIDGET_LINE_BYTES) return undefined;
+    if (encodedBytes(line) > MAX_WIDGET_LINE_BYTES) return undefined;
     lines.push(line);
   }
   return lines;
@@ -115,6 +115,10 @@ export class SemanticUIBroker {
   private mutate(change: (state: ExtensionSemanticState) => void): void {
     this.assertActive();
     this.presentation.transact((draft) => change(draft.semanticState));
+  }
+  private safeCallback(operation: string, callback: () => void): void {
+    try { callback(); }
+    catch (error) { this.presentation.recordRejectedCallback(operation, error); }
   }
 
   respond(id: string, hostEpoch: string, presentationRevision: number, value: unknown, cancelled: boolean): void {
@@ -347,85 +351,108 @@ export class SemanticUIBroker {
         return typeof result === "string" ? result : undefined;
       },
       notify(message, type = "info") {
-        broker.assertActive(); requireBoundedString(message, MAX_NOTIFICATION_BYTES, "notification"); message = stripTerminalPresentation(message);
-        if (type !== "info" && type !== "warning" && type !== "error") throw new GatewayError("conflict", "Extension UI notification type is invalid");
-        broker.presentation.notify(message, type);
+        broker.safeCallback("notify", () => {
+          broker.assertActive(); requireBoundedString(message, MAX_NOTIFICATION_BYTES, "notification"); message = stripTerminalPresentation(message);
+          if (type !== "info" && type !== "warning" && type !== "error") throw new GatewayError("conflict", "Extension UI notification type is invalid");
+          broker.presentation.notify(message, type);
+        });
       },
-      onTerminalInput() { broker.assertActive(); return () => {}; },
+      onTerminalInput() { return () => {}; },
       setStatus(key, text) {
-        broker.assertActive(); requireBoundedString(key, MAX_KEY_BYTES, "status key"); key = stripTerminalPresentation(key);
-        if (text !== undefined) { requireBoundedString(text, MAX_STATUS_BYTES, "status text"); text = stripTerminalPresentation(text); }
-        const owner = currentExtensionOwner();
-        broker.mutate((state) => {
-          if (text !== undefined) {
-            if (!(key in state.statuses) && Object.keys(state.statuses).length >= MAX_STATUSES) throw new GatewayError("busy", "Extension UI statuses reached their bounded capacity", true);
-            state.statuses[key] = text;
-            if (owner) state.statusOwners[key] = owner; else delete state.statusOwners[key];
-          } else {
-            delete state.statuses[key];
-            delete state.statusOwners[key];
-          }
+        broker.safeCallback("status", () => {
+          broker.assertActive(); requireBoundedString(key, MAX_KEY_BYTES, "status key"); key = stripTerminalPresentation(key);
+          if (text !== undefined) { requireBoundedString(text, MAX_STATUS_BYTES, "status text"); text = stripTerminalPresentation(text); }
+          const owner = currentExtensionOwner();
+          broker.mutate((state) => {
+            if (text !== undefined) {
+              if (!(key in state.statuses) && Object.keys(state.statuses).length >= MAX_STATUSES) throw new GatewayError("busy", "Extension UI statuses reached their bounded capacity", true);
+              state.statuses[key] = text;
+              if (owner) state.statusOwners[key] = owner; else delete state.statusOwners[key];
+            } else {
+              delete state.statuses[key];
+              delete state.statusOwners[key];
+            }
+          });
         });
       },
       setWorkingMessage(message) {
-        broker.assertActive(); if (message !== undefined) { requireBoundedString(message, MAX_WORKING_BYTES, "working message"); message = stripTerminalPresentation(message); }
-        broker.mutate((state) => { if (message === undefined) delete state.working.message; else state.working.message = message; });
-      },
-      setWorkingVisible(visible) {
-        broker.assertActive(); if (typeof visible !== "boolean") throw new GatewayError("conflict", "Extension UI working visibility is invalid");
-        broker.mutate((state) => { state.working.visible = visible; });
-      },
-      setWorkingIndicator(options?: WorkingIndicatorOptions) {
-        broker.assertActive();
-        let next: ExtensionSemanticState["working"]["indicator"];
-        if (options === undefined) next = { kind: "default", frames: [] };
-        else {
-          const frames = options.frames ?? [];
-          if (!Array.isArray(frames) || frames.length > MAX_INDICATOR_FRAMES || !frames.every((frame) => typeof frame === "string")) throw new GatewayError("conflict", "Extension UI working indicator is invalid");
-          const sanitizedFrames = frames.map((frame) => { const sanitized = stripTerminalPresentation(frame); requireBoundedString(sanitized, MAX_INDICATOR_FRAME_BYTES, "indicator frame"); return sanitized; });
-          if (options.intervalMs !== undefined && (!Number.isSafeInteger(options.intervalMs) || options.intervalMs < 16 || options.intervalMs > 60_000)) throw new GatewayError("conflict", "Extension UI working indicator interval is invalid");
-          next = { kind: sanitizedFrames.length === 0 ? "hidden" : sanitizedFrames.length === 1 ? "static" : "animated", frames: sanitizedFrames, ...(options.intervalMs === undefined ? {} : { intervalMs: options.intervalMs }) };
-        }
-        broker.mutate((state) => { state.working.indicator = next; });
-      },
-      setHiddenThinkingLabel(label) {
-        broker.assertActive(); if (label !== undefined) { requireBoundedString(label, MAX_TITLE_BYTES, "thinking label"); label = stripTerminalPresentation(label); }
-        broker.mutate((state) => { if (label === undefined) delete state.hiddenThinkingLabel; else state.hiddenThinkingLabel = label; });
-      },
-      setWidget(key, content, options) {
-        broker.assertActive(); requireBoundedString(key, MAX_KEY_BYTES, "widget key"); key = stripTerminalPresentation(key);
-        if (content === undefined) { broker.mutate((state) => { state.widgets = state.widgets.filter((widget) => widget.key !== key); }); return; }
-        const lines = boundedWidgetLines(content);
-        if (!lines) return;
-        const placement = options?.placement ?? "aboveEditor";
-        if (placement !== "aboveEditor" && placement !== "belowEditor") throw new GatewayError("conflict", "Extension UI widget placement is invalid");
-        broker.mutate((state) => {
-          const index = state.widgets.findIndex((widget) => widget.key === key);
-          if (index < 0 && state.widgets.length >= MAX_WIDGETS) throw new GatewayError("busy", "Extension UI widgets reached their bounded capacity", true);
-          const owner = currentExtensionOwner();
-          const widget: ExtensionWidget = { key, revision: (index < 0 ? 0 : state.widgets[index]?.revision ?? 0) + 1, lines, placement, ...(owner ? { owner } : {}) };
-          if (index < 0) state.widgets.push(widget); else state.widgets[index] = widget;
+        broker.safeCallback("working-message", () => {
+          broker.assertActive(); if (message !== undefined) { requireBoundedString(message, MAX_WORKING_BYTES, "working message"); message = stripTerminalPresentation(message); }
+          broker.mutate((state) => { if (message === undefined) delete state.working.message; else state.working.message = message; });
         });
       },
-      setFooter() { broker.assertActive(); }, setHeader() { broker.assertActive(); },
-      setTitle(title) { broker.assertActive(); requireBoundedString(title, MAX_TITLE_BYTES, "title"); title = stripTerminalPresentation(title); broker.mutate((state) => { if (title) state.title = title; else delete state.title; }); },
+      setWorkingVisible(visible) {
+        broker.safeCallback("working-visible", () => {
+          broker.assertActive(); if (typeof visible !== "boolean") throw new GatewayError("conflict", "Extension UI working visibility is invalid");
+          broker.mutate((state) => { state.working.visible = visible; });
+        });
+      },
+      setWorkingIndicator(options?: WorkingIndicatorOptions) {
+        broker.safeCallback("working-indicator", () => {
+          broker.assertActive();
+          let next: ExtensionSemanticState["working"]["indicator"];
+          if (options === undefined) next = { kind: "default", frames: [] };
+          else {
+            const frames = options.frames ?? [];
+            if (!Array.isArray(frames) || frames.length > MAX_INDICATOR_FRAMES || !frames.every((frame) => typeof frame === "string")) throw new GatewayError("conflict", "Extension UI working indicator is invalid");
+            const sanitizedFrames = frames.map((frame) => { const sanitized = stripTerminalPresentation(frame); requireBoundedString(sanitized, MAX_INDICATOR_FRAME_BYTES, "indicator frame"); return sanitized; });
+            if (options.intervalMs !== undefined && (!Number.isSafeInteger(options.intervalMs) || options.intervalMs < 16 || options.intervalMs > 60_000)) throw new GatewayError("conflict", "Extension UI working indicator interval is invalid");
+            next = { kind: sanitizedFrames.length === 0 ? "hidden" : sanitizedFrames.length === 1 ? "static" : "animated", frames: sanitizedFrames, ...(options.intervalMs === undefined ? {} : { intervalMs: options.intervalMs }) };
+          }
+          broker.mutate((state) => { state.working.indicator = next; });
+        });
+      },
+      setHiddenThinkingLabel(label) {
+        broker.safeCallback("thinking-label", () => {
+          broker.assertActive(); if (label !== undefined) { requireBoundedString(label, MAX_TITLE_BYTES, "thinking label"); label = stripTerminalPresentation(label); }
+          broker.mutate((state) => { if (label === undefined) delete state.hiddenThinkingLabel; else state.hiddenThinkingLabel = label; });
+        });
+      },
+      setWidget(key, content, options) {
+        broker.safeCallback("widget", () => {
+          broker.assertActive(); requireBoundedString(key, MAX_KEY_BYTES, "widget key"); key = stripTerminalPresentation(key);
+          if (content === undefined) { broker.mutate((state) => { state.widgets = state.widgets.filter((widget) => widget.key !== key); }); return; }
+          const lines = boundedWidgetLines(content);
+          if (!lines) return;
+          const placement = options?.placement ?? "aboveEditor";
+          if (placement !== "aboveEditor" && placement !== "belowEditor") throw new GatewayError("conflict", "Extension UI widget placement is invalid");
+          broker.mutate((state) => {
+            const index = state.widgets.findIndex((widget) => widget.key === key);
+            if (index < 0 && state.widgets.length >= MAX_WIDGETS) throw new GatewayError("busy", "Extension UI widgets reached their bounded capacity", true);
+            const owner = currentExtensionOwner();
+            const widget: ExtensionWidget = { key, revision: (index < 0 ? 0 : state.widgets[index]?.revision ?? 0) + 1, lines, placement, ...(owner ? { owner } : {}) };
+            if (index < 0) state.widgets.push(widget); else state.widgets[index] = widget;
+          });
+        });
+      },
+      setFooter() {}, setHeader() {},
+      setTitle(title) {
+        broker.safeCallback("title", () => {
+          broker.assertActive(); requireBoundedString(title, MAX_TITLE_BYTES, "title"); title = stripTerminalPresentation(title);
+          broker.mutate((state) => { if (title) state.title = title; else delete state.title; });
+        });
+      },
       async custom() { broker.assertActive(); return undefined as never; },
       pasteToEditor(text) {
-        broker.assertActive(); requireBoundedString(text, MAX_EDITOR_BYTES, "editor paste"); text = stripTerminalPresentation(text);
-        broker.presentation.transact((draft) => {
-          const fullText = draft.semanticState.editorText + text;
-          requireBoundedString(fullText, MAX_EDITOR_BYTES, "editor text");
-          draft.semanticState.editorText = fullText;
-          draft.semanticState.editorRevision += 1;
-          draft.editorDirective = { action: "paste", delta: text };
+        broker.safeCallback("editor-paste", () => {
+          broker.assertActive(); requireBoundedString(text, MAX_EDITOR_BYTES, "editor paste"); text = stripTerminalPresentation(text);
+          broker.presentation.transact((draft) => {
+            const fullText = draft.semanticState.editorText + text;
+            requireBoundedString(fullText, MAX_EDITOR_BYTES, "editor text");
+            draft.semanticState.editorText = fullText;
+            draft.semanticState.editorRevision += 1;
+            draft.editorDirective = { action: "paste", delta: text };
+          });
         });
       },
       setEditorText(text) {
-        broker.assertActive(); requireBoundedString(text, MAX_EDITOR_BYTES, "editor text"); text = stripTerminalPresentation(text);
-        broker.presentation.transact((draft) => {
-          draft.semanticState.editorText = text;
-          draft.semanticState.editorRevision += 1;
-          draft.editorDirective = { action: "set", delta: text };
+        broker.safeCallback("editor-set", () => {
+          broker.assertActive(); requireBoundedString(text, MAX_EDITOR_BYTES, "editor text"); text = stripTerminalPresentation(text);
+          broker.presentation.transact((draft) => {
+            draft.semanticState.editorText = text;
+            draft.semanticState.editorRevision += 1;
+            draft.editorDirective = { action: "set", delta: text };
+          });
         });
       },
       getEditorText() { broker.assertActive(); return broker.semantic().editorText; },
@@ -433,7 +460,12 @@ export class SemanticUIBroker {
       get theme() { broker.assertActive(); return BASELINE_THEME; }, getAllThemes() { broker.assertActive(); return []; }, getTheme() { broker.assertActive(); return undefined; },
       setTheme() { broker.assertActive(); return { success: false, error: "Remote theme switching requires the Phase 4 component host" }; },
       getToolsExpanded() { broker.assertActive(); return broker.semantic().toolsExpanded; },
-      setToolsExpanded(expanded) { broker.assertActive(); if (typeof expanded !== "boolean") throw new GatewayError("conflict", "Extension UI tool expansion is invalid"); broker.mutate((state) => { state.toolsExpanded = expanded; }); },
+      setToolsExpanded(expanded) {
+        broker.safeCallback("tools-expanded", () => {
+          broker.assertActive(); if (typeof expanded !== "boolean") throw new GatewayError("conflict", "Extension UI tool expansion is invalid");
+          broker.mutate((state) => { state.toolsExpanded = expanded; });
+        });
+      },
     };
     (context as ExtensionUIContext & { [TRON_QUESTIONNAIRE_REQUEST]: typeof broker.requestQuestionnaire })[TRON_QUESTIONNAIRE_REQUEST] = broker.requestQuestionnaire.bind(broker);
     return context;

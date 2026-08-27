@@ -254,6 +254,50 @@ static int required_path(const char *root, const char *relative, char *resolved,
     return 0;
 }
 
+/* Required runtime aliases are the one intentional executable-symlink contract.
+ * Their exact relative text is fingerprinted, and both the textual target and
+ * resolved file must match the already-required architecture runtime. */
+static int required_runtime_alias(const char *root, const char *architecture) {
+    char directory[PATH_MAX], alias[PATH_MAX], runtime[PATH_MAX];
+    char aliasResolved[PATH_MAX], runtimeResolved[PATH_MAX], target[PATH_MAX], expectedTarget[PATH_MAX];
+    struct stat directoryInfo, aliasInfo, targetInfo;
+    if (snprintf(directory, sizeof(directory), "%s/runtime/bin-%s", root, architecture) >= (int)sizeof(directory) ||
+        snprintf(alias, sizeof(alias), "%s/node", directory) >= (int)sizeof(alias) ||
+        snprintf(runtime, sizeof(runtime), "%s/runtime/node-%s", root, architecture) >= (int)sizeof(runtime) ||
+        snprintf(expectedTarget, sizeof(expectedTarget), "../node-%s", architecture) >= (int)sizeof(expectedTarget) ||
+        lstat(directory, &directoryInfo) != 0 || !S_ISDIR(directoryInfo.st_mode) || S_ISLNK(directoryInfo.st_mode) ||
+        lstat(alias, &aliasInfo) != 0 || !S_ISLNK(aliasInfo.st_mode)) return -1;
+    ssize_t length = readlink(alias, target, sizeof(target) - 1);
+    if (length <= 0 || length >= (ssize_t)sizeof(target) - 1) return -1;
+    target[length] = '\0';
+    if (strcmp(target, expectedTarget) != 0 || realpath(alias, aliasResolved) == NULL ||
+        realpath(runtime, runtimeResolved) == NULL || strcmp(aliasResolved, runtimeResolved) != 0 ||
+        !path_is_under(root, aliasResolved) || stat(aliasResolved, &targetInfo) != 0 ||
+        !S_ISREG(targetInfo.st_mode) || access(aliasResolved, X_OK) != 0) return -1;
+    return 0;
+}
+
+static int required_pi_alias(const char *root, const char *architecture) {
+    const char *expectedTarget = "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js";
+    char directory[PATH_MAX], alias[PATH_MAX], cli[PATH_MAX];
+    char aliasResolved[PATH_MAX], cliResolved[PATH_MAX], target[PATH_MAX];
+    struct stat directoryInfo, aliasInfo, cliInfo, targetInfo;
+    if (snprintf(directory, sizeof(directory), "%s/runtime/bin-%s", root, architecture) >= (int)sizeof(directory) ||
+        snprintf(alias, sizeof(alias), "%s/pi", directory) >= (int)sizeof(alias) ||
+        snprintf(cli, sizeof(cli), "%s/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", root) >= (int)sizeof(cli) ||
+        lstat(directory, &directoryInfo) != 0 || !S_ISDIR(directoryInfo.st_mode) || S_ISLNK(directoryInfo.st_mode) ||
+        lstat(cli, &cliInfo) != 0 || !S_ISREG(cliInfo.st_mode) || S_ISLNK(cliInfo.st_mode) ||
+        lstat(alias, &aliasInfo) != 0 || !S_ISLNK(aliasInfo.st_mode)) return -1;
+    ssize_t length = readlink(alias, target, sizeof(target) - 1);
+    if (length <= 0 || length >= (ssize_t)sizeof(target) - 1) return -1;
+    target[length] = '\0';
+    if (strcmp(target, expectedTarget) != 0 || realpath(alias, aliasResolved) == NULL ||
+        realpath(cli, cliResolved) == NULL || strcmp(aliasResolved, cliResolved) != 0 ||
+        !path_is_under(root, aliasResolved) || stat(aliasResolved, &targetInfo) != 0 ||
+        !S_ISREG(targetInfo.st_mode) || access(aliasResolved, X_OK) != 0) return -1;
+    return 0;
+}
+
 typedef struct {
     char path[PATH_MAX];
     char target[PATH_MAX];
@@ -508,7 +552,9 @@ static int validate_payload(const char *payload, const char *expectedChannel, co
     for (size_t index = 0; index < sizeof(architectures) / sizeof(architectures[0]); ++index) {
         char requiredRuntime[64];
         if (snprintf(requiredRuntime, sizeof(requiredRuntime), "runtime/node-%s", architectures[index]) >= (int)sizeof(requiredRuntime) ||
-            required_path(root, requiredRuntime, node, PATH_MAX, 1, 1024 * 1024, 0) != 0) return -1;
+            required_path(root, requiredRuntime, node, PATH_MAX, 1, 1024 * 1024, 0) != 0 ||
+            required_runtime_alias(root, architectures[index]) != 0 ||
+            required_pi_alias(root, architectures[index]) != 0) return -1;
     }
     if (snprintf(runtimeRelative, sizeof(runtimeRelative), "runtime/%s", runtimeName) >= (int)sizeof(runtimeRelative)) return -1;
     char actualFingerprint[65];

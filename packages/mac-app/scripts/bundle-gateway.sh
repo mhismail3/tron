@@ -281,6 +281,21 @@ cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
 stage_node arm64 "$NODE_ARM64_SHA256"
 stage_node x64 "$NODE_X64_SHA256"
 
+# Provide an immutable architecture-specific command named `node` for hosted
+# extensions whose detached helpers fall back to PATH when the embedded runtime
+# has Tron's `node-<arch>` basename. The links stay inside the fingerprinted
+# payload and never consult Homebrew, NVM, or another mutable toolchain.
+for arch in arm64 x64; do
+    alias_dir="$RUNTIME_DIR/bin-$arch"
+    # A previously generated path is disposable but not trusted. Remove an
+    # existing directory or unlink a symlink without ever following it before
+    # recreating the owned alias directory.
+    safe_remove_tree "$alias_dir"
+    mkdir -p "$alias_dir"
+    ln -s "../node-$arch" "$alias_dir/node"
+    ln -s "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" "$alias_dir/pi"
+done
+
 launcher_temp="$(mktemp -d)/tron"
 xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror -Wno-deprecated-declarations \
     -arch arm64 -arch x86_64 -mmacosx-version-min=15.0 \
@@ -295,6 +310,21 @@ for required_payload in \
     "$APP_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/gateway-payload-deploy.mjs" \
     "$APP_DIR/node_modules" "$RUNTIME_DIR/node-arm64" "$RUNTIME_DIR/node-x64"; do
     [[ -e "$required_payload" ]] || { echo "missing required staged payload: $required_payload" >&2; exit 3; }
+done
+PI_CLI="$APP_DIR/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+[[ -f "$PI_CLI" && ! -L "$PI_CLI" && -x "$PI_CLI" ]] || { echo "missing staged Pi CLI: $PI_CLI" >&2; exit 3; }
+for arch in arm64 x64; do
+    alias="$RUNTIME_DIR/bin-$arch/node"
+    pi_alias="$RUNTIME_DIR/bin-$arch/pi"
+    [[ -L "$alias" && "$(readlink "$alias")" == "../node-$arch" && "$(realpath "$alias")" == "$(realpath "$RUNTIME_DIR/node-$arch")" ]] || {
+        echo "invalid staged Node command alias: $alias" >&2
+        exit 3
+    }
+    [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" \
+        && "$(realpath "$pi_alias")" == "$(realpath "$PI_CLI")" ]] || {
+        echo "invalid staged Pi command alias: $pi_alias" >&2
+        exit 3
+    }
 done
 
 cp "$RESOURCES_DIR/AppIcon.icns" "$HELPER_DIR/Resources/AppIcon.icns"

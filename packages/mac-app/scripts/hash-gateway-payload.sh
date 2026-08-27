@@ -21,6 +21,22 @@ for required in \
         echo "required payload entry is missing or symlinked: $required" >&2; exit 2;
     }
 done
+PI_CLI="$ROOT/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+[[ -f "$PI_CLI" && ! -L "$PI_CLI" && -x "$PI_CLI" ]] || { echo "required payload Pi CLI is invalid" >&2; exit 2; }
+for architecture in arm64 x64; do
+    directory="$ROOT/runtime/bin-$architecture"
+    alias="$directory/node"
+    pi_alias="$directory/pi"
+    [[ -d "$directory" && ! -L "$directory" && -L "$alias" \
+        && "$(readlink "$alias")" == "../node-$architecture" \
+        && "$(realpath "$alias")" == "$(realpath "$ROOT/runtime/node-$architecture")" ]] || {
+        echo "required runtime Node alias is invalid: $architecture" >&2; exit 2;
+    }
+    [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" \
+        && "$(realpath "$pi_alias")" == "$(realpath "$PI_CLI")" ]] || {
+        echo "required runtime Pi alias is invalid: $architecture" >&2; exit 2;
+    }
+done
 
 # Validate links before hashing. realpath rejects dangling links, and the
 # target's type check rejects links to special entries while path matching

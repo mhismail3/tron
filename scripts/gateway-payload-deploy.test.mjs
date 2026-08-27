@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { chmod, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 import {
@@ -53,6 +53,19 @@ test("deployment timeout defaults to a valid bounded millisecond value", () => {
 
 function selection(version, payloadFingerprint = "a".repeat(64)) {
   return { schema: 1, kind: "tron-gateway-selection", channel: "stable", version, payloadFingerprint };
+}
+
+async function addRuntimeNodeAliases(root) {
+  const piCli = join(root, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
+  await mkdir(dirname(piCli), { recursive: true });
+  await writeFile(piCli, "#!/usr/bin/env node\n");
+  await chmod(piCli, 0o755);
+  for (const architecture of ["arm64", "x64"]) {
+    const directory = join(root, "runtime", `bin-${architecture}`);
+    await mkdir(directory, { recursive: true });
+    await symlink(`../node-${architecture}`, join(directory, "node"));
+    await symlink("../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", join(directory, "pi"));
+  }
 }
 
 async function paths(root) {
@@ -214,7 +227,14 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
     await writeFile(join(versionRoot, "runtime", "node-x64"), "n".repeat(1_048_576));
     await chmod(join(versionRoot, "runtime", "node-arm64"), 0o755);
     await chmod(join(versionRoot, "runtime", "node-x64"), 0o755);
+    await addRuntimeNodeAliases(versionRoot);
     await writeFile(join(versionRoot, "manifest.json"), "{}\n");
+    await payloadFingerprint(versionRoot);
+    await rm(join(versionRoot, "runtime", "bin-arm64", "node"));
+    await symlink("../node-x64", join(versionRoot, "runtime", "bin-arm64", "node"));
+    await assert.rejects(payloadFingerprint(versionRoot), /runtime Node alias target is invalid/);
+    await rm(join(versionRoot, "runtime", "bin-arm64", "node"));
+    await symlink("../node-arm64", join(versionRoot, "runtime", "bin-arm64", "node"));
     await symlink("../../dist/index.js", join(versionRoot, "app", "node_modules", ".bin", "tron"));
     const withLink = await payloadFingerprint(versionRoot);
     await rm(join(versionRoot, "app", "node_modules", ".bin", "tron"));
@@ -229,7 +249,7 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
     await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify({
       schema: 1, kind: "tron-gateway-payload", channel: "dev", version: "source",
       gatewayVersion: "1", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "source-epoch",
-      payloadFingerprint: sourceFingerprint,
+      payloadFingerprint: sourceFingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files",
     })}\n`);
 
     const home = join(root, "home");
@@ -241,12 +261,18 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
 
     const staged = await stagePayload({ home, channel: "dev", source: versionRoot, version: "candidate" });
     assert.equal(await readlink(join(staged.root, "app", "node_modules", ".bin", "tron")), "../../dist/index.js");
+    assert.equal(await readlink(join(staged.root, "runtime", "bin-arm64", "node")), "../node-arm64");
+    assert.equal(await readlink(join(staged.root, "runtime", "bin-x64", "node")), "../node-x64");
     await assert.rejects(readlink(staleLink), /ENOENT/);
     assert.equal(await readFile(outside, "utf8"), "must remain\n");
     for (const directory of [
-      join(staged.root, "app", "node_modules", ".bin"), join(staged.root, "app", "node_modules"),
+      join(staged.root, "app", "node_modules", ".bin"),
+      join(staged.root, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist"),
+      join(staged.root, "app", "node_modules", "@earendil-works", "pi-coding-agent"),
+      join(staged.root, "app", "node_modules", "@earendil-works"), join(staged.root, "app", "node_modules"),
       join(staged.root, "app", "dist"), join(staged.root, "app", "scripts"),
-      join(staged.root, "app"), join(staged.root, "runtime"), staged.root,
+      join(staged.root, "app"), join(staged.root, "runtime", "bin-arm64"),
+      join(staged.root, "runtime", "bin-x64"), join(staged.root, "runtime"), staged.root,
     ]) await chmod(directory, 0o755);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -270,8 +296,9 @@ test("source build failure leaves active selection and deployment state unchange
     await writeFile(join(versionRoot, "runtime", "node-x64"), "n".repeat(1_048_576));
     await chmod(join(versionRoot, "runtime", "node-arm64"), 0o755);
     await chmod(join(versionRoot, "runtime", "node-x64"), 0o755);
+    await addRuntimeNodeAliases(versionRoot);
     const fingerprint = await payloadFingerprint(versionRoot);
-    const manifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch", payloadFingerprint: fingerprint };
+    const manifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
     await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify(manifest)}\n`);
     await mkdir(store.channelRoot, { recursive: true });
     await writeFile(store.current, `${JSON.stringify(selection("active", fingerprint))}\n`);
@@ -318,8 +345,9 @@ test("source builds compile privately and leave the trusted source tree unchange
     await writeFile(join(versionRoot, "runtime", "node-x64"), "n".repeat(1_048_576));
     await chmod(join(versionRoot, "runtime", "node-arm64"), 0o755);
     await chmod(join(versionRoot, "runtime", "node-x64"), 0o755);
+    await addRuntimeNodeAliases(versionRoot);
     const fingerprint = await payloadFingerprint(versionRoot);
-    const activeManifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch", payloadFingerprint: fingerprint };
+    const activeManifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
     await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify(activeManifest)}\n`);
     await mkdir(store.channelRoot, { recursive: true });
     await writeFile(store.current, `${JSON.stringify(selection("active", fingerprint))}\n`);
@@ -332,7 +360,12 @@ test("source builds compile privately and leave the trusted source tree unchange
         if (tool === process.execPath && args[0].endsWith("/tsc")) {
           await mkdir(args.at(-1), { recursive: true });
           await writeFile(join(args.at(-1), "index.js"), `${"c".repeat(1_024)}\n`);
-        } else await mkdir(join(options.cwd, "node_modules"), { recursive: true });
+        } else {
+          const piCli = join(options.cwd, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
+          await mkdir(dirname(piCli), { recursive: true });
+          await writeFile(piCli, "#!/usr/bin/env node\n");
+          await chmod(piCli, 0o755);
+        }
       },
     });
     assert.equal(result.manifest.version, "candidate");
@@ -349,7 +382,13 @@ test("source builds compile privately and leave the trusted source tree unchange
     for (const directory of [
       join(store.versionsRoot, "candidate"), join(store.versionsRoot, "candidate", "app"),
       join(store.versionsRoot, "candidate", "app", "dist"), join(store.versionsRoot, "candidate", "app", "scripts"),
-      join(store.versionsRoot, "candidate", "app", "node_modules"), join(store.versionsRoot, "candidate", "runtime"),
+      join(store.versionsRoot, "candidate", "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist"),
+      join(store.versionsRoot, "candidate", "app", "node_modules", "@earendil-works", "pi-coding-agent"),
+      join(store.versionsRoot, "candidate", "app", "node_modules", "@earendil-works"),
+      join(store.versionsRoot, "candidate", "app", "node_modules"),
+      join(store.versionsRoot, "candidate", "runtime", "bin-arm64"),
+      join(store.versionsRoot, "candidate", "runtime", "bin-x64"),
+      join(store.versionsRoot, "candidate", "runtime"),
     ]) await chmod(directory, 0o755);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -371,11 +410,12 @@ async function makePreflightFixture(root) {
   await writeFile(join(payload, "runtime", "node-x64"), "n".repeat(1_048_576));
   await chmod(join(payload, "runtime", "node-arm64"), 0o755);
   await chmod(join(payload, "runtime", "node-x64"), 0o755);
+  await addRuntimeNodeAliases(payload);
   const fingerprint = await payloadFingerprint(payload);
   await writeFile(join(payload, "manifest.json"), JSON.stringify({
     schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "preflight",
     gatewayVersion: "1", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch",
-    payloadFingerprint: fingerprint,
+    payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files",
   }));
   return payload;
 }
@@ -396,6 +436,46 @@ test("stable payload push configuration rejects missing empty malformed and syml
       if (kind === "symlink") { await rm(config); await symlink("package.json", config); }
       await assert.rejects(validatePayload(payload, { channel: "stable" }, true), /PushService|incomplete/);
     }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("runtime Node and Pi aliases are exact required command links", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-runtime-node-alias-policy-"));
+  try {
+    for (const kind of ["missing", "regular", "wrong-target", "absolute-target"]) {
+      const payload = await makePreflightFixture(join(root, kind));
+      const alias = join(payload, "runtime", "bin-arm64", "node");
+      await rm(alias);
+      if (kind === "regular") {
+        await writeFile(alias, "#!/bin/sh\nexit 0\n");
+        await chmod(alias, 0o755);
+      } else if (kind === "wrong-target") {
+        await symlink("../node-x64", alias);
+      } else if (kind === "absolute-target") {
+        await symlink(join(payload, "runtime", "node-arm64"), alias);
+      }
+      await assert.rejects(validatePayload(payload, { channel: "stable" }, true), /runtime Node alias|ENOENT/);
+    }
+    for (const kind of ["missing", "regular", "wrong-target", "absolute-target"]) {
+      const payload = await makePreflightFixture(join(root, `pi-${kind}`));
+      const alias = join(payload, "runtime", "bin-arm64", "pi");
+      await rm(alias);
+      if (kind === "regular") {
+        await writeFile(alias, "#!/bin/sh\nexit 0\n");
+        await chmod(alias, 0o755);
+      } else if (kind === "wrong-target") {
+        await symlink("../node-arm64", alias);
+      } else if (kind === "absolute-target") {
+        await symlink(join(payload, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js"), alias);
+      }
+      await assert.rejects(validatePayload(payload, { channel: "stable" }, true), /runtime Pi alias|ENOENT/);
+    }
+    const missingCoverage = await makePreflightFixture(join(root, "missing-coverage"));
+    const manifestPath = join(missingCoverage, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    delete manifest.dependencyTreeCoverage;
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    await assert.rejects(validatePayload(missingCoverage, { channel: "stable" }, true), /manifest identity/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

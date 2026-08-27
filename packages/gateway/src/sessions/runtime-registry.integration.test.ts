@@ -3024,7 +3024,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await expect(registry.acquire(sessionID)).rejects.toMatchObject({ code: "not_found" });
   });
 
-  it("keeps the Gateway alive when an extension timer emits an oversized string widget", async () => {
+  it("keeps the Gateway alive when extension timers emit oversized or JSON-dense widgets", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-rpc-oversized-widget-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -3034,6 +3034,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       pi.on("session_start", (_event, ctx) => {
         setImmediate(() => {
           ctx.ui.setWidget("async-status", ["PI_SUBAGENT_ASYNC_JSON:" + "x".repeat(1_024)]);
+          ctx.ui.setWidget("async-status", ["PI_SUBAGENT_ASYNC_JSON:" + '\"x\",'.repeat(115)]);
           ctx.ui.setStatus("oversized-widget-callback", "completed");
         });
       });
@@ -3155,7 +3156,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await slot.reload();
     const secondEpoch = slot.snapshot().extensionPresentation.hostEpoch;
     expect(secondEpoch).not.toBe(firstEpoch);
-    expect(() => oldContext.setStatus("late", "old callback")).toThrow(expect.objectContaining({ code: "conflict" }));
+    expect(() => oldContext.setStatus("late", "old callback")).not.toThrow();
+    expect(slot.snapshot().extensionPresentation.semanticState.statuses.late).toBeUndefined();
 
     const pending = internal.ui.context().confirm("Pending", "Retire me");
     // Attach rejection observation before the command retires the epoch.

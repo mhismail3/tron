@@ -17,6 +17,9 @@ struct GatewayPayloadStore {
     static let nodeVersionByteLimit = 127
     static let sourceRevisionByteLimit = 255
     static let runtimeEpochComponentLimit = 127
+    static let fingerprintCoverage = "app/** and runtime/** regular files"
+    static let piCLIRelativePath = "app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+    static let piAliasTarget = "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
 
     let home: URL
     let channel: String
@@ -219,6 +222,7 @@ enum GatewayPayloadValidator {
               manifest.nodeVersion.utf8.count <= GatewayPayloadStore.nodeVersionByteLimit,
               manifest.sourceRevision.map({ !$0.isEmpty && $0.utf8.count <= GatewayPayloadStore.sourceRevisionByteLimit }) == true,
               manifest.runtimeEpoch.map({ GatewayPayloadStore.validComponent($0, maximumLength: GatewayPayloadStore.runtimeEpochComponentLimit) }) == true,
+              manifest.dependencyTreeCoverage == GatewayPayloadStore.fingerprintCoverage,
               isFingerprint(manifest.payloadFingerprint) else {
             return .failure(.invalidManifest("manifest identity"))
         }
@@ -260,6 +264,12 @@ enum GatewayPayloadValidator {
                   usableFile(runtime, minimumBytes: minimumRuntimeBytes, fileManager: fileManager),
                   fileManager.isExecutableFile(atPath: runtime.path) else {
                 return .failure(.incomplete("runtime/node-\(architecture)"))
+            }
+            guard validateRuntimeNodeAlias(architecture, under: root, runtime: runtime, fileManager: fileManager) else {
+                return .failure(.incomplete("runtime/bin-\(architecture)/node"))
+            }
+            guard validateRuntimePiAlias(architecture, under: root, fileManager: fileManager) else {
+                return .failure(.incomplete("runtime/bin-\(architecture)/pi"))
             }
         }
         guard let actualFingerprint = payloadFingerprint(root, fileManager: fileManager) else {
@@ -349,6 +359,58 @@ enum GatewayPayloadValidator {
             expectedFingerprint: selection.payloadFingerprint,
             fileManager: fileManager
         )
+    }
+
+    private static func validateRuntimeNodeAlias(
+        _ architecture: String,
+        under root: URL,
+        runtime: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        let directory = root.appendingPathComponent("runtime/bin-\(architecture)", isDirectory: true)
+        let alias = directory.appendingPathComponent("node", isDirectory: false)
+        var directoryInfo = stat()
+        var aliasInfo = stat()
+        guard lstat(directory.path, &directoryInfo) == 0,
+              (directoryInfo.st_mode & S_IFMT) == S_IFDIR,
+              lstat(alias.path, &aliasInfo) == 0,
+              (aliasInfo.st_mode & S_IFMT) == S_IFLNK,
+              let target = try? fileManager.destinationOfSymbolicLink(atPath: alias.path),
+              target == "../node-\(architecture)" else { return false }
+        let resolvedAlias = alias.resolvingSymlinksInPath().standardizedFileURL
+        let resolvedRuntime = runtime.resolvingSymlinksInPath().standardizedFileURL
+        var aliasTargetInfo = stat()
+        var runtimeInfo = stat()
+        guard resolvedAlias == resolvedRuntime,
+              isContained(resolvedAlias, under: root),
+              stat(resolvedAlias.path, &aliasTargetInfo) == 0,
+              stat(resolvedRuntime.path, &runtimeInfo) == 0,
+              (aliasTargetInfo.st_mode & S_IFMT) == S_IFREG,
+              aliasTargetInfo.st_dev == runtimeInfo.st_dev,
+              aliasTargetInfo.st_ino == runtimeInfo.st_ino,
+              fileManager.isExecutableFile(atPath: resolvedAlias.path) else { return false }
+        return true
+    }
+
+    private static func validateRuntimePiAlias(
+        _ architecture: String,
+        under root: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        let cli = root.appendingPathComponent(GatewayPayloadStore.piCLIRelativePath, isDirectory: false)
+        let alias = root.appendingPathComponent("runtime/bin-\(architecture)/pi", isDirectory: false)
+        var cliInfo = stat()
+        var aliasInfo = stat()
+        guard lstat(cli.path, &cliInfo) == 0,
+              (cliInfo.st_mode & S_IFMT) == S_IFREG,
+              fileManager.isExecutableFile(atPath: cli.path),
+              lstat(alias.path, &aliasInfo) == 0,
+              (aliasInfo.st_mode & S_IFMT) == S_IFLNK,
+              let target = try? fileManager.destinationOfSymbolicLink(atPath: alias.path),
+              target == GatewayPayloadStore.piAliasTarget else { return false }
+        let resolvedAlias = alias.resolvingSymlinksInPath().standardizedFileURL
+        let resolvedCLI = cli.resolvingSymlinksInPath().standardizedFileURL
+        return resolvedAlias == resolvedCLI && isContained(resolvedAlias, under: root)
     }
 
     private static func validatePushConfiguration(_ url: URL, channel: String, fileManager: FileManager) -> Bool {

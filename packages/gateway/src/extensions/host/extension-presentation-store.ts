@@ -284,6 +284,26 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
     this.transact((draft) => { draft.notification = { message: stripTerminalControls(message), type }; });
   }
 
+  /**
+   * Record a rejected extension-owned void callback without allowing its
+   * presentation failure to escape into an unawaited timer/event callback.
+   * The previously committed state remains authoritative and valid.
+   */
+  recordRejectedCallback(operation: string, error: unknown): void {
+    if (!this.active) return;
+    const raw = error instanceof Error ? error.message : "Extension presentation callback failed";
+    const message = stripTerminalControls(raw, true).slice(0, MAX_MESSAGE_BYTES / 8);
+    try {
+      this.transact((draft) => {
+        draft.diagnostics.push({ code: `semantic.${operation}`.slice(0, MAX_ID_BYTES / 2), message });
+        if (draft.diagnostics.length > MAX_DIAGNOSTICS) draft.diagnostics.splice(0, draft.diagnostics.length - MAX_DIAGNOSTICS);
+      });
+    } catch {
+      // Diagnostics are best effort. A rejected extension callback must never
+      // become a second process-level failure while reporting the first.
+    }
+  }
+
   revokeInputLease(connectionId: string): boolean {
     this.assertActive();
     if (this.inputLease?.connectionId !== connectionId) return false;
