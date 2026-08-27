@@ -5,7 +5,7 @@ struct SessionProcessesSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var selectedProcess: SessionProcessActivity?
-    @State private var detent: PresentationDetent = .large
+    @State private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {

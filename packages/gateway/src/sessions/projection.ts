@@ -1031,6 +1031,30 @@ function preview(item: TranscriptItem | undefined, entry: SessionEntry): string 
 export const COMMAND_CATALOG_ITEMS = 1_000;
 export const COMMAND_CATALOG_STRING_BYTES = 8_192;
 export const COMMAND_CATALOG_BYTES = 700_000;
+export const COMMAND_DETAIL_CONTENT_BYTES = 96 * 1_024;
+
+export interface BoundedCommandContent {
+  content: string;
+  contentBytes: number;
+  contentTruncated: boolean;
+}
+
+/** Keeps selected resource content bounded without making the complete command
+ * catalog carry every source document. UTF-8 decoding drops only a split final
+ * code point when truncation lands inside a multibyte scalar. */
+export function boundCommandContent(content: string): BoundedCommandContent {
+  const encoded = Buffer.from(content, "utf8");
+  if (encoded.byteLength <= COMMAND_DETAIL_CONTENT_BYTES) {
+    return { content, contentBytes: encoded.byteLength, contentTruncated: false };
+  }
+  let end = COMMAND_DETAIL_CONTENT_BYTES;
+  while (end > 0 && (encoded[end]! & 0xC0) === 0x80) end -= 1;
+  return {
+    content: encoded.subarray(0, end).toString("utf8"),
+    contentBytes: encoded.byteLength,
+    contentTruncated: true,
+  };
+}
 
 /** Validates the complete runtime-owned command catalog before generic JSON
  * projection can silently trim it. Ordering and object identity are preserved. */
@@ -1040,10 +1064,20 @@ export function admitCommandCatalog(commands: CommandInfo[]): CommandInfo[] {
   }
   const identities = new Set<string>();
   for (const command of commands) {
-    const fields = [command.name, command.description, command.argumentHint, command.sourcePath];
+    const fields = [
+      command.name,
+      command.description,
+      command.argumentHint,
+      command.sourcePath,
+      command.resourceSource,
+    ];
     const identity = `${command.source}:${command.name}`;
     if (typeof command.name !== "string" || command.name.length === 0
       || !["extension", "skill", "prompt"].includes(command.source)
+      || command.resourceScope !== undefined
+        && !["user", "project", "temporary"].includes(command.resourceScope)
+      || command.resourceOrigin !== undefined
+        && !["package", "top-level"].includes(command.resourceOrigin)
       || fields.some((field) => field !== undefined
         && (typeof field !== "string" || Buffer.byteLength(field) > COMMAND_CATALOG_STRING_BYTES))
       || identities.has(identity)) {

@@ -522,7 +522,10 @@ that row mounted; status, progress, completion, and canonical settlement do not 
 `ScrollPosition`. A retained presentation reconciles its first native geometry sample so a view physically at the tail regains pinned authority; only current signed tail-marker drift may admit one bounded repair, while a genuinely displaced reader remains anchored
 in an order native anchoring cannot retain; anchored readers receive no automatic follow. Compact
 measured prompts may use one clipped composer-to-row morph; long prompts fail over to the shorter, subtler row-local
-fade/slide entrance. The unified notification row retains one physical and child host when
+fade/slide entrance. New-row admission animates a measured, clipped layout fraction so
+existing pinned content moves continuously rather than jumping, while payload-only updates
+remain layout-animation free. Composer-to-row flights retain source pixels until exact
+destination geometry arrives instead of failing after a wall-clock delay. The unified notification row retains one physical and child host when
 active compaction becomes canonical compaction; progress, icon, title, and tone update
 inside that shell without animating unrelated projection updates.
 Attachment, skill, and resource accessories animate through one
@@ -533,10 +536,15 @@ readable during retry but never authorize prompt, upload, abort, or queue mutati
 suppression advances only after the mounted aggregate succeeds, so a failed reconciliation cannot consume
 visual continuity for a later live row. Queue mutation responses are confirmations only: the existing
 mounted synchronization path must observe the newer queue revision before local mutation presentation
-state retires. Tool calls, progress, and results join by `toolCallId`. One chip may contain
+state retires. Producer-triggered extension/session-input messages occupy one compact
+status row in the transcript and retain their full message, origin, canonical identity, and
+JSON payloads in the existing detail sheet. Tool calls, progress, and results join by `toolCallId`. One chip may contain
 only one exact finalized producer group: every assistant-message boundary flushes the run,
 including tool-only messages whose thinking is empty or hidden, so unrelated groups cannot
-accumulate in the newest chip. Collapsed rows retain structured
+accumulate in the newest chip. A bounded previous-install call/group lineage aliases only
+the physical SwiftUI host when finalized grouping arrives after execution starts; semantic
+run IDs remain producer-owned. Running/completed status changes keep one capsule and one
+stable glass surface while shallow icon, text, and timing slots animate in place. Collapsed rows retain structured
 request/response values without eagerly formatting JSON strings. Opening a detail sheet derives a
 bounded semantic presentation only for that selected tool: exact lowercase built-ins foreground their file,
 command, query, diff, and readable result. Extension-authored Pi tool labels are projected separately from canonical

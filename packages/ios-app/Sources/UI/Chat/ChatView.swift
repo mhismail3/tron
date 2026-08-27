@@ -2071,9 +2071,11 @@ struct ChatView: View {
             // transaction to animate would redraw the existing transcript.
             let installedBeforeSubmission = transcriptPresentation.installed
             _ = layoutTransaction.animation
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            let submission = try withTransaction(transaction) {
+            // The mutation carries no ambient animation; value-scoped composer
+            // and flight owners may still animate their exact structural values.
+            // `disablesAnimations` would suppress those explicit descendants and
+            // make prompt/photo removal jump before destination geometry arrives.
+            let submission = try withTransaction(Transaction()) {
                 composerResourcePicker = nil
                 let submission = try model.beginComposerSubmission(
                     target: target,

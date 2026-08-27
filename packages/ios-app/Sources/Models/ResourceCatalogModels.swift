@@ -2,12 +2,84 @@ import Foundation
 
 struct CommandInfo: Codable, Hashable, Identifiable, Sendable {
     enum Source: String, Codable, Sendable { case `extension`, skill, prompt }
+    enum ResourceScope: String, Codable, Sendable { case user, project, temporary }
+    enum ResourceOrigin: String, Codable, Sendable { case package, topLevel = "top-level" }
+
     let name: String
     let description: String?
     let argumentHint: String?
     let source: Source
     let sourcePath: String?
+    let resourceSource: String?
+    let resourceScope: ResourceScope?
+    let resourceOrigin: ResourceOrigin?
     var id: String { "\(source.rawValue):\(name)" }
+
+    init(
+        name: String,
+        description: String?,
+        argumentHint: String?,
+        source: Source,
+        sourcePath: String?,
+        resourceSource: String? = nil,
+        resourceScope: ResourceScope? = nil,
+        resourceOrigin: ResourceOrigin? = nil
+    ) {
+        self.name = name
+        self.description = description
+        self.argumentHint = argumentHint
+        self.source = source
+        self.sourcePath = sourcePath
+        self.resourceSource = resourceSource
+        self.resourceScope = resourceScope
+        self.resourceOrigin = resourceOrigin
+    }
+}
+
+struct CommandResourceDetail: Codable, Hashable, Sendable {
+    let name: String
+    let description: String?
+    let argumentHint: String?
+    let source: CommandInfo.Source
+    let sourcePath: String?
+    let resourceSource: String?
+    let resourceScope: CommandInfo.ResourceScope?
+    let resourceOrigin: CommandInfo.ResourceOrigin?
+    let content: String?
+    let contentBytes: Int?
+    let contentTruncated: Bool?
+}
+
+enum CommandResourceDetailPolicy {
+    static let maximumContentBytes = 96 * 1_024
+
+    static func admit(_ detail: CommandResourceDetail, matching command: CommandInfo) throws -> CommandResourceDetail {
+        let projectedBytes = detail.content?.utf8.count
+        let metadata = [
+            detail.name,
+            detail.description,
+            detail.argumentHint,
+            detail.sourcePath,
+            detail.resourceSource,
+        ]
+        guard detail.name == command.name,
+              metadata.allSatisfy({ $0.map { $0.utf8.count <= CommandCatalogPolicy.maximumStringBytes } ?? true }),
+              detail.source == command.source,
+              projectedBytes.map({ $0 <= maximumContentBytes }) ?? true,
+              detail.contentBytes.map({ $0 >= 0 }) ?? true,
+              projectedBytes == nil || detail.contentBytes.map({ $0 >= projectedBytes! }) == true,
+              (detail.contentTruncated == true
+                ? detail.contentBytes.map({ $0 > maximumContentBytes }) == true
+                : detail.contentBytes == projectedBytes) else {
+            throw GatewayFailure(
+                code: "invalid_response",
+                message: "The selected command detail from the Mac is invalid or too large.",
+                retryable: true,
+                details: nil
+            )
+        }
+        return detail
+    }
 }
 
 enum CommandCatalogPolicy {
@@ -25,6 +97,7 @@ enum CommandCatalogPolicy {
                   command.description.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
                   command.argumentHint.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
                   command.sourcePath.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
+                  command.resourceSource.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
                   identities.insert(command.id).inserted else {
                 throw invalidCatalog()
             }

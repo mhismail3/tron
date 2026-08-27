@@ -529,9 +529,14 @@ replacement; a full document rejects newer admission rather than dropping eviden
 Legacy v1 single-operation markers migrate on mutation without inferring an unstamped
 completion. Marker creation and exact stamping run independently of serialized
 attention admission, so a failing older projection cannot hide a completed extension
-continuation. Open/drain joins live settlement; after restart, a bounded canonical
-JSONL scan admits every successful completion named by the ordered exact durable
-stamps, and no markerless or temporal completion, before advancing its cursor. Catalog rows and
+continuation. Terminal stamping atomically reasserts its exact operation owner
+with completion evidence in one per-session marker transaction, so overlapping
+turn cleanup cannot leave a permanently unsatisfied marker precondition that
+blocks later prompts, `session.open`, or administrative drain; cleanup remains
+scoped to that operation ID. Open/drain
+joins live settlement; after restart, a bounded canonical JSONL scan admits every
+successful completion named by the ordered exact durable stamps, and no markerless
+or temporal completion, before advancing its cursor. Catalog rows and
 revisioned `session.summary` events project
 `completionRevision`, `attentionRevision`, and `isUnread` without changing
 structural `listRevision`. `session.attention.set` uses ordinary command receipts;
@@ -590,8 +595,13 @@ candidates, so omitted images do not consume BlobStore capacity. The projection 
 duplicate or malformed canonical entries and oversized retained strings; omitted older parents
 are valid because the bounded outline is not a canonical mirror.
 `session.commands` preserves runtime sort order and rejects catalogs above 1,000 rows
-or 700 KiB, duplicate full `source:name` identities, empty names, or command metadata
-strings above 8 KiB before generic JSON projection can truncate the response. `session.prompt`
+or 700 KiB, duplicate full `source:name` identities, empty names, invalid resource scope/origin,
+or command metadata strings above 8 KiB before generic JSON projection can truncate the response.
+Each row includes the runtime loader's source, scope, origin, and path when available. The lazy
+`session.commandDetail` read requires one exact current `source:name` identity and returns
+that selected prompt, skill, or extension source document only; content is UTF-8 bounded
+to 96 KiB with original byte count and explicit truncation metadata, so catalog loading
+never reads or copies every resource body. `session.prompt`
 may carry one optional, 512-byte-bounded `skillName` alongside nonempty text or attachments when hello advertises `skill-prompt.v1`. The Gateway admits it only when the live
 runtime catalog contains exactly one matching `source == skill` / `skill:<name>` command and no colliding extension command, then
 adds Pi's `/skill:<name>` prefix only at runtime admission while retaining the original prompt

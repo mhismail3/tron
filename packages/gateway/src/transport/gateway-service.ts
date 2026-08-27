@@ -740,6 +740,13 @@ export class GatewayService {
         const slot = await this.openedSlot(client, params);
         return safeJson({ commands: slot.commands() });
       }
+      case "session.commandDetail": {
+        const slot = await this.openedSlot(client, params);
+        return safeJson(await slot.commandDetail(
+          oneOf(params.source, "source", ["extension", "skill", "prompt"] as const),
+          string(params.name, "name", { max: 8_192 }),
+        ));
+      }
       case "session.export": {
         const slot = await this.openedSlot(client, params);
         return safeJson(await slot.export(oneOf(params.format, "format", ["html", "jsonl"] as const)));

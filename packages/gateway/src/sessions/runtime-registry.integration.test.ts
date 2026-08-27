@@ -4109,6 +4109,67 @@ export default function (pi) {
     expect(registry.activeSessionIds()).not.toContain(slot.id);
   });
 
+  it("reasserts exact marker ownership when cleanup races terminal completion stamping", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-terminal-marker-race-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let releaseResponse!: () => void;
+    const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    const faux = fauxProvider({ provider: "tron-terminal-marker-race", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      async () => { await responseBarrier; return fauxAssistantMessage("first completion"); },
+      fauxAssistantMessage("next completion"),
+    ]);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => {
+        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+        runtime.registerNativeProvider(faux.provider);
+        return runtime;
+      },
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    const first = await slot.prompt("first");
+    await waitUntil(() => slot.snapshot().phase === "running");
+    const markers = (slot as unknown as {
+      dependencies: {
+        markers: {
+          clear: (sessionId: string, operationId?: string) => Promise<void>;
+          evidenceFor: (sessionId: string) => Promise<Array<{ operationId: string }>>;
+        };
+      };
+    }).dependencies.markers;
+    await markers.clear(slot.id, first.operationId);
+    expect(await markers.evidenceFor(slot.id)).toEqual([]);
+
+    releaseResponse();
+    await waitUntil(() => registry.attentionProjection(slot.id).completionRevision === 1);
+    await waitUntil(() => slot.snapshot().phase === "idle");
+    await expect(slot.reconcileAttention()).resolves.toBeUndefined();
+    expect(await markers.evidenceFor(slot.id)).toEqual([]);
+
+    await expect(slot.prompt("next", [], "steer")).resolves.toEqual({
+      operationId: expect.any(String),
+    });
+    const drain = registry.waitUntilIdle();
+    await waitUntil(() => registry.attentionProjection(slot.id).completionRevision === 2);
+    await drain;
+    expect(slot.snapshot().phase).toBe("idle");
+    expect(registry.administrativeDrainSnapshot()).toMatchObject({ phase: "complete", blockerCount: 0 });
+  });
+
   it("retains one exact completion intent across repeated persistence failure and rejects a second prompt", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-attention-settlement-failure-"));
     const agentDir = join(root, "agent");

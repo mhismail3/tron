@@ -8,10 +8,14 @@ struct ComposerResourceEntry: Identifiable, Hashable, Sendable {
     let kind: Kind
     let invocationName: String
     let displayName: String
+    let friendlyName: String
     let description: String?
     let argumentHint: String?
     let source: CommandInfo.Source
     let sourcePath: String?
+    let resourceSource: String?
+    let resourceScope: CommandInfo.ResourceScope?
+    let resourceOrigin: CommandInfo.ResourceOrigin?
     fileprivate let normalizedName: String
     fileprivate let normalizedSearch: String
 
@@ -32,10 +36,14 @@ struct ComposerResourceEntry: Identifiable, Hashable, Sendable {
         self.kind = kind
         invocationName = command.name
         self.displayName = displayName
+        friendlyName = ComposerResourceNameFormatter.friendly(displayName)
         description = command.description
         argumentHint = command.argumentHint
         source = command.source
         sourcePath = command.sourcePath
+        resourceSource = command.resourceSource
+        resourceScope = command.resourceScope
+        resourceOrigin = command.resourceOrigin
         normalizedName = displayName.lowercased()
         normalizedSearch = [displayName, command.description, command.argumentHint]
             .compactMap { $0?.lowercased() }
@@ -48,8 +56,68 @@ struct ComposerResourceEntry: Identifiable, Hashable, Sendable {
             description: description,
             argumentHint: argumentHint,
             source: source,
-            sourcePath: sourcePath
+            sourcePath: sourcePath,
+            resourceSource: resourceSource,
+            resourceScope: resourceScope,
+            resourceOrigin: resourceOrigin
         )
+    }
+}
+
+enum ComposerResourceContentPresentation {
+    static func body(_ content: String, source: CommandInfo.Source) -> String {
+        guard source != .extension else { return content }
+
+        var openingStart = content.startIndex
+        if content[openingStart...].hasPrefix("\u{FEFF}") {
+            openingStart = content.index(after: openingStart)
+        }
+        guard let openingEnd = content[openingStart...].firstIndex(of: "\n") else { return content }
+        let opening = content[openingStart..<openingEnd].trimmingCharacters(in: .newlines)
+        guard opening == "---" || opening == "---\r" else { return content }
+
+        var lineStart = content.index(after: openingEnd)
+        while lineStart < content.endIndex {
+            let lineEnd = content[lineStart...].firstIndex(of: "\n") ?? content.endIndex
+            let line = content[lineStart..<lineEnd]
+            if line == "---" || line == "---\r" || line == "..." || line == "...\r" {
+                guard lineEnd < content.endIndex else { return "" }
+                return String(content[content.index(after: lineEnd)...])
+            }
+            guard lineEnd < content.endIndex else { break }
+            lineStart = content.index(after: lineEnd)
+        }
+        return content
+    }
+}
+
+enum ComposerResourceNameFormatter {
+    private static let initialisms: [String: String] = [
+        "ai": "AI", "api": "API", "http": "HTTP", "id": "ID",
+        "ios": "iOS", "json": "JSON", "macos": "macOS", "pi": "Pi",
+        "rpc": "RPC", "sdk": "SDK", "ui": "UI", "url": "URL",
+    ]
+
+    static func friendly(_ value: String) -> String {
+        let expanded = value
+            .replacingOccurrences(
+                of: "([A-Z]+)([A-Z][a-z])",
+                with: "$1 $2",
+                options: .regularExpression
+            )
+            .replacingOccurrences(
+                of: "([a-z0-9])([A-Z])",
+                with: "$1 $2",
+                options: .regularExpression
+            )
+            .replacingOccurrences(of: "[-_:]+", with: " ", options: .regularExpression)
+        let words = expanded.split(whereSeparator: { $0.isWhitespace })
+        guard !words.isEmpty else { return value }
+        return words.map { word in
+            let raw = String(word)
+            return initialisms[raw.lowercased()]
+                ?? raw.prefix(1).uppercased() + String(raw.dropFirst())
+        }.joined(separator: " ")
     }
 }
 
@@ -260,6 +328,7 @@ enum ComposerResourcePickerSource: Equatable {
 }
 
 struct ComposerResourcePicker: View {
+    let sessionID: String?
     let kind: ComposerResourceEntry.Kind
     let query: String
     let entries: [ComposerResourceEntry]
@@ -338,7 +407,12 @@ struct ComposerResourcePicker: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
         .sheet(item: $detail) { entry in
-            ComposerResourceDetailSheet(entry: entry, accent: accent, prefix: prefix)
+            ComposerResourceDetailSheet(
+                sessionID: sessionID,
+                entry: entry,
+                accent: accent,
+                prefix: prefix
+            )
         }
     }
 
@@ -347,16 +421,17 @@ struct ComposerResourcePicker: View {
             Button { onSelect(entry) } label: {
                 HStack(spacing: 10) {
                     ZStack {
-                        Circle().fill(accent.opacity(0.15)).frame(width: 32, height: 32)
+                        Circle().fill(accent.opacity(0.15)).frame(width: 28, height: 28)
                         Image(systemName: icon)
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
                             .foregroundStyle(accent)
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 5) {
-                            Text("\(prefix)\(entry.displayName)")
-                                .font(TronTypography.secondaryCodeDescription)
+                            Text(entry.friendlyName)
+                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
                                 .foregroundStyle(Color.tronTextPrimary)
+                                .lineLimit(1)
                             if entry.source == .prompt {
                                 sourceBadge("prompt")
                             } else if entry.source == .extension {
@@ -402,70 +477,249 @@ struct ComposerResourcePicker: View {
 }
 
 private struct ComposerResourceDetailSheet: View {
+    let sessionID: String?
     let entry: ComposerResourceEntry
     let accent: Color
     let prefix: String
+
+    @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @State private var detail: CommandResourceDetail?
+    @State private var loadError: String?
+    @State private var loadRevision = 0
+    @State private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("\(prefix)\(entry.displayName)")
-                        .font(TronTypography.headline)
-                        .foregroundStyle(accent)
-                    if let description = entry.description {
-                        Text(description).font(TronTypography.body).foregroundStyle(Color.tronTextPrimary)
-                    }
-                    if let hint = entry.argumentHint {
-                        Text(hint).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextSecondary)
-                    }
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
+                    summary
+                    TronTechnicalMetadataSection(
+                        title: "Resource",
+                        items: metadata,
+                        accent: accent
+                    )
+                    contentSection
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(20)
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .background(Color.tronBackground)
+            .defaultScrollAnchor(.top)
+            .tronScrollEdgeChrome()
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: entry.friendlyName, accent: accent)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
-                        TronToolbarTextLabel("Done", systemImage: "checkmark")
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
                     }
-                    .tronToolbarAction()
+                    .accessibilityLabel("Done")
                 }
             }
         }
+        .task(id: "\(entry.id):\(loadRevision)") { await loadDetail() }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)
+        .tronPresentation()
+    }
+
+    private var resolvedDescription: String? {
+        detail?.description ?? entry.description
+    }
+
+    private var metadata: [TronTechnicalMetadataItem] {
+        var items = [
+            TronTechnicalMetadataItem(
+                title: "Type",
+                value: entry.kind == .skill ? "Skill" : "Command",
+                icon: entry.kind == .skill ? "sparkles" : "command"
+            ),
+            TronTechnicalMetadataItem(
+                title: "Invocation",
+                value: "\(prefix)\(entry.displayName)",
+                icon: "terminal"
+            ),
+            TronTechnicalMetadataItem(
+                title: "Source",
+                value: sourceTitle,
+                icon: "shippingbox"
+            ),
+        ]
+        if let resourceSource = detail?.resourceSource ?? entry.resourceSource,
+           !resourceSource.isEmpty {
+            items.append(.init(title: "Resource source", value: resourceSource, icon: "shippingbox.fill"))
+        }
+        if let scope = detail?.resourceScope ?? entry.resourceScope {
+            items.append(.init(
+                title: "Scope",
+                value: ComposerResourceNameFormatter.friendly(scope.rawValue),
+                icon: scope == .project ? "folder" : "person"
+            ))
+        }
+        if let origin = detail?.resourceOrigin ?? entry.resourceOrigin {
+            items.append(.init(
+                title: "Origin",
+                value: ComposerResourceNameFormatter.friendly(origin.rawValue),
+                icon: "point.3.connected.trianglepath.dotted"
+            ))
+        }
+        if let hint = detail?.argumentHint ?? entry.argumentHint, !hint.isEmpty {
+            items.append(.init(title: "Arguments", value: hint, icon: "text.badge.plus"))
+        }
+        if let path = detail?.sourcePath ?? entry.sourcePath, !path.isEmpty {
+            items.append(.init(title: "Source file", value: path, icon: "doc.text"))
+        }
+        if let bytes = detail?.contentBytes {
+            items.append(.init(
+                title: "Content size",
+                value: ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file),
+                icon: "internaldrive"
+            ))
+        }
+        return items
+    }
+
+    private var displayedContent: String? {
+        detail?.content.map {
+            ComposerResourceContentPresentation.body($0, source: entry.source)
+        }
+    }
+
+    private var sourceTitle: String {
+        switch entry.source {
+        case .skill: "Skill resource"
+        case .prompt: "Prompt template"
+        case .extension: "Extension command"
+        }
+    }
+
+    @ViewBuilder
+    private var summary: some View {
+        if let description = resolvedDescription, !description.isEmpty {
+            Text(description)
+                .font(TronTypography.body)
+                .foregroundStyle(Color.tronTextPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .tronGlassSurface(accent: accent, tintOpacity: 0.10)
+        }
+    }
+
+    @ViewBuilder
+    private var contentSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TronTechnicalSectionLabel("Content")
+            Group {
+                if let content = displayedContent, !content.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if detail?.contentTruncated == true {
+                            Label("Showing the first 96 KiB of the source", systemImage: "text.badge.minus")
+                                .font(TronTypography.caption)
+                                .foregroundStyle(Color.tronAmber)
+                        }
+                        if entry.source == .extension {
+                            Text(content)
+                                .font(TronTypography.codeContent)
+                                .foregroundStyle(Color.tronTextPrimary)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            TronMarkdownView(text: content, streaming: false)
+                                .textSelection(.enabled)
+                        }
+                    }
+                } else if let loadError {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(loadError)
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronTextSecondary)
+                        Button("Try Again", systemImage: "arrow.clockwise") { loadRevision &+= 1 }
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(accent)
+                    }
+                } else if sessionID == nil {
+                    Text("Source content is unavailable for this session.")
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronTextSecondary)
+                } else if detail != nil {
+                    Text("This resource does not expose body content.")
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronTextSecondary)
+                } else {
+                    TronLoadingState(label: "Loading resource content…")
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .tronScrollSurface(accent: accent, cornerRadius: 16, tintOpacity: 0.06)
+        }
+    }
+
+    private func loadDetail() async {
+        detail = nil
+        loadError = nil
+        guard let sessionID else { return }
+        do {
+            detail = try await model.commandDetail(sessionID: sessionID, command: entry.commandInfo)
+        } catch is CancellationError {
+            return
+        } catch {
+            loadError = error.localizedDescription
+        }
     }
 }
 
 struct ComposerSkillChip: View {
+    let sessionID: String?
     let skill: ComposerResourceEntry
     let onRemove: () -> Void
+    @State private var showsDetail = false
 
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "sparkles")
-                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                .foregroundStyle(Color.tronCyan)
-            Text(skill.displayName)
-                .font(TronTypography.secondaryCodeDescription)
-                .foregroundStyle(Color.tronTextPrimary)
-                .lineLimit(1)
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(Color.tronTextMuted)
-                    .frame(width: 30, height: 30)
-                    .contentShape(Rectangle())
+        ChatCompactPillSurface(
+            tone: .information,
+            material: .glass,
+            interactive: true,
+            cornerRadiusOverride: ChatToolChipShapePolicy.cornerRadius
+        ) {
+            HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
+                Button { showsDetail = true } label: {
+                    ChatCompactPillLabel(
+                        icon: "sparkles",
+                        title: skill.friendlyName,
+                        tone: .information,
+                        iconSize: TronTypography.sizeBody,
+                        titleWeight: .bold
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show skill details, \(skill.friendlyName)")
+
+                Button(action: onRemove) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(Color.tronTextMuted)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove skill, \(skill.friendlyName)")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Remove skill, \(skill.displayName)")
         }
-        .padding(.leading, 10)
-        .padding(.trailing, 3)
-        .padding(.vertical, 3)
-        .glassEffect(.regular.tint(Color.tronCyan.opacity(0.40)), in: Capsule())
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Skill, \(skill.displayName)")
+        .sheet(isPresented: $showsDetail) {
+            ComposerResourceDetailSheet(
+                sessionID: sessionID,
+                entry: skill,
+                accent: .tronCyan,
+                prefix: "@"
+            )
+        }
     }
 }

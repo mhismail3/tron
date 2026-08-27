@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
   deploymentTransition,
   deploymentTimeoutMs,
+  commandTimeoutMs,
   publishSelection,
   rollbackSelection,
   rollbackSelectionAndClearAttempt,
@@ -49,6 +50,13 @@ test("deployment timeout defaults to a valid bounded millisecond value", () => {
   assert.equal(deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "120000" }), 120_000);
   assert.throws(() => deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "60_000" }), /invalid update timeout/);
   assert.throws(() => deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "1999" }), /invalid update timeout/);
+});
+
+test("command timeout defaults to a valid bounded millisecond value", () => {
+  assert.equal(commandTimeoutMs(undefined), 60_000);
+  assert.equal(commandTimeoutMs("120000"), 120_000);
+  assert.throws(() => commandTimeoutMs("60_000"), /invalid timeout/);
+  assert.throws(() => commandTimeoutMs("1999"), /invalid timeout/);
 });
 
 function selection(version, payloadFingerprint = "a".repeat(64)) {

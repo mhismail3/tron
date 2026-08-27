@@ -2192,6 +2192,23 @@ final class AppModel {
         await sessionPresentation.loadCommands(sessionID: sessionID)
     }
 
+    func commandDetail(sessionID: String, command: CommandInfo) async throws -> CommandResourceDetail {
+        guard let target = presentationTarget(for: sessionID),
+              admitsLiveSessionCommands(target) else { throw CancellationError() }
+        struct Params: Encodable {
+            let sessionId: String
+            let source: CommandInfo.Source
+            let name: String
+        }
+        let detail: CommandResourceDetail = try await client.request(
+            "session.commandDetail",
+            Params(sessionId: sessionID, source: command.source, name: command.name)
+        )
+        guard presentationTarget(for: sessionID) == target,
+              admitsLiveSessionCommands(target) else { throw CancellationError() }
+        return try CommandResourceDetailPolicy.admit(detail, matching: command)
+    }
+
     func loadResources(sessionID: String) async {
         await sessionPresentation.loadResources(sessionID: sessionID)
     }

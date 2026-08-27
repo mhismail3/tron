@@ -62,9 +62,32 @@ struct ComposerResourcePickerTests {
         ])
         #expect(catalog.skills.map(\.displayName) == ["review"])
         #expect(catalog.commands.map(\.displayName) == ["review-template", "skill:repair", "zeta"])
+        #expect(catalog.skills.map(\.friendlyName) == ["Review"])
+        #expect(catalog.commands.map(\.friendlyName) == ["Review Template", "Skill Repair", "Zeta"])
         #expect(catalog.entries(kind: .skill, query: "rev").map(\.displayName) == ["review"])
         #expect(catalog.entries(kind: .command, query: "review").map(\.displayName) == ["review-template", "zeta"])
         #expect(catalog.exactSkill(named: "review")?.invocationName == "skill:review")
+    }
+
+    @Test("resource names become user-facing titles without changing invocation identity")
+    func friendlyNames() {
+        #expect(ComposerResourceNameFormatter.friendly("council-mode") == "Council Mode")
+        #expect(ComposerResourceNameFormatter.friendly("pi-subagents") == "Pi Subagents")
+        #expect(ComposerResourceNameFormatter.friendly("inspectJSONPayload") == "Inspect JSON Payload")
+        #expect(ComposerResourceNameFormatter.friendly("ios_sdk") == "iOS SDK")
+    }
+
+    @Test("resource content hides duplicate Markdown front matter only")
+    func resourceContentBody() {
+        let skill = "---\nname: council-mode\ndescription: Council guidance\n---\n# Council Mode\n\nBody"
+        #expect(ComposerResourceContentPresentation.body(skill, source: .skill) == "# Council Mode\n\nBody")
+
+        let prompt = "\u{FEFF}---\r\ndescription: Review carefully\r\n...\r\nReview $ARGUMENTS"
+        #expect(ComposerResourceContentPresentation.body(prompt, source: .prompt) == "Review $ARGUMENTS")
+
+        let malformed = "---\nname: council-mode\n# No closing delimiter"
+        #expect(ComposerResourceContentPresentation.body(malformed, source: .skill) == malformed)
+        #expect(ComposerResourceContentPresentation.body(skill, source: .extension) == skill)
     }
 
     @MainActor
@@ -88,6 +111,41 @@ struct ComposerResourcePickerTests {
             .makeMenu().children.compactMap { ($0 as? UIAction)?.title }
         #expect(!legacyTitles.contains("Add Skills"))
         #expect(legacyTitles.last == "Add Commands")
+    }
+
+    @Test("selected resource detail requires exact identity and bounded content")
+    func selectedResourceDetailAdmission() throws {
+        let command = command("skill:council-mode", source: .skill)
+        let detail = CommandResourceDetail(
+            name: command.name,
+            description: "Council guidance",
+            argumentHint: nil,
+            source: .skill,
+            sourcePath: "/skills/council-mode/SKILL.md",
+            resourceSource: "project skills",
+            resourceScope: .project,
+            resourceOrigin: .topLevel,
+            content: "# Council Mode",
+            contentBytes: 14,
+            contentTruncated: false
+        )
+        #expect(try CommandResourceDetailPolicy.admit(detail, matching: command) == detail)
+        let mismatched = CommandResourceDetail(
+            name: "skill:other",
+            description: nil,
+            argumentHint: nil,
+            source: .skill,
+            sourcePath: nil,
+            resourceSource: nil,
+            resourceScope: nil,
+            resourceOrigin: nil,
+            content: nil,
+            contentBytes: nil,
+            contentTruncated: nil
+        )
+        #expect(throws: GatewayFailure.self) {
+            try CommandResourceDetailPolicy.admit(mismatched, matching: command)
+        }
     }
 
     @Test("the bounded catalog retains and filters its thousandth entry")

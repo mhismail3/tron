@@ -329,7 +329,6 @@ private struct ThinkingBlock: View {
         .overlay(alignment: .topLeading) { measurementProbe }
         .sheet(isPresented: $showingDetails) {
             ThinkingTraceDetailSheet(
-                label: label,
                 inline: preparedInline,
                 identity: traceIdentity,
                 streaming: animatesInsertion
@@ -494,15 +493,12 @@ private struct ChatThinkingTraceMetricsKey: PreferenceKey {
 }
 
 private struct ThinkingTraceDetailSheet: View {
-    let label: String?
     let inline: MarkdownPresentation.Inline
     let identity: String
     let streaming: Bool
     @Environment(\.dismiss) private var dismiss
 
-    private var title: String {
-        label?.isEmpty == false ? label! : "Thinking trace"
-    }
+    private let title = "Thinking"
 
     var body: some View {
         NavigationStack {

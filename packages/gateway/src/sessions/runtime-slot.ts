@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { closeSync, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
-import { copyFile, mkdtemp, open, rm, stat } from "node:fs/promises";
+import { copyFile, mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
@@ -20,6 +20,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import type {
+  CommandDetail,
   CommandInfo,
   ExtensionRunActivity,
   ExtensionRunChild,
@@ -48,6 +49,7 @@ import { ExtensionLifecycleCoordinator } from "./extension-lifecycle-coordinator
 import { RemotePiExtensionHost } from "../extensions/host/remote-pi-extension-host.js";
 import {
   admitCommandCatalog,
+  boundCommandContent,
   boundStreamingProgressItem,
   fitSessionSnapshot,
   projectJson,
@@ -1484,7 +1486,7 @@ export class RuntimeSlot {
     if (!completion.operationId) return Promise.resolve();
     const stamp = this.trackOwnershipWrite(() => this.retryDurableWrite(
       `marker:completion:${completion.operationId}:${completion.id}`,
-      () => this.dependencies.markers.markAssistantCompletion(
+      () => this.dependencies.markers.reassertAssistantCompletion(
         this.id,
         completion.operationId!,
         completion.id,
@@ -4352,6 +4354,9 @@ export class RuntimeSlot {
       ...(command.description ? { description: command.description } : {}),
       source: "extension",
       sourcePath: command.sourceInfo.path,
+      resourceSource: command.sourceInfo.source,
+      resourceScope: command.sourceInfo.scope,
+      resourceOrigin: command.sourceInfo.origin,
     }));
     const prompts: CommandInfo[] = session.promptTemplates.map((prompt) => ({
       name: prompt.name,
@@ -4359,16 +4364,42 @@ export class RuntimeSlot {
       ...(prompt.argumentHint ? { argumentHint: prompt.argumentHint } : {}),
       source: "prompt",
       sourcePath: prompt.filePath,
+      resourceSource: prompt.sourceInfo.source,
+      resourceScope: prompt.sourceInfo.scope,
+      resourceOrigin: prompt.sourceInfo.origin,
     }));
     const skills: CommandInfo[] = session.resourceLoader.getSkills().skills.map((skill) => ({
       name: `skill:${skill.name}`,
       ...(skill.description ? { description: skill.description } : {}),
       source: "skill",
       sourcePath: skill.filePath,
+      resourceSource: skill.sourceInfo.source,
+      resourceScope: skill.sourceInfo.scope,
+      resourceOrigin: skill.sourceInfo.origin,
     }));
     return admitCommandCatalog(
       [...extension, ...prompts, ...skills].sort((a, b) => a.name.localeCompare(b.name)),
     );
+  }
+
+  async commandDetail(source: CommandInfo["source"], name: string): Promise<CommandDetail> {
+    this.assertNoTrustReload();
+    const command = this.commands().find((candidate) =>
+      candidate.source === source && candidate.name === name
+    );
+    if (!command) throw new GatewayError("not_found", "That command is no longer available");
+
+    let content: string | undefined;
+    if (source === "prompt") {
+      content = this.runtime.session.promptTemplates.find((prompt) => prompt.name === name)?.content;
+    } else if (command.sourcePath) {
+      try {
+        content = await readFile(command.sourcePath, "utf8");
+      } catch {
+        throw new GatewayError("not_found", "The command source content is no longer available");
+      }
+    }
+    return content === undefined ? command : { ...command, ...boundCommandContent(content) };
   }
 
   context(): JsonValue {

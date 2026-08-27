@@ -104,23 +104,39 @@ export class RunMarkerStore {
     completionId: string,
     completedAt: string,
   ): Promise<void> {
-    if (!boundedString(operationId, MAXIMUM_MARKER_IDENTIFIER_BYTES)
-      || !boundedString(completionId, MAXIMUM_MARKER_IDENTIFIER_BYTES)
-      || !boundedString(completedAt, MAXIMUM_MARKER_TIMESTAMP_BYTES)) {
-      throw new Error("Run marker completion evidence exceeds its bound");
-    }
+    assertCompletionEvidence(operationId, completionId, completedAt);
     await this.withLane(sessionId, async () => {
       const path = join(this.directory, `${sessionId}.json`);
       const operations = await readOperations(path, sessionId);
       const operation = operations.find((candidate) => candidate.operationId === operationId);
       if (!operation) throw new Error("Run marker ownership changed before assistant completion admission");
-      if (operation.assistantCompletionId !== undefined
-        && (operation.assistantCompletionId !== completionId || operation.assistantCompletedAt !== completedAt)) {
-        throw new Error("Run marker operation already owns a different assistant completion");
+      if (!applyAssistantCompletion(operation, completionId, completedAt)) return;
+      await durableWriteRunMarker(path, { version: 2, sessionId, operations }, this.fileSystem);
+    });
+  }
+
+  /** Atomically restores a live operation's exact marker and stamps its terminal
+   * completion. Keeping both changes in one session lane prevents stale cleanup
+   * from recreating a permanent missing-owner retry between two durable writes. */
+  async reassertAssistantCompletion(
+    sessionId: string,
+    operationId: string,
+    completionId: string,
+    completedAt: string,
+  ): Promise<void> {
+    assertCompletionEvidence(operationId, completionId, completedAt);
+    await this.withLane(sessionId, async () => {
+      const path = join(this.directory, `${sessionId}.json`);
+      const operations = await readOperations(path, sessionId);
+      let operation = operations.find((candidate) => candidate.operationId === operationId);
+      if (!operation) {
+        if (operations.length >= MAXIMUM_RUN_MARKER_OPERATIONS) {
+          throw new Error("Run marker operation bound reached before terminal ownership reassertion");
+        }
+        operation = { operationId, acceptedAt: new Date().toISOString() };
+        operations.push(operation);
       }
-      if (operation.assistantCompletionId === completionId && operation.assistantCompletedAt === completedAt) return;
-      operation.assistantCompletionId = completionId;
-      operation.assistantCompletedAt = completedAt;
+      if (!applyAssistantCompletion(operation, completionId, completedAt)) return;
       await durableWriteRunMarker(path, { version: 2, sessionId, operations }, this.fileSystem);
     });
   }
@@ -188,6 +204,29 @@ async function readOperations(path: string, sessionId: string): Promise<RunMarke
 
 function boundedString(value: unknown, maximumBytes: number): value is string {
   return typeof value === "string" && value.length > 0 && Buffer.byteLength(value) <= maximumBytes;
+}
+
+function assertCompletionEvidence(operationId: string, completionId: string, completedAt: string): void {
+  if (!boundedString(operationId, MAXIMUM_MARKER_IDENTIFIER_BYTES)
+    || !boundedString(completionId, MAXIMUM_MARKER_IDENTIFIER_BYTES)
+    || !boundedString(completedAt, MAXIMUM_MARKER_TIMESTAMP_BYTES)) {
+    throw new Error("Run marker completion evidence exceeds its bound");
+  }
+}
+
+function applyAssistantCompletion(
+  operation: RunMarkerEvidence,
+  completionId: string,
+  completedAt: string,
+): boolean {
+  if (operation.assistantCompletionId !== undefined
+    && (operation.assistantCompletionId !== completionId || operation.assistantCompletedAt !== completedAt)) {
+    throw new Error("Run marker operation already owns a different assistant completion");
+  }
+  if (operation.assistantCompletionId === completionId && operation.assistantCompletedAt === completedAt) return false;
+  operation.assistantCompletionId = completionId;
+  operation.assistantCompletedAt = completedAt;
+  return true;
 }
 
 function admitsOperation(operation: unknown): operation is RunMarkerEvidence {

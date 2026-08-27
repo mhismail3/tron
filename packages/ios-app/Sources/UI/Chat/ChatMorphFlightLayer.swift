@@ -370,15 +370,8 @@ struct ChatMorphFlightLayer: View {
             registry.abandon()
         }
         .task(id: registry.flight?.lifecycleID) {
-            guard let lifecycleID = registry.flight?.lifecycleID else { return }
-            if reduceMotion {
-                failOpen(lifecycleID: lifecycleID)
-                return
-            }
-            try? await Task.sleep(for: .milliseconds(80))
-            guard !Task.isCancelled,
-                  registry.flight?.lifecycleID == lifecycleID,
-                  registry.flight?.phase == .waitingForDestination else { return }
+            guard reduceMotion,
+                  let lifecycleID = registry.flight?.lifecycleID else { return }
             failOpen(lifecycleID: lifecycleID)
         }
     }

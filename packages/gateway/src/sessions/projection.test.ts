@@ -8,10 +8,12 @@ import { SESSION_INPUT_RECEIPT_TYPE, makeSessionInputReceipt } from "./session-i
 import type { SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import {
   admitCommandCatalog,
+  boundCommandContent,
   boundStreamingProgressItem,
   COMMAND_CATALOG_BYTES,
   COMMAND_CATALOG_ITEMS,
   COMMAND_CATALOG_STRING_BYTES,
+  COMMAND_DETAIL_CONTENT_BYTES,
   fitSessionSnapshot,
   STREAMING_PROGRESS_BYTES,
   projectJson,
@@ -40,12 +42,31 @@ describe("catalog projection admission", () => {
     expect(admitCommandCatalog(commands).map((command) => command.name)).toEqual(["zeta", "alpha"]);
   });
 
+  it("bounds selected command content without splitting UTF-8 scalars", () => {
+    const exact = "Council guidance";
+    expect(boundCommandContent(exact)).toEqual({
+      content: exact,
+      contentBytes: Buffer.byteLength(exact),
+      contentTruncated: false,
+    });
+
+    const oversized = `${"x".repeat(COMMAND_DETAIL_CONTENT_BYTES - 1)}🙂tail`;
+    const bounded = boundCommandContent(oversized);
+    expect(Buffer.byteLength(bounded.content)).toBeLessThanOrEqual(COMMAND_DETAIL_CONTENT_BYTES);
+    expect(bounded.content.endsWith("�")).toBe(false);
+    expect(bounded.contentBytes).toBe(Buffer.byteLength(oversized));
+    expect(bounded.contentTruncated).toBe(true);
+  });
+
   it("rejects duplicate, malformed, count-excess, and byte-excess command catalogs", () => {
     expect(() => admitCommandCatalog([
       { name: "same", source: "skill" },
       { name: "same", source: "skill", description: "duplicate" },
     ])).toThrow(/duplicate/);
     expect(() => admitCommandCatalog([{ name: "", source: "prompt" }])).toThrow(/invalid/);
+    expect(() => admitCommandCatalog([{
+      name: "valid", source: "prompt", resourceScope: "machine" as "project",
+    }])).toThrow(/invalid/);
     expect(() => admitCommandCatalog([{
       name: "valid", source: "prompt", sourcePath: "x".repeat(COMMAND_CATALOG_STRING_BYTES + 1),
     }])).toThrow(/invalid/);

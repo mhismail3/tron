@@ -147,7 +147,11 @@ struct ChatComposerView: View {
         if let selectedSkill {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ComposerSkillChip(skill: selectedSkill, onRemove: onRemoveSkill)
+                    ComposerSkillChip(
+                        sessionID: snapshot?.sessionId,
+                        skill: selectedSkill,
+                        onRemove: onRemoveSkill
+                    )
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 2)
@@ -163,6 +167,7 @@ struct ChatComposerView: View {
     private var resourcePickerView: some View {
         if let resourcePicker {
             ComposerResourcePicker(
+                sessionID: snapshot?.sessionId,
                 kind: resourcePicker.kind,
                 query: resourcePicker.query,
                 entries: resourceResults,

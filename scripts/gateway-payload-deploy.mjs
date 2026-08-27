@@ -1947,6 +1947,14 @@ export function deploymentTimeoutMs(environment = process.env) {
   return timeoutMs;
 }
 
+export function commandTimeoutMs(raw) {
+  const timeoutMs = Number(raw ?? "60000");
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 2_000 || timeoutMs > 300_000) {
+    throw new Error("invalid timeout");
+  }
+  return timeoutMs;
+}
+
 async function applyPayloadInternal(request) {
   const value = validateApplyRequest(request);
   const home = homeForChannel(value.channel, process.env.TRON_DATA_DIR);
@@ -2159,8 +2167,7 @@ async function main() {
   const host = resolveDeploymentHost(requestedHost);
   const port = Number(argument("--port") ?? process.env.TRON_GATEWAY_PORT ?? (channel === "dev" ? "9848" : "9847"));
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("invalid Gateway port");
-  const timeoutMs = Number(argument("--timeout-ms") ?? "60_000");
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 2_000 || timeoutMs > 300_000) throw new Error("invalid timeout");
+  const timeoutMs = commandTimeoutMs(argument("--timeout-ms"));
   const tokenPath = join(home, "gateway", "local-auth.json");
   const token = await readLocalCredential(tokenPath);
   const callerCommandId = argument("--command-id");

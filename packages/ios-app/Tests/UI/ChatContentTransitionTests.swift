@@ -55,6 +55,15 @@ struct ChatContentTransitionTests {
         ))
     }
 
+    @Test("new transcript rows grow continuously with bounded measured height")
+    func transcriptEntranceGrowth() {
+        #expect(ChatEntranceGrowthPolicy.height(natural: 120, progress: -1) == 0)
+        #expect(ChatEntranceGrowthPolicy.height(natural: 120, progress: 0.5) == 60)
+        #expect(ChatEntranceGrowthPolicy.height(natural: 120, progress: 2) == 120)
+        #expect(ChatEntranceGrowthPolicy.height(natural: .infinity, progress: 1) == 0)
+        #expect(ChatEntranceGrowthPolicy.height(natural: 120, progress: .nan) == 0)
+    }
+
     @Test("user and queue content rises from the trailing composer edge")
     func composerEdgeMotion() {
         let user = ChatContentTransitionPolicy.hiddenTransform(

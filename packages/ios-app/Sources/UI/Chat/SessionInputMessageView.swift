@@ -1,5 +1,25 @@
 import SwiftUI
 
+enum SessionInputCompactPresentationPolicy {
+    static func status(details: JSONValue?, message: String) -> String {
+        let supplied = details?.objectValue?["status"]?.stringValue
+            ?? details?.objectValue?["state"]?.stringValue
+        if let supplied, !supplied.isEmpty {
+            return ComposerResourceNameFormatter.friendly(supplied)
+        }
+        let normalized = message.lowercased()
+        if normalized.contains("failed") || normalized.contains("error") { return "Failed" }
+        if normalized.contains("completed") || normalized.contains("finished") { return "Completed" }
+        return "Message"
+    }
+
+    static func durationMilliseconds(details: JSONValue?) -> Int? {
+        let object = details?.objectValue
+        let value = object?["durationMs"]?.intValue ?? object?["elapsedMs"]?.intValue
+        return value.map { max(0, $0) }
+    }
+}
+
 /// A producer-authored message delivered into the mounted session's agent turn.
 /// This is conversation input, not a tool invocation, so it shares the trailing
 /// edge with user and steering messages while retaining distinct provenance.
@@ -16,39 +36,48 @@ struct SessionInputMessageView: View {
         return text.isEmpty ? "No text content" : text
     }
 
-    private var bubbleShape: RoundedRectangle {
-        RoundedRectangle(
-            cornerRadius: ChatPromptContainerStyle.cornerRadius,
-            style: .continuous
+    private var status: String {
+        SessionInputCompactPresentationPolicy.status(
+            details: item.details,
+            message: messageText
         )
+    }
+
+    private var durationMilliseconds: Int? {
+        SessionInputCompactPresentationPolicy.durationMilliseconds(details: item.details)
+    }
+
+    private var tone: ChatNotificationTone {
+        status == "Failed" ? .error : status == "Completed" ? .accent : .information
     }
 
     var body: some View {
         Button { showingDetails = true } label: {
-            BoundedTrailingContentLayout(maxWidth: UserPromptTextLayoutPolicy.maximumWidth) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(originTitle, systemImage: "arrow.down.message.fill")
-                        .font(TronFont.mono(10, weight: .medium))
-                        .foregroundStyle(Color.tronCyan)
-                    UserPromptText(text: messageText)
+            ChatCompactPillSurface(
+                tone: tone,
+                material: .glass,
+                interactive: true,
+                cornerRadiusOverride: ChatToolChipShapePolicy.cornerRadius
+            ) {
+                ChatCompactPillLabel(
+                    icon: "arrow.down.message.fill",
+                    title: originTitle,
+                    detail: status,
+                    tone: tone,
+                    iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
+                    titleWeight: .bold
+                ) {
+                    if let durationMilliseconds {
+                        Text(ToolTiming.format(milliseconds: durationMilliseconds))
+                            .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
+                            .foregroundStyle(tone.secondaryColor)
+                    }
                 }
-                .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
-                .padding(.top, ChatPromptContainerStyle.topPadding)
-                .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
-                .fixedSize(horizontal: false, vertical: true)
             }
-            // The custom layout's transparent padded region must participate in
-            // hit testing. Without this explicit shape UIKit-backed message text
-            // can leave only its header glyphs reliably tappable.
-            .contentShape(bubbleShape)
-            .glassEffect(
-                .regular.tint(Color.tronCyan.opacity(0.14)).interactive(),
-                in: bubbleShape
-            )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Message from \(originTitle). \(messageText)")
-        .accessibilityHint("Shows message origin and technical details")
+        .accessibilityLabel("Message from \(originTitle), \(status). \(messageText)")
+        .accessibilityHint("Shows the full message and technical details")
         .sheet(isPresented: $showingDetails) {
             SessionInputDetailsSheet(item: item)
         }
@@ -58,6 +87,7 @@ struct SessionInputMessageView: View {
 private struct SessionInputDetailsSheet: View {
     let item: TranscriptItem
     @Environment(\.dismiss) private var dismiss
+    @State private var detent: PresentationDetent = .medium
 
     private let accent = Color.tronCyan
 
@@ -139,7 +169,7 @@ private struct SessionInputDetailsSheet: View {
             }
         }
         .tronTopBlur(.toolDetail)
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.medium, .large], selection: $detent)
         .presentationDragIndicator(.hidden)
         .tronPresentation()
     }

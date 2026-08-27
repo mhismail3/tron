@@ -51,6 +51,12 @@ struct SessionProcessButton: View {
                 .accessibilityHint("Shows current and recently finished subagents")
             }
         }
+        .animation(
+            reduceMotion
+                ? .easeOut(duration: 0.12)
+                : .spring(response: 0.32, dampingFraction: 0.82),
+            value: isVisible
+        )
         .task(id: expiryTaskIdentity) {
             localRecentExpired = false
             guard overview.visibility == .recent,

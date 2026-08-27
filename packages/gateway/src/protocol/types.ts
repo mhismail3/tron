@@ -746,6 +746,15 @@ export interface CommandInfo {
   argumentHint?: string;
   source: "extension" | "skill" | "prompt";
   sourcePath?: string;
+  resourceSource?: string;
+  resourceScope?: "user" | "project" | "temporary";
+  resourceOrigin?: "package" | "top-level";
+}
+
+export interface CommandDetail extends CommandInfo {
+  content?: string;
+  contentBytes?: number;
+  contentTruncated?: boolean;
 }
 
 export interface ProtocolEvent {

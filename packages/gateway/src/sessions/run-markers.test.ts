@@ -28,6 +28,31 @@ describe("RunMarkerStore", () => {
     expect(await store.interruptedSessionIds()).toEqual(new Set());
   });
 
+  it("atomically reasserts missing live ownership with exact completion evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-markers-reassert-"));
+    const renameMarker = vi.fn((...arguments_: Parameters<typeof rename>) => rename(...arguments_));
+    const store = new RunMarkerStore(root, {
+      fileSystem: { mkdir, open, rename: renameMarker, rm } as never,
+    });
+
+    await store.reassertAssistantCompletion(
+      "session", "operation", "completion", "2026-01-01T00:00:00.000Z",
+    );
+    expect(await store.evidenceFor("session")).toEqual([expect.objectContaining({
+      operationId: "operation",
+      assistantCompletionId: "completion",
+      assistantCompletedAt: "2026-01-01T00:00:00.000Z",
+    })]);
+    expect(renameMarker).toHaveBeenCalledTimes(1);
+    await store.reassertAssistantCompletion(
+      "session", "operation", "completion", "2026-01-01T00:00:00.000Z",
+    );
+    expect(renameMarker).toHaveBeenCalledTimes(1);
+    await expect(store.reassertAssistantCompletion(
+      "session", "operation", "other", "2026-01-01T00:00:01.000Z",
+    )).rejects.toThrow("different assistant completion");
+  });
+
   it("syncs marker files and their directory for accepted and exact completion evidence", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-markers-durable-"));
     const events: string[] = [];

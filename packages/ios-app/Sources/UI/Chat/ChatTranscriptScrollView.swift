@@ -148,10 +148,11 @@ struct ChatPhysicalTranscriptRows: RandomAccessCollection {
         isCommitted: Bool
     ) -> ChatPhysicalTranscriptRow {
         let canonicalID = ChatPhysicalTranscriptRowPolicy.canonicalSemanticID(item)
-        let alias = canonicalID.flatMap { canonicalAliases[$0] }
+        let promptAlias = canonicalID.flatMap { canonicalAliases[$0] }
+        let toolAlias = installed.toolPhysicalID(forRenderedID: item.id)
         return ChatPhysicalTranscriptRow(
-            id: alias ?? item.id,
-            semanticID: alias == nil ? item.id : (canonicalID ?? item.id),
+            id: promptAlias ?? toolAlias ?? item.id,
+            semanticID: promptAlias == nil ? item.id : (canonicalID ?? item.id),
             content: .transcript(item, isCommitted: isCommitted)
         )
     }
@@ -261,6 +262,7 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
         // progress, and canonical-settlement changes retarget this persistent
         // host without assigning an inner `.id` that would remove its subtree.
         content(displayed)
+            .contentTransition(reduceMotion ? .opacity : .interpolate)
             .onAppear { hostedRecorder?.recordPhysicalRowAppearance(id: displayed.id) }
             .onDisappear { hostedRecorder?.recordPhysicalRowDisappearance(id: displayed.id) }
             .onChange(of: row) { _, next in retarget(next) }

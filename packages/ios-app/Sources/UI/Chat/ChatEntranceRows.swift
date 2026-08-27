@@ -16,6 +16,52 @@ struct ChatSemanticFrameObservation: Equatable {
     }
 }
 
+enum ChatEntranceGrowthPolicy {
+    static func height(natural: CGFloat, progress: CGFloat) -> CGFloat {
+        guard natural.isFinite, natural > 0, progress.isFinite else { return 0 }
+        return natural * min(1, max(0, progress))
+    }
+}
+
+private struct ChatEntranceGrowthLayout: Layout, Animatable {
+    var progress: CGFloat
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        let natural = subview.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        return CGSize(
+            width: proposal.width ?? natural.width,
+            height: ChatEntranceGrowthPolicy.height(
+                natural: natural.height,
+                progress: progress
+            )
+        )
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let subview = subviews.first else { return }
+        let natural = subview.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+        subview.place(
+            at: CGPoint(x: bounds.minX, y: bounds.maxY - natural.height),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: natural.height)
+        )
+    }
+}
+
 enum ChatEntranceGeometryAdmissionPolicy {
     static func admits(
         observation: ChatSemanticFrameObservation,
@@ -60,33 +106,36 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
             for: kind,
             reduceMotion: reduceMotion
         )
-        content
-            .opacity(revealed ? 1 : 0)
-            .scaleEffect(
-                revealed ? 1 : hidden.scale,
-                anchor: hidden.anchor.unitPoint
-            )
-            .offset(
-                x: revealed ? 0 : hidden.offsetX,
-                y: revealed ? 0 : hidden.offsetY
-            )
-            .onChange(of: state, initial: true) { _, state in
-                switch state {
-                case .pending:
-                    break
-                case .admitted:
-                    var transaction = Transaction(animation: ChatContentTransitionPolicy.revealAnimation(
-                        for: kind,
-                        reduceMotion: reduceMotion
-                    ))
-                    transaction.admitsChatEntranceAnimation = true
-                    withTransaction(transaction) { revealed = true }
-                case .none:
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) { revealed = true }
-                }
+        ChatEntranceGrowthLayout(progress: revealed || reduceMotion ? 1 : 0) {
+            content
+                .opacity(revealed ? 1 : 0)
+                .scaleEffect(
+                    revealed ? 1 : hidden.scale,
+                    anchor: hidden.anchor.unitPoint
+                )
+                .offset(
+                    x: revealed ? 0 : hidden.offsetX,
+                    y: revealed ? 0 : hidden.offsetY
+                )
+        }
+        .clipped()
+        .onChange(of: state, initial: true) { _, state in
+            switch state {
+            case .pending:
+                break
+            case .admitted:
+                var transaction = Transaction(animation: ChatContentTransitionPolicy.revealAnimation(
+                    for: kind,
+                    reduceMotion: reduceMotion
+                ))
+                transaction.admitsChatEntranceAnimation = true
+                withTransaction(transaction) { revealed = true }
+            case .none:
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { revealed = true }
             }
+        }
     }
 }
 
@@ -135,41 +184,48 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
                 for: kind,
                 reduceMotion: reduceMotion
             )
-        content
-            .opacity(revealed ? 1 : 0)
-            .scaleEffect(
-                revealed ? 1 : hidden.scale,
-                anchor: hidden.anchor.unitPoint
-            )
-            .offset(
-                x: revealed ? 0 : hidden.offsetX,
-                y: revealed ? 0 : hidden.offsetY
-            )
-            .onAppear {
-                onEntranceConsumed()
-                guard morphOwnership == .ordinary else { return }
-                revealOrdinaryEntranceIfNeeded()
-            }
-            .onChange(of: morphOwnership) { previous, current in
-                switch current {
-                case .flight:
-                    break
-                case .completed:
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) { revealed = true }
-                case .ordinary:
-                    // A staged flight that failed before completion falls back
-                    // to the same bounded row entrance as a non-morphed send.
-                    if previous == .flight { revealOrdinaryEntranceIfNeeded() }
-                }
-            }
-            .onChange(of: animatesEntrance) { _, enabled in
-                guard !enabled, morphOwnership == .ordinary else { return }
+        ChatEntranceGrowthLayout(
+            progress: morphOwnership == .flight || morphOwnership == .completed
+                ? 1
+                : (revealed || reduceMotion ? 1 : 0)
+        ) {
+            content
+                .opacity(revealed ? 1 : 0)
+                .scaleEffect(
+                    revealed ? 1 : hidden.scale,
+                    anchor: hidden.anchor.unitPoint
+                )
+                .offset(
+                    x: revealed ? 0 : hidden.offsetX,
+                    y: revealed ? 0 : hidden.offsetY
+                )
+        }
+        .clipped()
+        .onAppear {
+            onEntranceConsumed()
+            guard morphOwnership == .ordinary else { return }
+            revealOrdinaryEntranceIfNeeded()
+        }
+        .onChange(of: morphOwnership) { previous, current in
+            switch current {
+            case .flight:
+                break
+            case .completed:
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) { revealed = true }
+            case .ordinary:
+                // A staged flight that failed before completion falls back
+                // to the same bounded row entrance as a non-morphed send.
+                if previous == .flight { revealOrdinaryEntranceIfNeeded() }
             }
+        }
+        .onChange(of: animatesEntrance) { _, enabled in
+            guard !enabled, morphOwnership == .ordinary else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { revealed = true }
+        }
     }
 
     private func revealOrdinaryEntranceIfNeeded() {
@@ -214,32 +270,35 @@ struct ChatQueuedMessageEntranceRow<Content: View>: View {
             for: .queuedPrompt,
             reduceMotion: reduceMotion
         )
-        content
-            .opacity(revealed ? 1 : 0)
-            .scaleEffect(
-                revealed ? 1 : hidden.scale,
-                anchor: hidden.anchor.unitPoint
-            )
-            .offset(
-                x: revealed ? 0 : hidden.offsetX,
-                y: revealed ? 0 : hidden.offsetY
-            )
-            .onAppear {
-                onEntranceConsumed()
-                guard animatesEntrance, !revealed else { return }
-                var transaction = Transaction(animation: ChatContentTransitionPolicy.revealAnimation(
-                    for: .queuedPrompt,
-                    reduceMotion: reduceMotion
-                ))
-                transaction.admitsChatEntranceAnimation = true
-                withTransaction(transaction) { revealed = true }
-            }
-            .onChange(of: animatesEntrance) { _, enabled in
-                guard !enabled else { return }
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { revealed = true }
-            }
+        ChatEntranceGrowthLayout(progress: revealed || reduceMotion ? 1 : 0) {
+            content
+                .opacity(revealed ? 1 : 0)
+                .scaleEffect(
+                    revealed ? 1 : hidden.scale,
+                    anchor: hidden.anchor.unitPoint
+                )
+                .offset(
+                    x: revealed ? 0 : hidden.offsetX,
+                    y: revealed ? 0 : hidden.offsetY
+                )
+        }
+        .clipped()
+        .onAppear {
+            onEntranceConsumed()
+            guard animatesEntrance, !revealed else { return }
+            var transaction = Transaction(animation: ChatContentTransitionPolicy.revealAnimation(
+                for: .queuedPrompt,
+                reduceMotion: reduceMotion
+            ))
+            transaction.admitsChatEntranceAnimation = true
+            withTransaction(transaction) { revealed = true }
+        }
+        .onChange(of: animatesEntrance) { _, enabled in
+            guard !enabled else { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { revealed = true }
+        }
     }
 }
 

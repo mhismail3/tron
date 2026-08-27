@@ -289,6 +289,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
     let queueRevision: Int?
     let supportsQueueManagement: Bool
     let sourceWindow: SourceWindow
+    private let toolPhysicalIDByRenderedID: [String: String]
     private let runtimeIDSet: Set<String>
     private let queueIDSet: Set<String>
     private let displayedItemByID: [String: ChatTranscriptRenderItem]?
@@ -307,7 +308,8 @@ struct InstalledChatTranscript: Hashable, Sendable {
         queueRevision: Int? = nil,
         supportsQueueManagement: Bool = false,
         sourceWindow: SourceWindow,
-        committedLedgerRevision: UInt64 = 1
+        committedLedgerRevision: UInt64 = 1,
+        toolPhysicalIDByRenderedID: [String: String] = [:]
     ) {
         self.tag = tag
         let frozenHandoff = handoff.frozenForHandoff()
@@ -332,6 +334,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
         self.queueRevision = queueRevision
         self.supportsQueueManagement = supportsQueueManagement
         self.sourceWindow = sourceWindow
+        self.toolPhysicalIDByRenderedID = toolPhysicalIDByRenderedID
         runtimeIDSet = Set(runtimeItems.map(\.id))
         queueIDSet = Set(queuedMessages.map(\.id))
         let displayed = Array(timeline.items) + runtimeItems
@@ -384,7 +387,8 @@ struct InstalledChatTranscript: Hashable, Sendable {
             queueRevision: queueRevision,
             supportsQueueManagement: supportsQueueManagement,
             sourceWindow: sourceWindow,
-            committedLedgerRevision: committedLedger.revision
+            committedLedgerRevision: committedLedger.revision,
+            toolPhysicalIDByRenderedID: toolPhysicalIDByRenderedID
         )
     }
 
@@ -394,7 +398,12 @@ struct InstalledChatTranscript: Hashable, Sendable {
             items: committedLedger.items,
             previous: compatiblePrevious?.committedLedger
         )
-        guard ledger.revision != committedLedger.revision else { return self }
+        let toolAliases = Self.reconciledToolPhysicalAliases(
+            timeline: timeline,
+            previous: compatiblePrevious
+        )
+        guard ledger.revision != committedLedger.revision
+                || toolAliases != toolPhysicalIDByRenderedID else { return self }
         return Self(
             tag: tag,
             handoff: handoff,
@@ -407,8 +416,47 @@ struct InstalledChatTranscript: Hashable, Sendable {
             queueRevision: queueRevision,
             supportsQueueManagement: supportsQueueManagement,
             sourceWindow: sourceWindow,
-            committedLedgerRevision: ledger.revision
+            committedLedgerRevision: ledger.revision,
+            toolPhysicalIDByRenderedID: toolAliases
         )
+    }
+
+    private static func reconciledToolPhysicalAliases(
+        timeline: ChatTranscriptTimeline,
+        previous: InstalledChatTranscript?
+    ) -> [String: String] {
+        guard let previous else { return [:] }
+        var previousPhysicalByCallID: [String: String] = [:]
+        var previousPhysicalByGroupID: [String: String] = [:]
+        for item in previous.timeline.items {
+            guard case .toolRun(let run) = item else { continue }
+            let physicalID = previous.toolPhysicalIDByRenderedID[run.id] ?? run.id
+            for tool in run.tools { previousPhysicalByCallID[tool.id] = physicalID }
+            for groupID in run.groupIDs { previousPhysicalByGroupID[groupID] = physicalID }
+        }
+
+        let currentIDs = Set(timeline.ids)
+        var proposals: [String: String] = [:]
+        for item in timeline.items {
+            guard case .toolRun(let run) = item else { continue }
+            let exactGroupOwners = Set(run.groupIDs.compactMap { previousPhysicalByGroupID[$0] })
+            let slotZeroOwner = run.tools
+                .first(where: { $0.groupFinalized == true && $0.groupIndex == 0 })
+                .flatMap { previousPhysicalByCallID[$0.id] }
+            let callOwners = Set(run.tools.compactMap { previousPhysicalByCallID[$0.id] })
+            let owner = exactGroupOwners.count == 1 ? exactGroupOwners.first
+                : slotZeroOwner ?? (callOwners.count == 1 ? callOwners.first : nil)
+            guard let owner,
+                  owner != run.id,
+                  !currentIDs.contains(owner) else { continue }
+            proposals[run.id] = owner
+        }
+
+        let ownerCounts = Dictionary(
+            grouping: proposals.values,
+            by: { $0 }
+        ).mapValues(\.count)
+        return proposals.filter { ownerCounts[$0.value] == 1 }
     }
 
     var displayedItems: ChatDisplayedTranscriptItems {
@@ -424,7 +472,10 @@ struct InstalledChatTranscript: Hashable, Sendable {
               queueIDSet.count == queuedMessages.count,
               Set(queuePresentationIDByOperationID.keys).isSubset(of: queueIDSet),
               Set(queuePresentationIDByOperationID.values).count
-                  == queuePresentationIDByOperationID.count else { return false }
+                  == queuePresentationIDByOperationID.count,
+              Set(toolPhysicalIDByRenderedID.keys).isSubset(of: Set(timeline.ids)),
+              Set(toolPhysicalIDByRenderedID.values).count
+                  == toolPhysicalIDByRenderedID.count else { return false }
 
         // Validate the namespace SwiftUI actually receives, not just the
         // canonical timeline. Presentation-only lifecycle, queue, paging, and
@@ -434,7 +485,9 @@ struct InstalledChatTranscript: Hashable, Sendable {
             guard !id.isEmpty else { return false }
             return physicalIDs.insert(id).inserted
         }
-        guard displayedItems.allSatisfy({ admit($0.id) }) else { return false }
+        guard timeline.items.allSatisfy({ item in
+            admit(toolPhysicalIDByRenderedID[item.id] ?? item.id)
+        }), runtimeItems.allSatisfy({ admit($0.id) }) else { return false }
         switch handoff {
         case .none:
             break
@@ -461,7 +514,13 @@ struct InstalledChatTranscript: Hashable, Sendable {
     }
 
     func containsUnaliasedPhysicalID(_ id: String) -> Bool {
-        containsDisplayedID(id) || presentationOnlyIDSet.contains(id)
+        containsDisplayedID(id)
+            || presentationOnlyIDSet.contains(id)
+            || toolPhysicalIDByRenderedID.values.contains(id)
+    }
+
+    func toolPhysicalID(forRenderedID id: String) -> String? {
+        toolPhysicalIDByRenderedID[id]
     }
 
     func resolveToolDetails(
@@ -522,7 +581,8 @@ struct InstalledChatTranscript: Hashable, Sendable {
             queueRevision: queueRevision,
             supportsQueueManagement: supportsQueueManagement,
             sourceWindow: sourceWindow,
-            committedLedgerRevision: committedLedger.revision
+            committedLedgerRevision: committedLedger.revision,
+            toolPhysicalIDByRenderedID: toolPhysicalIDByRenderedID
         )
     }
 

@@ -1685,6 +1685,48 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("finalized tool metadata preserves the mounted running chip lineage")
+    func finalizedToolMetadataPreservesPhysicalLineage() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_224)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.phase = .running
+            snapshot.toolExecutions = [storeRuntimeTool(
+                id: "call",
+                output: "working",
+                progressSequence: 1
+            )]
+            let store = ChatTranscriptPresentationStore()
+            var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 23)
+            store.submit(snapshot: snapshot, tag: tag)
+            let running = try await store.waitForInstall(of: tag)
+            let runningRow = try #require(ChatPhysicalTranscriptRowPolicy.rows(
+                installed: running,
+                canonicalAliases: [:]
+            ).first { $0.semanticID == "tool-run-call" })
+            #expect(runningRow.id == "tool-run-call")
+
+            snapshot.toolExecutions = [storeRuntimeTool(
+                id: "call",
+                output: "done",
+                progressSequence: 2,
+                status: .completed,
+                groupID: "producer-group"
+            )]
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 23)
+            store.submit(snapshot: snapshot, tag: tag)
+            let completed = try await store.waitForInstall(of: tag)
+            let completedRow = try #require(ChatPhysicalTranscriptRowPolicy.rows(
+                installed: completed,
+                canonicalAliases: [:]
+            ).first { $0.semanticID == "tool-run-producer-group" })
+            #expect(completedRow.id == runningRow.id)
+            #expect(completedRow.semanticID == "tool-run-producer-group")
+            #expect(completed.hasUniqueDisplayedIDs)
+        }
+    }
+
     @Test("reset session and runtime scope changes force cold projection after sparse work")
     func scopeRetirementForcesCold() async throws {
         try await withTestWatchdog { @MainActor in
@@ -2110,7 +2152,8 @@ private func storeRuntimeTool(
     id: String = "runtime-tool",
     output: String,
     progressSequence: Int,
-    status: ToolExecutionState.Status = .running
+    status: ToolExecutionState.Status = .running,
+    groupID: String? = nil
 ) -> ToolExecutionState {
     ToolExecutionState(
         toolCallId: id,
@@ -2127,7 +2170,11 @@ private func storeRuntimeTool(
         lastProgressAt: "2026-01-01T00:00:0\(progressSequence)Z",
         completedAt: status == .completed ? "2026-01-01T00:00:02Z" : nil,
         durationMs: status == .completed ? 2_000 : nil,
-        progressSequence: progressSequence
+        progressSequence: progressSequence,
+        groupId: groupID,
+        groupIndex: groupID == nil ? nil : 0,
+        groupCount: groupID == nil ? nil : 1,
+        groupFinalized: groupID == nil ? nil : true
     )
 }
 

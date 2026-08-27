@@ -651,12 +651,18 @@ struct ChatViewScrollHarnessTests {
 
                 var running = harness.snapshot
                 running.phase = .running
-                running.toolExecutions = [harnessRuntimeTool(status: .running)]
+                running.toolExecutions = [harnessRuntimeTool(
+                    status: .running,
+                    groupFinalized: false
+                )]
                 running.eventSequence += 1
                 let runningOrdinal = running.eventSequence
 
                 var completed = running
-                completed.toolExecutions = [harnessRuntimeTool(status: .completed)]
+                completed.toolExecutions = [harnessRuntimeTool(
+                    status: .completed,
+                    groupId: "settled-group"
+                )]
                 completed.eventSequence += 1
                 let completedOrdinal = completed.eventSequence
 
@@ -677,11 +683,13 @@ struct ChatViewScrollHarnessTests {
                     settled.observation.tailMaterializationCommandCount
                         == materializationBaseline + 1
                 )
-                #expect(settled.observation.rowFrames["tool-run-active-race"] != nil)
+                #expect(settled.observation.rowFrames["tool-run-settled-group"] != nil)
                 #expect(settled.observation.physicalRowAppearanceCounts["tool-run-active-race"] == 1)
-                #expect(settled.observation.toolChipSamples.count {
-                    $0.runID == "tool-run-active-race" && $0.transitionToken == 1
-                } == 1)
+                let lifecycleSamples = settled.observation.toolChipSamples.filter {
+                    $0.callIDs.contains("active-race")
+                }
+                #expect(lifecycleSamples.count { $0.transitionToken == 1 } == 1)
+                #expect(lifecycleSamples.last?.runID == "tool-run-settled-group")
             }
         }
     }
@@ -1045,7 +1053,8 @@ private func harnessRuntimeTool(
     status: ToolExecutionState.Status,
     groupId: String? = nil,
     groupIndex: Int = 0,
-    groupCount: Int = 1
+    groupCount: Int = 1,
+    groupFinalized: Bool = true
 ) -> ToolExecutionState {
     ToolExecutionState(
         toolCallId: id,
@@ -1062,10 +1071,10 @@ private func harnessRuntimeTool(
         completedAt: status == .completed ? "2026-01-01T00:00:01Z" : nil,
         durationMs: status == .completed ? 1_000 : nil,
         progressSequence: status == .completed ? 2 : 1,
-        groupId: groupId ?? id,
-        groupIndex: groupIndex,
-        groupCount: groupCount,
-        groupFinalized: true
+        groupId: groupFinalized ? (groupId ?? id) : nil,
+        groupIndex: groupFinalized ? groupIndex : nil,
+        groupCount: groupFinalized ? groupCount : nil,
+        groupFinalized: groupFinalized ? true : nil
     )
 }
 

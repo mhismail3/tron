@@ -239,11 +239,16 @@ struct ChatCompactPillTests {
 
     @Test("tool chip visual state excludes timing and provenance payload churn")
     func toolChipStructuralState() {
-        func run(duration: Int, origin: ExtensionToolOrigin?) -> ChatToolRunPresentation {
+        func run(
+            duration: Int,
+            origin: ExtensionToolOrigin?,
+            error: Bool = false,
+            completedAt: String? = nil
+        ) -> ChatToolRunPresentation {
             ChatToolRunPresentation(tools: [ChatToolPresentation(
                 id: "call", title: "subagent", subtitle: "Running",
                 request: nil, response: nil, content: "", fallbackContent: nil,
-                error: false, startedAt: "2026-01-01T00:00:00Z", completedAt: nil,
+                error: error, startedAt: "2026-01-01T00:00:00Z", completedAt: completedAt,
                 durationMs: duration, lastProgressAt: nil, progressSequence: duration,
                 extensionOrigin: origin,
                 groupId: "stream:turn:tool-group:0", groupIndex: 0,
@@ -256,6 +261,14 @@ struct ChatCompactPillTests {
             origin: ExtensionToolOrigin(source: "extension-source")
         ))
         #expect(first == updated)
+        #expect(first.tone == .warning)
+        let failed = ChatCompactPillVisualState.toolRun(run(
+            duration: 900,
+            origin: nil,
+            error: true,
+            completedAt: "2026-01-01T00:00:01Z"
+        ))
+        #expect(failed.tone == .error)
         #expect(first.title == "subagent")
         #expect(!first.title.contains("Extension activity"))
     }

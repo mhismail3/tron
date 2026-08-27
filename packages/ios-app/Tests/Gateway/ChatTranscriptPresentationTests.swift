@@ -4,6 +4,28 @@ import Testing
 
 @Suite("Chat transcript presentation")
 struct ChatTranscriptPresentationTests {
+    @Test("producer session messages derive one compact status and optional duration")
+    func compactSessionInputPresentation() {
+        #expect(SessionInputCompactPresentationPolicy.status(
+            details: .object(["status": .string("in_progress")]),
+            message: "ignored"
+        ) == "In Progress")
+        #expect(SessionInputCompactPresentationPolicy.status(
+            details: nil,
+            message: "Background task failed"
+        ) == "Failed")
+        #expect(SessionInputCompactPresentationPolicy.status(
+            details: nil,
+            message: "Worker finished"
+        ) == "Completed")
+        #expect(SessionInputCompactPresentationPolicy.durationMilliseconds(
+            details: .object(["durationMs": .number(42)])
+        ) == 42)
+        #expect(SessionInputCompactPresentationPolicy.durationMilliseconds(
+            details: .object(["elapsedMs": .number(-4)])
+        ) == 0)
+    }
+
     @Test("prompt behavior normalizes wire values before first rendering")
     func promptBehaviorNormalization() {
         #expect(ChatPromptBehavior(rawValue: nil) == .ordinary)

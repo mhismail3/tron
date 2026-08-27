@@ -214,11 +214,15 @@ struct ChatCompactPillLabel<Trailing: View>: View {
         HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
             ZStack {
                 if showsProgress {
-                    ProgressView().controlSize(.small).tint(tone.primaryColor)
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(tone.primaryColor)
+                        .transition(.opacity.combined(with: .scale(scale: 0.82)))
                 } else {
                     Image(systemName: icon)
                         .font(TronTypography.sans(size: iconSize, weight: .semibold))
                         .foregroundStyle(tone.primaryColor)
+                        .transition(.opacity.combined(with: .scale(scale: 0.82)))
                 }
             }
             .frame(width: 18, height: 18)
