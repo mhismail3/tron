@@ -11,12 +11,14 @@ struct ChatScrollCommand: Equatable, Sendable {
         case catchUp
         case layout
         case prepend
+        case tailMaterialization
         case physicalTailRepair
     }
 
     enum Destination: Equatable, Sendable {
         case tail
         case openingTail(String)
+        case renderedID(String)
         case offsetY(CGFloat)
     }
 
@@ -45,8 +47,9 @@ struct ChatPrependPage: Equatable, Sendable {
 }
 
 /// Owns explicit viewport intent plus opening, catch-up, semantic restore, and
-/// prepend commands. Ordinary pinned growth is physically owned by the native
-/// size-change anchor and never creates a command stream.
+/// prepend commands. Native anchoring owns routine size/payload changes; a new
+/// lazy tail row and explicit retained resume may each request one exact target
+/// realization. Proven drift remains owned by the bounded repair transaction.
 @Observable
 @MainActor
 final class ChatScrollCoordinator {
@@ -574,12 +577,31 @@ final class ChatScrollCoordinator {
         viewportMode.reduce(.submitted)
     }
 
-    func requestPinnedPositionReapplication() {
+    func discreteTailInserted(renderedID: String) {
+        guard !renderedID.isEmpty,
+              canAutomaticallyFollow,
+              command == nil,
+              appliedTargetCommandToken == nil,
+              targetReleaseToken == nil,
+              physicalTailRepairCommandToken == nil else { return }
+        publish(.renderedID(renderedID), animation: .disabled, origin: .tailMaterialization)
+    }
+
+    func requestPinnedPositionReapplication(targetRenderedID: String? = nil) {
         guard viewportMode == .pinned else { return }
         // Scene resume is a retained-presentation handoff. Revoke stale marker
-        // evidence and advance the layout epoch so the same bounded repair used
-        // by every other pinned displacement can admit only fresh proof.
+        // evidence and advance the layout epoch before one exact marker
+        // reassertion; routine pinned updates remain native and command-free.
         resetForPresentation(presentation, retainingVisibleViewport: true)
+        // A retained native UIScrollView can remain physically displaced while
+        // its lazy marker has no fresh callback to prove that displacement.
+        // Reassert the exact marker once for this explicit resume boundary;
+        // the ordinary streaming/resize paths remain command-free.
+        publish(
+            .renderedID(targetRenderedID ?? "transcript-bottom"),
+            animation: .disabled,
+            origin: .tailMaterialization
+        )
     }
 
     func semanticResponseArrived() {
@@ -668,6 +690,11 @@ final class ChatScrollCoordinator {
         targetReleaseToken = nil
         appliedTargetCommandToken = applied.token
         appliedTargetOrigin = applied.origin
+        if applied.origin == .tailMaterialization {
+            // The marker target needs one native frame to realize the lazy tail,
+            // then becomes target-free again so direct interaction owns scroll.
+            requestTargetRelease(applied.token)
+        }
         if applied.origin == .physicalTailRepair {
             // Application is not physical acknowledgement. Keep the target
             // lease until a newer, current marker frame proves alignment.

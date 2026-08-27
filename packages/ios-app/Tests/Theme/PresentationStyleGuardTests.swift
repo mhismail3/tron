@@ -2381,8 +2381,7 @@ struct PresentationStyleGuardTests {
         #expect(toolRunLabel.contains("ChatCompactPillSurface(tone: visual.tone, material: visual.material"))
         #expect(notification.contains("pill.frame(minWidth: 44, minHeight: 44)"))
         #expect(notification.contains(".frame(maxWidth: .infinity, minHeight: 44, alignment: .center)"))
-        #expect(transcriptView.contains("VStack(alignment: .leading, spacing: 0)"))
-        #expect(!transcriptView.contains("LazyVStack"))
+        #expect(transcriptView.contains("LazyVStack(alignment: .leading, spacing: 0)"))
         #expect(transcriptView.contains("canonicalSubmissionIDs.contains(semanticID)"))
         for label in [toolCardLabel, toolRunLabel] {
             #expect(label.contains("ChatCompactPillSurface"))

@@ -21,6 +21,11 @@ private struct ChatScrollGeometryObservation: Equatable {
     let presentationEpoch: Int
 }
 
+private struct ChatLazyTailMaterializationRequest: Hashable {
+    let timelineGeneration: Int
+    let renderedID: String
+}
+
 private enum ChatTranscriptLayoutConstants {
     static let rowSpacing: CGFloat = 8
     /// The marker owns the final composer affordance; stack spacing is zero so
@@ -348,7 +353,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 if let installed {
                     if (installed.sourceWindow.originalStart ?? 0) > 0 {
                         stableRow(
@@ -452,6 +457,15 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         }
         .onChange(of: scrollCoordinator.layoutEpoch) { _, _ in
             scrollCoordinator.installedLayoutEpochChanged()
+        }
+        .task(id: lazyTailMaterializationRequest) {
+            guard let request = lazyTailMaterializationRequest else { return }
+            await Task.yield()
+            guard !Task.isCancelled,
+                  transcriptPresentation.entranceState(for: request.renderedID) == .pending else {
+                return
+            }
+            scrollCoordinator.discreteTailInserted(renderedID: request.renderedID)
         }
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: responseState, initial: true) { previous, current in
@@ -682,6 +696,18 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         )
         .equatable()
         .chatStableTranscriptUpdates()
+    }
+
+    private var lazyTailMaterializationRequest: ChatLazyTailMaterializationRequest? {
+        guard let installed,
+              let renderedID = installed.timeline.ids.last,
+              transcriptPresentation.entranceState(for: renderedID) == .pending else {
+            return nil
+        }
+        return ChatLazyTailMaterializationRequest(
+            timelineGeneration: installed.tag.timelineGeneration,
+            renderedID: renderedID
+        )
     }
 
     private func stableRow<Content: View>(

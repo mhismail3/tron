@@ -344,9 +344,13 @@ struct ChatViewScrollHarnessTests {
                     await Task.yield()
                 }
                 #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
-                let repairCommands = harness.probeObservation.physicalTailRepairCommandCount
-                    - ready.observation.physicalTailRepairCommandCount
-                #expect(repairCommands == 1)
+                let resumeCommands = harness.probeObservation.tailMaterializationCommandCount
+                    - ready.observation.tailMaterializationCommandCount
+                #expect(resumeCommands == 1)
+                #expect(
+                    harness.probeObservation.physicalTailRepairCommandCount
+                        == ready.observation.physicalTailRepairCommandCount + 1
+                )
             }
         }
     }
@@ -502,6 +506,7 @@ struct ChatViewScrollHarnessTests {
                 let entranceBaseline = ready.observation.animatedEntranceCount
                 let automaticScrollBaseline = ready.observation.automaticScrollCommandCount
                 let smoothBaseline = ready.observation.smoothAutomaticScrollCommandCount
+                let materializationBaseline = ready.observation.tailMaterializationCommandCount
                 let installBaseline = ready.observation.projectionInstallCount
 
                 var updated = harness.snapshot
@@ -517,6 +522,10 @@ struct ChatViewScrollHarnessTests {
                 }
                 #expect(revealed.observation.automaticScrollCommandCount == automaticScrollBaseline)
                 #expect(revealed.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
+                #expect(
+                    revealed.observation.tailMaterializationCommandCount
+                        == materializationBaseline + 1
+                )
 
                 // Repeated geometry for the same row cannot replay admission.
                 if let frame = revealed.observation.rowFrames["discrete-tail"] {
@@ -537,6 +546,7 @@ struct ChatViewScrollHarnessTests {
                 }
                 let entranceBaseline = ready.observation.animatedEntranceCount
                 let smoothBaseline = ready.observation.smoothAutomaticScrollCommandCount
+                let materializationBaseline = ready.observation.tailMaterializationCommandCount
                 let installBaseline = ready.observation.projectionInstallCount
 
                 var running = harness.snapshot
@@ -563,6 +573,10 @@ struct ChatViewScrollHarnessTests {
                 }
                 #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
                 #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
+                #expect(
+                    settled.observation.tailMaterializationCommandCount
+                        == materializationBaseline + 1
+                )
                 #expect(settled.observation.rowFrames["tool-run-active-race"] != nil)
             }
         }
@@ -578,6 +592,7 @@ struct ChatViewScrollHarnessTests {
                 }
                 let installBaseline = ready.observation.projectionInstallCount
                 let smoothBaseline = ready.observation.smoothAutomaticScrollCommandCount
+                let materializationBaseline = ready.observation.tailMaterializationCommandCount
 
                 var first = harness.snapshot
                 first.phase = .running
@@ -605,6 +620,10 @@ struct ChatViewScrollHarnessTests {
 
                 #expect(settled.observation.rowFrames["tool-run-group-two"] == nil)
                 #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
+                #expect(
+                    settled.observation.tailMaterializationCommandCount
+                        == materializationBaseline + 1
+                )
                 let samples = settled.observation.toolChipSamples.filter {
                     $0.runID == "tool-run-group-one"
                 }

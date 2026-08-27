@@ -270,7 +270,9 @@ struct ChatView: View {
             } else if phase == .active {
                 // SwiftUI can retain a displaced native offset across scene
                 // suspension even though logical pinning did not change.
-                scrollCoordinator.requestPinnedPositionReapplication()
+                scrollCoordinator.requestPinnedPositionReapplication(
+                    targetRenderedID: transcriptPresentation.installed?.timeline.ids.last
+                )
                 if sessionPresentation.needsOpeningResume {
                     Task { await beginOpeningPresentation() }
                 }
@@ -1255,7 +1257,9 @@ struct ChatView: View {
                 return true
             },
             reapplyPinnedPosition: {
-                scrollCoordinator.requestPinnedPositionReapplication()
+                scrollCoordinator.requestPinnedPositionReapplication(
+                    targetRenderedID: transcriptPresentation.installed?.timeline.ids.last
+                )
             },
             invalidatePresentation: {
                 scrollCoordinator.resetForPresentation()
@@ -1353,13 +1357,17 @@ struct ChatView: View {
         performanceTracker.beginScrollCommand()
         let update = {
             switch command.destination {
-            case .tail where command.origin == .physicalTailRepair:
-                // A native viewport mutation can leave ScrollPosition logically
-                // at `.bottom` while UIScrollView is physically displaced. An
-                // edge-to-edge rewrite may then compare equal and become a
-                // no-op. Repair against the exact mounted tail marker so this
-                // bounded fallback has a distinct semantic target.
-                transcriptScrollPosition.scrollTo(id: "transcript-bottom", anchor: .bottom)
+            case .tail where command.origin == .physicalTailRepair
+                    || command.origin == .tailMaterialization:
+                // Rebuild the value instead of mutating a position SwiftUI may
+                // still regard as logically bottom-aligned after native drift.
+                var target = ScrollPosition(idType: String.self)
+                target.scrollTo(id: "transcript-bottom", anchor: .bottom)
+                transcriptScrollPosition = target
+            case .renderedID(let renderedID):
+                var target = ScrollPosition(idType: String.self)
+                target.scrollTo(id: renderedID, anchor: .bottom)
+                transcriptScrollPosition = target
             case .tail, .openingTail:
                 transcriptScrollPosition.scrollTo(edge: .bottom)
             case .offsetY(let offsetY):

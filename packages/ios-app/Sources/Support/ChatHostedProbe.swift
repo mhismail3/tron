@@ -24,6 +24,7 @@ struct ChatHostedObservation: Sendable {
     let rowFrames: [String: CGRect]
     let scrollSettledDistance: CGFloat?
     let scrollCommandCount: Int
+    let tailMaterializationCommandCount: Int
     let physicalTailRepairCommandCount: Int
     let automaticScrollCommandCount: Int
     let smoothAutomaticScrollCommandCount: Int
@@ -81,6 +82,7 @@ final class ChatHostedProbe {
     private var pendingRowFramesByGeneration: [Int: [String: CGRect]] = [:]
     private var scrollSettledDistance: CGFloat?
     private var scrollCommandCount = 0
+    private var tailMaterializationCommandCount = 0
     private var physicalTailRepairCommandCount = 0
     private var automaticScrollCommandCount = 0
     private var smoothAutomaticScrollCommandCount = 0
@@ -149,6 +151,7 @@ final class ChatHostedProbe {
             rowFrames: rowFrames,
             scrollSettledDistance: scrollSettledDistance,
             scrollCommandCount: scrollCommandCount,
+            tailMaterializationCommandCount: tailMaterializationCommandCount,
             physicalTailRepairCommandCount: physicalTailRepairCommandCount,
             automaticScrollCommandCount: automaticScrollCommandCount,
             smoothAutomaticScrollCommandCount: smoothAutomaticScrollCommandCount,
@@ -280,6 +283,7 @@ final class ChatHostedProbe {
         origin: ChatScrollCommand.Origin? = nil
     ) {
         scrollCommandCount &+= 1
+        if origin == .tailMaterialization { tailMaterializationCommandCount &+= 1 }
         if origin == .physicalTailRepair { physicalTailRepairCommandCount &+= 1 }
         if isAutomatic {
             automaticScrollCommandCount &+= 1

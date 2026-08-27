@@ -19,8 +19,7 @@ struct ChatScrollOwnershipGuardTests {
         )
 
         #expect(transcript.components(separatedBy: "ScrollView {").count - 1 == 1)
-        #expect(transcript.components(separatedBy: "VStack(alignment: .leading, spacing: 0)").count - 1 == 1)
-        #expect(!transcript.contains("LazyVStack"))
+        #expect(transcript.components(separatedBy: "LazyVStack(alignment: .leading, spacing: 0)").count - 1 == 1)
         #expect(chat.components(separatedBy: ".safeAreaInset(edge: .bottom, spacing: 0)").count - 1 == 1)
         #expect(transcript.contains(".scrollPosition($scrollPosition)"))
         #expect(transcript.contains(".defaultScrollAnchor(.bottom, for: .initialOffset)"))
@@ -30,6 +29,7 @@ struct ChatScrollOwnershipGuardTests {
         #expect(!chat.contains("position.scrollTo(id: \"transcript-bottom\", anchor: .bottom)"))
         #expect(!chat.contains("ScrollPosition(idType: String.self, edge: .bottom)"))
         #expect(chat.contains("case .tail where command.origin == .physicalTailRepair"))
+        #expect(chat.contains("|| command.origin == .tailMaterialization"))
         #expect(chat.components(separatedBy: "scrollTo(id: \"transcript-bottom\", anchor: .bottom)").count - 1 == 1)
         #expect(chat.components(separatedBy: "scrollTo(edge: .bottom)").count - 1 == 1)
         #expect(!chat.contains("scheduleTailFollow"))
