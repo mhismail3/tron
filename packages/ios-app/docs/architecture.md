@@ -527,9 +527,11 @@ that row mounted; status, progress, completion, and canonical settlement do not 
 `ScrollPosition`. A retained presentation reconciles its first native geometry sample so a view physically at the tail regains pinned authority; only current signed tail-marker drift may admit one bounded repair, while a genuinely displaced reader remains anchored
 in an order native anchoring cannot retain; anchored readers receive no automatic follow. Compact
 measured prompts may use one clipped composer-to-row morph; long prompts fail over to the shorter, subtler row-local
-fade/slide entrance. New-row admission animates a measured, clipped layout fraction so
-existing pinned content moves continuously rather than jumping, while payload-only updates
-remain layout-animation free. Composer-to-row flights retain source pixels until exact
+fade/slide entrance. New-row admission animates a measured layout fraction so
+existing pinned content moves continuously rather than jumping. Its vertical reveal clip owns a
+layout-neutral effect gutter: the hidden row remains bounded, but settled Liquid Glass shadows and
+native press expansion render beyond the semantic row instead of meeting a permanent rectangular
+boundary. Payload-only updates remain layout-animation free. Composer-to-row flights retain source pixels until exact
 destination geometry arrives instead of failing after a wall-clock delay. The unified notification row retains one physical and child host when
 active compaction becomes canonical compaction; progress, icon, title, and tone update
 inside that shell without animating unrelated projection updates.

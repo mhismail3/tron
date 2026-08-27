@@ -17,9 +17,24 @@ struct ChatSemanticFrameObservation: Equatable {
 }
 
 enum ChatEntranceGrowthPolicy {
+    /// Liquid Glass paints shadows and interactive press expansion beyond a
+    /// row's layout bounds. The entrance reveal owns only vertical admission;
+    /// this transparent gutter keeps those effects out of its clip boundary.
+    static let effectOverflow: CGFloat = 24
+
+    static func normalizedProgress(_ progress: CGFloat) -> CGFloat {
+        guard progress.isFinite else { return 0 }
+        return min(1, max(0, progress))
+    }
+
     static func height(natural: CGFloat, progress: CGFloat) -> CGFloat {
-        guard natural.isFinite, natural > 0, progress.isFinite else { return 0 }
-        return natural * min(1, max(0, progress))
+        guard natural.isFinite, natural > 0 else { return 0 }
+        return natural * normalizedProgress(progress)
+    }
+
+    static func clipRect(in bounds: CGRect, progress: CGFloat) -> CGRect {
+        let hiddenVerticalOverflow = effectOverflow * (1 - normalizedProgress(progress))
+        return bounds.insetBy(dx: 0, dy: hiddenVerticalOverflow)
     }
 }
 
@@ -59,6 +74,30 @@ private struct ChatEntranceGrowthLayout: Layout, Animatable {
             anchor: .topLeading,
             proposal: ProposedViewSize(width: bounds.width, height: natural.height)
         )
+    }
+}
+
+private struct ChatEntranceGrowthClipShape: Shape {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        Path(ChatEntranceGrowthPolicy.clipRect(in: rect, progress: progress))
+    }
+}
+
+private extension View {
+    /// Keeps the measured-height entrance vertically bounded while preserving
+    /// the natural horizontal shadow and press-morph region. Vertical overflow
+    /// joins continuously as the row reaches its full admitted height.
+    func chatEntranceGrowthClip(progress: CGFloat) -> some View {
+        padding(ChatEntranceGrowthPolicy.effectOverflow)
+            .clipShape(ChatEntranceGrowthClipShape(progress: progress))
+            .padding(-ChatEntranceGrowthPolicy.effectOverflow)
     }
 }
 
@@ -106,7 +145,8 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
             for: kind,
             reduceMotion: reduceMotion
         )
-        ChatEntranceGrowthLayout(progress: revealed || reduceMotion ? 1 : 0) {
+        let progress: CGFloat = revealed || reduceMotion ? 1 : 0
+        ChatEntranceGrowthLayout(progress: progress) {
             content
                 .opacity(revealed ? 1 : 0)
                 .scaleEffect(
@@ -118,7 +158,7 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
                     y: revealed ? 0 : hidden.offsetY
                 )
         }
-        .clipped()
+        .chatEntranceGrowthClip(progress: progress)
         .onChange(of: state, initial: true) { _, state in
             switch state {
             case .pending:
@@ -184,11 +224,10 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
                 for: kind,
                 reduceMotion: reduceMotion
             )
-        ChatEntranceGrowthLayout(
-            progress: morphOwnership == .flight || morphOwnership == .completed
-                ? 1
-                : (revealed || reduceMotion ? 1 : 0)
-        ) {
+        let progress: CGFloat = morphOwnership == .flight || morphOwnership == .completed
+            ? 1
+            : (revealed || reduceMotion ? 1 : 0)
+        ChatEntranceGrowthLayout(progress: progress) {
             content
                 .opacity(revealed ? 1 : 0)
                 .scaleEffect(
@@ -200,7 +239,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
                     y: revealed ? 0 : hidden.offsetY
                 )
         }
-        .clipped()
+        .chatEntranceGrowthClip(progress: progress)
         .onAppear {
             onEntranceConsumed()
             guard morphOwnership == .ordinary else { return }
@@ -270,7 +309,8 @@ struct ChatQueuedMessageEntranceRow<Content: View>: View {
             for: .queuedPrompt,
             reduceMotion: reduceMotion
         )
-        ChatEntranceGrowthLayout(progress: revealed || reduceMotion ? 1 : 0) {
+        let progress: CGFloat = revealed || reduceMotion ? 1 : 0
+        ChatEntranceGrowthLayout(progress: progress) {
             content
                 .opacity(revealed ? 1 : 0)
                 .scaleEffect(
@@ -282,7 +322,7 @@ struct ChatQueuedMessageEntranceRow<Content: View>: View {
                     y: revealed ? 0 : hidden.offsetY
                 )
         }
-        .clipped()
+        .chatEntranceGrowthClip(progress: progress)
         .onAppear {
             onEntranceConsumed()
             guard animatesEntrance, !revealed else { return }

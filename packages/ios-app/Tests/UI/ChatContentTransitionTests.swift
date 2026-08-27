@@ -55,13 +55,28 @@ struct ChatContentTransitionTests {
         ))
     }
 
-    @Test("new transcript rows grow continuously with bounded measured height")
+    @Test("new transcript rows grow continuously without clipping settled effects")
     func transcriptEntranceGrowth() {
         #expect(ChatEntranceGrowthPolicy.height(natural: 120, progress: -1) == 0)
         #expect(ChatEntranceGrowthPolicy.height(natural: 120, progress: 0.5) == 60)
         #expect(ChatEntranceGrowthPolicy.height(natural: 120, progress: 2) == 120)
         #expect(ChatEntranceGrowthPolicy.height(natural: .infinity, progress: 1) == 0)
         #expect(ChatEntranceGrowthPolicy.height(natural: 120, progress: .nan) == 0)
+
+        let overflow = ChatEntranceGrowthPolicy.effectOverflow
+        let hiddenBounds = CGRect(x: 0, y: 0, width: 200, height: overflow * 2)
+        let settledBounds = CGRect(x: 0, y: 0, width: 200, height: 168)
+        let hiddenClip = ChatEntranceGrowthPolicy.clipRect(in: hiddenBounds, progress: 0)
+        let settledClip = ChatEntranceGrowthPolicy.clipRect(in: settledBounds, progress: 1)
+
+        #expect(overflow >= 16)
+        #expect(hiddenClip.width == hiddenBounds.width)
+        #expect(hiddenClip.height == 0)
+        #expect(settledClip == settledBounds)
+        #expect(ChatEntranceGrowthPolicy.clipRect(
+            in: settledBounds,
+            progress: .infinity
+        ).height == settledBounds.height - overflow * 2)
     }
 
     @Test("user and queue content rises from the trailing composer edge")
