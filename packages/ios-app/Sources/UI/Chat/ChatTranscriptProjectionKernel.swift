@@ -70,11 +70,20 @@ fileprivate enum ChatToolPatchClassification: Hashable, Sendable {
     case unanchoredRuntime
 }
 
+/// Row ownership is kept separate from semantic identity. Canonical rows may
+/// be enriched by live execution facts, but runtime-only and streaming rows
+/// remain in the live region until canonical JSONL owns their exact calls.
+fileprivate enum ChatTranscriptRowOrigin: Hashable, Sendable {
+    case canonical
+    case live
+}
+
 fileprivate struct ChatToolPatchSite: Hashable, Sendable {
     let renderedIndex: Int
     let toolIndex: Int
     let canonicalBase: ChatToolPresentation?
     let classification: ChatToolPatchClassification
+    let region: ChatTranscriptRowOrigin
 }
 
 fileprivate struct ChatToolPatchMetadata: Hashable, Sendable {
@@ -636,15 +645,24 @@ enum ChatTranscriptProjectionKernel {
             guard previous.patchMetadata.sitesByCallID[callID]?.count == 1 else { return nil }
         }
         return measured(performanceSignposts: performanceSignposts, workRecorder: workRecorder) {
-            var runsByIndex: [Int: ChatToolRunPresentation] = [:]
+            struct PatchLocation: Hashable {
+                let region: ChatTranscriptRowOrigin
+                let index: Int
+            }
+            var runsByLocation: [PatchLocation: ChatToolRunPresentation] = [:]
             var payloadReplacements: [String: ChatToolPayload] = [:]
             for callID in changed {
                 let site = previous.patchMetadata.sitesByCallID[callID]![0]
+                let location = PatchLocation(region: site.region, index: site.renderedIndex)
                 let currentRun: ChatToolRunPresentation
-                if let prepared = runsByIndex[site.renderedIndex] {
+                if let prepared = runsByLocation[location] {
                     currentRun = prepared
                 } else {
-                    guard case .toolRun(let run) = previous.timeline.items[site.renderedIndex] else {
+                    let item: ChatTranscriptRenderItem = switch site.region {
+                    case .canonical: previous.timeline.items[site.renderedIndex]
+                    case .live: previous.timeline.items.live[site.renderedIndex]
+                    }
+                    guard case .toolRun(let run) = item else {
                         preconditionFailure("Assembler tool patch site did not reference a tool run")
                     }
                     currentRun = run
@@ -675,19 +693,29 @@ enum ChatTranscriptProjectionKernel {
                 var tools = currentRun.tools
                 tools[site.toolIndex] = updated.descriptor
                 payloadReplacements[callID] = updated.payload
-                runsByIndex[site.renderedIndex] = ChatToolRunPresentation(
+                runsByLocation[location] = ChatToolRunPresentation(
                     tools: tools,
                     anchorID: currentRun.anchorID
                 )
             }
 
-            var replacements: [Int: ChatTranscriptRenderItem] = [:]
-            for (index, run) in runsByIndex {
+            var canonicalReplacements: [Int: ChatTranscriptRenderItem] = [:]
+            var liveReplacements: [Int: ChatTranscriptRenderItem] = [:]
+            for (location, run) in runsByLocation {
                 let item = ChatTranscriptRenderItem.toolRun(run)
-                precondition(item.id == previous.timeline.items[index].id)
-                replacements[index] = item
+                let priorID: String = switch location.region {
+                case .canonical: previous.timeline.items[location.index].id
+                case .live: previous.timeline.items.live[location.index].id
+                }
+                precondition(item.id == priorID)
+                switch location.region {
+                case .canonical: canonicalReplacements[location.index] = item
+                case .live: liveReplacements[location.index] = item
+                }
             }
-            let timeline = previous.timeline.replacingCanonicalRows(replacements)
+            let timeline = previous.timeline
+                .replacingCanonicalRows(canonicalReplacements)
+                .replacingLiveRows(liveReplacements)
             let report = ChatTranscriptProjectionWorkReport(
                 mode: .toolPayloadPatch,
                 sourceEntriesExamined: 0,
@@ -730,6 +758,7 @@ enum ChatTranscriptProjectionKernel {
             $0.classification == .unanchoredRuntime
         }
     }
+
 
     private struct Assembly {
         let timeline: ChatTranscriptTimeline
@@ -778,7 +807,13 @@ enum ChatTranscriptProjectionKernel {
         )
         var toolsInspected = snapshot.toolExecutions.count
         var rendered: [ChatTranscriptRenderItem] = []
+        var renderedOrigins: [ChatTranscriptRowOrigin] = []
         var pendingTools: [PreparedTool] = []
+
+        func appendRendered(_ item: ChatTranscriptRenderItem, origin: ChatTranscriptRowOrigin) {
+            rendered.append(item)
+            renderedOrigins.append(origin)
+        }
         var pendingToolIndexByCallID: [String: Int] = [:]
         var anchoredCallIDs = Set<String>()
         var sitesByCallID: [String: [ChatToolPatchSite]] = [:]
@@ -820,13 +855,17 @@ enum ChatTranscriptProjectionKernel {
             guard !pendingTools.isEmpty else { return }
             let renderedIndex = rendered.count
             let presentations = pendingTools.map(\.presentation)
-            rendered.append(.toolRun(ChatToolRunPresentation(tools: presentations)))
+            let origin: ChatTranscriptRowOrigin = pendingTools.contains {
+                $0.classification != .canonical
+            } ? .live : .canonical
+            appendRendered(.toolRun(ChatToolRunPresentation(tools: presentations)), origin: origin)
             for (toolIndex, prepared) in pendingTools.enumerated() {
                 sitesByCallID[prepared.presentation.id, default: []].append(ChatToolPatchSite(
                     renderedIndex: renderedIndex,
                     toolIndex: toolIndex,
                     canonicalBase: prepared.canonicalBase,
-                    classification: prepared.classification
+                    classification: prepared.classification,
+                    region: origin
                 ))
             }
             pendingTools.removeAll(keepingCapacity: true)
@@ -878,14 +917,14 @@ enum ChatTranscriptProjectionKernel {
             showsFooter: Bool
         ) {
             let semanticID = ChatTranscriptRowIdentity.messageSlice(item, parts: parts, slice: slice)
-            rendered.append(.message(ChatMessagePresentation(
+            appendRendered(.message(ChatMessagePresentation(
                 id: semanticID,
                 semanticID: semanticID,
                 item: item,
                 parts: parts,
                 streaming: streaming,
                 showsFooter: showsFooter
-            )))
+            )), origin: streaming ? .live : .canonical)
         }
 
         let rawOrdinalByID: [String: Int]
@@ -923,10 +962,10 @@ enum ChatTranscriptProjectionKernel {
                     globalOrdinal: rawOrdinalByID[item.id]
                 ) {
                     flushTools()
-                    rendered.append(.notification(notification))
+                    appendRendered(.notification(notification), origin: .canonical)
                 } else if tools.isEmpty {
                     flushTools()
-                    rendered.append(.transcript(item))
+                    appendRendered(.transcript(item), origin: .canonical)
                 } else {
                     for tool in tools {
                         appendToolRunMember(tool, allowsLegacyContinuation: true)
@@ -1035,10 +1074,14 @@ enum ChatTranscriptProjectionKernel {
 
         var seenRenderedIDs = Set<String>()
         var collisionSafe: [ChatTranscriptRenderItem] = []
+        var collisionSafeOrigins: [ChatTranscriptRowOrigin] = []
         collisionSafe.reserveCapacity(rendered.count)
+        collisionSafeOrigins.reserveCapacity(rendered.count)
         for (index, original) in rendered.enumerated() {
+            let origin = renderedOrigins[index]
             guard !seenRenderedIDs.insert(original.id).inserted else {
                 collisionSafe.append(original)
+                collisionSafeOrigins.append(origin)
                 continue
             }
             switch original {
@@ -1051,6 +1094,7 @@ enum ChatTranscriptProjectionKernel {
                 if seenRenderedIDs.contains(disambiguated) { disambiguated += "#\(index)" }
                 guard seenRenderedIDs.insert(disambiguated).inserted else {
                     collisionSafe.append(original)
+                    collisionSafeOrigins.append(origin)
                     continue
                 }
                 collisionSafe.append(.message(ChatMessagePresentation(
@@ -1061,59 +1105,112 @@ enum ChatTranscriptProjectionKernel {
                     streaming: message.streaming,
                     showsFooter: message.showsFooter
                 )))
+                collisionSafeOrigins.append(origin)
             case .transcript, .toolRun, .notification:
                 // Canonical transcript, notification, and tool IDs are exact
                 // identities. Keep malformed duplicates in the candidate so
                 // installation fails closed instead of fabricating an alias.
                 collisionSafe.append(original)
+                collisionSafeOrigins.append(origin)
             }
         }
-        rendered = mergeFinalizedToolRuns(in: collisionSafe)
+        let merged = mergeFinalizedToolRuns(in: collisionSafe, origins: collisionSafeOrigins)
+        rendered = merged.items
+        renderedOrigins = merged.origins
+
+        // Keep the canonical ledger and the live region as separate physical
+        // collections. Their concatenated order is still deterministic, but a
+        // runtime row can no longer become committed merely because assembly
+        // appended it after the canonical tail.
+        let canonicalRendered = rendered.enumerated().compactMap { index, item in
+            renderedOrigins[index] == .canonical ? item : nil
+        }
+        let liveRendered = rendered.enumerated().compactMap { index, item in
+            renderedOrigins[index] == .live ? item : nil
+        }
 
         // Patch sites are recorded while assembling, so rebase them onto the
         // unchanged row spine before a later sparse tool update indexes the
         // timeline. Invalid duplicate identities remain visible to admission
         // rather than being silently removed.
         var rebasedSitesByCallID: [String: [ChatToolPatchSite]] = [:]
-        for (renderedIndex, item) in rendered.enumerated() {
-            guard case .toolRun(let run) = item else { continue }
-            for (toolIndex, tool) in run.tools.enumerated() {
-                guard let previousSite = sitesByCallID[tool.id]?.first else { continue }
-                rebasedSitesByCallID[tool.id, default: []].append(ChatToolPatchSite(
-                    renderedIndex: renderedIndex,
-                    toolIndex: toolIndex,
-                    canonicalBase: previousSite.canonicalBase,
-                    classification: previousSite.classification
-                ))
+        func rebasePatchSites(
+            in items: [ChatTranscriptRenderItem],
+            region: ChatTranscriptRowOrigin
+        ) {
+            for (renderedIndex, item) in items.enumerated() {
+                guard case .toolRun(let run) = item else { continue }
+                for (toolIndex, tool) in run.tools.enumerated() {
+                    guard let previousSite = sitesByCallID[tool.id]?.first else { continue }
+                    rebasedSitesByCallID[tool.id, default: []].append(ChatToolPatchSite(
+                        renderedIndex: renderedIndex,
+                        toolIndex: toolIndex,
+                        canonicalBase: previousSite.canonicalBase,
+                        classification: previousSite.classification,
+                        region: region
+                    ))
+                }
             }
         }
+        rebasePatchSites(in: canonicalRendered, region: .canonical)
+        rebasePatchSites(in: liveRendered, region: .live)
 
         var preferredSemanticIDByRenderedID: [String: String] = [:]
+        var preferredSemanticIDByRenderedIDLive: [String: String] = [:]
         var renderedIDBySemanticID: [String: String] = [:]
-        for item in rendered {
+        var renderedIDBySemanticIDLive: [String: String] = [:]
+        for (index, item) in rendered.enumerated() {
+            func record(
+                preferredID: String,
+                semanticID: String,
+                origin: ChatTranscriptRowOrigin
+            ) {
+                if origin == .canonical {
+                    preferredSemanticIDByRenderedID[preferredID] = semanticID
+                    renderedIDBySemanticID[semanticID] = item.id
+                } else {
+                    preferredSemanticIDByRenderedIDLive[preferredID] = semanticID
+                    renderedIDBySemanticIDLive[semanticID] = item.id
+                }
+            }
+            let origin = renderedOrigins[index]
             switch item {
             case .transcript(let transcript):
-                preferredSemanticIDByRenderedID[item.id] = transcript.id
-                renderedIDBySemanticID[transcript.id] = item.id
+                record(preferredID: item.id, semanticID: transcript.id, origin: origin)
             case .message(let message):
-                preferredSemanticIDByRenderedID[item.id] = message.semanticID
-                renderedIDBySemanticID[message.semanticID] = item.id
+                record(preferredID: item.id, semanticID: message.semanticID, origin: origin)
             case .toolRun(let run):
                 let semanticID = run.groupIDs.isEmpty ? (run.tools.last?.id ?? run.id) : run.id
-                preferredSemanticIDByRenderedID[item.id] = semanticID
-                renderedIDBySemanticID[semanticID] = item.id
-                for tool in run.tools { renderedIDBySemanticID[tool.id] = item.id }
+                record(preferredID: item.id, semanticID: semanticID, origin: origin)
+                for tool in run.tools {
+                    if origin == .canonical {
+                        renderedIDBySemanticID[tool.id] = item.id
+                    } else {
+                        renderedIDBySemanticIDLive[tool.id] = item.id
+                    }
+                }
             case .notification(let notification):
-                let semanticID = notification.semanticID ?? item.id
-                preferredSemanticIDByRenderedID[item.id] = semanticID
-                renderedIDBySemanticID[semanticID] = item.id
+                record(
+                    preferredID: item.id,
+                    semanticID: notification.semanticID ?? item.id,
+                    origin: origin
+                )
             }
         }
+        // `canonicalRendered`/`liveRendered` intentionally use the same
+        // identities and payloads as the assembled array; only ownership and
+        // physical placement change at this boundary.
         return Assembly(
             timeline: ChatTranscriptTimeline(
-                items: ChatTranscriptItems(canonical: rendered),
-                preferredSemanticIDByRenderedID: ChatSemanticIndex(canonical: preferredSemanticIDByRenderedID),
-                renderedIDBySemanticID: ChatSemanticIndex(canonical: renderedIDBySemanticID)
+                items: ChatTranscriptItems(canonical: canonicalRendered, live: liveRendered),
+                preferredSemanticIDByRenderedID: ChatSemanticIndex(
+                    canonical: preferredSemanticIDByRenderedID,
+                    live: preferredSemanticIDByRenderedIDLive
+                ),
+                renderedIDBySemanticID: ChatSemanticIndex(
+                    canonical: renderedIDBySemanticID,
+                    live: renderedIDBySemanticIDLive
+                )
             ),
             toolPayloads: ChatToolPayloadIndex(payloadsByCallID),
             toolsInspected: toolsInspected,
@@ -1125,9 +1222,16 @@ enum ChatTranscriptProjectionKernel {
     /// and runtime sources during handoff. Merge only adjacent tool runs that
     /// carry the same exact group. A canonical/barrier row or an unrelated
     /// group between members makes the evidence unsafe to relocate.
+    private struct MergedToolRuns {
+        let items: [ChatTranscriptRenderItem]
+        let origins: [ChatTranscriptRowOrigin]
+    }
+
     private static func mergeFinalizedToolRuns(
-        in items: [ChatTranscriptRenderItem]
-    ) -> [ChatTranscriptRenderItem] {
+        in items: [ChatTranscriptRenderItem],
+        origins: [ChatTranscriptRowOrigin]
+    ) -> MergedToolRuns {
+        precondition(items.count == origins.count)
         struct GroupSignature {
             var count: Int?
             var indexOwner: [Int: String] = [:]
@@ -1197,9 +1301,17 @@ enum ChatTranscriptProjectionKernel {
             ownerByGroup[groupID] = first
             groupsByOwner[first, default: []].insert(groupID)
         }
-        guard !ownerByGroup.isEmpty else { return items }
+        guard !ownerByGroup.isEmpty else { return MergedToolRuns(items: items, origins: origins) }
 
         var result = items
+        var resultOrigins = origins
+        var originByCallID: [String: ChatTranscriptRowOrigin] = [:]
+        for (index, item) in items.enumerated() {
+            guard case .toolRun(let run) = item else { continue }
+            for tool in run.tools {
+                originByCallID[tool.id] = origins[index]
+            }
+        }
         var additions: [Int: [ChatToolDescriptor]] = [:]
         var removalsByIndex: [Int: Set<String>] = [:]
         for (index, item) in items.enumerated() {
@@ -1234,6 +1346,10 @@ enum ChatTranscriptProjectionKernel {
                 }
             }
             result[index] = .toolRun(ChatToolRunPresentation(tools: merged, anchorID: run.anchorID))
+            if origins[index] == .live
+                || tools.contains(where: { originByCallID[$0.id] == .live }) {
+                resultOrigins[index] = .live
+            }
         }
 
         var removedIndices = Set<Int>()
@@ -1246,33 +1362,47 @@ enum ChatTranscriptProjectionKernel {
             if remaining.isEmpty { removedIndices.insert(index) }
             else { result[index] = .toolRun(ChatToolRunPresentation(tools: remaining, anchorID: run.anchorID)) }
         }
-        return result.enumerated().compactMap { index, item in
-            removedIndices.contains(index) ? nil : item
+        var mergedItems: [ChatTranscriptRenderItem] = []
+        var mergedOrigins: [ChatTranscriptRowOrigin] = []
+        for (index, item) in result.enumerated() where !removedIndices.contains(index) {
+            mergedItems.append(item)
+            mergedOrigins.append(resultOrigins[index])
         }
+        return MergedToolRuns(items: mergedItems, origins: mergedOrigins)
     }
 
     private static func resolved(_ canonical: ChatToolPresentation, live: ToolExecutionState?) -> ChatToolPresentation {
         guard let live else { return canonical }
-        let response = live.result ?? live.partialResult ?? canonical.response
-        // Terminal live projections intentionally omit output/result once the
-        // canonical tool result exists. Treat an absent or empty live frame as
-        // advisory metadata, not as permission to erase canonical detail.
+        // Once canonical JSONL has a terminal result, its status and readable
+        // payload are authoritative. A late runtime snapshot can still supply
+        // missing timing/identity metadata, but it must not resurrect a
+        // spinner, replace output, or turn a successful result into failure.
+        let canonicalIsTerminal = !canonical.isRunning
+        let response = canonicalIsTerminal
+            ? canonical.response
+            : (live.result ?? live.partialResult ?? canonical.response)
         let liveOutput = live.output.flatMap { $0.isEmpty ? nil : $0 }
-        let content = liveOutput ?? canonical.content
+        let content = canonicalIsTerminal ? canonical.content : (liveOutput ?? canonical.content)
+        let title = canonicalIsTerminal
+            ? canonical.title
+            : (live.toolLabel ?? (canonical.title == "Tool" ? live.toolName : canonical.title))
+        let subtitle = canonicalIsTerminal ? canonical.subtitle : liveToolSubtitle(live.status)
+        let error = canonicalIsTerminal ? canonical.error : live.isError
+        let fallbackContent = content.isEmpty && response == nil
+            ? (canonical.fallbackContent ?? canonical.request ?? live.arguments) : nil
         return ChatToolPresentation(
             id: canonical.id,
-            title: live.toolLabel ?? (canonical.title == "Tool" ? live.toolName : canonical.title),
-            subtitle: liveToolSubtitle(live.status), request: canonical.request ?? live.arguments,
+            title: title,
+            subtitle: subtitle, request: canonical.request ?? live.arguments,
             response: response, content: content,
-            fallbackContent: live.output == nil && content.isEmpty && response == nil
-                ? (canonical.fallbackContent ?? canonical.request ?? live.arguments) : nil,
-            error: live.isError, startedAt: live.startedAt,
-            completedAt: live.completedAt ?? canonical.completedAt,
-            durationMs: live.durationMs ?? canonical.durationMs,
-            lastProgressAt: live.lastProgressAt ?? live.updatedAt,
-            progressSequence: live.progressSequence,
+            fallbackContent: fallbackContent,
+            error: error, startedAt: canonical.startedAt ?? live.startedAt,
+            completedAt: canonical.completedAt ?? live.completedAt,
+            durationMs: canonical.durationMs ?? live.durationMs,
+            lastProgressAt: canonical.lastProgressAt ?? live.lastProgressAt ?? live.updatedAt,
+            progressSequence: canonical.progressSequence ?? live.progressSequence,
             outputTruncated: live.outputTruncated == true || canonical.outputTruncated,
-            extensionOrigin: live.extensionOrigin ?? canonical.extensionOrigin,
+            extensionOrigin: canonical.extensionOrigin ?? live.extensionOrigin,
             toolSegmentId: canonical.toolSegmentId ?? live.toolSegmentId,
             groupId: canonical.groupId ?? live.groupId,
             groupIndex: canonical.groupIndex ?? live.groupIndex,

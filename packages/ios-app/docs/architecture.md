@@ -478,6 +478,10 @@ or reporting-overflow arithmetic and conservatively reject malformed maximum val
 The random-access row collection is a flat immutable canonical base with direct index overrides and a
 tiny live suffix. A global assembly resets overrides; repeated runtime payload updates share the base
 and replace only affected tool-run rows rather than chaining overlays or copying 10,000 descriptors.
+Canonical and runtime ownership is preserved through assembly: only canonical rows enter
+`ChatCommittedLedger`; streaming and runtime-only rows enter `ChatLiveRegion`. A finalized group's
+reported member count is declaration completeness, never execution liveness, so a partial historical
+page cannot create a spinner. Runtime patch sites carry their canonical/live region and exact row index.
 Rendered identity spines and sets are cached/split so ordinary text/thinking/image streaming updates
 share the canonical rows and identities while the kernel constructs only the isolated live suffix.
 Markdown has one pure `Sendable` cold presentation model. It classifies the existing block dialect,

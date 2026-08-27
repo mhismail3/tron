@@ -1446,7 +1446,10 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
         }
         return max(tools.count, ungrouped + countByGroup.values.reduce(0, +))
     }
-    var isRunning: Bool { displayCount > tools.count || tools.contains(where: \.isRunning) }
+    /// Group cardinality describes declaration completeness, not execution
+    /// liveness. A paged or temporarily partial finalized group is still
+    /// historical evidence when every visible descriptor is terminal.
+    var isRunning: Bool { tools.contains(where: \.isRunning) }
     var failureCount: Int { tools.filter(\.error).count }
     var title: String {
         if displayCount == 1, let tool = tools.first {
@@ -1545,22 +1548,26 @@ struct ChatTranscriptItems: RandomAccessCollection, Hashable, Sendable {
 
     private let canonicalBase: [ChatTranscriptRenderItem]
     private let canonicalOverrides: [Int: ChatTranscriptRenderItem]
-    let live: [ChatTranscriptRenderItem]
+    private let liveBase: [ChatTranscriptRenderItem]
+    private let liveOverrides: [Int: ChatTranscriptRenderItem]
 
     init(canonical: [ChatTranscriptRenderItem], live: [ChatTranscriptRenderItem] = []) {
         canonicalBase = canonical
         canonicalOverrides = [:]
-        self.live = live
+        liveBase = live
+        liveOverrides = [:]
     }
 
     private init(
         canonicalBase: [ChatTranscriptRenderItem],
         canonicalOverrides: [Int: ChatTranscriptRenderItem],
-        live: [ChatTranscriptRenderItem]
+        liveBase: [ChatTranscriptRenderItem],
+        liveOverrides: [Int: ChatTranscriptRenderItem]
     ) {
         self.canonicalBase = canonicalBase
         self.canonicalOverrides = canonicalOverrides
-        self.live = live
+        self.liveBase = liveBase
+        self.liveOverrides = liveOverrides
     }
 
     /// Materializes the canonical spine with sparse replacements for hashing,
@@ -1573,8 +1580,15 @@ struct ChatTranscriptItems: RandomAccessCollection, Hashable, Sendable {
         return result
     }
 
+    var live: [ChatTranscriptRenderItem] {
+        guard !liveOverrides.isEmpty else { return liveBase }
+        var result = liveBase
+        for (index, item) in liveOverrides { result[index] = item }
+        return result
+    }
+
     var canonicalCount: Int { canonicalBase.count }
-    var sparseOverrideCount: Int { canonicalOverrides.count }
+    var sparseOverrideCount: Int { canonicalOverrides.count + liveOverrides.count }
     var startIndex: Int { 0 }
     var endIndex: Int { canonicalBase.count + live.count }
 
@@ -1602,7 +1616,8 @@ struct ChatTranscriptItems: RandomAccessCollection, Hashable, Sendable {
         return ChatTranscriptItems(
             canonicalBase: canonicalBase,
             canonicalOverrides: overrides,
-            live: live
+            liveBase: liveBase,
+            liveOverrides: liveOverrides
         )
     }
 
@@ -1610,7 +1625,29 @@ struct ChatTranscriptItems: RandomAccessCollection, Hashable, Sendable {
         ChatTranscriptItems(
             canonicalBase: canonicalBase,
             canonicalOverrides: canonicalOverrides,
-            live: live
+            liveBase: live,
+            liveOverrides: [:]
+        )
+    }
+
+    func replacingLiveRows(
+        _ replacements: [Int: ChatTranscriptRenderItem]
+    ) -> ChatTranscriptItems {
+        guard !replacements.isEmpty else { return self }
+        var overrides = liveOverrides
+        for (index, item) in replacements {
+            precondition(liveBase.indices.contains(index))
+            if item == liveBase[index] {
+                overrides.removeValue(forKey: index)
+            } else {
+                overrides[index] = item
+            }
+        }
+        return ChatTranscriptItems(
+            canonicalBase: canonicalBase,
+            canonicalOverrides: canonicalOverrides,
+            liveBase: liveBase,
+            liveOverrides: overrides
         )
     }
 
@@ -1810,6 +1847,20 @@ struct ChatTranscriptTimeline: Hashable, Sendable {
     ) -> ChatTranscriptTimeline {
         ChatTranscriptTimeline(
             items: items.replacingCanonical(replacements),
+            preferredSemanticIDByRenderedID: preferredSemanticIDByRenderedID,
+            renderedIDBySemanticID: renderedIDBySemanticID,
+            renderedIDs: renderedIDs,
+            canonicalRenderedIDSet: canonicalRenderedIDSet,
+            liveRenderedIDSet: liveRenderedIDSet,
+            internallyConsistent: internallyConsistent
+        )
+    }
+
+    func replacingLiveRows(
+        _ replacements: [Int: ChatTranscriptRenderItem]
+    ) -> ChatTranscriptTimeline {
+        ChatTranscriptTimeline(
+            items: items.replacingLiveRows(replacements),
             preferredSemanticIDByRenderedID: preferredSemanticIDByRenderedID,
             renderedIDBySemanticID: renderedIDBySemanticID,
             renderedIDs: renderedIDs,

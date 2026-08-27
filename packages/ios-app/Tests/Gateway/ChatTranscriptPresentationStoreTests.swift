@@ -5,6 +5,38 @@ import Testing
 @MainActor
 @Suite("Chat transcript presentation store")
 struct ChatTranscriptPresentationStoreTests {
+    @Test("runtime and streaming rows install in live region, never committed ledger")
+    func runtimeRowsNeverEnterCommittedLedger() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_199)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.transcript = []
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 0
+            snapshot.phase = .running
+            snapshot.streaming = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+            {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"text","type":"text","text":"working"}]}
+            """.utf8))
+            snapshot.toolExecutions = [ToolExecutionState(
+                toolCallId: "runtime-call", toolName: "read", order: 0, status: .completed,
+                arguments: .object([:]), partialResult: nil,
+                result: .object(["ok": .bool(true)]), output: "done", isError: false,
+                startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
+                lastProgressAt: "2026-01-01T00:00:01Z", completedAt: "2026-01-01T00:00:01Z",
+                durationMs: 1, progressSequence: 1, toolSegmentId: nil, groupId: nil,
+                groupIndex: nil, groupCount: nil, groupFinalized: nil
+            )]
+            let tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 1)
+            let store = ChatTranscriptPresentationStore()
+            #expect(store.submit(snapshot: snapshot, tag: tag))
+            let installed = try await store.waitForInstall(of: tag)
+
+            #expect(installed.committedLedger.items.isEmpty)
+            #expect(installed.liveRegion.items.map(\.id) == ["streaming", "tool-run-runtime-call"])
+            #expect(installed.displayedItems.map(\.id) == ["streaming", "tool-run-runtime-call"])
+        }
+    }
+
     @Test("same exact source coalesces to one detached build")
     func sameSourceCoalesces() async throws {
         try await withTestWatchdog { @MainActor in
@@ -1236,7 +1268,10 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(store.entranceState(for: rowID) == .admitted)
 
             let completedInstall = try await store.waitForInstall(of: completedTag)
-            #expect(!completedInstall.containsDisplayedID(rowID))
+            // Terminal unanchored execution remains a live-region row until
+            // canonical ownership or Gateway retirement removes it, but its
+            // completed state cannot retain a visual entrance entitlement.
+            #expect(completedInstall.containsDisplayedID(rowID))
             #expect(store.entranceState(for: rowID) == .none)
         }
     }
@@ -1515,7 +1550,7 @@ struct ChatTranscriptPresentationStoreTests {
             tag = ChatTranscriptProjectionTag(snapshot: live, presentationGeneration: 40)
             store.submit(snapshot: live, tag: tag)
             let liveInstall = try await store.waitForInstall(of: tag)
-            #expect(liveInstall.timeline.ids.first == "stream:install")
+            #expect(liveInstall.timeline.items.live.first?.id == "stream:install")
             #expect(liveInstall.timeline.items.compactMap { item -> ChatToolRunPresentation? in
                 guard case .toolRun(let run) = item else { return nil }
                 return run
@@ -1547,7 +1582,7 @@ struct ChatTranscriptPresentationStoreTests {
             tag = ChatTranscriptProjectionTag(snapshot: settled, presentationGeneration: 40)
             store.submit(snapshot: settled, tag: tag)
             let settledInstall = try await store.waitForInstall(of: tag)
-            #expect(settledInstall.timeline.ids.first == "stream:install")
+            #expect(settledInstall.timeline.items.canonical.contains { $0.id == "stream:install" })
             #expect(store.entranceState(for: "stream:install") == .admitted)
 
             settled.phase = .idle
@@ -1555,7 +1590,7 @@ struct ChatTranscriptPresentationStoreTests {
             tag = ChatTranscriptProjectionTag(snapshot: settled, presentationGeneration: 40)
             store.submit(snapshot: settled, tag: tag)
             let idleInstall = try await store.waitForInstall(of: tag)
-            #expect(idleInstall.timeline.ids.first == "stream:install")
+            #expect(idleInstall.timeline.items.canonical.contains { $0.id == "stream:install" })
             #expect(store.entranceState(for: "stream:install") == .admitted)
         }
     }

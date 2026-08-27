@@ -140,9 +140,15 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   The Gateway supplies monotonic duration samples while a call is running and the
   authoritative final call-to-return duration when it completes; chips display those
   samples without deriving normal timing from the device wall clock. The runtime-only
-  tail overlay admits every authoritative execution without canonical or streaming placement. Terminal unanchored executions
+  tail overlay admits every authoritative execution without canonical or streaming placement. iOS
+  preserves this ownership through projection: runtime-only and streaming rows stay in
+  `ChatLiveRegion` and never become `ChatCommittedLedger` rows; canonical terminal results dominate
+  any stale running runtime descriptor. Terminal unanchored executions
   remain visible until exact canonical transfer or authoritative operation retirement; they appear only through their
-  canonical or streaming transcript position, while anchored terminal calls remain visible.
+  canonical or streaming transcript position, while anchored terminal calls remain visible. Group counts never imply
+  liveness: the chip spinner is driven only by an actually running descriptor. Structure-change notifications with
+  `branchChanged: false` preserve an installed earlier-message prefix until an authoritative snapshot proves its overlap;
+  only branch replacement retires that prefix.
   Older Gateways
   without live duration samples use a bounded local monotonic fallback. The open detail
   sheet continues to consume the newest immutable call presentation, showing status and all bounded readable

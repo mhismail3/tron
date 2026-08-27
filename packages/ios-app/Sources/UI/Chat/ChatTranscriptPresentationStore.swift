@@ -513,6 +513,14 @@ struct InstalledChatTranscript: Hashable, Sendable {
         displayedItemByID?[id]
     }
 
+    /// Entrance animation is meaningful only for a row that still owns running
+    /// execution. Terminal tool rows can arrive as a fresh bounded snapshot,
+    /// but must never acquire or retain a pending visual entrance.
+    func toolRunIsRunning(forDisplayedID id: String) -> Bool? {
+        guard case .toolRun(let run) = displayedItem(for: id) else { return nil }
+        return run.isRunning
+    }
+
     func containsUnaliasedPhysicalID(_ id: String) -> Bool {
         containsDisplayedID(id)
             || presentationOnlyIDSet.contains(id)
@@ -649,7 +657,16 @@ enum ChatTranscriptTransitionPolicy {
         func admit<S: Sequence>(_ candidates: S) where S.Element == String {
             for id in candidates {
                 guard inserted.count < ChatTranscriptPageRequest.maximumItemCount else { return }
-                if !previous.containsDisplayedID(id), insertedSet.insert(id).inserted {
+                guard insertedSet.insert(id).inserted else { continue }
+                // A status-only update or canonical takeover can change the
+                // rendered row ID while retaining the exact semantic call or
+                // group. It is an update to an existing physical owner, not a
+                // new entrance entitlement.
+                let semanticAlreadyDisplayed = previous.displayedItems.contains { item in
+                    previous.semanticID(forDisplayedID: item.id)
+                        == next.semanticID(forDisplayedID: id)
+                }
+                if !previous.containsDisplayedID(id), !semanticAlreadyDisplayed {
                     inserted.append(id)
                 }
             }
@@ -1463,10 +1480,14 @@ final class ChatTranscriptPresentationStore {
 
     private func synchronizeEntranceBookkeeping(with output: InstalledChatTranscript) {
         pendingEntranceOrder.removeAll {
-            !pendingEntranceIDs.contains($0) || !output.containsDisplayedID($0)
+            !pendingEntranceIDs.contains($0)
+                || !output.containsDisplayedID($0)
+                || output.toolRunIsRunning(forDisplayedID: $0) == false
         }
         admittedEntranceOrder.removeAll {
-            !admittedEntranceIDs.contains($0) || !output.containsDisplayedID($0)
+            !admittedEntranceIDs.contains($0)
+                || !output.containsDisplayedID($0)
+                || output.toolRunIsRunning(forDisplayedID: $0) == false
         }
         pendingEntranceIDs = Set(pendingEntranceOrder)
         admittedEntranceIDs = Set(admittedEntranceOrder)
@@ -1479,7 +1500,8 @@ final class ChatTranscriptPresentationStore {
         for id in candidates
             where !admittedEntranceIDs.contains(id)
                 && !pendingEntranceIDs.contains(id)
-                && novelSet.insert(id).inserted {
+                && novelSet.insert(id).inserted
+                && output.toolRunIsRunning(forDisplayedID: id) != false {
             guard let semanticID = output.semanticID(forDisplayedID: id) else {
                 preconditionFailure("Displayed entrance candidate lacks semantic identity")
             }

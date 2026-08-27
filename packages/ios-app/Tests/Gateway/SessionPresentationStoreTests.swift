@@ -247,6 +247,38 @@ struct SessionPresentationStoreTests {
             #expect(store.mountedTranscriptCoverage?.leafEntryID == "appended-leaf")
         }
 
+        // Ordinary structure notifications (including custom-entry appends)
+        // preserve the browsing prefix while the next authoritative snapshot
+        // proves its exact overlap.
+        do {
+            let (store, tail) = try makeStore()
+            let sequence = tail.eventSequence + 1
+            await store.admit(GatewayEvent(
+                type: "event",
+                topic: "session.structureChanged",
+                sessionId: tail.sessionId,
+                payload: .object([
+                    "runtimeGeneration": .string(tail.runtimeGeneration),
+                    "eventSequence": .number(Double(sequence)),
+                    "revision": .number(Double(tail.revision + 1)),
+                    "data": .object(["branchChanged": .bool(false)]),
+                ])
+            ))
+            #expect(store.mountedTranscriptCoverage?.start == 2)
+            #expect(store.mountedTranscriptCoverage?.end == 10)
+
+            var appended = tail
+            appended.eventSequence = sequence + 1
+            appended.transcript = Array(entries[10..<12])
+            appended.transcriptStart = 10
+            appended.transcriptTotal = 12
+            appended.leafEntryId = "appended-leaf"
+            store.replaceHostedSnapshot(appended)
+            #expect(store.visibleTranscript.map(\.id) == entries[2..<12].map(\.id))
+            #expect(store.mountedTranscriptCoverage?.start == 2)
+            #expect(store.mountedTranscriptCoverage?.end == 12)
+        }
+
         // A structure revision change invalidates the old mounted window;
         // the same adjacent append must not resurrect that prefix.
         do {

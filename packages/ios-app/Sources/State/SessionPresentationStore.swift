@@ -2218,13 +2218,34 @@ final class SessionPresentationStore {
         case "session.structureChanged":
             guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
             if updatesSecondaryRevisions {
-                // Invalidate mounted transcript coverage before any later
-                // snapshot/rebaseline can attempt prefix reconciliation.
+                let branchChanged = envelope.data.objectValue?["branchChanged"]?.boolValue == true
+                // A structure notification is not itself a replacement of the
+                // mounted canonical window. Custom entries and other ordinary
+                // append-only changes must preserve explicitly loaded earlier
+                // rows until the next authoritative snapshot proves overlap.
+                // Only a real branch replacement invalidates that prefix.
                 structureRevision &+= 1
                 contextRevision &+= 1
-                mountedTranscriptWindow = nil
-                if envelope.data.objectValue?["branchChanged"]?.boolValue == true {
+                if branchChanged {
+                    mountedTranscriptWindow = nil
                     synchronization.requireFreshInstall(sessionID: snapshot.sessionId)
+                } else if let window = mountedTranscriptWindow {
+                    // Re-key the retained coverage to the new structure lease.
+                    // This preserves the exact loaded prefix while ensuring an
+                    // in-flight page captured before the event cannot install.
+                    let old = window.coverage
+                    mountedTranscriptWindow = MountedTranscriptWindow(
+                        coverage: MountedTranscriptCoverage(
+                            sessionID: old.sessionID,
+                            runtimeGeneration: old.runtimeGeneration,
+                            leafEntryID: old.leafEntryID,
+                            total: old.total,
+                            start: old.start,
+                            end: old.end,
+                            structureRevision: structureRevision
+                        ),
+                        prefixItems: window.prefixItems
+                    )
                 }
             }
             advance(&snapshot, envelope)

@@ -1270,12 +1270,50 @@ struct ChatTranscriptProjectionKernelTests {
 
         #expect(cold.timeline.ids == ["user", "stream-source"])
         #expect(coldWorker.timeline == cold.timeline)
-        #expect(coldWorker.timeline.items.live.isEmpty)
+        #expect(coldWorker.timeline.items.canonical.map(\.id) == ["user"])
+        #expect(coldWorker.timeline.items.live.map(\.id) == ["stream-source"])
         #expect(incremental.timeline == cold.timeline)
-        #expect(incremental.timeline.items.live.isEmpty)
+        #expect(incremental.timeline.items.canonical.map(\.id) == ["user"])
+        #expect(incremental.timeline.items.live.map(\.id) == ["stream-source"])
         #expect(incremental.workReport.mode == .fragmentReuse)
         #expect(ChatTranscriptProjectionKernel.visibleItems(in: snapshot).map(\.id) == ["user"])
         #expect(cold.timeline.renderedIDBySemanticID["extension-call"] == nil)
+    }
+
+    @Test("runtime-only tools remain live after a streaming message")
+    func runtimeOnlyRowsRemainLiveAfterStreaming() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
+        snapshot.streaming = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"text","type":"text","text":"still working"}]}
+        """.utf8))
+        snapshot.toolExecutions = [runtimeTool(id: "runtime-call", order: 0)]
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+
+        #expect(candidate.timeline.items.canonical.isEmpty)
+        #expect(candidate.timeline.items.live.map(\.id) == ["streaming", "tool-run-runtime-call"])
+        #expect(candidate.timeline.items.live.allSatisfy { !candidate.timeline.items.canonical.contains($0) })
+        #expect(candidate.isValid)
+    }
+
+    @Test("partial finalized groups are terminal when every visible descriptor is terminal")
+    func partialFinalizedGroupDoesNotSpin() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
+        snapshot.toolExecutions = [groupedRuntimeTool(
+            id: "partial-call", index: 1, count: 3, status: .completed,
+            groupID: "partial-group", order: 0
+        )]
+
+        guard case .toolRun(let run) = ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline.items.live.first else {
+            Issue.record("Expected a live tool run")
+            return
+        }
+        #expect(run.displayCount == 3)
+        #expect(!run.isRunning)
+        #expect(run.title == "Used 3 tools")
+        #expect(run.status == nil)
     }
 
     @Test("malformed maximum transcript bounds fall back without overflow")
