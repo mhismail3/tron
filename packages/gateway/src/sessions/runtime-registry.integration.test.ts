@@ -5123,6 +5123,214 @@ export default function (pi) {
     expect(slot.snapshot()).toMatchObject({ phase: "idle" });
   });
 
+  it("retires a command-triggered foreground owner when the turn has no successful assistant completion", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-failed-command-turn-drain-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+    await writeFile(join(extensionDir, "failed-turn.ts"), `export default function (pi) {
+      pi.registerCommand("start-failed-turn", { handler: async (_args, ctx) => {
+        pi.sendMessage({ customType: "failed-turn", content: "continue", display: false }, { triggerTurn: true });
+      }});
+    }\n`);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-failed-command-turn", tokensPerSecond: 10_000 });
+    faux.setResponses([{
+      ...fauxAssistantMessage("provider failed"),
+      stopReason: "error",
+      errorMessage: "injected provider failure",
+    }]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const workRegistry = new GatewayWorkRegistry("failed-command-turn-epoch");
+    const derivedAdmissions = vi.spyOn(workRegistry, "beginDerived");
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust, workRegistry,
+      modelRuntimeFactory: async () => runtime,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    await slot.prompt("/start-failed-turn").catch(() => {});
+    await waitUntil(() => slot.catalogPhase === "idle" || slot.catalogPhase === "interrupted");
+    await waitUntil(() => workRegistry.size === 0);
+    expect(faux.state.callCount).toBeGreaterThan(0);
+    expect(derivedAdmissions.mock.calls.some(([admission]) =>
+      admission.kind === "foreground-agent-operation"
+    )).toBe(true);
+    const markerPath = join(root, "tron", "gateway", "runtime-markers", `${slot.id}.json`);
+    if (existsSync(markerPath)) {
+      const marker = JSON.parse(await readFile(markerPath, "utf8")) as { operations: unknown[] };
+      expect(marker.operations).toEqual([]);
+    }
+    await registry.waitUntilIdle();
+    expect(registry.administrativeDrainSnapshot()).toMatchObject({
+      phase: "complete", blockerCount: 0, suspectProjectionCount: 0,
+    });
+  });
+
+  it("classifies and reconciles an unrepresented foreground token during drain", async () => {
+    const fixture = await coldFixture("orphaned-foreground-drain");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      pendingPrompt?: { id: string; createdAt: string; text: string; attachmentCount: number };
+      beginDerivedOperationWork: (operationId: string, kind: "foreground-agent-operation") => unknown;
+      runtime: { session: { readonly isStreaming: boolean } };
+      dependencies: { markers: { mark: (sessionId: string, operationId: string) => Promise<void> } };
+    };
+    internal.beginDerivedOperationWork("orphaned-operation", "foreground-agent-operation");
+    internal.pendingPrompt = {
+      id: "orphaned-operation",
+      createdAt: new Date().toISOString(),
+      text: "stale provisional prompt",
+      attachmentCount: 0,
+    };
+    await internal.dependencies.markers.mark(slot.id, "orphaned-operation");
+    const streaming = vi.spyOn(internal.runtime.session, "isStreaming", "get").mockReturnValue(true);
+
+    const admitted = fixture.registry.beginAdministrativeDrain();
+    expect(admitted).toMatchObject({
+      blockerCount: 1,
+      suspectProjectionCount: 0,
+      blockers: [expect.objectContaining({
+        category: "foreground-agent-operation", state: "active",
+      })],
+    });
+    streaming.mockRestore();
+    expect(fixture.registry.administrativeDrainSnapshot()).toMatchObject({
+      blockerCount: 1,
+      suspectProjectionCount: 1,
+      blockers: [expect.objectContaining({
+        category: "foreground-agent-operation", state: "suspect",
+      })],
+    });
+    await fixture.registry.waitUntilIdle();
+    expect(fixture.registry.administrativeDrainSnapshot()).toMatchObject({
+      phase: "complete", blockerCount: 0, suspectProjectionCount: 0,
+    });
+    expect(slot.snapshot().pendingPrompt).toBeUndefined();
+    const markerPath = join(fixture.root, "tron", "gateway", "runtime-markers", `${slot.id}.json`);
+    if (existsSync(markerPath)) {
+      const marker = JSON.parse(await readFile(markerPath, "utf8")) as { operations: unknown[] };
+      expect(marker.operations).toEqual([]);
+    }
+  });
+
+  it("reasserts ownership restored while orphan marker cleanup yields", async () => {
+    const fixture = await coldFixture("orphan-marker-race");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      phase: "idle" | "running";
+      activeOperationId?: string;
+      operation?: { id?: string; kind: "prompt"; startedAt: string };
+      beginDerivedOperationWork: (operationId: string, kind: "foreground-agent-operation") => unknown;
+      dependencies: { markers: {
+        mark: (sessionId: string, operationId: string) => Promise<void>;
+        clear: (sessionId: string, operationId?: string) => Promise<void>;
+        evidenceFor: (sessionId: string) => Promise<Array<{ operationId: string }>>;
+      } };
+    };
+    internal.beginDerivedOperationWork("racing-operation", "foreground-agent-operation");
+    await internal.dependencies.markers.mark(slot.id, "racing-operation");
+    const mark = vi.spyOn(internal.dependencies.markers, "mark");
+    const originalClear = internal.dependencies.markers.clear.bind(internal.dependencies.markers);
+    let releaseClear!: () => void;
+    const clearBarrier = new Promise<void>((resolve) => { releaseClear = resolve; });
+    const clear = vi.spyOn(internal.dependencies.markers, "clear")
+      .mockImplementationOnce(async () => clearBarrier)
+      .mockImplementation(originalClear);
+
+    const drain = fixture.registry.waitUntilIdle();
+    await waitUntil(() => clear.mock.calls.length === 1);
+    internal.phase = "running";
+    internal.activeOperationId = "racing-operation";
+    internal.operation = {
+      id: "racing-operation", kind: "prompt", startedAt: new Date().toISOString(),
+    };
+    releaseClear();
+    await waitUntil(() => mark.mock.calls.length === 1);
+    await expect(internal.dependencies.markers.evidenceFor(slot.id)).resolves.toEqual([
+      expect.objectContaining({ operationId: "racing-operation" }),
+    ]);
+
+    internal.phase = "idle";
+    internal.activeOperationId = undefined;
+    internal.operation = undefined;
+    await drain;
+    expect(clear.mock.calls.length).toBeGreaterThanOrEqual(2);
+    await expect(internal.dependencies.markers.evidenceFor(slot.id)).resolves.toEqual([]);
+  });
+
+  it("fails a drain instead of waiting forever on foreground work without a captured slot", async () => {
+    const workRegistry = new GatewayWorkRegistry("missing-slot-drain-epoch");
+    const fixture = await coldFixture("missing-slot-drain", { workRegistry });
+    const stranded = workRegistry.begin({
+      kind: "foreground-agent-operation",
+      sessionId: "missing-slot",
+      hostEpoch: "missing-slot-drain-epoch",
+    });
+
+    await expect(fixture.registry.waitUntilIdle()).rejects.toThrow(
+      /foreground ownership without a captured runtime slot/u,
+    );
+    expect(fixture.registry.administrativeDrainSnapshot()).toMatchObject({
+      phase: "failed", blockerCount: 1, suspectProjectionCount: 1,
+    });
+    stranded.settle();
+  });
+
+  it("does not treat an ownerless late agent settlement as all-marker authority", async () => {
+    const fixture = await coldFixture("ownerless-late-settlement");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      pendingExtensionCommand?: { id: string; kind: "command"; startedAt: string };
+      onEvent: (event: { type: "agent_settled" }) => void;
+      dependencies: { markers: {
+        mark: (sessionId: string, operationId: string) => Promise<void>;
+        evidenceFor: (sessionId: string) => Promise<Array<{ operationId: string }>>;
+      } };
+    };
+    internal.pendingExtensionCommand = {
+      id: "command-owner", kind: "command", startedAt: new Date().toISOString(),
+    };
+    await internal.dependencies.markers.mark(slot.id, "other-owner-one");
+    await internal.dependencies.markers.mark(slot.id, "other-owner-two");
+
+    internal.onEvent({ type: "agent_settled" });
+
+    await expect(internal.dependencies.markers.evidenceFor(slot.id)).resolves.toEqual([
+      expect.objectContaining({ operationId: "other-owner-one" }),
+      expect.objectContaining({ operationId: "other-owner-two" }),
+    ]);
+  });
+
+  it("retires an exact provisional prompt projection even after its work token already settled", async () => {
+    const fixture = await coldFixture("settled-provisional-prompt");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      pendingPrompt?: {
+        id: string; createdAt: string; text: string; attachmentCount: number;
+      };
+      settleOperationWork: (operationId: string) => void;
+    };
+    internal.pendingPrompt = {
+      id: "settled-operation",
+      createdAt: new Date().toISOString(),
+      text: "settled prompt",
+      attachmentCount: 0,
+    };
+
+    internal.settleOperationWork("settled-operation");
+
+    expect(slot.snapshot().pendingPrompt).toBeUndefined();
+  });
+
   it("admits exact extension commands while streaming without hiding the foreground run", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-streaming-extension-command-"));
     const agentDir = join(root, "agent");

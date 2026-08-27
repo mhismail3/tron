@@ -517,25 +517,90 @@ export class RuntimeSlot {
   private settleOperationWork(operationId: string | undefined): void {
     if (!operationId) return;
     this.lifecycle.cancelPreflight(operationId);
+    // PendingPrompt is a provisional projection, not independent ownership.
+    // Once its exact operation settles it must not keep an idle composer row
+    // alive merely because Pi omitted or replaced the expected user callback.
+    if (this.pendingPrompt?.id === operationId) {
+      this.pendingPrompt = undefined;
+      this.pendingPromptMessage = undefined;
+    }
     const work = this.operationWork.get(operationId);
     if (!work) return;
     this.operationWork.delete(operationId);
     work.settle();
   }
 
-  private settleRetiredOperationWork(): void {
-    const retained = new Set([
+  private retainedOperationWorkIDs(): Set<string> {
+    return new Set([
       this.activeOperationId,
       this.operation?.id,
       this.pendingPrompt?.id,
       this.pendingExtensionCommand?.id,
       this.pendingAssistantCompletion?.operationId,
+      this.pendingQueueAdmission?.id,
+      ...this.completionOwnershipQueue.map((item) => item.completion.operationId),
       ...this.completionWorkOwners.values(),
       ...this.queuedMessages.map((item) => item.id),
       ...this.dequeuedFollowUpOwners,
     ].filter((value): value is string => typeof value === "string"));
+  }
+
+  private administrativeRetainedOperationWorkIDs(): Set<string> {
+    const retained = this.retainedOperationWorkIDs();
+    // A provisional prompt cannot represent foreground work after both Pi and
+    // the Gateway have reached an operation-free terminal phase.
+    if (!this.hasActiveAgentRun
+      && (this.phase === "idle" || this.phase === "interrupted")
+      && this.activeOperationId === undefined
+      && this.operation === undefined
+      && this.pendingAssistantCompletion === undefined
+      && this.pendingPrompt) {
+      retained.delete(this.pendingPrompt.id);
+    }
+    return retained;
+  }
+
+  /** Foreground tokens without an exact runtime, queue, or settlement owner
+   * are orphaned projections. Age alone never makes work suspect. */
+  administrativeSuspectForegroundWorkTokens(): ReadonlySet<string> {
+    // Pi's broad streaming state is authoritative even if a projection callback
+    // is temporarily missing. Ambiguous live ownership must wait, never repair.
+    if (this.hasActiveAgentRun) return new Set();
+    const retained = this.administrativeRetainedOperationWorkIDs();
+    return new Set([...this.operationWork.entries()].flatMap(([operationId, work]) =>
+      retained.has(operationId) ? [] : [work.token]
+    ));
+  }
+
+  private settleRetiredOperationWork(): void {
+    const retained = this.retainedOperationWorkIDs();
     for (const operationId of [...this.operationWork.keys()]) {
       if (!retained.has(operationId)) this.settleOperationWork(operationId);
+    }
+  }
+
+  /** Administrative drain repairs only proven-orphaned foreground ownership.
+   * Its exact durable marker is removed before the process-local token; active,
+   * queued, and terminal-receipt owners remain untouched without a deadline. */
+  private async reconcileOrphanedForegroundWorkForDrain(): Promise<void> {
+    // Never synthesize or transfer identity during repair. Once Pi settles, its
+    // sequenced callback or the next reconciliation pass can prove an orphan.
+    if (this.hasActiveAgentRun) return;
+    const workFacts = new Map(this.dependencies.workRegistry.facts().map((fact) => [fact.token, fact]));
+    const retained = this.administrativeRetainedOperationWorkIDs();
+    const candidates = [...this.operationWork.entries()].filter(([operationId, work]) => {
+      const fact = workFacts.get(work.token);
+      return fact?.kind === "foreground-agent-operation" && !retained.has(operationId);
+    });
+    for (const [operationId, work] of candidates) {
+      await this.clearMarkerOwnership(operationId, work);
+      // A delayed exact callback may have restored ownership while marker I/O
+      // yielded. Reassert its marker rather than retiring live work.
+      if (this.administrativeRetainedOperationWorkIDs().has(operationId)) {
+        await this.enqueueMarkerOwnership(operationId);
+        continue;
+      }
+      this.settleOperationWork(operationId);
     }
   }
 
@@ -1785,7 +1850,11 @@ export class RuntimeSlot {
           }
           break;
         }
-        if (this.pendingExtensionCommand === undefined) {
+        // A command-triggered turn owns a distinct foreground token. The
+        // command may still be unwinding when agent_settled arrives; only skip
+        // this lane if the command itself somehow owns the settled identity.
+        if (this.pendingExtensionCommand === undefined
+          || this.pendingExtensionCommand.id !== settledOperationId) {
           if (this.pendingAssistantCompletion) {
             if (!this.pendingAssistantCompletion.operationId && settledOperationId) {
               this.pendingAssistantCompletion = { ...this.pendingAssistantCompletion, operationId: settledOperationId };
@@ -1800,21 +1869,27 @@ export class RuntimeSlot {
             void this.beginAttentionSettlement(this.pendingAssistantCompletion).catch(() => {});
             break;
           }
-          this.operationWork.get(settledOperationId ?? "")?.transition("terminal-receipt-persistence");
-          const markerClear = this.clearMarkerOwnership(settledOperationId);
-          // The foreground token remains the exact owner; do not create a second
-          // receipt token or report drain completion while marker I/O is active.
-          void markerClear.then(
-            () => undefined,
-            (error) => this.emit("session.operationFailed", safeJson({
-              operationId: settledOperationId,
-              message: error instanceof Error ? error.message : String(error),
-            })),
-          ).finally(() => {
-            this.settleOperationWork(settledOperationId);
+          if (settledOperationId) {
+            this.operationWork.get(settledOperationId)?.transition("terminal-receipt-persistence");
+            const markerClear = this.clearMarkerOwnership(settledOperationId);
+            // The foreground token remains the exact owner; do not create a second
+            // receipt token or report drain completion while marker I/O is active.
+            void markerClear.then(
+              () => undefined,
+              (error) => this.emit("session.operationFailed", safeJson({
+                operationId: settledOperationId,
+                message: error instanceof Error ? error.message : String(error),
+              })),
+            ).finally(() => {
+              this.settleOperationWork(settledOperationId);
+              this.hooks.settled(this.id);
+              this.publishSnapshot();
+            });
+          } else {
+            // A duplicate/late SDK callback has no exact marker authority. Never
+            // interpret undefined as permission to clear every session marker.
             this.hooks.settled(this.id);
-            this.publishSnapshot();
-          });
+          }
         }
         this.publishSnapshot();
         break;
@@ -2425,6 +2500,7 @@ export class RuntimeSlot {
     for (const asyncDir of this.ownedExtensionArtifactDirectories()) {
       await this.refreshSubagentActivityFromArtifact(asyncDir, canonicalFacts);
     }
+    await this.reconcileOrphanedForegroundWorkForDrain();
   }
 
   private async refreshSubagentActivityFromArtifact(

@@ -2274,11 +2274,20 @@ export class RuntimeRegistry {
       progressAt?: string;
     }> = [];
     const workFacts = this.workRegistry.facts();
+    const suspectForegroundTokens = new Set([...this.slots.values()].flatMap((slot) =>
+      [...slot.administrativeSuspectForegroundWorkTokens()]
+    ));
     for (const work of workFacts) {
+      const foregroundIsSuspect = work.kind === "foreground-agent-operation"
+        && (work.sessionId === undefined
+          || !this.slots.has(work.sessionId)
+          || suspectForegroundTokens.has(work.token));
       facts.push({
         key: `work:${work.token}`,
         category: work.kind,
-        state: work.kind === "terminal-receipt-persistence" ? "settling" : "active",
+        state: foregroundIsSuspect
+          ? "suspect"
+          : work.kind === "terminal-receipt-persistence" ? "settling" : "active",
         admittedAt: work.admittedAt,
         progressAt: work.progressAt,
       });
@@ -2333,9 +2342,7 @@ export class RuntimeRegistry {
       } : {}),
       blockers: summaries,
       omittedCount: Math.max(0, facts.length - summaries.length),
-      // No projection is currently retired without exact settlement evidence.
-      // Keep this additive lane explicit rather than conflating it with blockers.
-      suspectProjectionCount: 0,
+      suspectProjectionCount: facts.filter((fact) => fact.state === "suspect").length,
     };
   }
 
@@ -2351,6 +2358,17 @@ export class RuntimeRegistry {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       const slots = await this.mutex.run(() => [...this.slots.values()]);
+      const capturedSlotIDs = new Set(slots.map((slot) => slot.id));
+      const assertForegroundOwnersHaveSlots = () => {
+        const stranded = this.workRegistry.facts().some((work) =>
+          work.kind === "foreground-agent-operation"
+            && (work.sessionId === undefined || !capturedSlotIDs.has(work.sessionId))
+        );
+        if (stranded) {
+          throw new Error("Administrative drain found foreground ownership without a captured runtime slot");
+        }
+      };
+      assertForegroundOwnersHaveSlots();
       let preparationSettled = false;
       let preparationError: unknown;
       void Promise.all(slots.map((slot) => slot.prepareForAdministrativeDrain())).then(
@@ -2361,6 +2379,7 @@ export class RuntimeRegistry {
       this.setDrainPhase("waiting");
       while (!preparationSettled || this.workRegistry.size > 0 || slots.some((slot) => slot.isDrainBusy)) {
         this.administrativeDrainSnapshot();
+        assertForegroundOwnersHaveSlots();
         const monotonic = performance.now();
         if (preparationSettled && preparationError === undefined
           && monotonic - lastArtifactReconciliation >= 750) {

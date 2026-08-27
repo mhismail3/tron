@@ -653,9 +653,18 @@ never persists or expires work by age and does not duplicate Pi's runtime, JSONL
 markers. Prompt preflight transfers one token into accepted foreground, queue, or
 extension-command ownership without a release/reacquire gap. Exact accepted queue owners
 run naturally during a graceful drain; only an explicit client clear/replace settles them
-without execution. Direct Bash and idle compaction persist interruption markers before
-canonical SDK work, and reliable bounded-frequency marker/terminal-receipt retries keep
-the same owner live until durability succeeds.
+without execution. A command-triggered agent turn owns a distinct foreground token even
+while the command handler unwinds; agent settlement retires that token independently when
+the turn fails or produces no successful assistant completion. During drain, a foreground
+token is marked suspect only when no exact live runtime, queue, prompt, command, or terminal
+settlement projection represents it and Pi no longer reports a live run. The owning slot
+then removes its exact durable marker before retiring that process-local orphan, reasserting
+the marker if exact ownership returns while cleanup yields; age alone never authorizes
+cleanup. Foreground work without any captured owning slot fails the drain invariant instead
+of waiting forever, allowing supervised shutdown/replacement to recover. Direct Bash and
+idle compaction persist interruption markers before canonical SDK work, and reliable
+bounded-frequency marker/terminal-receipt retries keep the same owner live until durability
+succeeds.
 Package inventory/update discovery and provider login remain exact administrative owners
 until their underlying asynchronous operation settles; retiring mobile UI does not infer
 provider settlement. Registry tokens are the normal drain authority. Exact-owned
