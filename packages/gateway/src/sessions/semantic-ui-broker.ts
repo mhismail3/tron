@@ -15,7 +15,15 @@ import type {
   ExtensionWidget,
 } from "../protocol/types.js";
 import { TRON_QUESTIONNAIRE_REQUEST } from "./extension-adapter-contract.js";
-import { ExtensionPresentationStore } from "../extensions/host/extension-presentation-store.js";
+import {
+  EXTENSION_MAX_INTERACTIONS as MAX_PENDING_INTERACTIONS,
+  EXTENSION_MAX_SELECT_OPTIONS as MAX_SELECT_OPTIONS,
+  EXTENSION_MAX_STATUSES as MAX_STATUSES,
+  EXTENSION_MAX_WIDGET_LINE_BYTES as MAX_WIDGET_LINE_BYTES,
+  EXTENSION_MAX_WIDGET_LINES as MAX_WIDGET_LINES,
+  EXTENSION_MAX_WIDGETS as MAX_WIDGETS,
+  ExtensionPresentationStore,
+} from "../extensions/host/extension-presentation-store.js";
 import { stripTerminalControls } from "../extensions/host/terminal-sanitizer.js";
 import { currentExtensionOwner } from "../extensions/owner-attribution.js";
 
@@ -50,10 +58,6 @@ const THEME_BACKGROUNDS: ConstructorParameters<typeof Theme>[1] = {
 };
 const BASELINE_THEME = new Theme(THEME_COLORS, THEME_BACKGROUNDS, "256color", { name: "tron-rpc-baseline" });
 
-const MAX_STATUSES = 32;
-const MAX_WIDGETS = 24;
-const MAX_PENDING_INTERACTIONS = 8;
-const MAX_SELECT_OPTIONS = 64;
 const MAX_INTERACTION_BYTES = 192 * 1_024;
 const MAX_EDITOR_BYTES = 192 * 1_024;
 const MAX_INTERACTION_TIMEOUT_MS = 24 * 60 * 60_000;
@@ -66,8 +70,6 @@ const MAX_COMMENT_BYTES = 4 * 1_024;
 const MAX_STATUS_BYTES = 4 * 1_024;
 const MAX_WORKING_BYTES = 8 * 1_024;
 const MAX_NOTIFICATION_BYTES = 32 * 1_024;
-const MAX_WIDGET_LINES = 12;
-const MAX_WIDGET_LINE_BYTES = 512;
 const MAX_INDICATOR_FRAMES = 32;
 const MAX_INDICATOR_FRAME_BYTES = 256;
 const MAX_EDITOR_OPERATION_RECEIPTS = 128;

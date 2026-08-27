@@ -274,6 +274,7 @@ describe("projectExtensionRunActivity", () => {
       runId: "workflow-1",
       mode: "workflow",
       state: "running",
+      lastUpdate: Date.parse("2026-01-01T00:00:02.000Z"),
       steps: [
         { agent: "reviewer", status: "running", description: "Inspect the projection", recentOutput: ["read complete"], currentTool: "read", toolCount: 3, turnCount: 2 },
         { agent: "scout", status: "completed", durationMs: 1_200 },
@@ -282,11 +283,25 @@ describe("projectExtensionRunActivity", () => {
     expect(activity).toMatchObject({
       runId: "workflow-1",
       mode: "workflow",
+      lifecycle: { producerUpdatedAt: "2026-01-01T00:00:02.000Z" },
       children: [
         { label: "reviewer", status: "running", task: "Inspect the projection", output: "read complete", currentTool: "read", toolCount: 3 },
         { label: "scout", status: "completed", durationMs: 1_200 },
       ],
     });
+  });
+
+  it("canonicalizes string producer times and falls back to numeric artifact updates", () => {
+    const stringTime = projectExtensionRunActivity({
+      details: { updatedAt: "2026-01-01T00:00:02+00:00" },
+    }, base);
+    expect(stringTime.lifecycle?.producerUpdatedAt).toBe("2026-01-01T00:00:02.000Z");
+
+    const artifactTime = projectExtensionRunActivity({
+      updatedAt: "invalid",
+      lastUpdate: Date.parse("2026-01-01T00:00:03.000Z"),
+    }, base);
+    expect(artifactTime.lifecycle?.producerUpdatedAt).toBe("2026-01-01T00:00:03.000Z");
   });
 
   it("keeps a generic extension activity when details are not structured", () => {

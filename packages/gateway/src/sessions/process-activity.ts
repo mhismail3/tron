@@ -190,28 +190,26 @@ function childRows(
   return rows;
 }
 
-export function subagentProcessesFromActivity(sessionId: string, activity: ExtensionRunActivity): SessionProcessActivity[] {
-  const mode = subagentMode(activity.mode);
-  // Extension ownership and a run ID alone do not prove a delegated process:
-  // pi-subagents supervisor/control tools emit receipts too. Unknown execution
-  // modes fail closed so Gateway never authors an invalid subagent DTO.
-  if (mode === "unknown") return [];
-  if (activity.children.length > 0) return childRows(sessionId, activity, activity.children);
-  // Workflow roots are orchestration containers, not executable subagents.
-  // A single/sync run still has exact run identity and remains a valid row.
-  if (!activity.runId || activity.mode?.toLowerCase() === "workflow") return [];
-  const hasExecutionEvidence = activity.currentTool !== undefined
-    || activity.output !== undefined || activity.toolCount !== undefined
-    || activity.turnCount !== undefined || activity.lifecycle?.producerUpdatedAt !== undefined;
+function aggregateSubagentProcess(
+  sessionId: string,
+  activity: ExtensionRunActivity,
+  mode: SessionProcessActivity["executionMode"],
+): SessionProcessActivity | undefined {
+  if (!activity.runId || activity.mode?.toLowerCase() === "workflow") return undefined;
+  const hasExecutionEvidence = activity.children.length > 0
+    || activity.currentTool !== undefined || activity.output !== undefined
+    || activity.toolCount !== undefined || activity.turnCount !== undefined
+    || activity.lifecycle?.producerUpdatedAt !== undefined;
   // An asyncId-only launcher acknowledgement has correlation but no observed
-  // child execution. Do not turn that settled launcher into a phantom process.
-  if (mode === "asynchronous" && !hasExecutionEvidence) return [];
+  // child execution. The first admitted artifact child, even before that child
+  // has persisted its own run ID, is sufficient to author a temporary root.
+  if (mode === "asynchronous" && !hasExecutionEvidence) return undefined;
   const processId = subagentProcessId(sessionId, activity.toolCallId, activity.runId);
   const state = extensionState(activity.lifecycle?.state ?? (activity.status === "running" ? "running" : activity.status === "failed" ? "failed" : "completed"));
   const terminalAt = terminalStates.has(state) ? activity.lifecycle?.terminalAt ?? activity.completedAt : undefined;
   const output = processOutput(activity.output);
   const durationMs = boundedDurationMs(activity.durationMs, activity.startedAt, terminalAt);
-  return [{
+  return {
     version: 1,
     processId,
     kind: "subagent",
@@ -236,9 +234,44 @@ export function subagentProcessesFromActivity(sessionId: string, activity: Exten
     outputTruncated: output?.truncated === true,
     ...(activity.toolCount === undefined ? {} : { toolCount: Math.max(0, activity.toolCount) }),
     ...(activity.turnCount === undefined ? {} : { turnCount: Math.max(0, activity.turnCount) }),
+    ...(activity.children.length > 0 ? { childCount: activity.children.length } : {}),
     toolCallId: activity.toolCallId,
-    ...(activity.runId ? { runId: activity.runId } : {}),
-  }];
+    runId: activity.runId,
+  };
+}
+
+export function subagentProcessesFromActivity(sessionId: string, activity: ExtensionRunActivity): SessionProcessActivity[] {
+  const mode = subagentMode(activity.mode);
+  // Extension ownership and a run ID alone do not prove a delegated process:
+  // pi-subagents supervisor/control tools emit receipts too. Unknown execution
+  // modes fail closed so Gateway never authors an invalid subagent DTO.
+  if (mode === "unknown") return [];
+  if (activity.children.length > 0) {
+    let rows = childRows(sessionId, activity, activity.children);
+    const state = extensionState(activity.lifecycle?.state ?? (activity.status === "running" ? "running" : activity.status === "failed" ? "failed" : "completed"));
+    const hasActiveChild = rows.some((row) => row.lifecycle.state === "queued"
+      || row.lifecycle.state === "running" || row.lifecycle.state === "paused");
+    // Workflow trace entries acquire a child run ID only after that child
+    // persists. Keep the exact, artifact-owned workflow root until an
+    // executable child can carry the parent's visibility. This covers both the
+    // active interval and a terminal-before-child-persistence race, without
+    // granting the compatibility child ID any ownership.
+    const needsAggregate = state !== "unknown"
+      && (terminalStates.has(state) ? rows.length === 0 : !hasActiveChild);
+    if (needsAggregate) {
+      const aggregate = aggregateSubagentProcess(sessionId, activity, mode);
+      if (aggregate) {
+        rows = rows.map((row) => row.parentProcessId ? row : { ...row, parentProcessId: aggregate.processId });
+        return [aggregate, ...rows];
+      }
+    }
+    return rows;
+  }
+  // A single run still has exact run identity and remains a valid row. A bare
+  // workflow launcher acknowledgement stays hidden until its artifact reports
+  // child execution evidence.
+  const aggregate = aggregateSubagentProcess(sessionId, activity, mode);
+  return aggregate ? [aggregate] : [];
 }
 
 export function boundProcessActivities(activities: readonly SessionProcessActivity[]): {
@@ -316,11 +349,17 @@ export function canonicalProcessHistory(manager: ReadonlySessionManager): Sessio
     || left.processId.localeCompare(right.processId));
 }
 
-export function processHistoryRevision(manager: ReadonlySessionManager): string {
-  const history = canonicalProcessHistory(manager);
+function processHistoryRevisionFor(
+  manager: ReadonlySessionManager,
+  history: readonly SessionProcessActivity[],
+): string {
   return createHash("sha256")
     .update(`${manager.getSessionId()}\n${manager.getLeafId() ?? "root"}\n${history.map((activity) => `${activity.processId}\0${activity.lifecycle.terminalAt ?? activity.lifecycle.observedAt}`).join("\n")}`)
     .digest("hex").slice(0, 32);
+}
+
+export function processHistoryRevision(manager: ReadonlySessionManager): string {
+  return processHistoryRevisionFor(manager, canonicalProcessHistory(manager));
 }
 
 export function listProcessHistory(
@@ -329,8 +368,9 @@ export function listProcessHistory(
   limit = 25,
   filter?: { kind?: SessionProcessActivity["kind"]; state?: SessionProcessState },
 ): SessionProcessHistoryPage {
-  const revision = processHistoryRevision(manager);
-  const all = canonicalProcessHistory(manager).filter((activity) =>
+  const history = canonicalProcessHistory(manager);
+  const revision = processHistoryRevisionFor(manager, history);
+  const all = history.filter((activity) =>
     (!filter?.kind || activity.kind === filter.kind) && (!filter?.state || activity.lifecycle.state === filter.state));
   let offset = 0;
   if (cursor) {
@@ -371,8 +411,9 @@ export function listProcessHistory(
 }
 
 export function processHistoryDetail(manager: ReadonlySessionManager, processId: string, expectedRevision?: string): SessionProcessActivity | undefined {
-  if (expectedRevision !== undefined && processHistoryRevision(manager) !== expectedRevision) {
+  const history = canonicalProcessHistory(manager);
+  if (expectedRevision !== undefined && processHistoryRevisionFor(manager, history) !== expectedRevision) {
     throw new Error("process history generation conflict");
   }
-  return canonicalProcessHistory(manager).find((activity) => activity.processId === processId);
+  return history.find((activity) => activity.processId === processId);
 }

@@ -74,15 +74,88 @@ describe("session process projection", () => {
     }
   });
 
-  it("does not turn compatibility label/index child IDs into process ownership", () => {
+  it("uses the exact async root while a running workflow child lacks producer identity", () => {
     const rows = subagentProcessesFromActivity("session-1", {
       ...subagent,
+      status: "running",
+      completedAt: undefined,
       children: [{
         id: "worker:0", label: "worker", status: "running", lifecycle: "running", currentTool: "read",
       }],
       lifecycle: { ...subagent.lifecycle!, state: "running", terminalAt: undefined, recentUntil: undefined },
     });
-    expect(rows).toEqual([]);
+    expect(rows).toEqual([expect.objectContaining({
+      title: "Subagent",
+      runId: "run-1",
+      childCount: 1,
+      visibility: "active",
+      lifecycle: expect.objectContaining({ state: "running" }),
+    })]);
+    expect(rows[0]?.processId).toBe(subagentProcessesFromActivity("session-1", {
+      ...subagent,
+      status: "running",
+      completedAt: undefined,
+      children: [],
+      currentTool: "read",
+      lifecycle: { ...subagent.lifecycle!, state: "running", terminalAt: undefined, recentUntil: undefined },
+    })[0]?.processId);
+  });
+
+  it("keeps an active workflow root beside terminal children until a live child has identity", () => {
+    const rows = subagentProcessesFromActivity("session-1", {
+      ...subagent,
+      status: "running",
+      completedAt: undefined,
+      children: [
+        { id: "finished", producerId: "finished", label: "reviewer", status: "completed", lifecycle: "completed" },
+        { id: "worker:1", label: "worker", status: "running", lifecycle: "running" },
+      ],
+      lifecycle: {
+        version: 1, state: "running", attention: "none", sequence: 5,
+        observedAt: "2026-01-01T00:00:04.000Z",
+      },
+    });
+    expect(rows.map((row) => row.title)).toEqual(["Subagent", "reviewer"]);
+    expect(rows[0]).toMatchObject({ visibility: "active", childCount: 2 });
+    expect(rows[1]).toMatchObject({
+      visibility: "recent",
+      parentProcessId: rows[0]?.processId,
+    });
+  });
+
+  it("settles the exact async root when terminal admission precedes child identity", () => {
+    const rows = subagentProcessesFromActivity("session-1", {
+      ...subagent,
+      children: [{ id: "worker:0", label: "worker", status: "completed", lifecycle: "completed" }],
+    });
+    expect(rows).toEqual([expect.objectContaining({
+      title: "Subagent",
+      runId: "run-1",
+      childCount: 1,
+      visibility: "recent",
+      lifecycle: expect.objectContaining({
+        state: "completed",
+        terminalAt: "2026-01-01T00:00:02.000Z",
+      }),
+    })]);
+  });
+
+  it("uses identified live children without duplicating an aggregate root", () => {
+    const rows = subagentProcessesFromActivity("session-1", {
+      ...subagent,
+      status: "running",
+      completedAt: undefined,
+      children: [
+        { id: "identified", producerId: "identified", label: "reviewer", status: "running", lifecycle: "running" },
+        { id: "worker:1", label: "worker", status: "running", lifecycle: "running" },
+      ],
+      lifecycle: {
+        version: 1, state: "running", attention: "none", sequence: 5,
+        observedAt: "2026-01-01T00:00:04.000Z",
+      },
+    });
+    expect(rows).toEqual([expect.objectContaining({ title: "reviewer", visibility: "active" })]);
+    expect(rows[0]).not.toHaveProperty("parentProcessId");
   });
 
   it("does not project supervisor or control receipts without a delegated execution mode", () => {

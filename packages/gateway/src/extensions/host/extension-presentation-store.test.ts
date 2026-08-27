@@ -109,6 +109,21 @@ describe("ExtensionPresentationStore", () => {
     });
   });
 
+  it("deduplicates consecutive callback diagnostics without advancing presentation", () => {
+    const events: JsonValue[] = [];
+    const store = new ExtensionPresentationStore((_topic, payload) => events.push(payload));
+    store.recordRejectedCallback("widget", new Error("invalid widget"));
+    const admitted = store.state();
+    store.recordRejectedCallback("widget", new Error("invalid widget"));
+    expect(store.state()).toEqual(admitted);
+    expect(store.state().diagnostics).toEqual([{ code: "semantic.widget", message: "invalid widget" }]);
+    expect(events).toHaveLength(1);
+
+    store.recordRejectedCallback("widget", new Error("different failure"));
+    expect(store.state().diagnostics).toHaveLength(2);
+    expect(events).toHaveLength(2);
+  });
+
   it("projects input lease and generic lifecycle activity", () => {
     const store = new ExtensionPresentationStore(() => {});
     store.transact((draft) => {

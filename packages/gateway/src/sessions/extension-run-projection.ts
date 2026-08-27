@@ -86,6 +86,16 @@ function isoTime(value: unknown): string | undefined {
   return new Date(milliseconds).toISOString();
 }
 
+function producerTime(value: unknown): string | undefined {
+  if (typeof value === "string" && Buffer.byteLength(value) <= 128) {
+    const milliseconds = Date.parse(value);
+    if (Number.isFinite(milliseconds) && milliseconds >= 0 && milliseconds <= 8.64e15) {
+      return new Date(milliseconds).toISOString();
+    }
+  }
+  return isoTime(value);
+}
+
 function status(value: unknown, fallback: ExtensionRunStatus): ExtensionRunStatus {
   if (value === "failed") return "failed";
   if (value === "completed" || value === "complete" || value === "stopped" || value === "rejected") return "completed";
@@ -265,13 +275,14 @@ function lifecycleFrom(
   const state = priorTerminal && !terminalLifecycleStates.has(candidateState) ? prior.state : candidateState;
   const terminal = terminalLifecycleStates.has(state);
   const terminalAt = terminal ? base.terminalAt ?? prior?.terminalAt ?? base.completedAt : undefined;
+  const producerUpdatedAt = producerTime(details?.updatedAt) ?? producerTime(details?.lastUpdate);
   return {
     version: 1,
     state,
     attention: priorTerminal ? (prior?.attention ?? "none") : attention(details?.attention ?? details?.attentionState),
     sequence: Math.max(0, Number.isSafeInteger(base.sequence) ? base.sequence! : (prior?.sequence ?? 0)),
     observedAt: base.observedAt ?? prior?.observedAt ?? base.updatedAt,
-    ...(details?.updatedAt !== undefined && typeof details.updatedAt === "string" ? { producerUpdatedAt: details.updatedAt } : {}),
+    ...(producerUpdatedAt ? { producerUpdatedAt } : {}),
     ...(terminalAt ? { terminalAt } : {}),
     ...(terminalAt ? { recentUntil: base.recentUntil ?? prior?.recentUntil ?? new Date(Date.parse(terminalAt) + 900_000).toISOString() } : {}),
   };

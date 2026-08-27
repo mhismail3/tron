@@ -787,6 +787,14 @@ pi-subagents extension and every bounded child carries its stable safe-integer i
 and recognized lifecycle state. That producer index is scoped by the canonical parent tool
 call and may identify only a disposable live process row; it cannot authorize a child file.
 Generic extension tools continue to require explicit structured `runId`/`asyncId` evidence.
+For an admitted asynchronous artifact, a workflow step may not publish its child
+`runId` until persistence completes. While such a step is queued or running, Gateway
+projects the exact artifact-owned workflow root as a temporary active row; it is replaced
+by identified child rows as lifecycle evidence arrives. If terminal admission wins the race
+with child persistence, that same root settles into recent state and can still be atomically
+re-keyed by later terminal enrichment. This keeps the composer activity overview continuous
+for the full delegated run without treating label/index compatibility IDs as child ownership
+or turning a bare launcher acknowledgement into a phantom process.
 Absolute session and
 artifact paths, PIDs, environment values, and unbounded task/output data never cross
 the wire. Bounded delegated-output previews conservatively mask environment assignments,

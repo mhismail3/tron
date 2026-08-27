@@ -29,8 +29,6 @@ export type ProcessActivityExpiryCallback = (frame: ProcessActivityExpiryFrame) 
 const terminalStates = new Set(["completed", "failed", "stopped", "rejected", "interrupted"]);
 const MAX_TERMINAL_TOMBSTONES = 2_048;
 
-type TerminalTombstone = { sequence: number; state: string };
-
 /** Gateway-owned five-minute partition for disposable process presentation.
  * Canonical history is read independently and is never removed here. */
 export class ProcessActivityRecency {
@@ -38,7 +36,7 @@ export class ProcessActivityRecency {
   private readonly monotonicDeadlines = new Map<string, number>();
   /** Bounded non-presentational terminal latches prevent a late artifact from
    * resurrecting work after its five-minute row has expired. */
-  private readonly terminalTombstones = new Map<string, TerminalTombstone>();
+  private readonly terminalTombstones = new Set<string>();
   private readonly callbacks = new Set<ProcessActivityExpiryCallback>();
   private expiryTimer: unknown;
   private revision = 0;
@@ -57,8 +55,7 @@ export class ProcessActivityRecency {
       const previous = this.activities.get(activity.processId);
       return { activity: previous ? this.wire(previous) : { ...activity, visibility: "unknown" }, accepted: false };
     }
-    const tombstone = this.terminalTombstones.get(activity.processId);
-    if (tombstone) {
+    if (this.terminalTombstones.has(activity.processId)) {
       return { activity: { ...activity, visibility: "historical" }, accepted: false };
     }
     const previous = this.activities.get(activity.processId);
@@ -81,8 +78,7 @@ export class ProcessActivityRecency {
       this.monotonicDeadlines.delete(activity.processId);
     }
     this.revision += 1;
-    this.expireDue(false);
-    this.schedule();
+    this.expireDue(false); // Also installs the nearest remaining expiry timer.
     return { activity: this.wire(normalized), accepted: true };
   }
 
@@ -140,7 +136,7 @@ export class ProcessActivityRecency {
       if (this.visibility(activity) !== "historical") continue;
       this.activities.delete(processId);
       this.monotonicDeadlines.delete(processId);
-      if (terminalStates.has(activity.lifecycle.state)) this.latchTerminal(processId, activity);
+      if (terminalStates.has(activity.lifecycle.state)) this.latchTerminal(processId);
       expiredProcessIds.push(processId);
     }
     if (expiredProcessIds.length > 0) this.revision += 1;
@@ -164,14 +160,11 @@ export class ProcessActivityRecency {
     return frame;
   }
 
-  private latchTerminal(processId: string, activity: SessionProcessActivity): void {
+  private latchTerminal(processId: string): void {
     this.terminalTombstones.delete(processId);
-    this.terminalTombstones.set(processId, {
-      sequence: activity.lifecycle.sequence,
-      state: activity.lifecycle.state,
-    });
+    this.terminalTombstones.add(processId);
     while (this.terminalTombstones.size > MAX_TERMINAL_TOMBSTONES) {
-      const oldest = this.terminalTombstones.keys().next().value as string | undefined;
+      const oldest = this.terminalTombstones.values().next().value as string | undefined;
       if (!oldest) break;
       this.terminalTombstones.delete(oldest);
     }

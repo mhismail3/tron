@@ -41,7 +41,7 @@ const MAX_QUESTIONNAIRE_OPTIONS = 64;
 const MAX_QUESTIONNAIRE_PREVIEW_BYTES = 32 * 1_024;
 const MAX_STATUS_BYTES = 4 * 1_024;
 const MAX_WORKING_BYTES = 8 * 1_024;
-const MAX_WIDGET_LINE_BYTES = 512;
+export const EXTENSION_MAX_WIDGET_LINE_BYTES = 512;
 const MAX_INDICATOR_FRAMES = 32;
 const MAX_INDICATOR_FRAME_BYTES = 256;
 const MAX_INTERACTION_BYTES = 192 * 1_024;
@@ -292,10 +292,13 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
   recordRejectedCallback(operation: string, error: unknown): void {
     if (!this.active) return;
     const raw = error instanceof Error ? error.message : "Extension presentation callback failed";
+    const code = `semantic.${operation}`.slice(0, MAX_ID_BYTES / 2);
     const message = stripTerminalControls(raw, true).slice(0, MAX_MESSAGE_BYTES / 8);
     try {
       this.transact((draft) => {
-        draft.diagnostics.push({ code: `semantic.${operation}`.slice(0, MAX_ID_BYTES / 2), message });
+        const previous = draft.diagnostics.at(-1);
+        if (previous?.code === code && previous.message === message) return;
+        draft.diagnostics.push({ code, message });
         if (draft.diagnostics.length > MAX_DIAGNOSTICS) draft.diagnostics.splice(0, draft.diagnostics.length - MAX_DIAGNOSTICS);
       });
     } catch {
@@ -494,7 +497,7 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
         || !Number.isSafeInteger(widget.revision) || widget.revision < 1
         || !["aboveEditor", "belowEditor"].includes(widget.placement)
         || widget.lines.length > EXTENSION_MAX_WIDGET_LINES
-        || widget.lines.some((line) => !boundedSafe(line, MAX_WIDGET_LINE_BYTES)))) {
+        || widget.lines.some((line) => !boundedSafe(line, EXTENSION_MAX_WIDGET_LINE_BYTES)))) {
       throw new GatewayError("conflict", "Extension semantic presentation is invalid");
     }
   }

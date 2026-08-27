@@ -81,8 +81,7 @@ export class ExtensionActivityRecency {
       this.monotonicDeadlines.delete(key);
     }
     this.revision += 1;
-    this.expireDue(false);
-    this.scheduleNearestExpiry();
+    this.expireDue(false); // Also installs the nearest remaining expiry timer.
     return { ...this.visibility(activity), accepted: true };
   }
 

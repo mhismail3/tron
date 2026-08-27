@@ -2200,6 +2200,80 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     ]));
   });
 
+  it("keeps process overview active while an async workflow child awaits producer identity", async () => {
+    const fixture = await coldFixture("async-workflow-root-visibility");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      syncSubagentProcesses: (activity: ExtensionRunActivity) => void;
+      publishProcessesForToolCall: (toolCallId: string) => void;
+    };
+    const startedAt = new Date(Date.now() - 1_000).toISOString();
+    const runningAt = new Date().toISOString();
+    const base = {
+      id: "async-tool", activityId: "async-activity", runId: "workflow-run", toolCallId: "async-tool",
+      source: { source: "pi-subagents" }, title: "Pi Subagents", mode: "asynchronous",
+      startedAt, updatedAt: runningAt,
+    } satisfies Partial<ExtensionRunActivity>;
+    internal.syncSubagentProcesses({
+      ...base,
+      status: "running",
+      children: [{ id: "single-async", label: "worker", status: "running", lifecycle: "running" }],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: runningAt },
+    } as ExtensionRunActivity);
+    internal.publishProcessesForToolCall("async-tool");
+    expect(slot.snapshot()).toMatchObject({
+      processOverview: { visibility: "active", activeCount: 1, recentCount: 0 },
+      processActivities: [expect.objectContaining({
+        title: "Subagent", runId: "workflow-run", visibility: "active", childCount: 1,
+      })],
+    });
+
+    fixture.events.splice(0);
+    const completedAt = new Date().toISOString();
+    const terminalLifecycle = {
+      version: 1 as const, state: "completed" as const, attention: "none" as const, sequence: 2,
+      observedAt: completedAt, terminalAt: completedAt,
+      recentUntil: new Date(Date.parse(completedAt) + 900_000).toISOString(),
+    };
+    internal.syncSubagentProcesses({
+      ...base,
+      status: "completed",
+      completedAt,
+      children: [{ id: "single-async", label: "worker", status: "completed", lifecycle: "completed" }],
+      lifecycle: terminalLifecycle,
+    } as ExtensionRunActivity);
+    internal.publishProcessesForToolCall("async-tool");
+    const terminalRoot = slot.snapshot().processActivities?.[0];
+    expect(slot.snapshot()).toMatchObject({
+      processOverview: { visibility: "recent", activeCount: 0, recentCount: 1 },
+      processActivities: [expect.objectContaining({ title: "Subagent", visibility: "recent" })],
+    });
+    expect(fixture.events.find((event) => event.topic === "session.processActivity")?.payload.data)
+      .not.toHaveProperty("removedProcessIds");
+
+    // A later terminal enrichment with exact child identity replaces the root
+    // atomically rather than retaining a duplicate recent workflow row.
+    fixture.events.splice(0);
+    internal.syncSubagentProcesses({
+      ...base,
+      status: "completed",
+      completedAt,
+      children: [{
+        id: "child-run", producerId: "child-run", label: "worker",
+        status: "completed", lifecycle: "completed", childSessionRef: "child-session",
+      }],
+      lifecycle: { ...terminalLifecycle, sequence: 3 },
+    } as ExtensionRunActivity);
+    internal.publishProcessesForToolCall("async-tool");
+    expect(slot.snapshot()).toMatchObject({
+      processOverview: { visibility: "recent", activeCount: 0, recentCount: 1 },
+      processActivities: [expect.objectContaining({ title: "worker", visibility: "recent" })],
+    });
+    expect(slot.snapshot().processActivities?.[0]?.processId).not.toBe(terminalRoot?.processId);
+    expect(fixture.events.find((event) => event.topic === "session.processActivity")?.payload.data)
+      .toMatchObject({ removedProcessIds: [terminalRoot?.processId] });
+  });
+
   it("emits exact removals when process producer identity is replaced", async () => {
     const fixture = await coldFixture("process-removal-delta");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
@@ -2277,7 +2351,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       startedAt: Date.parse(startedAt),
       lastUpdate: Date.now(),
       mode: "workflow",
-      steps: [{ runId: "retry-child", agent: "worker", status: "running", currentTool: "bash" }],
+      // The artifact itself is authoritative running evidence even before a
+      // workflow publishes its first child step.
+      steps: [],
     }));
     const internal = slot as unknown as {
       extensionActivities: Map<string, ExtensionRunActivity>;
@@ -2302,10 +2378,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await waitUntil(() => reads >= 2 && (slot.snapshot().processActivities?.length ?? 0) === 1);
     expect(slot.snapshot().processActivities?.[0]).toMatchObject({
       kind: "subagent",
+      runId,
       executionMode: "asynchronous",
       visibility: "active",
-      currentTool: "bash",
     });
+    expect(slot.snapshot().processOverview).toMatchObject({ visibility: "active", activeCount: 1 });
   });
 
   it("admits the exact fresh child path for read-only process viewing", async () => {
