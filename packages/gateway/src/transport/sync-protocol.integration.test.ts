@@ -476,6 +476,7 @@ describe("connection-wide synchronization ownership", () => {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: (terminalId: string, sessionId: string) => terminalId === "terminal-before" && sessionId === "before",
       releaseClient: vi.fn(),
+      releaseSessionProcessTranscripts: vi.fn(),
       recoverySnapshot: async (sessionId: string) => ({ sessionId, runtimeGeneration: `generation-${sessionId}`, eventSequence: 99, revision: 99 }),
       invoke: async (context: any, method: string, params: any) => {
         const sessionId = params.sessionId as string;

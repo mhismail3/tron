@@ -411,10 +411,19 @@ export class RuntimeRegistry {
 
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
 
-  async initialize(): Promise<void> {
+  async initialize(onPhase?: (phase: "catalog-warming" | "attention-recovery") => void): Promise<void> {
+    // Load the durable recovery inputs before capturing catalog membership, as
+    // before this optimization. The later evidence cut therefore cannot omit a
+    // marker that was already admitted to this reconciliation pass.
     await this.timedStage("startup.attention.initialize", () => this.attention.initialize());
     const markerEvidence = await this.timedStage("startup.run-marker.read", () => this.markers.evidence());
-    await this.timedStage("startup.attention.reconcile", () => this.reconcileCanonicalAttention(markerEvidence));
+    // Capture one bounded structural cut and pass it through recovery. This
+    // prevents reconciliation from silently performing a second catalog walk
+    // and keeps incomplete evidence fail-closed.
+    onPhase?.("catalog-warming");
+    const catalogEvidence = await this.timedStage("startup.catalog.evidence", () => this.sharedCatalogStructureEvidence());
+    onPhase?.("attention-recovery");
+    await this.timedStage("startup.attention.reconcile", () => this.reconcileCanonicalAttention(markerEvidence, catalogEvidence));
     this.interrupted = await this.timedStage("startup.run-marker.interrupted", () => this.markers.interruptedSessionIds());
     this.evictionTimer = setInterval(() => void this.evictIdle(), 60_000);
     this.evictionTimer.unref();
@@ -427,12 +436,14 @@ export class RuntimeRegistry {
     return this.blobs.initialize();
   }
 
-  private async reconcileCanonicalAttention(markerEvidence: ReadonlyMap<string, readonly RunMarkerEvidence[]>): Promise<void> {
+  private async reconcileCanonicalAttention(
+    markerEvidence: ReadonlyMap<string, readonly RunMarkerEvidence[]>,
+    evidence: CatalogStructureEvidence,
+  ): Promise<void> {
     const scanBoundary = new Date().toISOString();
-    // Startup recovery needs structural identity, not dashboard metadata. A
-    // header-only walk avoids parsing every transcript solely to reconcile a
-    // bounded set of durable markers; only marked sessions are fully opened.
-    const evidence = await this.sharedCatalogStructureEvidence();
+    // Startup recovery uses the exact bounded structural cut acquired by
+    // initialize(). It must not start a second walk while attention is being
+    // reconciled.
     if (!evidence.complete) {
       // Incomplete discovery cannot prove either membership or absence. Keep
       // attention records and the reconciliation cursor for the next startup.

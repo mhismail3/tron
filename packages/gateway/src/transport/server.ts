@@ -325,6 +325,7 @@ export class GatewayServer {
   private readonly heartbeat: NodeJS.Timeout;
   private ready = false;
   private shuttingDown = false;
+  private startupPhase: "starting" | "catalog-warming" | "attention-recovery" | "storage-warming" = "starting";
 
   constructor(
     private readonly options: {
@@ -366,6 +367,12 @@ export class GatewayServer {
     this.heartbeat.unref();
   }
 
+  setStartupPhase(phase: "catalog-warming" | "attention-recovery" | "storage-warming"): void {
+    if (this.ready || this.shuttingDown) return;
+    this.startupPhase = phase;
+    this.options.logger.log("info", `Gateway startup phase: ${phase}`, { event: "gateway.startup-phase", source: "lifecycle" });
+  }
+
   async listen(afterBind: () => Promise<void> = async () => {}): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       this.server.once("error", reject);
@@ -374,8 +381,12 @@ export class GatewayServer {
         resolve();
       });
     });
+    this.options.logger.log("info", "Gateway listener bound; startup warmup beginning", { event: "gateway.bound", source: "transport" });
     try {
       await afterBind();
+      // A signal may close the transport while warmup is suspended. Never let
+      // that in-flight callback publish readiness after shutdown has begun.
+      if (this.shuttingDown) throw new GatewayError("busy", "Gateway shutdown began during startup", true);
       this.ready = true;
     } catch (error) {
       await new Promise<void>((resolve) => this.server.close(() => resolve()));
@@ -498,25 +509,10 @@ export class GatewayServer {
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
-      if (!this.ready) {
-        const info = this.options.service.info() as Record<string, JsonValue>;
-        if (request.method === "GET" && url.pathname === "/health") {
-          return sendJson(response, 503, {
-            status: "starting",
-            gatewayVersion: info.gatewayVersion,
-            protocolVersion: info.protocolVersion,
-            minProtocolVersion: info.minProtocolVersion,
-            ...(typeof info.sourceRevision === "string" ? { sourceRevision: info.sourceRevision } : {}),
-            ...(typeof info.buildFingerprint === "string" ? { buildFingerprint: info.buildFingerprint } : {}),
-            ...(typeof info.runtimeEpoch === "string" ? { runtimeEpoch: info.runtimeEpoch } : {}),
-          });
-        }
-        return sendJson(response, 503, { error: { code: "busy", message: "Gateway is starting", retryable: true } });
-      }
       if (request.method === "GET" && url.pathname === "/health") {
         const info = this.options.service.info() as Record<string, JsonValue>;
-        return sendJson(response, this.shuttingDown ? 503 : 200, {
-          status: this.shuttingDown ? "stopping" : "ok",
+        return sendJson(response, this.ready && !this.shuttingDown ? 200 : 503, {
+          status: this.shuttingDown ? "stopping" : this.ready ? "ok" : this.startupPhase,
           gatewayVersion: info.gatewayVersion,
           protocolVersion: info.protocolVersion,
           minProtocolVersion: info.minProtocolVersion,
@@ -524,6 +520,9 @@ export class GatewayServer {
           ...(typeof info.buildFingerprint === "string" ? { buildFingerprint: info.buildFingerprint } : {}),
           ...(typeof info.runtimeEpoch === "string" ? { runtimeEpoch: info.runtimeEpoch } : {}),
         });
+      }
+      if (!this.ready) {
+        return sendJson(response, 503, { error: { code: "busy", message: "Gateway is starting", retryable: true } });
       }
       if (request.method === "POST" && url.pathname === "/v1/pair") {
         const key = request.socket.remoteAddress ?? "unknown";
@@ -613,9 +612,15 @@ export class GatewayServer {
         socket.destroy();
         return;
       }
+      if (!this.ready || this.shuttingDown) {
+        this.options.logger.log("warning", "Rejected socket upgrade while gateway is unavailable", { event: "connection.rejected", source: "transport" });
+        socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return;
+      }
       const authenticated = await this.options.devices.authenticate(bearer(request));
-      if (!authenticated || !this.ready || this.shuttingDown) {
-        this.options.logger.log("warning", "Rejected unauthenticated or unavailable socket upgrade", { event: "connection.rejected", source: "transport" });
+      if (!authenticated) {
+        this.options.logger.log("warning", "Rejected unauthenticated socket upgrade", { event: "connection.rejected", source: "transport" });
         socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
         socket.destroy();
         return;

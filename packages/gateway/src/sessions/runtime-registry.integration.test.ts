@@ -30,6 +30,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     name?: string;
     maximumLiveRuntimes?: number;
     workRegistry?: GatewayWorkRegistry;
+    phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
   } = {}) {
     const root = await mkdtemp(join(tmpdir(), `tron-cold-acquire-${label}-`));
     const agentDir = join(root, "agent");
@@ -58,7 +59,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionListChanged: () => {},
     });
     registries.push(registry);
-    await registry.initialize();
+    const startupEvidence = options.phaseObserver
+      ? vi.spyOn(registry as any, "catalogStructureEvidence")
+      : undefined;
+    await registry.initialize(options.phaseObserver);
     return {
       root,
       agentDir,
@@ -69,6 +73,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       events,
       summaries,
       sessionFile: manager.getSessionFile()!,
+      startupEvidence,
     };
   }
 
@@ -76,6 +81,17 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  });
+
+  it("orders startup phases and acquires one structural evidence cut", async () => {
+    const phases: string[] = [];
+    const fixture = await coldFixture("startup-phases", {
+      phaseObserver: (phase) => phases.push(phase),
+    });
+    expect(phases).toEqual(["catalog-warming", "attention-recovery"]);
+    // A later page source may validate a different cut, but startup itself has
+    // exactly one bounded structural evidence acquisition for reconciliation.
+    expect(fixture.startupEvidence).toHaveBeenCalledTimes(1);
   });
 
   it("builds page sources without full catalog projection and captures overlays per generation", async () => {

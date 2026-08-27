@@ -122,8 +122,6 @@ const sessions = new RuntimeRegistry({
     );
   },
 });
-await sessions.initialize();
-
 const terminal = new TerminalService(
   config.terminalReplayBytes,
   (terminalId, topic, payload) => transport?.broadcastTerminal(terminalId, topic, payload),
@@ -275,7 +273,11 @@ process.on("unhandledRejection", (error) => {
 
 const enrollmentTimer = setInterval(() => void devices.ensureEnrollment(), 60_000);
 enrollmentTimer.unref();
-await transport.listen(() => sessions.initializeBlobStorage());
+await transport.listen(async () => {
+  await sessions.initialize((phase) => transport.setStartupPhase(phase));
+  transport.setStartupPhase("storage-warming");
+  await sessions.initializeBlobStorage();
+});
 const maintainUploads = async (): Promise<void> => {
   try {
     const liveSessionIds = new Set((await sessions.list("all")).map((session) => session.id));
