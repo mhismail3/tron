@@ -475,6 +475,16 @@ enum ChatComposerPolicy {
         false
     }
 
+    static func abortKind(operation: SessionOperationState?) -> String {
+        switch operation?.kind {
+        case .compaction: "compaction"
+        case .branchSummary: "branchSummary"
+        case .bash: "bash"
+        case .retry: "retry"
+        case .prompt, .command, .none: "agent"
+        }
+    }
+
     static func restoredDraft(outgoing: String, currentDraft: String) -> String {
         ComposerDraftTextPolicy.restoredDraft(
             outgoing: outgoing,

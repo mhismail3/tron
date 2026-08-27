@@ -127,16 +127,21 @@ chunks stream directly into protected store-owned files; exact declared and obse
 metadata publication. Persisted upload metadata is limited to an exact 64 KiB document with canonical timestamps and fields; malformed or oversized entries self-clean before quota admission or direct materialization. Every success, rejection, overflow, truncation, or disconnect removes uncommitted staging
 and releases its slot. Unclaimed uploads
 expire after 24 hours, malformed/partial folders self-clean, prompt attachment IDs are unique, and
-one prompt cannot materialize more than the per-request byte ceiling. Mobile projection derives the
+one prompt cannot materialize more than the per-request byte ceiling. A bounded maintenance pass runs
+at startup and every ten minutes: it removes stale staging, expires unclaimed files, retries live cleanup,
+and removes claimed folders only when the canonical session catalog proves their owner no longer exists.
+`uploads.status` exposes aggregate counts/bytes and health-safe capacity facts only—never IDs, session IDs,
+paths, names, or MIME data. Capacity failures include a machine-readable `entries` or `bytes` reason and
+an actionable unused-session/cleanup message; the aggregate ceiling is not silently raised. Mobile projection derives the
 opaque upload identity from the validated store-owned canonical path, strips that private path, and
 exposes the identity solely as an authenticated preview route; no extra identifier is added to the model
 prompt. Unclaimed staging is never readable, while a prompt-owned file streams from its already-open
 descriptor with its exact declared size and MIME type.
 Successful imports remove
 their staging folder; deleting a canonical session removes its claimed attachment folders. Cleanup
-failure is best effort after canonical import/deletion success and cannot turn that success into an
-ambiguous command receipt; failed session-folder cleanup remains pending in the live store and retries
-on later inventory work. Transient image/export blobs reject individual values above 25 MiB or MIME metadata above 1 KiB
+failure after canonical import/deletion success cannot turn that success into an ambiguous command receipt;
+failed session-folder cleanup remains pending in the live store and periodic canonical-catalog maintenance
+recovers it after process restart. Transient image/export blobs reject individual values above 25 MiB or MIME metadata above 1 KiB
 and retain at most 128 items/200 MiB; exact content deduplicates and access refreshes 30-minute idle
 expiry. Generated exports move into protected transient storage and stream to authenticated readers with backpressure,
 without retained export `Buffer` values. HTML renders the active branch; JSONL audit export copies the bounded canonical
@@ -373,8 +378,13 @@ For newly admitted steering/follow-up work, the returned prompt operation ID is 
 clients can therefore settle one optimistic submission without content-based queue guessing.
 A Gateway advertising
 `queue-management.v1` includes both `queueRevision` and `queuedItems` in every authoritative
-session snapshot. The legacy steering and follow-up string arrays remain a compatibility
-projection for older clients and Gateways; they never authorize entry-level mutation.
+session snapshot. The pinned Pi 0.84.1 queue itself still exposes string arrays rather than
+queue records. RuntimeSlot therefore retains the exact admission ID before accepting another
+queued mutation, publishes it from the same serialized lane, and treats later text arrays only
+as bounded live-runtime delivery evidence. A Gateway process restart does not replay or claim
+identity for an SDK-only queue; reconnect must report only surviving canonical/runtime truth.
+The legacy steering and follow-up string arrays remain a compatibility projection for older
+clients and Gateways; they never authorize entry-level mutation.
 `session.queue.replace`
 serializes with prompt admission and clear operations, validates bounded replacement
 state, rejects stale revisions, and rebuilds the pinned runtime queue atomically.
@@ -383,14 +393,20 @@ order; reordering is authoritative within either behavior, and changing behavior
 moves an entry into the corresponding delivery stage. Attachments remain bound to
 their original queued identity and cannot be fabricated by clients. Queue snapshots
 are bounded to 32 entries, 64 KiB per display message, and 256 KiB total.
-Prompt RPC admission follows the pinned runtime's preflight callback as its sole outcome;
-the Gateway does not race it against a local deadline that could report rejection while
+Prompt RPC admission follows the pinned runtime's preflight callback as its sole outcome.
+Because Pi 0.84.1 can clear its streaming flag before the final `agent_settled` choreography reaches
+the Gateway, ordinary admission additionally waits behind the existing sequenced foreground operation
+owner whenever runtime streaming is false but settlement/compaction/retry state is still active. The
+Gateway re-evaluates delivery behavior after that transition and never invokes an ordinary Agent prompt
+inside the settlement gap. It does not race preflight against a local deadline that could report rejection while
 the same uncancelled runtime call later starts canonical work. While the canonical user
 entry is pending, the snapshot's bounded `pendingPrompt` projection carries the display
 text and requested delivery behavior. The Gateway claims the exact Pi user-message object,
 retires the projection only for that same message at persistence, and exposes the prompt
 operation ID as the canonical user's bounded `presentationId`; repeated text therefore
-cannot settle the wrong mobile admission. Definitive rejection/no-agent settlement clears
+cannot settle the wrong mobile admission. A known operation ID never falls back to content matching on
+iOS. Sequenced `session.operationFailed` receipts retire only their exact accepted composer admission,
+restore its draft once, and release later send admission. Definitive rejection/no-agent settlement clears
 the same owner, so iOS can reconstruct an in-flight prompt across navigation without replay.
 
 Manual compaction has a separate Gateway-owned single-entry maintenance admission. Its
@@ -402,7 +418,9 @@ and completes or fails. Handoff revalidates that no newer agent run owns the ses
 completion awaits durable marker removal before publishing settled. Every successful or failed
 `compaction_end` publishes one immediate fitted authoritative snapshot with the current canonical
 tail/leaf and restored prompt/automatic-idle state; manual work remains compacting until its durable
-marker retires. Hooks may append after the compaction entry, so
+marker retires. The compaction operation identity is retained on the projected canonical compaction
+entry as presentation-only metadata, so compacting and compacted content occupy one physical row even
+when bounded transcript ranges change precision. Hooks may append after the compaction entry, so
 the Gateway does not spend a cursor on a single-entry delta that is already a non-leaf.
 Gateway shutdown synchronously
 closes runtime-slot admission, drains any already-entered creation/import critical section through the

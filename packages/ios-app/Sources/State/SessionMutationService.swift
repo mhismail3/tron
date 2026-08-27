@@ -123,11 +123,21 @@ final class SessionMutationService {
         }
     }
 
-    func abort(sessionID: String, kind: String) async throws {
-        struct Params: Codable { let sessionId, kind, commandId: String }
+    func abort(sessionID: String, kind: String, operationID: String? = nil) async throws {
+        struct Params: Codable {
+            let sessionId: String
+            let kind: String
+            let operationId: String?
+            let commandId: String
+        }
         struct Response: Codable { let aborted: Bool }
         let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, kind: kind, commandId: commandID)
+        let params = Params(
+            sessionId: sessionID,
+            kind: kind,
+            operationId: operationID,
+            commandId: commandID
+        )
         let _: Response = try await executor.perform(method: "session.abort", commandID: commandID) {
             try await client.request("session.abort", params, timeout: .seconds(30))
         }

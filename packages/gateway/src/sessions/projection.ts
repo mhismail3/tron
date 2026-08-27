@@ -995,18 +995,21 @@ export function projectEntry(
         customType: entry.customType,
         ...(entry.data === undefined ? {} : { data: projectJson(entry.data) }),
       };
-    case "compaction":
+    case "compaction": {
+      const presentationId = presentationIDs?.get(entry.id);
       return {
         id: entry.id,
         parentId: entry.parentId,
         timestamp: entry.timestamp,
         kind: "compaction",
+        ...(presentationId === undefined ? {} : { presentationId }),
         summary: boundedText(entry.summary),
         tokensBefore: entry.tokensBefore,
         ...(entry.details === undefined ? {} : { details: projectJson(entry.details) }),
         ...(entry.usage === undefined ? {} : { usage: projectJson(entry.usage) }),
         ...(entry.fromHook === undefined ? {} : { fromHook: entry.fromHook }),
       };
+    }
     case "branch_summary":
       return {
         id: entry.id,

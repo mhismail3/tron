@@ -1176,22 +1176,25 @@ struct ChatTranscriptPresentationTests {
         #expect(!notification.hasDetailSheet)
     }
 
-    @Test("pending compaction shares identity only under exact tail bounds")
+    @Test("pending compaction operation identity survives inexact tail bounds")
     func pendingCompactionContinuity() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .compacting
+        snapshot.operation = .init(
+            id: "compaction-operation", kind: .compaction,
+            startedAt: "2026-01-01T00:00:00Z", reason: "threshold"
+        )
         snapshot.extensionPresentation.semanticState.working = .init(message: nil, visible: true)
         snapshot.transcriptStart = 7
         snapshot.transcriptTotal = 7
         let exact = try #require(ChatNotificationPresentation.runtime(in: snapshot).first)
-        #expect(exact.id == "notification-compaction-slot-7")
+        #expect(exact.id == "notification-compaction-operation-compaction-operation")
         #expect(exact.title == "Compacting context")
         #expect(exact.material == .flat)
 
         snapshot.transcriptTotal = 8
         let malformed = try #require(ChatNotificationPresentation.runtime(in: snapshot).first)
-        #expect(malformed.id == "runtime-working")
-        #expect(malformed.id != exact.id)
+        #expect(malformed.id == exact.id)
 
         snapshot.transcriptStart = Int.max
         snapshot.transcriptTotal = Int.max
@@ -1199,7 +1202,28 @@ struct ChatTranscriptPresentationTests {
         [{"id":"user-max","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"x"}]}]
         """).transcript[0]]
         let maximum = try #require(ChatNotificationPresentation.runtime(in: snapshot).first)
-        #expect(maximum.id == "runtime-working")
+        #expect(maximum.id == exact.id)
+    }
+
+    @Test("canonical compaction keeps its live operation presentation identity")
+    func canonicalCompactionOperationIdentity() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"compact","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"compaction","presentationId":"compaction-operation","summary":"A","tokensBefore":100}
+        ]
+        """)
+        let notification = try #require(
+            ChatNotificationPresentation.canonical(snapshot.transcript[0], globalOrdinal: 9)
+        )
+        #expect(notification.id == "notification-compaction-operation-compaction-operation")
+        #expect(notification.semanticID == "compact")
+        #expect(throws: DecodingError.self) {
+            try fixture(transcript: """
+            [
+              {"id":"invalid","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"compaction","presentationId":"","summary":"A"}
+            ]
+            """)
+        }
     }
 
     @Test("canonical compaction ordinals survive bounded tails and prepends")

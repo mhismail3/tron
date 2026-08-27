@@ -724,7 +724,7 @@ final class ComposerDraftCoordinator {
                 baselineTranscriptIDs: admission.baselineTranscriptIDs
             ) ? item.id : nil
         }
-        let matches = exactMatches.isEmpty ? fallbackMatches : exactMatches
+        let matches = admission.operationID == nil ? fallbackMatches : exactMatches
         // Presentation suppression is fail-closed for the same reason as
         // reconciliation: never suppress multiple identical canonical rows.
         guard matches.count == 1 else { return [] }
@@ -905,7 +905,7 @@ final class ComposerDraftCoordinator {
         // The Gateway's operation-bound presentation identity is causal and
         // wins over repeated-text ambiguity. Legacy Gateways retain the bounded
         // exact-content fallback.
-        let canonicalMatches = exactOperationMatches.isEmpty
+        let canonicalMatches = admission.operationID == nil
             ? fallbackMatches
             : exactOperationMatches
         // A repeated prompt can produce multiple new canonical matches in one
@@ -971,6 +971,18 @@ final class ComposerDraftCoordinator {
         return submissionByScope[scope]?.snapshot
     }
 
+    /// A sequenced Gateway failure is terminal for the exact accepted operation.
+    /// Transport admission is not canonical settlement, so this explicit receipt
+    /// is required to retire a row that can no longer produce canonical input.
+    @discardableResult
+    func failOperation(_ operationID: String, target: SessionPresentationIdentity) -> Bool {
+        guard let scope = scope(for: target),
+              let admission = submissionByScope[scope],
+              admission.operationID == operationID else { return false }
+        restoreSubmission(admission)
+        return true
+    }
+
     func upload(
         name: String,
         mimeType: String,
@@ -979,25 +991,13 @@ final class ComposerDraftCoordinator {
     ) async throws {
         let admission = try beginUpload(target: target, bytes: data.count)
         defer { uploadAdmissions.remove(admission) }
-        let task = Task { try await uploadOperation(name, mimeType, data) }
-        uploadTasks[admission] = task
-        defer { uploadTasks[admission] = nil }
-        let id: String
-        do {
-            id = try await withTaskCancellationHandler {
-                try await task.value
-            } onCancel: {
-                task.cancel()
-            }
-        } catch {
-            try require(admission)
-            throw error
-        }
         let preparedThumbnail = await prepareAttachmentPreview(data, mimeType, name)
         try require(admission)
         guard let scope = scope(for: target) else { throw CancellationError() }
+        let localID = "local:\(UUID().uuidString)"
         attachmentsByScope[scope, default: []].append(PendingAttachment(
-            id: id,
+            id: localID,
+            gatewayUploadID: nil,
             name: name,
             mimeType: mimeType,
             size: data.count,
@@ -1005,6 +1005,31 @@ final class ComposerDraftCoordinator {
             fullPreviewData: data,
             preparedThumbnail: preparedThumbnail
         ))
+        schedulePersistence(for: scope)
+
+        let task = Task { try await uploadOperation(name, mimeType, data) }
+        uploadTasks[admission] = task
+        defer { uploadTasks[admission] = nil }
+        let uploadID: String
+        do {
+            uploadID = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+        } catch {
+            try require(admission)
+            // The local chip and bytes remain durable and explicitly require a
+            // later upload; transport failure never discards user input.
+            throw error
+        }
+        try require(admission)
+        guard var attachments = attachmentsByScope[scope],
+              let index = attachments.firstIndex(where: { $0.id == localID }) else {
+            throw CancellationError()
+        }
+        attachments[index] = attachments[index].replacingGatewayUploadID(uploadID)
+        attachmentsByScope[scope] = attachments
         schedulePersistence(for: scope)
     }
 
@@ -1079,12 +1104,29 @@ final class ComposerDraftCoordinator {
         let name = source.lastPathComponent
         let mimeType = UTType(filenameExtension: source.pathExtension)?.preferredMIMEType
             ?? "application/octet-stream"
+        let data = try await attachmentFileAccess.previewData(staged, size)
+        let preparedThumbnail = await prepareAttachmentPreview(data, mimeType, name)
+        try require(admission)
+        guard let scope = scope(for: target) else { throw CancellationError() }
+        let localID = "local:\(UUID().uuidString)"
+        attachmentsByScope[scope, default: []].append(PendingAttachment(
+            id: localID,
+            gatewayUploadID: nil,
+            name: name,
+            mimeType: mimeType,
+            size: size,
+            previewData: preparedThumbnail?.encodedData,
+            fullPreviewData: data,
+            preparedThumbnail: preparedThumbnail
+        ))
+        schedulePersistence(for: scope)
+
         let task = Task { try await fileUploadOperation(name, mimeType, staged, size) }
         uploadTasks[admission] = task
         defer { uploadTasks[admission] = nil }
-        let id: String
+        let uploadID: String
         do {
-            id = try await withTaskCancellationHandler {
+            uploadID = try await withTaskCancellationHandler {
                 try await task.value
             } onCancel: {
                 task.cancel()
@@ -1093,20 +1135,13 @@ final class ComposerDraftCoordinator {
             try require(admission)
             throw error
         }
-        let data = try await attachmentFileAccess.previewData(staged, size)
-        let preparedThumbnail = await prepareAttachmentPreview(data, mimeType, name)
-        let fullPreviewData = data
         try require(admission)
-        guard let scope = scope(for: target) else { throw CancellationError() }
-        attachmentsByScope[scope, default: []].append(PendingAttachment(
-            id: id,
-            name: name,
-            mimeType: mimeType,
-            size: size,
-            previewData: preparedThumbnail?.encodedData,
-            fullPreviewData: fullPreviewData,
-            preparedThumbnail: preparedThumbnail
-        ))
+        guard var attachments = attachmentsByScope[scope],
+              let index = attachments.firstIndex(where: { $0.id == localID }) else {
+            throw CancellationError()
+        }
+        attachments[index] = attachments[index].replacingGatewayUploadID(uploadID)
+        attachmentsByScope[scope] = attachments
         schedulePersistence(for: scope)
     }
 

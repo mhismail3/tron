@@ -143,6 +143,7 @@ const packages = new PackageService(
 const legacyImport = new LegacyImportService(config.tronHome);
 
 let stopping = false;
+let uploadMaintenanceTimer: NodeJS.Timeout | undefined;
 async function shutdown(reason: string, exitCode = 0): Promise<void> {
   if (stopping) return;
   stopping = true;
@@ -151,6 +152,8 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
   forced.unref();
   try {
     workRegistry.beginDrain();
+    if (uploadMaintenanceTimer) clearInterval(uploadMaintenanceTimer);
+    uploadMaintenanceTimer = undefined;
     await transport.close();
     await workRegistry.requestCancellation();
     // Administrative restart already waited without a deadline. Signal/error
@@ -273,6 +276,21 @@ process.on("unhandledRejection", (error) => {
 const enrollmentTimer = setInterval(() => void devices.ensureEnrollment(), 60_000);
 enrollmentTimer.unref();
 await transport.listen(() => sessions.initializeBlobStorage());
+const maintainUploads = async (): Promise<void> => {
+  try {
+    const liveSessionIds = new Set((await sessions.list("all")).map((session) => session.id));
+    await uploads.maintain(liveSessionIds);
+  } catch {
+    logger.log(
+      "warning",
+      "Bounded upload maintenance failed and will retry",
+      { event: "uploads.maintenance-failed", source: "uploads" },
+    );
+  }
+};
+await maintainUploads();
+uploadMaintenanceTimer = setInterval(() => void maintainUploads(), 10 * 60_000);
+uploadMaintenanceTimer.unref();
 } catch (error) {
   await releaseRuntimeLock();
   throw error;

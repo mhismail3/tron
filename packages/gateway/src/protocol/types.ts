@@ -170,6 +170,9 @@ export type TranscriptItem =
     }
   | TranscriptBase & {
       kind: "compaction" | "branchSummary";
+      /** Stable live-to-canonical presentation identity when the Gateway
+       * observed the producing operation. Canonical entry id remains truth. */
+      presentationId?: string;
       summary: string;
       tokensBefore?: number;
       details?: JsonValue;

@@ -332,6 +332,7 @@ struct SessionScenarioBuilder: Sendable {
                 parentId: id(seed: seed, index: index - 1),
                 timestamp: timestamp,
                 kind: .compaction,
+                presentationId: nil,
                 summary: String(repeating: "s", count: textBytes),
                 tokensBefore: index * 10,
                 details: nil,

@@ -2008,11 +2008,20 @@ final class AppModel {
         try await sendComposer(submission)
     }
 
-    func abort(sessionID: String, kind: String = "agent") async {
+    func abort(
+        sessionID: String,
+        kind: String = "agent",
+        operationID: String? = nil
+    ) async {
         guard let target = presentationTarget(for: sessionID),
               admitsLiveSessionCommands(target) else { return }
-        do { try await sessionMutations.abort(sessionID: sessionID, kind: kind) }
-        catch { surface(error) }
+        do {
+            try await sessionMutations.abort(
+                sessionID: sessionID,
+                kind: kind,
+                operationID: operationID
+            )
+        } catch { surface(error) }
     }
 
     func clearQueue(sessionID: String) async throws -> SessionSnapshot.QueuedMessages {
@@ -3028,6 +3037,13 @@ extension AppModel: SessionPresentationStoreDelegate {
             canonicalTranscript: snapshot.transcript,
             queuedMessages: snapshot.displayedQueuedMessages
         )
+    }
+
+    func sessionPresentationStoreDidFailOperation(
+        operationID: String,
+        target: SessionPresentationTarget
+    ) {
+        composerDrafts.failOperation(operationID, target: target)
     }
 
     func sessionPresentationStorePostNotice(

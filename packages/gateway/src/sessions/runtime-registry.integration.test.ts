@@ -3753,6 +3753,105 @@ export default function (pi) {
     }
   });
 
+  it("rejects a stale stop receipt before it can abort a newer operation", async () => {
+    const fixture = await coldFixture("stale-operation-abort");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      operation?: { id: string; kind: "prompt"; startedAt: string };
+    };
+    internal.operation = {
+      id: "newer-operation", kind: "prompt", startedAt: new Date().toISOString(),
+    };
+
+    await expect(slot.abort("agent", "older-operation")).rejects.toMatchObject({
+      code: "conflict",
+      retryable: true,
+    });
+    expect(internal.operation?.id).toBe("newer-operation");
+  });
+
+  it("holds steering behind compaction even while Pi reports broad streaming", async () => {
+    const fixture = await coldFixture("compaction-steer-admission");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      phase: "compacting" | "running";
+      operation?: { id?: string; kind: "compaction"; startedAt: string };
+      publishSnapshot: () => void;
+      runtime: { session: {
+        readonly isStreaming: boolean;
+        prompt: (text: string, options?: {
+          streamingBehavior?: "steer" | "followUp";
+          preflightResult?: (accepted: boolean) => void;
+        }) => Promise<void>;
+        getSteeringMessages: () => readonly string[];
+      } };
+    };
+    internal.phase = "compacting";
+    internal.operation = {
+      id: "compaction-operation", kind: "compaction", startedAt: new Date().toISOString(),
+    };
+    vi.spyOn(internal.runtime.session, "isStreaming", "get").mockReturnValue(true);
+    let queued = false;
+    vi.spyOn(internal.runtime.session, "getSteeringMessages")
+      .mockImplementation(() => queued ? ["after compaction"] : []);
+    let invoked = false;
+    vi.spyOn(internal.runtime.session, "prompt").mockImplementationOnce(async (_text, options) => {
+      invoked = true;
+      expect(options?.streamingBehavior).toBe("steer");
+      queued = true;
+      options?.preflightResult?.(true);
+    });
+
+    const prompting = slot.prompt("after compaction", [], "steer");
+    await Promise.resolve();
+    expect(invoked).toBe(false);
+    internal.phase = "running";
+    internal.operation = undefined;
+    internal.publishSnapshot();
+
+    await expect(prompting).resolves.toMatchObject({ operationId: expect.any(String) });
+    expect(invoked).toBe(true);
+    expect(slot.snapshot().queuedItems).toEqual([
+      expect.objectContaining({ id: expect.any(String), behavior: "steer", text: "after compaction" }),
+    ]);
+  });
+
+  it("keeps ordinary prompt admission behind the Gateway settlement transition", async () => {
+    const fixture = await coldFixture("prompt-settlement-admission");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      phase: "running" | "idle";
+      activeOperationId?: string;
+      operation?: { id?: string; kind: "prompt"; startedAt: string };
+      publishSnapshot: () => void;
+      runtime: { session: { prompt: (
+        text: string,
+        options?: { preflightResult?: (accepted: boolean) => void },
+      ) => Promise<void> } };
+    };
+    internal.phase = "running";
+    internal.activeOperationId = "settling-operation";
+    internal.operation = {
+      id: "settling-operation", kind: "prompt", startedAt: new Date().toISOString(),
+    };
+    let invoked = false;
+    vi.spyOn(internal.runtime.session, "prompt").mockImplementationOnce(async (_text, options) => {
+      invoked = true;
+      options?.preflightResult?.(true);
+    });
+
+    const prompting = slot.prompt("after settlement");
+    await Promise.resolve();
+    expect(invoked).toBe(false);
+    internal.phase = "idle";
+    internal.activeOperationId = undefined;
+    internal.operation = undefined;
+    internal.publishSnapshot();
+
+    await expect(prompting).resolves.toMatchObject({ operationId: expect.any(String) });
+    expect(invoked).toBe(true);
+  });
+
   it("does not retire a newer pending prompt for an older user message callback", async () => {
     const fixture = await coldFixture("pending-prompt-object-ownership");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());

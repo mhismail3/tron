@@ -112,6 +112,10 @@ protocol SessionPresentationStoreDelegate: AnyObject {
         _ snapshot: SessionSnapshot,
         target: SessionPresentationIdentity
     )
+    func sessionPresentationStoreDidFailOperation(
+        operationID: String,
+        target: SessionPresentationIdentity
+    )
     func sessionPresentationStorePostNotice(
         _ message: String,
         replacing key: InAppNoticeKey?,
@@ -122,6 +126,13 @@ protocol SessionPresentationStoreDelegate: AnyObject {
     func sessionPresentationStoreRetireNoticeScope(_ scope: InAppNoticeScope)
     func sessionPresentationStoreSurface(_ error: Error)
     func sessionPresentationStoreCheckpointCache()
+}
+
+extension SessionPresentationStoreDelegate {
+    func sessionPresentationStoreDidFailOperation(
+        operationID: String,
+        target: SessionPresentationIdentity
+    ) {}
 }
 
 @MainActor
@@ -1200,7 +1211,7 @@ final class SessionPresentationStore {
         case catalogRefresh
         case editor(action: SessionEditorAction, text: String, fullText: String, revision: Int, operationID: String?)
         case notice(String, type: String)
-        case failure(GatewayFailure)
+        case failure(GatewayFailure, operationID: String?)
     }
 
     private func performSynchronization(
@@ -2193,12 +2204,15 @@ final class SessionPresentationStore {
         case "session.operationFailed", "session.extensionError":
             guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
             if let message = envelope.data.objectValue?["message"]?.stringValue {
-                effects.append(.failure(GatewayFailure(
-                    code: "session_operation_failed",
-                    message: message,
-                    retryable: false,
-                    details: nil
-                )))
+                effects.append(.failure(
+                    GatewayFailure(
+                        code: "session_operation_failed",
+                        message: message,
+                        retryable: false,
+                        details: nil
+                    ),
+                    operationID: envelope.data.objectValue?["operationId"]?.stringValue
+                ))
             }
             advance(&snapshot, envelope)
         case "session.structureChanged":
@@ -2264,7 +2278,13 @@ final class SessionPresentationStore {
                     role: role,
                     scope: noticeScope
                 )
-            case .failure(let failure):
+            case .failure(let failure, let operationID):
+                if let operationID, let target {
+                    delegate?.sessionPresentationStoreDidFailOperation(
+                        operationID: operationID,
+                        target: target
+                    )
+                }
                 delegate?.sessionPresentationStoreSurface(failure)
             }
         }

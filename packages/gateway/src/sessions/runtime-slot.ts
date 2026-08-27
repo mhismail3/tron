@@ -253,6 +253,7 @@ export class RuntimeSlot {
   private eventSequence = 0;
   private phase: SessionPhase;
   private disposed = false;
+  private readonly stateChangeWaiters = new Set<() => void>();
   private snapshotTimer: NodeJS.Timeout | undefined;
   private progressFlushTimer: NodeJS.Timeout | undefined;
   /** The latest cumulative SDK message is projected only at the wire flush boundary. */
@@ -375,6 +376,7 @@ export class RuntimeSlot {
     origin?: ExtensionToolOrigin;
   }>();
   private pendingManualCompaction: PendingManualCompaction | undefined;
+  private compactionBaselineEntryId: string | undefined;
   private manualCompactionClaim: symbol | undefined;
   private queuedManualCompactionInFlight = false;
   private shuttingDown = false;
@@ -559,6 +561,32 @@ export class RuntimeSlot {
   private get hasActiveAgentRun(): boolean {
     const session = this.runtime?.session;
     return session?.isStreaming === true || session?.state.isStreaming === true;
+  }
+
+  /** Pi 0.84.1 can clear isStreaming before its agent_settled choreography has
+   * reached this runtime. Keep ordinary admission behind the existing Gateway
+   * operation owner until the sequenced state transition is published. */
+  private get isAgentAdmissionSettling(): boolean {
+    // Compaction has its own Pi abort controller and cannot accept Agent input,
+    // even when the SDK's broad streaming flag remains true. Wait until the
+    // continuation or idle transition, then re-evaluate steer/follow-up.
+    if (this.phase === "compacting") return true;
+    if (this.hasActiveAgentRun) return false;
+    return this.phase === "running"
+      || this.phase === "retrying"
+      || this.activeOperationId !== undefined
+      || this.operation !== undefined
+      || this.pendingAssistantCompletion !== undefined;
+  }
+
+  private waitForStateChange(): Promise<void> {
+    return new Promise((resolve) => { this.stateChangeWaiters.add(resolve); });
+  }
+
+  private publishStateChange(): void {
+    const waiters = [...this.stateChangeWaiters];
+    this.stateChangeWaiters.clear();
+    for (const resolve of waiters) resolve();
   }
 
   private get effectivePhase(): SessionPhase {
@@ -1792,12 +1820,35 @@ export class RuntimeSlot {
         break;
       case "compaction_start":
         this.phase = "compacting";
-        this.operation = { kind: "compaction", startedAt: new Date().toISOString(), reason: event.reason };
+        this.compactionBaselineEntryId = [...this.sessionManager.getBranch()]
+          .reverse()
+          .find((entry) => entry.type === "compaction")?.id;
+        // Manual compaction already has its own command identity. Automatic
+        // preflight compaction receives a distinct runtime identity so repeated
+        // maintenance within one prompt can never collide with the prompt row
+        // or another canonical compaction.
+        this.operation = {
+          id: this.operation?.kind === "compaction"
+            ? (this.operation.id ?? randomUUID())
+            : randomUUID(),
+          kind: "compaction",
+          startedAt: new Date().toISOString(),
+          reason: event.reason,
+        };
         this.publishSnapshot();
         break;
       case "compaction_end": {
         this.retry = undefined;
         const completedOperation = this.operation;
+        if (completedOperation?.kind === "compaction" && completedOperation.id) {
+          const canonicalCompaction = [...this.sessionManager.getBranch()]
+            .reverse()
+            .find((entry) => entry.type === "compaction");
+          if (canonicalCompaction && canonicalCompaction.id !== this.compactionBaselineEntryId) {
+            this.rememberPresentationID(canonicalCompaction.id, completedOperation.id);
+          }
+        }
+        this.compactionBaselineEntryId = undefined;
         // Hooks may append canonical entries after the compaction. A single-row
         // delta cannot describe that branch and consumes the client's next
         // cursor when rejected. Publish one immediate bounded authority frame.
@@ -3649,6 +3700,7 @@ export class RuntimeSlot {
 
   publishSnapshot(): void {
     if (this.disposed || this.trustReloadPending) return;
+    this.publishStateChange();
     // A coalesced streaming frame must not overtake the state transition this
     // snapshot publishes.
     this.flushPendingProgress();
@@ -3697,6 +3749,10 @@ export class RuntimeSlot {
       }
       if (this.lifecycle.isDraining) throw new GatewayError("busy", "Session is draining for an administrative restart", true);
       const session = this.runtime.session;
+      while (this.isAgentAdmissionSettling) {
+        await this.waitForStateChange();
+        this.assertUsable();
+      }
       if (queueDisplay?.attachments !== undefined
         && (queueDisplay.attachments.length > MAXIMUM_PROMPT_ATTACHMENTS
           || queueDisplay.attachments.length !== queueDisplay.attachmentCount)) {
@@ -3724,6 +3780,13 @@ export class RuntimeSlot {
       if (session.isStreaming && !behavior && !isExactExtensionCommand) throw new GatewayError("busy", "Session is running; choose steer or follow-up");
       if (queuesIntoActiveRun) {
         this.reconcileQueuedMessages();
+        if (this.pendingQueueAdmission) {
+          throw new GatewayError(
+            "busy",
+            "The prior queued prompt is still publishing its authoritative identity",
+            true,
+          );
+        }
         const display = queueDisplay ?? {
           text,
           attachmentEnvelope: "",
@@ -3867,7 +3930,8 @@ export class RuntimeSlot {
       // Pi's callback is authoritative. A local timeout could reject while the
       // same uncancelled input handler later accepts canonical work.
       const admitted = await accepted;
-      this.pendingQueueAdmission = undefined;
+      if (queuesIntoActiveRun && admitted) this.reconcileQueuedMessages();
+      if (!queuesIntoActiveRun || !admitted) this.pendingQueueAdmission = undefined;
       this.lifecycle.resolvePreflight(operationId, admitted);
       admissionFinalized = true;
       if (!admitted) {
@@ -3936,8 +4000,14 @@ export class RuntimeSlot {
     });
   }
 
-  async abort(kind: "agent" | "compaction" | "retry" | "branchSummary" | "bash" = "agent"): Promise<void> {
+  async abort(
+    kind: "agent" | "compaction" | "retry" | "branchSummary" | "bash" = "agent",
+    expectedOperationId?: string,
+  ): Promise<void> {
     this.assertUsable();
+    if (expectedOperationId !== undefined && this.operation?.id !== expectedOperationId) {
+      throw new GatewayError("conflict", "The active operation changed before it could be stopped", true);
+    }
     const session = this.runtime.session;
     switch (kind) {
       case "compaction": session.abortCompaction(); break;
@@ -4763,6 +4833,7 @@ export class RuntimeSlot {
     this.lifecycle.retire();
     this.ui.retire();
     this.disposed = true;
+    this.publishStateChange();
   }
 
   /** Pi gives extensions a session-shutdown callback before invalidating their

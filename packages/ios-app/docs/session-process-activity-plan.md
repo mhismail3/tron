@@ -20,7 +20,12 @@ detached-command tool, supervisor, event journal, history database, or durable i
 ## User experience
 
 The composer shows one emerald orb only when the mounted authoritative projection has at
-least one admitted current or recently finished subagent:
+least one admitted current or recently finished subagent. It is the sole above-composer
+subagent progress affordance: the retired **Pi Subagents** extension pill and generic summary
+sheet have no fallback route. This presentation rule does not alter the transcript—every real
+`subagent` invocation remains a normal tool chip with the standard tool detail surface.
+
+The orb appears when there is:
 
 - **Solving** while any subagent is queued, running, or paused.
 - **Thinking** while only terminal subagents remain in the five-minute recent window.

@@ -369,7 +369,7 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
-    @Test("independent uploads retain exact bytes and publish in completion order")
+    @Test("independent uploads retain exact bytes and stable invocation-order chips")
     func independentUploads() async throws {
         try await withTestWatchdog { @MainActor in
             let harness = ComposerHarness()
@@ -410,12 +410,14 @@ struct ComposerDraftCoordinatorTests {
             try await valueOfOwnedTask(second)
 
             let attachments = harness.coordinator.pendingAttachments(for: target)
-            #expect(attachments.map(\.id) == ["upload-second", "upload-first"])
-            #expect(attachments.map(\.name) == ["second.jpg", "first.bin"])
+            #expect(attachments.map(\.name) == ["first.bin", "second.jpg"])
+            #expect(attachments.compactMap(\.gatewayUploadID) == ["upload-first", "upload-second"])
+            #expect(Set(attachments.map(\.id)).count == 2)
+            #expect(attachments.allSatisfy { $0.id.hasPrefix("local:") })
             #expect(attachments[0].previewData == nil)
-            #expect(attachments[0].fullPreviewData == secondData)
+            #expect(attachments[0].fullPreviewData == firstData)
             #expect(attachments[1].previewData == nil)
-            #expect(attachments[1].fullPreviewData == firstData)
+            #expect(attachments[1].fullPreviewData == secondData)
         }
     }
 
@@ -485,7 +487,8 @@ struct ComposerDraftCoordinatorTests {
             #expect(access.previewCount == 1)
             #expect(access.stagingIsClean)
             let attachment = try #require(coordinator.pendingAttachments(for: target).first)
-            #expect(attachment.id == "document-id")
+            #expect(attachment.id.hasPrefix("local:"))
+            #expect(attachment.gatewayUploadID == "document-id")
             #expect(try #require(attachment.previewData).count <= ComposerAttachmentPreviewPolicy.maximumEncodedBytes)
             #expect(attachment.preparedThumbnail != nil)
             #expect(attachment.fullPreviewData == data)
@@ -552,7 +555,8 @@ struct ComposerDraftCoordinatorTests {
             await gate.waitForUploads(2)
             await gate.complete(index: 1, result: .success("second-id"))
             try await second.value
-            #expect(coordinator.pendingAttachments(for: target).map(\.id) == ["second-id"])
+            #expect(coordinator.pendingAttachments(for: target).map(\.name) == ["first.txt", "second.txt"])
+            #expect(coordinator.pendingAttachments(for: target).compactMap(\.gatewayUploadID) == ["second-id"])
 
             coordinator.revoke(target)
             await #expect(throws: CancellationError.self) { try await first.value }
@@ -592,7 +596,12 @@ struct ComposerDraftCoordinatorTests {
             )
             harness.completeUpload(index: 0, result: .success("stale"))
             await #expect(throws: CancellationError.self) { try await valueOfOwnedTask(success) }
-            #expect(harness.coordinator.pendingAttachments(for: currentTarget).isEmpty)
+            let retainedOld = try #require(
+                harness.coordinator.pendingAttachments(for: currentTarget).first
+            )
+            #expect(retainedOld.name == "old.txt")
+            #expect(retainedOld.gatewayUploadID == nil)
+            #expect(retainedOld.fullPreviewData == Data("old".utf8))
 
             let failure = Task {
                 try await harness.coordinator.upload(
@@ -629,7 +638,40 @@ struct ComposerDraftCoordinatorTests {
             }
             #expect(harness.coordinator.hostedUploadAdmissionCount == 0)
             #expect(harness.coordinator.admits(target))
-            #expect(harness.coordinator.pendingAttachments(for: target).isEmpty)
+            let retained = try #require(harness.coordinator.pendingAttachments(for: target).first)
+            #expect(retained.name == "cancel.txt")
+            #expect(retained.gatewayUploadID == nil)
+            #expect(retained.fullPreviewData == Data("cancel".utf8))
+        }
+    }
+
+    @Test("capacity failure retains one local attachment and exact retry bytes")
+    func failedFreshUploadRetainsLocalDraft() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 91)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1
+            )
+            let data = Data("retain after capacity".utf8)
+            let uploading = Task {
+                try await harness.coordinator.upload(
+                    name: "capacity.txt", mimeType: "text/plain", data: data,
+                    target: target
+                )
+            }
+            try await harness.waitForUploads(1)
+            harness.completeUpload(index: 0, result: .failure(GatewayFailure(
+                code: "busy", message: "capacity full", retryable: true,
+                details: .object(["reason": .string("bytes")])
+            )))
+            await #expect(throws: GatewayFailure.self) { try await valueOfOwnedTask(uploading) }
+
+            let retained = try #require(harness.coordinator.pendingAttachments(for: target).first)
+            #expect(retained.id.hasPrefix("local:"))
+            #expect(retained.gatewayUploadID == nil)
+            #expect(retained.fullPreviewData == data)
+            #expect(harness.coordinator.hasActiveUploads(for: target) == false)
         }
     }
 
@@ -712,7 +754,7 @@ struct ComposerDraftCoordinatorTests {
 
             let canonical = TranscriptItem.message(MessageTranscriptItem(
                 id: "canonical-user", parentId: nil, timestamp: "2025-01-01T00:00:00Z",
-                kind: .message, role: .user, presentationId: "canonical-user",
+                kind: .message, role: .user, presentationId: "operation-0",
                 content: [
                     ContentPart(id: "text", ordinal: 0, thinkingRunOrdinal: nil, type: .text, text: "outgoing", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
                     // Canonical attachment order is not a client-upload identity.
@@ -786,8 +828,8 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
-    @Test("reconciliation ignores historical identical user messages")
-    func reconciliationRequiresPostSubmissionCanonicalEntry() async throws {
+    @Test("known operation identity never falls back to identical canonical text")
+    func reconciliationRequiresExactOperationIdentity() async throws {
         try await withTestWatchdog { @MainActor in
             let harness = ComposerHarness()
             let target = SessionPresentationIdentity(sessionID: "session", generation: 41)
@@ -819,6 +861,19 @@ struct ComposerDraftCoordinatorTests {
             harness.coordinator.reconcileSubmission(
                 target: target,
                 canonicalTranscript: [historical, user("new")]
+            )
+            #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
+            let exact = TranscriptItem.message(MessageTranscriptItem(
+                id: "exact", parentId: nil, timestamp: "2025-01-01T00:00:00Z",
+                kind: .message, role: .user, presentationId: "operation-0",
+                content: [ContentPart(id: "text", ordinal: 0, thinkingRunOrdinal: nil, type: .text, text: "same", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil)],
+                provider: nil, modelId: nil, stopReason: nil, errorMessage: nil, toolCallId: nil,
+                toolName: nil, isError: nil, details: nil, usage: nil, startedAt: nil,
+                completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil
+            ))
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [historical, user("new"), exact]
             )
             #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
         }
@@ -1266,7 +1321,7 @@ struct ComposerDraftCoordinatorTests {
             try await valueOfOwnedTask(sending)
             let canonical = try decodeTranscriptFixture(
                 TranscriptItem.self,
-                from: Data("{\"id\":\"canonical-direct\",\"parentId\":null,\"timestamp\":\"2026-01-01T00:00:01Z\",\"kind\":\"message\",\"role\":\"user\",\"presentationId\":\"canonical-direct\",\"content\":[{\"id\":\"text\",\"ordinal\":0,\"type\":\"text\",\"text\":\"direct\"}]}".utf8))
+                from: Data("{\"id\":\"canonical-direct\",\"parentId\":null,\"timestamp\":\"2026-01-01T00:00:01Z\",\"kind\":\"message\",\"role\":\"user\",\"presentationId\":\"operation-0\",\"content\":[{\"id\":\"text\",\"ordinal\":0,\"type\":\"text\",\"text\":\"direct\"}]}".utf8))
             harness.coordinator.reconcileSubmission(
                 target: target,
                 canonicalTranscript: [canonical]
@@ -1288,10 +1343,10 @@ struct ComposerDraftCoordinatorTests {
                 profileID: "profile", target: target, lifecycleGeneration: 1,
                 initialText: "first"
             )
-            func canonical(_ id: String, text: String) throws -> TranscriptItem {
+            func canonical(_ id: String, operationID: String, text: String) throws -> TranscriptItem {
                 try decodeTranscriptFixture(
                     TranscriptItem.self,
-                    from: Data("{\"id\":\"\(id)\",\"parentId\":null,\"timestamp\":\"2026-01-01T00:00:01Z\",\"kind\":\"message\",\"role\":\"user\",\"presentationId\":\"\(id)\",\"content\":[{\"id\":\"text\",\"ordinal\":0,\"type\":\"text\",\"text\":\"\(text)\"}]}".utf8)
+                    from: Data("{\"id\":\"\(id)\",\"parentId\":null,\"timestamp\":\"2026-01-01T00:00:01Z\",\"kind\":\"message\",\"role\":\"user\",\"presentationId\":\"\(operationID)\",\"content\":[{\"id\":\"text\",\"ordinal\":0,\"type\":\"text\",\"text\":\"\(text)\"}]}".utf8)
                 )
             }
 
@@ -1299,7 +1354,7 @@ struct ComposerDraftCoordinatorTests {
             try await harness.waitForSends(1)
             harness.completeSend(index: 0, result: .success(()))
             try await valueOfOwnedTask(firstSend)
-            let first = try canonical("canonical-first", text: "first")
+            let first = try canonical("canonical-first", operationID: "operation-0", text: "first")
             harness.coordinator.reconcileSubmission(target: target, canonicalTranscript: [first])
 
             harness.coordinator.setText("second", for: scope)
@@ -1311,7 +1366,7 @@ struct ComposerDraftCoordinatorTests {
             try await harness.waitForSends(2)
             harness.completeSend(index: 1, result: .success(()))
             try await valueOfOwnedTask(secondSend)
-            let second = try canonical("canonical-second", text: "second")
+            let second = try canonical("canonical-second", operationID: "operation-1", text: "second")
             harness.coordinator.reconcileSubmission(
                 target: target,
                 canonicalTranscript: [first, second]
@@ -1352,7 +1407,7 @@ struct ComposerDraftCoordinatorTests {
             try await valueOfOwnedTask(sending)
             let canonical = TranscriptItem.message(MessageTranscriptItem(
                 id: "canonical-photo", parentId: nil, timestamp: "2026-01-01T00:00:01Z",
-                kind: .message, role: .user, presentationId: "canonical-photo",
+                kind: .message, role: .user, presentationId: "operation-0",
                 content: [
                     ContentPart(id: "text", ordinal: 0, thinkingRunOrdinal: nil, type: .text, text: "photo", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
                     ContentPart(id: "image", ordinal: 1, thinkingRunOrdinal: nil, type: .image, text: nil, attachment: nil, redacted: nil, mimeType: "image/jpeg", blobId: "canonical-blob", toolCallId: nil, name: nil, arguments: nil),
@@ -1681,7 +1736,7 @@ struct ComposerDraftCoordinatorTests {
             try await valueOfOwnedTask(sending)
             let canonical = TranscriptItem.message(MessageTranscriptItem(
                 id: "canonical", parentId: nil, timestamp: "2025-01-01T00:00:00Z",
-                kind: .message, role: .user, presentationId: "canonical",
+                kind: .message, role: .user, presentationId: "operation-0",
                 content: [
                     ContentPart(id: "text", ordinal: 0, thinkingRunOrdinal: nil, type: .text, text: "notes", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
                     ContentPart(id: "name", ordinal: 1, thinkingRunOrdinal: nil, type: .text, text: "notes.txt", attachment: .init(name: "notes.txt", mimeType: "text/plain", size: 5), redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
@@ -1716,7 +1771,7 @@ struct ComposerDraftCoordinatorTests {
 
             let canonical = TranscriptItem.message(MessageTranscriptItem(
                 id: "canonical-photo", parentId: nil, timestamp: "2025-01-01T00:00:00Z",
-                kind: .message, role: .user, presentationId: "canonical-photo",
+                kind: .message, role: .user, presentationId: "operation-0",
                 content: [
                     ContentPart(id: "envelope", ordinal: 0, thinkingRunOrdinal: nil, type: .text, text: "[Attached image context]", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
                     ContentPart(id: "image", ordinal: 1, thinkingRunOrdinal: nil, type: .image, text: nil, attachment: .init(name: "photo.jpg", mimeType: "image/jpeg", size: 7), redacted: nil, mimeType: "image/jpeg", blobId: "canonical-blob", toolCallId: nil, name: nil, arguments: nil),
@@ -1830,6 +1885,30 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
+    @Test("sequenced failure retires only its exact accepted operation and restores the draft once")
+    func acceptedOperationFailure() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 60)
+            let scope = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "outgoing"
+            )
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: "steer") }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+
+            #expect(harness.coordinator.failOperation("other-operation", target: target) == false)
+            #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
+            #expect(harness.coordinator.failOperation("operation-0", target: target))
+            #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+            #expect(harness.coordinator.text(for: scope) == "outgoing")
+            #expect(harness.coordinator.failOperation("operation-0", target: target) == false)
+            #expect(harness.coordinator.text(for: scope) == "outgoing")
+        }
+    }
+
     @Test("accepted submission survives remount until exact canonical settlement")
     func acceptedSendSurvivesPresentationRevocation() async throws {
         try await withTestWatchdog { @MainActor in
@@ -1929,7 +2008,7 @@ struct ComposerDraftCoordinatorTests {
 
             harness.coordinator.reconcileSubmission(
                 target: target,
-                canonicalTranscript: [canonicalUser(id: "canonical", text: "hello")]
+                canonicalTranscript: [canonicalUser(id: "canonical", presentationID: "operation-0", text: "hello")]
             )
             #expect(harness.coordinator.submissionLifecycle(for: target).phase == .canonical("canonical"))
             #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target) != nil)

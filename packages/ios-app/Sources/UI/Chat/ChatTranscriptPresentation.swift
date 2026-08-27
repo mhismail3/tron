@@ -1252,7 +1252,9 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
     var hasDetailSheet: Bool { material == .glass && body?.isEmpty == false }
     var showsProgress: Bool {
         semanticID == nil && (
-            id == "runtime-working" || id.hasPrefix("notification-compaction-slot-")
+            id == "runtime-working"
+                || id.hasPrefix("notification-compaction-slot-")
+                || id.hasPrefix("notification-compaction-operation-")
         )
     }
 
@@ -1264,8 +1266,12 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
         let admittedSummary = summaryBody?.isEmpty == false ? summaryBody : nil
         switch item.kind {
         case .compaction:
+            let operationIdentity = item.presentationId == item.id
+                ? nil
+                : "notification-compaction-operation-\(item.presentationId)"
             return ChatNotificationPresentation(
-                id: globalOrdinal.map { "notification-compaction-slot-\($0)" }
+                id: operationIdentity
+                    ?? globalOrdinal.map { "notification-compaction-slot-\($0)" }
                     ?? "notification-compaction-\(item.id)",
                 semanticID: item.id,
                 icon: "arrow.down.right.and.arrow.up.left",
@@ -1340,8 +1346,14 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
                       total - start == snapshot.transcript.count else { return nil }
                 return total
             }()
+            let operationIdentity = snapshot.operation.flatMap { operation in
+                operation.kind == .compaction
+                    ? operation.id.map { "notification-compaction-operation-\($0)" }
+                    : nil
+            }
             values.append(ChatNotificationPresentation(
-                id: exactNextOrdinal.map { "notification-compaction-slot-\($0)" }
+                id: operationIdentity
+                    ?? exactNextOrdinal.map { "notification-compaction-slot-\($0)" }
                     ?? "runtime-working",
                 semanticID: nil,
                 icon: working.phase == .compacting

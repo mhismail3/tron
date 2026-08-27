@@ -104,6 +104,20 @@ struct MultilineComposerTextViewTests {
         }
     }
 
+    @Test("stop routes to the authoritative active operation kind")
+    func activeOperationAbortPolicy() {
+        func operation(_ kind: SessionOperationState.Kind) -> SessionOperationState {
+            SessionOperationState(id: "operation", kind: kind, startedAt: "2026-01-01T00:00:00Z", reason: nil)
+        }
+        #expect(ChatComposerPolicy.abortKind(operation: operation(.prompt)) == "agent")
+        #expect(ChatComposerPolicy.abortKind(operation: operation(.command)) == "agent")
+        #expect(ChatComposerPolicy.abortKind(operation: operation(.compaction)) == "compaction")
+        #expect(ChatComposerPolicy.abortKind(operation: operation(.branchSummary)) == "branchSummary")
+        #expect(ChatComposerPolicy.abortKind(operation: operation(.bash)) == "bash")
+        #expect(ChatComposerPolicy.abortKind(operation: operation(.retry)) == "retry")
+        #expect(ChatComposerPolicy.abortKind(operation: nil) == "agent")
+    }
+
     @Test("failed steering restores the outgoing message without overwriting new input")
     func failedSteeringRestoresDraft() {
         #expect(ChatComposerPolicy.restoredDraft(

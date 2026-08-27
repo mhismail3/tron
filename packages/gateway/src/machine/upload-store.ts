@@ -45,6 +45,24 @@ interface UploadStoreOptions {
   uuid?: () => string;
 }
 
+export interface UploadCapacityStatus {
+  entryCount: number;
+  maximumEntries: number;
+  aggregateBytes: number;
+  maximumAggregateBytes: number;
+  availableBytes: number;
+  unclaimedCount: number;
+  unclaimedBytes: number;
+  claimedCount: number;
+  claimedBytes: number;
+  stagedCount: number;
+  stagedBytes: number;
+  activeBodyAdmissions: number;
+  maximumConcurrentBodies: number;
+  pendingSessionCleanupCount: number;
+  maintenanceAt: string;
+}
+
 function safeName(input: string): string {
   const name = basename(input).replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 160);
   return name || "attachment";
@@ -196,11 +214,24 @@ export class UploadStore {
       const uploadDirectory = await this.ensureUploadDirectory();
       const bodyDirectory = await this.ensureBodyDirectory();
       await this.cleanupStagedUploads(bodyDirectory);
-      const aggregateBytes = inventory.reduce((total, item) => total + item.size, 0)
-        + [...this.stagedUploads.values()].reduce((total, size) => total + size, 0);
-      if (inventory.length + this.stagedUploads.size >= this.maximumEntries
-        || reservedBytes > this.maximumAggregateBytes - aggregateBytes) {
-        throw new GatewayError("busy", "Stored uploads reached their bounded capacity; remove an imported session or try again later", true);
+      const stagedBytes = [...this.stagedUploads.values()].reduce((total, size) => total + size, 0);
+      const aggregateBytes = inventory.reduce((total, item) => total + item.size, 0) + stagedBytes;
+      const entryCapacityReached = inventory.length + this.stagedUploads.size >= this.maximumEntries;
+      const byteCapacityReached = reservedBytes > this.maximumAggregateBytes - aggregateBytes;
+      if (entryCapacityReached || byteCapacityReached) {
+        throw new GatewayError(
+          "busy",
+          "Stored attachment capacity is full; remove an unused session or wait for cleanup",
+          true,
+          {
+            reason: entryCapacityReached ? "entries" : "bytes",
+            entryCount: inventory.length + this.stagedUploads.size,
+            maximumEntries: this.maximumEntries,
+            aggregateBytes,
+            maximumAggregateBytes: this.maximumAggregateBytes,
+            availableBytes: Math.max(0, this.maximumAggregateBytes - aggregateBytes),
+          },
+        );
       }
 
       for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -377,7 +408,47 @@ export class UploadStore {
 
   async removeSession(sessionId: string): Promise<void> {
     this.pendingSessionRemovals.add(sessionId);
-    await this.serialize(async () => { await this.inventory(); }).catch(() => {});
+    await this.serialize(async () => { await this.inventory(); });
+  }
+
+  /** Runs bounded maintenance without weakening canonical attachment ownership.
+   * Claimed uploads are removed only when the canonical catalog proves their
+   * owner no longer exists. */
+  async maintain(liveSessionIds?: ReadonlySet<string>): Promise<UploadCapacityStatus> {
+    return this.serialize(async () => {
+      const bodyDirectory = await this.ensureBodyDirectory();
+      await this.cleanupStagedUploads(bodyDirectory);
+      const inventory = await this.inventory(liveSessionIds);
+      return this.capacityStatus(inventory);
+    });
+  }
+
+  async status(): Promise<UploadCapacityStatus> {
+    return this.serialize(async () => this.capacityStatus(await this.inventory()));
+  }
+
+  private capacityStatus(inventory: readonly UploadMetadata[]): UploadCapacityStatus {
+    const unclaimed = inventory.filter((item) => item.sessionId === undefined);
+    const claimed = inventory.filter((item) => item.sessionId !== undefined);
+    const aggregateBytes = inventory.reduce((total, item) => total + item.size, 0);
+    const stagedBytes = [...this.stagedUploads.values()].reduce((total, size) => total + size, 0);
+    return {
+      entryCount: inventory.length,
+      maximumEntries: this.maximumEntries,
+      aggregateBytes,
+      maximumAggregateBytes: this.maximumAggregateBytes,
+      availableBytes: Math.max(0, this.maximumAggregateBytes - aggregateBytes - stagedBytes),
+      unclaimedCount: unclaimed.length,
+      unclaimedBytes: unclaimed.reduce((total, item) => total + item.size, 0),
+      claimedCount: claimed.length,
+      claimedBytes: claimed.reduce((total, item) => total + item.size, 0),
+      stagedCount: this.stagedUploads.size,
+      stagedBytes,
+      activeBodyAdmissions: this.activeBodyAdmissions,
+      maximumConcurrentBodies: this.maximumConcurrentBodies,
+      pendingSessionCleanupCount: this.pendingSessionRemovals.size,
+      maintenanceAt: new Date(this.now()).toISOString(),
+    };
   }
 
   async materialize(ids: string[], sessionId: string): Promise<{
@@ -430,7 +501,7 @@ export class UploadStore {
     });
   }
 
-  private async inventory(): Promise<UploadMetadata[]> {
+  private async inventory(liveSessionIds?: ReadonlySet<string>): Promise<UploadMetadata[]> {
     const uploadDirectory = await this.ensureUploadDirectory();
     const entries = await readdir(uploadDirectory, { withFileTypes: true });
     const result: UploadMetadata[] = [];
@@ -445,7 +516,10 @@ export class UploadStore {
       }
       const metadata = await this.readMetadata(join(folder, "metadata.json"));
       if (!isUploadMetadata(metadata, entry.name, this.maximumBytes)
-        || (metadata.sessionId === undefined && Date.parse(metadata.createdAt) <= cutoff)) {
+        || (metadata.sessionId === undefined && Date.parse(metadata.createdAt) <= cutoff)
+        || (metadata.sessionId !== undefined
+          && liveSessionIds !== undefined
+          && !liveSessionIds.has(metadata.sessionId))) {
         await rm(folder, { recursive: true, force: true });
         continue;
       }

@@ -240,6 +240,7 @@ struct GatewayProtocolContractTests {
             parentId: wrongKind.parentId,
             timestamp: wrongKind.timestamp,
             kind: .branchSummary,
+            presentationId: wrongKind.presentationId,
             summary: wrongKind.summary,
             tokensBefore: wrongKind.tokensBefore,
             details: wrongKind.details,

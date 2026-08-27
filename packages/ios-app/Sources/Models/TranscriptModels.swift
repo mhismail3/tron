@@ -343,6 +343,7 @@ struct SummaryTranscriptItem: TranscriptPayload {
     let parentId: String?
     let timestamp: String
     let kind: TranscriptItem.Kind
+    let presentationId: String?
     let summary: String
     let tokensBefore: Int?
     let details: JSONValue?
@@ -414,7 +415,16 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
             try Self.validateContentOrdinals(message.content, container: container)
             self = .customMessage(message)
         case .customEntry: self = .customEntry(try CustomEntryTranscriptItem(from: decoder))
-        case .compaction, .branchSummary: self = .summary(try SummaryTranscriptItem(from: decoder))
+        case .compaction, .branchSummary:
+            let summary = try SummaryTranscriptItem(from: decoder)
+            guard summary.presentationId.map({ !$0.isEmpty && $0.utf8.count <= 200 }) != false else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .kind,
+                    in: container,
+                    debugDescription: "Summary presentation identity must be nonempty and bounded"
+                )
+            }
+            self = .summary(summary)
         case .modelChange: self = .modelChange(try ModelChangeTranscriptItem(from: decoder))
         case .thinkingChange: self = .thinkingChange(try ThinkingChangeTranscriptItem(from: decoder))
         case .label: self = .label(try LabelTranscriptItem(from: decoder))
@@ -484,7 +494,13 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
         }
     }
     var role: Role? { if case .message(let value) = self { value.role } else { nil } }
-    var presentationId: String { if case .message(let value) = self { value.presentationId } else { id } }
+    var presentationId: String {
+        switch self {
+        case .message(let value): value.presentationId
+        case .summary(let value): value.presentationId ?? value.id
+        default: id
+        }
+    }
     var content: [ContentPart]? {
         switch self {
         case .message(let value): value.content

@@ -17,6 +17,8 @@ struct SessionProcessPresentationGuardTests {
         let composer = try source("Sources/UI/Chat/ChatComposerView.swift")
         let routes = try source("Sources/UI/Chat/ChatRoutes.swift")
         let chat = try source("Sources/UI/Chat/ChatView.swift")
+        let transcript = try source("Sources/UI/Chat/ChatTranscriptProjectionKernel.swift")
+        let toolRows = try source("Sources/UI/Chat/ChatToolRunViews.swift")
 
         #expect(sheets.contains(".tronNavigationTitle(\"Subagents\")"))
         #expect(sheets.contains(".tronNavigationTitle(\"Subagent History\")"))
@@ -59,8 +61,17 @@ struct SessionProcessPresentationGuardTests {
         #expect(processButton.contains("value: isVisible"))
         #expect(processButton.contains(".spring(response: 0.32, dampingFraction: 0.82)"))
         #expect(!composer.contains("ExtensionActivityPill("))
+        #expect(!composer.contains("ExtensionDetailsSheet("))
+        #expect(!routes.contains("extensionHubPresented"))
+        #expect(!routes.contains("extensionDetailsGroupID"))
         #expect(routes.contains("SessionProcessesSheet(sessionID: sessionID)"))
         #expect(!chat.contains("ChatExtensionWidgetPolicy.liveGroups"))
+        #expect(!chat.contains("showExtensionDetails"))
+        // Process progress is an additional native affordance, never a reason
+        // to suppress the canonical subagent invocation from normal tool rows.
+        #expect(transcript.contains("appendToolRunMember"))
+        #expect(!transcript.contains("tool.name == \"subagent\""))
+        #expect(toolRows.contains("ToolActivityChip"))
     }
 
     @Test("child transcript keeps tail intent while aligning short content to the top")

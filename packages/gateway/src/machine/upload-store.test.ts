@@ -165,6 +165,73 @@ describe("UploadStore", () => {
     expect(rejection).toMatchObject({ reason: { code: "busy", retryable: true } });
   });
 
+  it("reports bounded aggregate capacity and a machine-readable rejection reason", async () => {
+    const store = new UploadStore(await root(), 8, {
+      maximumEntries: 2,
+      maximumAggregateBytes: 8,
+    });
+    await store.save("full", "text/plain", Buffer.from("12345678"));
+
+    await expect(store.status()).resolves.toMatchObject({
+      entryCount: 1,
+      maximumEntries: 2,
+      aggregateBytes: 8,
+      maximumAggregateBytes: 8,
+      availableBytes: 0,
+      unclaimedCount: 1,
+      claimedCount: 0,
+    });
+    await expect(store.save("overflow", "text/plain", Buffer.from("1"))).rejects.toMatchObject({
+      code: "busy",
+      retryable: true,
+      details: {
+        reason: "bytes",
+        aggregateBytes: 8,
+        maximumAggregateBytes: 8,
+        availableBytes: 0,
+      },
+    });
+  });
+
+  it("maintenance reclaims expired staging and claims whose canonical session no longer exists", async () => {
+    let now = 1_000;
+    const home = await root();
+    const store = new UploadStore(home, 8, {
+      maximumEntries: 2,
+      maximumAggregateBytes: 16,
+      maximumUnclaimedAgeMs: 100,
+      now: () => now,
+    });
+    const claimed = await store.save("claimed", "text/plain", Buffer.from("claimed"));
+    await store.materialize([claimed.id], "deleted-session");
+    const unclaimed = await store.save("unclaimed", "text/plain", Buffer.from("orphan"));
+    const staleBody = join(home, "gateway", "upload-bodies", "stale");
+    await mkdir(staleBody, { recursive: true });
+    await writeFile(join(staleBody, "content"), "partial");
+    now = 1_101;
+
+    const status = await store.maintain(new Set(["different-session"]));
+    expect(status).toMatchObject({ entryCount: 0, aggregateBytes: 0 });
+    expect(await readdir(join(home, "gateway", "upload-bodies"))).toEqual([]);
+    await expect(store.materialize([claimed.id], "deleted-session")).rejects.toMatchObject({ code: "not_found" });
+    await expect(store.materialize([unclaimed.id], "different-session")).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("maintenance retains claims while the canonical session still exists", async () => {
+    const store = new UploadStore(await root(), 16);
+    const upload = await store.save("claimed", "text/plain", Buffer.from("value"));
+    await store.materialize([upload.id], "live-session");
+
+    await expect(store.maintain(new Set(["live-session"]))).resolves.toMatchObject({
+      entryCount: 1,
+      claimedCount: 1,
+      claimedBytes: 5,
+    });
+    await expect(store.materialize([upload.id], "live-session")).resolves.toMatchObject({
+      envelope: expect.stringContaining("claimed"),
+    });
+  });
+
   it("prunes expired unclaimed and malformed entries before quota admission", async () => {
     let now = 1_000;
     const home = await root();

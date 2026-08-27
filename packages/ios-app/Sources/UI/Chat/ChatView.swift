@@ -1602,7 +1602,17 @@ struct ChatView: View {
             onDismissResourcePicker: dismissComposerResourcePicker,
             onShowContext: { sessionPresentation.showContext = true },
             onSend: { behavior in send(behavior: behavior) },
-            onAbort: { Task { await model.abort(sessionID: sessionID) } },
+            onAbort: {
+                let operation = selectedAuthoritativeSnapshot?.operation
+                let kind = ChatComposerPolicy.abortKind(operation: operation)
+                Task {
+                    await model.abort(
+                        sessionID: sessionID,
+                        kind: kind,
+                        operationID: operation?.id
+                    )
+                }
+            },
             onSelectAttachmentDestination: requestAttachmentPresentation,
             onCatchUp: catchUpToTail,
             onComposerHeight: { height in

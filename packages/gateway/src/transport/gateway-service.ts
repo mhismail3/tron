@@ -189,6 +189,7 @@ export class GatewayService {
         "filesystem.v1",
         "source-control.v1",
         "uploads.v1",
+        "uploads-status.v1",
         "terminal.v1",
         "extension-presentation.v1",
         EXTENSION_ACTIVITY_HISTORY_CAPABILITY,
@@ -215,6 +216,9 @@ export class GatewayService {
         return this.info();
       case "system.logs":
         return safeJson({ records: this.dependencies.logger.recent(integer(params.limit ?? 200, "limit", 1, 1_000)) });
+      case "uploads.status":
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Upload status accepts no parameters");
+        return safeJson(await this.dependencies.uploads.status());
       case "command.status":
         return safeJson(await this.dependencies.receipts.status(
           client.identity,
@@ -613,7 +617,15 @@ export class GatewayService {
           this.processTranscriptLeases.releaseSession(sessionId);
           await this.dependencies.sessions.delete(sessionId);
           this.dependencies.sessionDeleted(sessionId);
-          await this.dependencies.uploads.removeSession(sessionId).catch(() => {});
+          try {
+            await this.dependencies.uploads.removeSession(sessionId);
+          } catch {
+            this.dependencies.logger?.log(
+              "warning",
+              "A canonical session was deleted, but its attachment cleanup remains pending",
+              { event: "uploads.session-cleanup-pending", source: "uploads" },
+            );
+          }
           return { deleted: true };
         });
       case "session.prompt":
@@ -658,6 +670,7 @@ export class GatewayService {
             params.kind === undefined
               ? "agent"
               : oneOf(params.kind, "kind", ["agent", "compaction", "retry", "branchSummary", "bash"] as const),
+            optionalString(params.operationId, "operationId", 200),
           );
           return { aborted: true };
         }, true);
