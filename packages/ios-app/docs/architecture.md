@@ -208,9 +208,12 @@ One deterministic `ChatTranscriptProjectionKernel` converts exact canonical entr
 raw atoms and then globally assembles call/result joins, bootstrap filtering, barriers, grouping,
 and semantic maps. Message presentation IDs and required content/thinking-run ordinals arrive from
 the Gateway and are never rewritten: the same semantic row, thinking run, and prepared-text source
-therefore survive live-to-canonical settlement even though the canonical entry ID changes. Duplicate
-render IDs remain invalid and fail closed rather than being collision-disambiguated; semantic identity
-continues to own entrance and resilience state. The projection worker prepares immutable row-local
+therefore survive live-to-canonical settlement even though the canonical entry ID changes. When one
+snapshot briefly retains a streaming assistant after its matching presentation ID becomes canonical,
+canonical ownership wins for every row shape, including finalized tool groups. Other duplicate render
+IDs remain invalid and fail closed before row-local preparation rather than trapping or being
+collision-disambiguated; semantic identity continues to own entrance and resilience state. The
+projection worker prepares immutable row-local
 markdown/thinking slices with entry-local revision tokens, so render rows perform only cheap revision
 equality and never reslice the transcript-wide cache. `ToolExecutionStatePolicy` is shared with
 `SessionPresentationStore`, so progress-sequence, status-tie, producer-order/group-order, and call-ID

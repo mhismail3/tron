@@ -848,6 +848,19 @@ private actor ChatTranscriptProjectionWorker {
         }
 
         guard !Task.isCancelled else { return nil }
+        // Malformed authoritative identities are intentionally retained by the
+        // kernel so installation can fail closed. Do not feed those duplicate
+        // rendered IDs into Dictionary(uniqueKeysWithValues:), which traps
+        // before the owner can reject the projection safely.
+        guard candidate.isValid else {
+            return BuiltChatTranscript(
+                handoff: handoff,
+                timeline: candidate.timeline,
+                toolPayloads: candidate.toolPayloads,
+                preparedTextByRenderedID: [:],
+                isInternallyConsistent: false
+            )
+        }
         let admittedTextPreparationGeneration = textPreparationGeneration
         let prepared = await textPreparationCache.prepare(
             ChatTextPreparationPolicy.sources(in: snapshot)

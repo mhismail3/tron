@@ -494,6 +494,32 @@ enum ChatTranscriptProjectionKernel {
         fragments: [ChatTranscriptProjectionFragment],
         streamingFragment: ChatTranscriptProjectionFragment?
     ) -> AssembledProjection {
+        // The Gateway can publish a canonical assistant entry one snapshot
+        // before clearing the matching streaming projection. Canonical
+        // ownership wins that handoff regardless of row shape; assembling both
+        // would duplicate finalized tool-group identities and make the expected
+        // overlap look like malformed authoritative data.
+        if let streamingFragment,
+           snapshot.transcript.contains(where: { item in
+               item.kind == .message
+                   && item.role == streamingFragment.source.role
+                   && item.presentationId == streamingFragment.source.presentationId
+           }) {
+            var canonicalSnapshot = snapshot
+            canonicalSnapshot.streaming = nil
+            let base = assemble(
+                snapshot: canonicalSnapshot,
+                fragments: fragments,
+                streamingFragment: nil
+            )
+            return AssembledProjection(
+                timeline: base.timeline,
+                toolPayloads: base.toolPayloads,
+                toolsInspected: base.toolsInspected,
+                patchMetadata: base.patchMetadata,
+                usesIsolatedStreamingSuffix: false
+            )
+        }
         if snapshot.toolExecutions.allSatisfy({ $0.status != .running }),
            let streamingFragment,
            let live = isolatedStreamingTimeline(fragment: streamingFragment) {

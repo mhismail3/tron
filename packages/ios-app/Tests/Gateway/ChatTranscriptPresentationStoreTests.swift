@@ -347,6 +347,32 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("duplicate canonical row IDs fail closed without trapping projection preparation")
+    func duplicateCanonicalRowsRejectProjection() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_214)
+                .openingTail(targetEncodedBytes: 8_000)
+            let duplicate = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+            {"id":"duplicate","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"compaction","summary":"summary","tokensBefore":10}
+            """.utf8))
+            snapshot.transcript = [duplicate, duplicate]
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 2
+            let tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 7
+            )
+            let store = ChatTranscriptPresentationStore()
+
+            store.submit(snapshot: snapshot, tag: tag)
+
+            await #expect(throws: ChatTranscriptPresentationStoreError.invalidProjection) {
+                try await store.waitForInstall(of: tag)
+            }
+            #expect(store.installed == nil)
+        }
+    }
+
     @Test("presentation-only queue and tail IDs cannot collide with canonical rows")
     func physicalRowNamespaceRejectsQueueTailCollision() async throws {
         try await withTestWatchdog { @MainActor in
@@ -1487,12 +1513,16 @@ struct ChatTranscriptPresentationStoreTests {
             live.phase = .running
             live.eventSequence += 1
             live.streaming = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
-            {"id":"streaming","parentId":"parent","presentationId":"stream:install","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"stream:install:0","ordinal":0,"type":"text","text":"answer"}]}
+            {"id":"streaming","parentId":"parent","presentationId":"stream:install","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"stream:install:0","ordinal":0,"type":"text","text":"answer"},{"id":"stream:install:1","ordinal":1,"type":"toolCall","toolCallId":"settling-call","name":"read","arguments":{"path":"README.md"},"groupId":"settling-group","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
             """.utf8))
             tag = ChatTranscriptProjectionTag(snapshot: live, presentationGeneration: 40)
             store.submit(snapshot: live, tag: tag)
             let liveInstall = try await store.waitForInstall(of: tag)
-            #expect(liveInstall.timeline.ids.last == "stream:install")
+            #expect(liveInstall.timeline.ids.first == "stream:install")
+            #expect(liveInstall.timeline.items.compactMap { item -> ChatToolRunPresentation? in
+                guard case .toolRun(let run) = item else { return nil }
+                return run
+            }.flatMap(\.tools).map(\.id) == ["settling-call"])
             #expect(store.resolveEntrance(
                 id: "stream:install", installationTag: tag, isVisible: true
             ))
@@ -1500,13 +1530,17 @@ struct ChatTranscriptPresentationStoreTests {
             var overlap = live
             overlap.eventSequence += 1
             overlap.transcript.append(try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
-            {"id":"canonical","parentId":"parent","presentationId":"stream:install","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"stream:install:0","ordinal":0,"type":"text","text":"answer"}]}
+            {"id":"canonical","parentId":"parent","presentationId":"stream:install","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"stream:install:0","ordinal":0,"type":"text","text":"answer"},{"id":"stream:install:1","ordinal":1,"type":"toolCall","toolCallId":"settling-call","name":"read","arguments":{"path":"README.md"},"groupId":"settling-group","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
             """.utf8)))
             overlap.transcriptTotal = overlap.transcript.count
             tag = ChatTranscriptProjectionTag(snapshot: overlap, presentationGeneration: 40)
             store.submit(snapshot: overlap, tag: tag)
             let overlapInstall = try await store.waitForInstall(of: tag)
             #expect(overlapInstall.timeline.ids.filter { $0 == "stream:install" }.count == 1)
+            #expect(overlapInstall.timeline.items.compactMap { item -> ChatToolRunPresentation? in
+                guard case .toolRun(let run) = item else { return nil }
+                return run
+            }.flatMap(\.tools).map(\.id) == ["settling-call"])
             #expect(overlapInstall.hasUniqueDisplayedIDs)
             #expect(store.entranceState(for: "stream:install") == .admitted)
 
@@ -1516,7 +1550,7 @@ struct ChatTranscriptPresentationStoreTests {
             tag = ChatTranscriptProjectionTag(snapshot: settled, presentationGeneration: 40)
             store.submit(snapshot: settled, tag: tag)
             let settledInstall = try await store.waitForInstall(of: tag)
-            #expect(settledInstall.timeline.ids.last == "stream:install")
+            #expect(settledInstall.timeline.ids.first == "stream:install")
             #expect(store.entranceState(for: "stream:install") == .admitted)
 
             settled.phase = .idle
@@ -1524,7 +1558,7 @@ struct ChatTranscriptPresentationStoreTests {
             tag = ChatTranscriptProjectionTag(snapshot: settled, presentationGeneration: 40)
             store.submit(snapshot: settled, tag: tag)
             let idleInstall = try await store.waitForInstall(of: tag)
-            #expect(idleInstall.timeline.ids.last == "stream:install")
+            #expect(idleInstall.timeline.ids.first == "stream:install")
             #expect(store.entranceState(for: "stream:install") == .admitted)
         }
     }
