@@ -485,13 +485,18 @@ enum ChatTranscriptProjectionKernel {
         // before clearing the matching streaming projection. Canonical
         // ownership wins that handoff regardless of row shape; assembling both
         // would duplicate finalized tool-group identities and make the expected
-        // overlap look like malformed authoritative data.
+        // overlap look like malformed authoritative data. Presentation identity
+        // is the primary proof, while an exact nonempty call-membership subset
+        // closes the narrow handoff where canonical persistence is visible
+        // before its deferred live presentation binding is installed.
+        let canonicalToolCallIDs = Set(fragments.flatMap(\.toolCallIDs))
         if let streamingFragment,
            snapshot.transcript.contains(where: { item in
                item.kind == .message
                    && item.role == streamingFragment.source.role
                    && item.presentationId == streamingFragment.source.presentationId
-           }) {
+           }) || (!streamingFragment.toolCallIDs.isEmpty
+               && Set(streamingFragment.toolCallIDs).isSubset(of: canonicalToolCallIDs)) {
             var canonicalSnapshot = snapshot
             canonicalSnapshot.streaming = nil
             let base = assemble(

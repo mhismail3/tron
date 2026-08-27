@@ -1870,6 +1870,27 @@ final class AppModel {
         )
     }
 
+    /// Replaces one transiently malformed mounted projection with a fresh
+    /// authoritative synchronization cut without changing route ownership.
+    /// Chat presentation bounds this recovery to one attempt; persistent
+    /// malformed authority still fails closed.
+    func resynchronizeSessionPresentation(_ id: String, generation: Int) async throws {
+        guard sessionPresentation.presentationGeneration(for: id) == generation else {
+            throw CancellationError()
+        }
+        guard await sessionPresentation.reconnectMountedPresentation() else {
+            throw GatewayFailure(
+                code: "sync_failed",
+                message: "Tron could not refresh this conversation.",
+                retryable: true,
+                details: nil
+            )
+        }
+        guard sessionPresentation.presentationGeneration(for: id) == generation else {
+            throw CancellationError()
+        }
+    }
+
     func closeSessionPresentation(_ id: String, generation: Int) async {
         let target = SessionPresentationTarget(sessionID: id, generation: generation)
         cancelExtensionEditorSynchronization(for: target)

@@ -2150,6 +2150,15 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatOutgoingSubmissionRow.swift"),
             encoding: .utf8
         )
+        let scroll = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptScrollView.swift"),
+            encoding: .utf8
+        )
+        let replacementHost = (scroll.components(
+            separatedBy: "private struct ChatPhysicalTranscriptReplacementHost"
+        ).dropFirst().first ?? "").components(
+            separatedBy: "/// The single physical transcript scroll owner"
+        ).first ?? ""
         let motion = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatContentTransition.swift"),
             encoding: .utf8
@@ -2167,8 +2176,8 @@ struct PresentationStyleGuardTests {
         #expect(motion.contains("ChatPromptReplacementAnimationPolicy"))
         #expect(motion.contains("admitsChatPromptReplacementAnimation"))
         #expect(chat.contains("ChatPhysicalTranscriptReplacementHost"))
-        #expect(chat.contains(".contentTransition(reduceMotion ? .opacity : .interpolate)"))
-        #expect(chat.contains("withTransaction(transaction)"))
+        #expect(!replacementHost.contains(".contentTransition("))
+        #expect(replacementHost.contains("withTransaction(transaction)"))
         #expect(chat.contains("if canonicalSubmissionIDs.contains(semanticID)"))
         #expect(chat.contains("canonicalSubmissionIDs: sessionPresentation.canonicalSubmissionHandoffs.ids"))
         #expect(chat.contains("canonicalSubmissionAliases: sessionPresentation.canonicalSubmissionAliases.aliases"))
@@ -2187,6 +2196,8 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains("guard let mutationToken = sessionPresentation.queueMutationResolution.begin()"))
         #expect(chat.contains("sessionPresentation.queueMutationResolution.wait(for: token)"))
         #expect(chat.contains("guard resolution == .commandCompleted else { throw CancellationError() }"))
+        #expect(chat.contains("catch ChatTranscriptPresentationStoreError.invalidProjection"))
+        #expect(chat.contains("resynchronizeSessionPresentation("))
         #expect(chat.contains("sessionPresentation.modelPresentationGeneration == presentationGeneration"))
         #expect(chat.contains("presentationTarget == target"))
         #expect(chat.occurrences(of: "retireQueueMutationPresentationState()") >= 2)
@@ -2203,6 +2214,36 @@ struct PresentationStyleGuardTests {
         )
         #expect(resolutionWait.lowerBound < projectionWait.lowerBound)
         #expect(!preparedSeed.contains("decodeThumbnail"))
+    }
+
+    @Test("transient projection recovery and tool chip transitions have one owner")
+    func transcriptRecoveryAndToolTransitionOwnership() throws {
+        let scroll = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptScrollView.swift"),
+            encoding: .utf8
+        )
+        let replacementHost = (scroll.components(
+            separatedBy: "private struct ChatPhysicalTranscriptReplacementHost"
+        ).dropFirst().first ?? "").components(
+            separatedBy: "/// The single physical transcript scroll owner"
+        ).first ?? ""
+        let chatView = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        let appModel = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/AppModel.swift"),
+            encoding: .utf8
+        )
+
+        #expect(!replacementHost.contains(".contentTransition("))
+        #expect(replacementHost.contains("withTransaction(transaction)"))
+        #expect(chatView.contains("var attemptedInvalidProjectionRecovery = false"))
+        #expect(chatView.contains("catch ChatTranscriptPresentationStoreError.invalidProjection"))
+        #expect(chatView.contains("guard !attemptedInvalidProjectionRecovery"))
+        #expect(chatView.contains("resynchronizeSessionPresentation("))
+        #expect(appModel.contains("func resynchronizeSessionPresentation("))
+        #expect(appModel.contains("reconnectMountedPresentation()"))
     }
 
     @Test("queued messages remain visible and individually manageable in chat")

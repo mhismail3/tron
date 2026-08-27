@@ -122,7 +122,11 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   sequence so equal wall-clock timestamps cannot regress output. A display run keeps
   its first finalized group identity from invocation through completion, reconnect,
   and canonical settlement so final assistant text cannot jump ahead of or reinsert it.
-  Only calls in one exact finalized producer group consolidate. An assistant-message
+  Gateway snapshots require a still-owned live presentation identity before projecting Pi's
+  streaming message; canonical settlement cannot rotate a stale SDK frame into a duplicate group.
+  Exact call membership also lets canonical projection suppress that one transient handoff frame
+  if presentation binding and persistence are observed in opposite order. Only calls in one exact
+  finalized producer group consolidate. An assistant-message
   boundary always flushes the displayed run even when thinking is empty or hidden;
   distinct finalized group IDs can never accumulate in the newest chip. Missing group
   metadata cannot authorize a speculative cross-source aggregate, so unanchored runtime
@@ -147,7 +151,7 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   extension provenance never substitutes **Extension activity**. Structural chip targets
   exclude duration and payload churn, coalesce for one display frame, and use a monotonic
   latest-target token for local interruptible animation while transcript and scroll
-  projection transactions remain stable while the transcript boundary preserves continuous system interaction transactions. The one stable chip surface retains semantic tint as its value changes: running is amber, failure is red, and successful completion is emerald. Both legacy and consolidated tool chips use native interactive Liquid Glass as their sole press-and-drag owner. Their visible surface handles taps directly and exposes explicit button accessibility semantics; it is not wrapped in a second native `Button` press phase, preserving the system drag morph without an immediate stacked zoom or custom scale/opacity effect. Multi-tool run chips show accumulated time as the sum of their
+  projection transactions remain stable while the transcript boundary preserves continuous system interaction transactions. The physical row host installs no second content transition around the chip; only the chip's shallow value owner animates, preventing overlapping snapshots of rapid parallel-group updates. The one stable chip surface retains semantic tint as its value changes: running is amber, failure is red, and successful completion is emerald. Both legacy and consolidated tool chips use native interactive Liquid Glass as their sole press-and-drag owner. Their visible surface handles taps directly and exposes explicit button accessibility semantics; it is not wrapped in a second native `Button` press phase, preserving the system drag morph without an immediate stacked zoom or custom scale/opacity effect. Multi-tool run chips show accumulated time as the sum of their
   invocation durations. Detail summary and rows install atomically for one projection tag,
   and rows remain in reverse canonical invocation order rather than switching when optional
   timing metadata arrives. Known built-ins

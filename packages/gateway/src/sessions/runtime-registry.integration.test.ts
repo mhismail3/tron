@@ -3493,6 +3493,7 @@ export default function (pi) {
     expect(new Set(progressMessages.map((message) => message.timestamp)).size).toBe(1);
     expect(lastMessage.content.map((part: any) => part.ordinal)).toEqual([0]);
     const finalSnapshot = slot.snapshot();
+    expect(finalSnapshot.streaming).toBeUndefined();
     const assistant = finalSnapshot.transcript.find(
       (item) => item.kind === "message" && item.role === "assistant",
     );
@@ -3564,6 +3565,7 @@ export default function (pi) {
       await waitUntil(() => !slot.isBusy);
 
       const finalSnapshot = slot.snapshot();
+      expect(finalSnapshot.streaming).toBeUndefined();
       const canonical = finalSnapshot.transcript.find(
         (item) => item.kind === "message" && item.role === "assistant",
       );

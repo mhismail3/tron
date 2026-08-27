@@ -360,7 +360,10 @@ updates without losing the newest state. Running readable output is a bounded cu
 channel: each newer nonempty frame replaces the previous display in place, while an empty advisory
 frame preserves the last readable output so detail views never flash blank. A nonempty terminal result
 is authoritative. Clients join
-calls, progress, and results by canonical call ID rather than arrival order.
+calls, progress, and results by canonical call ID rather than arrival order. A live assistant
+frame is projected only while its explicit Gateway presentation identity remains owned. After
+canonical binding retires that identity, a briefly retained Pi `streamingMessage` cannot create
+a second stream identity or duplicate finalized tool groups in a settlement snapshot.
 
 Active message queues are projected with stable per-entry IDs, delivery behavior,
 display text, total attachment count, optional photo/file counts, optional bounded upload descriptors,

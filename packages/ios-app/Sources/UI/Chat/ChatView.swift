@@ -720,6 +720,7 @@ struct ChatView: View {
     private func installCurrentTranscriptProjection(
         presentationGeneration: Int
     ) async throws -> InstalledChatTranscript {
+        var attemptedInvalidProjectionRecovery = false
         while true {
             try Task.checkCancellation()
             guard sessionPresentation.modelPresentationGeneration == presentationGeneration,
@@ -751,6 +752,16 @@ struct ChatView: View {
                     return installed
                 }
             } catch ChatTranscriptPresentationStoreError.superseded {
+                continue
+            } catch ChatTranscriptPresentationStoreError.invalidProjection {
+                guard !attemptedInvalidProjectionRecovery else {
+                    throw ChatTranscriptPresentationStoreError.invalidProjection
+                }
+                attemptedInvalidProjectionRecovery = true
+                try await model.resynchronizeSessionPresentation(
+                    sessionID,
+                    generation: presentationGeneration
+                )
                 continue
             }
         }

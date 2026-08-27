@@ -210,9 +210,14 @@ and semantic maps. Message presentation IDs and required content/thinking-run or
 the Gateway and are never rewritten: the same semantic row, thinking run, and prepared-text source
 therefore survive live-to-canonical settlement even though the canonical entry ID changes. When one
 snapshot briefly retains a streaming assistant after its matching presentation ID becomes canonical,
-canonical ownership wins for every row shape, including finalized tool groups. Other duplicate render
-IDs remain invalid and fail closed before row-local preparation rather than trapping or being
-collision-disambiguated; semantic identity continues to own entrance and resilience state. The
+canonical ownership wins for every row shape, including finalized tool groups. Exact nonempty tool-call
+membership is a second settlement proof for the narrow frame where canonical persistence precedes its
+presentation binding. The Gateway additionally refuses to project Pi's briefly retained
+`streamingMessage` after the explicit live identity retires. Other duplicate render IDs remain invalid
+and fail closed before row-local preparation rather than trapping or being collision-disambiguated;
+one transient invalid mounted projection requests one fresh authoritative synchronization cut in the
+same presentation generation, while a repeated malformed cut fails with authored actionable copy.
+Semantic identity continues to own entrance and resilience state. The
 projection worker prepares immutable row-local
 markdown/thinking slices with entry-local revision tokens, so render rows perform only cheap revision
 equality and never reslice the transcript-wide cache. `ToolExecutionStatePolicy` is shared with

@@ -261,8 +261,11 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
         // `row.id` is the sole structural identity. Lifecycle, payload, title,
         // progress, and canonical-settlement changes retarget this persistent
         // host without assigning an inner `.id` that would remove its subtree.
+        // The host owns only structural continuity. Tool chips and the two
+        // admitted lifecycle replacements animate their own shallow values;
+        // a second container-level content transition can retain snapshots of
+        // rapid aggregate updates as phantom duplicate rows.
         content(displayed)
-            .contentTransition(reduceMotion ? .opacity : .interpolate)
             .onAppear { hostedRecorder?.recordPhysicalRowAppearance(id: displayed.id) }
             .onDisappear { hostedRecorder?.recordPhysicalRowDisappearance(id: displayed.id) }
             .onChange(of: row) { _, next in retarget(next) }

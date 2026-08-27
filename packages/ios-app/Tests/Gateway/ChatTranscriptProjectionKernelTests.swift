@@ -113,6 +113,28 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(candidate.isValid)
     }
 
+    @Test("exact canonical tool membership owns stale streaming identity during settlement")
+    func canonicalToolMembershipOwnsRotatedStreamingOverlap() throws {
+        var snapshot = try fixture(transcript: """
+        [{"id":"canonical","parentId":null,"presentationId":"canonical:settlement","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"canonical-call","ordinal":0,"type":"toolCall","toolCallId":"call","name":"read","arguments":{"path":"README.md"},"groupId":"canonical-group","groupIndex":0,"groupCount":1,"groupFinalized":true}]}]
+        """)
+        snapshot.transcriptTotal = 1
+        snapshot.phase = .running
+        snapshot.streaming = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+        {"id":"streaming","parentId":null,"presentationId":"stream:rotated","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"streaming-text","ordinal":0,"type":"text","text":"stale frame"},{"id":"streaming-call","ordinal":1,"type":"toolCall","toolCallId":"call","name":"read","arguments":{"path":"README.md"},"groupId":"stale-group","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
+        """.utf8))
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+
+        #expect(candidate.timeline.ids == ["tool-run-canonical-group"])
+        guard case .toolRun(let run) = candidate.timeline.items.first else {
+            Issue.record("Expected canonical tool ownership")
+            return
+        }
+        #expect(run.tools.map(\.id) == ["call"])
+        #expect(candidate.isValid)
+    }
+
     @Test("call references on malformed result content preserve canonical suppression")
     func malformedResultContentCallReference() throws {
         var snapshot = try fixture(transcript: """

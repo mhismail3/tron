@@ -704,10 +704,21 @@ enum ChatTranscriptTransitionPolicy {
     }
 }
 
-enum ChatTranscriptPresentationStoreError: Error, Equatable, Sendable {
+enum ChatTranscriptPresentationStoreError: Error, Equatable, Sendable, LocalizedError {
     case superseded
     case waiterLimitReached
     case invalidProjection
+
+    var errorDescription: String? {
+        switch self {
+        case .superseded:
+            "A newer conversation update replaced this one."
+        case .waiterLimitReached:
+            "The conversation changed too quickly to finish opening. Please retry."
+        case .invalidProjection:
+            "The conversation update was inconsistent after a fresh synchronization. Please retry."
+        }
+    }
 }
 
 #if HOSTED_TEST

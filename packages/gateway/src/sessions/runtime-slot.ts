@@ -264,6 +264,9 @@ export class RuntimeSlot {
   private streamPresentationId: string | undefined;
   private streamStartedAt: string | undefined;
   private finalizedStreamPresentationId: string | undefined;
+  /** Exact SDK assistant objects already bound to canonical entries cannot be
+   * re-admitted if Pi briefly retains them as streaming state. */
+  private readonly canonicalizedStreamingMessages = new WeakSet<object>();
   /** Exact successful canonical assistant completion awaiting durable attention admission. */
   private pendingAssistantCompletion: CanonicalAssistantCompletion | undefined;
   /** Exact completions retain canonical attention order. Their durable stamps
@@ -1325,6 +1328,7 @@ export class RuntimeSlot {
       if (candidate?.type !== "message"
         || candidate.message.role !== "assistant"
         || candidate.message !== message) return;
+      this.canonicalizedStreamingMessages.add(message);
       if (presentationID) this.rememberPresentationID(candidate.id, presentationID);
       const completion = successfulAssistantCompletion(candidate);
       if (completion && this.operation?.kind === "prompt") {
@@ -3419,8 +3423,16 @@ export class RuntimeSlot {
     const contextUsage = session.getContextUsage();
     const stats = session.getSessionStats();
     const latestCacheHitRate = this.latestCacheHitRate();
-    const streamingMessage = session.state.streamingMessage
-      ?? (this.streamPresentationId ? this.latestStreamingMessage : undefined);
+    // Pi exposes streamingMessage before an async message_start hook returns,
+    // so the SDK object may establish the initial Gateway identity. Once that
+    // exact object is canonically bound, however, Pi can retain it briefly;
+    // never let a snapshot recreate a second stream ID from that stale value.
+    const sdkStreamingMessage = session.state.streamingMessage;
+    const streamingMessage = this.streamPresentationId
+      ? (sdkStreamingMessage ?? this.latestStreamingMessage)
+      : sdkStreamingMessage && !this.canonicalizedStreamingMessages.has(sdkStreamingMessage)
+        ? sdkStreamingMessage
+        : undefined;
     const streaming = streamingMessage
       ? (() => {
         this.captureStreamIdentity(streamingMessage);
