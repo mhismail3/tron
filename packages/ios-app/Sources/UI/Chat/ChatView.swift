@@ -270,9 +270,7 @@ struct ChatView: View {
             } else if phase == .active {
                 // SwiftUI can retain a displaced native offset across scene
                 // suspension even though logical pinning did not change.
-                scrollCoordinator.requestPinnedPositionReapplication(
-                    targetRenderedID: transcriptPresentation.installed?.timeline.ids.last
-                )
+                scrollCoordinator.requestPinnedPositionReapplication()
                 if sessionPresentation.needsOpeningResume {
                     Task { await beginOpeningPresentation() }
                 }
@@ -1257,9 +1255,7 @@ struct ChatView: View {
                 return true
             },
             reapplyPinnedPosition: {
-                scrollCoordinator.requestPinnedPositionReapplication(
-                    targetRenderedID: transcriptPresentation.installed?.timeline.ids.last
-                )
+                scrollCoordinator.requestPinnedPositionReapplication()
             },
             invalidatePresentation: {
                 scrollCoordinator.resetForPresentation()
@@ -1363,10 +1359,6 @@ struct ChatView: View {
                 // still regard as logically bottom-aligned after native drift.
                 var target = ScrollPosition(idType: String.self)
                 target.scrollTo(id: "transcript-bottom", anchor: .bottom)
-                transcriptScrollPosition = target
-            case .renderedID(let renderedID):
-                var target = ScrollPosition(idType: String.self)
-                target.scrollTo(id: renderedID, anchor: .bottom)
                 transcriptScrollPosition = target
             case .tail, .openingTail:
                 transcriptScrollPosition.scrollTo(edge: .bottom)

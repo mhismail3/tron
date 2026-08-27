@@ -2377,8 +2377,6 @@ struct PresentationStyleGuardTests {
         #expect(transcriptEvents.contains("struct TranscriptNotice: View"))
         #expect(transcriptEvents.contains("struct ChatNotificationView: View"))
         #expect(toolRuns.contains("struct ToolRunView: View"))
-        #expect(toolCardLabel.contains("ChatCompactPillSurface(tone: tone, material: .glass"))
-        #expect(toolRunLabel.contains("ChatCompactPillSurface(tone: visual.tone, material: visual.material"))
         #expect(notification.contains("pill.frame(minWidth: 44, minHeight: 44)"))
         #expect(notification.contains(".frame(maxWidth: .infinity, minHeight: 44, alignment: .center)"))
         #expect(transcriptView.contains("LazyVStack(alignment: .leading, spacing: 0)"))
@@ -2388,6 +2386,7 @@ struct PresentationStyleGuardTests {
             #expect(!label.contains("minHeight"))
             #expect(!label.contains("Spacer("))
             #expect(!label.contains("maxWidth"))
+            #expect(label.contains("cornerRadiusOverride: ChatToolChipShapePolicy.cornerRadius"))
         }
         #expect(!(transcriptEvents + toolRuns).contains("value: visualState"))
         #expect(!notification.contains(".contentTransition(.opacity)"))

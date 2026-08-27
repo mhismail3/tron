@@ -1351,10 +1351,8 @@ struct ChatTranscriptPresentationStoreTests {
             }
             #expect(resolvedNotification.title == "Context compacted")
             #expect(!resolvedNotification.showsProgress)
-            #expect(resolvedPhysical.replacementAnimationIdentity
-                != pendingPhysical.replacementAnimationIdentity)
-            #expect(resolvedPhysical.replacementContentIdentity
-                != pendingPhysical.replacementContentIdentity)
+            #expect(resolvedPhysical.id == pendingPhysical.id)
+            #expect(resolvedPhysical.content != pendingPhysical.content)
             #expect(ChatPhysicalTranscriptReplacementPolicy.replacement(
                 from: pendingPhysical,
                 to: resolvedPhysical
@@ -1447,7 +1445,6 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(item.id == canonicalID)
             #expect(replacement.semanticID == canonicalID)
             #expect(replacement.id == submission.presentationID)
-            #expect(replacement.replacementAnimationIdentity != nil)
             let outgoingPhysical = try #require(
                 localRows.first { $0.id == submission.presentationID }
             )

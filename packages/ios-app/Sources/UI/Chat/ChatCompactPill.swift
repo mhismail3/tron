@@ -57,23 +57,27 @@ struct ChatCompactPillSurface<Content: View>: View {
     let tone: ChatNotificationTone
     let material: ChatNotificationMaterial
     let interactive: Bool
+    let cornerRadiusOverride: CGFloat?
     @ViewBuilder let content: Content
 
     init(
         tone: ChatNotificationTone,
         material: ChatNotificationMaterial,
         interactive: Bool = false,
+        cornerRadiusOverride: CGFloat? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self.tone = tone
         self.material = material
         self.interactive = interactive
+        self.cornerRadiusOverride = cornerRadiusOverride
         self.content = content()
     }
 
     @ViewBuilder var body: some View {
         let shape = RoundedRectangle(
-            cornerRadius: ChatCompactPillLayoutPolicy.cornerRadius(for: tone),
+            cornerRadius: cornerRadiusOverride
+                ?? ChatCompactPillLayoutPolicy.cornerRadius(for: tone),
             style: .continuous
         )
         switch material {
@@ -95,6 +99,12 @@ struct ChatCompactPillSurface<Content: View>: View {
                 .overlay(shape.stroke(tone.surfaceColor.opacity(0.30), lineWidth: 0.5))
         }
     }
+}
+
+enum ChatToolChipShapePolicy {
+    /// Status and failure tint changes are shallow. The Liquid Glass geometry
+    /// never switches shape while a mounted tool run settles.
+    static let cornerRadius = ChatCompactPillLayoutPolicy.capsuleCornerRadius
 }
 
 enum ChatCompactPillDetailStyle {

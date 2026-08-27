@@ -202,26 +202,12 @@ enum ChatTranscriptProjectionKernel {
             let fragments = snapshot.transcript.map(fragment)
             let streamingFragment = snapshot.streaming.map(fragment)
             let projection: AssembledProjection
-            if isolatesStreamingSuffix {
-                projection = assembledProjection(
-                    snapshot: snapshot,
-                    fragments: fragments,
-                    streamingFragment: streamingFragment
-                )
-            } else {
-                let assembly = assemble(
-                    snapshot: snapshot,
-                    fragments: fragments,
-                    streamingFragment: streamingFragment
-                )
-                projection = AssembledProjection(
-                    timeline: assembly.timeline,
-                    toolPayloads: assembly.toolPayloads,
-                    toolsInspected: assembly.toolsInspected,
-                    patchMetadata: assembly.patchMetadata,
-                    usesIsolatedStreamingSuffix: false
-                )
-            }
+            projection = assembledProjection(
+                snapshot: snapshot,
+                fragments: fragments,
+                streamingFragment: streamingFragment,
+                allowsIsolatedStreamingSuffix: isolatesStreamingSuffix
+            )
             let report = ChatTranscriptProjectionWorkReport(
                 mode: .cold,
                 sourceEntriesExamined: fragments.count,
@@ -492,7 +478,8 @@ enum ChatTranscriptProjectionKernel {
     private static func assembledProjection(
         snapshot: SessionSnapshot,
         fragments: [ChatTranscriptProjectionFragment],
-        streamingFragment: ChatTranscriptProjectionFragment?
+        streamingFragment: ChatTranscriptProjectionFragment?,
+        allowsIsolatedStreamingSuffix: Bool = true
     ) -> AssembledProjection {
         // The Gateway can publish a canonical assistant entry one snapshot
         // before clearing the matching streaming projection. Canonical
@@ -520,7 +507,8 @@ enum ChatTranscriptProjectionKernel {
                 usesIsolatedStreamingSuffix: false
             )
         }
-        if snapshot.toolExecutions.allSatisfy({ $0.status != .running }),
+        if allowsIsolatedStreamingSuffix,
+           snapshot.toolExecutions.allSatisfy({ $0.status != .running }),
            let streamingFragment,
            let live = isolatedStreamingTimeline(fragment: streamingFragment) {
             var baseSnapshot = snapshot
@@ -839,6 +827,29 @@ enum ChatTranscriptProjectionKernel {
             pendingToolIndexByCallID.removeAll(keepingCapacity: true)
         }
 
+        func finalizedGroupID(_ tool: PreparedTool) -> String? {
+            guard tool.presentation.groupFinalized == true else { return nil }
+            return tool.presentation.groupId
+        }
+
+        /// One chip may contain only one exact finalized producer group. Legacy
+        /// ungrouped calls may coalesce only inside the same source fragment;
+        /// they never accumulate across assistant-message/runtime boundaries.
+        func appendToolRunMember(
+            _ tool: PreparedTool,
+            allowsUngroupedContinuation: Bool
+        ) {
+            if let first = pendingTools.first {
+                let existingGroup = finalizedGroupID(first)
+                let incomingGroup = finalizedGroupID(tool)
+                let continuesExactGroup = existingGroup != nil && existingGroup == incomingGroup
+                let continuesLocalLegacyRun = existingGroup == nil && incomingGroup == nil
+                    && allowsUngroupedContinuation
+                if !continuesExactGroup && !continuesLocalLegacyRun { flushTools() }
+            }
+            appendTools([tool])
+        }
+
         func appendMessage(
             _ item: TranscriptItem,
             parts: [ChatMessagePart],
@@ -897,7 +908,10 @@ enum ChatTranscriptProjectionKernel {
                     flushTools()
                     rendered.append(.transcript(item))
                 } else {
-                    appendTools(tools)
+                    for tool in tools {
+                        appendToolRunMember(tool, allowsUngroupedContinuation: false)
+                    }
+                    flushTools()
                 }
                 return
             }
@@ -923,7 +937,7 @@ enum ChatTranscriptProjectionKernel {
                 if case .content(let canonical) = part, canonical.type == .toolCall,
                    let tool = toolsByID[canonical.toolCallId ?? canonical.id] {
                     flushContent(showsFooter: false)
-                    appendTools([tool])
+                    appendToolRunMember(tool, allowsUngroupedContinuation: true)
                 } else {
                     if !pendingTools.isEmpty { flushTools() }
                     content.append(part)
@@ -933,6 +947,15 @@ enum ChatTranscriptProjectionKernel {
             if !renderedFooter, !(item.errorMessage ?? "").isEmpty {
                 flushTools()
                 appendMessage(item, parts: [], streaming: streaming, slice: slice, showsFooter: true)
+            }
+            // Canonical assistant message boundaries are producer run
+            // boundaries. A following tool-only message must not inherit this
+            // chip merely because empty/hidden thinking left no visible row.
+            // Unfinalized tool calls declared by this one streaming source
+            // fragment may remain one provisional local run until the Gateway
+            // publishes exact group metadata.
+            if !streaming || pendingTools.allSatisfy({ $0.presentation.groupFinalized == true }) {
+                flushTools()
             }
         }
 
@@ -985,10 +1008,18 @@ enum ChatTranscriptProjectionKernel {
 
         if let streamingFragment {
             appendFragment(streamingFragment, tools: streamingTools, streaming: true)
-            appendTools(unanchoredLive)
         } else {
-            appendTools(streamingTools)
-            appendTools(unanchoredLive)
+            for tool in streamingTools {
+                appendToolRunMember(tool, allowsUngroupedContinuation: false)
+            }
+            flushTools()
+        }
+        for tool in unanchoredLive {
+            // Without exact finalized metadata there is no authority to merge
+            // independent calls. Keep one physical chip per call; bounded lazy
+            // rendering is cheaper and safer than a speculative aggregate that
+            // grows until abort clears runtime state.
+            appendToolRunMember(tool, allowsUngroupedContinuation: false)
         }
         flushTools()
 

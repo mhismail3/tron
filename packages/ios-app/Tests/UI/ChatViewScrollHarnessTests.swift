@@ -282,6 +282,7 @@ struct ChatViewScrollHarnessTests {
             try await withHarness(snapshot: snapshot) { harness in
                 let firstReady = try await harness.recorder.waitUntil { $0.observation.isReady }
                 #expect(firstReady.observation.installedProjectionRowCount == expectedRowCount)
+                #expect(firstReady.observation.physicalRowAppearanceCounts.values.reduce(0, +) < expectedRowCount)
                 #expect(firstReady.observation.visibleRowIDs.contains(harness.lastTranscriptID))
                 #expect(firstReady.observation.visibleRowIDs.contains("transcript-bottom"))
                 #expect(firstReady.observation.geometry.isPlausibleOpeningViewport)
@@ -494,8 +495,8 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("visible discrete insertion reveals once while native pinning owns the viewport")
-    func discreteInsertionEntrance() async throws {
+    @Test("agent response and compaction settlement retain mounted physical rows")
+    func unifiedResponseAndNotificationSettlement() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_190) { harness in
                 let ready = try await harness.recorder.waitUntil {
@@ -509,29 +510,128 @@ struct ChatViewScrollHarnessTests {
                 let materializationBaseline = ready.observation.tailMaterializationCommandCount
                 let installBaseline = ready.observation.projectionInstallCount
 
-                var updated = harness.snapshot
-                updated.transcript.append(try harnessMessage(id: "discrete-tail"))
-                updated.transcriptTotal = (updated.transcriptTotal ?? updated.transcript.count - 1) + 1
-                updated.revision += 1
-                updated.eventSequence += 1
-                harness.replaceAuthoritativeSnapshot(updated)
+                var intermediate = harness.snapshot
+                intermediate.phase = .running
+                intermediate.streaming = try harnessAssistantMessage(
+                    id: "streaming-agent",
+                    presentationID: "turn-agent",
+                    text: "An intermediate response"
+                )
+                intermediate.revision += 1
+                intermediate.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(intermediate)
 
                 let revealed = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount > installBaseline
                         && $0.observation.animatedEntranceCount == entranceBaseline + 1
+                        && $0.observation.rowFrames["turn-agent"] != nil
                 }
                 #expect(revealed.observation.automaticScrollCommandCount == automaticScrollBaseline)
                 #expect(revealed.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
-                #expect(
-                    revealed.observation.tailMaterializationCommandCount
-                        == materializationBaseline + 1
-                )
+                #expect(revealed.observation.tailMaterializationCommandCount == materializationBaseline + 1)
+                #expect(revealed.observation.physicalRowAppearanceCounts["turn-agent"] == 1)
 
-                // Repeated geometry for the same row cannot replay admission.
-                if let frame = revealed.observation.rowFrames["discrete-tail"] {
-                    harness.probe.updateRowFrame(id: "discrete-tail", frame: frame)
+                var final = intermediate
+                final.phase = .idle
+                final.streaming = nil
+                final.transcript.append(try harnessAssistantMessage(
+                    id: "canonical-agent",
+                    presentationID: "turn-agent",
+                    text: "The final response"
+                ))
+                final.transcriptTotal = (final.transcriptTotal ?? final.transcript.count - 1) + 1
+                final.revision += 1
+                final.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(final)
+
+                let settled = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount > revealed.observation.projectionInstallCount
+                        && $0.observation.rowFrames["turn-agent"] != nil
                 }
-                #expect(harness.probeObservation.animatedEntranceCount == entranceBaseline + 1)
+                #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
+                #expect(settled.observation.tailMaterializationCommandCount == materializationBaseline + 1)
+                #expect(settled.observation.physicalRowAppearanceCounts["turn-agent"] == 1)
+                #expect((settled.observation.physicalRowDisappearanceCounts["turn-agent"] ?? 0) == 0)
+
+                let compactionOrdinal = try #require(final.transcriptTotal)
+                let compactionRowID = "notification-compaction-slot-\(compactionOrdinal)"
+                var compacting = final
+                compacting.phase = .compacting
+                compacting.revision += 1
+                compacting.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(compacting)
+                let progress = try await harness.recorder.waitUntil {
+                    $0.observation.rowFrames[compactionRowID] != nil
+                        && $0.observation.animatedEntranceCount == entranceBaseline + 2
+                }
+                #expect(progress.observation.physicalRowAppearanceCounts[compactionRowID] == 1)
+                #expect(progress.observation.tailMaterializationCommandCount == materializationBaseline + 2)
+
+                var compacted = compacting
+                compacted.transcript.append(try harnessCompactionItem(id: "canonical-compaction"))
+                compacted.transcriptTotal = compactionOrdinal + 1
+                compacted.revision += 1
+                compacted.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(compacted)
+                let compactionSettled = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount > progress.observation.projectionInstallCount
+                        && $0.observation.rowFrames[compactionRowID] != nil
+                }
+                #expect(compactionSettled.observation.animatedEntranceCount == entranceBaseline + 2)
+                #expect(compactionSettled.observation.tailMaterializationCommandCount == materializationBaseline + 2)
+                #expect(compactionSettled.observation.physicalRowAppearanceCounts[compactionRowID] == 1)
+                #expect((compactionSettled.observation.physicalRowDisappearanceCounts[compactionRowID] ?? 0) == 0)
+            }
+        }
+    }
+
+    @Test("ordinary discrete transcript insertion materializes and reveals exactly once")
+    func ordinaryDiscreteInsertionEntrance() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 1_191) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                        && ($0.observation.scrollSettledDistance ?? .infinity)
+                            <= ChatTranscriptGeometry.catchUpDistance
+                }
+                let entranceBaseline = ready.observation.animatedEntranceCount
+                let automaticScrollBaseline = ready.observation.automaticScrollCommandCount
+                let materializationBaseline = ready.observation.tailMaterializationCommandCount
+                let installBaseline = ready.observation.projectionInstallCount
+
+                var inserted = harness.snapshot
+                inserted.transcript.append(try harnessMessage(id: "discrete-tail"))
+                inserted.transcriptTotal = (inserted.transcriptTotal ?? inserted.transcript.count - 1) + 1
+                inserted.revision += 1
+                inserted.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(inserted)
+
+                let revealed = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount > installBaseline
+                        && $0.observation.animatedEntranceCount == entranceBaseline + 1
+                        && $0.observation.rowFrames["discrete-tail"] != nil
+                }
+                #expect(revealed.observation.automaticScrollCommandCount == automaticScrollBaseline)
+                #expect(revealed.observation.tailMaterializationCommandCount == materializationBaseline + 1)
+                #expect(revealed.observation.physicalRowAppearanceCounts["discrete-tail"] == 1)
+
+                var revised = inserted
+                revised.transcript[revised.transcript.count - 1] = try harnessAssistantMessage(
+                    id: "discrete-tail",
+                    presentationID: "discrete-tail",
+                    text: "A revised final response"
+                )
+                revised.revision += 1
+                revised.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(revised)
+                let updated = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount > revealed.observation.projectionInstallCount
+                        && $0.observation.rowFrames["discrete-tail"] != nil
+                }
+                #expect(updated.observation.animatedEntranceCount == entranceBaseline + 1)
+                #expect(updated.observation.tailMaterializationCommandCount == materializationBaseline + 1)
+                #expect(updated.observation.physicalRowAppearanceCounts["discrete-tail"] == 1)
+                #expect((updated.observation.physicalRowDisappearanceCounts["discrete-tail"] ?? 0) == 0)
             }
         }
     }
@@ -578,6 +678,10 @@ struct ChatViewScrollHarnessTests {
                         == materializationBaseline + 1
                 )
                 #expect(settled.observation.rowFrames["tool-run-active-race"] != nil)
+                #expect(settled.observation.physicalRowAppearanceCounts["tool-run-active-race"] == 1)
+                #expect(settled.observation.toolChipSamples.count {
+                    $0.runID == "tool-run-active-race" && $0.transitionToken == 1
+                } == 1)
             }
         }
     }
@@ -624,11 +728,46 @@ struct ChatViewScrollHarnessTests {
                     settled.observation.tailMaterializationCommandCount
                         == materializationBaseline + 1
                 )
+                #expect(settled.observation.physicalRowAppearanceCounts["tool-run-group-one"] == 1)
+                #expect(settled.observation.toolChipSamples.count {
+                    $0.runID == "tool-run-group-one" && $0.transitionToken == 1
+                } == 1)
                 let samples = settled.observation.toolChipSamples.filter {
                     $0.runID == "tool-run-group-one"
                 }
                 #expect(samples.last?.count == 2)
                 #expect(samples.allSatisfy { !$0.title.contains("Extension activity") })
+
+                // A later assistant declaration is a distinct physical run.
+                // It must not grow the most recent chip into an aggregate of
+                // every tool still retained by runtime authority.
+                var nextGroup = grouped
+                nextGroup.toolExecutions.append(harnessRuntimeTool(
+                    id: "group-next",
+                    order: 2,
+                    status: .running,
+                    groupId: "group-next",
+                    groupIndex: 0,
+                    groupCount: 1
+                ))
+                nextGroup.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(nextGroup)
+                let distinct = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount >= installBaseline + 3
+                        && $0.observation.rowFrames["tool-run-group-one"] != nil
+                        && $0.observation.rowFrames["tool-run-group-next"] != nil
+                }
+                #expect(distinct.observation.toolChipSamples.count {
+                    $0.runID == "tool-run-group-one" && $0.transitionToken == 1
+                } == 1)
+                #expect(distinct.observation.toolChipSamples.count {
+                    $0.runID == "tool-run-group-next" && $0.transitionToken == 1
+                } == 1)
+                let latest = distinct.observation.toolChipSamples.last {
+                    $0.runID == "tool-run-group-next"
+                }
+                #expect(latest?.count == 1)
+                #expect(latest?.title == "Read file")
             }
         }
     }
@@ -927,6 +1066,28 @@ private func harnessRuntimeTool(
         groupIndex: groupIndex,
         groupCount: groupCount,
         groupFinalized: true
+    )
+}
+
+private func harnessAssistantMessage(
+    id: String,
+    presentationID: String,
+    text: String
+) throws -> TranscriptItem {
+    try decodeTranscriptFixture(
+        TranscriptItem.self,
+        from: Data("""
+        {"id":"\(id)","parentId":null,"presentationId":"\(presentationID)","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"\(id):text","ordinal":0,"type":"text","text":"\(text)"}]}
+        """.utf8)
+    )
+}
+
+private func harnessCompactionItem(id: String) throws -> TranscriptItem {
+    try decodeTranscriptFixture(
+        TranscriptItem.self,
+        from: Data("""
+        {"id":"\(id)","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"compaction","summary":"Compacted context","tokensBefore":100}
+        """.utf8)
     )
 }
 

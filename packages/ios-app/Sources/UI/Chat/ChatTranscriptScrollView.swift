@@ -2,10 +2,11 @@ import SwiftUI
 
 @MainActor
 protocol ChatTranscriptHostedRecording: AnyObject {
-    func recordEntranceFailsafeReveal()
     func updateGeometry(_ value: ChatTranscriptGeometry)
     func recordScrollSettle(distanceFromBottom: CGFloat)
     func recordToolChip(_ sample: ToolChipInstrumentationSample)
+    func recordPhysicalRowAppearance(id: String)
+    func recordPhysicalRowDisappearance(id: String)
     func recordCommittedHistoryRowEvaluation()
     func recordEntranceResolution(animated: Bool, sourceOrdinal: Int)
     func updateRowFrame(id: String, frame: CGRect, generation: Int?)
@@ -22,8 +23,8 @@ private struct ChatScrollGeometryObservation: Equatable {
 }
 
 private struct ChatLazyTailMaterializationRequest: Hashable {
-    let timelineGeneration: Int
-    let renderedID: String
+    /// The exact semantic ID emitted by `stableRow` geometry callbacks.
+    let semanticID: String
 }
 
 private enum ChatTranscriptLayoutConstants {
@@ -53,32 +54,6 @@ struct ChatPhysicalTranscriptRow: Identifiable, Hashable {
     let id: String
     let semanticID: String
     let content: Content
-
-    var replacementAnimationIdentity: String? {
-        switch content {
-        case .pending(let pending):
-            return "pending:\(pending.id):\(pending.text):\(pending.promptBehavior.isQueuedKind)"
-        case .outgoing(let outgoing, _):
-            return "outgoing:\(outgoing.id):\(outgoing.text):\(outgoing.promptBehavior.isQueuedKind)"
-        case .queued(let queued):
-            return "queued:\(queued.id):\(queued.message.text)"
-        case .transcript(let item, _):
-            switch item {
-            case .transcript(let transcript) where transcript.role == .user:
-                return "canonical:\(transcript.id)"
-            case .message(let message) where message.item.role == .user:
-                return "canonical:\(message.semanticID)"
-            case .notification(let notification):
-                return "notification:\(notification.title):\(notification.showsProgress)"
-            case .transcript, .message, .toolRun:
-                return nil
-            }
-        }
-    }
-
-    var replacementContentIdentity: String {
-        replacementAnimationIdentity ?? "stable:\(id)"
-    }
 
     var isPromptLifecycle: Bool {
         switch content {
@@ -257,12 +232,13 @@ enum ChatPhysicalTranscriptReplacementPolicy {
 }
 
 /// A unified ForEach keeps this host alive while runtime/local content becomes
-/// canonical. Row state advances in one explicit, admitted transaction; the
-/// changed inner identity retains the outgoing card for a bounded overlap while
-/// its canonical successor is inserted.
+/// canonical. Row state advances in one explicit, admitted transaction, but the
+/// child is never rekeyed from payload or lifecycle status; exact physical row
+/// identity remains the sole structural owner.
 private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     let row: ChatPhysicalTranscriptRow
     let reduceMotion: Bool
+    let hostedRecorder: (any ChatTranscriptHostedRecording)?
     @ViewBuilder let content: (ChatPhysicalTranscriptRow) -> Content
 
     @State private var displayed: ChatPhysicalTranscriptRow
@@ -270,32 +246,24 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     init(
         row: ChatPhysicalTranscriptRow,
         reduceMotion: Bool,
+        hostedRecorder: (any ChatTranscriptHostedRecording)? = nil,
         @ViewBuilder content: @escaping (ChatPhysicalTranscriptRow) -> Content
     ) {
         self.row = row
         self.reduceMotion = reduceMotion
+        self.hostedRecorder = hostedRecorder
         self.content = content
         _displayed = State(initialValue: row)
     }
 
     var body: some View {
+        // `row.id` is the sole structural identity. Lifecycle, payload, title,
+        // progress, and canonical-settlement changes retarget this persistent
+        // host without assigning an inner `.id` that would remove its subtree.
         content(displayed)
-            .id(displayed.replacementContentIdentity)
-            .contentTransition(reduceMotion ? .opacity : .interpolate)
-            .transition(transition)
+            .onAppear { hostedRecorder?.recordPhysicalRowAppearance(id: displayed.id) }
+            .onDisappear { hostedRecorder?.recordPhysicalRowDisappearance(id: displayed.id) }
             .onChange(of: row) { _, next in retarget(next) }
-    }
-
-    /// The child always carries both halves of the prompt transition. The
-    /// explicit replacement transaction below is the sole animation admission,
-    /// so ordinary projection updates remain stable while an outgoing removal
-    /// and canonical insertion overlap continuously.
-    private var transition: AnyTransition {
-        if reduceMotion { return .opacity }
-        if case .transcript(.notification, _) = displayed.content {
-            return .opacity.combined(with: .scale(scale: 0.97, anchor: .center))
-        }
-        return .opacity.combined(with: .scale(scale: 0.992, anchor: .trailing))
     }
 
     private func retarget(_ next: ChatPhysicalTranscriptRow) {
@@ -317,6 +285,8 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
         }
         var transaction = Transaction(animation: animation)
         transaction.admitsChatPromptReplacementAnimation = kind != .none
+        // The stable host owns continuity. Type-specific descendants can
+        // animate shallow values, but settlement never rekeys two row trees.
         withTransaction(transaction) { displayed = next }
     }
 }
@@ -353,30 +323,36 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                if let installed {
-                    if (installed.sourceWindow.originalStart ?? 0) > 0 {
-                        stableRow(
-                            physicalID: "earlier-messages",
-                            semanticID: "earlier-messages",
-                            installedTag: installed.tag,
-                            entranceState: .none
-                        ) {
-                            earlierRow(installed)
+            VStack(alignment: .leading, spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if let installed {
+                        if (installed.sourceWindow.originalStart ?? 0) > 0 {
+                            stableRow(
+                                physicalID: "earlier-messages",
+                                semanticID: "earlier-messages",
+                                installedTag: installed.tag,
+                                entranceState: .none
+                            ) {
+                                earlierRow(installed)
+                            }
                         }
-                    }
-                    ForEach(ChatPhysicalTranscriptRowPolicy.rows(
-                        installed: installed,
-                        canonicalAliases: canonicalSubmissionAliases
-                    )) { row in
-                        ChatPhysicalTranscriptReplacementHost(
-                            row: row,
-                            reduceMotion: reduceMotion
-                        ) { displayed in
-                            physicalRow(displayed, installed: installed)
+                        ForEach(ChatPhysicalTranscriptRowPolicy.rows(
+                            installed: installed,
+                            canonicalAliases: canonicalSubmissionAliases
+                        )) { row in
+                            ChatPhysicalTranscriptReplacementHost(
+                                row: row,
+                                reduceMotion: reduceMotion,
+                                hostedRecorder: hostedRecorder
+                            ) { displayed in
+                                physicalRow(displayed, installed: installed)
+                            }
                         }
                     }
                 }
+                // This eager sentinel is the only bounded realization target;
+                // transcript rows remain owned by one lazy collection and a new
+                // child is never targeted or released on a fixed timer.
                 tailMarker
             }
             .padding(.top, 12)
@@ -462,10 +438,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             guard let request = lazyTailMaterializationRequest else { return }
             await Task.yield()
             guard !Task.isCancelled,
-                  transcriptPresentation.entranceState(for: request.renderedID) == .pending else {
-                return
-            }
-            scrollCoordinator.discreteTailInserted(renderedID: request.renderedID)
+                  lazyTailMaterializationRequest == request else { return }
+            scrollCoordinator.discreteTailInserted(renderedID: request.semanticID)
         }
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: responseState, initial: true) { previous, current in
@@ -662,15 +636,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     state: state,
                     admissionTag: installed.tag,
                     kind: kind,
-                    reduceMotion: reduceMotion,
-                    onFailsafeReveal: {
-                        _ = transcriptPresentation.resolveEntrance(
-                            id: semanticID,
-                            installationTag: installed.tag,
-                            isVisible: false
-                        )
-                        hostedRecorder?.recordEntranceFailsafeReveal()
-                    }
+                    reduceMotion: reduceMotion
                 ) { renderRow(item, installed: installed, isCommitted: isCommitted) }
             }
         }
@@ -698,16 +664,38 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         .chatStableTranscriptUpdates()
     }
 
+    /// The presentation ledger supplies the newest transcript entrance in O(1),
+    /// including assistant/tool/notification rows inserted before a queue tail.
+    /// Lifecycle rows are capped by the authoritative 32-item queue budget.
     private var lazyTailMaterializationRequest: ChatLazyTailMaterializationRequest? {
-        guard let installed,
-              let renderedID = installed.timeline.ids.last,
-              transcriptPresentation.entranceState(for: renderedID) == .pending else {
-            return nil
+        guard let installed else { return nil }
+        if let id = transcriptPresentation.newestPendingEntranceID,
+           installed.containsDisplayedID(id) {
+            // Entrance IDs are rendered timeline IDs. The physical-row policy
+            // reports that same ID as geometry semantics; a canonical prompt
+            // alias changes only the outer `.id` and keeps this canonical key.
+            return ChatLazyTailMaterializationRequest(semanticID: id)
         }
-        return ChatLazyTailMaterializationRequest(
-            timelineGeneration: installed.tag.timelineGeneration,
-            renderedID: renderedID
-        )
+        let lifecycleIDs: [String] = {
+            var ids: [String] = []
+            switch installed.handoff {
+            case .none:
+                break
+            case .pending(let pending):
+                ids.append("pending-prompt-\(pending.id)")
+            case .outgoing(let outgoing, _):
+                ids.append(outgoing.id)
+            }
+            ids.append(contentsOf: installed.queuedMessages.reversed().map { message in
+                installed.queuePresentationIDByOperationID[message.id]
+                    ?? "queued-message-\(message.id)"
+            })
+            return ids
+        }()
+        guard let id = lifecycleIDs.first(where: {
+            !transcriptPresentation.lifecycleEntranceIsConsumed(id: $0)
+        }) else { return nil }
+        return ChatLazyTailMaterializationRequest(semanticID: id)
     }
 
     private func stableRow<Content: View>(

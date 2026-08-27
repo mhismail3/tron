@@ -58,10 +58,11 @@ struct ChatCompactPillTests {
         )
     }
 
-    @Test("error notifications use rounded rectangles while other notifications remain capsules")
-    func notificationShapes() {
+    @Test("notification tone may change shape while mounted tool chips remain capsules")
+    func compactPillShapeOwnership() {
         #expect(ChatCompactPillLayoutPolicy.cornerRadius(for: .error) == ChatCompactPillLayoutPolicy.errorCornerRadius)
         #expect(ChatCompactPillLayoutPolicy.cornerRadius(for: .accent) == ChatCompactPillLayoutPolicy.capsuleCornerRadius)
+        #expect(ChatToolChipShapePolicy.cornerRadius == ChatCompactPillLayoutPolicy.capsuleCornerRadius)
     }
 
     @Test("Manage Session compaction admission matches Gateway support")

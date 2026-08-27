@@ -66,7 +66,12 @@ struct ToolCard: View {
     }
 
     var body: some View {
-        ChatCompactPillSurface(tone: tone, material: .glass, interactive: true) {
+        ChatCompactPillSurface(
+            tone: tone,
+            material: .glass,
+            interactive: true,
+            cornerRadiusOverride: ChatToolChipShapePolicy.cornerRadius
+        ) {
             ChatCompactPillLabel(
                 icon: icon,
                 title: displayTitle,
@@ -81,7 +86,7 @@ struct ToolCard: View {
             }
         }
         .contentShape(RoundedRectangle(
-            cornerRadius: ChatCompactPillLayoutPolicy.cornerRadius(for: tone),
+            cornerRadius: ChatToolChipShapePolicy.cornerRadius,
             style: .continuous
         ))
         .fixedSize(horizontal: false, vertical: true)
@@ -263,7 +268,12 @@ private struct ToolActivityChip: View {
 
     var body: some View {
         let visual = displayedState ?? targetState
-        ChatCompactPillSurface(tone: visual.tone, material: visual.material, interactive: true) {
+        ChatCompactPillSurface(
+            tone: visual.tone,
+            material: visual.material,
+            interactive: true,
+            cornerRadiusOverride: ChatToolChipShapePolicy.cornerRadius
+        ) {
             ChatCompactPillLabel(
                 icon: visual.icon,
                 title: visual.title,
@@ -277,7 +287,7 @@ private struct ToolActivityChip: View {
             .contentTransition(reduceMotion ? .opacity : .interpolate)
         }
         .contentShape(RoundedRectangle(
-            cornerRadius: ChatCompactPillLayoutPolicy.cornerRadius(for: visual.tone),
+            cornerRadius: ChatToolChipShapePolicy.cornerRadius,
             style: .continuous
         ))
         .toolChipInteraction(

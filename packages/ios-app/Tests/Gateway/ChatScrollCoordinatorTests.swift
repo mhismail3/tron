@@ -566,6 +566,53 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.viewportMode == .pinned)
     }
 
+    @Test("lazy tail target waits for fresh requested-row evidence before release")
+    func lazyTailMaterializationUsesSemanticAcknowledgement() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            coordinator.discreteTailInserted(renderedID: "new-tail-row")
+            let command = try #require(coordinator.command)
+            #expect(command.destination == .tail)
+            #expect(command.origin == .tailMaterialization)
+            #expect(coordinator.commandApplied(command))
+            #expect(!coordinator.consumeTargetRelease())
+
+            coordinator.semanticFrameChanged(
+                renderedID: "unrelated-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 0, width: 100, height: 20)
+            )
+            #expect(!coordinator.consumeTargetRelease())
+
+            coordinator.semanticFrameChanged(
+                renderedID: "new-tail-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 20, width: 100, height: 20)
+            )
+            await frames.waitForRequest(count: 1)
+            #expect(coordinator.targetReleaseGeneration == 0)
+
+            let currentLayout = coordinator.beginInstalledLayoutEpoch()
+            await Task.yield()
+            frames.releaseNext()
+            await Task.yield()
+            #expect(coordinator.targetReleaseGeneration == 0)
+            #expect(!coordinator.consumeTargetRelease())
+
+            coordinator.semanticFrameChanged(
+                renderedID: "new-tail-row",
+                layoutEpoch: currentLayout.value,
+                frame: CGRect(x: 0, y: 24, width: 100, height: 20)
+            )
+            await frames.waitForRequest(count: 2)
+            frames.releaseNext()
+            await Task.yield()
+            #expect(coordinator.targetReleaseGeneration == 1)
+            #expect(coordinator.consumeTargetRelease())
+        }
+    }
+
     @Test("retained pinned resume republishes physical ownership even when mode is unchanged")
     func retainedPinnedResumeReappliesPosition() {
         let coordinator = ChatScrollCoordinator()

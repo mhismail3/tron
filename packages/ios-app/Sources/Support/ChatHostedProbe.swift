@@ -31,7 +31,6 @@ struct ChatHostedObservation: Sendable {
     let animatedEntranceCount: Int
     let lastAnimatedEntranceSourceOrdinal: Int?
     let offscreenEntranceResolutionCount: Int
-    let entranceFailsafeRevealCount: Int
     let geometryCallbackCount: Int
     let semanticFrameCallbackCount: Int
     let projectionSubmitCount: Int
@@ -39,6 +38,8 @@ struct ChatHostedObservation: Sendable {
     let projectionInstallCount: Int
     let committedHistoryRowEvaluationCount: Int
     let remountedWhileSemanticIDDisplayed: Int
+    let physicalRowAppearanceCounts: [String: Int]
+    let physicalRowDisappearanceCounts: [String: Int]
     let toolChipSamples: [ToolChipInstrumentationSample]
     let installedProjectionRowCount: Int
     let installedProjectionSourceOrdinal: Int?
@@ -89,7 +90,6 @@ final class ChatHostedProbe {
     private var animatedEntranceCount = 0
     private var lastAnimatedEntranceSourceOrdinal: Int?
     private var offscreenEntranceResolutionCount = 0
-    private var entranceFailsafeRevealCount = 0
     private var geometryCallbackCount = 0
     private var semanticFrameCallbackCount = 0
     private var projectionSubmitCount = 0
@@ -97,6 +97,8 @@ final class ChatHostedProbe {
     private var projectionInstallCount = 0
     private var committedHistoryRowEvaluationCount = 0
     private var remountedWhileSemanticIDDisplayed = 0
+    private var physicalRowAppearanceCounts: [String: Int] = [:]
+    private var physicalRowDisappearanceCounts: [String: Int] = [:]
     private var toolChipSamples: [ToolChipInstrumentationSample] = []
     private var renderedIDBySemanticID: [String: String] = [:]
     private var installedProjectionRowCount = 0
@@ -158,7 +160,6 @@ final class ChatHostedProbe {
             animatedEntranceCount: animatedEntranceCount,
             lastAnimatedEntranceSourceOrdinal: lastAnimatedEntranceSourceOrdinal,
             offscreenEntranceResolutionCount: offscreenEntranceResolutionCount,
-            entranceFailsafeRevealCount: entranceFailsafeRevealCount,
             geometryCallbackCount: geometryCallbackCount,
             semanticFrameCallbackCount: semanticFrameCallbackCount,
             projectionSubmitCount: projectionSubmitCount,
@@ -166,6 +167,8 @@ final class ChatHostedProbe {
             projectionInstallCount: projectionInstallCount,
             committedHistoryRowEvaluationCount: committedHistoryRowEvaluationCount,
             remountedWhileSemanticIDDisplayed: remountedWhileSemanticIDDisplayed,
+            physicalRowAppearanceCounts: physicalRowAppearanceCounts,
+            physicalRowDisappearanceCounts: physicalRowDisappearanceCounts,
             toolChipSamples: toolChipSamples,
             installedProjectionRowCount: installedProjectionRowCount,
             installedProjectionSourceOrdinal: installedProjectionSourceOrdinal,
@@ -292,11 +295,6 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
-    func recordEntranceFailsafeReveal() {
-        entranceFailsafeRevealCount &+= 1
-        revision &+= 1
-    }
-
     func recordEntranceResolution(animated: Bool, sourceOrdinal: Int) {
         if animated {
             animatedEntranceCount &+= 1
@@ -319,6 +317,25 @@ final class ChatHostedProbe {
             toolChipSamples.removeFirst(toolChipSamples.count - 128)
         }
         revision &+= 1
+    }
+
+    func recordPhysicalRowAppearance(id: String) {
+        Self.incrementBoundedCount(id: id, counts: &physicalRowAppearanceCounts)
+        revision &+= 1
+    }
+
+    func recordPhysicalRowDisappearance(id: String) {
+        Self.incrementBoundedCount(id: id, counts: &physicalRowDisappearanceCounts)
+        revision &+= 1
+    }
+
+    private static func incrementBoundedCount(id: String, counts: inout [String: Int]) {
+        guard !id.isEmpty else { return }
+        if counts[id] == nil, counts.count >= 256,
+           let retired = counts.keys.sorted().first {
+            counts[retired] = nil
+        }
+        counts[id, default: 0] &+= 1
     }
 
     func recordCommittedHistoryRowEvaluation() {

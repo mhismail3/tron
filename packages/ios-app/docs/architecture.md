@@ -515,13 +515,16 @@ pre-Gateway principles of a non-render-path measurement/projection owner and coa
 stream updates without reviving the retired Engine, local event reconstruction, or scroll
 proxy architecture. Explicit scroll commands keep their exact target until their opening, catch-up,
 semantic-restore, or prepend settlement evidence arrives, then release only that token on the next presented frame; submission retires a still-applied app target
-before changing layout. One mode-qualified native size-change anchor solely owns
-continuous streaming, keyboard, composer, and discrete pinned growth; no persistent
-`ScrollPosition` target competes for the same viewport delta. A retained presentation reconciles its first native geometry sample so a view physically at the tail regains pinned authority; only current signed tail-marker drift may admit one bounded repair, while a genuinely displaced reader remains anchored
+before changing layout. One mode-qualified native size-change anchor owns continuous
+streaming, keyboard, composer, and payload growth. A genuinely new lazy physical row
+may lease only the stable tail sentinel until fresh layout-epoch semantic evidence proves
+that row mounted; status, progress, completion, and canonical settlement do not retarget
+`ScrollPosition`. A retained presentation reconciles its first native geometry sample so a view physically at the tail regains pinned authority; only current signed tail-marker drift may admit one bounded repair, while a genuinely displaced reader remains anchored
 in an order native anchoring cannot retain; anchored readers receive no automatic follow. Compact
 measured prompts may use one clipped composer-to-row morph; long prompts fail over to the shorter, subtler row-local
-fade/slide entrance. The unified notification row changes inner identity when active compaction becomes canonical
-compaction, restoring its centered progress-to-check transition without animating unrelated projection updates.
+fade/slide entrance. The unified notification row retains one physical and child host when
+active compaction becomes canonical compaction; progress, icon, title, and tone update
+inside that shell without animating unrelated projection updates.
 Attachment, skill, and resource accessories animate through one
 value-scoped composer-height transition, while editor-only height changes remain atomic
 for UIKit caret ownership. A mounted
@@ -530,7 +533,10 @@ readable during retry but never authorize prompt, upload, abort, or queue mutati
 suppression advances only after the mounted aggregate succeeds, so a failed reconciliation cannot consume
 visual continuity for a later live row. Queue mutation responses are confirmations only: the existing
 mounted synchronization path must observe the newer queue revision before local mutation presentation
-state retires. Tool calls, progress, and results join by `toolCallId`; collapsed rows retain structured
+state retires. Tool calls, progress, and results join by `toolCallId`. One chip may contain
+only one exact finalized producer group: every assistant-message boundary flushes the run,
+including tool-only messages whose thinking is empty or hidden, so unrelated groups cannot
+accumulate in the newest chip. Collapsed rows retain structured
 request/response values without eagerly formatting JSON strings. Opening a detail sheet derives a
 bounded semantic presentation only for that selected tool: exact lowercase built-ins foreground their file,
 command, query, diff, and readable result. Extension-authored Pi tool labels are projected separately from canonical
@@ -1044,7 +1050,7 @@ an old flight or delay current rows. Each complete installed transcript exposes 
 one `ChatLiveRegion`. The ledger contains only the frozen canonical prefix and retains its local monotonic revision
 across streaming, handoff, queue, compatible reconnect, and foreground-reconciliation installs when those canonical
 rows are equal. Canonical append, prepend, or replacement advances that revision once; a cold owner deterministically
-rebuilds the same rows at revision one from the authoritative snapshot. The live region carries streaming/runtime, handoff, and queue facts in the same atomic commit, never as a mirror or second store. Rendering uses one bounded lazy stack and one physical `ForEach` namespace spanning committed, live/runtime, local lifecycle, and authoritative queue rows. Native anchoring owns routine size and payload changes. A newly inserted lazy tail row receives one disabled exact-row realization command and releases its target after a native frame; explicit retained resume uses the same one-shot target boundary. Neither path eagerly realizes transcript history, introduces a second scroll owner, or creates a recurring follow loop. This lets a global-ordinal compaction spinner become its canonical pill and lets a causal prompt alias replace lifecycle content without crossing collection owners. Installed base IDs remain validated once, while the zero-copy random-access row adapter takes an O(1) no-alias path and checks only bounded aliases against prebuilt transcript/presentation indexes. Alias collisions fail closed without changing canonical semantic geometry/anchor IDs. `ChatCommittedLedger`, equatable rows, sparse tool payload revisions, and row-scoped text preparation still keep a full streaming turn from re-evaluating settled history. Hidden thinking labels are
+rebuilds the same rows at revision one from the authoritative snapshot. The live region carries streaming/runtime, handoff, and queue facts in the same atomic commit, never as a mirror or second store. Rendering uses one bounded lazy stack and one physical `ForEach` namespace spanning committed, live/runtime, local lifecycle, and authoritative queue rows. Native anchoring owns routine size and payload changes. A genuinely new lazy physical row may receive one disabled command targeting the stable tail sentinel and retains that exact token until fresh layout-epoch row geometry proves realization; explicit retained resume uses fresh sentinel evidence. Neither path targets changing row identity, eagerly realizes transcript history, introduces a second scroll owner, or creates a recurring follow loop. This lets a global-ordinal compaction spinner become its canonical pill and lets a causal prompt alias replace lifecycle content without crossing collection owners. Installed base IDs remain validated once, while the zero-copy random-access row adapter takes an O(1) no-alias path and checks only bounded aliases against prebuilt transcript/presentation indexes. Alias collisions fail closed without changing canonical semantic geometry/anchor IDs. `ChatCommittedLedger`, equatable rows, sparse tool payload revisions, and row-scoped text preparation still keep a full streaming turn from re-evaluating settled history. Hidden thinking labels are
 attached only to preparation slices that render thinking, and tool rows compare a payload-only revision instead of an
 ambient installation tag. Foreground active and passive sessions therefore converge through the same complete commit:
 live work may be replaced, entrance suppression is consumed once, and neither history revision nor morph entitlement

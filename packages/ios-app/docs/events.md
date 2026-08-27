@@ -121,8 +121,12 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   sequence so equal wall-clock timestamps cannot regress output. A display run keeps
   its first finalized group identity from invocation through completion, reconnect,
   and canonical settlement so final assistant text cannot jump ahead of or reinsert it.
-  Only consecutive tool calls consolidate; thinking or other canonical content flushes
-  the group and remains in exact transcript order.
+  Only calls in one exact finalized producer group consolidate. An assistant-message
+  boundary always flushes the displayed run even when thinking is empty or hidden;
+  distinct finalized group IDs can never accumulate in the newest chip. Missing group
+  metadata cannot authorize a speculative cross-source aggregate, so unanchored runtime
+  calls remain separate. Thinking or other canonical content also flushes the group and
+  remains in exact transcript order.
   The Gateway supplies monotonic duration samples while a call is running and the
   authoritative final call-to-return duration when it completes; chips display those
   samples without deriving normal timing from the device wall clock. The runtime-only
@@ -154,13 +158,17 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   an observed call-to-result interval because Pi JSONL does not persist tool execution timing;
 - transcript structure has one explicit animation boundary: only rows with positive
   semantic-novelty evidence reserve their measured layout and reveal once after
-  geometry admission. A page-bounded semantic ledger preserves displayed identities,
-  suppresses duplicate entrances, and cannot evict currently visible rows; a cancelled,
-  unanimated failsafe reveals any row whose geometry admission never arrives. Installed-row
+  exact current-generation geometry admission. A page-bounded semantic ledger preserves
+  displayed identities, suppresses duplicate entrances, and cannot evict currently visible
+  rows. Pinned lazy insertion leases only the stable tail sentinel until fresh semantic
+  geometry proves the requested row mounted; anchored/offscreen entrances are consumed by
+  direct interaction or catch-up rather than a wall-clock reveal race. Installed-row
   updates, live-to-canonical settlement, thinking-height measurement, and tool status changes
   inherit no stack-wide animation. The stable transcript transaction admits only explicit entrance/tool-chip markers and continuous native-control transactions; thinking height/tail motion is row-local downstream of that boundary. Authority-only changes whose bounded transcript/stream/tool/queue/runtime layout identity is unchanged take a synchronous metadata path and cannot arm settlement. The sole composer inset exposes one bottom-aligned measured height; a generation captured before structural mutation keeps pinned tail coupling nonanimated, preserves a detached semantic locus with zero tail commands, coalesces retargets, and yields immediately to direct interaction. Reduce Motion removes spatial transitions. Tool status text
-  updates inside its stable row. Ordinary pinned growth, shrink, and discrete insertion remain
-  coupled by one mode-qualified native bottom size-change anchor and create no automatic command stream. Native
+  updates inside its stable row. Ordinary pinned growth and shrink remain coupled by one
+  mode-qualified native bottom size-change anchor. A genuinely new lazy physical row may
+  request one disabled stable-sentinel materialization lease; payload, progress, completion,
+  and canonical settlement create no command stream. Native
   bottom distance is bounded for display only: a visible rect beyond the physical content edge is
   not tail settlement. A deliberately detached reader retains the same viewport authority;
 - structure/context/resource invalidations reload an already-presented History,
@@ -209,8 +217,8 @@ owned through animation completion and two unchanged display frames; best-effort
 cancels that arm. The composer
 remains visible throughout opening, while sending stays disabled until readiness. Opening tail
 positioning and post-reveal settlement are owned by the coordinator's mutually exclusive opening
-phase; ordinary pinned growth, shrink, and discrete insertion create no command ownership. Explicit
-opening, catch-up, semantic restore, prepend, and the bounded physical-tail repair remain distinct command owners; after they release, pinned mode
+phase; ordinary pinned growth, shrink, streaming, and existing-row settlement create no command ownership. A genuinely new lazy physical row may own one stable-sentinel materialization lease until fresh row geometry arrives. Explicit
+opening, catch-up, semantic restore, prepend, retained resume, and the bounded physical-tail repair remain distinct command owners; after they release, pinned mode
 keeps `ScrollPosition` target-free and uses the native bottom size-change anchor with no recurring command stream. Repair is admitted only from current signed marker evidence and is cancelled by interaction or a newer layout epoch.
 Short-content alignment remains bottom-owned by the native anchor; blank space stays above the tail. Editor-only composer height changes install atomically;
 attachment, selected-skill, and resource-result identity changes use one value-scoped 240 ms smooth

@@ -1479,8 +1479,8 @@ struct ChatTranscriptPresentationTests {
         })
     }
 
-    @Test("semantic tool anchor survives page-boundary regrouping when the outer row changes")
-    func semanticAnchorSurvivesPageBoundaryRegrouping() throws {
+    @Test("page prepend preserves each tool-only assistant boundary")
+    func pagePrependPreservesToolRunBoundaries() throws {
         let current = try fixture(transcript: """
         [
           {"id":"assistant-2","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"call-part-2","type":"toolCall","toolCallId":"call-2","name":"bash","arguments":{"command":"pwd"}}]},
@@ -1500,8 +1500,9 @@ struct ChatTranscriptPresentationTests {
         ]
         """)
         let after = ChatTranscriptPresentation.timeline(in: prepended)
-        #expect(after.ids == ["tool-run-call-1"])
-        #expect(after.renderedIDBySemanticID["call-2"] == "tool-run-call-1")
+        #expect(after.ids == ["tool-run-call-1", "tool-run-call-2"])
+        #expect(after.renderedIDBySemanticID["call-1"] == "tool-run-call-1")
+        #expect(after.renderedIDBySemanticID["call-2"] == "tool-run-call-2")
     }
 
     @Test("parallel live tools keep one stable canonical row through settlement")
@@ -1776,11 +1777,11 @@ struct ChatTranscriptPresentationTests {
             tool("same-a", "find", startedAt: "2026-01-01T00:00:01Z", order: 0),
         ]
         let timeline = ChatTranscriptPresentation.timeline(in: snapshot)
-        guard case .toolRun(let run) = timeline.items.first else {
-            Issue.record("Expected deterministic live run")
-            return
+        let runs = timeline.items.compactMap { item -> ChatToolRunPresentation? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run
         }
-        #expect(run.tools.map(\.id) == ["same-a", "same-b", "later"])
+        #expect(runs.map { $0.tools.map(\.id) } == [["same-a"], ["same-b"], ["later"]])
     }
 
     @Test("live output, monotonic progress, and execution timing stay auditable")

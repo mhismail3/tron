@@ -32,17 +32,11 @@ enum ChatEntranceGeometryAdmissionPolicy {
     }
 }
 
-private struct ChatEntranceFailsafeID: Hashable {
-    let state: ChatTranscriptEntranceState
-    let admissionTag: ChatTranscriptProjectionTag?
-}
-
 struct ChatTranscriptEntranceRow<Content: View>: View {
     let state: ChatTranscriptEntranceState
     let admissionTag: ChatTranscriptProjectionTag?
     let kind: ChatContentEntranceKind
     let reduceMotion: Bool
-    let onFailsafeReveal: () -> Void
     @ViewBuilder let content: Content
     @State private var revealed: Bool
 
@@ -51,14 +45,12 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
         admissionTag: ChatTranscriptProjectionTag? = nil,
         kind: ChatContentEntranceKind,
         reduceMotion: Bool,
-        onFailsafeReveal: @escaping () -> Void = {},
         @ViewBuilder content: () -> Content
     ) {
         self.state = state
         self.admissionTag = admissionTag
         self.kind = kind
         self.reduceMotion = reduceMotion
-        self.onFailsafeReveal = onFailsafeReveal
         self.content = content()
         _revealed = State(initialValue: state != .pending)
     }
@@ -78,17 +70,6 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
                 x: revealed ? 0 : hidden.offsetX,
                 y: revealed ? 0 : hidden.offsetY
             )
-            .task(id: ChatEntranceFailsafeID(state: state, admissionTag: admissionTag)) {
-                guard state == .pending else { return }
-                if !reduceMotion { try? await Task.sleep(for: .milliseconds(34)) }
-                guard !Task.isCancelled, !revealed else { return }
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    revealed = true
-                    onFailsafeReveal()
-                }
-            }
             .onChange(of: state, initial: true) { _, state in
                 switch state {
                 case .pending:

@@ -1190,6 +1190,11 @@ final class ChatTranscriptPresentationStore {
         return installed.resolveToolDetails(callIDs: callIDs, installationTag: installationTag)
     }
 
+    /// O(1) newest-first materialization hint. The ordered ledger is already
+    /// page-bounded and remains the entrance authority; views never scan the
+    /// installed transcript merely to locate a newly inserted lazy row.
+    var newestPendingEntranceID: String? { pendingEntranceOrder.last }
+
     func entranceState(for id: String) -> ChatTranscriptEntranceState {
         if admittedEntranceIDs.contains(id) { return .admitted }
         if pendingEntranceIDs.contains(id) { return .pending }
