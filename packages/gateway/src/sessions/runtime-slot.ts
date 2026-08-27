@@ -11,6 +11,7 @@ import {
   createAgentSessionFromServices,
   createAgentSessionRuntime,
   createAgentSessionServices,
+  type AgentSession,
   type AgentSessionEvent,
   type CreateAgentSessionRuntimeFactory,
   type ExtensionCommandContextActions,
@@ -367,6 +368,14 @@ export class RuntimeSlot {
     updatedAt: string;
     messageCount: number;
     firstMessage: string;
+  } | undefined;
+  /** Snapshot-derived SDK scans are exact but need not repeat while the
+   * RuntimeSlot revision is unchanged. A canonical event/rebind/branch change
+   * increments revision before publication, naturally invalidating this cut. */
+  private cachedSnapshotDerived: {
+    revision: number;
+    stats: ReturnType<AgentSession["getSessionStats"]>;
+    latestCacheHitRate?: number;
   } | undefined;
   private lastTouchedAt = Date.now();
   private queueRevision = 0;
@@ -3623,9 +3632,22 @@ export class RuntimeSlot {
     this.assertNoTrustReload();
     const session = this.runtime.session;
     this.ensureAgentProjection();
-    const contextUsage = session.getContextUsage();
-    const stats = session.getSessionStats();
-    const latestCacheHitRate = this.latestCacheHitRate();
+    const derived = this.cachedSnapshotDerived?.revision === this.revision
+      ? this.cachedSnapshotDerived
+      : (() => {
+          const stats = session.getSessionStats();
+          const latestCacheHitRate = this.latestCacheHitRate();
+          const computed = {
+            revision: this.revision,
+            stats,
+            ...(latestCacheHitRate === undefined ? {} : { latestCacheHitRate }),
+          };
+          this.cachedSnapshotDerived = computed;
+          return computed;
+        })();
+    const contextUsage = derived.stats.contextUsage;
+    const stats = derived.stats;
+    const latestCacheHitRate = derived.latestCacheHitRate;
     // Pi exposes streamingMessage before an async message_start hook returns,
     // so the SDK object may establish the initial Gateway identity. Once that
     // exact object is canonically bound, however, Pi can retain it briefly;

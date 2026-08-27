@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { createReadStream, realpathSync } from "node:fs";
 import { lstat, open, opendir, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
+import { createInterface } from "node:readline";
 import {
   ModelRuntime,
   parseSessionEntries,
@@ -151,6 +152,95 @@ type CatalogSessionInfo = Omit<SessionInfo, "allMessagesText"> & {
   fileIdentity?: string;
 };
 
+function catalogMessageText(message: Record<string, unknown>): string {
+  if (typeof message.content === "string") return message.content;
+  if (!Array.isArray(message.content)) return "";
+  return message.content
+    .filter((part): part is Record<string, unknown> => !!part && typeof part === "object" && !Array.isArray(part))
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text as string)
+    .join(" ");
+}
+
+/** SDK-compatible row metadata without constructing its unused transcript-wide
+ * `allMessagesText` accumulator. The complete JSONL remains authoritative for
+ * RuntimeSlot.open; this pass is only catalog discovery metadata. */
+async function buildCatalogSessionInfo(filePath: string): Promise<CatalogSessionInfo | null> {
+  try {
+    const physical = await lstat(filePath);
+    if (!physical.isFile() || physical.isSymbolicLink()) return null;
+    const stats = await stat(filePath);
+    let header: Record<string, unknown> | undefined;
+    let messageCount = 0;
+    let firstMessage = "";
+    let name: string | undefined;
+    let lastActivityTime: number | undefined;
+    const lines = createInterface({
+      input: createReadStream(filePath, { encoding: "utf8" }),
+      crlfDelay: Infinity,
+    });
+    for await (const line of lines) {
+      let value: unknown;
+      try { value = JSON.parse(line); } catch { continue; }
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const entry = value as Record<string, unknown>;
+      if (!header) {
+        if (entry.type !== "session") return null;
+        header = entry;
+        continue;
+      }
+      if (entry.type === "session_info" && typeof entry.name === "string") {
+        name = entry.name.trim() || undefined;
+      }
+      if (entry.type !== "message") continue;
+      messageCount += 1;
+      const message = entry.message;
+      if (!message || typeof message !== "object" || Array.isArray(message)) continue;
+      const record = message as Record<string, unknown>;
+      if (record.role !== "user" && record.role !== "assistant") continue;
+      const timestamp = typeof record.timestamp === "number"
+        ? record.timestamp
+        : typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : NaN;
+      if (Number.isFinite(timestamp)) lastActivityTime = Math.max(lastActivityTime ?? 0, timestamp);
+      const text = catalogMessageText(record);
+      if (text && !firstMessage && record.role === "user") firstMessage = text;
+    }
+    if (!header || typeof header.id !== "string") return null;
+    const cwd = typeof header.cwd === "string" ? header.cwd : "";
+    const headerTime = typeof header.timestamp === "string" ? Date.parse(header.timestamp) : NaN;
+    const modified = typeof lastActivityTime === "number" && lastActivityTime > 0
+      ? new Date(lastActivityTime)
+      : Number.isFinite(headerTime) ? new Date(headerTime) : stats.mtime;
+    return {
+      path: filePath,
+      id: header.id,
+      cwd,
+      ...(typeof name === "string" ? { name } : {}),
+      ...(typeof header.parentSession === "string" ? { parentSessionPath: header.parentSession } : {}),
+      created: new Date(typeof header.timestamp === "string" ? header.timestamp : stats.birthtime),
+      modified,
+      messageCount,
+      firstMessage: firstMessage || "(no messages)",
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function buildCatalogSessionInfos(files: readonly string[]): Promise<CatalogSessionInfo[]> {
+  const results: Array<CatalogSessionInfo | null> = new Array(files.length).fill(null);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const index = next++;
+      if (index >= files.length) return;
+      results[index] = await buildCatalogSessionInfo(files[index]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(10, files.length) }, worker));
+  return results.filter((info): info is CatalogSessionInfo => info !== null);
+}
+
 interface CatalogHeaderIdentity {
   id: string;
   cwd: string;
@@ -174,6 +264,7 @@ interface CatalogAcquisitionEntry {
   path: string;
   cwd: string;
   canonicalCwd: string;
+  fileIdentity?: string;
   structuralSubagent: boolean;
   parentSessionId?: string;
 }
@@ -212,8 +303,21 @@ interface IdleEviction {
 export class RuntimeRegistry {
   private readonly slots = new Map<string, RuntimeSlot>();
   private readonly mutex = new AsyncMutex();
-  private readonly catalogMutex = new AsyncMutex();
+  /** Shares one authoritative materialization across concurrent callers. The
+   * promise is disposable and keyed by the structural/invalidation generation;
+   * canonical evidence still gates every publication. */
+  private catalogMaterializationPromise: Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>> | undefined;
+  private catalogMaterializationKey: string | undefined;
+  /** One bounded structural walk can serve catalog and acquisition callers.
+   * `refresh` is reserved for a post-materialization stability check. */
+  private catalogEvidencePromise: Promise<CatalogStructureEvidence> | undefined;
+  private catalogEvidenceKey: string | undefined;
+  private catalogSessionInfosPromise: Promise<CatalogSessionInfo[]> | undefined;
+  private catalogSessionInfosKey: string | undefined;
+  private catalogEvidenceRefresh = 0;
   private readonly catalogAcquisitionMutex = new AsyncMutex();
+  private catalogAcquisitionPromise: Promise<CatalogAcquisitionResolution> | undefined;
+  private catalogAcquisitionPromiseKey: string | undefined;
   /** Serializes attention membership checks with set/delete/rekey. */
   private readonly attentionLane = new AsyncMutex();
   private readonly blobs: BlobStore;
@@ -240,6 +344,10 @@ export class RuntimeRegistry {
   private catalogStructuralGeneration = 0;
   private catalogAcquisitionAdmission: CatalogAcquisitionAdmission | undefined;
   private catalogStructuralIndex: CatalogStructuralIndex | undefined;
+  /** Mutable row projections are separate from structural listRevision. This
+   * generation lets pagination share one immutable row vector per projection
+   * cut without making summary state authoritative. */
+  private catalogProjectionGeneration = 0;
   private readonly pendingSlotStarts = new Map<string, Promise<RuntimeSlot>>();
   private reservedSlotStarts = 0;
   private evictionTimer?: NodeJS.Timeout;
@@ -300,10 +408,10 @@ export class RuntimeRegistry {
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
 
   async initialize(): Promise<void> {
-    await this.attention.initialize();
-    const markerEvidence = await this.markers.evidence();
-    await this.reconcileCanonicalAttention(markerEvidence);
-    this.interrupted = await this.markers.interruptedSessionIds();
+    await this.timedStage("startup.attention.initialize", () => this.attention.initialize());
+    const markerEvidence = await this.timedStage("startup.run-marker.read", () => this.markers.evidence());
+    await this.timedStage("startup.attention.reconcile", () => this.reconcileCanonicalAttention(markerEvidence));
+    this.interrupted = await this.timedStage("startup.run-marker.interrupted", () => this.markers.interruptedSessionIds());
     this.evictionTimer = setInterval(() => void this.evictIdle(), 60_000);
     this.evictionTimer.unref();
     this.artifactDiscoveryTimer = setInterval(() => void this.discoverExtensionArtifacts(), 750);
@@ -317,20 +425,36 @@ export class RuntimeRegistry {
 
   private async reconcileCanonicalAttention(markerEvidence: ReadonlyMap<string, readonly RunMarkerEvidence[]>): Promise<void> {
     const scanBoundary = new Date().toISOString();
-    // Canonical JSONL alone never creates unread state. Recovery considers only
-    // exact durable run-marker ownership and does not warm the catalog cache.
-    const infos = await this.sessionInfos();
-    const retainedIDs = new Set(infos.map((info) => info.id));
-    await this.attention.prune(retainedIDs);
-    for (const info of infos) {
-      const markers = markerEvidence.get(info.id);
-      if (!markers) continue;
-      const manager = SessionManager.open(info.path);
+    // Startup recovery needs structural identity, not dashboard metadata. A
+    // header-only walk avoids parsing every transcript solely to reconcile a
+    // bounded set of durable markers; only marked sessions are fully opened.
+    const evidence = await this.sharedCatalogStructureEvidence();
+    if (!evidence.complete) {
+      // Incomplete discovery cannot prove either membership or absence. Keep
+      // attention records and the reconciliation cursor for the next startup.
+      return;
+    }
+    const byID = new Map<string, Array<{ path: string; identity: CatalogHeaderIdentity }>>();
+    for (const [path, identity] of evidence.identitiesByPath) {
+      const candidates = byID.get(identity.id) ?? [];
+      candidates.push({ path, identity });
+      byID.set(identity.id, candidates);
+    }
+    await this.attention.prune(new Set(byID.keys()));
+    for (const [sessionId, markers] of markerEvidence) {
+      const candidates = byID.get(sessionId);
+      // Duplicate IDs are intentionally not recoverable: choosing one file
+      // would make attention state depend on enumeration order.
+      if (!candidates || candidates.length !== 1) continue;
+      const path = candidates[0]!.path;
+      let manager: SessionManager;
+      try { manager = SessionManager.open(path); }
+      catch { continue; }
       for (const marker of markers) {
         const completion = completionOwnedByMarker(manager, marker);
         if (!completion) continue;
-        await this.attention.complete(info.id, completion.id);
-        await this.markers.clear(info.id, marker.operationId);
+        await this.attention.complete(sessionId, completion.id);
+        await this.markers.clear(sessionId, marker.operationId);
       }
     }
     await this.attention.advanceReconciliationCursor(scanBoundary);
@@ -439,6 +563,7 @@ export class RuntimeRegistry {
   }
 
   private publishRevisionedSummary(summary: SessionSummaryUpdate): void {
+    this.catalogProjectionGeneration += 1;
     const summaryRevision = (this.summaryRevisions.get(summary.sessionId) ?? 0) + 1;
     this.summaryRevisions.set(summary.sessionId, summaryRevision);
     const revisioned = { ...summary, summaryRevision };
@@ -474,25 +599,81 @@ export class RuntimeRegistry {
     return this.attention.projection(sessionId);
   }
 
+  private async resolveAttentionAdmission(sessionId: string): Promise<{
+    acquisition: CatalogAcquisitionResolution;
+    generation: number;
+    entry?: CatalogAcquisitionEntry;
+    liveOnlySlot?: RuntimeSlot;
+  }> {
+    const acquisition = await this.timedStage("attention.resolve", () => this.catalogAcquisition());
+    this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
+    const entry = acquisition.entriesByID.get(sessionId);
+    if (entry) return { acquisition, generation: this.catalogAcquisitionInvalidationGeneration, entry };
+    // Empty sessions are visible before their first canonical append. Their
+    // exact runtime owner is a valid attention target until it is persisted or
+    // disposed; a disk claimant would already be quarantined above.
+    const liveOnlySlot = this.slots.get(sessionId);
+    if (liveOnlySlot && !liveOnlySlot.isDisposed && liveOnlySlot.persistedSessionFile === undefined) {
+      return { acquisition, generation: this.catalogAcquisitionInvalidationGeneration, liveOnlySlot };
+    }
+    throw new GatewayError("not_found", "Tron session was not found");
+  }
+
   async setAttention(sessionId: string, unread: boolean, throughCompletionRevision?: number): Promise<SessionAttentionProjection> {
-    return this.attentionLane.run(async () => {
-      await this.flushPendingAttentionRemovals();
-      if (this.deletingSessionIds.has(sessionId)) {
-        throw new GatewayError("not_found", "Tron session was not found");
-      }
-      const catalog = await this.catalog("all");
-      const summary = catalog.sessions.find((session) => session.id === sessionId);
-      if (!summary) throw new GatewayError("not_found", "Tron session was not found");
-      const result = await this.attention.set(sessionId, unread, throughCompletionRevision);
-      if (result.changed) {
-        // The store write may suspend while a live summary advances. Merge into
-        // the newest retained facts rather than stamping stale catalog fields
-        // with a newer summary revision.
-        const latest = this.latestSummaries.get(sessionId) ?? summary;
-        this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
-      }
-      return result.projection;
-    });
+    // Membership resolution is deliberately outside the attention lane. A cold
+    // catalog read must not block completion/rekey/delete ordering for every
+    // other session. Internal catalog mutations advance the generation and are
+    // rechecked immediately before the durable attention commit.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const admission = await this.resolveAttentionAdmission(sessionId);
+      const result = await this.attentionLane.run(async () => {
+        await this.flushPendingAttentionRemovals();
+        if (this.deletingSessionIds.has(sessionId)) {
+          throw new GatewayError("not_found", "Tron session was not found");
+        }
+        const current = this.catalogAcquisitionAdmission;
+        const currentEntry = current?.entriesByID.get(sessionId);
+        const currentLiveOnly = this.slots.get(sessionId);
+        const admittedEntry = admission.entry;
+        if (admission.generation !== this.catalogAcquisitionInvalidationGeneration
+          || current !== undefined && admittedEntry !== undefined && (
+            currentEntry === undefined
+            || currentEntry.path !== admittedEntry.path
+            || currentEntry.id !== admittedEntry.id
+            || currentEntry.fileIdentity !== admittedEntry.fileIdentity
+          )
+          || admission.liveOnlySlot !== undefined && (
+            currentEntry !== undefined
+            || currentLiveOnly !== admission.liveOnlySlot
+            || currentLiveOnly.isDisposed
+            || currentLiveOnly.persistedSessionFile !== undefined
+          )) {
+          return undefined;
+        }
+        if (admittedEntry !== undefined && !(await this.attentionEntryStillAdmitted(admittedEntry))) {
+          return undefined;
+        }
+        if (admission.liveOnlySlot !== undefined
+          && !(await this.attentionLiveOnlyStillAdmitted(sessionId))) {
+          return undefined;
+        }
+        const result = await this.timedStage(
+          "attention.persist",
+          () => this.attention.set(sessionId, unread, throughCompletionRevision),
+        );
+        if (result.changed) {
+          // The store write may suspend while a live summary advances. Merge into
+          // the newest retained facts rather than stamping stale catalog fields
+          // with a newer summary revision. A missing live summary is safe: the
+          // next catalog refresh projects the persisted attention fact.
+          const latest = this.latestSummaries.get(sessionId);
+          if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
+        }
+        return result.projection;
+      });
+      if (result) return result;
+    }
+    throw new GatewayError("busy", "Session catalog changed while updating attention", true);
   }
 
   private dependencies() {
@@ -535,6 +716,16 @@ export class RuntimeRegistry {
     return this.configuredSessionDirectory() ?? join(this.options.agentDir, "sessions");
   }
 
+  /** pi-subagents writes diagnostic transcripts beneath the exact reserved
+   * `<catalog-root>/<workspace>/subagent-artifacts` subtree. A legitimate
+   * deeper project directory with the same name remains canonical. */
+  private isIgnoredCatalogDirectory(directory: string, canonicalRoot: string): boolean {
+    const fromRoot = relative(canonicalRoot, resolve(directory));
+    if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) return true;
+    const parts = fromRoot.split(sep);
+    return parts.length === 2 && parts[1] === "subagent-artifacts";
+  }
+
   private catalogDiscoveryLimits() {
     return { ...DEFAULT_CATALOG_DISCOVERY_LIMITS, ...this.options.catalogDiscoveryLimits };
   }
@@ -552,6 +743,7 @@ export class RuntimeRegistry {
     this.invalidateCatalogAdmission();
     this.catalogStructuralGeneration += 1;
     this.catalogStructuralIndex = undefined;
+    this.catalogProjectionGeneration += 1;
   }
 
   private dynamicAmbiguousSessionIDs(index: CatalogStructuralIndex): Set<string> {
@@ -590,7 +782,7 @@ export class RuntimeRegistry {
     const index = this.catalogStructuralIndex;
     if (!index || index.structuralGeneration !== this.catalogStructuralGeneration) return undefined;
     const structuralGeneration = this.catalogStructuralGeneration;
-    const evidence = await this.catalogStructureEvidence();
+    const evidence = await this.sharedCatalogStructureEvidence();
     if (this.catalogStructuralIndex === index
         && structuralGeneration === this.catalogStructuralGeneration
         && evidence.complete
@@ -628,7 +820,8 @@ export class RuntimeRegistry {
 
   private async catalogStructureEvidence(): Promise<CatalogStructureEvidence> {
     const limits = this.catalogDiscoveryLimits();
-    const pending = [resolve(this.catalogDirectory())];
+    const catalogRoot = await realpath(resolve(this.catalogDirectory())).catch(() => resolve(this.catalogDirectory()));
+    const pending = [catalogRoot];
     const seenDirectories = new Set<string>();
     const candidatePaths = new Set<string>();
     let entriesExamined = 0;
@@ -642,6 +835,7 @@ export class RuntimeRegistry {
         if (!isMissingFilesystemError(error)) complete = false;
         continue;
       }
+      if (this.isIgnoredCatalogDirectory(directory, catalogRoot)) continue;
       if (!seenDirectories.add(directory)) continue;
       traversalBytes += Buffer.byteLength(directory);
       if (seenDirectories.size > limits.maximumDirectories
@@ -653,20 +847,22 @@ export class RuntimeRegistry {
           if (entriesExamined > limits.maximumEntries) this.catalogCapacityExceeded();
           const child = join(directory, entry.name);
           if (entry.isDirectory()) {
+            if (this.isIgnoredCatalogDirectory(child, catalogRoot)) continue;
             traversalBytes += Buffer.byteLength(child);
             if (traversalBytes > limits.maximumTraversalBytes) this.catalogCapacityExceeded();
             pending.push(child);
             continue;
           }
           if (!entry.name.endsWith(".jsonl") || (!entry.isFile() && !entry.isSymbolicLink())) continue;
+          // Symlinked JSONL is never canonical authority. Following it could
+          // import a session outside the configured root or create an alias
+          // that changes inode identity between admission and open.
+          if (entry.isSymbolicLink()) continue;
           let canonicalPath: string;
-          try {
-            canonicalPath = await realpath(child);
-            if (entry.isSymbolicLink() && !(await stat(canonicalPath)).isFile()) continue;
-          } catch {
-            if (entry.isSymbolicLink()) continue;
-            canonicalPath = resolve(child);
-          }
+          try { canonicalPath = await realpath(child); }
+          catch { continue; }
+          const fromRoot = relative(catalogRoot, canonicalPath);
+          if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) continue;
           traversalBytes += Buffer.byteLength(canonicalPath);
           if (traversalBytes > limits.maximumTraversalBytes) this.catalogCapacityExceeded();
           candidatePaths.add(canonicalPath);
@@ -814,7 +1010,8 @@ export class RuntimeRegistry {
 
   private async sessionInfos() {
     const limits = this.catalogDiscoveryLimits();
-    const pending = [resolve(this.catalogDirectory())];
+    const catalogRoot = await realpath(resolve(this.catalogDirectory())).catch(() => resolve(this.catalogDirectory()));
+    const pending = [catalogRoot];
     const seen = new Set<string>();
     const sessions: CatalogSessionInfo[] = [];
     let entriesExamined = 0;
@@ -828,11 +1025,13 @@ export class RuntimeRegistry {
         if (isMissingFilesystemError(error)) continue;
         throw new GatewayError("busy", "Session catalog directory could not be validated", true);
       }
+      if (this.isIgnoredCatalogDirectory(directory, catalogRoot)) continue;
       if (!seen.add(directory)) continue;
       traversalBytes += Buffer.byteLength(directory);
       if (seen.size > limits.maximumDirectories
         || traversalBytes > limits.maximumTraversalBytes) this.catalogCapacityExceeded();
 
+      const files: string[] = [];
       try {
         const entries = await opendir(directory);
         for await (const entry of entries) {
@@ -840,9 +1039,12 @@ export class RuntimeRegistry {
           if (entriesExamined > limits.maximumEntries) this.catalogCapacityExceeded();
           if (entry.isDirectory()) {
             const child = join(directory, entry.name);
+            if (this.isIgnoredCatalogDirectory(child, catalogRoot)) continue;
             traversalBytes += Buffer.byteLength(child);
             if (traversalBytes > limits.maximumTraversalBytes) this.catalogCapacityExceeded();
             pending.push(child);
+          } else if (entry.name.endsWith(".jsonl") && entry.isFile()) {
+            files.push(join(directory, entry.name));
           }
         }
       } catch (error) {
@@ -851,15 +1053,11 @@ export class RuntimeRegistry {
         throw new GatewayError("busy", "Session catalog directory could not be enumerated", true);
       }
 
-      // With an explicit directory the pinned SDK lists only that directory's
-      // JSONL files. RuntimeRegistry owns recursion and invokes it once for each
-      // canonical directory, avoiding overlapping descendant materializations.
-      const discovered = await SessionManager.listAll(directory);
+      // RuntimeRegistry owns recursion and uses a bounded metadata scanner here;
+      // the SDK list helper also builds an unused transcript-wide search string.
+      const discovered = await buildCatalogSessionInfos(files);
       if (sessions.length + discovered.length > limits.maximumSessions) this.catalogCapacityExceeded();
-      for (const { allMessagesText: _discardedSearchText, ...session } of discovered) {
-        // Gateway search never consumes the SDK's transcript-wide picker text.
-        // Drop it at the SDK boundary instead of retaining a second transcript
-        // projection for the lifetime of catalog materialization.
+      for (const session of discovered) {
         retainedBytes += Buffer.byteLength(JSON.stringify(session));
         if (retainedBytes > limits.maximumRetainedBytes) this.catalogCapacityExceeded();
         sessions.push(session);
@@ -912,23 +1110,129 @@ export class RuntimeRegistry {
     return (await this.catalog(scope)).sessions;
   }
 
-  async catalog(scope: "user" | "all" = "user"): Promise<{ sessions: SessionSummary[]; listRevision: number }> {
-    const snapshot = await this.catalogSnapshot(scope);
-    return { sessions: snapshot.sessions, listRevision: snapshot.listRevision };
+  private async attentionLiveOnlyStillAdmitted(sessionId: string): Promise<boolean> {
+    const evidence = await this.catalogStructureEvidence();
+    if (!evidence.complete) return false;
+    return ![...evidence.identitiesByPath].some(([, identity]) => identity.id === sessionId);
   }
 
-  private catalogSnapshot(scope: "user" | "all") {
-    return this.catalogMutex.run(async () => {
-      const materialized = await this.materializeCatalogSnapshot();
+  private async attentionEntryStillAdmitted(entry: CatalogAcquisitionEntry): Promise<boolean> {
+    // Refresh the complete bounded header set at commit. This closes the race
+    // where an external writer creates a same-ID file after admission without
+    // changing Gateway's generation counters.
+    const evidence = await this.catalogStructureEvidence();
+    if (!evidence.complete) return false;
+    const matches = [...evidence.identitiesByPath]
+      .filter(([, identity]) => identity.id === entry.id);
+    if (matches.length !== 1 || resolve(matches[0]![0]) !== entry.path) return false;
+    const identity = matches[0]![1];
+    if (identity.fileIdentity !== entry.fileIdentity
+      || resolve(identity.cwd || process.cwd()) !== entry.canonicalCwd) return false;
+    let metadata: Awaited<ReturnType<typeof lstat>>;
+    try { metadata = await lstat(entry.path); }
+    catch { return false; }
+    if (!metadata.isFile() || metadata.isSymbolicLink()) return false;
+    if (entry.fileIdentity !== undefined && `${metadata.dev}:${metadata.ino}` !== entry.fileIdentity) return false;
+    // A same-inode rewrite can change the header without changing the catalog
+    // generation. Re-read only this bounded header at the commit boundary.
+    const headerIdentity = (await this.readCatalogHeader(
+      entry.path,
+      this.catalogDiscoveryLimits().maximumHeaderBytesPerFile,
+      () => true,
+      () => {},
+    )).identity;
+    return headerIdentity?.id === entry.id
+      && resolve(headerIdentity.cwd || process.cwd()) === entry.canonicalCwd
+      && headerIdentity.fileIdentity === `${metadata.dev}:${metadata.ino}`;
+  }
+
+  async catalog(scope: "user" | "all" = "user"): Promise<{
+    sessions: SessionSummary[];
+    listRevision: number;
+    /** Disposable identity for sharing one immutable page source. */
+    generation?: string;
+  }> {
+    const snapshot = await this.catalogSnapshot(scope);
+    return {
+      sessions: snapshot.sessions,
+      listRevision: snapshot.listRevision,
+      generation: snapshot.generation,
+    };
+  }
+
+  private async catalogSnapshot(scope: "user" | "all"): Promise<{
+    infos: CatalogSessionInfo[];
+    sessions: SessionSummary[];
+    listRevision: number;
+    structureDigest: string;
+    generation: string;
+  }> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const projectionGeneration = this.catalogProjectionGeneration;
+      const materialized = await this.sharedCatalogMaterialization();
+      // Mutable live summaries are not structural authority, but a catalog page
+      // must not label a pre-update projection with the newer generation. Bound
+      // retries so a continuously streaming session cannot livelock catalog I/O.
+      if (projectionGeneration !== this.catalogProjectionGeneration) continue;
       return {
-        infos: materialized.infos,
-        sessions: scope === "all"
-          ? materialized.sessions
-          : materialized.sessions.filter((session) => session.kind === "user"),
-        listRevision: materialized.listRevision,
-        structureDigest: materialized.structureDigest,
+      infos: materialized.infos,
+      sessions: scope === "all"
+        ? materialized.sessions
+        : materialized.sessions.filter((session) => session.kind === "user"),
+      listRevision: materialized.listRevision,
+      structureDigest: materialized.structureDigest,
+      generation: `${materialized.listRevision}:${projectionGeneration}:${scope}`,
       };
-    });
+    }
+    throw new GatewayError("busy", "Session catalog changed during projection", true);
+  }
+
+  private sharedCatalogSessionInfos(refresh = false): Promise<CatalogSessionInfo[]> {
+    const key = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}:${refresh ? `refresh:${++this.catalogEvidenceRefresh}` : "current"}`;
+    if (!refresh && this.catalogSessionInfosPromise && this.catalogSessionInfosKey === key) return this.catalogSessionInfosPromise;
+    const operation = this.sessionInfos();
+    this.catalogSessionInfosPromise = operation;
+    this.catalogSessionInfosKey = key;
+    void operation.finally(() => {
+      if (this.catalogSessionInfosPromise === operation) {
+        this.catalogSessionInfosPromise = undefined;
+        this.catalogSessionInfosKey = undefined;
+      }
+    }).catch(() => {});
+    return operation;
+  }
+
+  private sharedCatalogStructureEvidence(refresh = false): Promise<CatalogStructureEvidence> {
+    const generationKey = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}`;
+    const key = refresh ? `${generationKey}:refresh:${++this.catalogEvidenceRefresh}` : generationKey;
+    if (this.catalogEvidencePromise && this.catalogEvidenceKey === key) return this.catalogEvidencePromise;
+    const operation = this.catalogStructureEvidence();
+    this.catalogEvidencePromise = operation;
+    this.catalogEvidenceKey = key;
+    void operation.finally(() => {
+      if (this.catalogEvidencePromise === operation) {
+        this.catalogEvidencePromise = undefined;
+        this.catalogEvidenceKey = undefined;
+      }
+    }).catch(() => {});
+    return operation;
+  }
+
+  private sharedCatalogMaterialization(): Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>> {
+    const key = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}:${this.revision}:${this.catalogProjectionGeneration}`;
+    if (this.catalogMaterializationPromise && this.catalogMaterializationKey === key) {
+      return this.catalogMaterializationPromise;
+    }
+    const operation = this.materializeCatalogSnapshot();
+    this.catalogMaterializationPromise = operation;
+    this.catalogMaterializationKey = key;
+    void operation.finally(() => {
+      if (this.catalogMaterializationPromise === operation) {
+        this.catalogMaterializationPromise = undefined;
+        this.catalogMaterializationKey = undefined;
+      }
+    }).catch(() => {});
+    return operation;
   }
 
   private async materializeCatalogSnapshot(): Promise<{
@@ -1010,9 +1314,9 @@ export class RuntimeRegistry {
   }> {
     const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
     const structuralGeneration = this.catalogStructuralGeneration;
-    const before = await this.catalogStructureEvidence();
-    const discoveredInfos = await this.sessionInfos();
-    const after = await this.catalogStructureEvidence();
+    const before = await this.timedStage("catalog.validate.before", () => this.sharedCatalogStructureEvidence());
+    const discoveredInfos = await this.timedStage("catalog.metadata-materialize", () => this.sharedCatalogSessionInfos());
+    const after = await this.timedStage("catalog.validate.after", () => this.sharedCatalogStructureEvidence(true));
     const allInfos = this.withCatalogEvidence(discoveredInfos, after);
     const ambiguousDiskIDs = this.diskAmbiguousSessionIDs(allInfos);
     return {
@@ -1130,6 +1434,7 @@ export class RuntimeRegistry {
       id: string;
       path: string;
       cwd: string;
+      fileIdentity?: string;
       parentSessionPath?: string;
     }>,
     ambiguousIDs: ReadonlySet<string>,
@@ -1166,6 +1471,7 @@ export class RuntimeRegistry {
         path: sessionPath,
         cwd: session.cwd,
         canonicalCwd: resolve(session.cwd || process.cwd()),
+        ...(session.fileIdentity ? { fileIdentity: session.fileIdentity } : {}),
         structuralSubagent: topology !== undefined,
         ...(parentSessionId ? { parentSessionId } : {}),
       };
@@ -1214,6 +1520,23 @@ export class RuntimeRegistry {
   }
 
   private async catalogAcquisition(): Promise<CatalogAcquisitionResolution> {
+    const key = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}`;
+    if (this.catalogAcquisitionPromise && this.catalogAcquisitionPromiseKey === key) {
+      return this.catalogAcquisitionPromise;
+    }
+    const operation = this.resolveCatalogAcquisition();
+    this.catalogAcquisitionPromise = operation;
+    this.catalogAcquisitionPromiseKey = key;
+    void operation.finally(() => {
+      if (this.catalogAcquisitionPromise === operation) {
+        this.catalogAcquisitionPromise = undefined;
+        this.catalogAcquisitionPromiseKey = undefined;
+      }
+    }).catch(() => {});
+    return operation;
+  }
+
+  private async resolveCatalogAcquisition(): Promise<CatalogAcquisitionResolution> {
     const candidateIndex = this.catalogStructuralIndex;
     const cachedIndex = candidateIndex?.structuralGeneration === this.catalogStructuralGeneration
       ? candidateIndex : undefined;
@@ -1257,7 +1580,7 @@ export class RuntimeRegistry {
     const lightweight = await this.catalogAcquisitionMutex.run(async () => {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
-        const evidence = await this.catalogStructureEvidence();
+        const evidence = await this.sharedCatalogStructureEvidence();
         if (invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration) continue;
         if (!evidence.complete) return undefined;
         const admission = this.catalogAcquisitionAdmission;
@@ -1295,11 +1618,11 @@ export class RuntimeRegistry {
   private async fallbackCatalogAcquisition(): Promise<CatalogAcquisitionResolution> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
-      const before = await this.catalogStructureEvidence();
-      const firstInfos = this.withCatalogEvidence(await this.sessionInfos(), before);
+      const before = await this.sharedCatalogStructureEvidence();
+      const firstInfos = this.withCatalogEvidence(await this.sharedCatalogSessionInfos(), before);
       const firstFingerprint = this.sdkCatalogIdentityFingerprint(firstInfos);
       const discoveredInfos = await this.sessionInfos();
-      const after = await this.catalogStructureEvidence();
+      const after = await this.sharedCatalogStructureEvidence(true);
       const allInfos = this.withCatalogEvidence(discoveredInfos, after);
       const identityFingerprint = this.sdkCatalogIdentityFingerprint(allInfos);
       if (firstFingerprint !== identityFingerprint) continue;
@@ -1737,7 +2060,10 @@ export class RuntimeRegistry {
       }
       let manager: SessionManager;
       try {
-        manager = SessionManager.open(canonicalPath, this.sessionDirectoryFor(entry.canonicalCwd));
+        manager = await this.timedStage(
+          "session.open.manager",
+          async () => SessionManager.open(canonicalPath, this.sessionDirectoryFor(entry.canonicalCwd)),
+        );
       } catch {
         throw new GatewayError("conflict", "Tron session is not a valid canonical session");
       }
@@ -1747,7 +2073,7 @@ export class RuntimeRegistry {
       }
       if (acquisition.indexedStructuralGeneration !== undefined) {
         const indexed = this.catalogStructuralIndex;
-        const validated = await this.catalogStructureEvidence();
+        const validated = await this.sharedCatalogStructureEvidence(true);
         if (acquisition.indexedStructuralGeneration !== this.catalogStructuralGeneration
             || indexed?.structuralGeneration !== acquisition.indexedStructuralGeneration
             || !validated.complete
@@ -1761,7 +2087,7 @@ export class RuntimeRegistry {
           || invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration) {
           throw new GatewayError("busy", "Session catalog changed while opening the session", true);
         }
-        const finalEvidence = await this.catalogStructureEvidence();
+        const finalEvidence = await this.sharedCatalogStructureEvidence(true);
         const finalInfos = this.withCatalogEvidence(await this.sessionInfos(), finalEvidence);
         if (invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration
           || this.sdkCatalogIdentityFingerprint(finalInfos) !== acquisition.fallbackIdentityFingerprint) {

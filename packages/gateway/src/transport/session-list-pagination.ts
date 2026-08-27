@@ -8,13 +8,22 @@ export interface SessionListPage {
   nextCursor?: string;
 }
 
-interface SessionListLease {
-  id: string;
-  clientID: string;
+interface CatalogGeneration {
+  key: string;
   scope: "user" | "all";
   sessions: readonly SessionSummary[];
   listRevision: number;
   byteCount: number;
+}
+
+interface SessionListLease {
+  id: string;
+  clientID: string;
+  scope: "user" | "all";
+  generationKey: string;
+  sessionCount: number;
+  byteCount: number;
+  listRevision: number;
   expiresAt: number;
   lastAccess: number;
 }
@@ -23,9 +32,16 @@ interface SessionListLease {
  * Bounded, disposable immutable projections for session.list traversals.
  * Cursors are authenticated and bound to one client, scope, offset, revision,
  * and materialization. Canonical catalog truth remains in RuntimeRegistry.
+ *
+ * RuntimeRegistry supplies a generation for indexed catalog snapshots. The
+ * store validates and freezes that source once, then leases share it instead
+ * of cloning and JSON-sizing the entire catalog for each client. Catalogs from
+ * older/mock callers without a generation retain the conservative per-request
+ * behavior.
  */
 export class SessionListPaginationStore {
   private readonly leases = new Map<string, SessionListLease>();
+  private readonly generations = new Map<string, CatalogGeneration>();
   private readonly secret: Buffer;
 
   constructor(private readonly options: {
@@ -51,40 +67,29 @@ export class SessionListPaginationStore {
     for (const [id, lease] of this.leases) {
       if (lease.clientID === clientID) this.leases.delete(id);
     }
+    this.pruneGenerations();
   }
 
   firstPage(
     clientID: string,
     scope: "user" | "all",
-    catalog: { sessions: SessionSummary[]; listRevision: number },
+    catalog: { sessions: SessionSummary[]; listRevision: number; generation?: string },
     limit: number,
   ): SessionListPage {
     this.prune();
-    const maxSessions = Math.min(
-      this.options.maxSessionsPerLease ?? 25_000,
-      this.options.maxTotalSessions ?? 50_000,
-    );
-    if (catalog.sessions.length > maxSessions) {
-      throw new GatewayError("busy", "The session catalog is too large for one bounded traversal", true);
-    }
-    const maxBytes = Math.min(
-      this.options.maxBytesPerLease ?? 4 * 1_024 * 1_024,
-      this.options.maxTotalBytes ?? 8 * 1_024 * 1_024,
-    );
-    let byteCount = 0;
-    for (const session of catalog.sessions) {
-      byteCount += Buffer.byteLength(JSON.stringify(session));
-      if (byteCount > maxBytes) {
-        throw new GatewayError("busy", "The session catalog is too large for one bounded traversal", true);
-      }
-    }
-    const sessions = Object.freeze(catalog.sessions.map((session) => Object.freeze({ ...session })));
-    const page = sessions.slice(0, limit);
-    if (page.length >= sessions.length) {
+    // A one-page response needs no cursor lease. Validate its bounded wire
+    // size, but do not retain a complete generation that cannot be referenced.
+    if (catalog.sessions.length <= limit) {
+      this.validateCatalogBudget(catalog.sessions);
+      const page: SessionSummary[] = catalog.sessions
+        .map((session) => Object.freeze({ ...session }));
       return { sessions: page, listRevision: catalog.listRevision };
     }
+    const generation = this.admitGeneration(scope, catalog);
+    const sessions = generation.sessions;
+    const page: SessionSummary[] = [...sessions.slice(0, limit)];
 
-    this.evictForCapacity(clientID, sessions.length, byteCount);
+    this.evictForCapacity(clientID, sessions.length, generation.byteCount);
     const now = this.now();
     let id: string;
     do { id = randomBytes(6).toString("hex"); } while (this.leases.has(id));
@@ -92,9 +97,10 @@ export class SessionListPaginationStore {
       id,
       clientID,
       scope,
-      sessions,
-      listRevision: catalog.listRevision,
-      byteCount,
+      generationKey: generation.key,
+      sessionCount: sessions.length,
+      byteCount: generation.byteCount,
+      listRevision: generation.listRevision,
       expiresAt: now + (this.options.leaseTTLms ?? 30_000),
       lastAccess: now,
     };
@@ -112,19 +118,74 @@ export class SessionListPaginationStore {
     const lease = this.leases.get(parsed.leaseID);
     if (!lease || lease.clientID !== clientID || lease.scope !== scope) this.invalidCursor();
     const expected = this.signature(lease!, parsed.offset);
-    if (parsed.signature !== expected || parsed.offset <= 0 || parsed.offset >= lease!.sessions.length) {
+    const generation = this.generations.get(lease!.generationKey);
+    if (parsed.signature !== expected || parsed.offset <= 0
+      || parsed.offset >= lease!.sessionCount || !generation) {
       this.invalidCursor();
     }
 
     lease!.lastAccess = this.now();
-    const sessions = lease!.sessions.slice(parsed.offset, parsed.offset + limit);
+    const sessions = generation!.sessions.slice(parsed.offset, parsed.offset + limit);
     const nextOffset = parsed.offset + sessions.length;
-    if (nextOffset >= lease!.sessions.length) this.leases.delete(lease!.id);
+    if (nextOffset >= lease!.sessionCount) this.leases.delete(lease!.id);
+    this.pruneGenerations();
     return {
       sessions,
       listRevision: lease!.listRevision,
-      ...(nextOffset < lease!.sessions.length ? { nextCursor: this.cursor(lease!, nextOffset) } : {}),
+      ...(nextOffset < lease!.sessionCount ? { nextCursor: this.cursor(lease!, nextOffset) } : {}),
     };
+  }
+
+  private admitGeneration(
+    scope: "user" | "all",
+    catalog: { sessions: SessionSummary[]; listRevision: number; generation?: string },
+  ): CatalogGeneration {
+    const maximumSessions = Math.min(
+      this.options.maxSessionsPerLease ?? 25_000,
+      this.options.maxTotalSessions ?? 50_000,
+    );
+    if (catalog.sessions.length > maximumSessions) {
+      throw new GatewayError("busy", "The session catalog is too large for one bounded traversal", true);
+    }
+    const maximumBytes = Math.min(
+      this.options.maxBytesPerLease ?? 4 * 1_024 * 1_024,
+      this.options.maxTotalBytes ?? 8 * 1_024 * 1_024,
+    );
+    const key = catalog.generation ?? `request:${scope}:${catalog.listRevision}:${randomBytes(8).toString("hex")}`;
+    const existing = this.generations.get(key);
+    if (existing) {
+      if (existing.scope !== scope || existing.listRevision !== catalog.listRevision) this.invalidCursor();
+      return existing;
+    }
+
+    const byteCount = this.validateCatalogBudget(catalog.sessions, maximumBytes);
+    // One clone/freeze establishes an immutable generation. Subsequent clients
+    // and pages share these objects and do not repeat whole-catalog work.
+    const sessions = Object.freeze(catalog.sessions.map((session) => Object.freeze({ ...session })));
+    const generation: CatalogGeneration = {
+      key,
+      scope,
+      sessions,
+      listRevision: catalog.listRevision,
+      byteCount,
+    };
+    this.generations.set(key, generation);
+    return generation;
+  }
+
+  private validateCatalogBudget(sessions: readonly SessionSummary[], maximumBytes?: number): number {
+    const maxBytes = maximumBytes ?? Math.min(
+      this.options.maxBytesPerLease ?? 4 * 1_024 * 1_024,
+      this.options.maxTotalBytes ?? 8 * 1_024 * 1_024,
+    );
+    let byteCount = 0;
+    for (const session of sessions) {
+      byteCount += Buffer.byteLength(JSON.stringify(session));
+      if (byteCount > maxBytes) {
+        throw new GatewayError("busy", "The session catalog is too large for one bounded traversal", true);
+      }
+    }
+    return byteCount;
   }
 
   private cursor(lease: SessionListLease, offset: number): string {
@@ -133,7 +194,7 @@ export class SessionListPaginationStore {
 
   private signature(lease: SessionListLease, offset: number): string {
     return createHmac("sha256", this.secret)
-      .update(`${lease.id}\0${lease.clientID}\0${lease.scope}\0${lease.listRevision}\0${offset}`)
+      .update(`${lease.id}\0${lease.clientID}\0${lease.scope}\0${lease.listRevision}\0${lease.generationKey}\0${offset}`)
       .digest("base64url")
       .slice(0, 11);
   }
@@ -152,6 +213,14 @@ export class SessionListPaginationStore {
     for (const [id, lease] of this.leases) {
       if (lease.expiresAt <= now) this.leases.delete(id);
     }
+    this.pruneGenerations();
+  }
+
+  private pruneGenerations(): void {
+    const referenced = new Set([...this.leases.values()].map((lease) => lease.generationKey));
+    for (const key of this.generations.keys()) {
+      if (!referenced.has(key)) this.generations.delete(key);
+    }
   }
 
   private evictForCapacity(clientID: string, incomingSessionCount: number, incomingBytes: number): void {
@@ -160,7 +229,7 @@ export class SessionListPaginationStore {
     const maxTotalSessions = this.options.maxTotalSessions ?? 50_000;
     const maxTotalBytes = this.options.maxTotalBytes ?? 8 * 1_024 * 1_024;
     let retainedSessions = [...this.leases.values()]
-      .reduce((total, lease) => total + lease.sessions.length, 0);
+      .reduce((total, lease) => total + lease.sessionCount, 0);
     let retainedBytes = [...this.leases.values()]
       .reduce((total, lease) => total + lease.byteCount, 0);
     let clientLeaseCount = [...this.leases.values()].filter((lease) => lease.clientID === clientID).length;
@@ -176,7 +245,7 @@ export class SessionListPaginationStore {
       }
       if (!oldest) break;
       this.leases.delete(oldest.id);
-      retainedSessions -= oldest.sessions.length;
+      retainedSessions -= oldest.sessionCount;
       retainedBytes -= oldest.byteCount;
       if (oldest.clientID === clientID) clientLeaseCount -= 1;
     }

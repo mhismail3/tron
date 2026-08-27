@@ -49,6 +49,19 @@ describe("SessionListPaginationStore", () => {
     expect(store.activeLeaseCount).toBe(0);
   });
 
+  it("does not retain unleased generations for one-page responses", () => {
+    const store = new SessionListPaginationStore({ secret: Buffer.alloc(32, 9) });
+    for (let revision = 0; revision < 100; revision += 1) {
+      const page = store.firstPage("phone", "user", {
+        sessions: [summary(revision)],
+        listRevision: revision,
+        generation: `generation-${revision}`,
+      }, 10);
+      expect(page.nextCursor).toBeUndefined();
+    }
+    expect((store as unknown as { generations: Map<string, unknown> }).generations.size).toBe(0);
+  });
+
   it("rejects stale, wrong-client, wrong-scope, and tampered cursors", () => {
     let now = 100;
     const store = new SessionListPaginationStore({

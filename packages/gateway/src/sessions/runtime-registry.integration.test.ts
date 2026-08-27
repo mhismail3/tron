@@ -257,6 +257,14 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(secondRestart.attentionProjection(sessionId).completionRevision).toBe(1);
   });
 
+  it("resolves attention membership without materializing the full catalog", async () => {
+    const fixture = await coldFixture("attention-scoped-resolution");
+    const catalog = vi.spyOn(fixture.registry, "catalog");
+    const projection = await fixture.registry.setAttention(fixture.manager.getSessionId(), true);
+    expect(projection.isUnread).toBe(true);
+    expect(catalog).not.toHaveBeenCalled();
+  });
+
   it("merges a suspended attention write into latest summary facts and cannot race deletion", async () => {
     const fixture = await coldFixture("attention-races");
     const sessionId = fixture.manager.getSessionId();
@@ -605,10 +613,14 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       firstMessage: id,
       allMessagesText: "unused picker search text ".repeat(20_000),
     }));
-    const encodedBytes = infos.reduce((total, { allMessagesText: _discarded, ...info }) => (
-      total + Buffer.byteLength(JSON.stringify(info))
+    await Promise.all(infos.map((info) => writeFile(info.path, `${JSON.stringify({
+      type: "session", version: 3, id: info.id, timestamp: now.toISOString(), cwd: root,
+    })}\n`)));
+    const encodedBytes = infos.reduce((total, { allMessagesText: _unused, ...info }) => (
+      total + Buffer.byteLength(JSON.stringify({
+        ...info, created: now, modified: now, firstMessage: "(no messages)",
+      }))
     ), 0);
-    const listAll = vi.spyOn(SessionManager, "listAll").mockResolvedValue(infos as never);
     const makeRegistry = (maximumSessions: number, maximumRetainedBytes: number) => {
       const registry = new RuntimeRegistry({
         agentDir,
@@ -624,15 +636,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       return registry;
     };
 
-    try {
-      await expect(makeRegistry(1, encodedBytes).catalog("all")).rejects.toMatchObject({ code: "busy" });
-      await expect(makeRegistry(2, encodedBytes - 1).catalog("all")).rejects.toMatchObject({ code: "busy" });
-      await expect(makeRegistry(2, encodedBytes).catalog("all")).resolves.toMatchObject({
-        sessions: [{ id: "first" }, { id: "second" }],
-      });
-    } finally {
-      listAll.mockRestore();
-    }
+    await expect(makeRegistry(1, encodedBytes).catalog("all")).rejects.toMatchObject({ code: "busy" });
+    await expect(makeRegistry(2, encodedBytes).catalog("all")).rejects.toMatchObject({ code: "busy" });
+    await expect(makeRegistry(2, encodedBytes + 1_024).catalog("all")).resolves.toMatchObject({
+      sessions: [{ id: "first" }, { id: "second" }],
+    });
   });
 
   it("caps canonical session path normalization concurrency", async () => {
@@ -649,7 +657,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       messageCount: 0,
       firstMessage: `session ${index}`,
     }));
-    const listAll = vi.spyOn(SessionManager, "listAll").mockResolvedValue(infos as never);
+    await Promise.all(infos.map((info) => writeFile(info.path, `${JSON.stringify({
+      type: "session", version: 3, id: info.id, timestamp: now.toISOString(), cwd: root,
+    })}\n`)));
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
@@ -688,7 +698,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       expect(maximumActive).toBe(2);
     } finally {
       canonicalize.mockRestore();
-      listAll.mockRestore();
     }
   });
 
@@ -729,6 +738,59 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(materialize).toHaveBeenCalledTimes(1);
   });
 
+  it("admits unread and read attention for an empty live-only session", async () => {
+    const fixture = await coldFixture("live-only-attention");
+    const live = await fixture.registry.create(fixture.cwd);
+    const unread = await fixture.registry.setAttention(live.id, true);
+    expect(unread.isUnread).toBe(true);
+    const read = await fixture.registry.setAttention(live.id, false, unread.completionRevision);
+    expect(read.isUnread).toBe(false);
+  });
+
+  it("quarantines a disk claimant that collides with an empty live-only session", async () => {
+    const fixture = await coldFixture("live-only-attention-collision");
+    const live = await fixture.registry.create(fixture.cwd);
+    const collisionDirectory = join(fixture.agentDir, "sessions", "collision");
+    await mkdir(collisionDirectory, { recursive: true });
+    const collision = SessionManager.create(fixture.cwd, collisionDirectory, { id: live.id });
+    collision.appendMessage(fauxAssistantMessage("collision"));
+    await expect(fixture.registry.setAttention(live.id, true)).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("rechecks a live-only attention target when a disk claimant appears at the commit boundary", async () => {
+    const fixture = await coldFixture("live-only-attention-race");
+    const live = await fixture.registry.create(fixture.cwd);
+    const internals = fixture.registry as unknown as {
+      attentionLiveOnlyStillAdmitted: (sessionId: string) => Promise<boolean>;
+    };
+    const original = internals.attentionLiveOnlyStillAdmitted.bind(fixture.registry);
+    let entered!: () => void;
+    let release!: () => void;
+    const reachedCommitBoundary = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const finalAdmission = vi.spyOn(internals, "attentionLiveOnlyStillAdmitted")
+      .mockImplementation(async (sessionId) => {
+        entered();
+        await gate;
+        return original(sessionId);
+      });
+
+    try {
+      const update = fixture.registry.setAttention(live.id, true);
+      await reachedCommitBoundary;
+      const collisionDirectory = join(fixture.agentDir, "sessions", "late-collision");
+      await mkdir(collisionDirectory, { recursive: true });
+      const collision = SessionManager.create(fixture.cwd, collisionDirectory, { id: live.id });
+      collision.appendMessage(fauxAssistantMessage("late collision"));
+      release();
+      await expect(update).rejects.toMatchObject({ code: "conflict" });
+      expect(fixture.registry.attentionProjection(live.id).isUnread).toBe(false);
+    } finally {
+      release();
+      finalAdmission.mockRestore();
+    }
+  });
+
   it("does not certify a cached index when traversal evidence is incomplete", async () => {
     const fixture = await coldFixture("incomplete-index-evidence");
     const internals = fixture.registry as unknown as {
@@ -743,7 +805,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       .mockResolvedValue({ ...evidence, complete: false });
     try {
       await fixture.registry.catalog("all");
-      expect(materialize).toHaveBeenCalledTimes(2);
+      // Incomplete evidence is intentionally not cached: the second catalog
+      // performs a fresh bounded metadata materialization, including its
+      // stability pass, before returning the fallback projection.
+      expect(materialize).toHaveBeenCalledTimes(3);
     } finally {
       evidenceSpy.mockRestore();
     }
@@ -815,6 +880,52 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
       .toBe(fixture.manager.getSessionId());
     expect(materialize).not.toHaveBeenCalled();
+  });
+
+  it("ignores malformed non-session subagent artifacts without poisoning the catalog index", async () => {
+    const fixture = await coldFixture("ignored-artifacts");
+    const artifactDirectory = join(fixture.agentDir, "sessions", "workspace", "subagent-artifacts");
+    await mkdir(artifactDirectory, { recursive: true });
+    await writeFile(join(artifactDirectory, "worker.jsonl"), `${JSON.stringify({ recordType: "message", text: "diagnostic" })}\\n`);
+    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
+    const materialize = vi.spyOn(internals, "sessionInfos");
+
+    const first = await fixture.registry.catalog("all");
+    expect(first.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
+    expect(materialize).toHaveBeenCalledTimes(1);
+    const second = await fixture.registry.catalog("all");
+    expect(second.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
+    expect(materialize).toHaveBeenCalledTimes(1);
+  });
+
+  it("coalesces concurrent fallback acquisition scans for one catalog generation", async () => {
+    const fixture = await coldFixture("coalesced-fallback");
+    await writeFile(join(fixture.agentDir, "sessions", "workspace", "malformed.jsonl"), `${"x".repeat(70_000)}\\n`);
+    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
+    const original = internals.sessionInfos.bind(fixture.registry);
+    let entered!: () => void;
+    let release!: () => void;
+    const enteredScan = new Promise<void>((resolve) => { entered = resolve; });
+    const scanBarrier = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    const materialize = vi.spyOn(internals, "sessionInfos").mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) {
+        entered();
+        await scanBarrier;
+      }
+      return original();
+    });
+    const acquire = (fixture.registry as unknown as { catalogAcquisition: () => Promise<unknown> }).catalogAcquisition
+      .bind(fixture.registry);
+    const first = acquire();
+    await enteredScan;
+    const second = acquire();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(calls).toBe(1);
+    release();
+    await Promise.all([first, second]);
+    expect(materialize).toHaveBeenCalledTimes(2);
   });
 
   it("falls back to stable SDK discovery for an unrelated malformed header", async () => {
