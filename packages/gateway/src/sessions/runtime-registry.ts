@@ -74,21 +74,6 @@ function assertProcessSessionRef(value: string): void {
   }
 }
 
-function orderSessionSummariesByRecency(summaries: SessionSummary[]): SessionSummary[] {
-  return summaries
-    .map((summary) => ({ summary, instant: Date.parse(summary.updatedAt) }))
-    .sort((left, right) => {
-      const leftValid = Number.isFinite(left.instant);
-      const rightValid = Number.isFinite(right.instant);
-      if (leftValid && rightValid && left.instant !== right.instant) return right.instant - left.instant;
-      if (leftValid !== rightValid) return rightValid ? 1 : -1;
-      // Equivalent instants can use different valid ISO precision. Identity,
-      // not textual timestamp shape, is the deterministic pagination tie-breaker.
-      return left.summary.id.localeCompare(right.summary.id);
-    })
-    .map(({ summary }) => summary);
-}
-
 function branchFromParsedSession(entries: FileEntry[]): {
   sessionId: string;
   parentSession?: string;
@@ -275,6 +260,29 @@ export interface ReadOnlySubagentAdmission {
   fileIdentity: string;
 }
 
+interface CatalogPageSeed {
+  readonly id: string;
+  readonly name?: string;
+  readonly cwd: string;
+  readonly kind: SessionSummary["kind"];
+  readonly parentSessionId?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly messageCount: number;
+  readonly firstMessage: string;
+  readonly phase: SessionSummary["phase"];
+  readonly summaryRevision: number;
+  readonly attention: SessionAttentionProjection;
+}
+
+interface CatalogPageSource {
+  readonly generation: string;
+  readonly listRevision: number;
+  readonly count: number;
+  readonly compactByteEstimate: number;
+  readonly page: (offset: number, limit: number) => Promise<SessionSummary[]>;
+}
+
 interface CatalogStructuralIndex {
   allInfos: readonly CatalogSessionInfo[];
   ambiguousDiskIDs: ReadonlySet<string>;
@@ -335,10 +343,11 @@ export class RuntimeRegistry {
   private catalogStructuralGeneration = 0;
   private catalogAcquisitionAdmission: CatalogAcquisitionAdmission | undefined;
   private catalogStructuralIndex: CatalogStructuralIndex | undefined;
-  /** Mutable row projections are separate from structural listRevision. This
-   * generation lets pagination share one immutable row vector per projection
-   * cut without making summary state authoritative. */
+  /** Mutable page overlays are separate from structural listRevision. This
+   * generation keys immutable compact page seeds without making them catalog
+   * authority. */
   private catalogProjectionGeneration = 0;
+  private readonly catalogPageSources = new Map<string, WeakRef<CatalogPageSource>>();
   private readonly pendingSlotStarts = new Map<string, Promise<RuntimeSlot>>();
   private reservedSlotStarts = 0;
   private evictionTimer?: NodeJS.Timeout;
@@ -659,10 +668,11 @@ export class RuntimeRegistry {
         if (result.changed) {
           // The store write may suspend while a live summary advances. Merge into
           // the newest retained facts rather than stamping stale catalog fields
-          // with a newer summary revision. A missing live summary is safe: the
-          // next catalog refresh projects the persisted attention fact.
+          // with a newer summary revision. A missing live summary still advances
+          // the captured page-overlay generation directly.
           const latest = this.latestSummaries.get(sessionId);
           if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
+          else this.catalogProjectionGeneration += 1;
         }
         return result.projection;
       });
@@ -1185,6 +1195,31 @@ export class RuntimeRegistry {
       && headerIdentity.fileIdentity === `${metadata.dev}:${metadata.ino}`;
   }
 
+  async pageSource(scope: "user" | "all" = "user"): Promise<CatalogPageSource> {
+    const projectionGeneration = this.catalogProjectionGeneration;
+    const materialized = await this.sharedCatalogMaterialization();
+    if (projectionGeneration !== this.catalogProjectionGeneration) {
+      throw new GatewayError("busy", "Session catalog changed during projection", true);
+    }
+    const generation = `${materialized.listRevision}:${projectionGeneration}:${scope}`;
+    const existing = this.catalogPageSources.get(generation)?.deref();
+    if (existing) return existing;
+    const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs);
+    const source = this.createCatalogPageSource(generation, materialized.listRevision, seeds);
+    // RuntimeRegistry does not strongly retain disposable sources. Multi-page
+    // leases own them; one-page responses become collectible immediately.
+    this.catalogPageSources.set(generation, new WeakRef(source));
+    for (const [key, reference] of this.catalogPageSources) {
+      if (!reference.deref()) this.catalogPageSources.delete(key);
+    }
+    while (this.catalogPageSources.size > 4) {
+      const oldest = this.catalogPageSources.keys().next().value;
+      if (oldest === undefined) break;
+      this.catalogPageSources.delete(oldest);
+    }
+    return source;
+  }
+
   async catalog(scope: "user" | "all" = "user"): Promise<{
     sessions: SessionSummary[];
     listRevision: number;
@@ -1202,6 +1237,7 @@ export class RuntimeRegistry {
   private async catalogSnapshot(scope: "user" | "all"): Promise<{
     infos: CatalogSessionInfo[];
     sessions: SessionSummary[];
+    ambiguousIDs: ReadonlySet<string>;
     listRevision: number;
     structureDigest: string;
     generation: string;
@@ -1213,14 +1249,15 @@ export class RuntimeRegistry {
       // must not label a pre-update projection with the newer generation. Bound
       // retries so a continuously streaming session cannot livelock catalog I/O.
       if (projectionGeneration !== this.catalogProjectionGeneration) continue;
+      const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs);
+      const source = this.createCatalogPageSource(`${materialized.listRevision}:${projectionGeneration}:${scope}`, materialized.listRevision, seeds);
       return {
-      infos: materialized.infos,
-      sessions: scope === "all"
-        ? materialized.sessions
-        : materialized.sessions.filter((session) => session.kind === "user"),
-      listRevision: materialized.listRevision,
-      structureDigest: materialized.structureDigest,
-      generation: `${materialized.listRevision}:${projectionGeneration}:${scope}`,
+        infos: materialized.infos,
+        sessions: await source.page(0, seeds.length),
+        ambiguousIDs: materialized.ambiguousIDs,
+        listRevision: materialized.listRevision,
+        structureDigest: materialized.structureDigest,
+        generation: source.generation,
       };
     }
     throw new GatewayError("busy", "Session catalog changed during projection", true);
@@ -1377,7 +1414,7 @@ export class RuntimeRegistry {
 
   private async materializeCatalogSnapshot(): Promise<{
     infos: CatalogSessionInfo[];
-    sessions: SessionSummary[];
+    ambiguousIDs: ReadonlySet<string>;
     listRevision: number;
     structureDigest: string;
   }> {
@@ -1392,7 +1429,7 @@ export class RuntimeRegistry {
       this.ambiguousSessionIds = ambiguousIDs;
       return {
         infos: [...infos],
-        sessions: await this.projectSessions(infos, "all", ambiguousIDs),
+        ambiguousIDs,
         listRevision: this.revision,
         structureDigest: cached.structureDigest,
       };
@@ -1442,7 +1479,6 @@ export class RuntimeRegistry {
     // No await may separate the final generation confirmation from publication
     // of catalog identity and its matching revision.
     this.updateCatalogIdentity(materialized.allInfos, ambiguousIDs);
-    const sessions = await this.projectSessions(infos, "all", ambiguousIDs);
     // Persistence is acceleration only. Failure leaves the in-memory canonical
     // projection usable and is reported by the index owner without affecting
     // authority or list success.
@@ -1453,7 +1489,7 @@ export class RuntimeRegistry {
     ).catch(() => {});
     return {
       infos: [...infos],
-      sessions,
+      ambiguousIDs,
       listRevision: this.revision,
       structureDigest: materialized.after.digest,
     };
@@ -1813,27 +1849,25 @@ export class RuntimeRegistry {
     throw new GatewayError("busy", "Session catalog changed during acquisition", true);
   }
 
-  private async projectSessions(
-    sessions: Awaited<ReturnType<RuntimeRegistry["sessionInfos"]>>,
+  private buildCatalogPageSeeds(
+    sessions: readonly CatalogSessionInfo[],
     scope: "user" | "all",
-    ambiguousIDs: ReadonlySet<string> = new Set(),
-  ): Promise<SessionSummary[]> {
+    ambiguousIDs: ReadonlySet<string>,
+  ): CatalogPageSeed[] {
     const pathToId = new Map(sessions.map((session) => [resolve(session.path), session.id]));
     const delegated = this.delegatedSessionTopologies(sessions);
-
     const persistedIDs = new Set(sessions.map((session) => session.id));
-    const persisted = sessions.flatMap((session) => {
-      const sessionPath = resolve(session.path);
-      const topology = delegated.get(sessionPath);
-      if (topology?.contradictoryHeader) return [];
+    const seeds: CatalogPageSeed[] = [];
+    for (const session of sessions) {
+      const topology = delegated.get(resolve(session.path));
+      if (topology?.contradictoryHeader) continue;
       const kind: SessionSummary["kind"] = topology ? "subagent" : "user";
-      if (scope === "user" && kind === "subagent") return [];
+      if (scope === "user" && kind === "subagent") continue;
       const headerParentSessionId = session.parentSessionPath ? pathToId.get(resolve(session.parentSessionPath)) : undefined;
       const parentSessionId = topology?.parentSessionId ?? headerParentSessionId;
-      const slot = this.slots.get(session.id);
       const latest = this.latestSummaries.get(session.id);
       const name = latest?.name ?? session.name;
-      return [{
+      seeds.push({
         id: session.id,
         ...(name ? { name } : {}),
         cwd: session.cwd,
@@ -1843,33 +1877,69 @@ export class RuntimeRegistry {
         updatedAt: latest?.updatedAt ?? session.modified.toISOString(),
         messageCount: latest?.messageCount ?? session.messageCount,
         firstMessage: latest?.firstMessage ?? session.firstMessage,
-        phase: latest?.phase ?? (slot ? slot.catalogPhase : this.interrupted.has(session.id) ? "interrupted" : "idle"),
+        phase: latest?.phase ?? (this.slots.get(session.id) ? this.slots.get(session.id)!.catalogPhase : this.interrupted.has(session.id) ? "interrupted" : "idle"),
         summaryRevision: latest?.summaryRevision ?? 0,
-        ...this.attention.projection(session.id),
-      }];
+        attention: this.attention.projection(session.id),
+      });
+    }
+    if (scope === "all" || scope === "user") {
+      for (const [id, slot] of this.slots) {
+        if (slot.isDisposed || persistedIDs.has(id) || ambiguousIDs.has(id)) continue;
+        const latest = this.latestSummaries.get(id);
+        seeds.push({
+          id,
+          ...(latest?.name ? { name: latest.name } : {}),
+          cwd: slot.cwd,
+          kind: "user",
+          createdAt: slot.catalogCreatedAt,
+          updatedAt: latest?.updatedAt ?? slot.catalogCreatedAt,
+          messageCount: latest?.messageCount ?? 0,
+          firstMessage: latest?.firstMessage ?? "",
+          phase: latest?.phase ?? slot.catalogPhase,
+          summaryRevision: latest?.summaryRevision ?? 0,
+          attention: this.attention.projection(id),
+        });
+      }
+    }
+    return seeds.sort((left, right) => {
+      const l = Date.parse(left.updatedAt); const r = Date.parse(right.updatedAt);
+      if (Number.isFinite(l) && Number.isFinite(r) && l !== r) return r - l;
+      if (Number.isFinite(l) !== Number.isFinite(r)) return Number.isFinite(r) ? 1 : -1;
+      return left.id.localeCompare(right.id);
     });
-    const liveOnly: SessionSummary[] = [...this.slots].flatMap(([id, slot]) => {
-      // A runtime may create its canonical file after the cached disk
-      // generation. Keep its exact-owned row visible until structural
-      // invalidation discovers the file; never create a catalog gap.
-      if (slot.isDisposed || persistedIDs.has(id) || ambiguousIDs.has(id)) return [];
-      const latest = this.latestSummaries.get(id);
-      const name = latest?.name;
-      return [{
-        id,
-        ...(name ? { name } : {}),
-        cwd: slot.cwd,
-        kind: "user",
-        createdAt: slot.catalogCreatedAt,
-        updatedAt: latest?.updatedAt ?? slot.catalogCreatedAt,
-        messageCount: latest?.messageCount ?? 0,
-        firstMessage: latest?.firstMessage ?? "",
-        phase: latest?.phase ?? slot.catalogPhase,
-        summaryRevision: latest?.summaryRevision ?? 0,
-        ...this.attention.projection(id),
-      }];
+  }
+
+  private createCatalogPageSource(generation: string, listRevision: number, seeds: readonly CatalogPageSeed[]): CatalogPageSource {
+    const uniqueIDs = new Set(seeds.map((seed) => seed.id));
+    if (uniqueIDs.size !== seeds.length) {
+      throw new GatewayError("busy", "Session catalog identity is ambiguous", true);
+    }
+    const compactByteEstimate = Buffer.byteLength(generation) + 64 + seeds.reduce((total, seed) => total
+      + Buffer.byteLength(seed.id) + Buffer.byteLength(seed.cwd) + Buffer.byteLength(seed.kind)
+      + Buffer.byteLength(seed.createdAt) + Buffer.byteLength(seed.updatedAt)
+      + Buffer.byteLength(seed.firstMessage) + Buffer.byteLength(seed.phase)
+      + (seed.name ? Buffer.byteLength(seed.name) : 0)
+      + (seed.parentSessionId ? Buffer.byteLength(seed.parentSessionId) : 0)
+      // Object/reference, number, and boolean storage for the seed and captured
+      // summary/attention revision fields. String payloads are counted above.
+      + 160, 0);
+    return Object.freeze({
+      generation, listRevision, count: seeds.length, compactByteEstimate,
+      page: async (offset: number, limit: number) => seeds.slice(offset, offset + limit).map((seed) => ({
+        id: seed.id,
+        ...(seed.name ? { name: seed.name } : {}),
+        cwd: seed.cwd,
+        kind: seed.kind,
+        ...(seed.parentSessionId ? { parentSessionId: seed.parentSessionId } : {}),
+        createdAt: seed.createdAt,
+        updatedAt: seed.updatedAt,
+        messageCount: seed.messageCount,
+        firstMessage: seed.firstMessage,
+        phase: seed.phase,
+        summaryRevision: seed.summaryRevision,
+        ...seed.attention,
+      })),
     });
-    return orderSessionSummariesByRecency([...persisted, ...liveOnly]);
   }
 
   private async projectTrustReloading(cwdInput: string): Promise<boolean> {

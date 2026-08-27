@@ -17,6 +17,14 @@ function summary(index: number, phase: SessionSummary["phase"] = "idle"): Sessio
   };
 }
 
+function pageSource(sessions: SessionSummary[], listRevision: number, generation = `generation-${listRevision}`) {
+  const rows = sessions.slice();
+  return {
+    generation, listRevision, count: rows.length, compactByteEstimate: rows.reduce((n, row) => n + 96 + row.id.length + row.cwd.length + row.firstMessage.length, 0),
+    page: async (offset: number, limit: number) => rows.slice(offset, offset + limit),
+  };
+}
+
 const client = (id: string): ClientContext => ({
   id,
   identity: `device:${id}`,
@@ -31,14 +39,14 @@ const client = (id: string): ClientContext => ({
 });
 
 describe("SessionListPaginationStore", () => {
-  it("pages 1000 rows from one immutable revision with exact ordering and no gaps", () => {
+  it("pages 1000 rows from one immutable revision with exact ordering and no gaps", async () => {
     const store = new SessionListPaginationStore({ secret: Buffer.alloc(32, 1) });
     const canonical = Array.from({ length: 1_000 }, (_, index) => summary(index));
-    let page = store.firstPage("phone", "user", { sessions: canonical, listRevision: 41 }, 137);
+    let page = await store.firstPage("phone", "user", pageSource(canonical, 41), 137);
     const received = [...page.sessions];
     canonical.splice(0, canonical.length, summary(2_000, "running"));
     while (page.nextCursor) {
-      page = store.nextPage("phone", "user", page.nextCursor, 137);
+      page = await store.nextPage("phone", "user", page.nextCursor, 137);
       expect(page.listRevision).toBe(41);
       received.push(...page.sessions);
     }
@@ -49,38 +57,31 @@ describe("SessionListPaginationStore", () => {
     expect(store.activeLeaseCount).toBe(0);
   });
 
-  it("does not retain unleased generations for one-page responses", () => {
+  it("does not retain unleased generations for one-page responses", async () => {
     const store = new SessionListPaginationStore({ secret: Buffer.alloc(32, 9) });
     for (let revision = 0; revision < 100; revision += 1) {
-      const page = store.firstPage("phone", "user", {
-        sessions: [summary(revision)],
-        listRevision: revision,
-        generation: `generation-${revision}`,
-      }, 10);
+      const page = await store.firstPage("phone", "user", pageSource([summary(revision)], revision), 10);
       expect(page.nextCursor).toBeUndefined();
     }
     expect((store as unknown as { generations: Map<string, unknown> }).generations.size).toBe(0);
   });
 
-  it("rejects stale, wrong-client, wrong-scope, and tampered cursors", () => {
+  it("rejects stale, wrong-client, wrong-scope, and tampered cursors", async () => {
     let now = 100;
     const store = new SessionListPaginationStore({
       now: () => now,
       leaseTTLms: 20,
       secret: Buffer.alloc(32, 2),
     });
-    const first = store.firstPage("phone", "user", {
-      sessions: [summary(0), summary(1), summary(2)],
-      listRevision: 1,
-    }, 1);
-    expect(() => store.nextPage("tablet", "user", first.nextCursor!, 1)).toThrow(/invalid or expired/);
-    expect(() => store.nextPage("phone", "all", first.nextCursor!, 1)).toThrow(/invalid or expired/);
-    expect(() => store.nextPage("phone", "user", `${first.nextCursor!}x`, 1)).toThrow(/invalid or expired/);
+    const first = await store.firstPage("phone", "user", pageSource([summary(0), summary(1), summary(2)], 1), 1);
+    await expect(store.nextPage("tablet", "user", first.nextCursor!, 1)).rejects.toThrow(/invalid or expired/);
+    await expect(store.nextPage("phone", "all", first.nextCursor!, 1)).rejects.toThrow(/invalid or expired/);
+    await expect(store.nextPage("phone", "user", `${first.nextCursor!}x`, 1)).rejects.toThrow(/invalid or expired/);
     now = 120;
-    expect(() => store.nextPage("phone", "user", first.nextCursor!, 1)).toThrow(/invalid or expired/);
+    await expect(store.nextPage("phone", "user", first.nextCursor!, 1)).rejects.toThrow(/invalid or expired/);
   });
 
-  it("enforces LRU lease and materialization count bounds", () => {
+  it("enforces LRU lease and materialization count bounds", async () => {
     let now = 0;
     const store = new SessionListPaginationStore({
       now: () => now,
@@ -88,41 +89,34 @@ describe("SessionListPaginationStore", () => {
       maxSessionsPerLease: 3,
       secret: Buffer.alloc(32, 3),
     });
-    const first = store.firstPage("one", "user", { sessions: [summary(0), summary(1)], listRevision: 1 }, 1);
+    const first = await store.firstPage("one", "user", pageSource([summary(0), summary(1)], 1), 1);
     now += 1;
-    const second = store.firstPage("two", "user", { sessions: [summary(2), summary(3)], listRevision: 2 }, 1);
+    const second = await store.firstPage("two", "user", pageSource([summary(2), summary(3)], 2), 1);
     now += 1;
-    const third = store.firstPage("three", "user", { sessions: [summary(4), summary(5)], listRevision: 3 }, 1);
+    const third = await store.firstPage("three", "user", pageSource([summary(4), summary(5)], 3), 1);
     expect(store.activeLeaseCount).toBe(2);
-    expect(() => store.nextPage("one", "user", first.nextCursor!, 1)).toThrow(/invalid or expired/);
-    expect(store.nextPage("two", "user", second.nextCursor!, 1).sessions).toEqual([summary(3)]);
-    expect(store.nextPage("three", "user", third.nextCursor!, 1).sessions).toEqual([summary(5)]);
-    expect(() => store.firstPage("large", "user", {
-      sessions: [summary(0), summary(1), summary(2), summary(3)],
-      listRevision: 4,
-    }, 1)).toThrow(/too large/);
+    await expect(store.nextPage("one", "user", first.nextCursor!, 1)).rejects.toThrow(/invalid or expired/);
+    expect((await store.nextPage("two", "user", second.nextCursor!, 1)).sessions).toEqual([summary(3)]);
+    expect((await store.nextPage("three", "user", third.nextCursor!, 1)).sessions).toEqual([summary(5)]);
+    await expect(store.firstPage("large", "user", pageSource([summary(0), summary(1), summary(2), summary(3)], 4), 1)).rejects.toThrow(/too large/);
   });
 
-  it("bounds retained rows across all concurrent leases", () => {
+  it("bounds retained rows across all concurrent leases", async () => {
     const store = new SessionListPaginationStore({
       maxLeases: 8,
       maxSessionsPerLease: 4,
       maxTotalSessions: 5,
       secret: Buffer.alloc(32, 4),
     });
-    const first = store.firstPage("one", "user", {
-      sessions: [summary(0), summary(1), summary(2)], listRevision: 1,
-    }, 1);
-    const second = store.firstPage("two", "user", {
-      sessions: [summary(3), summary(4), summary(5)], listRevision: 2,
-    }, 1);
+    const first = await store.firstPage("one", "user", pageSource([summary(0), summary(1), summary(2)], 1), 1);
+    const second = await store.firstPage("two", "user", pageSource([summary(3), summary(4), summary(5)], 2), 1);
 
     expect(store.activeLeaseCount).toBe(1);
-    expect(() => store.nextPage("one", "user", first.nextCursor!, 1)).toThrow(/invalid or expired/);
-    expect(store.nextPage("two", "user", second.nextCursor!, 1).sessions).toEqual([summary(4)]);
+    await expect(store.nextPage("one", "user", first.nextCursor!, 1)).rejects.toThrow(/invalid or expired/);
+    expect((await store.nextPage("two", "user", second.nextCursor!, 1)).sessions).toEqual([summary(4)]);
   });
 
-  it("bounds retained bytes and isolates each client's lease quota", () => {
+  it("bounds retained bytes and isolates each client's lease quota", async () => {
     const store = new SessionListPaginationStore({
       maxLeases: 4,
       maxLeasesPerClient: 1,
@@ -130,56 +124,122 @@ describe("SessionListPaginationStore", () => {
       maxTotalBytes: 2_000,
       secret: Buffer.alloc(32, 5),
     });
-    const phoneFirst = store.firstPage("phone", "user", {
-      sessions: [summary(0), summary(1)], listRevision: 1,
-    }, 1);
-    const tablet = store.firstPage("tablet", "user", {
-      sessions: [summary(2), summary(3)], listRevision: 2,
-    }, 1);
-    const phoneSecond = store.firstPage("phone", "user", {
-      sessions: [summary(4), summary(5)], listRevision: 3,
-    }, 1);
+    const phoneFirst = await store.firstPage("phone", "user", pageSource([summary(0), summary(1)], 1), 1);
+    const tablet = await store.firstPage("tablet", "user", pageSource([summary(2), summary(3)], 2), 1);
+    const phoneSecond = await store.firstPage("phone", "user", pageSource([summary(4), summary(5)], 3), 1);
 
-    expect(() => store.nextPage("phone", "user", phoneFirst.nextCursor!, 1)).toThrow(/invalid or expired/);
-    expect(store.nextPage("tablet", "user", tablet.nextCursor!, 1).sessions).toEqual([summary(3)]);
-    expect(store.nextPage("phone", "user", phoneSecond.nextCursor!, 1).sessions).toEqual([summary(5)]);
+    await expect(store.nextPage("phone", "user", phoneFirst.nextCursor!, 1)).rejects.toThrow(/invalid or expired/);
+    expect((await store.nextPage("tablet", "user", tablet.nextCursor!, 1)).sessions).toEqual([summary(3)]);
+    expect((await store.nextPage("phone", "user", phoneSecond.nextCursor!, 1)).sessions).toEqual([summary(5)]);
 
     const oversized = { ...summary(6), firstMessage: "x".repeat(2_000) };
-    expect(() => store.firstPage("large", "user", {
-      sessions: [oversized, summary(7)], listRevision: 4,
-    }, 1)).toThrow(/too large/);
+    await expect(store.firstPage("large", "user", pageSource([oversized, summary(7)], 4), 1)).rejects.toThrow(/too large/);
 
-    const abandoned = store.firstPage("abandoned", "user", {
-      sessions: [summary(8), summary(9)], listRevision: 5,
-    }, 1);
+    const abandoned = await store.firstPage("abandoned", "user", pageSource([summary(8), summary(9)], 5), 1);
     store.releaseClient("abandoned");
-    expect(() => store.nextPage("abandoned", "user", abandoned.nextCursor!, 1)).toThrow(/invalid or expired/);
+    await expect(store.nextPage("abandoned", "user", abandoned.nextCursor!, 1)).rejects.toThrow(/invalid or expired/);
+  });
+
+  it("rejects malformed source slices without retaining traversal state", async () => {
+    const store = new SessionListPaginationStore({ secret: Buffer.alloc(32, 6) });
+    const malformed = (rows: SessionSummary[]) => ({
+      generation: `malformed-${rows.length}-${rows.map((row) => row.id).join("-")}`,
+      listRevision: 1,
+      count: 3,
+      compactByteEstimate: 512,
+      page: async () => rows,
+    });
+    await expect(store.firstPage("phone", "user", malformed([summary(0)]), 2)).rejects.toThrow(/inconsistent/);
+    await expect(store.firstPage("phone", "user", malformed([summary(0), summary(1), summary(2)]), 2)).rejects.toThrow(/inconsistent/);
+    await expect(store.firstPage("phone", "user", malformed([summary(0), summary(0)]), 2)).rejects.toThrow(/inconsistent/);
+    await expect(store.firstPage("phone", "user", {
+      ...malformed([summary(0), summary(1)]),
+      generation: "rejected",
+      page: async () => { throw new Error("rejected source"); },
+    }, 2)).rejects.toThrow(/rejected source/);
+    const wireBounded = new SessionListPaginationStore({
+      secret: Buffer.alloc(32, 11), maxBytesPerLease: 1_000, maxTotalBytes: 2_000,
+    });
+    await expect(wireBounded.firstPage("phone", "user", {
+      ...malformed([{ ...summary(0), firstMessage: "x".repeat(2_000) }, summary(1)]),
+      generation: "wire-oversized",
+    }, 2)).rejects.toThrow(/too large/);
+    expect(wireBounded.activeLeaseCount).toBe(0);
+    expect((wireBounded as unknown as { generations: Map<string, unknown> }).generations.size).toBe(0);
+    expect(store.activeLeaseCount).toBe(0);
+    expect((store as unknown as { generations: Map<string, unknown> }).generations.size).toBe(0);
+  });
+
+  it("fails closed when one generation key names a different source", async () => {
+    const store = new SessionListPaginationStore({ secret: Buffer.alloc(32, 8) });
+    const firstSource = pageSource([summary(0), summary(1)], 1, "shared");
+    const first = await store.firstPage("phone", "user", firstSource, 1);
+    await expect(store.firstPage("tablet", "user", pageSource([summary(0), summary(1)], 1, "shared"), 1))
+      .rejects.toThrow(/generation changed/);
+    expect((await store.nextPage("phone", "user", first.nextCursor!, 1)).sessions).toEqual([summary(1)]);
+  });
+
+  it("retires a lease whose later source slice violates its contract", async () => {
+    const store = new SessionListPaginationStore({ secret: Buffer.alloc(32, 10) });
+    const rows = [summary(0), summary(1), summary(2)];
+    const source = {
+      generation: "later-malformed", listRevision: 1, count: rows.length, compactByteEstimate: 512,
+      page: async (offset: number, limit: number) => offset === 0 ? rows.slice(0, limit) : [],
+    };
+    const first = await store.firstPage("phone", "user", source, 1);
+    await expect(store.nextPage("phone", "user", first.nextCursor!, 1)).rejects.toThrow(/inconsistent/);
+    expect(store.activeLeaseCount).toBe(0);
   });
 });
 
 describe("session.list stable traversal", () => {
+  it("leases a page source and hydrates only requested slices", async () => {
+    const store = new SessionListPaginationStore({ secret: Buffer.alloc(32, 7) });
+    const rows = Array.from({ length: 25_000 }, (_, index) => summary(index));
+    let hydrated = 0;
+    const page = vi.fn(async (offset: number, limit: number) => {
+      const selected = rows.slice(offset, offset + limit);
+      hydrated += selected.length;
+      return selected;
+    });
+    const source = { generation: "25k", listRevision: 3, count: rows.length, compactByteEstimate: 1000, page };
+    const first = await store.firstPage("phone", "user", source, 100);
+    expect(first.sessions).toHaveLength(100);
+    expect(hydrated).toBe(100);
+    expect(page).toHaveBeenCalledTimes(1);
+    const second = await store.nextPage("phone", "user", first.nextCursor!, 100);
+    expect(second.sessions).toHaveLength(100);
+    expect(hydrated).toBe(200);
+    expect(page).toHaveBeenCalledTimes(2);
+  });
+
   it("materializes the catalog once per traversal and uses a later traversal for new truth", async () => {
     const firstCatalog = Array.from({ length: 1_000 }, (_, index) => summary(index));
     const secondCatalog = [summary(9_999, "running")];
-    const catalog = vi.fn()
-      .mockResolvedValueOnce({ sessions: firstCatalog, listRevision: 7 })
-      .mockResolvedValueOnce({ sessions: secondCatalog, listRevision: 8 });
-    const service = new GatewayService({ sessions: { catalog } } as unknown as GatewayServiceDependencies);
+    const source = (sessions: SessionSummary[], revision: number, generation: string) => ({
+      sessions, listRevision: revision, generation, count: sessions.length,
+      compactByteEstimate: sessions.reduce((total, row) => total + 96 + row.id.length + row.cwd.length + row.firstMessage.length, 0),
+      page: async (offset: number, limit: number) => sessions.slice(offset, offset + limit),
+    });
+    const pageSource = vi.fn()
+      .mockResolvedValueOnce(source(firstCatalog, 7, "generation-7"))
+      .mockResolvedValueOnce(source(secondCatalog, 8, "generation-8"));
+    const service = new GatewayService({ sessions: { pageSource } } as unknown as GatewayServiceDependencies);
     let response = await service.invoke(client("phone"), "session.list", { scope: "user", limit: 500 }) as {
       sessions: SessionSummary[]; listRevision: number; nextCursor?: string;
     };
     const rows = [...response.sessions];
-    expect(catalog).toHaveBeenCalledTimes(1);
+    expect(pageSource).toHaveBeenCalledTimes(1);
     response = await service.invoke(client("phone"), "session.list", {
       scope: "user", limit: 500, cursor: response.nextCursor,
     }) as typeof response;
     rows.push(...response.sessions);
-    expect(catalog).toHaveBeenCalledTimes(1);
+    expect(pageSource).toHaveBeenCalledTimes(1);
     expect(response.listRevision).toBe(7);
     expect(rows).toHaveLength(1_000);
 
     const later = await service.invoke(client("phone"), "session.list", { scope: "user", limit: 500 });
-    expect(catalog).toHaveBeenCalledTimes(2);
+    expect(pageSource).toHaveBeenCalledTimes(2);
     expect(later).toEqual({ sessions: secondCatalog, listRevision: 8 });
   });
 });

@@ -78,6 +78,21 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
   });
 
+  it("builds page sources without full catalog projection and captures overlays per generation", async () => {
+    const fixture = await coldFixture("page-source");
+    const catalog = vi.spyOn(fixture.registry, "catalog");
+    const firstSource = await fixture.registry.pageSource("user");
+    const firstPage = await firstSource.page(0, 25_000);
+    expect(catalog).not.toHaveBeenCalled();
+    expect(firstPage).toHaveLength(1);
+    expect(firstPage[0]).toMatchObject({ id: fixture.manager.getSessionId(), kind: "user", cwd: fixture.cwd });
+    expect(firstPage[0]!.isUnread).toBe(false);
+    await fixture.registry.setAttention(fixture.manager.getSessionId(), true);
+    const secondSource = await fixture.registry.pageSource("user");
+    expect(secondSource.generation).not.toBe(firstSource.generation);
+    expect((await secondSource.page(0, 1))[0]!.isUnread).toBe(true);
+  });
+
   it("rejects read-only child access without an exact live parent process owner", async () => {
     const fixture = await coldFixture("readonly-unowned", { nested: true, name: "subagent-worker" });
     const sessionId = fixture.manager.getSessionId();

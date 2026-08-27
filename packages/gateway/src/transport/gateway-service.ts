@@ -393,10 +393,10 @@ export class GatewayService {
         const cursor = optionalString(params.cursor, "cursor", 96);
         const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 500);
         if (cursor !== undefined) {
-          return safeJson(this.sessionListPages.nextPage(client.id, scope, cursor, limit));
+          return safeJson(await this.sessionListPages.nextPage(client.id, scope, cursor, limit));
         }
-        const catalog = await this.dependencies.sessions.catalog(scope);
-        return safeJson(this.sessionListPages.firstPage(client.id, scope, catalog, limit));
+        const source = await this.dependencies.sessions.pageSource(scope);
+        return safeJson(await this.sessionListPages.firstPage(client.id, scope, source, limit));
       }
       case "session.create": {
         const created = await this.mutation(client, method, params, async () => {
