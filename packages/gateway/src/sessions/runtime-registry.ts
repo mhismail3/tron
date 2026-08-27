@@ -41,6 +41,13 @@ import { admitExtensionLifecycleArtifact } from "./extension-run-projection.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { projectTranscriptPage, type TranscriptPage } from "./projection.js";
+import {
+  CatalogMetadataIndex,
+  type CatalogMetadataIndexRow,
+  type CatalogMetadataIndexSummary,
+  type CatalogMetadataAccumulator,
+  applyCatalogMetadataEntry,
+} from "./catalog-metadata-index.js";
 
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 /** A read-only child observer may page only canonical sessions that fit this
@@ -152,16 +159,6 @@ type CatalogSessionInfo = Omit<SessionInfo, "allMessagesText"> & {
   fileIdentity?: string;
 };
 
-function catalogMessageText(message: Record<string, unknown>): string {
-  if (typeof message.content === "string") return message.content;
-  if (!Array.isArray(message.content)) return "";
-  return message.content
-    .filter((part): part is Record<string, unknown> => !!part && typeof part === "object" && !Array.isArray(part))
-    .filter((part) => part.type === "text" && typeof part.text === "string")
-    .map((part) => part.text as string)
-    .join(" ");
-}
-
 /** SDK-compatible row metadata without constructing its unused transcript-wide
  * `allMessagesText` accumulator. The complete JSONL remains authoritative for
  * RuntimeSlot.open; this pass is only catalog discovery metadata. */
@@ -171,10 +168,12 @@ async function buildCatalogSessionInfo(filePath: string): Promise<CatalogSession
     if (!physical.isFile() || physical.isSymbolicLink()) return null;
     const stats = await stat(filePath);
     let header: Record<string, unknown> | undefined;
-    let messageCount = 0;
-    let firstMessage = "";
-    let name: string | undefined;
-    let lastActivityTime: number | undefined;
+    const metadata: CatalogMetadataAccumulator = {
+      messageCount: 0,
+      firstMessage: "(no messages)",
+      name: undefined,
+      updatedAt: "",
+    };
     const lines = createInterface({
       input: createReadStream(filePath, { encoding: "utf8" }),
       crlfDelay: Infinity,
@@ -189,38 +188,23 @@ async function buildCatalogSessionInfo(filePath: string): Promise<CatalogSession
         header = entry;
         continue;
       }
-      if (entry.type === "session_info" && typeof entry.name === "string") {
-        name = entry.name.trim() || undefined;
-      }
-      if (entry.type !== "message") continue;
-      messageCount += 1;
-      const message = entry.message;
-      if (!message || typeof message !== "object" || Array.isArray(message)) continue;
-      const record = message as Record<string, unknown>;
-      if (record.role !== "user" && record.role !== "assistant") continue;
-      const timestamp = typeof record.timestamp === "number"
-        ? record.timestamp
-        : typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : NaN;
-      if (Number.isFinite(timestamp)) lastActivityTime = Math.max(lastActivityTime ?? 0, timestamp);
-      const text = catalogMessageText(record);
-      if (text && !firstMessage && record.role === "user") firstMessage = text;
+      applyCatalogMetadataEntry(metadata, entry);
     }
     if (!header || typeof header.id !== "string") return null;
     const cwd = typeof header.cwd === "string" ? header.cwd : "";
     const headerTime = typeof header.timestamp === "string" ? Date.parse(header.timestamp) : NaN;
-    const modified = typeof lastActivityTime === "number" && lastActivityTime > 0
-      ? new Date(lastActivityTime)
+    const modified = metadata.updatedAt ? new Date(metadata.updatedAt)
       : Number.isFinite(headerTime) ? new Date(headerTime) : stats.mtime;
     return {
       path: filePath,
       id: header.id,
       cwd,
-      ...(typeof name === "string" ? { name } : {}),
+      ...(metadata.name ? { name: metadata.name } : {}),
       ...(typeof header.parentSession === "string" ? { parentSessionPath: header.parentSession } : {}),
       created: new Date(typeof header.timestamp === "string" ? header.timestamp : stats.birthtime),
       modified,
-      messageCount,
-      firstMessage: firstMessage || "(no messages)",
+      messageCount: metadata.messageCount,
+      firstMessage: metadata.firstMessage,
     };
   } catch {
     return null;
@@ -245,6 +229,8 @@ interface CatalogHeaderIdentity {
   id: string;
   cwd: string;
   fileIdentity: string;
+  size: number;
+  mtimeMs: number;
   parentSessionPath?: string;
 }
 
@@ -255,8 +241,10 @@ interface DelegatedSessionTopology {
 
 interface CatalogStructureEvidence {
   digest: string;
+  factsDigest: string;
   identitiesByPath: ReadonlyMap<string, CatalogHeaderIdentity>;
   complete: boolean;
+  unstableCanonicalFiles: boolean;
 }
 
 interface CatalogAcquisitionEntry {
@@ -291,7 +279,9 @@ interface CatalogStructuralIndex {
   allInfos: readonly CatalogSessionInfo[];
   ambiguousDiskIDs: ReadonlySet<string>;
   structureDigest: string;
+  factsDigest: string;
   structuralGeneration: number;
+  invalidationGeneration: number;
 }
 
 interface IdleEviction {
@@ -325,6 +315,7 @@ export class RuntimeRegistry {
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
   private readonly processActivityRecency = new ProcessActivityRecency();
   private readonly attention: SessionAttentionStore;
+  private readonly catalogMetadataIndex: CatalogMetadataIndex;
   private readonly configuredSessionDir: string | undefined;
   private interrupted = new Set<string>();
   private readonly subscribers = new Map<string, Set<string>>();
@@ -389,6 +380,10 @@ export class RuntimeRegistry {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     this.markers = new RunMarkerStore(options.tronHome);
     this.attention = new SessionAttentionStore(options.tronHome);
+    this.catalogMetadataIndex = new CatalogMetadataIndex(
+      join(options.tronHome, "gateway"),
+      (stage, durationMs, outcome) => this.options.stageTiming?.(`catalog-index.${stage}`, durationMs, outcome),
+    );
     this.workRegistry = options.workRegistry ?? new GatewayWorkRegistry();
     this.drainId = `idle-${createHash("sha256").update(this.workRegistry.runtimeEpoch).digest("hex").slice(0, 16)}`;
     this.configuredSessionDir = SettingsManager.create(
@@ -782,11 +777,12 @@ export class RuntimeRegistry {
     const index = this.catalogStructuralIndex;
     if (!index || index.structuralGeneration !== this.catalogStructuralGeneration) return undefined;
     const structuralGeneration = this.catalogStructuralGeneration;
-    const evidence = await this.sharedCatalogStructureEvidence();
+    const evidence = await this.sharedCatalogStructureEvidence(true);
     if (this.catalogStructuralIndex === index
         && structuralGeneration === this.catalogStructuralGeneration
         && evidence.complete
-        && evidence.digest === index.structureDigest) return index;
+        && evidence.digest === index.structureDigest
+        && evidence.factsDigest === index.factsDigest) return index;
     if (this.catalogStructuralIndex === index) this.invalidateCatalogAcquisition();
     return undefined;
   }
@@ -812,7 +808,9 @@ export class RuntimeRegistry {
       allInfos: remaining,
       ambiguousDiskIDs: this.diskAmbiguousSessionIDs(remaining),
       structureDigest: evidence.digest,
+      factsDigest: evidence.factsDigest,
       structuralGeneration: this.catalogStructuralGeneration,
+      invalidationGeneration: this.catalogAcquisitionInvalidationGeneration,
     };
     this.catalogFingerprint = this.catalogIdentityFingerprint(remaining);
     return true;
@@ -827,6 +825,7 @@ export class RuntimeRegistry {
     let entriesExamined = 0;
     let traversalBytes = Buffer.byteLength(pending[0]!);
     let complete = true;
+    let unstableCanonicalFiles = false;
     while (pending.length > 0) {
       const candidate = pending.pop()!;
       let directory: string;
@@ -888,17 +887,22 @@ export class RuntimeRegistry {
     };
     const refundHeaderBytes = (count: number): void => { remainingHeaderBytes += count; };
     const digest = createHash("sha256");
+    const factsDigest = createHash("sha256");
     const identitiesByPath = new Map<string, CatalogHeaderIdentity>();
+    digest.update(`count:${paths.length}\n`);
+    factsDigest.update(`count:${paths.length}\n`);
     for (let start = 0; start < paths.length; start += limits.normalizationConcurrency) {
       const batchPaths = paths.slice(start, start + limits.normalizationConcurrency);
       const identities = await Promise.all(batchPaths.map(async (path) => {
         try {
-          const identity = (await this.readCatalogHeader(
+          const header = await this.readCatalogHeader(
             path,
             perCandidateHeaderBytes,
             reserveHeaderBytes,
             refundHeaderBytes,
-          )).identity;
+          );
+          if (header.unstable) unstableCanonicalFiles = true;
+          const identity = header.identity;
           if (!identity) return undefined;
           return identity.parentSessionPath
             ? { ...identity, parentSessionPath: await this.canonicalSessionPath(identity.parentSessionPath) }
@@ -921,13 +925,21 @@ export class RuntimeRegistry {
           .update(identity?.cwd ?? "").update("\0")
           .update(identity?.fileIdentity ?? "").update("\0")
           .update(identity?.parentSessionPath ?? "").update("\n");
+        factsDigest.update(path).update("\0")
+          .update(identity?.id ?? "").update("\0")
+          .update(identity?.cwd ?? "").update("\0")
+          .update(identity?.fileIdentity ?? "").update("\0")
+          .update(identity ? String(identity.size) : "").update("\0")
+          .update(identity ? String(identity.mtimeMs) : "").update("\n");
         if (identity) identitiesByPath.set(path, identity);
       }
     }
     return {
       digest: digest.digest("base64url"),
+      factsDigest: factsDigest.digest("base64url"),
       identitiesByPath,
       complete,
+      unstableCanonicalFiles,
     };
   }
 
@@ -936,7 +948,7 @@ export class RuntimeRegistry {
     maximumBytes: number,
     reserveBytes: (count: number) => boolean,
     refundBytes: (count: number) => void,
-  ): Promise<{ identity?: CatalogHeaderIdentity }> {
+  ): Promise<{ identity?: CatalogHeaderIdentity; unstable?: boolean }> {
     const firstReadLength = Math.min(512, maximumBytes);
     if (!reserveBytes(firstReadLength)) return {};
     let handle: Awaited<ReturnType<typeof open>>;
@@ -958,6 +970,18 @@ export class RuntimeRegistry {
       return {};
     }
     const fileIdentity = `${opened.dev}:${opened.ino}`;
+    if (opened.size === 0) {
+      refundBytes(firstReadLength);
+      await handle.close();
+      return {};
+    }
+    const finalByte = Buffer.alloc(1);
+    const finalRead = await handle.read(finalByte, 0, 1, opened.size - 1);
+    if (finalRead.bytesRead !== 1 || finalByte[0] !== 0x0a) {
+      refundBytes(firstReadLength);
+      await handle.close();
+      return { unstable: true };
+    }
     const buffer = Buffer.allocUnsafe(maximumBytes);
     const parseHeader = (line: Buffer): CatalogHeaderIdentity | undefined => {
       if (line.length === 0 || !line.toString("utf8").trim()) return undefined;
@@ -971,10 +995,23 @@ export class RuntimeRegistry {
         id: record.id,
         cwd: typeof record.cwd === "string" ? record.cwd : "",
         fileIdentity,
+        size: opened.size,
+        mtimeMs: opened.mtimeMs,
         ...(typeof record.parentSession === "string"
           ? { parentSessionPath: record.parentSession }
           : {}),
       };
+    };
+    const stableIdentity = async (identity: CatalogHeaderIdentity | undefined): Promise<CatalogHeaderIdentity | undefined> => {
+      if (!identity) return undefined;
+      const after = await handle.stat();
+      const afterPath = await lstat(path);
+      if (!after.isFile() || after.dev !== opened.dev || after.ino !== opened.ino
+        || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs
+        || !afterPath.isFile() || afterPath.isSymbolicLink()
+        || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino
+        || afterPath.size !== opened.size || afterPath.mtimeMs !== opened.mtimeMs) return undefined;
+      return identity;
     };
     try {
       let bytesReadTotal = 0;
@@ -993,13 +1030,15 @@ export class RuntimeRegistry {
         if (bytesRead === 0) {
           if (lineStart >= bytesReadTotal) return {};
           const identity = parseHeader(buffer.subarray(lineStart, bytesReadTotal));
-          return identity ? { identity } : {};
+          const stable = await stableIdentity(identity);
+          return stable ? { identity: stable } : {};
         }
         bytesReadTotal += bytesRead;
         const newline = buffer.indexOf(0x0a, lineStart);
         if (newline >= 0 && newline < bytesReadTotal) {
           const identity = parseHeader(buffer.subarray(lineStart, newline));
-          return identity ? { identity } : {};
+          const stable = await stableIdentity(identity);
+          return stable ? { identity: stable } : {};
         }
       }
       return {};
@@ -1224,15 +1263,116 @@ export class RuntimeRegistry {
       return this.catalogMaterializationPromise;
     }
     const operation = this.materializeCatalogSnapshot();
-    this.catalogMaterializationPromise = operation;
-    this.catalogMaterializationKey = key;
-    void operation.finally(() => {
-      if (this.catalogMaterializationPromise === operation) {
+    const settled = operation.then((value) => {
+      if (this.catalogMaterializationKey === key) {
         this.catalogMaterializationPromise = undefined;
         this.catalogMaterializationKey = undefined;
       }
-    }).catch(() => {});
-    return operation;
+      return value;
+    }, (error) => {
+      if (this.catalogMaterializationKey === key) {
+        this.catalogMaterializationPromise = undefined;
+        this.catalogMaterializationKey = undefined;
+      }
+      throw error;
+    });
+    this.catalogMaterializationPromise = settled;
+    this.catalogMaterializationKey = key;
+    return settled;
+  }
+
+  private async loadDurableCatalogIndex(): Promise<void> {
+    const structuralGeneration = this.catalogStructuralGeneration;
+    const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
+    const before = await this.sharedCatalogStructureEvidence();
+    if (!before.complete) return;
+    const candidates = [...before.identitiesByPath].map(([path, identity]) => ({
+      path, id: identity.id, cwd: identity.cwd, fileIdentity: identity.fileIdentity,
+      size: identity.size, mtimeMs: identity.mtimeMs,
+    }));
+    // reconcile admits and reads the durable document once. A missing/corrupt
+    // document deliberately falls through to the canonical first-cut scan.
+    const rows = await this.catalogMetadataIndex.reconcile(
+      this.catalogDirectory(),
+      candidates,
+      async (candidate) => {
+        const info = await buildCatalogSessionInfo(candidate.path);
+        if (!info || info.id !== candidate.id || info.cwd !== candidate.cwd) return undefined;
+        return {
+          id: info.id, path: info.path, cwd: info.cwd,
+          ...(info.parentSessionPath ? { parentSessionPath: info.parentSessionPath } : {}),
+          ...(info.name ? { name: info.name } : {}),
+          firstMessage: info.firstMessage,
+          createdAt: info.created.toISOString(), updatedAt: info.modified.toISOString(),
+          messageCount: info.messageCount,
+        };
+      },
+    );
+    if (!rows) return;
+    const after = await this.sharedCatalogStructureEvidence(true);
+    const rowsMatchAfterFacts = rows.length === after.identitiesByPath.size
+      && rows.every((row) => {
+        const identity = after.identitiesByPath.get(resolve(row.path));
+        return identity?.id === row.id && identity.cwd === row.cwd
+          && identity.fileIdentity === row.fileIdentity
+          && identity.size === row.size && identity.mtimeMs === row.mtimeMs;
+      });
+    if (structuralGeneration !== this.catalogStructuralGeneration
+      || invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration
+      || !after.complete || after.digest !== before.digest || !rowsMatchAfterFacts) return;
+    const infos: CatalogSessionInfo[] = rows.map((row) => ({
+      path: row.path,
+      id: row.id,
+      cwd: row.cwd,
+      ...(row.parentSessionPath ? { parentSessionPath: row.parentSessionPath } : {}),
+      ...(row.name ? { name: row.name } : {}),
+      created: new Date(row.createdAt),
+      modified: new Date(row.updatedAt),
+      messageCount: row.messageCount,
+      firstMessage: row.firstMessage,
+      fileIdentity: row.fileIdentity,
+    }));
+    this.catalogStructuralIndex = {
+      allInfos: infos,
+      ambiguousDiskIDs: this.diskAmbiguousSessionIDs(infos),
+      structureDigest: before.digest,
+      factsDigest: after.factsDigest,
+      structuralGeneration,
+      invalidationGeneration,
+    };
+    // A durable generation can differ from the admission cached before this
+    // filesystem cut (for example, a newly duplicated ID). Force acquisition
+    // to rebuild from the exact index rather than pairing stale membership
+    // with the freshly published rows.
+    this.catalogAcquisitionAdmission = undefined;
+  }
+
+  private async persistDurableCatalogIndex(
+    infos: readonly CatalogSessionInfo[],
+    structuralGeneration: number,
+    invalidationGeneration: number,
+  ): Promise<void> {
+    const rows: CatalogMetadataIndexRow[] = [];
+    for (const info of infos) {
+      const summary: CatalogMetadataIndexSummary = {
+        id: info.id,
+        path: info.path,
+        cwd: info.cwd,
+        ...(info.parentSessionPath ? { parentSessionPath: info.parentSessionPath } : {}),
+        ...(info.name ? { name: info.name } : {}),
+        firstMessage: info.firstMessage,
+        createdAt: info.created.toISOString(),
+        updatedAt: info.modified.toISOString(),
+        messageCount: info.messageCount,
+      };
+      const row = await this.catalogMetadataIndex.entryFromSummary(summary);
+      if (!row) return;
+      if (info.fileIdentity !== undefined) row.fileIdentity = info.fileIdentity;
+      rows.push(row);
+    }
+    if (structuralGeneration !== this.catalogStructuralGeneration
+      || invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration) return;
+    await this.catalogMetadataIndex.save(this.catalogDirectory(), rows).catch(() => {});
   }
 
   private async materializeCatalogSnapshot(): Promise<{
@@ -1241,7 +1381,11 @@ export class RuntimeRegistry {
     listRevision: number;
     structureDigest: string;
   }> {
-    const cached = await this.validatedStructuralIndex();
+    let cached = await this.validatedStructuralIndex();
+    if (!cached) {
+      await this.loadDurableCatalogIndex();
+      cached = await this.validatedStructuralIndex();
+    }
     if (cached) {
       const ambiguousIDs = this.dynamicAmbiguousSessionIDs(cached);
       const infos = cached.allInfos.filter((session) => !ambiguousIDs.has(session.id));
@@ -1276,7 +1420,9 @@ export class RuntimeRegistry {
       allInfos: materialized.allInfos,
       ambiguousDiskIDs: materialized.ambiguousDiskIDs,
       structureDigest: materialized.after.digest,
+      factsDigest: materialized.after.factsDigest,
       structuralGeneration: materialized.structuralGeneration,
+      invalidationGeneration: materialized.invalidationGeneration,
     };
     const indexIsExact = materialized.after.complete
       && materialized.after.identitiesByPath.size === materialized.allInfos.length
@@ -1296,9 +1442,18 @@ export class RuntimeRegistry {
     // No await may separate the final generation confirmation from publication
     // of catalog identity and its matching revision.
     this.updateCatalogIdentity(materialized.allInfos, ambiguousIDs);
+    const sessions = await this.projectSessions(infos, "all", ambiguousIDs);
+    // Persistence is acceleration only. Failure leaves the in-memory canonical
+    // projection usable and is reported by the index owner without affecting
+    // authority or list success.
+    void this.persistDurableCatalogIndex(
+      materialized.allInfos,
+      materialized.structuralGeneration,
+      materialized.invalidationGeneration,
+    ).catch(() => {});
     return {
       infos: [...infos],
-      sessions: await this.projectSessions(infos, "all", ambiguousIDs),
+      sessions,
       listRevision: this.revision,
       structureDigest: materialized.after.digest,
     };
@@ -1327,7 +1482,9 @@ export class RuntimeRegistry {
       structuralGeneration,
       stable: invalidationGeneration === this.catalogAcquisitionInvalidationGeneration
         && structuralGeneration === this.catalogStructuralGeneration
-        && before.digest === after.digest,
+        && !before.unstableCanonicalFiles && !after.unstableCanonicalFiles
+        && before.digest === after.digest
+        && before.factsDigest === after.factsDigest,
     };
   }
 
@@ -1525,15 +1682,22 @@ export class RuntimeRegistry {
       return this.catalogAcquisitionPromise;
     }
     const operation = this.resolveCatalogAcquisition();
-    this.catalogAcquisitionPromise = operation;
-    this.catalogAcquisitionPromiseKey = key;
-    void operation.finally(() => {
-      if (this.catalogAcquisitionPromise === operation) {
+    const settled = operation.then((value) => {
+      if (this.catalogAcquisitionPromiseKey === key) {
         this.catalogAcquisitionPromise = undefined;
         this.catalogAcquisitionPromiseKey = undefined;
       }
-    }).catch(() => {});
-    return operation;
+      return value;
+    }, (error) => {
+      if (this.catalogAcquisitionPromiseKey === key) {
+        this.catalogAcquisitionPromise = undefined;
+        this.catalogAcquisitionPromiseKey = undefined;
+      }
+      throw error;
+    });
+    this.catalogAcquisitionPromise = settled;
+    this.catalogAcquisitionPromiseKey = key;
+    return settled;
   }
 
   private async resolveCatalogAcquisition(): Promise<CatalogAcquisitionResolution> {
@@ -1544,13 +1708,14 @@ export class RuntimeRegistry {
     if (cachedAdmission?.invalidationGeneration === this.catalogAcquisitionInvalidationGeneration
         && cachedIndex) {
       const validated = await this.validatedStructuralIndex();
-      if (!validated) return this.catalogAcquisition();
-      return {
-        ...cachedAdmission,
-        indexedStructuralGeneration: cachedIndex.structuralGeneration,
-      };
+      if (validated) {
+        return {
+          ...cachedAdmission,
+          indexedStructuralGeneration: cachedIndex.structuralGeneration,
+        };
+      }
     }
-    if (cachedIndex) {
+    if (cachedIndex && cachedIndex.structuralGeneration === this.catalogStructuralGeneration) {
       const indexed = await this.catalogAcquisitionMutex.run(async () => {
         const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
         const structuralGeneration = this.catalogStructuralGeneration;

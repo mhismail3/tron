@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { copyFile, mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { getExamplesPath, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -10,6 +10,7 @@ import { TrustService } from "../admin/trust-service.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../protocol/types.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
+import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
@@ -708,6 +709,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
     const catalog = await fixture.registry.catalog("user");
     expect(catalog.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
+    // The first cut builds the durable metadata index; subsequent operations
+    // reuse it without another transcript-wide SDK catalog helper.
     expect(materialize).toHaveBeenCalledTimes(1);
     fixture.manager.appendMessage(fauxAssistantMessage("ordinary append after catalog"));
 
@@ -721,6 +724,114 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
     expect(materialize).toHaveBeenCalledTimes(1);
     expect(evidence).not.toHaveBeenCalled();
+  });
+
+  it("reuses an on-disk catalog across a second registry without a body scan and advances one appended row", async () => {
+    const fixture = await coldFixture("restart-index");
+    const secondDirectory = join(fixture.agentDir, "sessions", "second");
+    await mkdir(secondDirectory, { recursive: true });
+    const secondManager = SessionManager.create(fixture.cwd, secondDirectory);
+    secondManager.appendMessage(fauxAssistantMessage("unchanged canonical body"));
+    fixture.manager.appendMessage(fauxAssistantMessage("initial canonical body"));
+    await fixture.registry.catalog("all");
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v1.json");
+    await waitUntil(() => existsSync(indexPath));
+    await fixture.registry.dispose();
+    const restarted = new RuntimeRegistry({
+      agentDir: fixture.agentDir,
+      tronHome: join(fixture.root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(fixture.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(restarted);
+    await restarted.initialize();
+    const internals = restarted as unknown as { sessionInfos: () => Promise<unknown[]> };
+    const scanner = vi.spyOn(internals, "sessionInfos");
+    const append = vi.spyOn(CatalogMetadataIndex.prototype, "append");
+    const reconcile = vi.spyOn(CatalogMetadataIndex.prototype, "reconcile");
+    try {
+      const unchanged = await restarted.catalog("all");
+      expect(scanner).not.toHaveBeenCalled();
+      expect(unchanged.sessions.find((session) => session.id === fixture.manager.getSessionId())?.messageCount).toBe(2);
+      expect(unchanged.sessions.find((session) => session.id === secondManager.getSessionId())?.messageCount).toBe(1);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      fixture.manager.appendMessage(fauxAssistantMessage("external append after restart"));
+      const updated = await restarted.catalog("all");
+      expect(scanner).not.toHaveBeenCalled();
+      expect(append).toHaveBeenCalledTimes(1);
+      expect(updated.sessions.find((session) => session.id === fixture.manager.getSessionId())?.messageCount).toBe(3);
+      expect(updated.sessions.find((session) => session.id === secondManager.getSessionId())?.messageCount).toBe(1);
+    } finally {
+      scanner.mockRestore();
+      append.mockRestore();
+      reconcile.mockRestore();
+    }
+  });
+
+  it("retires a durable load invalidated before publication and falls back to a fresh canonical cut", async () => {
+    const fixture = await coldFixture("restart-index-publication-race");
+    fixture.manager.appendMessage(fauxAssistantMessage("indexed canonical body"));
+    await fixture.registry.catalog("all");
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v1.json");
+    await waitUntil(() => existsSync(indexPath));
+    await fixture.registry.dispose();
+
+    const restarted = new RuntimeRegistry({
+      agentDir: fixture.agentDir,
+      tronHome: join(fixture.root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(fixture.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(restarted);
+    await restarted.initialize();
+    const internals = restarted as unknown as {
+      catalogMetadataIndex: CatalogMetadataIndex;
+      sessionInfos: () => Promise<unknown[]>;
+      invalidateCatalogAcquisition: () => void;
+      catalogStructuralIndex?: { structuralGeneration: number };
+      catalogStructuralGeneration: number;
+    };
+    const original = internals.catalogMetadataIndex.reconcile.bind(internals.catalogMetadataIndex);
+    let entered!: () => void;
+    let release!: () => void;
+    const suspended = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const reconcile = vi.spyOn(internals.catalogMetadataIndex, "reconcile").mockImplementation(async (...arguments_) => {
+      entered();
+      await gate;
+      return original(...arguments_);
+    });
+    const scanner = vi.spyOn(internals, "sessionInfos");
+    try {
+      const listing = restarted.catalog("all");
+      await suspended;
+      internals.invalidateCatalogAcquisition();
+      release();
+      await expect(listing).resolves.toMatchObject({
+        sessions: expect.arrayContaining([expect.objectContaining({ id: fixture.manager.getSessionId() })]),
+      });
+      expect(scanner).toHaveBeenCalledTimes(1);
+      expect(internals.catalogStructuralIndex?.structuralGeneration).toBe(internals.catalogStructuralGeneration);
+    } finally {
+      release();
+      reconcile.mockRestore();
+      scanner.mockRestore();
+    }
+  });
+
+  it("fails closed with retryable busy when a canonical file ends in a partial line", async () => {
+    const fixture = await coldFixture("partial-final-line");
+    await fixture.registry.catalog("all");
+    await appendFile(fixture.sessionFile, "{\"type\":\"message\"");
+    await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
   });
 
   it("keeps a warmed disk index across live-only create and delete", async () => {
@@ -805,9 +916,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       .mockResolvedValue({ ...evidence, complete: false });
     try {
       await fixture.registry.catalog("all");
-      // Incomplete evidence is intentionally not cached: the second catalog
-      // performs a fresh bounded metadata materialization, including its
-      // stability pass, before returning the fallback projection.
+      // Generic acquisition-budget incompleteness may use the stable full
+      // metadata fallback, but it is never certified as a reusable index.
       expect(materialize).toHaveBeenCalledTimes(3);
     } finally {
       evidenceSpy.mockRestore();
