@@ -77,7 +77,7 @@ rejected with bounded diagnostics and can never become an uncaught process exit.
   ten minutes, one use; pairing consumes it before device persistence and regenerates it if persistence fails)
 - Run markers and command receipts: gateway-owned bounded operational state; per-session
   marker mutex lanes are retained only while queued or executing callers use them
-- Uploads: transient and bounded; unclaimed staging expires, while prompt attachments remain session-owned until canonical deletion
+- Uploads: transient and bounded; clients may immediately discard their unclaimed staging, remaining unclaimed staging expires, and prompt attachments remain session-owned until canonical deletion
 - Tool invocation lineage: Gateway stamps every live and canonical tool declaration with a `toolSegmentId` owned by the exact active conversation turn, then publishes each complete contiguous declaration group at finalized assistant `message_end` with runtime-only `groupId`, `groupIndex`, `groupCount`, and `groupFinalized` metadata before any corresponding tool start. Equal segment IDs authorize bounded cross-message display aggregation; missing or different segment IDs do not. Group IDs derive from the stable assistant presentation ID plus first projected content ordinal. Cold canonical projection deterministically derives the same segment boundary from authoritative conversation input and visible barriers. All lineage is bounded presentation metadata, survives live/canonical/result reconciliation, is never written to Pi JSONL, and never implies parallel execution.
 - Push grants and short-lived intents: `gateway/notifications.json`, an exact 1 MiB owner-only document. It stores endpoint-scoped grants, at most 64 active devices, 256 pending intents, 512 bounded receipts, and 192 revocation tombstones (128 rotation slots plus a 64-device revocation reserve). It never stores raw APNs tokens. Secrets and message content are excluded from RPC projections, logs, and Pi session JSONL.
 
@@ -107,6 +107,7 @@ Outbound relay requests use one fixed `/v3/notifications` route, no redirects, a
 - `GET /health` — unauthenticated readiness and compatibility metadata. The bound listener reports `starting`, `catalog-warming`, `attention-recovery`, or `storage-warming` with HTTP 503 until all startup prerequisites complete, then reports `ok` with HTTP 200; every other HTTP route and WebSocket upgrade remains retryable `busy`/503 during warmup and does not enter session APIs.
 - `POST /v1/pair` — rate-limited one-time enrollment exchange
 - `POST /v1/uploads` — authenticated bounded upload
+- `DELETE /v1/uploads/:id` — authenticated discard of unclaimed client staging; prompt-owned attachments fail closed
 - `GET /v1/uploads/:id` — authenticated stream for a prompt-owned canonical attachment
 - `GET /v1/blobs/:id` — authenticated transient projected blob
 - `GET /v1/socket` — authenticated protocol version 3 WebSocket
@@ -125,8 +126,7 @@ serialize reservation and commit against a 1,024-entry and eight-times-per-uploa
 A separate admission permits at most half that ratio concurrently (four default 25 MiB bodies). Authenticated request
 chunks stream directly into protected store-owned files; exact declared and observed sizes are checked before atomic
 metadata publication. Persisted upload metadata is limited to an exact 64 KiB document with canonical timestamps and fields; malformed or oversized entries self-clean before quota admission or direct materialization. Every success, rejection, overflow, truncation, or disconnect removes uncommitted staging
-and releases its slot. Unclaimed uploads
-expire after 24 hours, malformed/partial folders self-clean, prompt attachment IDs are unique, and
+and releases its slot. An authenticated client may immediately discard an unclaimed upload when its local chip or presentation is retired; claimed prompt attachments reject that operation. Remaining unclaimed uploads expire after 24 hours, malformed/partial folders self-clean, prompt attachment IDs are unique, and
 one prompt cannot materialize more than the per-request byte ceiling. A bounded maintenance pass runs
 at startup and every ten minutes: it removes stale staging, expires unclaimed files, retries live cleanup,
 and removes claimed folders only when the canonical session catalog proves their owner no longer exists.

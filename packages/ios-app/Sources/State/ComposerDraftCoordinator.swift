@@ -284,11 +284,19 @@ struct ChatSubmissionLifecycle: Equatable, Sendable {
     var id: String? { submission?.presentationID }
 }
 
+struct ComposerAttachmentUploadCandidate: Sendable {
+    let name: String
+    let mimeType: String
+    let data: Data
+}
+
 typealias ComposerUploadOperation = @MainActor @Sendable (
     _ name: String,
     _ mimeType: String,
     _ data: Data
 ) async throws -> String
+
+typealias ComposerUploadDiscardOperation = @MainActor @Sendable (_ uploadID: String) async -> Void
 
 typealias ComposerFileUploadOperation = @MainActor @Sendable (
     _ name: String,
@@ -429,6 +437,7 @@ final class ComposerDraftCoordinator {
     }
 
     private let uploadOperation: ComposerUploadOperation
+    private let discardUploadOperation: ComposerUploadDiscardOperation
     private let fileUploadOperation: ComposerFileUploadOperation
     private let attachmentFileAccess: ComposerAttachmentFileAccess
     private let prepareAttachmentPreview: ComposerAttachmentPreviewPreparation
@@ -447,6 +456,9 @@ final class ComposerDraftCoordinator {
     private var editorRequestByTarget: [SessionPresentationIdentity: ComposerEditorRequest] = [:]
     private var uploadAdmissions = Set<UploadAdmission>()
     private var uploadTasks: [UploadAdmission: Task<String, Error>] = [:]
+    /// Exact local chip ownership for cancellable, presentation-scoped uploads.
+    /// Removing a chip retires only its transport admission immediately.
+    private var uploadAdmissionByAttachmentID: [String: UploadAdmission] = [:]
     /// One admitted transport lifecycle per durable profile/session scope. The
     /// snapshot retains its origin presentation only for source metadata; route
     /// replacement never changes ownership or resends the operation.
@@ -473,6 +485,7 @@ final class ComposerDraftCoordinator {
 
     init(
         upload: @escaping ComposerUploadOperation,
+        discardUpload: @escaping ComposerUploadDiscardOperation = { _ in },
         fileUpload: @escaping ComposerFileUploadOperation,
         attachmentFileAccess: ComposerAttachmentFileAccess = .live,
         prepareAttachmentPreview: @escaping ComposerAttachmentPreviewPreparation = {
@@ -483,6 +496,7 @@ final class ComposerDraftCoordinator {
         admitsLifecycleGeneration: @escaping @MainActor (Int) -> Bool
     ) {
         uploadOperation = upload
+        discardUploadOperation = discardUpload
         fileUploadOperation = fileUpload
         self.attachmentFileAccess = attachmentFileAccess
         self.prepareAttachmentPreview = prepareAttachmentPreview
@@ -1005,6 +1019,12 @@ final class ComposerDraftCoordinator {
             fullPreviewData: data,
             preparedThumbnail: preparedThumbnail
         ))
+        uploadAdmissionByAttachmentID[localID] = admission
+        defer {
+            if uploadAdmissionByAttachmentID[localID] == admission {
+                uploadAdmissionByAttachmentID[localID] = nil
+            }
+        }
         schedulePersistence(for: scope)
 
         let task = Task { try await uploadOperation(name, mimeType, data) }
@@ -1031,6 +1051,131 @@ final class ComposerDraftCoordinator {
         attachments[index] = attachments[index].replacingGatewayUploadID(uploadID)
         attachmentsByScope[scope] = attachments
         schedulePersistence(for: scope)
+    }
+
+    /// Stages one PhotosPicker selection atomically in selection order, then
+    /// uploads every member concurrently. Transport latency can never serialize
+    /// chip publication or leave later selected photos invisible behind one
+    /// active upload.
+    func uploadBatch(
+        _ candidates: [ComposerAttachmentUploadCandidate],
+        target: SessionPresentationIdentity
+    ) async throws {
+        guard !candidates.isEmpty, let scope = scope(for: target) else {
+            throw CancellationError()
+        }
+
+        var admissions: [UploadAdmission] = []
+        do {
+            for candidate in candidates {
+                admissions.append(try beginUpload(target: target, bytes: candidate.data.count))
+            }
+        } catch {
+            admissions.forEach { uploadAdmissions.remove($0) }
+            throw error
+        }
+
+        var thumbnails: [ComposerPreparedAttachmentThumbnail?] = []
+        do {
+            thumbnails.reserveCapacity(candidates.count)
+            for (index, candidate) in candidates.enumerated() {
+                let thumbnail = await prepareAttachmentPreview(
+                    candidate.data, candidate.mimeType, candidate.name
+                )
+                try require(admissions[index])
+                thumbnails.append(thumbnail)
+            }
+            guard self.scope(for: target) == scope else { throw CancellationError() }
+        } catch {
+            admissions.forEach { uploadAdmissions.remove($0) }
+            throw error
+        }
+
+        let localIDs = candidates.map { _ in "local:\(UUID().uuidString)" }
+        for index in candidates.indices {
+            let candidate = candidates[index]
+            let thumbnail = thumbnails[index]
+            let localID = localIDs[index]
+            let admission = admissions[index]
+            attachmentsByScope[scope, default: []].append(PendingAttachment(
+                id: localID,
+                gatewayUploadID: nil,
+                name: candidate.name,
+                mimeType: candidate.mimeType,
+                size: candidate.data.count,
+                previewData: thumbnail?.encodedData,
+                fullPreviewData: candidate.data,
+                preparedThumbnail: thumbnail
+            ))
+            uploadAdmissionByAttachmentID[localID] = admission
+        }
+        schedulePersistence(for: scope)
+
+        // Preserve the pre-batch transport contract: one HTTP body at a time.
+        // Every chip is already visible, so parallel network work adds no UI
+        // benefit and can contend with the Gateway's global upload capacity.
+        var predecessor: Task<String, Error>?
+        let transportTasks = candidates.map { candidate in
+            let precedingTransport = predecessor
+            let task = Task { @MainActor [uploadOperation] in
+                if let precedingTransport { _ = await precedingTransport.result }
+                try Task.checkCancellation()
+                return try await uploadOperation(
+                    candidate.name,
+                    candidate.mimeType,
+                    candidate.data
+                )
+            }
+            predecessor = task
+            return task
+        }
+        for index in admissions.indices {
+            uploadTasks[admissions[index]] = transportTasks[index]
+        }
+        defer {
+            for index in admissions.indices {
+                let admission = admissions[index]
+                let localID = localIDs[index]
+                uploadAdmissions.remove(admission)
+                uploadTasks[admission] = nil
+                if uploadAdmissionByAttachmentID[localID] == admission {
+                    uploadAdmissionByAttachmentID[localID] = nil
+                }
+            }
+        }
+
+        try await withTaskCancellationHandler {
+            var firstError: (any Error)?
+            for index in transportTasks.indices {
+                let admission = admissions[index]
+                let localID = localIDs[index]
+                do {
+                    let uploadID = try await transportTasks[index].value
+                    guard uploadAdmissions.contains(admission),
+                          var attachments = attachmentsByScope[scope],
+                          let attachmentIndex = attachments.firstIndex(where: {
+                              $0.id == localID
+                          }) else { continue }
+                    attachments[attachmentIndex] = attachments[attachmentIndex]
+                        .replacingGatewayUploadID(uploadID)
+                    attachmentsByScope[scope] = attachments
+                    schedulePersistence(for: scope)
+                } catch {
+                    if Task.isCancelled { throw CancellationError() }
+                    // Exact chip removal retires its admission and is not a
+                    // batch failure. Transport failures retain upload-required
+                    // bytes and surface one bounded error after siblings settle.
+                    if uploadAdmissions.contains(admission), firstError == nil {
+                        firstError = error
+                    }
+                }
+            }
+            try Task.checkCancellation()
+            guard admits(target) else { throw CancellationError() }
+            if let firstError { throw firstError }
+        } onCancel: {
+            transportTasks.forEach { $0.cancel() }
+        }
     }
 
     func uploadFile(
@@ -1119,6 +1264,12 @@ final class ComposerDraftCoordinator {
             fullPreviewData: data,
             preparedThumbnail: preparedThumbnail
         ))
+        uploadAdmissionByAttachmentID[localID] = admission
+        defer {
+            if uploadAdmissionByAttachmentID[localID] == admission {
+                uploadAdmissionByAttachmentID[localID] = nil
+            }
+        }
         schedulePersistence(for: scope)
 
         let task = Task { try await fileUploadOperation(name, mimeType, staged, size) }
@@ -1147,9 +1298,18 @@ final class ComposerDraftCoordinator {
 
     func removeAttachment(_ id: String, target: SessionPresentationIdentity) {
         guard admits(target), let scope = lease?.scope,
-              var attachments = attachmentsByScope[scope] else { return }
+              var attachments = attachmentsByScope[scope],
+              let removedAttachment = attachments.first(where: { $0.id == id }) else { return }
+        if let admission = uploadAdmissionByAttachmentID.removeValue(forKey: id),
+           admission.target == target {
+            uploadAdmissions.remove(admission)
+            uploadTasks.removeValue(forKey: admission)?.cancel()
+        }
         attachments.removeAll { $0.id == id }
         attachmentsByScope[scope] = attachments.isEmpty ? nil : attachments
+        if let uploadID = removedAttachment.gatewayUploadID {
+            discardUpload(uploadID)
+        }
         schedulePersistence(for: scope)
     }
 
@@ -1425,6 +1585,11 @@ final class ComposerDraftCoordinator {
         }
     }
 
+    private func discardUpload(_ uploadID: String) {
+        let operation = discardUploadOperation
+        Task { @MainActor in await operation(uploadID) }
+    }
+
     private func schedulePersistence(for scope: ComposerDraftScope) {
         dirtyScopes.insert(scope)
         let predecessor = persistenceTask
@@ -1587,7 +1752,7 @@ final class ComposerDraftCoordinator {
         guard submittedAttachments.allSatisfy({ $0.gatewayUploadID != nil }) else {
             throw GatewayFailure(
                 code: "upload_failed",
-                message: "Attachments are still being restored. They remain available to retry.",
+                message: "Some attachments could not be uploaded. Remove them or leave and reopen this chat to retry.",
                 retryable: true,
                 details: nil
             )
@@ -1930,6 +2095,14 @@ final class ComposerDraftCoordinator {
         restoredUploadTasks[lease.target]?.cancel()
         restoredUploadTasks[lease.target] = nil
         if let attachments = attachmentsByScope[lease.scope] {
+            let submittedIDs = Set(
+                submissionByScope[lease.scope]?.submittedAttachments.map(\.id) ?? []
+            )
+            for attachment in attachments where !submittedIDs.contains(attachment.id) {
+                if let uploadID = attachment.gatewayUploadID {
+                    discardUpload(uploadID)
+                }
+            }
             attachmentsByScope[lease.scope] = attachments.map { $0.requiringUpload() }
             schedulePersistence(for: lease.scope)
         }
@@ -1944,6 +2117,9 @@ final class ComposerDraftCoordinator {
             task.cancel()
         }
         uploadAdmissions = uploadAdmissions.filter { $0.target != lease.target }
+        uploadAdmissionByAttachmentID = uploadAdmissionByAttachmentID.filter {
+            $0.value.target != lease.target
+        }
         let retainedSubmission = submissionByScope[lease.scope]
         self.lease = nil
         // Route replacement revokes presentation-only artifacts, never the

@@ -359,6 +359,19 @@ export class UploadStore {
     });
   }
 
+  /** Discards client staging only. Canonical prompt ownership is immutable. */
+  async discard(id: string): Promise<void> {
+    this.validateID(id);
+    await this.serialize(async () => {
+      const metadata = await this.metadata(id);
+      if (metadata.sessionId !== undefined) {
+        throw new GatewayError("conflict", "A prompt-owned attachment cannot be discarded");
+      }
+      const uploadDirectory = await this.ensureUploadDirectory();
+      await rm(join(uploadDirectory, id), { recursive: true, force: true });
+    });
+  }
+
   async remove(id: string): Promise<void> {
     this.validateID(id);
     await this.serialize(async () => {

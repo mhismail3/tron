@@ -345,6 +345,9 @@ final class AppModel {
             upload: composerUpload ?? { name, mimeType, data in
                 try await client.upload(name: name, mimeType: mimeType, data: data)
             },
+            discardUpload: { uploadID in
+                try? await client.discardUpload(uploadID)
+            },
             fileUpload: composerFileUpload ?? { name, mimeType, fileURL, byteCount in
                 try await client.upload(
                     name: name,
@@ -2260,6 +2263,14 @@ final class AppModel {
             data: data,
             target: target
         )
+    }
+
+    func uploadBatch(
+        _ candidates: [ComposerAttachmentUploadCandidate],
+        target: SessionPresentationTarget
+    ) async throws {
+        guard admitsLiveSessionCommands(target) else { throw CancellationError() }
+        try await composerDrafts.uploadBatch(candidates, target: target)
     }
 
     func uploadFile(

@@ -599,6 +599,47 @@ actor GatewayClient {
         return try admitUploadResponse(responseData, http: http, context: context)
     }
 
+    func discardUpload(_ id: String) async throws {
+        guard UUID(uuidString: id) != nil else {
+            throw GatewayFailure(
+                code: "invalid_request",
+                message: "Attachment staging identity is invalid.",
+                retryable: false,
+                details: nil
+            )
+        }
+        guard let profile, let token else {
+            throw GatewayFailure(
+                code: "not_paired",
+                message: "No paired gateway is selected.",
+                retryable: false,
+                details: nil
+            )
+        }
+        guard let url = profile.httpURL(path: "/v1/uploads/\(id)") else {
+            throw Self.invalidProfileEndpoint()
+        }
+        var request = URLRequest(url: url, timeoutInterval: 15)
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, http) = try await boundedHTTPDataTransport.data(
+            for: request,
+            maximumBytes: GatewayUploadPolicy.maximumResponseBytes
+        )
+        guard self.profile?.id == profile.id else { throw CancellationError() }
+        guard http.statusCode != 204, http.statusCode != 404 else { return }
+        struct FailureEnvelope: Decodable { let error: GatewayFailure }
+        if let failure = try? JSONDecoder.gateway.decode(FailureEnvelope.self, from: data).error {
+            throw failure
+        }
+        throw GatewayFailure(
+            code: "upload_failed",
+            message: "Attachment staging could not be discarded (HTTP \(http.statusCode)).",
+            retryable: http.statusCode == 408 || http.statusCode == 429 || http.statusCode >= 500,
+            details: nil
+        )
+    }
+
     func upload(
         name: String,
         mimeType: String,

@@ -421,6 +421,92 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
+    @Test("photo batch stages every chip before serial transport settles")
+    func photoBatchStagesBeforeTransport() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 71)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1
+            )
+            let candidates = (0..<4).map { index in
+                ComposerAttachmentUploadCandidate(
+                    name: "photo-\(index).bin",
+                    mimeType: "application/octet-stream",
+                    data: Data([UInt8(index + 1)])
+                )
+            }
+            let batch = Task {
+                try await harness.coordinator.uploadBatch(candidates, target: target)
+            }
+            try await harness.waitForUploads(1)
+
+            let staged = harness.coordinator.pendingAttachments(for: target)
+            #expect(staged.map(\.name) == candidates.map(\.name))
+            #expect(staged.allSatisfy { $0.gatewayUploadID == nil })
+            #expect(harness.coordinator.hasActiveUploads(for: target))
+
+            for callIndex in candidates.indices {
+                try await harness.waitForUploads(callIndex + 1)
+                #expect(harness.uploadCalls[callIndex].name == candidates[callIndex].name)
+                harness.completeUpload(
+                    index: callIndex,
+                    result: .success("upload-\(callIndex)")
+                )
+            }
+            try await valueOfOwnedTask(batch)
+
+            let completed = harness.coordinator.pendingAttachments(for: target)
+            #expect(completed.map(\.name) == candidates.map(\.name))
+            #expect(completed.compactMap(\.gatewayUploadID) == [
+                "upload-0", "upload-1", "upload-2", "upload-3",
+            ])
+            #expect(!harness.coordinator.hasActiveUploads(for: target))
+        }
+    }
+
+    @Test("unresolved attachment rejects send without starting another blocking upload")
+    func unresolvedAttachmentDoesNotRestartUploadOnSend() async throws {
+        try await withTestWatchdog { @MainActor in
+            let bytes = Data("retry me".utf8)
+            var uploadAttempts = 0
+            let coordinator = ComposerDraftCoordinator(
+                upload: { _, _, _ in
+                    uploadAttempts += 1
+                    return "unexpected"
+                },
+                fileUpload: { _, _, _, _ in "unused" },
+                send: { _, _, _, _, _ in "unused" },
+                admitsLifecycleGeneration: { $0 == 1 }
+            )
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 72)
+            let scope = coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "draft remains"
+            )
+            coordinator.installHostedAttachment(.init(
+                id: "local:failed",
+                gatewayUploadID: nil,
+                name: "photo.jpg",
+                mimeType: "image/jpeg",
+                size: bytes.count,
+                previewData: nil,
+                fullPreviewData: bytes
+            ), target: target)
+
+            do {
+                try await coordinator.send(target: target, behavior: nil)
+                Issue.record("unresolved attachment should reject submission")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "upload_failed")
+            }
+            #expect(uploadAttempts == 0)
+            #expect(!coordinator.hasActiveUploads(for: target))
+            #expect(coordinator.text(for: scope) == "draft remains")
+            #expect(coordinator.pendingAttachments(for: target).count == 1)
+        }
+    }
+
     @Test("successful image upload retains only its bounded preview")
     func boundedImagePreview() async throws {
         try await withTestWatchdog { @MainActor in
@@ -642,6 +728,91 @@ struct ComposerDraftCoordinatorTests {
             #expect(retained.name == "cancel.txt")
             #expect(retained.gatewayUploadID == nil)
             #expect(retained.fullPreviewData == Data("cancel".utf8))
+        }
+    }
+
+    @Test("removing an active upload chip cancels only that transport and admits re-add")
+    func activeUploadRemovalIsImmediatelyRetired() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 90)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1
+            )
+            let first = Task {
+                try await harness.coordinator.upload(
+                    name: "photo.jpg", mimeType: "image/jpeg", data: Data("first".utf8),
+                    target: target
+                )
+            }
+            try await harness.waitForUploads(1)
+            let firstID = try #require(
+                harness.coordinator.pendingAttachments(for: target).first?.id
+            )
+            #expect(harness.coordinator.hasActiveUploads(for: target))
+
+            harness.coordinator.removeAttachment(firstID, target: target)
+            #expect(harness.coordinator.pendingAttachments(for: target).isEmpty)
+            #expect(!harness.coordinator.hasActiveUploads(for: target))
+            #expect(harness.coordinator.hostedUploadAdmissionCount == 0)
+
+            harness.completeUpload(index: 0, result: .success("removed-upload"))
+            await #expect(throws: CancellationError.self) {
+                try await valueOfOwnedTask(first)
+            }
+
+            let second = Task {
+                try await harness.coordinator.upload(
+                    name: "photo.jpg", mimeType: "image/jpeg", data: Data("second".utf8),
+                    target: target
+                )
+            }
+            try await harness.waitForUploads(2)
+            #expect(harness.coordinator.pendingAttachments(for: target).count == 1)
+            #expect(harness.coordinator.hasActiveUploads(for: target))
+            harness.completeUpload(index: 1, result: .success("replacement-upload"))
+            try await valueOfOwnedTask(second)
+            #expect(!harness.coordinator.hasActiveUploads(for: target))
+            #expect(harness.coordinator.pendingAttachments(for: target).first?.gatewayUploadID
+                == "replacement-upload")
+        }
+    }
+
+    @Test("removal and route revocation discard only unclaimed Gateway staging")
+    func discardedPendingAttachmentsReleaseGatewayStaging() async throws {
+        try await withTestWatchdog { @MainActor in
+            let firstUploadID = "00000000-0000-4000-8000-000000000001"
+            let secondUploadID = "00000000-0000-4000-8000-000000000002"
+            var uploadIDs = [firstUploadID, secondUploadID]
+            var discarded: [String] = []
+            let coordinator = ComposerDraftCoordinator(
+                upload: { _, _, _ in uploadIDs.removeFirst() },
+                discardUpload: { discarded.append($0) },
+                fileUpload: { _, _, _, _ in "unused" },
+                send: { _, _, _, _, _ in "unused" },
+                admitsLifecycleGeneration: { $0 == 1 }
+            )
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 92)
+            _ = coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1
+            )
+
+            try await coordinator.upload(
+                name: "first.jpg", mimeType: "image/jpeg", data: Data("first".utf8),
+                target: target
+            )
+            let firstLocalID = try #require(coordinator.pendingAttachments(for: target).first?.id)
+            coordinator.removeAttachment(firstLocalID, target: target)
+            await Task.yield()
+            #expect(discarded == [firstUploadID])
+
+            try await coordinator.upload(
+                name: "second.jpg", mimeType: "image/jpeg", data: Data("second".utf8),
+                target: target
+            )
+            coordinator.revoke(target)
+            await Task.yield()
+            #expect(discarded == [firstUploadID, secondUploadID])
         }
     }
 

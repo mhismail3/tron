@@ -257,6 +257,21 @@ describe("UploadStore", () => {
     expect(await readdir(join(home, "gateway", "uploads"))).not.toEqual(expect.arrayContaining(["malformed", "oversized"]));
   });
 
+  it("discards only unclaimed client staging", async () => {
+    const home = await root();
+    const store = new UploadStore(home, 32);
+    const abandoned = await store.save("abandoned", "text/plain", Buffer.from("draft"));
+    const claimed = await store.save("claimed", "text/plain", Buffer.from("prompt"));
+    await store.materialize([claimed.id], "session");
+
+    await expect(store.discard(abandoned.id)).resolves.toBeUndefined();
+    expect(await readdir(join(home, "gateway", "uploads"))).not.toContain(abandoned.id);
+    await expect(store.discard(claimed.id)).rejects.toMatchObject({ code: "conflict" });
+    await expect(store.materialize([claimed.id], "session")).resolves.toMatchObject({
+      envelope: expect.stringContaining("claimed"),
+    });
+  });
+
   it("removes oversized metadata on direct lookup and returns not found", async () => {
     const home = await root();
     const store = new UploadStore(home, 16);

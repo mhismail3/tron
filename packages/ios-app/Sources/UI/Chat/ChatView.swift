@@ -2192,7 +2192,10 @@ struct ChatView: View {
 
     private func importPhotos(_ values: [PhotosPickerItem], target: SessionPresentationIdentity) async {
         guard !values.isEmpty, presentationTarget == target else { return }
-        for item in values {
+        var candidates: [ComposerAttachmentUploadCandidate] = []
+        var candidateBytes = 0
+        candidates.reserveCapacity(min(values.count, ChatAttachmentImportPolicy.maximumPhotoSelection))
+        for item in values.prefix(ChatAttachmentImportPolicy.maximumPhotoSelection) {
             guard !Task.isCancelled, presentationTarget == target else { return }
             do {
                 guard let data = try await item.loadTransferable(type: Data.self) else {
@@ -2202,18 +2205,35 @@ struct ChatView: View {
                     )
                     continue
                 }
-                guard !Task.isCancelled, presentationTarget == target else { return }
+                let (nextBytes, overflow) = candidateBytes.addingReportingOverflow(data.count)
+                guard !overflow,
+                      data.count > 0,
+                      nextBytes <= ChatAttachmentImportPolicy.maximumFileBytes else {
+                    model.presentComposerActionError(
+                        "Attach at most 10 files totaling 25 MiB.",
+                        target: target
+                    )
+                    break
+                }
+                candidateBytes = nextBytes
                 let mimeType = item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
                 let filename = "photo.\(UTType(mimeType: mimeType)?.preferredFilenameExtension ?? "jpg")"
-                try await model.upload(
-                    name: filename,
-                    mimeType: mimeType,
-                    data: data,
-                    target: target
-                )
+                candidates.append(.init(name: filename, mimeType: mimeType, data: data))
+            } catch is CancellationError {
+                guard !Task.isCancelled, presentationTarget == target else { return }
+                continue
+            } catch {
+                model.presentComposerActionError(error, target: target)
             }
-            catch is CancellationError { return }
-            catch { model.presentComposerActionError(error, target: target) }
+        }
+        guard !candidates.isEmpty, !Task.isCancelled,
+              presentationTarget == target else { return }
+        do {
+            try await model.uploadBatch(candidates, target: target)
+        } catch is CancellationError {
+            return
+        } catch {
+            model.presentComposerActionError(error, target: target)
         }
     }
 

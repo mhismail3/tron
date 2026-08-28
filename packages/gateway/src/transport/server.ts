@@ -552,6 +552,13 @@ export class GatewayServer {
         });
         return;
       }
+      if (request.method === "DELETE" && url.pathname.startsWith("/v1/uploads/")) {
+        const id = decodeURIComponent(url.pathname.slice("/v1/uploads/".length));
+        await this.options.uploads.discard(id);
+        response.writeHead(204, { "cache-control": "no-store" });
+        response.end();
+        return;
+      }
       if (request.method === "GET" && url.pathname.startsWith("/v1/uploads/")) {
         const id = decodeURIComponent(url.pathname.slice("/v1/uploads/".length));
         const lease = await this.options.uploads.acquire(id);
@@ -595,8 +602,9 @@ export class GatewayServer {
       const status = failure.code === "unauthenticated" ? 401
         : failure.code === "not_found" ? 404
           : failure.code === "invalid_request" ? 400
-            : failure.code === "busy" ? 503
-              : 500;
+            : failure.code === "conflict" ? 409
+              : failure.code === "busy" ? 503
+                : 500;
       if (!request.complete) {
         response.setHeader("connection", "close");
         response.once("finish", () => request.destroy());

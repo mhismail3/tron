@@ -86,6 +86,27 @@ async function entries(path: string): Promise<string[]> {
   }
 }
 
+function deleteUploadRequest(port: number, id: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const outgoing = request({
+      host: "127.0.0.1",
+      port,
+      method: "DELETE",
+      path: `/v1/uploads/${encodeURIComponent(id)}`,
+      headers: { authorization: "Bearer paired" },
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () => resolve({
+        status: response.statusCode ?? 0,
+        body: Buffer.concat(chunks).toString("utf8"),
+      }));
+    });
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
+}
+
 function uploadRequest(
   port: number,
   declaredBytes: number | undefined,
@@ -132,6 +153,21 @@ describe("Gateway upload HTTP streaming", () => {
     const id = JSON.parse(response.body).upload.id as string;
     expect(await readFile(join(home, "gateway", "uploads", id, "content.txt"), "utf8")).toBe("12345678");
     expect(await readdir(join(home, "gateway", "upload-bodies"))).toEqual([]);
+  });
+
+  it("discards authenticated unclaimed staging but rejects prompt-owned uploads", async () => {
+    const { home, port, uploads } = await fixture();
+    const abandonedResponse = await uploadRequest(port, 5, (outgoing) => outgoing.end("draft"));
+    const abandonedID = JSON.parse(abandonedResponse.body).upload.id as string;
+    await expect(deleteUploadRequest(port, abandonedID)).resolves.toMatchObject({ status: 204, body: "" });
+    expect(await entries(join(home, "gateway", "uploads"))).not.toContain(abandonedID);
+
+    const claimedResponse = await uploadRequest(port, 6, (outgoing) => outgoing.end("prompt"));
+    const claimedID = JSON.parse(claimedResponse.body).upload.id as string;
+    await uploads.materialize([claimedID], "session");
+    const rejected = await deleteUploadRequest(port, claimedID);
+    expect(rejected.status).toBe(409);
+    expect(JSON.parse(rejected.body)).toMatchObject({ error: { code: "conflict" } });
   });
 
   it("rejects declared and observed oversize without publishing staging", async () => {
