@@ -323,7 +323,7 @@ struct SessionContextSheet: View {
                 case .queued:
                     Image(systemName: "clock")
                 case .inProgress:
-                    ProgressView().controlSize(.small)
+                    TronPulseLoadingIndicator(size: 18)
                 case .idle:
                     Image(systemName: "rectangle.compress.vertical")
                 }
@@ -614,7 +614,7 @@ struct SessionContextSheet: View {
                     subtitleRole: .dynamicValue,
                     accent: sessionRowAccent
                 ) {
-                    ProgressView().controlSize(.small)
+                    TronPulseLoadingIndicator(size: 18)
                 }
             case .notRepository:
                 TronSettingsRow(icon: "folder", title: "Current Branch", subtitle: "Workspace is not a Git repository", accent: sessionRowAccent) {
@@ -681,7 +681,7 @@ struct SessionContextSheet: View {
                     rowFormat: format,
                     activeFormat: exportingFormat
                 ) {
-                    ProgressView().controlSize(.small)
+                    TronPulseLoadingIndicator(size: 18)
                 }
             }
         }

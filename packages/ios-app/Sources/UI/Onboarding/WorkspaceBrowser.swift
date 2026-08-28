@@ -231,7 +231,7 @@ struct WorkspaceBrowser: View {
                     .focused($folderFieldFocused)
                     .onSubmit { createFolder() }
                 if submittingFolder {
-                    ProgressView().controlSize(.mini).tint(.tronEmerald)
+                    TronPulseLoadingIndicator(accent: .tronEmerald, size: 16)
                 } else {
                     Button { cancelFolder() } label: { Image(systemName: "xmark.circle.fill") }
                         .accessibilityLabel("Cancel new folder")

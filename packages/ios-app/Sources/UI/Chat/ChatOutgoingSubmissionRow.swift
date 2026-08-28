@@ -49,19 +49,16 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
         )
         BoundedTrailingContentLayout(maxWidth: UserPromptTextLayoutPolicy.maximumWidth) {
             VStack(alignment: .leading, spacing: QueuedMessageCardLayout.contentSpacing) {
-                if let onActivate {
-                    Button(action: onActivate) { promptContent }
-                        .buttonStyle(.plain)
-                        .accessibilityHint("Opens the queued message editor")
-                } else {
-                    promptContent
-                }
+                promptContent
                 attachmentContent
             }
             .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
             .padding(.top, QueuedMessageCardLayout.contentSpacing)
             .padding(.bottom, ChatPromptContainerStyle.queuedMessageBottomPadding)
             .contentShape(shape)
+            // The whole prompt surface is the editor affordance, not only its
+            // title/text. Attachment controls still retain their own actions.
+            .modifier(ChatPromptActivationModifier(action: onActivate))
             .glassEffect(
                 isInteractive
                     ? .regular.tint(accent.opacity(ChatPromptContainerStyle.tintOpacity)).interactive()
@@ -105,6 +102,23 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
             if !text.isEmpty {
                 UserPromptText(text: text)
             }
+        }
+    }
+}
+
+private struct ChatPromptActivationModifier: ViewModifier {
+    let action: (() -> Void)?
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let action {
+            content
+                .onTapGesture(perform: action)
+                .accessibilityHint("Opens the queued message editor")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { action() }
+        } else {
+            content
         }
     }
 }

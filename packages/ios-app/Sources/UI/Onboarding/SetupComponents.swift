@@ -214,9 +214,7 @@ private struct ProviderConfigurationSheet: View {
                                                 accent: .tronEmerald
                                             )
                                             if beginningMethod == method {
-                                                ProgressView()
-                                                    .controlSize(.small)
-                                                    .tint(Color.tronEmerald)
+                                                TronPulseLoadingIndicator(size: 18)
                                                     .padding(.trailing, 14)
                                             }
                                         }

@@ -273,7 +273,7 @@ private struct NotificationInboxDetailView: View {
                     )
                     Button(action: onOpenSession) {
                         HStack(spacing: TronSpacing.sm) {
-                            if isOpening { ProgressView().controlSize(.small) }
+                            if isOpening { TronPulseLoadingIndicator(size: 18) }
                             else { Image(systemName: "arrow.up.right.square") }
                             Text(isOpening ? "Opening Chat…" : "Open Chat")
                         }

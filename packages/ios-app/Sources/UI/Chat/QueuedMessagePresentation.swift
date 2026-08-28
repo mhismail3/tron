@@ -494,9 +494,7 @@ struct QueuedMessageRow: View {
     @ViewBuilder
     private var trailingStatus: some View {
         if isMutating {
-            ProgressView()
-                .controlSize(.mini)
-                .tint(accent)
+            TronPulseLoadingIndicator(accent: accent, size: 18)
                 .frame(width: 28, height: 28)
         } else if !isManageable {
             Image(systemName: "lock")
@@ -553,15 +551,19 @@ struct QueuedMessageEditorSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: 18) {
-                    TronSettingsGroup(
-                        "Delivery",
-                        detail: behavior == .steer
-                            ? "Steering is delivered after the current assistant turn finishes its tool calls."
-                            : "Follow-up waits until Tron finishes its current work.",
-                        accent: behavior == .steer ? .tronEmerald : .tronPurple
-                    ) {
-                        HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Delivery")
+                            .font(TronTypography.sheetSectionHeader)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .accessibilityAddTraits(.isHeader)
+                        Text(behavior == .steer
+                            ? "Delivered after the current assistant turn finishes its tool calls."
+                            : "Follow-up waits until Tron finishes its current work.")
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronTextMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 8) {
                             deliveryChoice(
                                 .steer,
                                 title: "Steer next",
@@ -575,29 +577,29 @@ struct QueuedMessageEditorSheet: View {
                                 accent: .tronPurple
                             )
                         }
-                        .padding(12)
                     }
 
-                    TronSettingsGroup("Message", accent: .tronTeal) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            TextEditor(text: $text)
-                                .font(TronTypography.body)
-                                .frame(minHeight: 160)
-                                .tronTextEditor()
-                                .accessibilityLabel("Queued message")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Message")
+                            .font(TronTypography.sheetSectionHeader)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .accessibilityAddTraits(.isHeader)
+                        TextEditor(text: $text)
+                            .font(TronTypography.body)
+                            .frame(minHeight: 160)
+                            .padding(10)
+                            .tronTextEditor()
+                            .accessibilityLabel("Queued message")
 
-                            if message.attachmentCount > 0 {
-                                Label(
-                                    "Attachments stay with this queued message.",
-                                    systemImage: "paperclip"
-                                )
-                                .font(TronTypography.caption)
-                                .foregroundStyle(Color.tronTextSecondary)
-                            }
+                        if message.attachmentCount > 0 {
+                            Label(
+                                "Attachments stay with this queued message.",
+                                systemImage: "paperclip"
+                            )
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronTextSecondary)
                         }
-                        .padding(12)
                     }
-
                 }
                 .padding(18)
             }
@@ -625,7 +627,7 @@ struct QueuedMessageEditorSheet: View {
                         dismiss()
                     } label: {
                         if isSaving {
-                            ProgressView().controlSize(.small)
+                            TronPulseLoadingIndicator(accent: behavior == .steer ? .tronEmerald : .tronPurple, size: 18)
                         } else {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
@@ -656,13 +658,13 @@ struct QueuedMessageEditorSheet: View {
         } label: {
             VStack(spacing: 7) {
                 Image(systemName: selected ? "checkmark.circle.fill" : icon)
-                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                 Text(title)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(selected ? accent : Color.tronTextSecondary)
-            .frame(maxWidth: .infinity, minHeight: 70)
+            .frame(maxWidth: .infinity, minHeight: 48)
             .contentShape(Rectangle())
         }
         .background(

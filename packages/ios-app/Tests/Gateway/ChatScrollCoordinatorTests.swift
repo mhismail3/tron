@@ -79,6 +79,19 @@ struct ChatScrollCoordinatorTests {
         #expect(!coordinator.usesPinnedSizeChangeAnchor)
     }
 
+    @Test("an uncommanded status-bar retreat detaches from the pinned tail")
+    func statusBarScrollToTopDetaches() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        let top = ChatTranscriptGeometry(
+            offsetY: 0, contentHeight: 1_000, containerHeight: 400
+        )
+        coordinator.geometryChanged(previous: bottom, current: top)
+        #expect(coordinator.viewportMode == .anchored)
+        #expect(!coordinator.isAtBottom)
+        #expect(coordinator.userScrolledAway)
+    }
+
     @Test("native pinned size anchoring absorbs discrete and streaming growth without commands")
     func pinnedNativeEdgeEliminatesFollowCommandStream() throws {
         let coordinator = ChatScrollCoordinator()

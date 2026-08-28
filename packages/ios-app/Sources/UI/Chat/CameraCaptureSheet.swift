@@ -295,7 +295,7 @@ struct CameraCaptureSheet: View {
             .multilineTextAlignment(.center)
             .padding(.horizontal, 32)
         } else {
-            ProgressView().tint(.white)
+            TronPulseLoadingIndicator(accent: .white, size: 20)
         }
     }
 

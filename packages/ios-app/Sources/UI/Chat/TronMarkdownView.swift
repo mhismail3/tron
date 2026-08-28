@@ -117,7 +117,7 @@ private struct CodeBlock: View {
                 Text(language?.isEmpty == false ? language! : "code")
                     .font(TronFont.body(10, weight: .medium)).foregroundStyle(Color.tronTextMuted)
                 Spacer()
-                if streaming { ProgressView().controlSize(.mini).tint(.tronEmerald) }
+                if streaming { TronPulseLoadingIndicator(accent: .tronEmerald, size: 16) }
                 Button {
                     UIPasteboard.general.string = code
                     copied = true

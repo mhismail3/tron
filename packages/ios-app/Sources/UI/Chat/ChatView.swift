@@ -1030,7 +1030,7 @@ struct ChatView: View {
         switch sessionPresentation.open.phase {
         case .opening, .positioning:
             VStack(spacing: 12) {
-                ProgressView().controlSize(.regular)
+                TronPulseLoadingIndicator(accent: .tronEmerald, size: 22)
                 Text("Opening conversation…")
                     .font(TronTypography.bodySM)
                     .foregroundStyle(Color.tronTextSecondary)
@@ -1640,9 +1640,7 @@ struct ChatView: View {
         } label: {
             HStack(spacing: 7) {
                 if isLoadingEarlierMessages {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(Color.tronEmerald)
+                    TronPulseLoadingIndicator(accent: .tronEmerald, size: 18)
                 } else {
                     Image(systemName: "arrow.up")
                 }

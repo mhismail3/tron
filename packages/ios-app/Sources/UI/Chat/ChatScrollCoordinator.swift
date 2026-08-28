@@ -412,6 +412,20 @@ final class ChatScrollCoordinator {
             evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
             return
         }
+        // The status-bar tap uses UIKit's native scroll-to-top path and may
+        // not publish `isPositionedByUser` or an interacting phase. Treat its
+        // unmistakable retreat from the tail as direct ownership before a
+        // layout update can re-apply the pinned bottom anchor.
+        let hasAutomaticViewportTarget = command != nil || appliedTargetOrigin != nil
+        if !openingTailSettlementPending,
+           !hasAutomaticViewportTarget,
+           viewportMode == .pinned,
+           geometry.isAtCatchUpBoundary,
+           current.isValid,
+           current.offsetY < geometry.offsetY - 2,
+           !current.isAtCatchUpBoundary {
+            beginDirectInteraction(allowsBottomRubberBand: false)
+        }
         geometry = current
         if appliedTargetOrigin == .tailMaterialization {
             tailMaterializationEvidenceChanged()
@@ -1303,7 +1317,7 @@ final class ChatScrollCoordinator {
         catchUpUnreadBeforeJump = false
     }
 
-    private func beginDirectInteraction() {
+    private func beginDirectInteraction(allowsBottomRubberBand: Bool = true) {
         retainedViewportReconciliationPending = false
         physicalTailRepairTask?.cancel()
         physicalTailRepairTask = nil
@@ -1312,7 +1326,8 @@ final class ChatScrollCoordinator {
         physicalTailRepairIssuedEvidenceRevision = nil
         physicalTailRepairFailedDisplacement = nil
         retireAppliedTargetWithoutCallback()
-        let isBottomRubberBand = viewportMode == .pinned
+        let isBottomRubberBand = allowsBottomRubberBand
+            && viewportMode == .pinned
             && geometry.isValid
             && (geometry.isAtCatchUpBoundary || geometry.isPastBottomEdge)
         if !isBottomRubberBand {

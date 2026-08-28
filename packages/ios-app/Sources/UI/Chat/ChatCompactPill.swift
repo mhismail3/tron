@@ -214,9 +214,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
         HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
             ZStack {
                 if showsProgress {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(tone.primaryColor)
+                    TronPulseLoadingIndicator(accent: tone.primaryColor, size: 18)
                         .transition(.opacity.combined(with: .scale(scale: 0.82)))
                 } else {
                     Image(systemName: icon)

@@ -541,9 +541,7 @@ struct ComposerTrailingButton: View {
                             .opacity(isSending ? 0 : 1)
                             .scaleEffect(isSending && !reduceMotion ? 0.72 : 1)
                         if isSending {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(Color.tronEmerald)
+                            TronPulseLoadingIndicator(accent: .tronEmerald, size: 18)
                                 .transition(
                                     reduceMotion
                                         ? .opacity

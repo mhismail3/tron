@@ -545,7 +545,7 @@ struct GatewayConnectionDetailView: View {
                                 detail: loadingInfo ? nil : "Connect to this server to load its metadata.",
                                 accent: .tronCyan
                             ) {
-                                if loadingInfo { ProgressView().controlSize(.small).tint(Color.tronCyan) }
+                                if loadingInfo { TronPulseLoadingIndicator(accent: .tronCyan, size: 18) }
                             }
                         }
                     }
@@ -728,7 +728,7 @@ struct GatewayConnectionDetailView: View {
             accent: accent
         ) {
             if active {
-                ProgressView().controlSize(.small).tint(accent)
+                TronPulseLoadingIndicator(accent: accent, size: 18)
             }
         }
     }

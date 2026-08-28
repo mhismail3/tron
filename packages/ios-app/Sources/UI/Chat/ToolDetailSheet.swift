@@ -355,7 +355,7 @@ private struct ToolStatusChip: View {
     private func content(_ presentation: ToolStatusChipPresentation, showsSpinner: Bool) -> some View {
         HStack(spacing: 6) {
             if showsSpinner {
-                ProgressView().controlSize(.small).tint(accent)
+                TronPulseLoadingIndicator(accent: accent, size: 18)
             } else {
                 Image(systemName: presentation.icon)
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))

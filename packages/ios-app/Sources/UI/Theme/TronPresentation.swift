@@ -307,7 +307,7 @@ struct TronPrimaryActionButton: View {
         Button(action: action) {
             HStack(spacing: TronSpacing.md) {
                 if isBusy {
-                    ProgressView().controlSize(.small).tint(accent).accessibilityHidden(true)
+                    TronPulseLoadingIndicator(accent: accent, size: 18)
                 } else {
                     Image(systemName: systemImage).accessibilityHidden(true)
                 }
@@ -783,7 +783,7 @@ struct TronToolbarTextLabel: View {
     var body: some View {
         HStack(spacing: 5) {
             if isWorking {
-                ProgressView().controlSize(.small)
+                TronPulseLoadingIndicator(size: 18)
             } else {
                 Image(systemName: systemImage)
             }
@@ -824,9 +824,7 @@ struct TronReloadToolbarButton: View {
     var body: some View {
         Button(action: action) {
             if isReloading {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(Color.tronEmerald)
+                TronPulseLoadingIndicator(size: 18)
             } else {
                 Image(systemName: "arrow.clockwise")
                     .font(TronTypography.buttonSM)
@@ -1413,13 +1411,98 @@ struct TronCaption: View {
     }
 }
 
+/// A dependency-free, concentric pulse inspired by the requested loading
+/// treatment. One Canvas draws all three waves; TimelineView supplies a
+/// lifecycle-bound clock without retaining per-indicator animation tasks.
+enum TronPulseLoadingIndicatorEngine {
+    static let pulseCount = 3
+    static let cycleDuration = 1.6
+
+    static func animationPaused(reduceMotion: Bool, sceneActive: Bool) -> Bool {
+        reduceMotion || !sceneActive
+    }
+
+    static func progress(pulse: Int, time: Double) -> Double {
+        let offset = Double(pulse) / Double(pulseCount)
+        let raw = time / cycleDuration - offset
+        return raw - floor(raw)
+    }
+
+    static func scale(progress: Double) -> Double {
+        0.08 + 0.92 * min(1, max(0, progress))
+    }
+
+    static func opacity(progress: Double) -> Double {
+        let remaining = 1 - min(1, max(0, progress))
+        return 0.62 * remaining * remaining
+    }
+}
+
+struct TronPulseLoadingIndicator: View {
+    var accent: Color = .tronEmerald
+    var size: CGFloat = 18
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        TimelineView(.animation(
+            minimumInterval: 1 / 30,
+            paused: TronPulseLoadingIndicatorEngine.animationPaused(
+                reduceMotion: reduceMotion,
+                sceneActive: scenePhase == .active
+            )
+        )) { _ in
+            Canvas { context, canvasSize in
+                let diameter = min(canvasSize.width, canvasSize.height)
+                let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+                if reduceMotion {
+                    let radius = diameter * 0.24
+                    context.fill(
+                        Path(ellipseIn: CGRect(
+                            x: center.x - radius,
+                            y: center.y - radius,
+                            width: radius * 2,
+                            height: radius * 2
+                        )),
+                        with: .color(accent.opacity(0.72))
+                    )
+                } else {
+                    let time = ProcessInfo.processInfo.systemUptime
+                    for pulse in 0..<TronPulseLoadingIndicatorEngine.pulseCount {
+                        let progress = TronPulseLoadingIndicatorEngine.progress(
+                            pulse: pulse,
+                            time: time
+                        )
+                        let radius = diameter * 0.5
+                            * TronPulseLoadingIndicatorEngine.scale(progress: progress)
+                        context.fill(
+                            Path(ellipseIn: CGRect(
+                                x: center.x - radius,
+                                y: center.y - radius,
+                                width: radius * 2,
+                                height: radius * 2
+                            )),
+                            with: .color(accent.opacity(
+                                TronPulseLoadingIndicatorEngine.opacity(progress: progress)
+                            ))
+                        )
+                    }
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
 struct TronLoadingState: View {
     let label: String
     var accent: Color = .tronEmerald
 
     var body: some View {
         HStack(spacing: TronSpacing.md) {
-            ProgressView().controlSize(.small).tint(accent).accessibilityHidden(true)
+            TronPulseLoadingIndicator(accent: accent)
             Text(label)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(Color.tronTextSecondary)

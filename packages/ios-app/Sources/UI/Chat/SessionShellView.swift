@@ -932,7 +932,7 @@ private struct HistoricalSessionRow: View {
         return HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
             Group {
                 if activity == .active || activity == .resuming {
-                    ProgressView().controlSize(.small).tint(.tronEmerald)
+                    TronPulseLoadingIndicator(accent: .tronEmerald, size: 18)
                 } else {
                     Image(systemName: activity == .interrupted ? "exclamationmark.circle" : session.isUnread ? "circle.fill" : "circle")
                         .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))

@@ -61,13 +61,7 @@ struct ChatRoutes: ViewModifier {
                         onDelete: { onRemoveQueuedMessage(message.id) }
                     )
                 } else {
-                    ContentUnavailableView(
-                        "Queue Editing Unavailable",
-                        systemImage: "exclamationmark.triangle",
-                        description: Text(
-                            "Queue management is no longer available for this Gateway commit."
-                        )
-                    )
+                    QueueEditingUnavailableSheet()
                 }
             }
             .sheet(isPresented: $cameraPresented) {
@@ -116,5 +110,48 @@ struct ChatRoutes: ViewModifier {
                     onSecondary: { onKeepEditorRequest(request) }
                 )
             }
+    }
+}
+
+private struct QueueEditingUnavailableSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(TronTypography.sans(size: 28, weight: .semibold))
+                    .foregroundStyle(Color.tronAmber)
+                    .accessibilityHidden(true)
+                Text("Queue Editing Unavailable")
+                    .font(TronTypography.sheetSectionHeader)
+                    .foregroundStyle(Color.tronTextPrimary)
+                Text("Queue management is no longer available for this Gateway commit.")
+                    .font(TronTypography.secondaryDescription)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.tronBackground)
+            .accessibilityElement(children: .combine)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: "Queued Message", accent: .tronAmber)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
+        }
+        .tronTopBlur(.sheet)
+        .presentationDragIndicator(.hidden)
+        .tronPresentation()
     }
 }

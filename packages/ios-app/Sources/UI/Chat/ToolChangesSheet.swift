@@ -81,8 +81,11 @@ struct ToolDiffView: View {
     }
 
     private var diffScroll: some View {
+        // Keep the code column intrinsic. A flexible row inside a horizontal
+        // scroll view can grow to the viewport width, making long lines fight
+        // the sheet's vertical scroll and producing a rubber-band snap.
         ScrollView(.horizontal, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 ForEach(lines) { line in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(marker(for: line.kind))
@@ -97,12 +100,14 @@ struct ToolDiffView: View {
                     }
                     .padding(.horizontal, 11)
                     .padding(.vertical, verticalPadding(for: line.kind))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
                     .background(background(for: line.kind))
                 }
             }
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.vertical, 7)
         }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
     }
 
     private func marker(for kind: ToolDiffLineKind) -> String {

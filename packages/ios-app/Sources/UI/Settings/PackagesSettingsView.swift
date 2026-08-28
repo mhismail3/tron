@@ -362,7 +362,7 @@ struct PackagesSettingsView: View {
                 .compactMap { $0 }.joined(separator: " · ")
         ) {
             if isMutating(package) {
-                ProgressView().controlSize(.small)
+                TronPulseLoadingIndicator(size: 18)
             } else {
                 Menu {
                     Button("Update", systemImage: "arrow.clockwise") { update(package) }

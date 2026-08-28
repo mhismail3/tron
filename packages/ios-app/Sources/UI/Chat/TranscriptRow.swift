@@ -670,7 +670,7 @@ private struct TranscriptImageChip: View {
                 } else {
                     ZStack {
                         Color.tronBlue.opacity(0.10)
-                        ProgressView().controlSize(.mini).tint(.tronBlue)
+                        TronPulseLoadingIndicator(accent: .tronBlue, size: 18)
                     }
                 }
             }

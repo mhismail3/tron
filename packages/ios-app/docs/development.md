@@ -12,6 +12,20 @@ cd packages/ios-app
 xcodegen generate
 ```
 
+## UI motion and loading surfaces
+
+Compact in-progress UI uses `TronPulseLoadingIndicator`, an in-house SwiftUI
+Canvas pulse. It is lifecycle-aware, stops with the view, and pauses for Reduce
+Motion or inactive scenes. Keep `ProgressView(value:total:)` for determinate
+progress only; do not reintroduce stock indeterminate spinners in chat chips,
+dashboard activity rows, or shared loading states. Diff content owns an
+intrinsic horizontal code column so long lines scroll without competing with
+the sheet's vertical gesture. Queue editing uses direct sheet content with
+compact delivery tabs, a full-card tap target, and Tron typography for its
+unavailable state. The chat scroll coordinator treats an uncommanded native
+retreat from the pinned tail (including the status-bar scroll-to-top gesture) as
+reader ownership, so it exposes catch-up rather than reapplying the tail anchor.
+
 ## Generate and build
 
 ```bash

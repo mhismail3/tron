@@ -982,13 +982,13 @@ struct PresentationStyleGuardTests {
         #expect(settings.contains("ImportSettingsView(onImported: onImported)"))
         #expect(settings.contains("VStack(spacing: 12)"))
         #expect(settings.contains("summary: \"Theme, type scale, and visual preferences\""))
-        #expect(settings.components(separatedBy: "TronGlassCard(accent: .tronEmerald)").count == 2)
+        #expect(settings.occurrences(of: "TronSettingsGroup(\"") == 3)
+        #expect(settings.contains("TronSettingsGroup(\"Personalization & Connections\""))
+        #expect(settings.contains("TronSettingsGroup(\"Agent\""))
+        #expect(settings.contains("TronSettingsGroup(\"Workspace & Diagnostics\""))
+        #expect(!settings.contains("TronGlassCard("))
         #expect(settings.contains("private func settingsDivider()"))
-        #expect(settings.contains("VStack(spacing: 0)"))
         #expect(settings.contains("subtitleColor: .tronTextSecondary"))
-        #expect(!settings.contains("TronSettingsGroup(\"App\""))
-        #expect(!settings.contains("TronSettingsGroup(\"Agent\""))
-        #expect(!settings.contains("TronSettingsGroup(\"Gateway\""))
         #expect(!settings.contains("LazyVStack(spacing: 16)"))
         #expect(!settings.contains("Import Legacy Sessions"))
         #expect(!providerSettings.contains(".providerAuthPresenter()"))
@@ -1966,6 +1966,10 @@ struct PresentationStyleGuardTests {
         #expect(!sheet.contains("Button(\"Open full diff\")"))
         #expect(changesSheet.contains("ToolDiffView(lines: diff.lines, surfaceStyle: .scrollOptimized)"))
         #expect(changesSheet.contains("ScrollView(.horizontal, showsIndicators: true)"))
+        #expect(changesSheet.contains("VStack(alignment: .leading, spacing: 0)"))
+        #expect(!changesSheet.contains("LazyVStack(alignment: .leading, spacing: 0)"))
+        #expect(changesSheet.contains(".fixedSize(horizontal: true, vertical: false)"))
+        #expect(changesSheet.contains(".scrollBounceBehavior(.basedOnSize, axes: .horizontal)"))
         #expect(!changesSheet.contains("ScrollView([.horizontal, .vertical]"))
         let scrollOptimizedSurface = try #require(
             changesSheet.components(separatedBy: "case .scrollOptimized:").dropFirst().first?
@@ -2278,6 +2282,14 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
             encoding: .utf8
         )
+        let promptCard = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatOutgoingSubmissionRow.swift"),
+            encoding: .utf8
+        )
+        let routes = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatRoutes.swift"),
+            encoding: .utf8
+        )
         #expect(chat.contains("case .queued(let entry)"))
         #expect(chat.contains("let message = installed.queuedMessages[index]"))
         #expect(chat.contains("let messages = installed.queuedMessages"))
@@ -2306,6 +2318,16 @@ struct PresentationStyleGuardTests {
         #expect(queue.contains("Attachments stay with this queued message."))
         #expect(queue.contains("attachmentContent:"))
         #expect(queue.contains("statusContent:"))
+        #expect(queue.contains("Text(\"Delivery\")"))
+        #expect(queue.contains("Text(\"Message\")"))
+        #expect(queue.contains("minHeight: 48"))
+        #expect(!queue.contains("TronSettingsGroup("))
+        #expect(promptCard.contains(".onTapGesture(perform: action)"))
+        #expect(promptCard.contains("ChatPromptActivationModifier(action: onActivate)"))
+        #expect(routes.contains("QueueEditingUnavailableSheet()"))
+        #expect(routes.contains(".font(TronTypography.sheetSectionHeader)"))
+        #expect(routes.contains(".font(TronTypography.secondaryDescription)"))
+        #expect(!routes.contains("ContentUnavailableView("))
         #expect(composer.contains("Steer after current turn"))
         #expect(composer.contains("Follow up after current work"))
     }
@@ -2484,7 +2506,7 @@ struct PresentationStyleGuardTests {
         #expect(compactPill.contains("static let toolIconSize: CGFloat = 12"))
         #expect(compactPill.contains("HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing)"))
         #expect(toolRuns.occurrences(of: "iconSize: ChatCompactPillLayoutPolicy.toolIconSize") == 2)
-        #expect(compactPill.contains("ProgressView().controlSize(.small)"))
+        #expect(compactPill.contains("TronPulseLoadingIndicator("))
         #expect(composerControls.contains("static let hitTarget: CGFloat = 40"))
         #expect(composerControls.contains("static let symbolSize: CGFloat = 16"))
         #expect(composerControls.contains("static let contextRingDiameter: CGFloat = 16"))
