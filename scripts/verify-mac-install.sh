@@ -5,6 +5,7 @@ set -u
 
 APP="${TRON_APP_PATH:-/Applications/Tron.app}"
 UID_VALUE="$(id -u)"
+HOST_ARCH="$(uname -m)"
 failures=0
 pass() { printf 'PASS  %s\n' "$1"; }
 fail() { printf 'FAIL  %s\n' "$1"; failures=$((failures + 1)); }
@@ -84,7 +85,7 @@ verify_payload() {
   local pi_cli="${payload}/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   [[ -f "$pi_cli" && ! -L "$pi_cli" && -x "$pi_cli" ]] && pass "$label bundled Pi CLI executable" || fail "$label bundled Pi CLI missing/substituted"
   for architecture in arm64 x64; do
-    local runtime="${payload}/runtime/node-${architecture}" alias="${payload}/runtime/bin-${architecture}/node" pi_alias="${payload}/runtime/bin-${architecture}/pi" expected_arch archs version_output entitlements
+    local runtime="${payload}/runtime/node-${architecture}" alias="${payload}/runtime/bin-${architecture}/node" pi_alias="${payload}/runtime/bin-${architecture}/pi" expected_arch archs version_output entitlements native_arch
     [[ -x "$runtime" ]] && pass "$label Node $architecture runtime executable" || fail "$label Node $architecture runtime missing/non-executable"
     if codesign --verify --deep --strict "$runtime" >/dev/null 2>&1; then
       entitlements="$(codesign -d --entitlements :- "$runtime" 2>/dev/null || true)"
@@ -100,22 +101,42 @@ verify_payload() {
     [[ "$architecture" == x64 ]] && expected_arch="x86_64"
     archs="$(lipo -archs "$runtime" 2>/dev/null || true)"
     grep -Eq "(^| )${expected_arch}( |$)" <<<"$archs" && pass "$label Node $architecture runtime architecture $expected_arch" || fail "$label Node $architecture runtime lacks architecture $expected_arch"
-    version_output="$("$runtime" --version 2>&1)"
-    [[ "$version_output" == v* ]] && pass "$label Node $architecture runtime executes --version" || fail "$label Node $architecture runtime --version failed: $version_output"
+    # A payload contains both runtimes so the same app can be copied between
+    # Intel and Apple-silicon Macs.  Do not execute the foreign binary during
+    # verification: Rosetta may be absent, and Node's JIT entitlement is not
+    # reliable when a CLI is launched through translation.  The signed Mach-O
+    # and exact architecture checks above are the portable validation for that
+    # runtime; execute only the host-native one.
+    native_arch="$HOST_ARCH"
+    [[ "$native_arch" == x86_64 ]] && native_arch=x64
+    if [[ "$architecture" == "$native_arch" ]]; then
+      version_output="$("$runtime" --version 2>/dev/null | head -n 1 || true)"
+      [[ "$version_output" == v* ]] && pass "$label Node $architecture runtime executes --version" || fail "$label Node $architecture runtime --version failed"
+    else
+      pass "$label Node $architecture runtime is cross-architecture; execution deferred"
+    fi
     [[ -L "$alias" && "$(readlink "$alias")" == "../node-$architecture" \
         && "$(realpath "$alias")" == "$(realpath "$runtime")" && -x "$alias" ]] \
       && pass "$label Node $architecture command alias resolves to the signed runtime" \
       || fail "$label Node $architecture command alias is invalid"
-    [[ "$(PATH="$(dirname "$alias"):/usr/bin:/bin:/usr/sbin:/sbin" node --version 2>&1)" == "$version_output" ]] \
-      && pass "$label Node $architecture command executes through a launchd-style PATH" \
-      || fail "$label Node $architecture command failed through a launchd-style PATH"
+    if [[ "$architecture" == "$native_arch" ]]; then
+      [[ "$(PATH="$(dirname "$alias"):/usr/bin:/bin:/usr/sbin:/sbin" node --version 2>/dev/null | head -n 1 || true)" == "$version_output" ]] \
+        && pass "$label Node $architecture command executes through a launchd-style PATH" \
+        || fail "$label Node $architecture command failed through a launchd-style PATH"
+    else
+      pass "$label Node $architecture command alias is cross-architecture; execution deferred"
+    fi
     [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" \
         && "$(realpath "$pi_alias")" == "$(realpath "$pi_cli")" && -x "$pi_alias" ]] \
       && pass "$label Pi $architecture command alias resolves to the bundled CLI" \
       || fail "$label Pi $architecture command alias is invalid"
-    PATH="$(dirname "$pi_alias"):/usr/bin:/bin:/usr/sbin:/sbin" pi --version >/dev/null 2>&1 \
-      && pass "$label Pi $architecture command executes through a launchd-style PATH" \
-      || fail "$label Pi $architecture command failed through a launchd-style PATH"
+    if [[ "$architecture" == "$native_arch" ]]; then
+      PATH="$(dirname "$pi_alias"):/usr/bin:/bin:/usr/sbin:/sbin" pi --version >/dev/null 2>&1 \
+        && pass "$label Pi $architecture command executes through a launchd-style PATH" \
+        || fail "$label Pi $architecture command failed through a launchd-style PATH"
+    else
+      pass "$label Pi $architecture command alias is cross-architecture; execution deferred"
+    fi
   done
   case "$label" in
     stable)

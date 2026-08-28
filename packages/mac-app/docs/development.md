@@ -118,6 +118,9 @@ packages/mac-app/scripts/test-gateway-payload-verifier.sh
 
 # Launcher boundary fixture (also covers channel path-component rejection)
 packages/mac-app/scripts/test-tron-gateway-launcher.sh
+
+# Manifest fingerprint rewrite (preserves launcher-sensitive JSON strings)
+packages/mac-app/scripts/test-update-payload-fingerprint.sh
 ```
 
 ## Generate and build
@@ -227,7 +230,11 @@ executes the validated active payload, and returns matching authenticated
 requires one lifecycle snapshot whose live supervisor and child PID/start
 identities, sole 9848 listener, selected manifest, command, and authenticated
 identity all agree. Debug absence is informational; loaded legacy Debug or
-Preview services are collisions. If the menu-bar controls are
+Preview services are collisions. The verifier checks both signed runtimes and
+aliases on every Mac, but executes only the host-native runtime. The bundled
+foreign-architecture runtime is validated statically; this avoids false
+failures when Rosetta is unavailable or when translated Node cannot obtain its
+JIT permissions. If the menu-bar controls are
 unavailable, use the installed app's **Uninstall Tron** action without selecting
 reset options, then launch the replacement and complete the Install step; that
 preserves canonical sessions and credentials but stops the Gateway during the

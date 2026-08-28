@@ -117,7 +117,7 @@ targets:
             # bundle fingerprint before the outer app seals its resources.
             PAYLOAD_HASHER="$DST/LoginItems/Tron Agent.app/Contents/MacOS/tron"
             PAYLOAD_FINGERPRINT="$("$PAYLOAD_HASHER" --fingerprint "$GATEWAY_DST")"
-            /usr/bin/plutil -replace payloadFingerprint -string "$PAYLOAD_FINGERPRINT" "$GATEWAY_DST/manifest.json"
+            "$SRCROOT/scripts/update-payload-fingerprint.sh" "$GATEWAY_DST/manifest.json" "$PAYLOAD_FINGERPRINT"
             chmod -R a-w "$GATEWAY_DST"
             if [ -n "${CODESIGNING_FOLDER_PATH:-}" ] \
               && [ -d "$CODESIGNING_FOLDER_PATH" ] \
