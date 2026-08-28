@@ -270,15 +270,20 @@ struct ChatView: View {
             } else if phase == .active {
                 if sessionPresentation.needsOpeningResume
                     || transcriptPresentation.installed == nil {
-                    Task { await beginOpeningPresentation() }
+                    beginOpeningAfterForegroundWhenConnected()
                 } else {
-                    // A retained native scroll view can resume at its top before
-                    // SwiftUI reapplies logical bottom ownership. Re-enter the
-                    // opaque positioning phase so that correction is never a
-                    // visible top-to-bottom scroll.
+                    // Reapply physical tail ownership independently from
+                    // canonical/session-open state. This short correction may
+                    // be masked, but it cannot become a loading or failure UI.
                     Task { await resumePinnedViewportPresentation() }
                 }
             }
+        }
+        .onChange(of: model.connectionState) { _, state in
+            guard scenePhase == .active, state == .connected,
+                  (sessionPresentation.needsOpeningResume
+                    || transcriptPresentation.installed == nil) else { return }
+            beginOpeningAfterForegroundWhenConnected()
         }
         .onChange(of: model.foregroundReconciliationGeneration) { _, _ in
             // Reconciliation installs a complete authoritative aggregate. A
@@ -636,6 +641,18 @@ struct ChatView: View {
             onApplyViewportMode: applyViewportMode,
             hostedRecorder: transcriptHostedRecorder
         )
+        .allowsHitTesting(!sessionPresentation.masksPinnedViewportResume)
+        .overlay {
+            if sessionPresentation.masksPinnedViewportResume {
+                // A retained native scroll view can transiently restore a stale
+                // offset before its stable tail target is republished. Mask
+                // only that physical correction; it is not a conversation open
+                // and must never expose loading or terminal synchronization UI.
+                Color.tronBackground
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     private var transcriptHostedRecorder: (any ChatTranscriptHostedRecording)? {
@@ -990,6 +1007,14 @@ struct ChatView: View {
     }
 
     @MainActor
+    private func beginOpeningAfterForegroundWhenConnected() {
+        guard scenePhase == .active,
+              model.admitsSessionPresentationOpen,
+              sessionPresentation.openingTask == nil else { return }
+        Task { await beginOpeningPresentation() }
+    }
+
+    @MainActor
     private func beginOpeningPresentation() async {
         // Retiring/restarting presentation authority cancels any local page
         // admission; late model/scroll completions are token-gated.
@@ -1328,44 +1353,43 @@ struct ChatView: View {
 
     @MainActor
     private func resumePinnedViewportPresentation() async {
-        guard sessionPresentation.openingTask == nil,
-              scrollCoordinator.usesPinnedSizeChangeAnchor,
+        guard scrollCoordinator.usesPinnedSizeChangeAnchor,
               let generation = sessionPresentation.modelPresentationGeneration,
               selectedAuthoritativeSnapshot?.sessionId == sessionID,
               transcriptPresentation.installed != nil,
-              let epoch = sessionPresentation.open.beginPinnedResumePositioning(
-                  sessionID: sessionID
-              ) else { return }
+              let resumeGeneration = sessionPresentation.beginPinnedViewportResume() else { return }
 
         scrollCoordinator.resetForPresentation(generation)
         let task = Task { @MainActor in
-            let positioned = await positionLatestTail(
-                epoch: epoch,
+            let positioned = await positionRetainedTail(
+                resumeGeneration: resumeGeneration,
                 targetRenderedID: "transcript-bottom"
             )
-            guard !Task.isCancelled, positioned else {
-                if !Task.isCancelled {
-                    _ = sessionPresentation.open.fail(
-                        sessionID: sessionID,
-                        epoch: epoch,
-                        message: "The conversation layout did not settle. Please retry."
-                    )
-                }
+            guard !Task.isCancelled, positioned,
+                  sessionPresentation.ownsPinnedViewportResume(resumeGeneration) else {
+                sessionPresentation.finishPinnedViewportResume(resumeGeneration)
                 return
             }
-            guard revealPositionedTranscript(epoch: epoch) else { return }
+            // Keep the correction covered through a real display boundary,
+            // then fail open to the retained transcript. Resume positioning is
+            // presentation-only and can never poison session-open authority.
             do { try await displayFrameScheduler.nextFrame() }
-            catch { return }
+            catch {
+                sessionPresentation.finishPinnedViewportResume(resumeGeneration)
+                return
+            }
             guard !Task.isCancelled,
-                  sessionPresentation.open.epoch == epoch,
-                  sessionPresentation.open.phase == .ready else { return }
+                  sessionPresentation.ownsPinnedViewportResume(resumeGeneration) else { return }
+            scrollCoordinator.openingRevealCompleted()
+            sessionPresentation.finishPinnedViewportResume(resumeGeneration)
             await scrollCoordinator.waitForOpeningTailSettlement()
         }
-        sessionPresentation.openingTask = task
+        sessionPresentation.pinnedViewportResumeTask = task
         await task.value
-        if sessionPresentation.open.epoch == epoch {
-            sessionPresentation.openingTask = nil
+        if sessionPresentation.ownsPinnedViewportResume(resumeGeneration) {
+            sessionPresentation.finishPinnedViewportResume(resumeGeneration)
         }
+        sessionPresentation.clearPinnedViewportResumeTask(resumeGeneration)
     }
 
     @MainActor
@@ -1394,6 +1418,22 @@ struct ChatView: View {
         // The marker is always mounted, including empty and queue-only
         // presentations, so opening never falls back to an implicit top offset.
         "transcript-bottom"
+    }
+
+    @MainActor
+    private func positionRetainedTail(
+        resumeGeneration: Int,
+        targetRenderedID: String?
+    ) async -> Bool {
+        guard !Task.isCancelled,
+              sessionPresentation.ownsPinnedViewportResume(resumeGeneration) else { return false }
+        let positioned = await scrollCoordinator.positionOpeningTail(
+            targetRenderedID: targetRenderedID
+        )
+        if positioned { performanceTracker.settleScroll() }
+        return positioned
+            && !Task.isCancelled
+            && sessionPresentation.ownsPinnedViewportResume(resumeGeneration)
     }
 
     @MainActor

@@ -28,13 +28,15 @@ struct ChatSessionPresentationTests {
     }
 
     @Test("suspension abandons picker and import targets without changing presentation authority")
-    func suspension() {
+    func suspension() throws {
         let owner = ChatSessionPresentation(sessionID: "session-a")
         owner.modelPresentationGeneration = 9
         let epoch = owner.open.begin(retainingVisiblePresentation: true)
         owner.attachmentDestination = .files
         owner.queuedAttachmentDestination = .camera
         owner.photoImportTarget = SessionPresentationIdentity(sessionID: "session-a", generation: 9)
+        let resumeGeneration = try #require(owner.beginPinnedViewportResume())
+        #expect(owner.masksPinnedViewportResume)
 
         owner.suspendForBackground()
 
@@ -45,6 +47,32 @@ struct ChatSessionPresentationTests {
         #expect(owner.open.epoch == epoch)
         #expect(owner.open.phase == .ready)
         #expect(!owner.needsOpeningResume)
+        #expect(!owner.masksPinnedViewportResume)
+        #expect(!owner.ownsPinnedViewportResume(resumeGeneration))
+
+        let replacementGeneration = try #require(owner.beginPinnedViewportResume())
+        owner.finishPinnedViewportResume(resumeGeneration)
+        #expect(owner.ownsPinnedViewportResume(replacementGeneration))
+        owner.finishPinnedViewportResume(replacementGeneration)
+        #expect(!owner.masksPinnedViewportResume)
+    }
+
+    @Test("pinned viewport resume never mutates conversation-open authority")
+    func pinnedViewportResumeOwnership() throws {
+        let owner = ChatSessionPresentation(sessionID: "session-a")
+        let openingEpoch = owner.open.begin(retainingVisiblePresentation: true)
+
+        let resumeGeneration = try #require(owner.beginPinnedViewportResume())
+        #expect(owner.masksPinnedViewportResume)
+        #expect(owner.open.epoch == openingEpoch)
+        #expect(owner.open.phase == .ready)
+        #expect(!owner.needsOpeningResume)
+        #expect(owner.beginPinnedViewportResume() == nil)
+
+        owner.finishPinnedViewportResume(resumeGeneration)
+        #expect(!owner.masksPinnedViewportResume)
+        #expect(owner.open.epoch == openingEpoch)
+        #expect(owner.open.phase == .ready)
     }
 
     @Test("foreground resumes an interrupted opening but not a passive ready session")

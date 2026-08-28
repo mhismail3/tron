@@ -621,6 +621,12 @@ final class AppModel {
         sessionPresentation.mountedTarget
     }
 
+    /// Presentation intake needs a concrete socket epoch, not only the public
+    /// connection label retained while a background transport is retiring.
+    var admitsSessionPresentationOpen: Bool {
+        lifecycle.admission?.connectionID != nil
+    }
+
     static func soleAdmittedPresentationTarget(
         generations: [String: Int],
         revoked: Set<SessionPresentationTarget>
@@ -1848,7 +1854,12 @@ final class AppModel {
         _ id: String,
         composerScope suppliedScope: ComposerDraftScope? = nil
     ) async throws -> Int {
-        guard let admission = lifecycle.generationAdmission,
+        // A foreground scene can become active before background transport
+        // retirement and reconnect have published their replacement socket.
+        // Never start session.open against that target-free interval, even if
+        // the last public connection state still reads as connected.
+        guard let admission = lifecycle.admission,
+              admission.connectionID != nil,
               let profileID = lifecycle.selectedProfileID else { throw CancellationError() }
         let scope = suppliedScope ?? composerDrafts.prepareDraft(
             profileID: profileID,

@@ -837,16 +837,6 @@ struct ChatOpenPresentationState: Equatable {
         return epoch
     }
 
-    mutating func beginPinnedResumePositioning(sessionID: String) -> Int? {
-        guard sessionID == self.sessionID, phase == .ready else { return nil }
-        epoch &+= 1
-        // A retained native scroll view may resume at a displaced offset. Put
-        // the opaque cover back before issuing the exact tail correction so no
-        // intermediate top-origin motion can become a presented chat frame.
-        phase = .positioning
-        return epoch
-    }
-
     mutating func installAuthoritativeBaseline(sessionID: String, epoch: Int) -> Bool {
         guard sessionID == self.sessionID, epoch == self.epoch, phase == .opening else { return false }
         // Keep the opaque opening surface mounted while the exact physical tail

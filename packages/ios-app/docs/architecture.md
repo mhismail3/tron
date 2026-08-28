@@ -244,7 +244,7 @@ bottom boundary, and retains that command through animation completion plus two
 unchanged presented frames before releasing the binding. Its bounded deadline only
 retries or fails positioning; it never certifies an unverified ready frame. Ordinary
 pinned resizing then belongs to the native size-change anchor; detached readers remain
-unpositioned. If scene suspension leaves a retained pinned native view physically displaced, foreground resume re-enters the same opaque positioning phase before issuing the exact marker correction, then uses the ordinary fade/eight-point reveal. A transient top-origin correction is therefore never presented; a detached reader is not repinned.
+unpositioned. If scene suspension leaves a retained pinned native view physically displaced, foreground resume uses a separate presentation-only opaque mask while republishing the exact marker target. It never changes conversation-open phase, displays an opening spinner, or converts a physical correction timeout into synchronization failure; the mask fails open to the retained transcript after its bounded attempt. A transient top-origin correction is therefore never presented, and a detached reader is not repinned.
 Short and empty transcripts use the existing native geometry callback to install one disabled-animation minimum content height at the composer-visible viewport; overflowing transcripts are unaffected. The same coalesced observation carries the opening phase so geometry captured before positioning is re-admitted without a callback-order race. This keeps underflow bottom-owned through keyboard contraction, while a bounded signed-marker repair remains reserved for proven overflow drift.
 Test builds can admit one synthetic authoritative
 snapshot through the same read gate and skip only the network opening handshake.
@@ -267,8 +267,7 @@ only the destination route may establish live presentation authority. An admitte
 transport intentionally survives route disappearance: its target is retained by the
 composer admission owner, and revocation makes any late error target-gated and silent rather
 than allowing a retired view to surface stale UI state. Backgrounding cancels only disposable
-opening, paging, picker, and route work; foreground resumes a non-ready retained presentation
-through the same generation checks.
+opening, paging, picker, and route work. A resumed open waits for an exact current transport connection rather than trusting the previous epoch's public connected label; a target-free background-retirement interval cancels silently, and the replacement connected transition retries through the same generation checks. Already-ready active and passive chats retain their complete installed projection while the lifecycle owner synchronizes in place.
 
 Gateway restart uses a supervised drain contract. The request freezes new mutations,
 waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway

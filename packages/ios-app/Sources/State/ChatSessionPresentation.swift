@@ -38,8 +38,11 @@ final class ChatSessionPresentation {
     @ObservationIgnored var photoImportTask: Task<Void, Never>?
     @ObservationIgnored var attachmentPresentationTask: Task<Void, Never>?
     @ObservationIgnored var openingTask: Task<Void, Never>?
+    @ObservationIgnored var pinnedViewportResumeTask: Task<Void, Never>?
     @ObservationIgnored private var unanchoredPrependTask: Task<Void, Never>?
     private var unanchoredPrependGeneration = 0
+    private var pinnedViewportResumeGeneration = 0
+    private(set) var masksPinnedViewportResume = false
 
     init(sessionID: String) {
         self.sessionID = sessionID
@@ -68,6 +71,29 @@ final class ChatSessionPresentation {
         open.phase != .ready && openingTask == nil
     }
 
+    func beginPinnedViewportResume() -> Int? {
+        guard open.phase == .ready,
+              pinnedViewportResumeTask == nil,
+              !masksPinnedViewportResume else { return nil }
+        pinnedViewportResumeGeneration &+= 1
+        masksPinnedViewportResume = true
+        return pinnedViewportResumeGeneration
+    }
+
+    func ownsPinnedViewportResume(_ generation: Int) -> Bool {
+        masksPinnedViewportResume && pinnedViewportResumeGeneration == generation
+    }
+
+    func finishPinnedViewportResume(_ generation: Int) {
+        guard pinnedViewportResumeGeneration == generation else { return }
+        masksPinnedViewportResume = false
+    }
+
+    func clearPinnedViewportResumeTask(_ generation: Int) {
+        guard pinnedViewportResumeGeneration == generation else { return }
+        pinnedViewportResumeTask = nil
+    }
+
     func startUnanchoredPrepend(
         _ operation: @escaping @MainActor @Sendable () async -> Void
     ) {
@@ -84,6 +110,10 @@ final class ChatSessionPresentation {
     func suspendForBackground() {
         openingTask?.cancel()
         openingTask = nil
+        pinnedViewportResumeGeneration &+= 1
+        pinnedViewportResumeTask?.cancel()
+        pinnedViewportResumeTask = nil
+        masksPinnedViewportResume = false
         earlierMessagesOperation.cancel()
         unanchoredPrependGeneration &+= 1
         unanchoredPrependTask?.cancel()

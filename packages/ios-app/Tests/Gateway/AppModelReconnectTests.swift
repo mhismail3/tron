@@ -295,6 +295,40 @@ struct AppModelReconnectTests {
         await client.close()
     }
 
+    @Test("foreground cannot open a conversation before replacement transport admission")
+    func foregroundOpenRejectsRetiredTransport() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(
+            socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory
+        )
+        let model = AppModel(client: client)
+        let profile = GatewayProfile(
+            id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device"
+        )
+        await socket.enqueue(helloFrame())
+        try await model.connectHostedGateway(profile: profile, token: "token")
+        #expect(model.admitsSessionPresentationOpen)
+
+        model.enteredBackground()
+        _ = model.becameActive()
+        #expect(!model.admitsSessionPresentationOpen)
+        do {
+            _ = try await model.openSessionPresentation("session-a")
+            Issue.record("retired transport unexpectedly admitted session.open")
+        } catch is CancellationError {
+            // Expected: foreground UI waits for the replacement connection.
+        }
+        let methods = await socket.sentFrames().compactMap { frame in
+            (try? JSONDecoder.gateway.decode(JSONValue.self, from: frame))?
+                .objectValue?["method"]?.stringValue
+        }
+        #expect(!methods.contains("session.open"))
+
+        await model.teardown()
+        await client.close()
+    }
+
     @Test("paired Debug profile follows system stopping on 9848 with the same token and authoritative reconnect without prompt replay")
     func debugPlannedRestartReconnectsWithoutReplay() async throws {
         let suiteName = "GatewayDebugReconnectTests.\(UUID().uuidString)"
