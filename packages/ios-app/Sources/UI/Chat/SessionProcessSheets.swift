@@ -512,7 +512,7 @@ struct ReadOnlySubagentSessionSheet: View {
     @State private var store: ReadOnlySubagentSessionStore?
     @State private var scrollPosition = ScrollPosition(idType: String.self)
     @State private var isNearTail = true
-    @State private var detent: PresentationDetent = .large
+    @State private var detent: PresentationDetent = .medium
 
     private let tailID = "read-only-subagent-tail"
 
@@ -597,15 +597,16 @@ struct ReadOnlySubagentSessionSheet: View {
 
     private func transcript(_ store: ReadOnlySubagentSessionStore) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 if store.transcriptStart > 0 {
                     Button(store.status == .loadingEarlier ? "Loading…" : "Load Earlier Messages") {
                         store.loadEarlier()
                     }
                     .frame(maxWidth: .infinity)
+                    .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
                     .disabled(!store.canLoadEarlier)
                 }
-                if store.items.isEmpty {
+                if store.presentation.timeline.items.isEmpty {
                     let isActive = store.liveActivity?.lifecycle.state.isActive == true
                     SessionProcessPlaceholder(
                         title: isActive ? "Transcript starting" : "No transcript recorded",
@@ -614,24 +615,29 @@ struct ReadOnlySubagentSessionSheet: View {
                             : "This completed subagent session contains no presentable messages.",
                         icon: isActive ? "ellipsis.message" : "doc.text.magnifyingglass"
                     )
+                    .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
                 } else {
-                    ForEach(store.items) { item in
-                        TranscriptRow(item: item)
-                            .id(item.id)
-                            .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
+                    ForEach(store.presentation.timeline.items) { item in
+                        ReadOnlySubagentTranscriptRow(
+                            item: item,
+                            preparedText: store.preparedText.slice(for: item),
+                            toolPayloads: store.presentation.toolPayloads
+                        )
+                        .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
+                        .id(item.id)
                     }
                 }
                 if store.status == .reconnecting {
                     TronLoadingState(label: "Updating canonical session…")
+                        .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
                 }
-                if let live = store.liveActivity,
-                   live.lifecycle.state.isActive,
-                   live.currentTool != nil || live.outputTail != nil {
-                    liveActivity(live)
-                }
-                Color.clear.frame(height: 1).id(tailID)
+                Color.clear
+                    .frame(height: ChatTranscriptLayoutConstants.tailAffordanceHeight)
+                    .id(tailID)
+                    .accessibilityHidden(true)
             }
-            .padding(18)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
             .scrollTargetLayout()
         }
         .defaultScrollAnchor(.bottom, for: .initialOffset)
@@ -655,29 +661,51 @@ struct ReadOnlySubagentSessionSheet: View {
         .tronScrollEdgeChrome()
     }
 
-    private func liveActivity(_ activity: SessionProcessActivity) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Label("Live activity", systemImage: "waveform.path")
-                .font(TronTypography.caption)
-                .foregroundStyle(Color.tronEmerald)
-                .accessibilityAddTraits(.isHeader)
-            if let tool = activity.currentTool {
-                ToolStaticChip(icon: "hammer", text: tool, accent: .tronEmerald)
-            }
-            if let output = activity.outputTail, !output.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("CURRENT OUTPUT")
-                        .font(TronTypography.sheetSectionHeader)
-                        .foregroundStyle(Color.tronTextMuted)
-                    Text(output)
-                        .font(TronTypography.code(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .textSelection(.enabled)
-                }
+}
+
+private struct ReadOnlySubagentTranscriptRow: View, Equatable {
+    let item: ChatTranscriptRenderItem
+    let preparedText: ChatTextPreparationSnapshot
+    let toolPayloads: ChatToolPayloadIndex
+
+    var body: some View {
+        Group {
+            switch item {
+            case .transcript(let transcript):
+                TranscriptRow(
+                    item: transcript,
+                    rendersToolCalls: false,
+                    preparedText: preparedText
+                )
+            case .message(let message):
+                TranscriptRow(
+                    item: message.item,
+                    streaming: false,
+                    rendersToolCalls: false,
+                    projectedMessageParts: message.parts,
+                    preparedText: preparedText,
+                    showsMessageFooter: message.showsFooter
+                )
+            case .toolRun(let run):
+                ReadOnlyToolRunView(
+                    run: run,
+                    tools: run.tools.compactMap(toolPayloads.resolving)
+                )
+            case .notification(let notification):
+                ChatNotificationView(presentation: notification)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .tronScrollSurface(accent: .tronEmerald, tintOpacity: 0.07)
+        .frame(maxWidth: .infinity, alignment: alignment)
+    }
+
+    private var alignment: Alignment {
+        switch item {
+        case .transcript(let transcript):
+            transcript.role == .user ? .trailing : .leading
+        case .message(let message):
+            message.item.role == .user ? .trailing : .leading
+        case .toolRun, .notification:
+            .leading
+        }
     }
 }

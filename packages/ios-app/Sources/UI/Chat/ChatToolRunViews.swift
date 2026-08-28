@@ -253,9 +253,66 @@ struct ToolRunView: View {
     }
 }
 
+/// Read-only child transcripts share the canonical run chip and detail sheets
+/// without manufacturing a mutable main-chat installation tag.
+struct ReadOnlyToolRunView: View {
+    let run: ChatToolRunPresentation
+    let tools: [ChatToolPresentation]
+    @State private var showsDetails = false
+    @State private var detailDetent: PresentationDetent = .medium
+
+    var body: some View {
+        ToolActivityChip(
+            run: run,
+            installationTag: nil,
+            recordChip: { _ in },
+            action: { if !resolvedTools.isEmpty { showsDetails = true } }
+        )
+        .sheet(isPresented: $showsDetails) {
+            if run.displayCount == 1, let tool = resolvedTools.first {
+                let accent: Color = tool.error ? .tronError : .tronEmerald
+                NavigationStack {
+                    ToolDetailSheet(
+                        tool: tool,
+                        density: detailDetent == .large ? .expanded : .glance
+                    )
+                    .tronToolDetailNavigationChrome()
+                    .toolbar {
+                        ToolbarItem(placement: .principal) {
+                            TronSheetTitle(
+                                title: ToolDetailPresentation.displayTitle(for: tool.title),
+                                accent: accent
+                            )
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button { showsDetails = false } label: {
+                                Image(systemName: "checkmark")
+                                    .font(TronTypography.buttonSM)
+                                    .foregroundStyle(Color.tronEmerald)
+                            }
+                            .accessibilityLabel("Done")
+                        }
+                    }
+                }
+                .tronTopBlur(.toolDetail)
+                .presentationDetents([.medium, .large], selection: $detailDetent)
+                .presentationDragIndicator(.hidden)
+                .tronPresentation()
+            } else {
+                ToolRunDetailSheet(run: run, tools: resolvedTools)
+            }
+        }
+    }
+
+    private var resolvedTools: [ChatToolPresentation] {
+        let byID = Dictionary(uniqueKeysWithValues: tools.map { ($0.id, $0) })
+        return run.tools.compactMap { byID[$0.id] }
+    }
+}
+
 private struct ToolActivityChip: View {
     let run: ChatToolRunPresentation
-    let installationTag: ChatTranscriptProjectionTag
+    let installationTag: ChatTranscriptProjectionTag?
     let recordChip: (ToolChipInstrumentationSample) -> Void
     let action: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -324,6 +381,7 @@ private struct ToolActivityChip: View {
     }
 
     private func recordSample(_ visual: ChatCompactPillVisualState, token: Int) {
+        guard let installationTag else { return }
         recordChip(ToolChipInstrumentationSample(
             runID: run.id,
             callIDs: run.tools.map(\.id),

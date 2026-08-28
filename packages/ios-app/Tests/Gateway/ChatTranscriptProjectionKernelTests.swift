@@ -70,6 +70,92 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(ChatTranscriptPresentation.timeline(in: snapshot) == candidate.timeline)
     }
 
+    @Test("read-only child transcript uses canonical tool and message assembly")
+    func readOnlyChildAssembly() async throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"presentationId":"assistant","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+            {"id":"thinking","ordinal":0,"thinkingRunOrdinal":0,"type":"thinking","text":"**Checking** the file"},
+            {"id":"call","ordinal":1,"type":"toolCall","toolCallId":"read-call","name":"read","arguments":{"path":"README.md"}},
+            {"id":"answer","ordinal":2,"type":"text","text":"## Finished\\nThe file is ready."}
+          ]},
+          {"id":"result","parentId":"assistant","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"result-text","ordinal":0,"type":"text","text":"contents"}],"toolCallId":"read-call","toolName":"read","isError":false}
+        ]
+        """)
+
+        let projection = ChatTranscriptProjectionKernel.readOnlyTranscript(
+            snapshot.transcript,
+            transcriptStart: 0,
+            transcriptTotal: snapshot.transcript.count,
+            isActive: false
+        )
+
+        #expect(projection.isValid)
+        #expect(projection.timeline.ids == [
+            "assistant", "tool-run-read-call", "assistant-slice-content-2",
+        ])
+        let runs = projection.timeline.items.compactMap { item -> ChatToolRunPresentation? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run
+        }
+        let run = try #require(runs.first)
+        #expect(runs.count == 1)
+        #expect(run.tools.map(\.id) == ["read-call"])
+        #expect(run.tools.first?.subtitle == "Completed")
+        let tool = try #require(run.tools.first.flatMap(projection.toolPayloads.resolving))
+        #expect(tool.request == .object(["path": .string("README.md")]))
+        #expect(tool.content == "contents")
+
+        let messages = projection.timeline.items.compactMap { item -> ChatMessagePresentation? in
+            guard case .message(let message) = item else { return nil }
+            return message
+        }
+        #expect(messages.count == 2)
+        #expect(messages.contains { message in
+            message.parts.contains { part in
+                guard case .content(let content) = part else { return false }
+                return content.type == .text && content.text?.contains("The file is ready") == true
+            }
+        })
+
+        let cache = ChatTextPreparationCache()
+        let prepared = await cache.prepare(ChatTextPreparationPolicy.sources(in: snapshot.transcript))
+        let slices = messages.map { prepared.slice(for: .message($0)) }
+        #expect(slices.contains { !$0.thinking.isEmpty })
+        #expect(slices.contains { !$0.markdown.isEmpty })
+        #expect(slices.flatMap(\.thinking.values).allSatisfy {
+            $0.inline.attributedString != nil
+        })
+    }
+
+    @Test("read-only unresolved invocation follows authoritative child activity")
+    func readOnlyInvocationLifecycle() throws {
+        let snapshot = try fixture(transcript: """
+        [{"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call","ordinal":0,"type":"toolCall","toolCallId":"call","name":"read","arguments":{}}]}]
+        """)
+        let active = ChatTranscriptProjectionKernel.readOnlyTranscript(
+            snapshot.transcript,
+            transcriptStart: 0,
+            transcriptTotal: 1,
+            isActive: true
+        )
+        let inactive = ChatTranscriptProjectionKernel.readOnlyTranscript(
+            snapshot.transcript,
+            transcriptStart: 0,
+            transcriptTotal: 1,
+            isActive: false
+        )
+        guard case .toolRun(let activeRun) = active.timeline.items.first,
+              case .toolRun(let inactiveRun) = inactive.timeline.items.first else {
+            Issue.record("Expected one projected tool run")
+            return
+        }
+        #expect(activeRun.tools.first?.subtitle == "Invocation")
+        #expect(activeRun.tools.first?.isRunning == true)
+        #expect(inactiveRun.tools.first?.subtitle == "Interrupted")
+        #expect(inactiveRun.tools.first?.error == true)
+    }
+
     @Test("global assembler owns bootstrap filtering and orphan result visibility")
     func bootstrapAndOrphan() throws {
         var snapshot = try fixture(transcript: """

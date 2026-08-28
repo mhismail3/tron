@@ -146,11 +146,14 @@ final class ReadOnlySubagentSessionStore {
     }
 
     private let client: GatewayClient
+    private let textPreparationCache = ChatTextPreparationCache()
     private var generation = 0
+    private var textPreparationGeneration = 0
     private var openTask: Task<Void, Never>?
     private var pageTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var bindingRetryTask: Task<Void, Never>?
+    private var textPreparationTask: Task<Void, Never>?
     private var bindingRetryAttempts = 0
     private var pendingRefreshRevision: String?
 
@@ -164,6 +167,8 @@ final class ReadOnlySubagentSessionStore {
     private(set) var childSessionRef: String?
     private(set) var revision: String?
     private(set) var items: [TranscriptItem] = []
+    private(set) var presentation: ChatReadOnlyTranscriptProjection = .empty
+    private(set) var preparedText: ChatTextPreparationSnapshot = .empty
     private(set) var transcriptStart = 0
     private(set) var transcriptTotal = 0
     private(set) var nextEntryID: String?
@@ -240,7 +245,12 @@ final class ReadOnlySubagentSessionStore {
                     self.leaseID = response.leaseId
                     self.childSessionRef = response.childSessionRef
                     self.revision = response.revision
-                    self.install(response.page)
+                    guard self.install(response.page) else {
+                        self.leaseID = nil
+                        self.status = .failed("The canonical subagent transcript is inconsistent.")
+                        Self.closeDetached(client: client, leaseID: response.leaseId)
+                        return
+                    }
                     self.status = .open
                 }
             } catch is CancellationError {
@@ -314,6 +324,11 @@ final class ReadOnlySubagentSessionStore {
                     self.items = page.items + self.items
                     self.transcriptStart = page.start
                     self.nextEntryID = page.nextEntryId
+                    guard self.rebuildPresentation() else {
+                        self.status = .failed("The canonical subagent transcript is inconsistent.")
+                        return
+                    }
+                    self.prepareText()
                     self.status = .open
                 }
             } catch is CancellationError {
@@ -388,6 +403,12 @@ final class ReadOnlySubagentSessionStore {
                     self.nextEntryID = merged.nextEntryId
                     self.leafEntryID = merged.leafEntryId
                     self.revision = response.revision
+                    guard self.rebuildPresentation() else {
+                        self.status = .failed("The canonical subagent transcript is inconsistent.")
+                        self.refreshTask = nil
+                        return
+                    }
+                    self.prepareText()
                     if self.pendingRefreshRevision == targetRevision
                         || self.pendingRefreshRevision == response.revision {
                         self.pendingRefreshRevision = nil
@@ -431,8 +452,10 @@ final class ReadOnlySubagentSessionStore {
 
     func updateLiveActivity(_ activity: SessionProcessActivity?) {
         guard let processID else { return }
+        let wasActive = liveActivity?.lifecycle.state.isActive == true
         guard let activity else {
             liveActivity = nil
+            if wasActive { rebuildPresentation() }
             bindingRetryTask?.cancel()
             bindingRetryTask = nil
             if status == .waiting { status = .unavailable }
@@ -441,6 +464,7 @@ final class ReadOnlySubagentSessionStore {
         guard activity.processId == processID,
               SessionProcessAdmissionPolicy.admits(activity) else { return }
         liveActivity = activity
+        if wasActive != activity.lifecycle.state.isActive { rebuildPresentation() }
         guard status == .waiting else { return }
         if activity.childSessionRef != nil {
             if activity.lifecycle.state.isActive {
@@ -509,17 +533,61 @@ final class ReadOnlySubagentSessionStore {
         pageTask?.cancel(); pageTask = nil
         refreshTask?.cancel(); refreshTask = nil
         bindingRetryTask?.cancel(); bindingRetryTask = nil
+        textPreparationTask?.cancel(); textPreparationTask = nil
+        textPreparationGeneration &+= 1
         pendingRefreshRevision = nil
         leaseID = nil; childSessionRef = nil; revision = nil
-        items.removeAll(); transcriptStart = 0; transcriptTotal = 0
+        items.removeAll(); presentation = .empty; preparedText = .empty
+        transcriptStart = 0; transcriptTotal = 0
         nextEntryID = nil; leafEntryID = nil; liveActivity = nil
         status = .idle
         if sendClose, let oldLease { Self.closeDetached(client: client, leaseID: oldLease) }
     }
 
-    private func install(_ page: ProcessTranscriptPage) {
+    private func install(_ page: ProcessTranscriptPage) -> Bool {
         items = page.items; transcriptStart = page.start; transcriptTotal = page.total
         nextEntryID = page.nextEntryId; leafEntryID = page.leafEntryId
+        guard rebuildPresentation() else { return false }
+        prepareText()
+        return true
+    }
+
+    @discardableResult
+    private func rebuildPresentation() -> Bool {
+        let next = ChatTranscriptProjectionKernel.readOnlyTranscript(
+            items,
+            transcriptStart: transcriptStart,
+            transcriptTotal: transcriptTotal,
+            isActive: liveActivity?.lifecycle.state.isActive == true
+        )
+        guard next.isValid else {
+            presentation = .empty
+            return false
+        }
+        presentation = next
+        return true
+    }
+
+    private func prepareText() {
+        textPreparationGeneration &+= 1
+        let ownedPreparationGeneration = textPreparationGeneration
+        textPreparationTask?.cancel()
+        let sources = ChatTextPreparationPolicy.sources(in: items)
+        guard !sources.isEmpty else {
+            textPreparationTask = nil
+            preparedText = .empty
+            return
+        }
+        textPreparationTask = Task { [weak self, textPreparationCache] in
+            let snapshot = await textPreparationCache.prepare(sources)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self,
+                      self.textPreparationGeneration == ownedPreparationGeneration else { return }
+                self.preparedText = snapshot
+                self.textPreparationTask = nil
+            }
+        }
     }
 
     private static func admits(_ response: ProcessTranscriptOpenResponse) -> Bool {

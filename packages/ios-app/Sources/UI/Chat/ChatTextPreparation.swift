@@ -159,6 +159,23 @@ enum ChatTextPreparationPolicy {
     static let maximumNewThinkingPreparationsPerProjection = 128
 
     static func sources(in snapshot: SessionSnapshot) -> [ChatTextPreparationSource] {
+        sources(
+            in: Array(snapshot.transcript.suffix(ChatTranscriptPageRequest.maximumItemCount)),
+            streaming: snapshot.streaming
+        )
+    }
+
+    static func sources(in transcript: [TranscriptItem]) -> [ChatTextPreparationSource] {
+        sources(
+            in: Array(transcript.suffix(ChatTranscriptPageRequest.maximumItemCount)),
+            streaming: nil
+        )
+    }
+
+    private static func sources(
+        in transcript: [TranscriptItem],
+        streaming: TranscriptItem?
+    ) -> [ChatTextPreparationSource] {
         var result: [ChatTextPreparationSource] = []
         var indexes: [ChatTextPreparationIdentity: Int] = [:]
 
@@ -205,10 +222,8 @@ enum ChatTextPreparationPolicy {
         // Explicitly paged history may exceed one page. Only the render-critical
         // bounded tail is warmed; older lazily realized rows retain the exact
         // cold parser fallback and are never mirrored by this cache.
-        for item in snapshot.transcript.suffix(ChatTranscriptPageRequest.maximumItemCount) {
-            admit(item)
-        }
-        if let streaming = snapshot.streaming { admit(streaming) }
+        for item in transcript { admit(item) }
+        if let streaming { admit(streaming) }
         return result
     }
 }

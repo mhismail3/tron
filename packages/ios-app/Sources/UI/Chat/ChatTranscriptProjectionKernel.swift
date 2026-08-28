@@ -125,6 +125,30 @@ struct ChatTranscriptProjectionCandidate: Sendable {
 /// The sole deterministic transcript projector and global assembler. Incremental
 /// paths may reuse exact source fragments or patch assembler-proven tool sites,
 /// but no path constructs a competing complete timeline.
+struct ChatReadOnlyTranscriptProjection: Hashable, Sendable {
+    let timeline: ChatTranscriptTimeline
+    let toolPayloads: ChatToolPayloadIndex
+
+    static let empty = ChatReadOnlyTranscriptProjection(
+        timeline: ChatTranscriptTimeline(
+            items: ChatTranscriptItems(canonical: []),
+            preferredSemanticIDByRenderedID: ChatSemanticIndex(canonical: [:]),
+            renderedIDBySemanticID: ChatSemanticIndex(canonical: [:])
+        ),
+        toolPayloads: ChatToolPayloadIndex()
+    )
+
+    var isValid: Bool {
+        guard timeline.isInternallyConsistent else { return false }
+        let callIDs = timeline.items.flatMap { item -> [String] in
+            guard case .toolRun(let run) = item else { return [] }
+            return run.tools.map(\.id)
+        }
+        return Set(callIDs).count == callIDs.count
+            && Set(callIDs) == toolPayloads.callIDs
+    }
+}
+
 enum ChatTranscriptProjectionKernel {
     static func fragment(for item: TranscriptItem) -> ChatTranscriptProjectionFragment {
         var atoms: [ChatTranscriptProjectionRawAtom] = []
@@ -169,6 +193,31 @@ enum ChatTranscriptProjectionKernel {
     static func runtimeItems(in snapshot: SessionSnapshot) -> [ChatTranscriptRenderItem] {
         ChatNotificationPresentation.runtime(in: snapshot)
             .map(ChatTranscriptRenderItem.notification)
+    }
+
+    /// Read-only child sessions use the same canonical assembler as the main
+    /// chat without fabricating a mutable runtime snapshot. Their JSONL page
+    /// supplies canonical entries only; parent process activity supplies the
+    /// narrow active/inactive fact needed to present an unresolved invocation.
+    static func readOnlyTranscript(
+        _ transcript: [TranscriptItem],
+        transcriptStart: Int,
+        transcriptTotal: Int,
+        isActive: Bool
+    ) -> ChatReadOnlyTranscriptProjection {
+        let assembly = assemble(
+            phase: isActive ? .running : .idle,
+            toolExecutions: [],
+            transcriptStart: transcriptStart,
+            transcriptTotal: transcriptTotal,
+            preservesRunningState: false,
+            fragments: transcript.map(fragment),
+            streamingFragment: nil
+        )
+        return ChatReadOnlyTranscriptProjection(
+            timeline: assembly.timeline,
+            toolPayloads: assembly.toolPayloads
+        )
     }
 
     static func cold(
@@ -794,6 +843,26 @@ enum ChatTranscriptProjectionKernel {
         fragments: [ChatTranscriptProjectionFragment],
         streamingFragment: ChatTranscriptProjectionFragment?
     ) -> Assembly {
+        assemble(
+            phase: snapshot.phase,
+            toolExecutions: snapshot.toolExecutions,
+            transcriptStart: snapshot.transcriptStart,
+            transcriptTotal: snapshot.transcriptTotal,
+            preservesRunningState: snapshot.isCachedProjection == true,
+            fragments: fragments,
+            streamingFragment: streamingFragment
+        )
+    }
+
+    private static func assemble(
+        phase: SessionPhase,
+        toolExecutions: [ToolExecutionState],
+        transcriptStart: Int?,
+        transcriptTotal: Int?,
+        preservesRunningState: Bool,
+        fragments: [ChatTranscriptProjectionFragment],
+        streamingFragment: ChatTranscriptProjectionFragment?
+    ) -> Assembly {
         let results = Dictionary(
             fragments.compactMap { fragment -> (String, TranscriptItem)? in
                 guard let callID = fragment.toolResultID else { return nil }
@@ -802,10 +871,10 @@ enum ChatTranscriptProjectionKernel {
             uniquingKeysWith: { _, newest in newest }
         )
         let liveByID = Dictionary(
-            snapshot.toolExecutions.map { ($0.toolCallId, $0) },
+            toolExecutions.map { ($0.toolCallId, $0) },
             uniquingKeysWith: ToolExecutionStatePolicy.newest
         )
-        var toolsInspected = snapshot.toolExecutions.count
+        var toolsInspected = toolExecutions.count
         var rendered: [ChatTranscriptRenderItem] = []
         var renderedOrigins: [ChatTranscriptRowOrigin] = []
         var pendingTools: [PreparedTool] = []
@@ -824,8 +893,8 @@ enum ChatTranscriptProjectionKernel {
                 let value = PreparedTool(
                     presentation: foregroundPresentation(
                         prepared.presentation,
-                        phase: snapshot.phase,
-                        preservesRunningState: snapshot.isCachedProjection == true
+                        phase: phase,
+                        preservesRunningState: preservesRunningState
                     ),
                     canonicalBase: prepared.canonicalBase,
                     classification: prepared.classification
@@ -940,8 +1009,8 @@ enum ChatTranscriptProjectionKernel {
         }
 
         let rawOrdinalByID: [String: Int]
-        if let transcriptStart = snapshot.transcriptStart,
-           let transcriptTotal = snapshot.transcriptTotal,
+        if let transcriptStart,
+           let transcriptTotal,
            transcriptStart >= 0, transcriptTotal >= transcriptStart,
            transcriptTotal - transcriptStart == fragments.count {
             var ordinals: [String: Int] = [:]
@@ -1027,7 +1096,7 @@ enum ChatTranscriptProjectionKernel {
 
         for fragment in visibleFragments(
             from: fragments,
-            transcriptStart: snapshot.transcriptStart,
+            transcriptStart: transcriptStart,
             additionalVisibleCallIDs: streamingFragment?.toolCallIDs ?? []
         ) {
             let tools = toolPresentations(in: fragment.source, results: results).map { canonical in
@@ -1138,6 +1207,7 @@ enum ChatTranscriptProjectionKernel {
                 // projection composes them back into the canonical host. Every
                 // other duplicate remains malformed and fails closed below.
                 if origin == .live,
+                   collisionSafe.last?.id == original.id,
                    let prior = firstToolRunByID[original.id], prior.origin == .canonical,
                    let segment = exactToolSegment(run),
                    exactToolSegment(prior.run) == segment {

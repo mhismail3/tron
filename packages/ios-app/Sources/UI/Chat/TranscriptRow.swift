@@ -455,10 +455,13 @@ private struct ThinkingBlock: View {
             }
             attributed += value
         }
-        return MarkdownPresentation.Inline(
-            source: source,
-            attributedString: allPrepared ? attributed : nil
-        )
+        if allPrepared {
+            return MarkdownPresentation.Inline(source: source, attributedString: attributed)
+        }
+        // Explicitly paged history can exceed the asynchronously warmed tail.
+        // Lazily realized older thinking rows still receive the same exact
+        // Markdown semantics through the bounded cold-parser fallback.
+        return MarkdownPresentation.Inline(source: source)
     }
 
     private var measurementText: some View {

@@ -1552,8 +1552,8 @@ struct PresentationStyleGuardTests {
         #expect(processSheets.contains(".tronNavigationTitle(\"Subagent History\")"))
         #expect(processSheets.occurrences(of: ".tronTopBlur(.sheet)") == 3)
         #expect(processSheets.occurrences(of: ".tronPresentation()") == 3)
-        #expect(processSheets.occurrences(of: "@State private var detent: PresentationDetent = .medium") == 1)
-        #expect(processSheets.occurrences(of: "@State private var detent: PresentationDetent = .large") == 2)
+        #expect(processSheets.occurrences(of: "@State private var detent: PresentationDetent = .medium") == 2)
+        #expect(processSheets.occurrences(of: "@State private var detent: PresentationDetent = .large") == 1)
         #expect(processSheets.occurrences(of: ".sheet(item: $selectedProcess)") == 2)
         #expect(!processSheets.contains("NavigationLink"))
         #expect(processSheets.contains("SessionProcessRow(process: process, accent: accent, surfaceStyle: .glass)"))
@@ -1932,7 +1932,8 @@ struct PresentationStyleGuardTests {
         let subagentSheet = try #require(
             processSheets.components(separatedBy: "struct ReadOnlySubagentSessionSheet").dropFirst().first
         )
-        #expect(subagentSheet.contains("TranscriptRow(item: item)"))
+        #expect(subagentSheet.contains("ReadOnlySubagentTranscriptRow("))
+        #expect(subagentSheet.contains("store.presentation.timeline.items"))
         #expect(subagentSheet.contains("store.loadEarlier()"))
         #expect(subagentSheet.contains("store?.close()"))
         #expect(!subagentSheet.contains("ChatComposerView"))
@@ -2021,7 +2022,8 @@ struct PresentationStyleGuardTests {
         let subagentSheet = try #require(
             processSheets.components(separatedBy: "struct ReadOnlySubagentSessionSheet").dropFirst().first
         )
-        #expect(subagentSheet.contains("TranscriptRow(item: item)"))
+        #expect(subagentSheet.contains("ReadOnlySubagentTranscriptRow("))
+        #expect(subagentSheet.contains("store.presentation.timeline.items"))
         #expect(subagentSheet.contains("store.loadEarlier()"))
         #expect(subagentSheet.contains("store?.close()"))
         #expect(subagentSheet.contains(".defaultScrollAnchor(.bottom, for: .initialOffset)"))
