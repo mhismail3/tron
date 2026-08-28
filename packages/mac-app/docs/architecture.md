@@ -195,6 +195,12 @@ artifact promotion is wired, and source builds read only the validated
 `gateway/update-config.json` projection. Source mode compiles with the repository's
 local TypeScript compiler into a private temporary output directory, never the trusted
 repository's `packages/gateway/dist`, and copies only verified output into the candidate.
+It admits source-only dependency reuse when the active and source lockfiles are
+byte-identical, replaces npm's ad-hoc Darwin native binaries with the active
+team-signed artifacts, and load-tests all host native modules before publishing
+the selection. A dependency-lock change requires a newly signed Tron build. If
+the bundled payload was active before the first external promotion, failed
+promotion recovery restores that bundled fallback directly.
 The existing trusted Gateway postinstall helper also supplies the exact runtime
 and CLI aliases while assembling a source candidate inherited from a predecessor
 payload that predates this contract. Workspace installs have no sibling payload

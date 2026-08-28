@@ -763,7 +763,12 @@ Stable staging, promotion, source updates, rollback, launcher/Swift admission,
 and packaging require its one exact non-empty public HTTPS origin; dev alone
 may carry one explicit empty assignment. Stable source updates preserve the
 validated active projection rather than consulting source files or environment,
-and notification state stays outside payload version directories. Payload staging,
+including its team-signed Darwin native modules. Source rebuilds require a
+byte-identical dependency lock; dependency changes require a newly signed app or
+artifact. Preflight loads every host-architecture native module before pointer
+publication, and a failed first external candidate restores the validated bundled
+fallback rather than requiring a `previous.json` pointer. Notification state stays
+outside payload version directories. Payload staging,
 promotion, and rollback use `scripts/gateway-payload-deploy.mjs`. Restart requests use the authenticated drain-aware Gateway protocol; direct self-stop
 is rejected. Clients receive `system.stopping`, reconnect with bounded backoff, and replace
 live state from a new authoritative snapshot. Staging preserves package-manager relative

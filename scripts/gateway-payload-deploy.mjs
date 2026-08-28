@@ -922,6 +922,41 @@ async function verifiedSourceCompilerOutput(root) {
   return root;
 }
 
+function signedNativeArtifact(entry) {
+  return entry.target === undefined
+    && (entry.path.endsWith(".node") || entry.path.endsWith("/spawn-helper"));
+}
+
+/**
+ * npm publishes Darwin native modules with ad-hoc or linker signatures. They
+ * cannot be loaded by the Developer-ID-signed hardened Node runtime because
+ * library validation requires the same signing team. A source-only rebuild is
+ * therefore permitted to reuse the active payload's signed native artifacts
+ * only when the dependency lock is byte-for-byte unchanged. Dependency
+ * changes require a newly signed application/artifact build.
+ */
+export async function preserveSignedNativeArtifacts(activeRoot, candidateRoot) {
+  const activeLock = await readFile(join(activeRoot, "app", "package-lock.json"));
+  const candidateLock = await readFile(join(candidateRoot, "app", "package-lock.json"));
+  if (!activeLock.equals(candidateLock)) {
+    throw new Error("Gateway dependency lock changed; install a newly signed Tron build before rebuilding from source");
+  }
+  const active = (await regularFiles(activeRoot, "app/node_modules"))
+    .filter(signedNativeArtifact).map((entry) => entry.path).sort();
+  const candidate = (await regularFiles(candidateRoot, "app/node_modules"))
+    .filter(signedNativeArtifact).map((entry) => entry.path).sort();
+  if (active.length !== candidate.length
+    || active.some((path, index) => path !== candidate[index])) {
+    throw new Error("Gateway native dependency artifacts do not match the active signed payload");
+  }
+  for (const path of active) {
+    await cp(join(activeRoot, path), join(candidateRoot, path), {
+      force: true, errorOnExist: false, preserveTimestamps: true,
+    });
+  }
+  return active;
+}
+
 export function runBounded(tool, args, options = {}) {
   const timeoutMs = options.timeoutMs ?? 120_000;
   const maxOutputBytes = options.maxOutputBytes ?? 128 * 1_024;
@@ -1129,6 +1164,24 @@ export async function preflightPayload(root, runCommand = runBounded, timeoutMs 
   const runtime = join(root, process.arch === "arm64" ? "runtime/node-arm64" : "runtime/node-x64");
   const entrypoint = join(root, "app", "dist", "index.js");
   await runCommand(runtime, ["--check", entrypoint], { timeoutMs, maxOutputBytes: 64 * 1024 });
+  const nativeModules = (await regularFiles(root, "app/node_modules"))
+    .filter((entry) => entry.target === undefined && entry.path.endsWith(".node"))
+    .map((entry) => entry.path)
+    .filter((path) => path.includes(`darwin-${process.arch}`) || path.includes("darwin-universal"))
+    .sort();
+  if (!nativeModules.some((path) => path.endsWith(`/node-pty/prebuilds/darwin-${process.arch}/pty.node`)
+      || path.endsWith(`node-pty/prebuilds/darwin-${process.arch}/pty.node`))) {
+    throw new Error(`candidate Gateway is missing the ${process.arch} node-pty native module`);
+  }
+  const nativeProbe = "const path = require('node:path'); const root = process.env.TRON_CANDIDATE_ROOT; for (const file of JSON.parse(process.env.TRON_CANDIDATE_NATIVE_MODULES)) require(path.join(root, file));";
+  await runCommand(runtime, ["-e", nativeProbe], {
+    timeoutMs, maxOutputBytes: 64 * 1024,
+    env: {
+      ...process.env,
+      TRON_CANDIDATE_ROOT: root,
+      TRON_CANDIDATE_NATIVE_MODULES: JSON.stringify(nativeModules),
+    },
+  });
   // Protocol values are deliberately read from the candidate's compiled
   // module with the candidate runtime. Manifests do not carry these fields;
   // defaulting them here would turn a preflight into a self-assertion.
@@ -1446,6 +1499,17 @@ async function requireSelectedPayload(paths, expected) {
   }
 }
 
+async function requireBundledPayload(paths, expected) {
+  if (await currentSelection(paths)) {
+    throw new Error("restored Gateway still has an external payload selection");
+  }
+  const bundled = await bundledPayload();
+  if (bundled.manifest.version !== expected.version
+    || bundled.manifest.payloadFingerprint !== expected.payloadFingerprint) {
+    throw new Error("restored bundled Gateway does not match the validated recovery payload");
+  }
+}
+
 export async function verifyIdempotentPromotion({ paths, channel, manifest, current, requestInfo }) {
   if (current?.version !== manifest.version || current.payloadFingerprint !== manifest.payloadFingerprint) return undefined;
   const [stateValue, pending] = await Promise.all([
@@ -1482,10 +1546,15 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
       ? (priorState.previous === undefined ? undefined : selection(JSON.parse(priorState.previous), channel))
       : prior;
     let recoveryManifest;
+    let recoveryUsesBundledFallback = false;
     if (recoverySelectionValue) {
       recoveryManifest = await validatePayload(join(paths.versionsRoot, recoverySelectionValue.version), {
         channel, version: recoverySelectionValue.version, payloadFingerprint: recoverySelectionValue.payloadFingerprint,
       }, true);
+    } else {
+      const bundled = await bundledPayload();
+      recoveryManifest = bundled.manifest;
+      recoveryUsesBundledFallback = true;
     }
     const boundary = await captureAuthenticatedRestartBoundary({ host, port, token, timeoutMs, channel });
     const before = boundary.info;
@@ -1553,18 +1622,21 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
       if (published) {
         try {
           await writeState(paths, { ...stateBase, state: deploymentTransition("published", "failed"), error: String(error?.message ?? error) });
-          if (!recoverySelectionValue || !recoveryManifest) throw new Error("validated recovery payload is unavailable");
+          if (!recoveryManifest) throw new Error("validated recovery payload is unavailable");
           const restore = () => unchanged
             ? rollbackSelectionAndClearAttempt(paths)
             : restoreSelectionStateAndClearAttempt(paths, priorState);
+          const validateRecovery = () => recoveryUsesBundledFallback
+            ? requireBundledPayload(paths, recoveryManifest)
+            : requireSelectedPayload(paths, recoverySelectionValue);
           if (!oldProcessGone) {
             await restore();
-            await requireSelectedPayload(paths, recoverySelectionValue);
+            await validateRecovery();
             throw new Error("supervisor recovery withheld until the exact old Gateway identity disappears");
           }
           await restoreAndVerifyReplacement({
             restore,
-            validateRestored: () => requireSelectedPayload(paths, recoverySelectionValue),
+            validateRestored: validateRecovery,
             beforeLaunch: () => writeState(paths, {
               ...stateBase, state: deploymentTransition("failed", "rollbackRequested"),
             }),
@@ -1680,17 +1752,7 @@ export async function stagedCandidate(paths, requestedVersion, expectedFingerpri
   }
 }
 
-async function currentPayload(paths, bundledCandidatesOverride) {
-  try {
-    const selected = await currentSelection(paths);
-    if (selected) {
-      const root = join(paths.versionsRoot, selected.version);
-      const manifest = await validatePayload(root, {
-        channel: paths.channel, version: selected.version, payloadFingerprint: selected.payloadFingerprint,
-      }, true);
-      return { root, manifest };
-    }
-  } catch { /* fall through to the validated bundled payload */ }
+async function bundledPayload(bundledCandidatesOverride) {
   const bundledCandidates = bundledCandidatesOverride ?? [
     resolve(scriptDirectory, "..", ".."),
     resolve(scriptDirectory, "../packages/mac-app/Sources/Resources/Gateway"),
@@ -1702,6 +1764,20 @@ async function currentPayload(paths, bundledCandidatesOverride) {
     } catch { /* Try the next known bundled-payload location. */ }
   }
   throw new Error("source update requires an active or bundled validated Gateway payload");
+}
+
+async function currentPayload(paths, bundledCandidatesOverride) {
+  try {
+    const selected = await currentSelection(paths);
+    if (selected) {
+      const root = join(paths.versionsRoot, selected.version);
+      const manifest = await validatePayload(root, {
+        channel: paths.channel, version: selected.version, payloadFingerprint: selected.payloadFingerprint,
+      }, true);
+      return { root, manifest };
+    }
+  } catch { /* fall through to the validated bundled payload */ }
+  return bundledPayload(bundledCandidatesOverride);
 }
 
 async function stageConfiguredArtifact(paths, config, requestedVersion) {
@@ -1768,6 +1844,7 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
           PATH: npmCommand.bin ? `${dirname(npmCommand.bin)}:/usr/bin:/bin` : process.env.PATH,
         },
       });
+      await preserveSignedNativeArtifacts(active.root, temporary);
       const fingerprint = await payloadFingerprint(temporary);
       const manifest = {
         ...active.manifest,

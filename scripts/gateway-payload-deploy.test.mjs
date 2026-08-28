@@ -24,6 +24,7 @@ import {
   validatePayload,
   payloadFingerprint,
   buildSourcePayload,
+  preserveSignedNativeArtifacts,
   preflightPayload,
   proveDebugHandoffIdentity,
   handoffDebugCandidate,
@@ -406,6 +407,7 @@ async function makePreflightFixture(root) {
   await mkdir(join(payload, "app", "dist"), { recursive: true });
   await mkdir(join(payload, "app", "scripts"), { recursive: true });
   await mkdir(join(payload, "app", "node_modules"), { recursive: true });
+  await mkdir(join(payload, "app", "node_modules", "node-pty", "prebuilds", `darwin-${process.arch}`), { recursive: true });
   await mkdir(join(payload, "runtime"), { recursive: true });
   await writeFile(join(payload, "app", "dist", "index.js"), "x".repeat(1_024));
   await writeFile(join(payload, "app", "dist", "version.js"), "export const PROTOCOL_VERSION = 3; export const MIN_PROTOCOL_VERSION = 3;\n");
@@ -414,6 +416,7 @@ async function makePreflightFixture(root) {
   await writeFile(join(payload, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
   await writeFile(join(payload, "app", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
   await writeFile(join(payload, "app", "scripts", "gateway-payload-deploy.mjs"), "// updater\n");
+  await writeFile(join(payload, "app", "node_modules", "node-pty", "prebuilds", `darwin-${process.arch}`, "pty.node"), "native-fixture\n");
   await writeFile(join(payload, "runtime", "node-arm64"), "n".repeat(1_048_576));
   await writeFile(join(payload, "runtime", "node-x64"), "n".repeat(1_048_576));
   await chmod(join(payload, "runtime", "node-arm64"), 0o755);
@@ -427,6 +430,34 @@ async function makePreflightFixture(root) {
   }));
   return payload;
 }
+
+test("source rebuild preserves signed native artifacts only with an unchanged dependency lock", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-source-native-signatures-"));
+  try {
+    const active = join(root, "active");
+    const candidate = join(root, "candidate");
+    const nativePaths = [
+      "app/node_modules/node-pty/prebuilds/darwin-arm64/pty.node",
+      "app/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper",
+      "app/node_modules/example/prebuilds/darwin-x64/addon.node",
+    ];
+    for (const payload of [active, candidate]) {
+      await mkdir(join(payload, "app", "node_modules"), { recursive: true });
+      await writeFile(join(payload, "app", "package-lock.json"), "same-lock\n");
+      for (const path of nativePaths) {
+        await mkdir(dirname(join(payload, path)), { recursive: true });
+        await writeFile(join(payload, path), payload === active ? `signed:${path}\n` : `adhoc:${path}\n`);
+      }
+    }
+    assert.deepEqual(await preserveSignedNativeArtifacts(active, candidate), nativePaths.sort());
+    for (const path of nativePaths) assert.equal(await readFile(join(candidate, path), "utf8"), `signed:${path}\n`);
+    await writeFile(join(candidate, "app", "package-lock.json"), "changed-lock\n");
+    await assert.rejects(
+      preserveSignedNativeArtifacts(active, candidate),
+      /dependency lock changed/,
+    );
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("stable payload push configuration rejects missing empty malformed and symlinked files", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-push-payload-policy-"));
