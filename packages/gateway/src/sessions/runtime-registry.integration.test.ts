@@ -12,6 +12,7 @@ import type { ExtensionRunActivity, ExtensionToolOrigin, SessionProcessActivity,
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import { RunMarkerCompletionConflictError } from "./run-markers.js";
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -3499,7 +3500,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(slot.snapshot().extensionPresentation.hostEpoch).not.toBe(thirdEpoch);
   });
 
-  it("serializes extension continuation ownership through a transient attention failure", async () => {
+  it("serializes chained extension continuation ownership through a transient attention failure", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-settlement-overlap-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -3508,12 +3509,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       mkdir(join(cwd, ".pi", "extensions"), { recursive: true }),
     ]);
     await writeFile(join(cwd, ".pi", "extensions", "continuation.ts"), `
-let triggered = false;
+let remaining = 3;
 export default function (pi) {
   pi.on("agent_settled", () => {
-    if (triggered) return;
-    triggered = true;
-    pi.sendMessage({ customType: "test-continuation", content: "continue", display: false }, { triggerTurn: true });
+    if (remaining === 0) return;
+    const sequence = 4 - remaining;
+    remaining -= 1;
+    pi.sendMessage({ customType: "test-continuation", content: \`continue-\${sequence}\`, display: false }, { triggerTurn: true });
   });
 }
 `);
@@ -3528,7 +3530,12 @@ export default function (pi) {
       fauxAssistantMessage("first complete"),
       async () => {
         await new Promise((resolve) => setTimeout(resolve, 250));
-        return fauxAssistantMessage("continuation complete");
+        return fauxAssistantMessage("continuation one complete");
+      },
+      fauxAssistantMessage("continuation two complete"),
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        return fauxAssistantMessage("continuation three complete");
       },
     ]);
     const snapshots: Array<{ phase: string; operation?: unknown }> = [];
@@ -3552,16 +3559,23 @@ export default function (pi) {
     expect(slot.sessionFile?.startsWith(join(agentDir, "sessions"))).toBe(true);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
-    const attention = (registry as unknown as {
+    const internals = registry as unknown as {
       attention: { complete: (sessionId: string, completionId: string) => Promise<unknown> };
-    }).attention;
+      markers: {
+        reassertAssistantCompletion: (
+          sessionId: string, operationId: string, completionId: string, completedAt: string,
+        ) => Promise<void>;
+      };
+    };
+    const attention = internals.attention;
+    const completionStamps = vi.spyOn(internals.markers, "reassertAssistantCompletion");
     const originalComplete = attention.complete.bind(attention);
     const complete = vi.spyOn(attention, "complete")
       .mockRejectedValueOnce(new Error("injected overlapping attention failure"))
       .mockImplementation(originalComplete);
     await slot.prompt("start");
 
-    await waitUntil(() => faux.state.callCount === 2);
+    await waitUntil(() => faux.state.callCount === 4);
     expect(slot.snapshot()).toMatchObject({ phase: "running", operation: { kind: "prompt" } });
     const continuationSnapshotIndex = snapshots.length;
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -3571,19 +3585,37 @@ export default function (pi) {
     expect(settled).toMatchObject({ phase: "idle" });
     expect(settled.transcript.find((item) => item.kind === "customMessage")).toMatchObject({
       customType: "test-continuation",
-      content: [{ type: "text", text: "continue" }],
+      content: [{ type: "text", text: "continue-1" }],
       sessionInput: {
         source: "extension",
         trigger: "turn",
         origin: { owner: { id: expect.stringMatching(/^extension:/) } },
       },
     });
-    expect(registry.attentionProjection(slot.id).completionRevision).toBe(2);
+    expect(registry.attentionProjection(slot.id).completionRevision).toBe(4);
     const completionIds = complete.mock.calls.map(([, completionId]) => completionId);
-    expect(completionIds).toHaveLength(3);
+    expect(completionIds).toHaveLength(5);
     expect(completionIds[0]).toBe(completionIds[1]);
-    expect(completionIds[2]).not.toBe(completionIds[1]);
+    expect(new Set(completionIds.slice(1)).size).toBe(4);
+    const stampedOperationIds = completionStamps.mock.calls.map(([, operationId]) => operationId);
+    expect(stampedOperationIds).toHaveLength(4);
+    expect(new Set(stampedOperationIds).size).toBe(4);
     expect(snapshots.some((snapshot) => snapshot.phase === "running" && snapshot.operation)).toBe(true);
+  });
+
+  it("does not retry permanent marker completion conflicts", async () => {
+    const fixture = await coldFixture("permanent-marker-invariant");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const retry = (slot as unknown as {
+      retryDurableWrite: (key: string, operation: () => Promise<void>) => Promise<void>;
+    }).retryDurableWrite.bind(slot);
+    const operation = vi.fn(async () => {
+      throw new RunMarkerCompletionConflictError("injected permanent ownership conflict");
+    });
+
+    await expect(retry("marker:test", operation)).rejects.toThrow("injected permanent ownership conflict");
+    expect(operation).toHaveBeenCalledOnce();
+    expect(fixture.events.filter((event) => event.topic === "session.operationFailed")).toEqual([]);
   });
 
   it("recovers ordered continuation completions after the attention head repeatedly fails and restart", async () => {

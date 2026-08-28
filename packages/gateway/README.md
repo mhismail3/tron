@@ -560,10 +560,15 @@ replacement; a full document rejects newer admission rather than dropping eviden
 Legacy v1 single-operation markers migrate on mutation without inferring an unstamped
 completion. Marker creation and exact stamping run independently of serialized
 attention admission, so a failing older projection cannot hide a completed extension
-continuation. Terminal stamping atomically reasserts its exact operation owner
-with completion evidence in one per-session marker transaction, so overlapping
-turn cleanup cannot leave a permanently unsatisfied marker precondition that
-blocks later prompts, `session.open`, or administrative drain; cleanup remains
+continuation. Assistant `message_end` captures its operation owner in the
+callback turn before Pi's synchronous canonical append; an extension continuation
+that starts inside the append/microtask gap therefore rotates to a distinct owner
+instead of inheriting the completed turn. Terminal stamping atomically reasserts
+that exact owner with completion evidence in one per-session marker transaction,
+so overlapping turn cleanup cannot erase newer work. A conflicting completion
+claim for an already-stamped operation is permanent and fails immediately while
+ordinary storage failures retain durable retry, preventing that impossible claim from indefinitely
+blocking later prompts, `session.open`, or administrative drain. Cleanup remains
 scoped to that operation ID. Open/drain
 joins live settlement; after restart, a bounded canonical JSONL scan admits every
 successful completion named by the ordered exact durable stamps, and no markerless

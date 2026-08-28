@@ -46,6 +46,14 @@ const MAXIMUM_RUN_MARKER_BYTES = 32 * 1_024;
 const MAXIMUM_MARKER_IDENTIFIER_BYTES = 256;
 const MAXIMUM_MARKER_TIMESTAMP_BYTES = 128;
 
+/** One operation can never own two different canonical completions. */
+export class RunMarkerCompletionConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RunMarkerCompletionConflictError";
+  }
+}
+
 export class RunMarkerStore {
   private readonly directory: string;
   private readonly lanes = new Map<string, Lane>();
@@ -109,7 +117,9 @@ export class RunMarkerStore {
       const path = join(this.directory, `${sessionId}.json`);
       const operations = await readOperations(path, sessionId);
       const operation = operations.find((candidate) => candidate.operationId === operationId);
-      if (!operation) throw new Error("Run marker ownership changed before assistant completion admission");
+      if (!operation) {
+        throw new Error("Run marker ownership changed before assistant completion admission");
+      }
       if (!applyAssistantCompletion(operation, completionId, completedAt)) return;
       await durableWriteRunMarker(path, { version: 2, sessionId, operations }, this.fileSystem);
     });
@@ -221,7 +231,7 @@ function applyAssistantCompletion(
 ): boolean {
   if (operation.assistantCompletionId !== undefined
     && (operation.assistantCompletionId !== completionId || operation.assistantCompletedAt !== completedAt)) {
-    throw new Error("Run marker operation already owns a different assistant completion");
+    throw new RunMarkerCompletionConflictError("Run marker operation already owns a different assistant completion");
   }
   if (operation.assistantCompletionId === completionId && operation.assistantCompletedAt === completedAt) return false;
   operation.assistantCompletionId = completionId;

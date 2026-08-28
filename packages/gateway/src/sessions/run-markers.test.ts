@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from "node:fs/p
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { MAXIMUM_RUN_MARKER_OPERATIONS, RunMarkerStore } from "./run-markers.js";
+import { MAXIMUM_RUN_MARKER_OPERATIONS, RunMarkerCompletionConflictError, RunMarkerStore } from "./run-markers.js";
 
 describe("RunMarkerStore", () => {
   it("records accepted work without storing the prompt", async () => {
@@ -50,7 +50,10 @@ describe("RunMarkerStore", () => {
     expect(renameMarker).toHaveBeenCalledTimes(1);
     await expect(store.reassertAssistantCompletion(
       "session", "operation", "other", "2026-01-01T00:00:01.000Z",
-    )).rejects.toThrow("different assistant completion");
+    )).rejects.toEqual(expect.objectContaining({
+      name: "RunMarkerCompletionConflictError",
+      message: expect.stringContaining("different assistant completion"),
+    } satisfies Partial<RunMarkerCompletionConflictError>));
   });
 
   it("syncs marker files and their directory for accepted and exact completion evidence", async () => {

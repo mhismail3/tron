@@ -66,7 +66,7 @@ import {
   type ToolProjectionMetadata,
   type TranscriptPage,
 } from "./projection.js";
-import type { RunMarkerEvidence, RunMarkerStore } from "./run-markers.js";
+import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, currentExtensionOwner, extensionOwnerFor } from "../extensions/owner-attribution.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates, type ExtensionArtifactRejectionReason } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
@@ -273,6 +273,13 @@ export class RuntimeSlot {
   private readonly canonicalizedStreamingMessages = new WeakSet<object>();
   /** Exact successful canonical assistant completion awaiting durable attention admission. */
   private pendingAssistantCompletion: CanonicalAssistantCompletion | undefined;
+  /** `message_end` precedes Pi's synchronous canonical append. Capture immutable
+   * operation ownership in that callback turn so an immediate extension
+   * continuation cannot inherit the completion's already-consumed owner. */
+  private readonly pendingAssistantBindings = new Map<object, {
+    operationId?: string;
+    ownsPromptOperation: boolean;
+  }>();
   /** Exact completions retain canonical attention order. Their durable stamps
    * are started independently so a failed projection head cannot hide a newer
    * continuation from restart reconciliation. */
@@ -1434,38 +1441,48 @@ export class RuntimeSlot {
   private bindCanonicalPresentation(message: AgentMessage): void {
     if (message.role !== "assistant") return;
     const presentationID = this.streamPresentationId;
+    const binding = {
+      ...(this.activeOperationId ? { operationId: this.activeOperationId } : {}),
+      ownsPromptOperation: this.operation?.kind === "prompt",
+    };
+    const mayComplete = message.stopReason === "stop" || message.stopReason === "length";
+    if (mayComplete && binding.ownsPromptOperation) this.pendingAssistantBindings.set(message, binding);
     // Pi notifies listeners before synchronously appending the finalized
-    // message. The microtask runs after that append and before the next model
-    // continuation, so the exact new leaf owns this live-turn identity.
+    // message. Mutable operation state may advance before this microtask; the
+    // callback-turn binding above remains the exact owner of this completion.
     queueMicrotask(() => {
-      const canonicalID = this.runtime.session.sessionManager.getLeafId();
-      const candidate = canonicalID
-        ? this.runtime.session.sessionManager.getEntry(canonicalID)
-        : undefined;
-      if (candidate?.type !== "message"
-        || candidate.message.role !== "assistant"
-        || candidate.message !== message) return;
-      this.canonicalizedStreamingMessages.add(message);
-      if (presentationID) this.rememberPresentationID(candidate.id, presentationID);
-      const completion = successfulAssistantCompletion(candidate);
-      if (completion && this.operation?.kind === "prompt") {
-        this.pendingAssistantCompletion = {
-          ...completion,
-          ...(this.activeOperationId ? { operationId: this.activeOperationId } : {}),
-        };
-        // Pi has synchronously appended the canonical entry. Start its exact
-        // durable stamp now; truthful agent settlement still gates projection.
-        this.recordCompletionOwnership(this.pendingAssistantCompletion);
+      try {
+        const canonicalID = this.runtime.session.sessionManager.getLeafId();
+        const candidate = canonicalID
+          ? this.runtime.session.sessionManager.getEntry(canonicalID)
+          : undefined;
+        if (candidate?.type !== "message"
+          || candidate.message.role !== "assistant"
+          || candidate.message !== message) return;
+        this.canonicalizedStreamingMessages.add(message);
+        if (presentationID) this.rememberPresentationID(candidate.id, presentationID);
+        const completion = successfulAssistantCompletion(candidate);
+        if (completion && binding.ownsPromptOperation) {
+          const item = this.recordCompletionOwnership({
+            ...completion,
+            ...(binding.operationId ? { operationId: binding.operationId } : {}),
+          });
+          this.pendingAssistantCompletion = item.completion;
+          // Pi has synchronously appended the canonical entry. Its exact durable
+          // stamp has started; truthful agent settlement still gates projection.
+        }
+        if (presentationID && this.streamPresentationId === presentationID) {
+          this.latestStreamingMessage = undefined;
+          this.streamIdentityMessage = undefined;
+          this.streamAnchorId = undefined;
+          this.streamPresentationId = undefined;
+          this.streamStartedAt = undefined;
+          this.finalizedStreamPresentationId = undefined;
+        }
+        this.scheduleSnapshot();
+      } finally {
+        this.pendingAssistantBindings.delete(message);
       }
-      if (presentationID && this.streamPresentationId === presentationID) {
-        this.latestStreamingMessage = undefined;
-        this.streamIdentityMessage = undefined;
-        this.streamAnchorId = undefined;
-        this.streamPresentationId = undefined;
-        this.streamStartedAt = undefined;
-        this.finalizedStreamPresentationId = undefined;
-      }
-      this.scheduleSnapshot();
     });
   }
 
@@ -1565,7 +1582,11 @@ export class RuntimeSlot {
         try {
           await operation();
           return;
-        } catch {
+        } catch (error) {
+          // One operation can never own two canonical completions. Retrying
+          // that conflict would hold session.open behind an impossible claim;
+          // ordinary storage failures retain the existing durable retry.
+          if (error instanceof RunMarkerCompletionConflictError) throw error;
           attempt += 1;
           if (attempt === 1 || attempt % 60 === 0) {
             this.emit("session.operationFailed", safeJson({ message: "Canonical ownership persistence is retrying" }));
@@ -1623,11 +1644,18 @@ export class RuntimeSlot {
 
   private recordCompletionOwnership(completion: CanonicalAssistantCompletion): CompletionOwnershipItem {
     let item = this.completionOwnershipQueue.find((candidate) => candidate.completion.id === completion.id);
-    if (!item) {
+    if (item) {
+      const existingOperationId = item.completion.operationId;
+      // The first callback-turn binding is immutable. A later settlement view
+      // may fill a missing owner, but mutable runtime state cannot replace one.
+      if (!existingOperationId && completion.operationId) {
+        item.completion = { ...item.completion, operationId: completion.operationId };
+      }
+    } else {
       const operationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
       const exactOwner = operationId ? this.operationWork.get(operationId) : undefined;
       item = {
-        completion,
+        completion: operationId && !completion.operationId ? { ...completion, operationId } : completion,
         stamp: undefined,
         ...(exactOwner ? {} : {
           fallbackWork: this.dependencies.workRegistry.beginDerived({
@@ -1758,7 +1786,8 @@ export class RuntimeSlot {
       : new Date().toISOString());
     switch (event.type) {
       case "agent_start": {
-        const continuationFromSettlement = this.pendingAssistantCompletion !== undefined;
+        const continuationFromSettlement = this.pendingAssistantCompletion !== undefined
+          || this.pendingAssistantBindings.size > 0;
         const dequeuedOwner = this.dequeuedFollowUpOwners[0];
         const queuedOwner = dequeuedOwner
           ?? this.queuedMessages.find((item) => item.behavior === "followUp")?.id;
@@ -1767,22 +1796,27 @@ export class RuntimeSlot {
           ?? this.activeOperationId;
         const requiresDistinctAgentOwner = queuedOwner === undefined
           && (continuationFromSettlement || this.pendingExtensionCommand !== undefined);
-        if (this.pendingAssistantCompletion) {
-          if (!this.pendingAssistantCompletion.operationId && this.activeOperationId) {
-            this.pendingAssistantCompletion = { ...this.pendingAssistantCompletion, operationId: this.activeOperationId };
+        if (continuationFromSettlement) {
+          if (this.pendingAssistantCompletion) {
+            if (!this.pendingAssistantCompletion.operationId && this.activeOperationId) {
+              this.pendingAssistantCompletion = { ...this.pendingAssistantCompletion, operationId: this.activeOperationId };
+            }
+            if (this.activeOperationId) this.completionWorkOwners.set(this.pendingAssistantCompletion.id, this.activeOperationId);
+            // Pi may start an extension continuation before the older settlement
+            // callback unwinds. Preserve and immediately commit the prior exact
+            // completion, then give the continuation a distinct marker owner so
+            // cleanup from the older settlement cannot erase the newer run.
+            // Attention is ordered durable presentation state, not authorization
+            // to continue already-accepted canonical agent work. A failed queue
+            // head remains marked/interrupted and blocks later attention commits,
+            // while the continuation may finish and stamp its own completion for
+            // ordered restart recovery. Aborting here would silently discard that
+            // accepted continuation and strand its durable ownership test.
+            void this.beginAttentionSettlement(this.pendingAssistantCompletion).catch(() => {});
           }
-          if (this.activeOperationId) this.completionWorkOwners.set(this.pendingAssistantCompletion.id, this.activeOperationId);
-          // Pi may start an extension continuation before the older settlement
-          // callback unwinds. Preserve and immediately commit the prior exact
-          // completion, then give the continuation a distinct marker owner so
-          // cleanup from the older settlement cannot erase the newer run.
-          // Attention is ordered durable presentation state, not authorization
-          // to continue already-accepted canonical agent work. A failed queue
-          // head remains marked/interrupted and blocks later attention commits,
-          // while the continuation may finish and stamp its own completion for
-          // ordered restart recovery. Aborting here would silently discard that
-          // accepted continuation and strand its durable ownership test.
-          void this.beginAttentionSettlement(this.pendingAssistantCompletion).catch(() => {});
+          // `message_end` may still be waiting for Pi's canonical append. Its
+          // callback-turn binding owns the preceding operation even before a
+          // completion object exists, so the new run must rotate now.
           this.activeOperationId = undefined;
           this.operation = undefined;
         }
