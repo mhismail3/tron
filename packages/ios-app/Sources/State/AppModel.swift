@@ -838,6 +838,9 @@ final class AppModel {
         lifecycle.enteredBackground()
         catalogInvalidationGeneration &+= 1
         cancelCatalogRefresh()
+        // Provider login is stable-device-owned on the Gateway. Retire only
+        // this transport delivery epoch and retain the operation for auth.resume.
+        providerAuth.retireConnection()
         return draftCheckpoint
     }
 
@@ -2314,6 +2317,16 @@ final class AppModel {
         }
     }
 
+    func submitBrowserAuthCallback(
+        _ callback: ProviderOAuthCapturedCallback,
+        operationID: String
+    ) async throws {
+        // Capture first even if the socket was replaced while the system
+        // browser was open. ProviderAuthCoordinator keeps one memory-only
+        // callback and submits it after auth.resume on the same profile.
+        try await providerAuth.submitBrowserCallback(callback, operationID: operationID)
+    }
+
     func cancelAuth(operationID: String? = nil) async {
         await providerAuth.cancelAuth(operationID: operationID)
     }
@@ -2705,9 +2718,9 @@ final class AppModel {
         case "transport.disconnected", "system.stopping":
             if event.topic == "system.stopping" { lifecycle.beginRestarting() }
             lifecycle.noteDisconnected(connectionID: connectionID)
-            // AuthBroker operations belong to the current transport client.
-            // Retire any visible prompt before reconnect can expose a new
-            // client, so the UI never submits a stale operation ID.
+            // Authentication belongs to the paired device identity, not this
+            // disposable socket. Retire prompt delivery while retaining the
+            // operation ID/target for an exact auth.resume after reconnect.
             providerAuth.retireConnection()
             lifecycleInvalidateSessionConnectionOwnership()
             sessionCatalog.markDisconnected()
@@ -3143,12 +3156,13 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
         guard admitsLifecycle(admission) else { return }
         adoptConnectedGatewayIdentity()
+        async let authResume: Void = providerAuth.resumeAuthIfNeeded()
         async let sessionLoad = refreshSessions()
         async let providerLoad = refreshProviders(target: .global)
         async let settingLoad = refreshSettings(target: .global)
         async let deviceLoad = refreshDevices()
         let sessionOutcome = await sessionLoad
-        _ = await (providerLoad, settingLoad, deviceLoad)
+        _ = await (authResume, providerLoad, settingLoad, deviceLoad)
         guard admitsLifecycle(admission) else { return }
         if sessionOutcome == .transportFailure {
             lifecycle.noteProjectionFailure(admission)
@@ -3188,6 +3202,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         defer { isReconcilingForeground = false }
         try await client.ensureResponsive()
         try requireLifecycle(admission)
+        async let authResume: Void = providerAuth.resumeAuthIfNeeded()
         async let catalog = refreshSessions()
         let mountedTarget = sessionPresentation.mountedTarget
         let mountedRestored = await sessionPresentation.reconnectMountedPresentation()
@@ -3207,6 +3222,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
             )
         }
         await terminal.reattach(admission: admission)
+        _ = await authResume
         let outcome = await catalog
         if outcome == .transportFailure {
             throw GatewayFailure(

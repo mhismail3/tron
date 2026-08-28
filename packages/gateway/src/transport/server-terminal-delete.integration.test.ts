@@ -78,7 +78,7 @@ describe("terminal attachment revocation after session deletion", () => {
       devices,
       uploads: {} as any,
       sessions: sessions as any,
-      auth: { cancelClient: vi.fn() } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: service as any,
       logger: { log: vi.fn() } as any,
     });
@@ -180,7 +180,7 @@ describe("terminal attachment revocation after session deletion", () => {
       devices,
       uploads: {} as any,
       sessions,
-      auth: { cancelClient: vi.fn() } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: service as any,
       logger: { log: vi.fn() } as any,
     });

@@ -1,6 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer } from "node:http";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { JsonValue } from "../protocol/types.js";
@@ -211,21 +212,85 @@ describe("AuthBroker", () => {
     expect(() => broker.start("phone", "provider", "api_key")).toThrow(/draining/u);
   });
 
-  it("disconnect cancellation releases all client capacity even when providers ignore abort", async () => {
+  it("disconnect detaches delivery while the stable device owner can resume", async () => {
     const signals: AbortSignal[] = [];
     const runtime = runtimeWithLogin(async (interaction) => {
       signals.push(interaction.signal);
       return new Promise<void>(() => {});
     });
     const broker = new AuthBroker(runtime, () => {});
-    broker.start("phone", "provider", "api_key");
-    broker.start("phone", "provider", "api_key");
+    const first = broker.start("socket-1", "provider", "api_key", runtime, "device");
+    const second = broker.start("socket-1", "provider", "api_key", runtime, "device");
     await flushPromises();
 
-    broker.cancelClient("phone");
-    expect(broker.activeOperationCount).toBe(0);
+    broker.detachClient("socket-1");
+    expect(broker.activeOperationCount).toBe(2);
     expect(signals).toHaveLength(2);
+    expect(signals.every((signal) => !signal.aborted)).toBe(true);
+    expect(broker.resume("device", "socket-2", first)).toMatchObject({ state: "active" });
+    expect(() => broker.resume("other-device", "socket-2", first)).toThrow(expect.objectContaining({ code: "not_found" }));
+
+    broker.cancelOwner("device");
+    expect(broker.activeOperationCount).toBe(0);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
+    expect(broker.cancel("device", second)).toBe(false);
+  });
+
+  it("deduplicates auth.begin by stable owner and command ID", async () => {
+    const runtime = runtimeWithLogin(async () => new Promise<void>(() => {}));
+    const broker = new AuthBroker(runtime, () => {});
+    const first = broker.start("socket-1", "provider", "api_key", runtime, "device", "command-123", "global");
+    const duplicate = broker.start("socket-2", "provider", "api_key", runtime, "device", "command-123", "global");
+
+    expect(duplicate).toBe(first);
+    expect(broker.activeOperationCount).toBe(1);
+    expect(() => broker.start("socket-2", "other", "api_key", runtime, "device", "command-123", "global"))
+      .toThrow(expect.objectContaining({ code: "conflict" }));
+    broker.cancelOwner("device");
+  });
+
+  it("relays one exact provider callback without accepting a client-selected destination", async () => {
+    let receivedTarget = "";
+    let completeCallback!: () => void;
+    const callbackReceived = new Promise<void>((resolve) => { completeCallback = resolve; });
+    const server = createServer((request, response) => {
+      receivedTarget = request.url ?? "";
+      response.writeHead(200, { "content-type": "text/plain" });
+      response.end("provider response is not projected");
+      completeCallback();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("missing callback port");
+    const runtime = runtimeWithLogin(async (interaction) => {
+      const redirect = `http://127.0.0.1:${address.port}/oauth/callback`;
+      interaction.notify({
+        type: "auth_url",
+        url: `https://provider.invalid/authorize?redirect_uri=${encodeURIComponent(redirect)}&state=expected`,
+      });
+      await callbackReceived;
+    });
+    const events: Array<{ topic: string; payload: JsonValue }> = [];
+    const broker = new AuthBroker(runtime, (_client, topic, payload) => events.push({ topic, payload }));
+    const operationId = broker.start("socket", "provider", "api_key", runtime, "device");
+    await waitFor(() => events.some((event) => event.topic === "auth.event"));
+    const event = events.find((value) => value.topic === "auth.event")!.payload as Record<string, JsonValue>;
+    const capture = event.callbackCapture as Record<string, JsonValue>;
+
+    await expect(broker.forwardCallback("device", operationId, capture.id as string, "code=one&code=two&state=expected"))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    await expect(broker.forwardCallback("device", operationId, capture.id as string, "code=temporary&state=wrong"))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    await expect(broker.forwardCallback("other-device", operationId, capture.id as string, "code=temporary&state=expected"))
+      .rejects.toMatchObject({ code: "not_found" });
+    await expect(broker.forwardCallback("device", operationId, capture.id as string, "code=temporary&state=expected"))
+      .resolves.toBe(true);
+    await expect(broker.forwardCallback("device", operationId, capture.id as string, "code=temporary&state=expected"))
+      .resolves.toBe(false);
+    expect(receivedTarget).toBe("/oauth/callback?code=temporary&state=expected");
+    await waitFor(() => events.some((value) => value.topic === "auth.completed"));
+    expect(JSON.stringify(events)).not.toContain("provider response is not projected");
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
   it("rejects oversized provider projections and releases the operation exactly once", async () => {

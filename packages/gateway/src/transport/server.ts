@@ -498,6 +498,10 @@ export class GatewayServer {
   }
 
   disconnectDevice(deviceId: string): void {
+    // Revocation retires the stable device owner, not merely its disposable
+    // sockets. Unlike an ordinary disconnect, its provider-auth work must not
+    // remain resumable.
+    this.options.auth.cancelOwner(deviceId);
     const timer = setTimeout(() => {
       for (const client of this.clients.values()) {
         if (!client.isLocal && client.identity === deviceId) client.socket.close(1008, "device revoked");
@@ -1196,7 +1200,9 @@ export class GatewayServer {
     connection.subscriptionTokens.clear();
     this.options.sessions.unsubscribeClient(connection.id);
     this.options.service.releaseClient(connection.id);
-    this.options.auth.cancelClient(connection.id);
+    // The authenticated device identity owns provider login. A socket close
+    // only detaches event delivery; auth.resume can bind a replacement socket.
+    this.options.auth.detachClient(connection.id);
   }
 
   async close(): Promise<void> {

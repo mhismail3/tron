@@ -281,11 +281,21 @@ retirement rejection at each suspended boundary, exact `true`/`false`/explicit-`
 wire decisions, event-only revisions, centralized receipt replay, and nested Observation through
 the `AppModel` façade. `ProviderAuthCoordinatorTests` owns the corresponding provider boundary:
 target-isolated newest-load admission, atomic provider/model publication, bounded cursor validation,
-transport-retired prompts, and stale operation responses that close without surfacing a broker not-found error.
-profile-retirement rejection across parallel reads and pagination, operation-keyed prompt/event
-state, bounded event-before-response quarantine and promotion, stale response/cancellation safety,
-exact-target completion refresh, receipt-backed forced refresh/logout, event-only invalidation, and
-nested façade observation. `PackageConfigurationCoordinatorTests` owns typed target isolation,
+transport-detached prompt delivery with stable-operation resume, stale operation responses that close
+without surfacing a broker not-found error, profile-retirement rejection across parallel reads and
+pagination, operation-keyed prompt/event state, bounded event-before-response quarantine and promotion,
+manual-prompt versus callback-relay routing, stale response/cancellation safety, exact-target completion
+refresh, receipt-backed forced refresh/logout, event-only invalidation, and nested façade observation.
+`ProviderOAuthBrowserTests` owns pure callback policy: HTTPS authorization admission, exact
+provider/Gateway loopback descriptor agreement, IPv4/IPv6 loopback limits, bounded GET parsing, encoded
+query preservation, and rejection of external destinations, bodies, absolute targets, wrong routes,
+fragments, and missing authorization results. Hosted tests do not open a production listener or login.
+Before release, perform a physical-device smoke against a disposable provider account: confirm the
+system authentication browser closes through the iPhone loopback handoff for Anthropic/OpenAI/OpenRouter,
+Radius completes through the query-only relay, temporary background/network replacement resumes the same
+operation, the selected Mac's canonical Pi `auth.json` becomes configured, and no callback query or token
+appears in Gateway/iOS logs. Never add real callback values or credentials to fixtures.
+`PackageConfigurationCoordinatorTests` owns typed target isolation,
 newest list/check admission, admitted-error handling, event-only invalidation, closed mutation
 wires and timeouts, stable receipt replay, pre-confirmation marker stability, admitted-versus-stale
 mutation failures, same-profile uncertainty preservation, exact-target reload, profile retirement,
@@ -326,6 +336,7 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/SettingsTrustCoordinatorTests \
   -only-testing:TronMobileTests/ProviderAuthCoordinatorTests \
+  -only-testing:TronMobileTests/ProviderOAuthBrowserTests \
   -only-testing:TronMobileTests/PackageConfigurationCoordinatorTests \
   -only-testing:TronMobileTests/CustomModelConfigurationCoordinatorTests \
   -only-testing:TronMobileTests/AppModelInvalidationTests \

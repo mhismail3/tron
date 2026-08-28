@@ -7,12 +7,15 @@ struct ProviderAuthFlowContent: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: TronSpacing.section) {
+            if let event = model.authEvent,
+               event.kind == .authURL || model.authPrompt == nil {
+                AuthEventContent(event: event)
+            }
             if let prompt = model.authPrompt {
                 AuthPromptContent(prompt: prompt)
-            } else if let event = model.authEvent {
-                AuthEventContent(event: event)
-            } else {
+            }
+            if model.authPrompt == nil && model.authEvent == nil {
                 TronLoadingState(label: "Finishing provider login…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -74,8 +77,8 @@ private struct AuthPromptContent: View {
                 .tronField(monospaced: prompt.kind == .secret)
 
                 TronPrimaryActionButton(
-                    title: submitting ? "Saving…" : "Save",
-                    systemImage: "square.and.arrow.down",
+                    title: submitting ? "Submitting…" : (prompt.kind == .manualCode ? "Complete Login" : "Save"),
+                    systemImage: prompt.kind == .manualCode ? "checkmark.shield" : "square.and.arrow.down",
                     isBusy: submitting,
                     isEnabled: !value.isEmpty && !submitting
                 ) { submit(value) }
@@ -98,8 +101,13 @@ private struct AuthPromptContent: View {
 }
 
 private struct AuthEventContent: View {
+    @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
     let event: AppModel.AuthEventState
+    @State private var browserSession = ProviderOAuthBrowserSession()
+    @State private var openingBrowser = false
+    @State private var browserActive = false
+    @State private var browserError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: TronSpacing.section) {
@@ -117,6 +125,18 @@ private struct AuthEventContent: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: event.operationId) { _, _ in resetBrowser() }
+        .onChange(of: event.kind) { _, kind in
+            if kind != .authURL { resetBrowser() }
+        }
+        .onDisappear { resetBrowser() }
+    }
+
+    private func resetBrowser() {
+        browserSession.cancel()
+        browserError = nil
+        openingBrowser = false
+        browserActive = false
     }
 
     @ViewBuilder private var authURLContent: some View {
@@ -129,10 +149,19 @@ private struct AuthEventContent: View {
             }
         }
         if let url = event.url {
-            Button { openURL(url) } label: {
-                Label("Open Provider Login", systemImage: "safari")
+            Button { openProviderLogin(url) } label: {
+                if openingBrowser {
+                    Label("Opening Provider Login…", systemImage: "safari")
+                } else {
+                    Label(browserActive ? "Open Provider Login Again" : "Open Provider Login", systemImage: "safari")
+                }
             }
             .buttonStyle(TronActionButtonStyle(role: .primary))
+            .disabled(openingBrowser)
+            if let browserError {
+                TronCaption(browserError)
+                    .foregroundStyle(Color.tronError)
+            }
             Text(url.absoluteString)
                 .font(TronTypography.codeContent)
                 .foregroundStyle(Color.tronTextSecondary)
@@ -168,6 +197,45 @@ private struct AuthEventContent: View {
         }
         if let seconds = event.expiresInSeconds {
             TronCaption("The code expires in approximately \(seconds / 60) minute\(seconds / 60 == 1 ? "" : "s").")
+        }
+    }
+
+    private func openProviderLogin(_ url: URL) {
+        browserError = nil
+        guard let capture = event.callbackCapture else {
+            openURL(url)
+            return
+        }
+        openingBrowser = true
+        Task { @MainActor in
+            defer { openingBrowser = false }
+            do {
+                try await browserSession.start(
+                    authorizationURL: url,
+                    capture: capture,
+                    onComplete: { callback in
+                        browserActive = false
+                        Task { @MainActor in
+                            do {
+                                try await model.submitBrowserAuthCallback(
+                                    callback,
+                                    operationID: event.operationId
+                                )
+                            } catch is CancellationError { }
+                            catch { model.presentError(error) }
+                        }
+                    },
+                    onCancel: {
+                        browserActive = false
+                    },
+                    onError: { error in
+                        browserActive = false
+                        browserError = error.localizedDescription
+                    }
+                )
+                browserActive = true
+            } catch is CancellationError { }
+            catch { browserError = error.localizedDescription }
         }
     }
 

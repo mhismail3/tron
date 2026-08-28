@@ -112,6 +112,7 @@ private struct ProviderConfigurationSheet: View {
     let provider: ProviderSummary
     let target: ProviderCatalogTarget
     @State private var activeOperationID: String?
+    @State private var owningProfileID: String?
     @State private var beginningMethod: String?
     @State private var clearing = false
 
@@ -149,6 +150,13 @@ private struct ProviderConfigurationSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled(isPresentingOwnedAuth || beginningMethod != nil)
+        .onAppear {
+            if owningProfileID == nil { owningProfileID = model.profiles.selected?.id }
+        }
+        .onChange(of: model.profiles.selected?.id) { _, selectedProfileID in
+            guard let owningProfileID, selectedProfileID != owningProfileID else { return }
+            close()
+        }
         .onChange(of: currentOperationID) { previous, current in
             if let previous, previous == activeOperationID, current == nil {
                 activeOperationID = nil

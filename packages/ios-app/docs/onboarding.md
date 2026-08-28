@@ -30,8 +30,14 @@ hidden while the native upward sheet gesture remains available.
    and Configure open the same standardized provider configuration sheet used by
    Settings, with every runtime-advertised API-key and account-login method in
    one place. API-key entry stays inline in that sheet with a value-gated Save
-   action. API keys and OAuth responses go directly to the Mac credential
-   flow and are not persisted by iOS.
+   action. Browser OAuth opens in `ASWebAuthenticationSession` on iPhone. For Pi
+   loopback redirects, a one-shot operation-owned iOS listener binds only the exact
+   advertised localhost port/path, captures the bounded authorization response, and
+   closes the system browser through the dedicated `com.tron.mobile.oauth` handoff. The complete
+   redirect is submitted to Pi's existing manual-code interaction; providers without
+   that interaction use the Gateway's exact operation-scoped loopback relay. Pi on the
+   selected Mac still validates state/PKCE, exchanges tokens, and writes canonical
+   credentials. API keys and OAuth responses are never persisted by iOS.
 9. **Default model** chooses a provider-qualified model, records local setup
    completion, and dismisses the sheet to reveal the already-mounted shell and
    floating new-session action.

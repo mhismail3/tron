@@ -74,7 +74,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 const restartDrainMethods = new Set([
   "system.info", "system.logs", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status",
   "session.list", "session.open", "session.sync", "session.close", "session.transcript", "session.attention.read",
-  "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.cancel",
+  "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
 ]);
 
@@ -810,25 +810,46 @@ export class GatewayService {
       case "model.list":
         return this.models(await this.modelRuntime(params), params.cursor, params.limit);
       case "auth.begin": {
+        const sessionId = optionalString(params.sessionId, "sessionId", 200);
         const operationId = this.dependencies.auth.start(
           client.id,
           string(params.providerId, "providerId", { max: 120 }),
           oneOf(params.authType, "authType", ["api_key", "oauth"] as const) as AuthType,
           await this.modelRuntime(params),
+          client.identity,
+          params.commandId === undefined
+            ? undefined
+            : string(params.commandId, "commandId", { min: 8, max: 160 }),
+          sessionId === undefined ? "global" : `session:${sessionId}`,
         );
         return { operationId };
       }
       case "auth.respond": {
         const answered = this.dependencies.auth.respond(
-          client.id,
+          client.identity,
           string(params.operationId, "operationId", { max: 100 }),
           string(params.promptId, "promptId", { max: 100 }),
           typeof params.value === "string" ? params.value : "",
         );
         return { answered };
       }
+      case "auth.callback": {
+        const forwarded = await this.dependencies.auth.forwardCallback(
+          client.identity,
+          string(params.operationId, "operationId", { max: 100 }),
+          string(params.callbackId, "callbackId", { max: 100 }),
+          string(params.query, "query", { max: 16 * 1_024 }),
+        );
+        return { forwarded };
+      }
+      case "auth.resume":
+        return this.dependencies.auth.resume(
+          client.identity,
+          client.id,
+          string(params.operationId, "operationId", { max: 100 }),
+        );
       case "auth.cancel": {
-        const cancelled = this.dependencies.auth.cancel(client.id, string(params.operationId, "operationId", { max: 100 }));
+        const cancelled = this.dependencies.auth.cancel(client.identity, string(params.operationId, "operationId", { max: 100 }));
         return { cancelled };
       }
       case "auth.logout":

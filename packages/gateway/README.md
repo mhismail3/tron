@@ -515,12 +515,25 @@ Primary operation groups are `system`, `device`, `legacy`, `session`,
 `extension`, `provider`, `model`, `auth`, `settings`, `trust`, `packages`,
 `models.custom`, `filesystem`, `git`, `terminal`, and uploads/blobs over HTTP.
 Provider authentication admits at most eight operations globally and two per
-client. Each operation has a 15-minute Gateway-owned lifetime, so providers that
-ignore abort cannot retain broker capacity; completion, failure, cancellation,
-disconnect, and timeout retire exactly once. Provider prompt/event projections
+authenticated device identity. Each operation has a 15-minute Gateway-owned lifetime, so providers that
+ignore abort cannot retain broker capacity; completion, failure, explicit cancellation,
+device revocation, Gateway shutdown, and timeout retire exactly once. A WebSocket disconnect
+only detaches event delivery: `auth.resume` rebinds the same stable-device-owned operation to a
+replacement connection and replays its latest bounded event/prompt or terminal tombstone. Current
+clients send a `commandId` with `auth.begin`; a bounded in-memory admission receipt returns the
+same operation for an uncertain duplicate without claiming that login completed. Provider prompt/event projections
 are limited to 128 KiB before broadcast, and late callbacks from retired operations
-are inert. A bounded one-minute tombstone window makes duplicate or reordered
-`auth.respond`/`auth.cancel` requests harmless without retaining prompt values.
+are inert. Bounded 15-minute tombstones make duplicate or reordered
+`auth.respond`, `auth.callback`, `auth.resume`, and `auth.cancel` requests harmless without retaining prompt values.
+
+For phone browser OAuth, the Gateway derives an optional callback descriptor only from Pi's
+provider-authored `auth_url` (`redirect_uri` or `callback_url`) and only for explicit HTTP loopback
+hosts. iOS may answer Pi's existing `manual_code` prompt with the complete captured redirect. For
+providers such as Radius without that prompt, `auth.callback` accepts only the operation/callback ID
+and bounded query: the host, port, and path remain Gateway-retained, state is checked before a fixed
+no-proxy loopback GET reaches Pi's already-listening callback server, and neither callback data nor
+response bodies are logged, persisted, or returned. Pi remains the sole state/PKCE, token exchange,
+refresh, and credential-storage authority.
 `session.list` and `model.list` are cursor-paginated so Pi catalogs remain
 complete without exceeding bounded gateway frames. Workspace browsing streams directory entries
 from an identity-checked directory handle and fails visibly, without returning a partial listing,

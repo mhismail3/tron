@@ -345,13 +345,26 @@ JSON `null`, while `true` and `false` remain distinct decisions. It uses the sha
 confirmed-mutation executor, and profile retirement synchronously revokes suspended work
 and clears settings projections. `ProviderAuthCoordinator` likewise solely owns typed-target
 provider/model catalogs, per-target paging admission, event-only provider invalidation,
-auth prompt/event parsing, and operation-to-target retention through completion or confirmed
-cancellation. Because provider login can synchronously emit presentation or completion events
+auth prompt/event parsing, browser-callback submission, and operation-to-target retention through
+completion or confirmed cancellation. Because provider login can synchronously emit presentation or completion events
 before `auth.begin` returns, a four-operation, 64-element, 16 KiB pre-response quarantine promotes only the
 newest admitted operation and is synchronously revoked on failure, cancellation, or profile
-retirement. Prompt submission is single-flight on iOS, and the Gateway treats bounded late
+retirement. `auth.begin` carries a command ID, while the active operation belongs to the authenticated
+device identity rather than a disposable socket. Transient transport retirement clears prompt delivery
+but retains the operation/target; foreground or active reconnect calls `auth.resume`, which replays the
+Gateway's latest bounded state without restarting Pi login. Profile replacement still revokes all local
+authority. Prompt and browser callback submission are single-flight on iOS, and the Gateway treats bounded late
 auth acknowledgements as idempotent no-ops so completion/response reordering cannot surface a
-misleading operation-not-found error. Provider and model pages publish as one atomic catalog. Provider projection rejects
+misleading operation-not-found error.
+
+`ProviderOAuthBrowserSession` owns the system authentication browser. It admits only HTTPS authorization
+URLs with a Gateway-derived HTTP loopback callback descriptor, waits for explicitly loopback-bound
+IPv4/IPv6 `NWListener` readiness, accepts one bounded exact-path GET, and uses a nonce-only
+`com.tron.mobile.oauth` redirect to close `ASWebAuthenticationSession`; authorization codes never enter the
+custom-scheme URL. iOS forwards the complete callback URL only to the matching Pi `manual_code`
+prompt. When Pi exposes no such prompt, the app sends only the callback ID and encoded query to the
+Gateway's fixed-destination relay. The app never handles tokens or credentials, and callback values
+remain memory-only. Provider and model pages publish as one atomic catalog. Provider projection rejects
 more than 1,000 rows, 4 MiB of strings, or duplicate IDs. Model projection rejects repeated cursors,
 more than 50 pages, 25,000 models, 16 MiB of retained strings, pages above the requested 500 rows,
 and duplicate compound identities. Gateway cursors bind offsets to an exact whole-catalog fingerprint,

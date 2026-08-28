@@ -103,7 +103,7 @@ struct ProviderAuthCoordinatorTests {
         }
     }
 
-    @Test("transient disconnect retires auth ownership without blanking bounded catalogs")
+    @Test("transient disconnect preserves stable auth operation and bounded catalogs")
     func transientDisconnectRetainsCatalog() async throws {
         let harness = try await makeHarness()
         let catalog = ProviderCatalog(
@@ -111,9 +111,11 @@ struct ProviderAuthCoordinatorTests {
             models: []
         )
         harness.owner.installHostedCatalog(catalog, for: .global)
+        harness.owner.installHostedAuthOperation("operation", target: .global)
 
         harness.owner.retireConnection()
         #expect(harness.owner.catalog(for: .global)?.providers.first?.id == "retained")
+        #expect(harness.owner.hostedActiveAuthOperationID == "operation")
 
         harness.owner.clearProfile()
         #expect(harness.owner.catalog(for: .global) == nil)
@@ -257,6 +259,7 @@ struct ProviderAuthCoordinatorTests {
             let beginRequest = try request(await harness.socket.sentFrames()[1])
             #expect(beginRequest.method == "auth.begin")
             #expect(beginRequest.params?["sessionId"] == .string("session-a"))
+            #expect((beginRequest.params?["commandId"]?.stringValue?.count ?? 0) >= 8)
             await harness.socket.enqueue(response(id: beginRequest.id, result: .object(["operationId": .string("operation-a")])))
             try await begin.value
 
@@ -852,15 +855,206 @@ struct ProviderAuthCoordinatorTests {
 
         owner.handleEvent(.object([
             "operationId": .string("operation"),
+            "callbackCapture": .object([
+                "id": .string("callback"),
+                "host": .string("localhost"),
+                "port": .number(1_455),
+                "path": .string("/auth/callback"),
+            ]),
             "event": .object([
                 "type": .string("auth_url"),
-                "url": .string("https://example.com/login"),
+                "url": .string("https://example.com/login?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback"),
                 "instructions": .string("Open the link"),
             ]),
         ]))
         #expect(owner.event?.kind == .authURL)
-        #expect(owner.event?.url?.absoluteString == "https://example.com/login")
+        #expect(owner.event?.url?.host == "example.com")
         #expect(owner.event?.instructions == "Open the link")
+        #expect(owner.event?.callbackCapture?.id == "callback")
+        #expect(owner.event?.callbackCapture?.port == 1_455)
+
+        owner.handleEvent(.object([
+            "operationId": .string("operation"),
+            "event": .object([
+                "type": .string("auth_url"),
+                "url": .string("file:///tmp/untrusted"),
+            ]),
+        ]))
+        #expect(owner.event?.url == nil)
+    }
+
+    @Test("browser callback uses the exact manual-code prompt when available")
+    func browserCallbackUsesManualPrompt() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            harness.owner.installHostedAuthOperation("operation", target: .global)
+            harness.owner.handlePrompt(.object([
+                "operationId": .string("operation"),
+                "promptId": .string("manual"),
+                "prompt": .object([
+                    "type": .string("manual_code"),
+                    "message": .string("Paste redirect"),
+                ]),
+            ]))
+            let callbackURL = try #require(URL(string:
+                "http://localhost:1455/auth/callback?code=temporary&state=expected"
+            ))
+            let callback = ProviderOAuthCapturedCallback(
+                url: callbackURL,
+                percentEncodedQuery: "code=temporary&state=expected"
+            )
+            let submission = Task {
+                try await harness.owner.submitBrowserCallback(callback, operationID: "operation")
+            }
+            try await harness.socket.waitUntilSent(count: 2)
+            let request = try request(await harness.socket.sentFrames()[1])
+            #expect(request.method == "auth.respond")
+            #expect(request.params?["operationId"] == .string("operation"))
+            #expect(request.params?["promptId"] == .string("manual"))
+            #expect(request.params?["value"] == .string(callbackURL.absoluteString))
+            await harness.socket.enqueue(response(
+                id: request.id,
+                result: .object(["answered": .bool(true)])
+            ))
+            try await submission.value
+            #expect(harness.owner.prompt == nil)
+            #expect(harness.owner.event?.kind == .progress)
+            #expect(harness.owner.event?.message == "Completing provider login…")
+            await harness.client.close()
+        }
+    }
+
+    @Test("browser callback uses the operation-scoped relay when Pi has no manual prompt")
+    func browserCallbackUsesRelay() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            harness.owner.installHostedAuthOperation("radius", target: .global)
+            harness.owner.handleEvent(.object([
+                "operationId": .string("radius"),
+                "callbackCapture": .object([
+                    "id": .string("callback"),
+                    "host": .string("127.0.0.1"),
+                    "port": .number(1_456),
+                    "path": .string("/oauth/callback"),
+                ]),
+                "event": .object([
+                    "type": .string("auth_url"),
+                    "url": .string("https://radius.example/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1456%2Foauth%2Fcallback"),
+                ]),
+            ]))
+            let callback = ProviderOAuthCapturedCallback(
+                url: try #require(URL(string:
+                    "http://127.0.0.1:1456/oauth/callback?code=temporary&state=expected"
+                )),
+                percentEncodedQuery: "code=temporary&state=expected"
+            )
+            let submission = Task {
+                try await harness.owner.submitBrowserCallback(callback, operationID: "radius")
+            }
+            try await harness.socket.waitUntilSent(count: 2)
+            let request = try request(await harness.socket.sentFrames()[1])
+            #expect(request.method == "auth.callback")
+            #expect(request.params?["callbackId"] == .string("callback"))
+            #expect(request.params?["query"] == .string("code=temporary&state=expected"))
+            await harness.socket.enqueue(response(
+                id: request.id,
+                result: .object(["forwarded": .bool(true)])
+            ))
+            try await submission.value
+            #expect(harness.owner.event?.kind == .progress)
+            #expect(harness.owner.event?.callbackCapture == nil)
+            await harness.client.close()
+        }
+    }
+
+    @Test("captured callback survives a retryable transport loss and submits after resume")
+    func callbackRetriesAfterResume() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            harness.owner.installHostedAuthOperation("operation", target: .global)
+            harness.owner.handleEvent(.object([
+                "operationId": .string("operation"),
+                "callbackCapture": .object([
+                    "id": .string("callback"),
+                    "host": .string("127.0.0.1"),
+                    "port": .number(1_456),
+                    "path": .string("/oauth/callback"),
+                ]),
+                "event": .object([
+                    "type": .string("auth_url"),
+                    "url": .string("https://radius.example/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A1456%2Foauth%2Fcallback"),
+                ]),
+            ]))
+            let callback = ProviderOAuthCapturedCallback(
+                url: try #require(URL(string:
+                    "http://127.0.0.1:1456/oauth/callback?code=temporary"
+                )),
+                percentEncodedQuery: "code=temporary"
+            )
+            let first = Task {
+                try await harness.owner.submitBrowserCallback(callback, operationID: "operation")
+            }
+            try await harness.socket.waitUntilSent(count: 2)
+            let firstRequest = try request(await harness.socket.sentFrames()[1])
+            await harness.socket.enqueue(errorResponse(
+                id: firstRequest.id,
+                code: "disconnected",
+                message: "transport replaced",
+                retryable: true
+            ))
+            try await first.value
+
+            harness.owner.retireConnection()
+            let resume = Task { await harness.owner.resumeAuthIfNeeded() }
+            try await harness.socket.waitUntilSent(count: 3)
+            let resumeRequest = try request(await harness.socket.sentFrames()[2])
+            await harness.socket.enqueue(response(
+                id: resumeRequest.id,
+                result: .object([
+                    "state": .string("active"),
+                    "operationId": .string("operation"),
+                    "providerId": .string("provider"),
+                ])
+            ))
+            try await harness.socket.waitUntilSent(count: 4)
+            let retryRequest = try request(await harness.socket.sentFrames()[3])
+            #expect(retryRequest.method == "auth.callback")
+            #expect(retryRequest.params?["query"] == .string("code=temporary"))
+            await harness.socket.enqueue(response(
+                id: retryRequest.id,
+                result: .object(["forwarded": .bool(true)])
+            ))
+            await resume.value
+            #expect(harness.owner.event?.kind == .progress)
+            await harness.client.close()
+        }
+    }
+
+    @Test("transient transport retirement preserves and resumes the active auth operation")
+    func resumesAfterTransportRetirement() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            harness.owner.installHostedAuthOperation("operation", target: .global)
+            harness.owner.retireConnection()
+            #expect(harness.owner.hostedActiveAuthOperationID == "operation")
+
+            let resume = Task { await harness.owner.resumeAuthIfNeeded() }
+            try await harness.socket.waitUntilSent(count: 2)
+            let request = try request(await harness.socket.sentFrames()[1])
+            #expect(request.method == "auth.resume")
+            #expect(request.params?["operationId"] == .string("operation"))
+            await harness.socket.enqueue(response(
+                id: request.id,
+                result: .object([
+                    "state": .string("active"),
+                    "operationId": .string("operation"),
+                    "providerId": .string("provider"),
+                ])
+            ))
+            await resume.value
+            #expect(harness.owner.hostedActiveAuthOperationID == "operation")
+            await harness.client.close()
+        }
     }
 
     @Test("profile clear rejects suspended auth admission")
@@ -1257,7 +1451,12 @@ struct ProviderAuthCoordinatorTests {
         ]))
     }
 
-    private func errorResponse(id: String, code: String, message: String) -> Data {
+    private func errorResponse(
+        id: String,
+        code: String,
+        message: String,
+        retryable: Bool = false
+    ) -> Data {
         try! JSONEncoder.gateway.encode(JSONValue.object([
             "type": .string("response"),
             "id": .string(id),
@@ -1265,7 +1464,7 @@ struct ProviderAuthCoordinatorTests {
             "error": .object([
                 "code": .string(code),
                 "message": .string(message),
-                "retryable": .bool(false),
+                "retryable": .bool(retryable),
             ]),
         ]))
     }

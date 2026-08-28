@@ -118,7 +118,7 @@ describe("WebSocket connection and outbound capacity", () => {
       devices,
       uploads: {} as any,
       sessions: { unsubscribeClient: vi.fn() } as any,
-      auth: { cancelClient: vi.fn() } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: {
         info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
         terminalBelongsToSession: () => false,
@@ -174,7 +174,7 @@ describe("WebSocket connection and outbound capacity", () => {
       devices,
       uploads: {} as any,
       sessions: { unsubscribeClient: vi.fn() } as any,
-      auth: { cancelClient: vi.fn() } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: service as any,
       logger: logger as any,
     });

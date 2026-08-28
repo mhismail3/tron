@@ -37,6 +37,7 @@ struct ProviderAuthEventState: Identifiable, Hashable {
     let verificationURL: URL?
     let intervalSeconds: Int?
     let expiresInSeconds: Int?
+    let callbackCapture: ProviderOAuthCallbackCapture?
     var id: String { operationId }
 }
 
@@ -153,10 +154,14 @@ final class ProviderAuthCoordinator {
     private struct ModelParams: Codable { let sessionId: String?; let cursor: String?; let limit: Int }
     private struct ProviderResponse: Decodable { let providers: [ProviderSummary] }
     private struct ModelResponse: Decodable { let models: [ModelSummary]; let nextCursor: String? }
-    private struct BeginParams: Codable { let providerId, authType: String; let sessionId: String? }
+    private struct BeginParams: Codable { let providerId, authType: String; let sessionId: String?; let commandId: String }
     private struct BeginResponse: Decodable { let operationId: String }
     private struct RespondParams: Codable { let operationId, promptId, value: String }
     private struct RespondResponse: Decodable { let answered: Bool }
+    private struct CallbackParams: Codable { let operationId, callbackId, query: String }
+    private struct CallbackResponse: Decodable { let forwarded: Bool }
+    private struct ResumeParams: Codable { let operationId: String }
+    private struct ResumeResponse: Decodable { let state, operationId, providerId: String; let success: Bool? }
     private struct CancelParams: Codable { let operationId: String }
     private struct CancelResponse: Decodable { let cancelled: Bool }
     private struct RefreshParams: Codable { let force: Bool; let sessionId: String?; let commandId: String }
@@ -230,6 +235,8 @@ final class ProviderAuthCoordinator {
     private var targetByAuthOperation: [String: ProviderCatalogTarget] = [:]
     private var activeAuthOperationID: String?
     private var answeringPromptID: String?
+    private var pendingBrowserCallbackByOperation: [String: ProviderOAuthCapturedCallback] = [:]
+    private var submittingBrowserCallbackOperationID: String?
     private var authBeginGeneration = 0
     private var authPresentationGeneration = 0
     private var inFlightAuthBeginGenerations = Set<Int>()
@@ -316,7 +323,12 @@ final class ProviderAuthCoordinator {
         authPresentationGeneration &+= 1
         let response: BeginResponse = try await client.request(
             "auth.begin",
-            BeginParams(providerId: providerID, authType: authType, sessionId: target.sessionID),
+            BeginParams(
+                providerId: providerID,
+                authType: authType,
+                sessionId: target.sessionID,
+                commandId: uuidSource.next().uuidString
+            ),
             timeout: .seconds(15)
         )
         try requireProfile(admittedProfileGeneration)
@@ -342,7 +354,8 @@ final class ProviderAuthCoordinator {
             userCode: nil,
             verificationURL: nil,
             intervalSeconds: nil,
-            expiresInSeconds: nil
+            expiresInSeconds: nil,
+            callbackCapture: nil
         )
         prompt = quarantined?.prompt
         event = quarantined?.event ?? event
@@ -394,6 +407,116 @@ final class ProviderAuthCoordinator {
         if prompt?.operationId == admittedPrompt.operationId, prompt?.id == admittedPrompt.id {
             prompt = nil
         }
+        installCompletingEvent(operationID: admittedPrompt.operationId)
+        pendingBrowserCallbackByOperation[admittedPrompt.operationId] = nil
+        if submittingBrowserCallbackOperationID == admittedPrompt.operationId {
+            submittingBrowserCallbackOperationID = nil
+        }
+    }
+
+    func submitBrowserCallback(
+        _ callback: ProviderOAuthCapturedCallback,
+        operationID: String
+    ) async throws {
+        guard activeAuthOperationID == operationID else { throw CancellationError() }
+        guard callback.url.absoluteString.utf8.count <= 16 * 1_024,
+              callback.percentEncodedQuery.utf8.count <= 16 * 1_024 else {
+            throw GatewayFailure(
+                code: "invalid_callback",
+                message: "The provider returned an oversized authorization callback.",
+                retryable: false,
+                details: nil
+            )
+        }
+        pendingBrowserCallbackByOperation[operationID] = callback
+        do {
+            try await submitPendingBrowserCallback(operationID: operationID)
+        } catch let failure as GatewayFailure where failure.retryable {
+            // The callback remains memory-only and is retried after auth.resume.
+            return
+        } catch is GatewayPossiblySentError {
+            // The Gateway may already have delivered the one-use callback.
+            // Resume first; its latest event/completion decides whether a retry
+            // remains admissible.
+            return
+        } catch is CancellationError {
+            guard activeAuthOperationID == operationID else { throw CancellationError() }
+        }
+    }
+
+    func resumeAuthIfNeeded() async {
+        guard let operationID = activeAuthOperationID else { return }
+        do {
+            let response: ResumeResponse = try await client.request(
+                "auth.resume",
+                ResumeParams(operationId: operationID),
+                timeout: .seconds(15)
+            )
+            guard response.operationId == operationID else { return }
+            if response.state != "active" && activeAuthOperationID == operationID {
+                retireAuthPresentation(operationID: operationID)
+                return
+            }
+            try? await submitPendingBrowserCallback(operationID: operationID)
+        } catch let failure as GatewayFailure where failure.code == "not_found" {
+            retireAuthPresentation(operationID: operationID)
+        } catch {
+            // Reconnect reconciliation owns the next retry. Keep the bounded
+            // operation identity rather than turning transport loss into OAuth
+            // cancellation.
+        }
+    }
+
+    private func submitPendingBrowserCallback(operationID: String) async throws {
+        guard submittingBrowserCallbackOperationID != operationID,
+              let callback = pendingBrowserCallbackByOperation[operationID],
+              activeAuthOperationID == operationID else { return }
+        submittingBrowserCallbackOperationID = operationID
+        defer {
+            if submittingBrowserCallbackOperationID == operationID {
+                submittingBrowserCallbackOperationID = nil
+            }
+        }
+        if let prompt,
+           prompt.operationId == operationID,
+           prompt.kind == .manualCode {
+            try await answerAuth(callback.url.absoluteString)
+            pendingBrowserCallbackByOperation[operationID] = nil
+            return
+        }
+        guard let event,
+              event.operationId == operationID,
+              let capture = event.callbackCapture else { return }
+        let response: CallbackResponse = try await client.request(
+            "auth.callback",
+            CallbackParams(
+                operationId: operationID,
+                callbackId: capture.id,
+                query: callback.percentEncodedQuery
+            ),
+            timeout: .seconds(45)
+        )
+        if response.forwarded || activeAuthOperationID != operationID {
+            pendingBrowserCallbackByOperation[operationID] = nil
+            installCompletingEvent(operationID: operationID)
+        }
+    }
+
+    private func installCompletingEvent(operationID: String) {
+        guard activeAuthOperationID == operationID else { return }
+        event = ProviderAuthEventState(
+            operationId: operationID,
+            kind: .progress,
+            message: "Completing provider login…",
+            links: [],
+            url: nil,
+            instructions: nil,
+            userCode: nil,
+            verificationURL: nil,
+            intervalSeconds: nil,
+            expiresInSeconds: nil,
+            callbackCapture: nil
+        )
     }
 
     func cancelAuth(operationID: String? = nil) async {
@@ -412,6 +535,8 @@ final class ProviderAuthCoordinator {
         }
         if prompt?.operationId == id { prompt = nil }
         if event?.operationId == id { event = nil }
+        pendingBrowserCallbackByOperation[id] = nil
+        if submittingBrowserCallbackOperationID == id { submittingBrowserCallbackOperationID = nil }
         if response?.cancelled == true {
             targetByAuthOperation[id] = nil
         }
@@ -445,6 +570,12 @@ final class ProviderAuthCoordinator {
         guard let parsed = parsePrompt(payload) else { return }
         if parsed.operationId == activeAuthOperationID {
             prompt = parsed
+            if parsed.kind == .manualCode,
+               pendingBrowserCallbackByOperation[parsed.operationId] != nil {
+                Task { [weak self] in
+                    try? await self?.submitPendingBrowserCallback(operationID: parsed.operationId)
+                }
+            }
         } else if targetByAuthOperation[parsed.operationId] == nil,
                   !inFlightAuthBeginGenerations.isEmpty {
             quarantine(prompt: parsed)
@@ -477,32 +608,37 @@ final class ProviderAuthCoordinator {
         invalidationGeneration &+= 1
     }
 
-    /// Revokes transport-owned auth work while retaining the last bounded
-    /// provider/model projection for a transient reconnect. The next successful
-    /// catalog read replaces it atomically.
+    /// Revokes disposable transport work while retaining the stable-device-owned
+    /// provider operation so a replacement socket can rebind with auth.resume.
     func retireConnection() {
-        revokeConnectionOwnership(clearCatalogs: false)
+        revokeConnectionOwnership(clearCatalogs: false, preserveActiveAuth: true)
     }
 
     /// Synchronously revokes suspended work and disposes all profile projections.
     func clearProfile() {
-        revokeConnectionOwnership(clearCatalogs: true)
+        revokeConnectionOwnership(clearCatalogs: true, preserveActiveAuth: false)
     }
 
-    private func revokeConnectionOwnership(clearCatalogs: Bool) {
+    private func revokeConnectionOwnership(clearCatalogs: Bool, preserveActiveAuth: Bool) {
         profileGeneration &+= 1
         invalidationGeneration &+= 1
         authBeginGeneration &+= 1
         authPresentationGeneration &+= 1
         loadGenerationByTarget = loadGenerationByTarget.mapValues { $0 &+ 1 }
         if clearCatalogs { catalogByTarget.removeAll() }
-        targetByAuthOperation.removeAll()
-        activeAuthOperationID = nil
+        if preserveActiveAuth, let activeAuthOperationID {
+            targetByAuthOperation = targetByAuthOperation.filter { $0.key == activeAuthOperationID }
+        } else {
+            targetByAuthOperation.removeAll()
+            activeAuthOperationID = nil
+            pendingBrowserCallbackByOperation.removeAll()
+            event = nil
+        }
         answeringPromptID = nil
+        submittingBrowserCallbackOperationID = nil
         inFlightAuthBeginGenerations.removeAll()
         removeAllQuarantinedPresentations()
         prompt = nil
-        event = nil
     }
 
     private func retireAuthPresentation(operationID: String) {
@@ -513,6 +649,10 @@ final class ProviderAuthCoordinator {
         }
         if prompt?.operationId == operationID { prompt = nil }
         if event?.operationId == operationID { event = nil }
+        pendingBrowserCallbackByOperation[operationID] = nil
+        if submittingBrowserCallbackOperationID == operationID {
+            submittingBrowserCallbackOperationID = nil
+        }
     }
 
     private func parsePrompt(_ payload: JSONValue) -> ProviderAuthPromptState? {
@@ -548,20 +688,42 @@ final class ProviderAuthCoordinator {
         let links = (eventValue["links"]?.arrayValue ?? []).compactMap { value -> ProviderAuthEventState.Link? in
             guard let object = value.objectValue,
                   let rawURL = object["url"]?.stringValue,
-                  let url = URL(string: rawURL) else { return nil }
+                  let url = URL(string: rawURL),
+                  ProviderOAuthURLPolicy.admitsExternalWebURL(url) else { return nil }
             return .init(url: url, label: object["label"]?.stringValue)
         }
+        let callbackCapture: ProviderOAuthCallbackCapture?
+        if let capture = root["callbackCapture"]?.objectValue,
+           let id = capture["id"]?.stringValue,
+           let host = capture["host"]?.stringValue,
+           let port = capture["port"]?.intValue,
+           let path = capture["path"]?.stringValue,
+           let boundedPort = UInt16(exactly: port),
+           ProviderOAuthURLPolicy.normalizedLoopbackHost(host) == host,
+           id.utf8.count <= 100,
+           path.hasPrefix("/"), path.utf8.count <= 2_048 {
+            callbackCapture = ProviderOAuthCallbackCapture(id: id, host: host, port: boundedPort, path: path)
+        } else {
+            callbackCapture = nil
+        }
+        let authorizationURL = eventValue["url"]?.stringValue
+            .flatMap(URL.init(string:))
+            .flatMap { ProviderOAuthURLPolicy.admitsExternalWebURL($0) ? $0 : nil }
+        let verificationURL = eventValue["verificationUri"]?.stringValue
+            .flatMap(URL.init(string:))
+            .flatMap { ProviderOAuthURLPolicy.admitsExternalWebURL($0) ? $0 : nil }
         return ProviderAuthEventState(
             operationId: operationID,
             kind: kind,
             message: eventValue["message"]?.stringValue,
             links: links,
-            url: eventValue["url"]?.stringValue.flatMap(URL.init(string:)),
+            url: authorizationURL,
             instructions: eventValue["instructions"]?.stringValue,
             userCode: eventValue["userCode"]?.stringValue,
-            verificationURL: eventValue["verificationUri"]?.stringValue.flatMap(URL.init(string:)),
+            verificationURL: verificationURL,
             intervalSeconds: eventValue["intervalSeconds"]?.intValue,
-            expiresInSeconds: eventValue["expiresInSeconds"]?.intValue
+            expiresInSeconds: eventValue["expiresInSeconds"]?.intValue,
+            callbackCapture: callbackCapture
         )
     }
 
@@ -583,6 +745,10 @@ final class ProviderAuthCoordinator {
             activeAuthOperationID = nil
             if prompt?.operationId == completion.operationID { prompt = nil }
             if event?.operationId == completion.operationID { event = nil }
+        }
+        pendingBrowserCallbackByOperation[completion.operationID] = nil
+        if submittingBrowserCallbackOperationID == completion.operationID {
+            submittingBrowserCallbackOperationID = nil
         }
         let target = targetByAuthOperation.removeValue(forKey: completion.operationID)
         if let target {

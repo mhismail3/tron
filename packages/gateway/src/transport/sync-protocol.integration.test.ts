@@ -76,7 +76,7 @@ describe("two-phase session synchronization protocol", () => {
       devices,
       uploads: {} as any,
       sessions: sessions as any,
-      auth: { cancelClient: vi.fn() } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: service as any,
       logger: { log: vi.fn() } as any,
     });
@@ -338,7 +338,7 @@ describe("synchronization catch-up overflow recovery", () => {
       devices,
       uploads: {} as any,
       sessions: sessions as any,
-      auth: { cancelClient: vi.fn() } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: service as any,
       logger: { log: vi.fn() } as any,
     });
@@ -512,7 +512,8 @@ describe("connection-wide synchronization ownership", () => {
     gateway = new GatewayServer({
       host: "127.0.0.1", port: address.port, maxFrameBytes: 1_048_576,
       maximumSynchronizationBytes: 1_000,
-      devices, uploads: {} as any, sessions: sessions as any, auth: { cancelClient: vi.fn() } as any,
+      devices, uploads: {} as any, sessions: sessions as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: service as any, logger: { log: vi.fn() } as any,
     });
     await gateway.listen();

@@ -17,6 +17,14 @@ struct ProvidersSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(spacing: 6) {
+                if let profile = model.profiles.selected {
+                    TronInfoCard(
+                        icon: "desktopcomputer",
+                        text: "Provider credentials are stored on \(profile.label) (\(profile.host)).",
+                        accent: .tronEmerald
+                    )
+                    .padding(.bottom, 6)
+                }
                 if loading && providers.isEmpty {
                     TronLoadingState(label: "Loading providers…", accent: .tronEmerald)
                         .frame(maxWidth: .infinity, alignment: .leading)

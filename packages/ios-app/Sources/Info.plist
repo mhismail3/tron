@@ -81,11 +81,21 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>com.tron.mobile.oauth</string>
+			<string>com.tron.mobile.links</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>tron-mobile</string>
 				<string>tron</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.tron.mobile.oauth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.tron.mobile.oauth</string>
 			</array>
 		</dict>
 	</array>

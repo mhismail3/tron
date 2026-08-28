@@ -768,8 +768,8 @@ struct AppModelEventTests {
         #expect(model.commands.isEmpty)
     }
 
-    @Test("transport loss retires provider authentication before reconnect")
-    func authPresentationRetiresOnDisconnect() async {
+    @Test("transport loss detaches provider prompt presentation before resumable reconnect")
+    func authPresentationDetachesOnDisconnect() async {
         let model = AppModel()
         model.installHostedProviderAuthOperation("auth-operation")
         await model.handle(GatewayEvent(
