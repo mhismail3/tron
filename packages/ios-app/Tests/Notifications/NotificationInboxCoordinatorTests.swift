@@ -87,6 +87,25 @@ struct NotificationInboxCoordinatorTests {
         #expect(restored.unreadCount == 0)
     }
 
+    @Test("primary inbox projects exactly fifteen rows before full history")
+    func recentProjection() {
+        let notifications = (0..<16).map { index in
+            NotificationInboxItem(
+                profileID: "profile-a",
+                profileLabel: "Studio",
+                machineID: "machine-a",
+                notification: item(
+                    id: "notification-\(String(format: "%02d", index))",
+                    createdAt: "2026-01-01T00:00:\(String(format: "%02d", index))Z"
+                )
+            )
+        }
+        #expect(NotificationInboxPresentationPolicy.recentLimit == 15)
+        #expect(NotificationInboxPresentationPolicy.recent(notifications).map(\.id) == notifications.prefix(15).map(\.id))
+        #expect(NotificationInboxPresentationPolicy.hasHistory(after: notifications))
+        #expect(!NotificationInboxPresentationPolicy.hasHistory(after: Array(notifications.prefix(15))))
+    }
+
     @MainActor
     @Test("a stale profile refresh cannot replace its newer authoritative generation")
     func staleRefresh() {

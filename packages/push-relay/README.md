@@ -24,7 +24,7 @@ or arbitrary APNs payloads.
 
 A grant can address only its installation. The model cannot select a token,
 topic, APNs environment, badge, sound, priority, provider URL, or payload
-object. The Worker maps these exact routes:
+object. The fixed alert names `tron-notification.caf`, which the iOS target bundles as a supported 1.46-second CAF resource. The Worker maps these exact routes:
 
 | Route | App Attest app ID suffix | App Attest environment | APNs |
 | --- | --- | --- | --- |

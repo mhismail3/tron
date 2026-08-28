@@ -1,0 +1,7 @@
+System Notification 02
+Creator: Universfield
+Source: Pixabay sound effect 352442
+License: Pixabay Content License
+License terms: https://pixabay.com/service/terms/
+
+The sound is bundled as tron-notification.caf and used only as part of the Tron application.

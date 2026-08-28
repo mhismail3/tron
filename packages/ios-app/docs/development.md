@@ -37,10 +37,7 @@ xcodebuild build -project TronMobile.xcodeproj -scheme 'Tron Fast' \
 ```
 
 The generated Xcode project is not architectural truth; edit `project.yml` and
-source files, then regenerate. `packages/ios-app/project.yml` is the sole
-orientation authority: iPhone supports portrait plus both landscape orientations,
-and iPad supports all four orientations. Do not add orientation keys to
-`Sources/Info.plist`; run `scripts/test-source-policy.sh` to guard this boundary.
+source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `scripts/test-source-policy.sh` to guard this boundary and the bundled notification sound.
 
 ## Efficient focused tests
 
@@ -761,7 +758,7 @@ reject an empty origin, and Mac installation verification rejects a selected sta
 through App Attest: `com.tron.mobile.beta` development and `com.tron.mobile`
 development (`Tron Fast`/`ProdDebug`) use APNs sandbox, while
 `com.tron.mobile` production uses APNs production. iOS cannot select an
-arbitrary topic or environment. The App Attest key identifier returned by Apple
+arbitrary topic or environment. APNs payloads name the app-bundled `tron-notification.caf`; keep that CAF under 30 seconds, in a supported linear PCM/IMA4/µLaw/aLaw format, and included as a root bundle resource whenever the Worker sound name changes. The App Attest key identifier returned by Apple
 remains verbatim in Keychain and is passed verbatim back to `DCAppAttestService`.
 Only the Worker registration projection decodes its exact 32-byte credential ID
 and re-encodes it as canonical unpadded base64url before computing the client-data

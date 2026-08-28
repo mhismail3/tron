@@ -5,23 +5,32 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/project.yml"
 INFO="$ROOT/Sources/Info.plist"
 fail() { echo "iOS source policy: $*" >&2; exit 1; }
+SOUND="$ROOT/Sources/Resources/Sounds/tron-notification.caf"
 [[ -f "$PROJECT" && -f "$INFO" ]] || fail "missing project source"
+[[ -f "$SOUND" && ! -L "$SOUND" && -s "$SOUND" ]] || fail "missing bundled notification sound"
+[[ "$(grep -Fc 'Sources/Resources/Sounds/tron-notification.caf' "$PROJECT")" == 1 ]] \
+  || fail "project.yml must bundle the notification sound exactly once"
 
-iphone_key='INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone'
-ipad_key='INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad'
-iphone_value='UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'
-ipad_value='UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight'
-iphone="${iphone_key}: \"${iphone_value}\""
-ipad="${ipad_key}: \"${ipad_value}\""
-[[ "$(grep -Fc "$iphone" "$PROJECT")" == 1 ]] || fail "project.yml must declare the exact iPhone orientation policy once"
-[[ "$(grep -Fc "$ipad" "$PROJECT")" == 1 ]] || fail "project.yml must declare the exact iPad orientation policy once"
-
-# Every checked-in source Info.plist must leave orientation ownership to the
-# generated build settings. This includes the share extension plist.
-while IFS= read -r info; do
-  ! grep -Eq 'UISupportedInterfaceOrientations' "$info" \
-    || fail "orientation keys must not be present in $info"
-done < <(find "$ROOT/Sources" "$ROOT/ShareExtension" -name Info.plist -type f -print)
+# The application uses a checked-in Info.plist, so that plist—not generated
+# INFOPLIST_KEY settings—must own the runtime orientation arrays.
+! grep -Fq 'INFOPLIST_KEY_UISupportedInterfaceOrientations' "$PROJECT" \
+  || fail "project.yml must not declare ineffective generated orientation keys"
+/usr/bin/python3 - "$INFO" "$ROOT/ShareExtension/Info.plist" <<'PY' \
+  || fail "source Info.plist orientation policy is invalid"
+import plistlib, sys
+with open(sys.argv[1], "rb") as source:
+    app = plistlib.load(source)
+assert app.get("UISupportedInterfaceOrientations") == ["UIInterfaceOrientationPortrait"]
+assert app.get("UISupportedInterfaceOrientations~ipad") == [
+    "UIInterfaceOrientationPortrait",
+    "UIInterfaceOrientationPortraitUpsideDown",
+    "UIInterfaceOrientationLandscapeLeft",
+    "UIInterfaceOrientationLandscapeRight",
+]
+with open(sys.argv[2], "rb") as source:
+    extension = plistlib.load(source)
+assert not any(key.startswith("UISupportedInterfaceOrientations") for key in extension)
+PY
 
 # Render into a disposable directory and inspect the actual Xcode project. Do
 # not leave generated projects in the working tree.
@@ -34,16 +43,9 @@ PATH="/opt/homebrew/bin:$PATH" xcodegen generate \
 generated_project="$generated_root/TronMobile.xcodeproj/project.pbxproj"
 [[ -f "$generated_project" ]] || fail "xcodegen did not produce a project build-settings file"
 
-# XcodeGen repeats inherited settings for generated configurations. Ensure
-# every emitted orientation declaration has the exact source-owned value and
-# that both device families are emitted at least once.
-for pair in "$iphone_key|$iphone_value" "$ipad_key|$ipad_value"; do
-  key="${pair%%|*}"
-  value="${pair#*|}"
-  key_count="$(grep -Fc "$key" "$generated_project")"
-  value_count="$(grep -Fc "$value" "$generated_project")"
-  [[ "$key_count" -gt 0 && "$key_count" == "$value_count" ]] \
-    || fail "generated project orientation setting $key is missing or mismatched"
-done
+! grep -Fq 'INFOPLIST_KEY_UISupportedInterfaceOrientations' "$generated_project" \
+  || fail "generated project reintroduced competing orientation settings"
+grep -Fq 'tron-notification.caf' "$generated_project" \
+  || fail "generated project omitted the notification sound"
 
-echo "iOS orientation source policy passed (project.yml and generated build settings are authoritative)"
+echo "iOS source policy passed (iPhone is portrait-only; iPad supports all orientations; project.yml owns resources)"

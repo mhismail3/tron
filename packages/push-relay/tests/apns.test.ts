@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { buildApnsPayload, sendToApns } from "../src/apns";
+import { buildApnsPayload, sendToApns, TRON_NOTIFICATION_SOUND } from "../src/apns";
 import type { Env } from "../src/contracts";
 import { notification } from "./fixtures";
 
@@ -14,7 +14,7 @@ describe("closed APNs payload", () => {
     expect(payload).toEqual({
       aps: {
         alert: { title: "Tron", body: "Tron needs your input." },
-        sound: "default",
+        sound: TRON_NOTIFICATION_SOUND,
         category: "TRON_AGENT_NOTIFICATION",
       },
       tron: { kind: "agent_notification", requestId: "request-identifier-0001" },
