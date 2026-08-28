@@ -337,7 +337,7 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("displaced retained pinned view physically resumes at the latest tail")
+    @Test("displaced retained pinned view is covered while it resumes at the latest tail")
     func displacedRetainedResume() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_207) { harness in
@@ -349,17 +349,16 @@ struct ChatViewScrollHarnessTests {
                 #expect(try harness.nativeTranscriptDistanceFromTail() > 100)
 
                 harness.drivePinnedPositionReapplication()
-                for _ in 0..<20 where try harness.nativeTranscriptDistanceFromTail() > 2 {
-                    try await harness.driveFrameBoundary()
-                    await Task.yield()
+                _ = try await harness.recorder.waitUntil { !$0.observation.isReady }
+                let resumed = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.observation.visibleRowIDs.contains(harness.lastTranscriptID)
+                        && $0.observation.geometry.distanceFromBottom <= 2
                 }
                 #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
-                let resumeCommands = harness.probeObservation.tailMaterializationCommandCount
-                    - ready.observation.tailMaterializationCommandCount
-                #expect(resumeCommands == 1)
                 #expect(
-                    harness.probeObservation.physicalTailRepairCommandCount
-                        == ready.observation.physicalTailRepairCommandCount + 1
+                    resumed.observation.smoothAutomaticScrollCommandCount
+                        == ready.observation.smoothAutomaticScrollCommandCount
                 )
             }
         }

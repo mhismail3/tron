@@ -657,23 +657,14 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
-    @Test("retained pinned resume republishes physical ownership even when mode is unchanged")
-    func retainedPinnedResumeReappliesPosition() {
+    @Test("retained pinned presentation handoff republishes physical ownership")
+    func retainedPinnedPresentationReappliesPosition() {
         let coordinator = ChatScrollCoordinator()
         let initial = coordinator.pinnedPositionRevision
         coordinator.resetForPresentation(2, retainingVisibleViewport: true)
         #expect(coordinator.viewportMode == .pinned)
         #expect(coordinator.pinnedPositionRevision == initial + 1)
         #expect(coordinator.canInstallPersistentBottomPosition)
-
-        coordinator.requestPinnedPositionReapplication()
-        #expect(coordinator.pinnedPositionRevision == initial + 2)
-
-        coordinator.scrollPositionChanged(isPositionedByUser: true)
-        let anchoredRevision = coordinator.pinnedPositionRevision
-        coordinator.requestPinnedPositionReapplication()
-        #expect(coordinator.pinnedPositionRevision == anchoredRevision)
-        #expect(!coordinator.canInstallPersistentBottomPosition)
     }
 
     @Test("catch-up lease stays stronger than persistent pin until physical settlement")

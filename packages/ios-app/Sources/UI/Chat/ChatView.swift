@@ -268,11 +268,15 @@ struct ChatView: View {
                 // picker must not cancel the selection it is about to deliver.
                 sessionPresentation.suspendForBackground()
             } else if phase == .active {
-                // SwiftUI can retain a displaced native offset across scene
-                // suspension even though logical pinning did not change.
-                scrollCoordinator.requestPinnedPositionReapplication()
-                if sessionPresentation.needsOpeningResume {
+                if sessionPresentation.needsOpeningResume
+                    || transcriptPresentation.installed == nil {
                     Task { await beginOpeningPresentation() }
+                } else {
+                    // A retained native scroll view can resume at its top before
+                    // SwiftUI reapplies logical bottom ownership. Re-enter the
+                    // opaque positioning phase so that correction is never a
+                    // visible top-to-bottom scroll.
+                    Task { await resumePinnedViewportPresentation() }
                 }
             }
         }
@@ -1003,6 +1007,8 @@ struct ChatView: View {
         performanceTracker.discardScroll()
         let retainsVisiblePresentation = sessionPresentation.modelPresentationGeneration != nil
             && selectedAuthoritativeSnapshot?.sessionId == sessionID
+            && transcriptPresentation.installed != nil
+            && sessionPresentation.open.phase == .ready
         if !retainsVisiblePresentation {
             sessionPresentation.modelPresentationGeneration = nil
             transcriptPresentation.reset()
@@ -1137,6 +1143,8 @@ struct ChatView: View {
         performanceTracker.discardScroll()
         let retainsVisiblePresentation = sessionPresentation.modelPresentationGeneration != nil
             && selectedAuthoritativeSnapshot?.sessionId == sessionID
+            && transcriptPresentation.installed != nil
+            && sessionPresentation.open.phase == .ready
         if !retainsVisiblePresentation {
             transcriptPresentation.reset()
         }
@@ -1266,7 +1274,7 @@ struct ChatView: View {
                 return true
             },
             reapplyPinnedPosition: {
-                scrollCoordinator.requestPinnedPositionReapplication()
+                Task { await resumePinnedViewportPresentation() }
             },
             invalidatePresentation: {
                 scrollCoordinator.resetForPresentation()
@@ -1310,6 +1318,48 @@ struct ChatView: View {
             guard sessionPresentation.open.epoch == epoch,
                   sessionPresentation.open.phase == .ready else { return }
             scrollCoordinator.openingRevealCompleted()
+        }
+    }
+
+    @MainActor
+    private func resumePinnedViewportPresentation() async {
+        guard sessionPresentation.openingTask == nil,
+              scrollCoordinator.usesPinnedSizeChangeAnchor,
+              let generation = sessionPresentation.modelPresentationGeneration,
+              selectedAuthoritativeSnapshot?.sessionId == sessionID,
+              transcriptPresentation.installed != nil,
+              let epoch = sessionPresentation.open.beginPinnedResumePositioning(
+                  sessionID: sessionID
+              ) else { return }
+
+        scrollCoordinator.resetForPresentation(generation)
+        let task = Task { @MainActor in
+            let positioned = await positionLatestTail(
+                epoch: epoch,
+                targetRenderedID: "transcript-bottom"
+            )
+            guard !Task.isCancelled, positioned else {
+                if !Task.isCancelled {
+                    _ = sessionPresentation.open.fail(
+                        sessionID: sessionID,
+                        epoch: epoch,
+                        message: "The conversation layout did not settle. Please retry."
+                    )
+                }
+                return
+            }
+            guard revealPositionedTranscript(epoch: epoch) else { return }
+            do { try await displayFrameScheduler.nextFrame() }
+            catch { return }
+            guard !Task.isCancelled,
+                  sessionPresentation.open.epoch == epoch,
+                  sessionPresentation.open.phase == .ready else { return }
+            await scrollCoordinator.waitForOpeningTailSettlement()
+        }
+        sessionPresentation.openingTask = task
+        await task.value
+        if sessionPresentation.open.epoch == epoch {
+            sessionPresentation.openingTask = nil
         }
     }
 

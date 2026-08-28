@@ -244,7 +244,7 @@ bottom boundary, and retains that command through animation completion plus two
 unchanged presented frames before releasing the binding. Its bounded deadline only
 retries or fails positioning; it never certifies an unverified ready frame. Ordinary
 pinned resizing then belongs to the native size-change anchor; detached readers remain
-unpositioned.
+unpositioned. If scene suspension leaves a retained pinned native view physically displaced, foreground resume re-enters the same opaque positioning phase before issuing the exact marker correction, then uses the ordinary fade/eight-point reveal. A transient top-origin correction is therefore never presented; a detached reader is not repinned.
 Short and empty transcripts use the existing native geometry callback to install one disabled-animation minimum content height at the composer-visible viewport; overflowing transcripts are unaffected. The same coalesced observation carries the opening phase so geometry captured before positioning is re-admitted without a callback-order race. This keeps underflow bottom-owned through keyboard contraction, while a bounded signed-marker repair remains reserved for proven overflow drift.
 Test builds can admit one synthetic authoritative
 snapshot through the same read gate and skip only the network opening handshake.

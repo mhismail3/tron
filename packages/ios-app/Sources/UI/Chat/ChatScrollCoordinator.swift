@@ -627,21 +627,6 @@ final class ChatScrollCoordinator {
         publish(.tail, animation: .disabled, origin: .tailMaterialization)
     }
 
-    func requestPinnedPositionReapplication() {
-        guard viewportMode == .pinned else { return }
-        // Scene resume is a retained-presentation handoff. Revoke stale marker
-        // evidence and advance the layout epoch before one exact marker
-        // reassertion; routine pinned updates remain native and command-free.
-        resetForPresentation(presentation, retainingVisibleViewport: true)
-        // A retained native UIScrollView can remain physically displaced while
-        // its lazy marker has no fresh callback to prove that displacement.
-        // Reassert the exact marker once for this explicit resume boundary;
-        // the ordinary streaming/resize paths remain command-free.
-        tailMaterializationRenderedID = "transcript-bottom"
-        tailMaterializationRequiredRevision = semanticFrameRevision
-        publish(.tail, animation: .disabled, origin: .tailMaterialization)
-    }
-
     func semanticResponseArrived() {
         if shouldTrackUnreadResponse { hasUnreadContent = true }
     }

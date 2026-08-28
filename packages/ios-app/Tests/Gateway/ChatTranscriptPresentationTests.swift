@@ -935,6 +935,34 @@ struct ChatTranscriptPresentationTests {
         #expect(state.phase == .ready)
     }
 
+    @Test("pinned scene resume remounts the opaque positioning phase before reveal")
+    func pinnedResumePresentationState() throws {
+        var state = ChatOpenPresentationState(sessionID: "session-a")
+        let openingEpoch = state.begin()
+        let installed = state.installAuthoritativeBaseline(
+            sessionID: "session-a", epoch: openingEpoch
+        )
+        let positioned = state.installPositionedViewport(
+            sessionID: "session-a", epoch: openingEpoch
+        )
+        #expect(installed)
+        #expect(positioned)
+
+        let wrongSession = state.beginPinnedResumePositioning(sessionID: "session-b")
+        #expect(wrongSession == nil)
+        #expect(state.phase == .ready)
+
+        let resumeEpoch = state.beginPinnedResumePositioning(sessionID: "session-a")
+        #expect(resumeEpoch == openingEpoch + 1)
+        #expect(state.phase == .positioning)
+        let resumed = state.installPositionedViewport(
+            sessionID: "session-a",
+            epoch: try #require(resumeEpoch)
+        )
+        #expect(resumed)
+        #expect(state.phase == .ready)
+    }
+
     @Test("stale presentation callbacks cannot fail a newer opening epoch")
     func staleChatOpenCallbacks() {
         var state = ChatOpenPresentationState(sessionID: "session-a")
