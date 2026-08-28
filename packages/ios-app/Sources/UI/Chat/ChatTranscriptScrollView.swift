@@ -20,6 +20,7 @@ extension ChatHostedProbe: ChatTranscriptHostedRecording {}
 private struct ChatScrollGeometryObservation: Equatable {
     let geometry: ChatTranscriptGeometry
     let presentationEpoch: Int
+    let presentationPhase: ChatOpenPresentationPhase
 }
 
 private struct ChatLazyTailMaterializationRequest: Hashable {
@@ -27,11 +28,29 @@ private struct ChatLazyTailMaterializationRequest: Hashable {
     let semanticID: String
 }
 
-private enum ChatTranscriptLayoutConstants {
+enum ChatTranscriptLayoutConstants {
     static let rowSpacing: CGFloat = 8
     /// The marker owns the final composer affordance; stack spacing is zero so
     /// it cannot silently add another tail gap.
     static let tailAffordanceHeight: CGFloat = 12
+}
+
+enum ChatTranscriptUnderflowLayoutPolicy {
+    static func minimumContentHeight(containerHeight: CGFloat, bottomInset: CGFloat) -> CGFloat {
+        guard containerHeight.isFinite, bottomInset.isFinite else { return 0 }
+        return max(0, containerHeight - bottomInset)
+    }
+
+    static func isPhysicallyInstalled(_ geometry: ChatTranscriptGeometry) -> Bool {
+        guard geometry.isValid else { return false }
+        let visibleHeight = max(0, geometry.containerHeight - geometry.bottomInset)
+        let minimum = minimumContentHeight(
+            containerHeight: geometry.containerHeight,
+            bottomInset: geometry.bottomInset
+        )
+        return geometry.contentHeight + 2 >= minimum
+            && geometry.contentHeight <= visibleHeight + 2
+    }
 }
 
 struct ChatQueuedMessageRenderEntry: Identifiable, Hashable {
@@ -80,10 +99,20 @@ struct ChatPhysicalTranscriptRows: RandomAccessCollection {
     let installed: InstalledChatTranscript
     let canonicalAliases: [String: String]
 
+    private var canonicalCount: Int { installed.committedLedger.items.count }
+    private var liveCount: Int { installed.liveRegion.items.count }
+
+    /// Canonical and live authority remain separate in `InstalledChatTranscript`.
+    /// The installed commit precomputes its one optional display-only boundary
+    /// composition so collection indexing stays O(1).
+    private var boundaryFusion: ChatPhysicalToolRunFusion? { installed.toolBoundaryFusion }
+    private var hasBoundaryFusion: Bool { installed.toolBoundaryFusion != nil }
+
     var startIndex: Int { 0 }
     var endIndex: Int {
-        installed.committedLedger.items.count
-            + installed.liveRegion.items.count
+        canonicalCount
+            + liveCount
+            - (hasBoundaryFusion ? 1 : 0)
             + handoffCount
             + installed.queuedMessages.count
     }
@@ -91,14 +120,18 @@ struct ChatPhysicalTranscriptRows: RandomAccessCollection {
     subscript(position: Int) -> ChatPhysicalTranscriptRow {
         precondition(indices.contains(position))
         var index = position
-        if index < installed.committedLedger.items.count {
+        if index < canonicalCount {
+            if index == canonicalCount - 1, let fusion = boundaryFusion {
+                return transcriptRow(.toolRun(fusion.run), isCommitted: true)
+            }
             return transcriptRow(installed.committedLedger.items[index], isCommitted: true)
         }
-        index -= installed.committedLedger.items.count
-        if index < installed.liveRegion.items.count {
+        index -= canonicalCount
+        if hasBoundaryFusion { index += 1 }
+        if index < liveCount {
             return transcriptRow(installed.liveRegion.items[index], isCommitted: false)
         }
-        index -= installed.liveRegion.items.count
+        index -= liveCount
         if handoffCount == 1 {
             if index == 0 { return handoffRow }
             index -= 1
@@ -155,6 +188,36 @@ struct ChatPhysicalTranscriptRows: RandomAccessCollection {
             semanticID: promptAlias == nil ? item.id : (canonicalID ?? item.id),
             content: .transcript(item, isCommitted: isCommitted)
         )
+    }
+}
+
+struct ChatPhysicalToolRunFusion: Hashable {
+    let canonicalRenderedID: String
+    let liveRenderedID: String
+    let run: ChatToolRunPresentation
+
+    init?(canonical: ChatToolRunPresentation, live: ChatToolRunPresentation) {
+        guard let segment = Self.segmentID(for: canonical),
+              Self.segmentID(for: live) == segment else { return nil }
+        var tools = canonical.tools
+        let canonicalIDs = Set(tools.map(\.id))
+        // Canonical descriptors win for a handoff duplicate. New live calls
+        // retain their exact order after the canonical membership.
+        tools.append(contentsOf: live.tools.filter { !canonicalIDs.contains($0.id) })
+        guard !tools.isEmpty else { return nil }
+        canonicalRenderedID = canonical.id
+        liveRenderedID = live.id
+        run = ChatToolRunPresentation(tools: tools, anchorID: canonical.anchorID)
+    }
+
+    private static func segmentID(for run: ChatToolRunPresentation) -> String? {
+        let segments = Set(run.tools.compactMap { tool -> String? in
+            guard let segment = tool.toolSegmentId, !segment.isEmpty else { return nil }
+            return segment
+        })
+        guard segments.count == 1,
+              run.tools.allSatisfy({ $0.toolSegmentId == segments.first }) else { return nil }
+        return segments.first
     }
 }
 
@@ -326,6 +389,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let onApplyViewportMode: (ChatViewportMode) -> Void
     let hostedRecorder: (any ChatTranscriptHostedRecording)?
 
+    @State private var minimumUnderflowContentHeight: CGFloat = 0
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -361,6 +426,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 tailMarker
             }
             .padding(.top, 12)
+            // An explicit ScrollPosition target suppresses SwiftUI's advisory
+            // underflow alignment. A measured minimum keeps only short/empty
+            // transcripts composer-aligned; overflowing transcripts are unchanged.
+            .frame(minHeight: minimumUnderflowContentHeight, alignment: .bottom)
             .scrollTargetLayout()
             .chatStableTranscriptUpdates()
             .offset(y: isReady || reduceMotion ? 0 : 8)
@@ -372,8 +441,11 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         // semantic position through the coordinator's restore transaction.
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.bottom, for: .alignment)
+        // Positioning is pinned-owned even while the opaque opening surface is
+        // mounted; switching this role to top would undo underflow alignment
+        // before the exact tail evidence is admitted.
         .defaultScrollAnchor(
-            isReady && scrollCoordinator.usesPinnedSizeChangeAnchor ? .bottom : .top,
+            scrollCoordinator.usesPinnedSizeChangeAnchor ? .bottom : .top,
             for: .sizeChanges
         )
         // Native size-change anchoring owns ordinary pinned layout changes.
@@ -392,17 +464,33 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         .onScrollGeometryChange(for: ChatScrollGeometryObservation.self) { value in
             ChatScrollGeometryObservation(
                 geometry: ChatTranscriptGeometry(value),
-                presentationEpoch: presentationEpoch
+                presentationEpoch: presentationEpoch,
+                presentationPhase: presentationPhase
             )
         } action: { previous, observation in
             guard observation.presentationEpoch == presentationEpoch else { return }
             let current = observation.geometry
             let prior = previous.geometry
+            let minimumHeight = ChatTranscriptUnderflowLayoutPolicy.minimumContentHeight(
+                containerHeight: current.containerHeight,
+                bottomInset: current.bottomInset
+            )
+            if current.containerHeight.isFinite,
+               current.containerHeight > 0,
+               current.bottomInset.isFinite,
+               abs(minimumUnderflowContentHeight - minimumHeight) > 0.5 {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    minimumUnderflowContentHeight = minimumHeight
+                }
+            }
             hostedRecorder?.updateGeometry(current)
             if isReady, current.isAtCatchUpBoundary {
                 hostedRecorder?.recordScrollSettle(distanceFromBottom: current.distanceFromBottom)
             }
-            guard presentationPhase == .positioning || presentationPhase == .ready,
+            guard observation.presentationPhase == .positioning
+                    || observation.presentationPhase == .ready,
                   admitsGeometryCallbacks,
                   admitsNativeCallbacks else { return }
             if current.hasViewportChange(from: prior) {

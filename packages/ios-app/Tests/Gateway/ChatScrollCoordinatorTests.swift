@@ -613,6 +613,50 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
+    @Test("a row frame before its materialization request still releases the exact lease")
+    func rowFrameBeforeMaterializationRequest() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            coordinator.semanticFrameChanged(
+                renderedID: "new-row", layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 20, width: 100, height: 20)
+            )
+            coordinator.discreteTailInserted(renderedID: "new-row")
+            let command = try #require(coordinator.command)
+            #expect(coordinator.commandApplied(command))
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            await Task.yield()
+            #expect(coordinator.targetReleaseGeneration == 1)
+            #expect(coordinator.consumeTargetRelease())
+        }
+    }
+
+    @Test("burst materialization requests retain one newest follow-up lease")
+    func burstMaterializationRequestsAreRetained() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            coordinator.discreteTailInserted(renderedID: "first-row")
+            let first = try #require(coordinator.command)
+            #expect(coordinator.commandApplied(first))
+            coordinator.semanticFrameChanged(
+                renderedID: "first-row", layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 20, width: 100, height: 20)
+            )
+            coordinator.discreteTailInserted(renderedID: "second-row")
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            await Task.yield()
+            #expect(coordinator.consumeTargetRelease())
+            let second = try #require(coordinator.command)
+            #expect(second.origin == .tailMaterialization)
+            #expect(second.token != first.token)
+            coordinator.cancel()
+        }
+    }
+
     @Test("retained pinned resume republishes physical ownership even when mode is unchanged")
     func retainedPinnedResumeReappliesPosition() {
         let coordinator = ChatScrollCoordinator()
@@ -670,9 +714,9 @@ struct ChatScrollCoordinatorTests {
         #expect(ChatScrollCoordinator.defaultOpeningTailTimeout == .milliseconds(750))
     }
 
-    @Test("opening timeout reveals after one exact-ID attempt when geometry disappears")
-    func openingTailTimeoutFallsBackToExactTail() async throws {
-        try await assertOpeningTimeout(target: "missing-tail", reveals: true)
+    @Test("opening timeout fails without physical marker proof")
+    func openingTailTimeoutRequiresPhysicalProof() async throws {
+        try await assertOpeningTimeout(target: "missing-tail", reveals: false)
     }
 
     @Test("opening timeout clears a published command before delayed application")
@@ -723,13 +767,11 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
-    @Test("opening timeout keeps native pinning through reveal and stable frames")
-    func openingTailTimeoutRevealsThenSettles() async throws {
+    @Test("opening timeout does not expose a best-effort ready frame")
+    func openingTailTimeoutDoesNotRevealWithoutProof() async throws {
         try await withTestWatchdog { @MainActor in
             let clock = ManualClock()
-            let frames = ManualViewportFrameScheduler()
             let coordinator = ChatScrollCoordinator(
-                frameScheduler: frames.scheduler,
                 clock: clock.clock,
                 openingTailTimeout: .seconds(1)
             )
@@ -738,22 +780,10 @@ struct ChatScrollCoordinatorTests {
             }
             try await clock.waitUntilSleeping(count: 1)
             clock.advance(by: .seconds(1))
-            #expect(await positioning.value)
-            let baseline = frames.requestCount
-            coordinator.openingRevealCompleted()
-            await frames.waitForRequest(count: baseline + 1)
-            frames.releaseNext()
-            await frames.waitForRequest(count: baseline + 2)
-            frames.releaseNext()
-            await coordinator.waitForOpeningTailSettlement()
-            #expect(coordinator.viewportMode == .pinned)
+            #expect(!(await positioning.value))
             #expect(coordinator.command == nil)
+            #expect(coordinator.viewportMode == .pinned)
         }
-    }
-
-    @Test("best-effort timeout settles after two reveal frames without later geometry")
-    func openingTailBestEffortReleaseWithoutGeometry() async throws {
-        try await openingTailTimeoutRevealsThenSettles()
     }
 
     @Test("physical positioning cancels the deadline before reveal settlement")
@@ -834,9 +864,30 @@ struct ChatScrollCoordinatorTests {
         #expect(await coordinator.positionOpeningTail(targetRenderedID: nil))
         #expect(coordinator.command == nil)
         #expect(coordinator.viewportMode == .pinned)
-        let short = ChatTranscriptGeometry(offsetY: 0, contentHeight: 180, containerHeight: 400)
-        coordinator.geometryChanged(previous: .zero, current: short)
-        #expect(coordinator.command == nil)
+
+        let installedUnderflow = ChatTranscriptGeometry(
+            offsetY: 0, contentHeight: 347, containerHeight: 400, bottomInset: 53
+        )
+        #expect(ChatTranscriptUnderflowLayoutPolicy.isPhysicallyInstalled(installedUnderflow))
+        #expect(!ChatTranscriptUnderflowLayoutPolicy.isPhysicallyInstalled(.init(
+            offsetY: 0, contentHeight: 280, containerHeight: 400, bottomInset: 53
+        )))
+        #expect(!ChatTranscriptUnderflowLayoutPolicy.isPhysicallyInstalled(.init(
+            offsetY: 0, contentHeight: 500, containerHeight: 400, bottomInset: 53
+        )))
+
+        let positioned = ChatScrollCoordinator()
+        let task = Task {
+            await positioned.positionOpeningTail(targetRenderedID: "transcript-bottom")
+        }
+        positioned.semanticFrameChanged(
+            renderedID: "transcript-bottom", layoutEpoch: positioned.layoutEpoch,
+            frame: CGRect(x: 0, y: 20, width: 100, height: 12)
+        )
+        positioned.geometryChanged(previous: .zero, current: installedUnderflow)
+        #expect(await task.value)
+        #expect(positioned.command == nil)
+        positioned.cancel()
     }
 
     @Test("native interaction cancels exact pending opening tail")

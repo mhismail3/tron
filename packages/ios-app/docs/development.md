@@ -452,7 +452,7 @@ history back to the retained authoritative tail. Opening ownership is one mutual
 `OpeningTailPhase` (`idle`, `positioning`, `positioned`, or `postReveal`). `ChatViewportModeTests`
 prove that only explicit takeover, return, catch-up, opening, submission, prepend, and presentation
 intents can change durable viewport authority. `ChatScrollCoordinatorTests` assert observable outcomes:
-the native bottom size-change anchor absorbs pinned continuous stream/composer/keyboard and existing-row growth with zero app offset writes; a genuinely new lazy physical row owns at most one stable-sentinel materialization lease until fresh semantic geometry, while detached growth remains target-free;
+the native bottom size-change anchor absorbs pinned continuous stream/composer/keyboard and existing-row growth with zero app offset writes; a genuinely new lazy physical row owns at most one stable-sentinel materialization lease until fresh current-layout semantic geometry, row-frame-before-request and request-before-row-frame ordering both settle, and burst requests are retained/coalesced, while detached growth remains target-free;
 direct return clears catch-up and unread; bottom rubber-band callbacks remain pinned and keep catch-up
 hidden in both geometry/ownership orders, while the same gesture detaches as soon as valid geometry moves
 beyond the tail boundary; catch-up emits one explicit tail intent and restores unread if
@@ -464,7 +464,7 @@ semantic-restore command while active opening/catch-up rejects paging; anchorles
 session-owned and cancels on suspension. Hosted controls drive the production coordinator/executor and record bounded aggregate
 callback, command, frame, and maximum-excursion evidence.
 Hosted streaming bursts must install only their newest exact source while detached composer/viewport work
-remains writable and creates no projection work. `ChatCompactPillTests` own intrinsic-width trailing placement for short prompts, the 364-point
+remains writable and creates no projection work. Canonical/live tool handoff tests also assert that adjacent equal nonempty producer segments compose into one display-only row with the first physical ID, canonical payload precedence, incremented membership, and any-member-running state; barriers or missing/conflicting segments remain separate. `ChatCompactPillTests` own intrinsic-width trailing placement for short prompts, the 364-point
 long-prompt bound, intrinsic-width glass selection, equal user-prompt vertical padding, logical-leading
 line alignment, agent-matched Dynamic Type body sizing, shared prompt/queue Liquid Glass geometry, and
 flat/detail material policy. `ChatContentTransitionTests` own role

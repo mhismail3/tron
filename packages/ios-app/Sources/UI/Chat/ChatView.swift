@@ -1371,7 +1371,13 @@ struct ChatView: View {
                 var target = ScrollPosition(idType: String.self)
                 target.scrollTo(id: "transcript-bottom", anchor: .bottom)
                 transcriptScrollPosition = target
-            case .tail, .openingTail:
+            case .openingTail(let renderedID):
+                // Opening has one exact eager marker after all transcript and
+                // queue rows. Do not replace that identity with an edge command:
+                // edge scrolling can succeed physically while leaving a short
+                // session's rows above the composer.
+                transcriptScrollPosition.scrollTo(id: renderedID, anchor: .bottom)
+            case .tail:
                 transcriptScrollPosition.scrollTo(edge: .bottom)
             case .offsetY(let offsetY):
                 transcriptScrollPosition.scrollTo(y: offsetY)

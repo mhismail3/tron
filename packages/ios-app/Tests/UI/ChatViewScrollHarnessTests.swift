@@ -80,6 +80,15 @@ struct ChatViewScrollHarnessTests {
                         && $0.observation.visibleRowIDs.contains(harness.firstTranscriptID)
                 }
                 #expect(!ready.observation.geometry.isPastBottomEdge)
+                let leadingFrame = try #require(
+                    ready.observation.rowFrames[harness.firstTranscriptID]
+                )
+                let visibleBottom = ready.observation.geometry.containerHeight
+                    - ready.observation.geometry.bottomInset
+                let trailingGap = visibleBottom - leadingFrame.maxY
+                #expect(trailingGap >= 0)
+                #expect(trailingGap <= ChatTranscriptLayoutConstants.rowSpacing
+                    + ChatTranscriptLayoutConstants.tailAffordanceHeight + 12)
 
                 // The hosted window contraction is the keyboard-sized native
                 // viewport boundary. Do not also summon the simulator keyboard,

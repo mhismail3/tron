@@ -342,6 +342,60 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(canonicalTools == [["canonical-call"]])
         #expect(liveTools == [["runtime-call"]])
         #expect(candidate.isValid)
+
+        guard case .toolRun(let canonicalRun) = candidate.timeline.items.canonical.first,
+              case .toolRun(let liveRun) = candidate.timeline.items.live.first,
+              let fused = ChatPhysicalToolRunFusion(canonical: canonicalRun, live: liveRun) else {
+            Issue.record("Expected an admitted display-only canonical/live fusion")
+            return
+        }
+        #expect(fused.run.id == canonicalRun.id)
+        #expect(fused.run.tools.map(\.id) == ["canonical-call", "runtime-call"])
+        #expect(fused.run.isRunning)
+    }
+
+    @Test("matching finalized group IDs across canonical and live stay valid and compose physically")
+    func sameGroupCrossOwnerComposition() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"canonical-part","type":"toolCall","toolCallId":"canonical-call","name":"read","arguments":{},"toolSegmentId":"tool-segment:turn","groupId":"shared-group","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
+        ]
+        """)
+        snapshot.phase = .running
+        snapshot.transcriptTotal = 1
+        snapshot.toolExecutions = [groupedRuntimeTool(
+            id: "live-call", index: 0, count: 1, status: .running,
+            groupID: "shared-group", order: 1
+        )]
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(candidate.isValid)
+        guard case .toolRun(let canonical) = candidate.timeline.items.canonical.first,
+              case .toolRun(let live) = candidate.timeline.items.live.first,
+              let fusion = ChatPhysicalToolRunFusion(canonical: canonical, live: live) else {
+            Issue.record("Expected separate valid owners and one display composition")
+            return
+        }
+        #expect(canonical.id == "tool-run-shared-group")
+        #expect(live.id == "tool-run-shared-group#live")
+        #expect(fusion.run.id == canonical.id)
+        #expect(fusion.run.tools.map(\.id) == ["canonical-call", "live-call"])
+        #expect(fusion.run.isRunning)
+    }
+
+    @Test("display-only tool fusion fails closed for missing or conflicting segments")
+    func displayToolFusionRequiresOneNonemptySegment() throws {
+        let canonical = ChatToolRunPresentation(tools: [descriptor(
+            id: "canonical", segment: "segment-a", subtitle: "Used"
+        )])
+        let missing = ChatToolRunPresentation(tools: [descriptor(
+            id: "missing", segment: nil, subtitle: "Running"
+        )])
+        let conflicting = ChatToolRunPresentation(tools: [descriptor(
+            id: "conflicting", segment: "segment-b", subtitle: "Running"
+        )])
+        #expect(ChatPhysicalToolRunFusion(canonical: canonical, live: missing) == nil)
+        #expect(ChatPhysicalToolRunFusion(canonical: canonical, live: conflicting) == nil)
     }
 
     @Test("foreground catch-up replaces one immutable ledger value without adding physical rows")
@@ -1434,6 +1488,29 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(assembled.workReport.mode != .toolPayloadPatch)
         #expect(assembled.timeline.items.sparseOverrideCount == 0)
         #expect(assembled.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
+    }
+
+    private func descriptor(
+        id: String,
+        segment: String?,
+        subtitle: String
+    ) -> ChatToolDescriptor {
+        ChatToolDescriptor(ChatToolPresentation(
+            id: id,
+            title: "Read file",
+            subtitle: subtitle,
+            request: .object([:]),
+            response: nil,
+            content: "",
+            fallbackContent: nil,
+            error: false,
+            startedAt: nil,
+            completedAt: nil,
+            durationMs: nil,
+            lastProgressAt: nil,
+            progressSequence: nil,
+            toolSegmentId: segment
+        ))
     }
 
     private func runtimeTool(

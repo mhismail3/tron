@@ -1084,7 +1084,16 @@ enum ChatTranscriptProjectionKernel {
         }
         flushTools()
 
+        func exactToolSegment(_ run: ChatToolRunPresentation) -> String? {
+            let values = Set(run.tools.compactMap(\.toolSegmentId))
+            guard values.count == 1,
+                  let value = values.first, !value.isEmpty,
+                  run.tools.allSatisfy({ $0.toolSegmentId == value }) else { return nil }
+            return value
+        }
+
         var seenRenderedIDs = Set<String>()
+        var firstToolRunByID: [String: (run: ChatToolRunPresentation, origin: ChatTranscriptRowOrigin)] = [:]
         var collisionSafe: [ChatTranscriptRenderItem] = []
         var collisionSafeOrigins: [ChatTranscriptRowOrigin] = []
         collisionSafe.reserveCapacity(rendered.count)
@@ -1094,6 +1103,9 @@ enum ChatTranscriptProjectionKernel {
             guard !seenRenderedIDs.insert(original.id).inserted else {
                 collisionSafe.append(original)
                 collisionSafeOrigins.append(origin)
+                if case .toolRun(let run) = original {
+                    firstToolRunByID[original.id] = (run, origin)
+                }
                 continue
             }
             switch original {
@@ -1118,10 +1130,34 @@ enum ChatTranscriptProjectionKernel {
                     showsFooter: message.showsFooter
                 )))
                 collisionSafeOrigins.append(origin)
-            case .transcript, .toolRun, .notification:
-                // Canonical transcript, notification, and tool IDs are exact
-                // identities. Keep malformed duplicates in the candidate so
-                // installation fails closed instead of fabricating an alias.
+            case .toolRun(let run):
+                // A finalized group may be split between immutable canonical
+                // ownership and the live suffix while its later members run.
+                // Preserve those authorities as distinct source rows with one
+                // deterministic live-only identity; the physical boundary
+                // projection composes them back into the canonical host. Every
+                // other duplicate remains malformed and fails closed below.
+                if origin == .live,
+                   let prior = firstToolRunByID[original.id], prior.origin == .canonical,
+                   let segment = exactToolSegment(run),
+                   exactToolSegment(prior.run) == segment {
+                    let disambiguated = ChatToolRunPresentation(
+                        tools: run.tools,
+                        anchorID: "\(run.anchorID)#live"
+                    )
+                    if seenRenderedIDs.insert(disambiguated.id).inserted {
+                        collisionSafe.append(.toolRun(disambiguated))
+                        collisionSafeOrigins.append(origin)
+                        firstToolRunByID[disambiguated.id] = (disambiguated, origin)
+                        continue
+                    }
+                }
+                collisionSafe.append(original)
+                collisionSafeOrigins.append(origin)
+            case .transcript, .notification:
+                // Canonical transcript and notification IDs are exact. Keep
+                // malformed duplicates so installation fails closed instead of
+                // fabricating an alias.
                 collisionSafe.append(original)
                 collisionSafeOrigins.append(origin)
             }

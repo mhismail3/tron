@@ -1761,6 +1761,130 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("a newly fused tool boundary grants one canonical-host entrance")
+    func newCanonicalLiveToolBoundaryUsesCanonicalEntrance() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_227)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.phase = .running
+            snapshot.transcript = []
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 0
+            snapshot.toolExecutions = []
+
+            let store = ChatTranscriptPresentationStore()
+            var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 25)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            snapshot.transcript = [try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+            {"id":"assistant-one","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"part-one","type":"toolCall","toolCallId":"call-one","name":"read","arguments":{},"toolSegmentId":"segment:turn","groupId":"group-one","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
+            """.utf8))]
+            snapshot.transcriptTotal = 1
+            snapshot.toolExecutions = [
+                storeRuntimeTool(
+                    id: "call-one", output: "done", progressSequence: 1,
+                    status: .completed, toolSegmentID: "segment:turn",
+                    groupID: "group-one"
+                ),
+                storeRuntimeTool(
+                    id: "call-two", output: "running", progressSequence: 2,
+                    toolSegmentID: "segment:turn", groupID: "group-two", order: 1
+                ),
+            ]
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 25)
+            store.submit(snapshot: snapshot, tag: tag)
+            let installed = try await store.waitForInstall(of: tag)
+            let fusion = try #require(installed.toolBoundaryFusion)
+            let rows = ChatPhysicalTranscriptRowPolicy.rows(
+                installed: installed, canonicalAliases: [:]
+            )
+            #expect(rows.count == 1)
+            #expect(store.pendingEntranceIDs == [fusion.canonicalRenderedID])
+            #expect(!store.pendingEntranceIDs.contains(fusion.liveRenderedID))
+            #expect(store.entranceState(for: fusion.canonicalRenderedID) == .pending)
+        }
+    }
+
+    @Test("canonical and live segment members keep one physical chip through takeover")
+    func canonicalLiveToolBoundaryKeepsPhysicalHost() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_226)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.phase = .running
+            snapshot.transcript = [try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+            {"id":"assistant-one","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"part-one","type":"toolCall","toolCallId":"call-one","name":"read","arguments":{},"toolSegmentId":"segment:turn","groupId":"group-one","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
+            """.utf8))]
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 1
+            snapshot.toolExecutions = [storeRuntimeTool(
+                id: "call-one", output: "done", progressSequence: 1,
+                status: .completed, toolSegmentID: "segment:turn",
+                groupID: "group-one"
+            )]
+
+            let store = ChatTranscriptPresentationStore()
+            var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 24)
+            store.submit(snapshot: snapshot, tag: tag)
+            let baseline = try await store.waitForInstall(of: tag)
+            let baselineToolID = try #require(baseline.committedLedger.items.compactMap { item -> String? in
+                guard case .toolRun(let run) = item else { return nil }
+                return run.id
+            }.last)
+
+            snapshot.toolExecutions.append(storeRuntimeTool(
+                id: "call-two", output: "running", progressSequence: 2,
+                toolSegmentID: "segment:turn", groupID: "group-two", order: 1
+            ))
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 24)
+            store.submit(snapshot: snapshot, tag: tag)
+            let running = try await store.waitForInstall(of: tag)
+            let runningToolRows = ChatPhysicalTranscriptRowPolicy.rows(
+                installed: running, canonicalAliases: [:]
+            ).compactMap { row -> ChatToolRunPresentation? in
+                guard case .transcript(.toolRun(let run), _) = row.content else { return nil }
+                return run
+            }
+            #expect(running.committedLedger.items.count == baseline.committedLedger.items.count)
+            #expect(running.liveRegion.items.count == 1)
+            #expect(runningToolRows.count == 1)
+            #expect(runningToolRows.first?.id == baselineToolID)
+            #expect(runningToolRows.first?.tools.map(\.id) == ["call-one", "call-two"])
+            #expect(runningToolRows.first?.isRunning == true)
+            #expect(store.pendingEntranceIDs.isEmpty)
+
+            snapshot.transcript.append(try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+            {"id":"assistant-two","parentId":"assistant-one","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"part-two","type":"toolCall","toolCallId":"call-two","name":"read","arguments":{},"toolSegmentId":"segment:turn","groupId":"group-two","groupIndex":0,"groupCount":1,"groupFinalized":true}]}
+            """.utf8)))
+            snapshot.transcriptTotal = 2
+            snapshot.toolExecutions = snapshot.toolExecutions.map {
+                storeRuntimeTool(
+                    id: $0.toolCallId, output: "done", progressSequence: 3,
+                    status: .completed, toolSegmentID: "segment:turn",
+                    groupID: $0.groupId, order: $0.order ?? 0
+                )
+            }
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 24)
+            store.submit(snapshot: snapshot, tag: tag)
+            let settled = try await store.waitForInstall(of: tag)
+            let settledToolRows = ChatPhysicalTranscriptRowPolicy.rows(
+                installed: settled, canonicalAliases: [:]
+            ).compactMap { row -> ChatToolRunPresentation? in
+                guard case .transcript(.toolRun(let run), _) = row.content else { return nil }
+                return run
+            }
+            #expect(settled.liveRegion.items.isEmpty)
+            #expect(settledToolRows.count == 1)
+            #expect(settledToolRows.first?.id == baselineToolID)
+            #expect(settledToolRows.first?.tools.map(\.id) == ["call-one", "call-two"])
+            #expect(settledToolRows.first?.isRunning == false)
+            #expect(store.pendingEntranceIDs.isEmpty)
+        }
+    }
+
     @Test("reset session and runtime scope changes force cold projection after sparse work")
     func scopeRetirementForcesCold() async throws {
         try await withTestWatchdog { @MainActor in
@@ -2187,12 +2311,16 @@ private func storeRuntimeTool(
     output: String,
     progressSequence: Int,
     status: ToolExecutionState.Status = .running,
-    groupID: String? = nil
+    toolSegmentID: String? = nil,
+    groupID: String? = nil,
+    groupIndex: Int = 0,
+    groupCount: Int = 1,
+    order: Int = 0
 ) -> ToolExecutionState {
     ToolExecutionState(
         toolCallId: id,
         toolName: "read",
-        order: 0,
+        order: order,
         status: status,
         arguments: .object([:]),
         partialResult: nil,
@@ -2205,9 +2333,10 @@ private func storeRuntimeTool(
         completedAt: status == .completed ? "2026-01-01T00:00:02Z" : nil,
         durationMs: status == .completed ? 2_000 : nil,
         progressSequence: progressSequence,
+        toolSegmentId: toolSegmentID,
         groupId: groupID,
-        groupIndex: groupID == nil ? nil : 0,
-        groupCount: groupID == nil ? nil : 1,
+        groupIndex: groupID == nil ? nil : groupIndex,
+        groupCount: groupID == nil ? nil : groupCount,
         groupFinalized: groupID == nil ? nil : true
     )
 }

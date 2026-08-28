@@ -171,6 +171,9 @@ final class ChatScrollCoordinator {
     private var appliedTargetOrigin: ChatScrollCommand.Origin?
     private var tailMaterializationRenderedID: String?
     private var tailMaterializationRequiredRevision: Int?
+    private var tailMaterializationRequiredLayoutEpoch: Int?
+    /// Retain the newest entrance while the stable-sentinel lease is active.
+    private var pendingTailMaterializationID: String?
     private var targetReleaseToken: Int?
     private(set) var targetReleaseGeneration = 0
     private var catchUpPhase: CatchUpPhase = .none
@@ -184,6 +187,9 @@ final class ChatScrollCoordinator {
     private var physicalTailRepairCommandToken: Int?
     private var physicalTailRepairIssuedEvidenceRevision: Int?
     private var physicalTailRepairFailedDisplacement: CGFloat?
+    /// Reveal/layout transitions must publish a new marker frame before drift
+    /// repair can inspect it; the lifted opening frame is not repair evidence.
+    private var physicalTailRepairBlockedUntilEvidenceRevision: Int?
 
     @ObservationIgnored private var catchUpTask: Task<Void, Never>?
     @ObservationIgnored private var layoutRestoreTimeoutTask: Task<Void, Never>?
@@ -252,6 +258,7 @@ final class ChatScrollCoordinator {
         physicalTailRepairCommandToken = nil
         physicalTailRepairIssuedEvidenceRevision = nil
         physicalTailRepairFailedDisplacement = nil
+        physicalTailRepairBlockedUntilEvidenceRevision = nil
         physicalTailRepairAttempts = 0
         self.presentation = presentation ?? (self.presentation &+ 1)
         viewportMode.reduce(.presentationReset(retainingViewport: retainingVisibleViewport))
@@ -481,6 +488,12 @@ final class ChatScrollCoordinator {
         appliedTargetOrigin = nil
         tailMaterializationRenderedID = nil
         tailMaterializationRequiredRevision = nil
+        tailMaterializationRequiredLayoutEpoch = nil
+        let pending = pendingTailMaterializationID
+        pendingTailMaterializationID = nil
+        if let pending, canAutomaticallyFollow {
+            beginTailMaterialization(renderedID: pending)
+        }
         // Opening can finish best-effort while the native target lease is still
         // applied. Re-evaluate the marker captured during that opening now that
         // the lease is consumed; otherwise the repair admission guard would
@@ -587,14 +600,28 @@ final class ChatScrollCoordinator {
     }
 
     func discreteTailInserted(renderedID: String) {
-        guard !renderedID.isEmpty,
-              canAutomaticallyFollow,
-              command == nil,
+        guard !renderedID.isEmpty, canAutomaticallyFollow else { return }
+        guard command == nil,
               appliedTargetCommandToken == nil,
               targetReleaseToken == nil,
-              physicalTailRepairCommandToken == nil else { return }
+              physicalTailRepairCommandToken == nil else {
+            // Several entrance tasks may arrive during one lease. Retain the
+            // newest request instead of silently dropping that burst.
+            pendingTailMaterializationID = renderedID
+            return
+        }
+        beginTailMaterialization(renderedID: renderedID)
+    }
+
+    private func beginTailMaterialization(renderedID: String) {
         tailMaterializationRenderedID = renderedID
-        tailMaterializationRequiredRevision = semanticFrameRevision
+        tailMaterializationRequiredLayoutEpoch = layoutEpoch
+        // A row-frame callback may precede the request task. A current-epoch
+        // sample is already sufficient evidence; later callbacks use the
+        // normal strictly-newer revision path.
+        tailMaterializationRequiredRevision = semanticFrames[renderedID].map {
+            max(0, $0.revision - 1)
+        } ?? semanticFrameRevision
         // Always target the stable sentinel. Targeting the newly inserted row
         // and releasing it one frame later can recreate that lazy subtree.
         publish(.tail, animation: .disabled, origin: .tailMaterialization)
@@ -704,6 +731,7 @@ final class ChatScrollCoordinator {
         if applied.origin == .tailMaterialization,
            let renderedID = tailMaterializationRenderedID,
            let sample = semanticFrames[renderedID],
+           sample.layoutEpoch == (tailMaterializationRequiredLayoutEpoch ?? layoutEpoch),
            sample.revision > (tailMaterializationRequiredRevision ?? -1) {
             // Release only after fresh semantic evidence proves the requested
             // physical tail mounted. A one-frame timer can race slow layout and
@@ -886,11 +914,11 @@ final class ChatScrollCoordinator {
         let targetIsVisible = context.targetSample?.layoutEpoch == layoutEpoch
             && context.targetSample!.frame.maxY > 0
             && context.targetSample!.frame.minY < geometry.containerHeight
-        let currentTailIsAligned = physicalTailEvidence?.presentationEpoch == presentation
-            && physicalTailEvidence?.layoutEpoch == layoutEpoch
-            && physicalTailEvidence?.classification == .aligned
+        let underflowLayoutIsInstalled = ChatTranscriptUnderflowLayoutPolicy
+            .isPhysicallyInstalled(geometry)
         let physicallyPositioned = geometry.isPlausibleOpeningViewport
-            && geometry.isAtCatchUpBoundary && targetIsVisible && currentTailIsAligned
+            && geometry.isAtCatchUpBoundary
+            && (underflowLayoutIsInstalled || (targetIsVisible && openingTailEvidenceIsAligned))
         if physicallyPositioned {
             switch openingTailPhase {
             case .positioning(var value):
@@ -978,14 +1006,27 @@ final class ChatScrollCoordinator {
         }
     }
 
+    /// During the opaque opening, the transcript stack is intentionally lifted
+    /// eight points for the reveal. Marker geometry therefore proves the tail
+    /// when it is aligned to the lifted viewport as well as at its settled
+    /// position; this exception is opening-only and cannot arm physical repair.
+    private var openingTailEvidenceIsAligned: Bool {
+        guard let evidence = physicalTailEvidence,
+              evidence.presentationEpoch == presentation,
+              evidence.layoutEpoch == layoutEpoch else { return false }
+        if evidence.classification == .aligned { return true }
+        return openingTailPhase.isActive && abs(evidence.signedDisplacement - 8) <= 2
+    }
+
     private var openingTailViewportIsPhysicallySettled: Bool {
+        guard geometry.isPlausibleOpeningViewport,
+              geometry.isAtCatchUpBoundary else { return false }
+        if ChatTranscriptUnderflowLayoutPolicy.isPhysicallyInstalled(geometry) {
+            return true
+        }
         guard let sample = openingTailPhase.context?.targetSample,
               sample.layoutEpoch == layoutEpoch else { return false }
-        let currentTailIsAligned = physicalTailEvidence?.presentationEpoch == presentation
-            && physicalTailEvidence?.layoutEpoch == layoutEpoch
-            && physicalTailEvidence?.classification == .aligned
-        return geometry.isPlausibleOpeningViewport && geometry.isAtCatchUpBoundary
-            && currentTailIsAligned
+        return openingTailEvidenceIsAligned
             && sample.frame.maxY > 0 && sample.frame.minY < geometry.containerHeight
     }
 
@@ -1005,9 +1046,10 @@ final class ChatScrollCoordinator {
         viewportMode.reduce(.opened)
         isAtBottom = true
         tailSettlementGeneration &+= 1
-        // Best-effort opening may have completed without a physical marker
-        // acknowledgement. Re-arm the bounded fallback only after opening
-        // ownership is released; never let it compete with the reveal.
+        // The marker frame observed while the transcript is lifted by the
+        // opening reveal is intentionally not repair evidence. Wait for the
+        // first post-reveal marker sample before admitting physical repair.
+        physicalTailRepairBlockedUntilEvidenceRevision = semanticFrameRevision
         schedulePhysicalTailRepairIfNeeded()
     }
 
@@ -1043,15 +1085,34 @@ final class ChatScrollCoordinator {
         openingTailTimeoutTask = Task { [weak self, clock, openingTailTimeout] in
             do { try await clock.sleep(openingTailTimeout); try Task.checkCancellation() }
             catch { return }
-            guard let self, case .positioning(var value) = self.openingTailPhase,
+            guard let self, case .positioning(let value) = self.openingTailPhase,
                   value.token == token, value.presentation == presentation else { return }
+
+            // A deadline is a failure boundary, never physical proof. A
+            // command that crossed the native application boundary cannot be
+            // safely replayed while its target is still installed, so fail the
+            // bounded opening rather than revealing an unverified viewport.
             self.clearOpeningCommand(matching: value.commandToken)
-            value.commandToken = nil
-            value.positionedBestEffort = true
-            self.openingTailPhase = .positioned(value)
-            self.openingTailContinuation?.resume(returning: true)
-            self.openingTailContinuation = nil
+            self.failOpeningTailPositioning()
         }
+    }
+
+    private func failOpeningTailPositioning() {
+        let token = openingTailToken
+        openingTailTimeoutTask?.cancel()
+        openingTailTimeoutTask = nil
+        openingTailFrameTaskGeneration &+= 1
+        openingTailFrameTask?.cancel()
+        openingTailFrameTask = nil
+        if let commandToken = openingTailPhase.context?.commandToken,
+           command?.token == commandToken {
+            clearCommand()
+        }
+        retireAppliedTargetWithoutCallback()
+        openingTailPhase = .idle
+        openingTailContinuation?.resume(returning: false)
+        openingTailContinuation = nil
+        if let token { resumeOpeningTailFinalWaiters(token: token) }
     }
 
     private func resumeOpeningTailFinalWaiter(id: Int, token: Int) {
@@ -1165,6 +1226,8 @@ final class ChatScrollCoordinator {
         physicalTailRepairCommandToken = nil
         physicalTailRepairIssuedEvidenceRevision = nil
         physicalTailRepairFailedDisplacement = nil
+        physicalTailRepairBlockedUntilEvidenceRevision = nil
+        pendingTailMaterializationID = nil
         retireAppliedTargetWithoutCallback()
         clearOpeningTailSettlement()
         cancelLayoutRestore()
@@ -1218,6 +1281,7 @@ final class ChatScrollCoordinator {
         appliedTargetOrigin = nil
         tailMaterializationRenderedID = nil
         tailMaterializationRequiredRevision = nil
+        tailMaterializationRequiredLayoutEpoch = nil
     }
 
     private func publish(
@@ -1250,6 +1314,7 @@ final class ChatScrollCoordinator {
         if command.origin == .tailMaterialization {
             tailMaterializationRenderedID = nil
             tailMaterializationRequiredRevision = nil
+            tailMaterializationRequiredLayoutEpoch = nil
         }
         self.command = nil
         commandRevision &+= 1
@@ -1272,6 +1337,8 @@ final class ChatScrollCoordinator {
         physicalTailRepairCommandToken = nil
         physicalTailRepairIssuedEvidenceRevision = nil
         physicalTailRepairFailedDisplacement = nil
+        physicalTailRepairBlockedUntilEvidenceRevision = nil
+        pendingTailMaterializationID = nil
         physicalTailEvidence = nil
         semanticFrames.removeAll(keepingCapacity: true)
         semanticFrameOrder.removeAll(keepingCapacity: true)
@@ -1349,6 +1416,12 @@ final class ChatScrollCoordinator {
               prepend == nil, layoutRestore == nil,
               catchUpPhase == .none, !openingTailPhase.isActive,
               physicalTailRepairAttempts < 2 else {
+            physicalTailRepairTask?.cancel()
+            physicalTailRepairTask = nil
+            return
+        }
+        guard evidence.semanticFrameRevision
+                > (physicalTailRepairBlockedUntilEvidenceRevision ?? -1) else {
             physicalTailRepairTask?.cancel()
             physicalTailRepairTask = nil
             return

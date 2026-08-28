@@ -283,6 +283,9 @@ struct InstalledChatTranscript: Hashable, Sendable {
     let runtimeItems: [ChatTranscriptRenderItem]
     let committedLedger: ChatCommittedLedger
     let liveRegion: ChatLiveRegion
+    /// Bounded display-only composition at the one canonical/live boundary.
+    /// Source ownership remains unchanged in the two ledgers above.
+    let toolBoundaryFusion: ChatPhysicalToolRunFusion?
     let preparedTextByRenderedID: [String: ChatTextPreparationSnapshot]
     let queuedMessages: [SessionSnapshot.QueuedMessage]
     let queuePresentationIDByOperationID: [String: String]
@@ -317,17 +320,25 @@ struct InstalledChatTranscript: Hashable, Sendable {
         self.timeline = timeline
         self.toolPayloads = toolPayloads
         self.runtimeItems = runtimeItems
-        committedLedger = ChatCommittedLedger(
+        let committedLedger = ChatCommittedLedger(
             items: timeline.items.canonical,
             revision: committedLedgerRevision
         )
-        liveRegion = ChatLiveRegion(
+        let liveRegion = ChatLiveRegion(
             timelineItems: timeline.items.live,
             runtimeItems: runtimeItems,
             handoff: frozenHandoff,
             queuedMessages: queuedMessages,
             queuePresentationIDByOperationID: queuePresentationIDByOperationID
         )
+        self.committedLedger = committedLedger
+        self.liveRegion = liveRegion
+        if case .toolRun(let canonical) = committedLedger.items.last,
+           case .toolRun(let live) = liveRegion.items.first {
+            toolBoundaryFusion = ChatPhysicalToolRunFusion(canonical: canonical, live: live)
+        } else {
+            toolBoundaryFusion = nil
+        }
         self.preparedTextByRenderedID = preparedTextByRenderedID
         self.queuedMessages = queuedMessages
         self.queuePresentationIDByOperationID = queuePresentationIDByOperationID
@@ -509,6 +520,17 @@ struct InstalledChatTranscript: Hashable, Sendable {
         timeline.containsID(id) || runtimeIDSet.contains(id)
     }
 
+    /// Returns the stable physical host for a source row when display-only
+    /// boundary composition is active. This never changes canonical/live
+    /// ownership or semantic call identity.
+    func physicalHostID(forDisplayedID id: String) -> String {
+        guard let fusion = toolBoundaryFusion,
+              id == fusion.canonicalRenderedID || id == fusion.liveRenderedID else {
+            return toolPhysicalIDByRenderedID[id] ?? id
+        }
+        return toolPhysicalIDByRenderedID[fusion.canonicalRenderedID] ?? fusion.run.id
+    }
+
     func displayedItem(for id: String) -> ChatTranscriptRenderItem? {
         displayedItemByID?[id]
     }
@@ -517,6 +539,10 @@ struct InstalledChatTranscript: Hashable, Sendable {
     /// execution. Terminal tool rows can arrive as a fresh bounded snapshot,
     /// but must never acquire or retain a pending visual entrance.
     func toolRunIsRunning(forDisplayedID id: String) -> Bool? {
+        if let fusion = toolBoundaryFusion,
+           id == fusion.canonicalRenderedID || id == fusion.liveRenderedID {
+            return fusion.run.isRunning
+        }
         guard case .toolRun(let run) = displayedItem(for: id) else { return nil }
         return run.isRunning
     }
@@ -662,12 +688,20 @@ enum ChatTranscriptTransitionPolicy {
                 // rendered row ID while retaining the exact semantic call or
                 // group. It is an update to an existing physical owner, not a
                 // new entrance entitlement.
+                let entranceID = id == next.toolBoundaryFusion?.liveRenderedID
+                    ? (next.toolBoundaryFusion?.canonicalRenderedID ?? id)
+                    : id
                 let semanticAlreadyDisplayed = previous.displayedItems.contains { item in
                     previous.semanticID(forDisplayedID: item.id)
-                        == next.semanticID(forDisplayedID: id)
+                        == next.semanticID(forDisplayedID: entranceID)
                 }
-                if !previous.containsDisplayedID(id), !semanticAlreadyDisplayed {
-                    inserted.append(id)
+                let physicalHost = next.physicalHostID(forDisplayedID: entranceID)
+                let physicalHostAlreadyDisplayed = physicalHost != entranceID
+                    && previous.containsUnaliasedPhysicalID(physicalHost)
+                if !previous.containsDisplayedID(entranceID),
+                   !semanticAlreadyDisplayed,
+                   !physicalHostAlreadyDisplayed {
+                    inserted.append(entranceID)
                 }
             }
         }
@@ -1479,15 +1513,18 @@ final class ChatTranscriptPresentationStore {
     }
 
     private func synchronizeEntranceBookkeeping(with output: InstalledChatTranscript) {
+        let composedLiveID = output.toolBoundaryFusion?.liveRenderedID
         pendingEntranceOrder.removeAll {
             !pendingEntranceIDs.contains($0)
                 || !output.containsDisplayedID($0)
                 || output.toolRunIsRunning(forDisplayedID: $0) == false
+                || $0 == composedLiveID
         }
         admittedEntranceOrder.removeAll {
             !admittedEntranceIDs.contains($0)
                 || !output.containsDisplayedID($0)
                 || output.toolRunIsRunning(forDisplayedID: $0) == false
+                || $0 == composedLiveID
         }
         pendingEntranceIDs = Set(pendingEntranceOrder)
         admittedEntranceIDs = Set(admittedEntranceOrder)

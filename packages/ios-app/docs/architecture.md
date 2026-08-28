@@ -238,12 +238,14 @@ after transcript and queue rows. Rows remain fully realizable beneath that opaqu
 an opacity-zero lazy stack is never used as a layout gate. Only then does the cover fade
 while the positioned transcript rises eight points (opacity only under Reduce Motion).
 The first-ready performance interval closes after the next display-link frame proves
-that ready state was presented. Opening uses one leased bottom-edge `ScrollPosition`
+that ready state was presented. Opening uses one exact eager-marker `ScrollPosition`
 command when the marker is not yet realized, rejects native overflow overshoot as a
 bottom boundary, and retains that command through animation completion plus two
-unchanged presented frames before releasing the binding. Ordinary pinned resizing then
-belongs to the native size-change anchor; detached readers remain unpositioned.
-Short-content alignment is always bottom-owned by the native anchor, so keyboard contraction cannot leave blank past-tail space; a bounded signed-marker repair is used only when native settling proves physical drift.
+unchanged presented frames before releasing the binding. Its bounded deadline only
+retries or fails positioning; it never certifies an unverified ready frame. Ordinary
+pinned resizing then belongs to the native size-change anchor; detached readers remain
+unpositioned.
+Short and empty transcripts use the existing native geometry callback to install one disabled-animation minimum content height at the composer-visible viewport; overflowing transcripts are unaffected. The same coalesced observation carries the opening phase so geometry captured before positioning is re-admitted without a callback-order race. This keeps underflow bottom-owned through keyboard contraction, while a bounded signed-marker repair remains reserved for proven overflow drift.
 Test builds can admit one synthetic authoritative
 snapshot through the same read gate and skip only the network opening handshake.
 The hosted harness still mounts the production chat, lazy transcript, composer
@@ -554,8 +556,11 @@ status row in the transcript and retain their full message, origin, canonical id
 JSON payloads in the existing detail sheet. Tool calls, progress, and results join by `toolCallId`.
 The Gateway stamps every live and canonical declaration with a producer-owned `toolSegmentId` for one exact
 conversation turn. Only equal nonempty segment IDs authorize distinct finalized groups to share one consecutive
-tool-only display run; missing or conflicting identity fails closed to separate rows. The run stays anchored to
-its first finalized group while every group remains independently validated and indexed. Visible thinking, text,
+tool-only display run; missing or conflicting identity fails closed to separate rows. At the canonical/live
+boundary, a bounded display-only composition may fuse directly adjacent runs with one equal segment, preserving
+the first run's physical host while canonical and live authority remain separate. Canonical descriptors win
+handoff duplicates, and any member running keeps the aggregate spinner/count live until the same host settles.
+Visible thinking, text,
 user input, notifications, and transcript barriers end the physical run even inside one segment. Cold canonical
 projection derives segment boundaries from authoritative conversation input, so foreground catch-up and continuous
 delivery reduce identically without speculative adjacency. A bounded previous-install call/group lineage aliases
@@ -624,9 +629,10 @@ unread state, and five bounded command purposes only: exact opening-tail realiza
 semantic-anchor correction, prepend correction, and a token-guarded physical-tail repair. Automatic growth follow, tail-correction arbitration, and callback-order compatibility flags no longer exist.
 
 Opening still keeps the opaque surface until the exact physical marker after transcript and
-queue rows is positioned. It permits one bounded bottom-edge realization command and a
-750-millisecond best-effort deadline, then keeps that lease through the reveal's stable
-frames before releasing to native size-change anchoring. Direct interaction abandons
+queue rows is positioned. It permits bounded exact-marker realization attempts; the
+750-millisecond deadline retries or fails and never substitutes physical proof. The
+lease remains through the reveal's stable frames before releasing to native size-change
+anchoring. Direct interaction abandons
 opening immediately. Catch-up retains its
 staged long-distance approach and unread ownership until physical settlement; interruption
 restores anchored/unread state. An installed projection captured while anchored advances an
