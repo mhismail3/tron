@@ -216,8 +216,10 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
     let morphOwnership: ChatMorphFrameRegistry.EntranceOwnership
     let kind: ChatContentEntranceKind
     let onEntranceConsumed: () -> Void
+    let onEntranceSettled: () -> Void
     @ViewBuilder let content: Content
     @State private var revealed: Bool
+    @State private var reportedSettlement = false
 
     init(
         reduceMotion: Bool,
@@ -225,6 +227,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
         morphOwnership: ChatMorphFrameRegistry.EntranceOwnership = .ordinary,
         kind: ChatContentEntranceKind = .userPrompt,
         onEntranceConsumed: @escaping () -> Void = {},
+        onEntranceSettled: @escaping () -> Void = {},
         @ViewBuilder content: () -> Content
     ) {
         self.reduceMotion = reduceMotion
@@ -232,6 +235,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
         self.morphOwnership = morphOwnership
         self.kind = kind
         self.onEntranceConsumed = onEntranceConsumed
+        self.onEntranceSettled = onEntranceSettled
         self.content = content()
         switch morphOwnership {
         case .ordinary:
@@ -270,8 +274,16 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
         .chatEntranceGrowthClip(progress: progress)
         .onAppear {
             onEntranceConsumed()
-            guard morphOwnership == .ordinary else { return }
-            revealOrdinaryEntranceIfNeeded()
+            switch morphOwnership {
+            case .ordinary:
+                revealOrdinaryEntranceIfNeeded()
+            case .flight:
+                // The full-height destination is provisional until the flight
+                // completes or fails open to the ordinary row entrance.
+                break
+            case .completed:
+                reportSettlementOnce()
+            }
         }
         .onChange(of: morphOwnership) { previous, current in
             switch current {
@@ -281,6 +293,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) { revealed = true }
+                reportSettlementOnce()
             case .ordinary:
                 // A staged flight that failed before completion falls back
                 // to the same bounded row entrance as a non-morphed send.
@@ -292,23 +305,39 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) { revealed = true }
+            reportSettlementOnce()
         }
     }
 
     private func revealOrdinaryEntranceIfNeeded() {
-        guard !revealed else { return }
-        guard animatesEntrance else {
+        guard !revealed else {
+            reportSettlementOnce()
+            return
+        }
+        guard animatesEntrance, !reduceMotion else {
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) { revealed = true }
+            reportSettlementOnce()
             return
         }
-        var transaction = Transaction(animation: ChatContentTransitionPolicy.revealAnimation(
+        let animation = ChatContentTransitionPolicy.revealAnimation(
             for: kind,
             reduceMotion: reduceMotion
-        ))
-        transaction.admitsChatEntranceAnimation = true
-        withTransaction(transaction) { revealed = true }
+        )
+        withAnimation(animation, completionCriteria: .logicallyComplete) {
+            var transaction = Transaction(animation: animation)
+            transaction.admitsChatEntranceAnimation = true
+            withTransaction(transaction) { revealed = true }
+        } completion: {
+            reportSettlementOnce()
+        }
+    }
+
+    private func reportSettlementOnce() {
+        guard !reportedSettlement else { return }
+        reportedSettlement = true
+        onEntranceSettled()
     }
 }
 

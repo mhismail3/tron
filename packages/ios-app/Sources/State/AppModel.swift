@@ -212,6 +212,7 @@ final class AppModel {
     /// even if the network task finishes before projection preparation does.
     private(set) var isReconcilingForeground = false
     private(set) var foregroundReconciliationGeneration = 0
+    private var reconciliationAggregateAdmission: GatewayLifecycleCoordinator.Admission?
     /// Advances only after an admitted Gateway projection is ready for bounded
     /// on-demand diagnostics such as Logs. Views key refresh work to completion,
     /// never raw scene activation, a transient connected state, or reconciliation start.
@@ -239,6 +240,7 @@ final class AppModel {
     private var eventTask: Task<Void, Never>?
     private var extensionEditorSyncTasks: [SessionPresentationIdentity: Task<Void, Never>] = [:]
     private var extensionEditorPendingText: [SessionPresentationIdentity: String] = [:]
+    private var extensionEditorPendingRevisions: [SessionPresentationIdentity: Int] = [:]
     private var extensionEditorSyncGenerations: [SessionPresentationIdentity: Int] = [:]
     private var extensionEditorOperationReceipts: [SessionPresentationIdentity: [String]] = [:]
     private var deviceLoadGeneration = 0
@@ -621,10 +623,10 @@ final class AppModel {
         sessionPresentation.mountedTarget
     }
 
-    /// Presentation intake needs a concrete socket epoch, not only the public
-    /// connection label retained while a background transport is retiring.
     var admitsSessionPresentationOpen: Bool {
-        lifecycle.admission?.connectionID != nil
+        connectionState == .connected
+            && !isReconcilingForeground
+            && lifecycle.admission?.connectionID != nil
     }
 
     static func soleAdmittedPresentationTarget(
@@ -836,6 +838,8 @@ final class AppModel {
         pushNavigationActivationGeneration &+= 1
         noticeCenter.setBackgrounded(true)
         diagnosticsAreReady = false
+        reconciliationAggregateAdmission = nil
+        isReconcilingForeground = false
         dashboardConnections.retire()
         // The canonical session may still be running on the Gateway, but this
         // mobile projection is intentionally retiring its transport lease.
@@ -2537,6 +2541,7 @@ final class AppModel {
         extensionEditorSyncTasks[target]?.cancel()
         extensionEditorSyncTasks[target] = nil
         extensionEditorPendingText[target] = nil
+        extensionEditorPendingRevisions[target] = nil
         extensionEditorSyncGenerations[target] = nil
         extensionEditorOperationReceipts[target] = nil
     }
@@ -2545,18 +2550,18 @@ final class AppModel {
         for task in extensionEditorSyncTasks.values { task.cancel() }
         extensionEditorSyncTasks.removeAll()
         extensionEditorPendingText.removeAll()
+        extensionEditorPendingRevisions.removeAll()
         extensionEditorSyncGenerations.removeAll()
         extensionEditorOperationReceipts.removeAll()
     }
 
-    /// Coalesces native composer echoes into one target-scoped worker. A worker
-    /// never cancels after a request may have crossed the wire; later edits are
-    /// retained as the latest value and use the next authoritative revision.
+    /// Debounces composer echoes into one target-scoped serialized worker.
     func scheduleExtensionEditorUpdate(target: SessionPresentationIdentity, text: String) {
         guard ownsPresentation(target),
               let presentation = authoritativeSnapshot(for: target.sessionID)?.extensionPresentation,
               !presentation.hostEpoch.isEmpty else { return }
         extensionEditorPendingText[target] = text
+        extensionEditorPendingRevisions[target, default: 0] &+= 1
         guard extensionEditorSyncTasks[target] == nil else { return }
         let generation = (extensionEditorSyncGenerations[target] ?? 0) + 1
         extensionEditorSyncGenerations[target] = generation
@@ -2564,17 +2569,20 @@ final class AppModel {
             guard let self else { return }
             do {
                 while !Task.isCancelled {
-                    try await Task.sleep(for: .milliseconds(150))
+                    guard let pendingRevision = self.extensionEditorPendingRevisions[target] else { break }
+                    try await Task.sleep(for: .milliseconds(300))
+                    guard self.extensionEditorPendingRevisions[target] == pendingRevision else { continue }
                     guard self.ownsPresentation(target),
                           let current = self.authoritativeSnapshot(for: target.sessionID)?.extensionPresentation,
                           !current.hostEpoch.isEmpty,
                           let pending = self.extensionEditorPendingText.removeValue(forKey: target) else { break }
+                    self.extensionEditorPendingRevisions[target] = nil
                     let operationID = self.uuidSource.next().uuidString
                     var receipts = self.extensionEditorOperationReceipts[target] ?? []
                     receipts.append(operationID)
                     if receipts.count > 128 { receipts.removeFirst(receipts.count - 128) }
                     self.extensionEditorOperationReceipts[target] = receipts
-                    let result = try await self.sessionMutations.updateExtensionEditor(
+                    _ = try await self.sessionMutations.updateExtensionEditor(
                         sessionID: target.sessionID,
                         hostEpoch: current.hostEpoch,
                         baseRevision: current.semanticState.editorRevision,
@@ -2582,24 +2590,11 @@ final class AppModel {
                         text: pending
                     )
                     guard self.ownsPresentation(target) else { break }
-                    if !result.applied {
-                        // With one serialized native writer, rejection proves a
-                        // newer extension-owned revision won. Its authoritative
-                        // directive is delivered through the presentation reducer
-                        // and existing use/keep arbiter; blindly retrying this
-                        // attempted value would either overwrite that directive or
-                        // spin against a revision the client has not installed yet.
-                        // A genuinely newer local edit remains in pendingText and
-                        // is handled after the directive settles.
-                    }
-                    // Any newer pending value, including an empty deletion, is
-                    // retained and sent by this same serialized worker.
                 }
             } catch is CancellationError {
                 return
             } catch {
-                // Transport failures are surfaced by the connection owner. Do
-                // not turn an expected editor race into a global alert.
+                // Connection lifecycle presents transport state.
             }
             if self.extensionEditorSyncGenerations[target] == generation {
                 self.extensionEditorSyncTasks[target] = nil
@@ -3164,6 +3159,24 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         invalidateSessionConnectionOwnership()
     }
 
+    func lifecycleBeginReconciliationAggregate(
+        admission: GatewayLifecycleCoordinator.Admission
+    ) {
+        guard admitsLifecycle(admission) else { return }
+        reconciliationAggregateAdmission = admission
+        isReconcilingForeground = true
+    }
+
+    func lifecycleCompleteReconciliationAggregate(
+        admission: GatewayLifecycleCoordinator.Admission,
+        succeeded: Bool
+    ) {
+        guard reconciliationAggregateAdmission == admission else { return }
+        reconciliationAggregateAdmission = nil
+        isReconcilingForeground = false
+        if succeeded { foregroundReconciliationGeneration &+= 1 }
+    }
+
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
         guard admitsLifecycle(admission) else { return }
         adoptConnectedGatewayIdentity()
@@ -3209,8 +3222,14 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     func lifecycleReconcileForeground(
         admission: GatewayLifecycleCoordinator.Admission
     ) async throws {
-        isReconcilingForeground = true
-        defer { isReconcilingForeground = false }
+        lifecycleBeginReconciliationAggregate(admission: admission)
+        var completed = false
+        defer {
+            lifecycleCompleteReconciliationAggregate(
+                admission: admission,
+                succeeded: completed
+            )
+        }
         try await client.ensureResponsive()
         try requireLifecycle(admission)
         async let authResume: Void = providerAuth.resumeAuthIfNeeded()
@@ -3245,10 +3264,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
         reconcileDashboardConnections()
         try requireLifecycle(admission)
-        // Advance only after the mounted aggregate and catalog both succeeded.
-        // While reconciliation is in flight, the retained projection carries no
-        // new suppression token and therefore cannot consume this generation.
-        foregroundReconciliationGeneration &+= 1
+        // Mounted restoration and catalog refresh jointly publish the next
+        // entrance-suppression generation.
+        completed = true
         diagnosticsReadinessGeneration &+= 1
         diagnosticsAreReady = true
     }

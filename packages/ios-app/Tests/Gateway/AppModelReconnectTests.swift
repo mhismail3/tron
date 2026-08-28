@@ -176,6 +176,10 @@ struct AppModelReconnectTests {
                 await Task.yield()
             }
             #expect(projection.restoreCount == 2)
+            for _ in 0..<50 where projection.aggregateCompletions.count < 2 {
+                await Task.yield()
+            }
+            #expect(projection.aggregateCompletions == [false, true])
             #expect(coordinator.connectionState == .connected)
             #expect(factory.requests.count == 3)
 
@@ -289,10 +293,58 @@ struct AppModelReconnectTests {
         for _ in 0..<20 where coordinator.connectionState != .connected { await Task.yield() }
         await foreground?.value
         #expect(factory.requests.count == 2)
+        for _ in 0..<50 where projection.aggregateCompletions.isEmpty {
+            await Task.yield()
+        }
+        #expect(projection.aggregateCompletions == [true])
         #expect(coordinator.connectionState == .connected)
 
         await coordinator.teardown()
         await client.close()
+    }
+
+    @Test("terminal mutation response survives immediate lifecycle retirement")
+    func terminalMutationResponseOwnsCompletion() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory
+            )
+            let lifecycle = GatewayLifecycleCoordinator(
+                client: client,
+                profiles: GatewayProfileStore(),
+                clock: .continuous,
+                reconnectDelayPolicy: .standard,
+                uuidSource: .random,
+                pairer: GatewayPairer(),
+                pairingCommit: { _, _ in },
+                profileTokenLookup: { _ in "token" }
+            )
+            let profile = GatewayProfile(
+                id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            await socket.enqueue(helloFrame())
+            try await lifecycle.connectHosted(profile: profile, token: "token")
+            let executor = ConfirmedMutationExecutor(
+                client: client,
+                lifecycle: lifecycle,
+                clock: .continuous,
+                performanceSignposts: RecordingPerformanceSignposts()
+            )
+
+            let result = try await executor.performValue(
+                method: "test.confirmed",
+                commandID: "confirmed-command"
+            ) {
+                lifecycle.enteredBackground()
+                return .string("confirmed")
+            }
+
+            #expect(result == .string("confirmed"))
+            await lifecycle.teardown()
+            await client.close()
+        }
     }
 
     @Test("foreground cannot open a conversation before replacement transport admission")
@@ -573,8 +625,17 @@ struct AppModelReconnectTests {
 
 @MainActor
 private final class NoopGatewayLifecycleProjection: GatewayLifecycleProjectionDelegate {
+    private(set) var aggregateCompletions: [Bool] = []
+
     func lifecycleLoadCache(profileID: String, admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleInvalidateSessionConnectionOwnership() {}
+    func lifecycleBeginReconciliationAggregate(admission: GatewayLifecycleCoordinator.Admission) {}
+    func lifecycleCompleteReconciliationAggregate(
+        admission: GatewayLifecycleCoordinator.Admission,
+        succeeded: Bool
+    ) {
+        aggregateCompletions.append(succeeded)
+    }
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async -> Bool { true }
     func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
@@ -586,9 +647,17 @@ private final class NoopGatewayLifecycleProjection: GatewayLifecycleProjectionDe
 @MainActor
 private final class FailFirstMountedRestoreProjection: GatewayLifecycleProjectionDelegate {
     private(set) var restoreCount = 0
+    private(set) var aggregateCompletions: [Bool] = []
 
     func lifecycleLoadCache(profileID: String, admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleInvalidateSessionConnectionOwnership() {}
+    func lifecycleBeginReconciliationAggregate(admission: GatewayLifecycleCoordinator.Admission) {}
+    func lifecycleCompleteReconciliationAggregate(
+        admission: GatewayLifecycleCoordinator.Admission,
+        succeeded: Bool
+    ) {
+        aggregateCompletions.append(succeeded)
+    }
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleRestoreMountedPresentation(
         admission: GatewayLifecycleCoordinator.Admission
@@ -619,6 +688,11 @@ private final class FailFirstForegroundProjection: GatewayLifecycleProjectionDel
         admission: GatewayLifecycleCoordinator.Admission
     ) async {}
     func lifecycleInvalidateSessionConnectionOwnership() {}
+    func lifecycleBeginReconciliationAggregate(admission: GatewayLifecycleCoordinator.Admission) {}
+    func lifecycleCompleteReconciliationAggregate(
+        admission: GatewayLifecycleCoordinator.Admission,
+        succeeded: Bool
+    ) {}
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async -> Bool { true }
     func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}

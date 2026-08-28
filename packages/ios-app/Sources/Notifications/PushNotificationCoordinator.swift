@@ -558,6 +558,10 @@ final class PushNotificationCoordinator {
         guard let admittedContext = context, let worker, let token = document.apnsToken else {
             throw PushRegistrationError.unavailable
         }
+        guard let profileDeviceID = admittedContext.profile.deviceId,
+              !profileDeviceID.isEmpty else {
+            throw PushRegistrationError.invalidCredentialState
+        }
         try validateRegistration(generation: generation, profileID: admittedContext.profile.id, token: token)
         let tokenHash = Self.hash("tron-apns-token-v1\0" + token)
         if let grant = document.grants[admittedContext.profile.id], grant.tokenHash == tokenHash {
@@ -609,7 +613,7 @@ final class PushNotificationCoordinator {
                     throw PushRegistrationError.invalidCredentialState
                 }
                 let bindingHash = Self.hash(
-                    "tron-push-binding-v1\0\(admittedContext.profile.machineId)\0\(admittedContext.profile.deviceId)"
+                    "tron-push-binding-v1\0\(admittedContext.profile.machineId)\0\(profileDeviceID)"
                 )
                 let payload = PushWorkerClient.RegistrationPayload(
                     version: 1,

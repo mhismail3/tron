@@ -11,13 +11,12 @@ struct ChatInteractionStormTests {
         let generation = transaction.join(.submission)
         #expect(transaction.join(.keyboard) == generation)
         #expect(transaction.join(.transcriptGrowth) == generation)
-        #expect(transaction.join(.catchUp) == generation)
         #expect(transaction.join(.morphFlight) == generation)
-        #expect(transaction.generation?.joined.count == 5)
+        #expect(transaction.generation?.joined.count == 4)
     }
 
-    @Test("composer height installs atomically outside the motion generation")
-    func composerHeightIsNotAMotionParticipant() {
+    @Test("composer settlement and transcript entrance share the send generation")
+    func composerAndEntranceShareSendGeneration() {
         #expect(ChatComposerStructuralTransitionPolicy.admitsHeightChange(
             current: 44,
             measured: 88
@@ -29,7 +28,10 @@ struct ChatInteractionStormTests {
 
         let transaction = ChatLayoutTransaction()
         let generation = transaction.join(.submission)
+        #expect(transaction.join(.transcriptGrowth) == generation)
         transaction.settle(generation, source: .submission)
+        #expect(transaction.generation?.id == generation)
+        transaction.settle(generation, source: .transcriptGrowth)
         #expect(transaction.generation == nil)
     }
 

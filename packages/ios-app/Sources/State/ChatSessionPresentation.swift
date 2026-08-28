@@ -37,12 +37,10 @@ final class ChatSessionPresentation {
 
     @ObservationIgnored var photoImportTask: Task<Void, Never>?
     @ObservationIgnored var attachmentPresentationTask: Task<Void, Never>?
-    @ObservationIgnored var openingTask: Task<Void, Never>?
-    @ObservationIgnored var pinnedViewportResumeTask: Task<Void, Never>?
+    @ObservationIgnored private(set) var openingTask: Task<Void, Never>?
     @ObservationIgnored private var unanchoredPrependTask: Task<Void, Never>?
+    private var openingTaskGeneration = 0
     private var unanchoredPrependGeneration = 0
-    private var pinnedViewportResumeGeneration = 0
-    private(set) var masksPinnedViewportResume = false
 
     init(sessionID: String) {
         self.sessionID = sessionID
@@ -68,30 +66,26 @@ final class ChatSessionPresentation {
     /// transport is owned by ComposerDraftCoordinator and intentionally remains
     /// alive so an accepted prompt can reconcile after reconnect.
     var needsOpeningResume: Bool {
-        open.phase != .ready && openingTask == nil
+        (open.phase != .ready || modelPresentationGeneration == nil)
+            && openingTask == nil
     }
 
-    func beginPinnedViewportResume() -> Int? {
-        guard open.phase == .ready,
-              pinnedViewportResumeTask == nil,
-              !masksPinnedViewportResume else { return nil }
-        pinnedViewportResumeGeneration &+= 1
-        masksPinnedViewportResume = true
-        return pinnedViewportResumeGeneration
+    func installOpeningTask(_ task: Task<Void, Never>) -> Int? {
+        guard openingTask == nil else { return nil }
+        openingTaskGeneration &+= 1
+        openingTask = task
+        return openingTaskGeneration
     }
 
-    func ownsPinnedViewportResume(_ generation: Int) -> Bool {
-        masksPinnedViewportResume && pinnedViewportResumeGeneration == generation
+    func finishOpeningTask(_ generation: Int) {
+        guard openingTaskGeneration == generation else { return }
+        openingTask = nil
     }
 
-    func finishPinnedViewportResume(_ generation: Int) {
-        guard pinnedViewportResumeGeneration == generation else { return }
-        masksPinnedViewportResume = false
-    }
-
-    func clearPinnedViewportResumeTask(_ generation: Int) {
-        guard pinnedViewportResumeGeneration == generation else { return }
-        pinnedViewportResumeTask = nil
+    func cancelOpeningTask() {
+        openingTaskGeneration &+= 1
+        openingTask?.cancel()
+        openingTask = nil
     }
 
     func startUnanchoredPrepend(
@@ -108,12 +102,7 @@ final class ChatSessionPresentation {
     }
 
     func suspendForBackground() {
-        openingTask?.cancel()
-        openingTask = nil
-        pinnedViewportResumeGeneration &+= 1
-        pinnedViewportResumeTask?.cancel()
-        pinnedViewportResumeTask = nil
-        masksPinnedViewportResume = false
+        cancelOpeningTask()
         earlierMessagesOperation.cancel()
         unanchoredPrependGeneration &+= 1
         unanchoredPrependTask?.cancel()

@@ -47,9 +47,9 @@ struct ChatPrependPage: Equatable, Sendable {
 
 /// Owns explicit viewport intent plus opening, catch-up, semantic restore, and
 /// prepend commands. Native anchoring owns payload and size changes. A genuinely
-/// new lazy physical row and explicit retained resume may each lease the stable
-/// tail sentinel until fresh semantic evidence proves realization; proven drift
-/// remains owned by the bounded repair transaction.
+/// New lazy rows lease the stable tail sentinel through their exact layout
+/// transaction. Foreground resume retains native ownership; signed-marker drift
+/// admits bounded repair.
 @Observable
 @MainActor
 final class ChatScrollCoordinator {
@@ -60,6 +60,22 @@ final class ChatScrollCoordinator {
         let layoutEpoch: Int
         let revision: Int
         let frame: CGRect
+    }
+
+    private struct TailMaterialization {
+        var renderedID: String?
+        var requiredRevision: Int?
+        var requiredLayoutEpoch: Int?
+        let layoutOwnerRenderedID: String?
+        let layoutTransactionID: Int?
+        var layoutSettled: Bool
+    }
+
+    private struct PendingTailMaterialization {
+        let renderedID: String
+        let layoutOwnerRenderedID: String?
+        let layoutTransactionID: Int?
+        var layoutSettled: Bool
     }
 
     private struct OpeningTailFinalWaiter {
@@ -168,11 +184,10 @@ final class ChatScrollCoordinator {
     private var openingTailFrameTaskGeneration = 0
     private var appliedTargetCommandToken: Int?
     private var appliedTargetOrigin: ChatScrollCommand.Origin?
-    private var tailMaterializationRenderedID: String?
-    private var tailMaterializationRequiredRevision: Int?
-    private var tailMaterializationRequiredLayoutEpoch: Int?
-    /// Retain the newest entrance while the stable-sentinel lease is active.
-    private var pendingTailMaterializationID: String?
+    private var tailMaterialization: TailMaterialization?
+    private var tailMaterializationEvidenceRevision = 0
+    private var targetReleaseEvidenceRevision: Int?
+    private var pendingTailMaterialization: PendingTailMaterialization?
     private var targetReleaseToken: Int?
     private(set) var targetReleaseGeneration = 0
     private var catchUpPhase: CatchUpPhase = .none
@@ -198,6 +213,7 @@ final class ChatScrollCoordinator {
     @ObservationIgnored private var openingTailTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private var physicalTailRepairTask: Task<Void, Never>?
     @ObservationIgnored private var targetReleaseTask: Task<Void, Never>?
+    @ObservationIgnored private var tailMaterializationSettlementTask: Task<Void, Never>?
     @ObservationIgnored private var directPositionOwnership = false
 
     #if HOSTED_TEST
@@ -242,6 +258,9 @@ final class ChatScrollCoordinator {
         canAutomaticallyFollow && command == nil
             && appliedTargetCommandToken == nil && targetReleaseToken == nil
     }
+    var admitsSubmission: Bool {
+        prepend == nil && catchUpPhase == .none && !openingTailPhase.isActive
+    }
 
     private var openingTailSettlementPending: Bool { openingTailPhase.isActive }
     private var openingTailToken: Int? { openingTailPhase.context?.token }
@@ -264,9 +283,7 @@ final class ChatScrollCoordinator {
         retainedViewportReconciliationPending = retainingVisibleViewport
         clearCommand()
         if viewportMode == .pinned { pinnedPositionRevision &+= 1 }
-        // A retained viewport may preserve native geometry, but its old
-        // semantic/frame callbacks belong to the revoked presentation and
-        // must not satisfy the new one.
+        // Semantic evidence is scoped to the current presentation epoch.
         advanceLayoutEpoch()
         guard !retainingVisibleViewport else { return }
         isAtBottom = true
@@ -293,17 +310,14 @@ final class ChatScrollCoordinator {
             revision: semanticFrameRevision,
             frame: frame
         )
-        // Geometry can update every display frame during one short entrance.
-        // Refreshing an existing sample stays O(1); only a genuinely new 257th
-        // row pays the bounded oldest-sample scan. The former removeAll-based
-        // LRU scanned the full cache on every animation frame.
+        // Existing samples update in O(1); bounded eviction scans only when a
+        // new sample exceeds capacity.
         if renderedID == "transcript-bottom" {
             refreshPhysicalTailEvidence(markerFrame: frame)
         }
         if appliedTargetOrigin == .tailMaterialization,
-           tailMaterializationRenderedID == renderedID,
-           semanticFrameRevision > (tailMaterializationRequiredRevision ?? -1) {
-            requestAppliedTargetRelease(origin: .tailMaterialization)
+           (tailMaterialization?.renderedID == renderedID || renderedID == "transcript-bottom") {
+            tailMaterializationEvidenceChanged()
         }
         if semanticFrames.count > 256,
            let oldest = semanticFrames.min(by: { $0.value.revision < $1.value.revision })?.key {
@@ -399,6 +413,9 @@ final class ChatScrollCoordinator {
             return
         }
         geometry = current
+        if appliedTargetOrigin == .tailMaterialization {
+            tailMaterializationEvidenceChanged()
+        }
         if let marker = semanticFrames["transcript-bottom"], marker.layoutEpoch == layoutEpoch {
             refreshPhysicalTailEvidence(markerFrame: marker.frame)
         }
@@ -482,33 +499,36 @@ final class ChatScrollCoordinator {
         guard let token = targetReleaseToken,
               token == appliedTargetCommandToken,
               command == nil else { return false }
+        if appliedTargetOrigin == .tailMaterialization,
+           let releaseEvidence = targetReleaseEvidenceRevision,
+           releaseEvidence != tailMaterializationEvidenceRevision {
+            // Geometry changed after publication; re-enter settlement with the
+            // exact sentinel still installed.
+            targetReleaseToken = nil
+            targetReleaseEvidenceRevision = nil
+            scheduleTailMaterializationSettlementIfReady()
+            return false
+        }
         targetReleaseToken = nil
-        let pending = pendingTailMaterializationID
-        pendingTailMaterializationID = nil
+        targetReleaseEvidenceRevision = nil
+        let pending = pendingTailMaterialization
+        pendingTailMaterialization = nil
         if let pending, canAutomaticallyFollow {
-            // Every automatic insertion targets the same stable sentinel. Hand
-            // its already-applied native target directly to the newest row
-            // instead of clearing and reapplying ScrollPosition between layout
-            // frames. That gap used to let submission/keyboard mutations expose
-            // a transient top-origin viewport in existing sessions.
+            // Transfer the applied sentinel directly to the newest insertion.
             appliedTargetOrigin = .tailMaterialization
-            prepareTailMaterialization(renderedID: pending)
-            if let sample = semanticFrames[pending],
-               sample.layoutEpoch == tailMaterializationRequiredLayoutEpoch,
-               sample.revision > (tailMaterializationRequiredRevision ?? -1) {
-                requestTargetRelease(token)
-            }
+            prepareTailMaterialization(
+                renderedID: pending.renderedID,
+                layoutOwnerRenderedID: pending.layoutOwnerRenderedID,
+                layoutTransactionID: pending.layoutTransactionID,
+                layoutSettled: pending.layoutSettled
+            )
+            scheduleTailMaterializationSettlementIfReady()
             return false
         }
         appliedTargetCommandToken = nil
         appliedTargetOrigin = nil
-        tailMaterializationRenderedID = nil
-        tailMaterializationRequiredRevision = nil
-        tailMaterializationRequiredLayoutEpoch = nil
-        // Opening can finish best-effort while the native target lease is still
-        // applied. Re-evaluate the marker captured during that opening now that
-        // the lease is consumed; otherwise the repair admission guard would
-        // discard the only chance to arm a bounded correction.
+        clearTailMaterializationState()
+        // Re-evaluate marker evidence captured under the opening lease.
         schedulePhysicalTailRepairIfNeeded()
         return true
     }
@@ -582,37 +602,39 @@ final class ChatScrollCoordinator {
     func reconcileMaterializationRows(
         containsPhysicalRowID: (String) -> Bool
     ) {
-        if let pending = pendingTailMaterializationID,
-           !containsPhysicalRowID(pending) {
-            pendingTailMaterializationID = nil
+        if let pending = pendingTailMaterialization,
+           !containsPhysicalRowID(pending.renderedID) {
+            pendingTailMaterialization = nil
         }
-        guard let renderedID = tailMaterializationRenderedID,
+        guard let renderedID = tailMaterialization?.renderedID,
               !containsPhysicalRowID(renderedID) else { return }
-        if let pending = pendingTailMaterializationID,
-           containsPhysicalRowID(pending) {
-            pendingTailMaterializationID = nil
+        if let pending = pendingTailMaterialization,
+           containsPhysicalRowID(pending.renderedID) {
+            pendingTailMaterialization = nil
             if appliedTargetCommandToken != nil {
                 appliedTargetOrigin = .tailMaterialization
             }
-            prepareTailMaterialization(renderedID: pending)
+            prepareTailMaterialization(
+                renderedID: pending.renderedID,
+                layoutOwnerRenderedID: pending.layoutOwnerRenderedID,
+                layoutTransactionID: pending.layoutTransactionID,
+                layoutSettled: pending.layoutSettled
+            )
+            scheduleTailMaterializationSettlementIfReady()
             return
         }
         if command?.origin == .tailMaterialization {
             clearCommand()
-            tailMaterializationRenderedID = nil
-            tailMaterializationRequiredRevision = nil
-            tailMaterializationRequiredLayoutEpoch = nil
-        } else if let token = appliedTargetCommandToken,
+        } else if appliedTargetCommandToken != nil,
                   appliedTargetOrigin == .tailMaterialization {
-            // The requested row settled into canonical/queue ownership before
-            // publishing geometry. The stable sentinel itself remains valid;
-            // release it on the normal frame boundary instead of leaking an
-            // unprovable target indefinitely.
-            requestTargetRelease(token)
+            // Canonical replacement retains the sentinel when lifecycle-row
+            // geometry has not published.
+            tailMaterialization?.renderedID = nil
+            tailMaterialization?.requiredRevision = nil
+            tailMaterialization?.requiredLayoutEpoch = nil
+            scheduleTailMaterializationSettlementIfReady()
         } else {
-            tailMaterializationRenderedID = nil
-            tailMaterializationRequiredRevision = nil
-            tailMaterializationRequiredLayoutEpoch = nil
+            clearTailMaterializationState()
         }
     }
 
@@ -638,38 +660,127 @@ final class ChatScrollCoordinator {
         viewportMode.reduce(.submitted)
     }
 
-    func discreteTailInserted(renderedID: String) {
-        guard !renderedID.isEmpty, canAutomaticallyFollow,
-              renderedID != tailMaterializationRenderedID,
-              renderedID != pendingTailMaterializationID else { return }
+    /// Retains native viewport ownership and admits bounded repair from current
+    /// same-presentation or fresh resumed marker evidence.
+    func foregroundViewportBecameActive() {
+        guard viewportMode == .pinned, !isUserInteracting else { return }
+        retainedViewportReconciliationPending = true
+        if openingTailPhase.isActive {
+            scheduleOpeningTailFrame()
+            return
+        }
+        // An existing command or target retains its original settlement owner.
+        guard command == nil, appliedTargetCommandToken == nil,
+              physicalTailRepairCommandToken == nil else { return }
+        physicalTailRepairTask?.cancel()
+        physicalTailRepairTask = nil
+        physicalTailRepairEvidenceRevision = nil
+        physicalTailRepairAttempts = 0
+        physicalTailRepairFailedDisplacement = nil
+        let currentEvidenceIsDisplaced = physicalTailEvidence.map {
+            $0.presentationEpoch == presentation
+                && $0.layoutEpoch == layoutEpoch
+                && ($0.classification == .aboveViewport
+                    || $0.classification == .belowViewport)
+        } == true
+        physicalTailRepairBlockedUntilEvidenceRevision = currentEvidenceIsDisplaced
+            ? max(-1, semanticFrameRevision - 1)
+            : semanticFrameRevision
+        schedulePhysicalTailRepairIfNeeded()
+    }
+
+    @discardableResult
+    func discreteTailInserted(
+        renderedID: String,
+        layoutTransactionID: Int? = nil
+    ) -> Bool {
+        guard !renderedID.isEmpty, canAutomaticallyFollow else { return false }
+        if renderedID == tailMaterialization?.renderedID
+            || renderedID == pendingTailMaterialization?.renderedID {
+            return layoutTransactionID != nil
+                && materializationLayoutTransactionID(for: renderedID) == layoutTransactionID
+        }
         guard command == nil,
               appliedTargetCommandToken == nil,
               targetReleaseToken == nil,
               physicalTailRepairCommandToken == nil else {
-            // Several entrance tasks may arrive during one lease. Retain the
-            // newest request instead of silently dropping that burst.
-            pendingTailMaterializationID = renderedID
-            return
+            let existing = pendingTailMaterialization
+            let ownsLayout = layoutTransactionID != nil
+            pendingTailMaterialization = PendingTailMaterialization(
+                renderedID: renderedID,
+                layoutOwnerRenderedID: ownsLayout
+                    ? renderedID
+                    : existing?.layoutOwnerRenderedID,
+                layoutTransactionID: layoutTransactionID
+                    ?? existing?.layoutTransactionID,
+                layoutSettled: ownsLayout
+                    ? false
+                    : existing?.layoutSettled ?? true
+            )
+            return true
         }
-        beginTailMaterialization(renderedID: renderedID)
+        beginTailMaterialization(
+            renderedID: renderedID,
+            layoutTransactionID: layoutTransactionID
+        )
+        return true
     }
 
-    private func beginTailMaterialization(renderedID: String) {
-        prepareTailMaterialization(renderedID: renderedID)
-        // Always target the stable sentinel. Targeting the newly inserted row
-        // and releasing it one frame later can recreate that lazy subtree.
+    func layoutTransactionSettled(_ id: Int) {
+        if tailMaterialization?.layoutTransactionID == id {
+            tailMaterialization?.layoutSettled = true
+            scheduleTailMaterializationSettlementIfReady()
+        }
+        if pendingTailMaterialization?.layoutTransactionID == id {
+            pendingTailMaterialization?.layoutSettled = true
+        }
+    }
+
+    func materializationLayoutTransactionID(for renderedID: String) -> Int? {
+        if tailMaterialization?.layoutOwnerRenderedID == renderedID {
+            return tailMaterialization?.layoutTransactionID
+        }
+        if pendingTailMaterialization?.layoutOwnerRenderedID == renderedID {
+            return pendingTailMaterialization?.layoutTransactionID
+        }
+        return nil
+    }
+
+    private func beginTailMaterialization(
+        renderedID: String,
+        layoutTransactionID: Int?
+    ) {
+        prepareTailMaterialization(
+            renderedID: renderedID,
+            layoutOwnerRenderedID: layoutTransactionID == nil ? nil : renderedID,
+            layoutTransactionID: layoutTransactionID,
+            layoutSettled: layoutTransactionID == nil
+        )
+        // The stable sentinel preserves lazy-row identity through settlement.
         publish(.tail, animation: .disabled, origin: .tailMaterialization)
     }
 
-    private func prepareTailMaterialization(renderedID: String) {
-        tailMaterializationRenderedID = renderedID
-        tailMaterializationRequiredLayoutEpoch = layoutEpoch
-        // A row-frame callback may precede the request task. A current-epoch
-        // sample is already sufficient evidence; later callbacks use the
-        // normal strictly-newer revision path.
-        tailMaterializationRequiredRevision = semanticFrames[renderedID].map {
+    private func prepareTailMaterialization(
+        renderedID: String,
+        layoutOwnerRenderedID: String?,
+        layoutTransactionID: Int?,
+        layoutSettled: Bool
+    ) {
+        tailMaterializationSettlementTask?.cancel()
+        tailMaterializationSettlementTask = nil
+        let requiredRevision = semanticFrames[renderedID].map {
             max(0, $0.revision - 1)
         } ?? semanticFrameRevision
+        tailMaterialization = TailMaterialization(
+            renderedID: renderedID,
+            requiredRevision: requiredRevision,
+            requiredLayoutEpoch: layoutEpoch,
+            layoutOwnerRenderedID: layoutOwnerRenderedID,
+            layoutTransactionID: layoutTransactionID,
+            layoutSettled: layoutSettled
+        )
+        targetReleaseEvidenceRevision = nil
+        tailMaterializationEvidenceRevision &+= 1
     }
 
     func semanticResponseArrived() {
@@ -759,14 +870,14 @@ final class ChatScrollCoordinator {
         appliedTargetCommandToken = applied.token
         appliedTargetOrigin = applied.origin
         if applied.origin == .tailMaterialization,
-           let renderedID = tailMaterializationRenderedID,
+           let materialization = tailMaterialization,
+           let renderedID = materialization.renderedID,
            let sample = semanticFrames[renderedID],
-           sample.layoutEpoch == (tailMaterializationRequiredLayoutEpoch ?? layoutEpoch),
-           sample.revision > (tailMaterializationRequiredRevision ?? -1) {
-            // Release only after fresh semantic evidence proves the requested
-            // physical tail mounted. A one-frame timer can race slow layout and
-            // tear down a visible entrance or tool transition.
-            requestTargetRelease(applied.token)
+           sample.layoutEpoch == (materialization.requiredLayoutEpoch ?? layoutEpoch),
+           sample.revision > (materialization.requiredRevision ?? -1) {
+            // Fresh row evidence proves materialization; layout and stable-frame
+            // evidence prove final geometry.
+            scheduleTailMaterializationSettlementIfReady()
         }
         if applied.origin == .physicalTailRepair {
             // Application is not physical acknowledgement. Keep the target
@@ -1257,7 +1368,9 @@ final class ChatScrollCoordinator {
         physicalTailRepairIssuedEvidenceRevision = nil
         physicalTailRepairFailedDisplacement = nil
         physicalTailRepairBlockedUntilEvidenceRevision = nil
-        pendingTailMaterializationID = nil
+        pendingTailMaterialization = nil
+        tailMaterializationSettlementTask?.cancel()
+        tailMaterializationSettlementTask = nil
         retireAppliedTargetWithoutCallback()
         clearOpeningTailSettlement()
         cancelLayoutRestore()
@@ -1273,6 +1386,59 @@ final class ChatScrollCoordinator {
         #endif
     }
 
+    private func tailMaterializationEvidenceChanged() {
+        tailMaterializationEvidenceRevision &+= 1
+        tailMaterializationSettlementTask?.cancel()
+        tailMaterializationSettlementTask = nil
+        scheduleTailMaterializationSettlementIfReady()
+    }
+
+    private func scheduleTailMaterializationSettlementIfReady() {
+        guard tailMaterializationSettlementTask == nil,
+              let materialization = tailMaterialization,
+              materialization.layoutSettled,
+              command == nil,
+              appliedTargetOrigin == .tailMaterialization,
+              let token = appliedTargetCommandToken,
+              targetReleaseToken == nil,
+              materialization.requiredLayoutEpoch == nil
+                || materialization.requiredLayoutEpoch == layoutEpoch else { return }
+        if let renderedID = materialization.renderedID {
+            guard let sample = semanticFrames[renderedID],
+                  sample.layoutEpoch == layoutEpoch,
+                  sample.revision > (materialization.requiredRevision ?? -1) else { return }
+        }
+        let admittedPresentation = presentation
+        let admittedLayoutEpoch = layoutEpoch
+        let evidenceRevision = tailMaterializationEvidenceRevision
+        tailMaterializationSettlementTask = Task { [weak self, frameScheduler] in
+            do {
+                try await frameScheduler.nextFrame()
+                try Task.checkCancellation()
+                try await frameScheduler.nextFrame()
+                try Task.checkCancellation()
+            } catch { return }
+            guard let self,
+                  self.presentation == admittedPresentation,
+                  self.layoutEpoch == admittedLayoutEpoch,
+                  self.appliedTargetCommandToken == token,
+                  self.appliedTargetOrigin == .tailMaterialization,
+                  self.command == nil,
+                  self.tailMaterializationEvidenceRevision == evidenceRevision else { return }
+            self.tailMaterializationSettlementTask = nil
+            // Publish release after participant completion and two unchanged
+            // display boundaries; consumption revalidates this evidence.
+            self.requestTargetRelease(token)
+        }
+    }
+
+    private func clearTailMaterializationState() {
+        tailMaterializationSettlementTask?.cancel()
+        tailMaterializationSettlementTask = nil
+        tailMaterialization = nil
+        targetReleaseEvidenceRevision = nil
+    }
+
     private func requestTargetRelease(_ token: Int?) {
         guard let token,
               command == nil,
@@ -1284,6 +1450,9 @@ final class ChatScrollCoordinator {
         let admittedLayoutEpoch = appliedTargetOrigin == .tailMaterialization
             ? layoutEpoch
             : nil
+        let admittedEvidenceRevision = appliedTargetOrigin == .tailMaterialization
+            ? tailMaterializationEvidenceRevision
+            : nil
         targetReleaseTask = Task { [weak self, frameScheduler] in
             do { try await frameScheduler.nextFrame(); try Task.checkCancellation() }
             catch { return }
@@ -1294,6 +1463,7 @@ final class ChatScrollCoordinator {
                   self.appliedTargetCommandToken == token,
                   self.targetReleaseToken == token else { return }
             self.targetReleaseTask = nil
+            self.targetReleaseEvidenceRevision = admittedEvidenceRevision
             self.targetReleaseGeneration &+= 1
         }
     }
@@ -1307,11 +1477,10 @@ final class ChatScrollCoordinator {
         targetReleaseTask?.cancel()
         targetReleaseTask = nil
         targetReleaseToken = nil
+        targetReleaseEvidenceRevision = nil
         appliedTargetCommandToken = nil
         appliedTargetOrigin = nil
-        tailMaterializationRenderedID = nil
-        tailMaterializationRequiredRevision = nil
-        tailMaterializationRequiredLayoutEpoch = nil
+        clearTailMaterializationState()
     }
 
     private func publish(
@@ -1342,9 +1511,7 @@ final class ChatScrollCoordinator {
     private func clearCommand() {
         guard let command else { return }
         if command.origin == .tailMaterialization {
-            tailMaterializationRenderedID = nil
-            tailMaterializationRequiredRevision = nil
-            tailMaterializationRequiredLayoutEpoch = nil
+            clearTailMaterializationState()
         }
         self.command = nil
         commandRevision &+= 1
@@ -1352,13 +1519,17 @@ final class ChatScrollCoordinator {
 
     private func advanceLayoutEpoch() {
         layoutEpoch &+= 1
-        // A materialization release armed by semantic geometry from the prior
-        // layout cannot retire its sentinel target in the new layout. Keep
-        // target ownership, but require a current-epoch row frame to arm again.
+        // Materialization leases require evidence from the current layout epoch.
         if appliedTargetOrigin == .tailMaterialization {
             targetReleaseTask?.cancel()
             targetReleaseTask = nil
             targetReleaseToken = nil
+            targetReleaseEvidenceRevision = nil
+            tailMaterializationSettlementTask?.cancel()
+            tailMaterializationSettlementTask = nil
+            tailMaterialization?.requiredLayoutEpoch = layoutEpoch
+            tailMaterialization?.requiredRevision = semanticFrameRevision
+            tailMaterializationEvidenceRevision &+= 1
         }
         physicalTailRepairTask?.cancel()
         physicalTailRepairTask = nil
@@ -1368,16 +1539,13 @@ final class ChatScrollCoordinator {
         physicalTailRepairIssuedEvidenceRevision = nil
         physicalTailRepairFailedDisplacement = nil
         physicalTailRepairBlockedUntilEvidenceRevision = nil
-        pendingTailMaterializationID = nil
+        pendingTailMaterialization = nil
         physicalTailEvidence = nil
         semanticFrames.removeAll(keepingCapacity: true)
     }
 
     private func refreshPhysicalTailEvidence(markerFrame: CGRect) {
-        // Semantic frames are reported in the scroll view's viewport-relative
-        // coordinate space. ScrollGeometry.visibleRect is content-relative and
-        // must never be compared with this frame (keyboard changes otherwise
-        // manufacture a persistent 49–53 point tail displacement).
+        // Marker frames and visible bounds share viewport-relative coordinates.
         let visibleBounds = geometry.containerHeight > 0 && geometry.containerHeight.isFinite
             ? CGRect(x: 0, y: 0, width: 1, height: geometry.containerHeight)
             : nil
@@ -1395,17 +1563,14 @@ final class ChatScrollCoordinator {
         physicalTailRepairEvidenceRevision = nil
         physicalTailEvidence = evidence
         if evidence.classification == .aligned, previousClassification != .aligned {
-            // A settled alignment starts a fresh repair budget for the next
-            // independent displacement. Retry frames in the same displacement
-            // do not reset the budget and cannot loop.
+            // A settled alignment starts a fresh bounded repair budget.
             physicalTailRepairAttempts = 0
             physicalTailRepairFailedDisplacement = nil
         } else if let failed = physicalTailRepairFailedDisplacement,
                   (evidence.classification == .belowViewport
                     || evidence.classification == .aboveViewport),
                   abs(evidence.signedDisplacement - failed) > 2 {
-            // A materially new displacement (for example a keyboard/inset
-            // settlement) gets a new bounded lease after a prior failure.
+            // A materially new displacement starts a fresh bounded lease.
             physicalTailRepairAttempts = 0
             physicalTailRepairFailedDisplacement = nil
         }

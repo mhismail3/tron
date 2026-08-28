@@ -16,6 +16,11 @@ protocol GatewayLifecycleProjectionDelegate: AnyObject, Sendable {
         admission: GatewayLifecycleCoordinator.Admission
     ) async
     func lifecycleInvalidateSessionConnectionOwnership()
+    func lifecycleBeginReconciliationAggregate(admission: GatewayLifecycleCoordinator.Admission)
+    func lifecycleCompleteReconciliationAggregate(
+        admission: GatewayLifecycleCoordinator.Admission,
+        succeeded: Bool
+    )
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async
     func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async -> Bool
     func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async
@@ -782,6 +787,7 @@ final class GatewayLifecycleCoordinator {
                     ) else { return }
                     self.connectionState = self.restartRequested ? .restarting : .reconnecting
                     var establishedConnectionID: Int?
+                    var reconciliationAggregateAdmission: Admission?
                     do {
                         let connection = try await self.client.reconnectForLifecycle()
                         establishedConnectionID = connection.id
@@ -808,7 +814,8 @@ final class GatewayLifecycleCoordinator {
                             connectionID: connection.id
                         )
                         self.gatewayInfo = connection.info
-                        self.connectionState = self.restartRequested ? .restarting : .connected
+                        reconciliationAggregateAdmission = admission
+                        self.delegate?.lifecycleBeginReconciliationAggregate(admission: admission)
                         self.delegate?.lifecycleInvalidateSessionConnectionOwnership()
                         async let refresh: Void = self.delegate?.lifecycleRefreshAll(admission: admission) ?? ()
                         let restored = await self.delegate?.lifecycleRestoreMountedPresentation(admission: admission) ?? true
@@ -835,6 +842,11 @@ final class GatewayLifecycleCoordinator {
                             )
                         }
                         if self.projectionFailureGeneration == lifecycleGeneration {
+                            self.delegate?.lifecycleCompleteReconciliationAggregate(
+                                admission: admission,
+                                succeeded: false
+                            )
+                            reconciliationAggregateAdmission = nil
                             self.projectionFailureGeneration = nil
                             self.connectionState = self.restartRequested ? .restarting : .offline("Gateway projection refresh failed")
                             self.finishReconnect(
@@ -848,12 +860,23 @@ final class GatewayLifecycleCoordinator {
                         self.restartWatchdogTask = nil
                         self.restartRequested = false
                         self.connectionState = .connected
+                        self.delegate?.lifecycleCompleteReconciliationAggregate(
+                            admission: admission,
+                            succeeded: true
+                        )
+                        reconciliationAggregateAdmission = nil
                         self.finishReconnect(
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration
                         )
                         return
                     } catch let failure as GatewayFailure where failure.code == "unauthenticated" {
+                        if let reconciliationAggregateAdmission {
+                            self.delegate?.lifecycleCompleteReconciliationAggregate(
+                                admission: reconciliationAggregateAdmission,
+                                succeeded: false
+                            )
+                        }
                         if let establishedConnectionID {
                             await self.client.closeIfCurrent(connectionID: establishedConnectionID)
                             if self.connectionID == establishedConnectionID { self.connectionID = nil }
@@ -873,12 +896,24 @@ final class GatewayLifecycleCoordinator {
                         )
                         return
                     } catch is CancellationError {
+                        if let reconciliationAggregateAdmission {
+                            self.delegate?.lifecycleCompleteReconciliationAggregate(
+                                admission: reconciliationAggregateAdmission,
+                                succeeded: false
+                            )
+                        }
                         if let establishedConnectionID {
                             await self.client.closeIfCurrent(connectionID: establishedConnectionID)
                             if self.connectionID == establishedConnectionID { self.connectionID = nil }
                         }
                         return
                     } catch {
+                        if let reconciliationAggregateAdmission {
+                            self.delegate?.lifecycleCompleteReconciliationAggregate(
+                                admission: reconciliationAggregateAdmission,
+                                succeeded: false
+                            )
+                        }
                         if let establishedConnectionID {
                             await self.client.closeIfCurrent(connectionID: establishedConnectionID)
                             if self.connectionID == establishedConnectionID { self.connectionID = nil }

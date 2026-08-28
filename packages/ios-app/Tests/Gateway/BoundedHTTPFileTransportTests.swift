@@ -90,7 +90,7 @@ struct BoundedHTTPFileTransportTests {
     }
 }
 
-private final class BoundedFileURLProtocol: URLProtocol, @unchecked Sendable {
+private final class BoundedFileURLProtocol: URLProtocol {
     enum Behavior: Sendable {
         case response(status: Int, data: Data)
         case pending

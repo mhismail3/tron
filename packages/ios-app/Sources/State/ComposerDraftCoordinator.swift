@@ -1806,8 +1806,7 @@ final class ComposerDraftCoordinator {
     }
 
     private func requireOutcome(_ admission: SubmissionAdmission) throws {
-        guard submissionByScope[admission.scope]?.id == admission.id,
-              admitsLifecycleGeneration(admission.lifecycleGeneration) else {
+        guard submissionByScope[admission.scope]?.id == admission.id else {
             throw CancellationError()
         }
     }

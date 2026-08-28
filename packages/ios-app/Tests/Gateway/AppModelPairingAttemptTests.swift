@@ -328,6 +328,11 @@ private final class SuspendedPairingRetirement: GatewayLifecycleProjectionDelega
         admission: GatewayLifecycleCoordinator.Admission
     ) async {}
     func lifecycleInvalidateSessionConnectionOwnership() {}
+    func lifecycleBeginReconciliationAggregate(admission: GatewayLifecycleCoordinator.Admission) {}
+    func lifecycleCompleteReconciliationAggregate(
+        admission: GatewayLifecycleCoordinator.Admission,
+        succeeded: Bool
+    ) {}
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async -> Bool { true }
     func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}

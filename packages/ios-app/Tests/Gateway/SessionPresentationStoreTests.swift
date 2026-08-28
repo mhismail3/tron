@@ -2198,7 +2198,8 @@ struct SessionPresentationStoreTests {
             let target = SessionPresentationIdentity(sessionID: snapshot.sessionId, generation: generation)
             frames = await socket.sentFrames()
             let sentBeforeEditorUpdate = frames.count
-            model.scheduleExtensionEditorUpdate(target: target, text: "local")
+            model.scheduleExtensionEditorUpdate(target: target, text: "local-1")
+            model.scheduleExtensionEditorUpdate(target: target, text: "local-2")
             await model.handle(GatewayEvent(
                 type: "event", topic: "session.extensionPresentation", sessionId: snapshot.sessionId,
                 payload: .object([
@@ -2207,7 +2208,8 @@ struct SessionPresentationStoreTests {
                         "semantic": .object(["editorAction": .string("set"), "editorDelta": .string("remote"), "editorText": .string("remote"), "editorRevision": .number(4)])]),
                 ])
             ))
-            try await Task.sleep(for: .milliseconds(250))
+            model.scheduleExtensionEditorUpdate(target: target, text: "local")
+            try await Task.sleep(for: .milliseconds(400))
             frames = await socket.sentFrames()
             let updateFrame = try #require(frames.dropFirst(sentBeforeEditorUpdate).first { frame in
                 (try? JSONDecoder.gateway.decode(JSONValue.self, from: frame).objectValue?["method"]?.stringValue) == "extension.editor.update"
@@ -2216,6 +2218,12 @@ struct SessionPresentationStoreTests {
             #expect(request.objectValue?["method"]?.stringValue == "extension.editor.update")
             #expect(request.objectValue?["params"]?.objectValue?["hostEpoch"]?.stringValue == "debounce-host")
             #expect(request.objectValue?["params"]?.objectValue?["baseRevision"]?.intValue == 4)
+            #expect(request.objectValue?["params"]?.objectValue?["text"]?.stringValue == "local")
+            let editorUpdates = frames.dropFirst(sentBeforeEditorUpdate).filter { frame in
+                (try? JSONDecoder.gateway.decode(JSONValue.self, from: frame)
+                    .objectValue?["method"]?.stringValue) == "extension.editor.update"
+            }
+            #expect(editorUpdates.count == 1)
             let updateID = try #require(request.objectValue?["id"]?.stringValue)
             await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("response"), "id": .string(updateID), "ok": .bool(true),

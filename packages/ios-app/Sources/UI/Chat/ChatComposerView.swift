@@ -42,6 +42,7 @@ struct ChatComposerView: View {
     let onSelectAttachmentDestination: @MainActor @Sendable (ChatAttachmentDestination) -> Void
     let onCatchUp: () -> Void
     let onComposerHeight: (CGFloat) -> Void
+    let onComposerHeightSettled: (CGFloat) -> Void
 
     var body: some View {
         ChatComposerStructuralHost(
@@ -52,7 +53,8 @@ struct ChatComposerView: View {
                 resourceResultIDs: resourceResults.map(\.id)
             ),
             reduceMotion: reduceMotion,
-            onHeightChange: onComposerHeight
+            onHeightChange: onComposerHeight,
+            onHeightSettled: onComposerHeightSettled
         ) {
             VStack(spacing: 10) {
                 attachmentStrip

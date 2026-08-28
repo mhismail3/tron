@@ -36,6 +36,7 @@ struct ChatComposerStructuralHost<Content: View>: View {
     let accessoryIdentity: ChatComposerAccessoryLayoutIdentity
     let reduceMotion: Bool
     let onHeightChange: ((CGFloat) -> Void)?
+    let onHeightSettled: ((CGFloat) -> Void)?
     @ViewBuilder let content: () -> Content
 
     @State private var presentedHeight: CGFloat?
@@ -45,11 +46,13 @@ struct ChatComposerStructuralHost<Content: View>: View {
         accessoryIdentity: ChatComposerAccessoryLayoutIdentity,
         reduceMotion: Bool,
         onHeightChange: ((CGFloat) -> Void)? = nil,
+        onHeightSettled: ((CGFloat) -> Void)? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.accessoryIdentity = accessoryIdentity
         self.reduceMotion = reduceMotion
         self.onHeightChange = onHeightChange
+        self.onHeightSettled = onHeightSettled
         self.content = content
     }
 
@@ -71,15 +74,19 @@ struct ChatComposerStructuralHost<Content: View>: View {
                 )
                 installedAccessoryIdentity = accessoryIdentity
                 if animatesAccessory {
-                    withAnimation(.smooth(
-                        duration: ChatComposerStructuralTransitionPolicy.accessoryDuration
-                    )) {
+                    withAnimation(
+                        .smooth(duration: ChatComposerStructuralTransitionPolicy.accessoryDuration),
+                        completionCriteria: .logicallyComplete
+                    ) {
                         presentedHeight = height
+                    } completion: {
+                        onHeightSettled?(height)
                     }
                 } else {
                     var transaction = Transaction()
                     transaction.disablesAnimations = true
                     withTransaction(transaction) { presentedHeight = height }
+                    onHeightSettled?(height)
                 }
             }
             .frame(height: presentedHeight, alignment: .bottom)
@@ -280,11 +287,8 @@ extension ChatContentEntranceTransform.Anchor {
     }
 }
 
-/// Transcript projection is published in complete snapshots while streaming.
-/// Those updates must not inherit an unrelated scroll/composer transaction and
-/// replay an opacity or layout animation over content that is already visible.
-/// The modifier may own the structural transcript stack; explicitly tagged row
-/// entrances and shallow tool-chip transactions still pass through it.
+/// Complete transcript snapshots install atomically while explicitly tagged row,
+/// prompt, tool-chip, and continuous native-control animations pass through.
 private enum ChatToolChipAnimationTransactionKey: TransactionKey {
     static let defaultValue = false
 }
@@ -326,10 +330,8 @@ enum ChatPromptReplacementAnimationPolicy {
 private struct ChatStableTranscriptUpdateModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.transaction { transaction in
-            // Projection replacements must not inherit ambient layout motion,
-            // but continuous direct manipulation belongs to the system control
-            // beneath this boundary. Clearing that transaction makes native
-            // interactive glass jump to its pressed scale before its drag morph.
+            // Tagged presentation motion and continuous native control retain
+            // their scoped animations across atomic projection replacement.
             if !transaction.admitsChatToolChipAnimation,
                !transaction.admitsChatEntranceAnimation,
                !transaction.admitsChatPromptReplacementAnimation,

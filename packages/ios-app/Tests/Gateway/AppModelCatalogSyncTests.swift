@@ -202,15 +202,20 @@ struct AppModelCatalogSyncTests {
         try await model.connectHostedGateway(profile: profile, token: "token")
         defer { try? FileManager.default.removeItem(at: root) }
         let baseline = model.diagnosticsReadinessGeneration
+        let foregroundBaseline = model.foregroundReconciliationGeneration
 
         let reconciliation = model.becameActive()
         let catalog = try await request(socket, index: 1)
         #expect(catalog.method == "session.list")
+        #expect(model.isReconcilingForeground)
+        #expect(model.foregroundReconciliationGeneration == foregroundBaseline)
         #expect(model.diagnosticsReadinessGeneration == baseline)
         await socket.enqueue(response(id: catalog.id, sessions: [], listRevision: 1))
         await reconciliation?.value
 
         #expect(model.diagnosticsReadinessGeneration == baseline + 1)
+        #expect(model.foregroundReconciliationGeneration == foregroundBaseline + 1)
+        #expect(!model.isReconcilingForeground)
         #expect(model.diagnosticsAreReady)
         model.enteredBackground()
         #expect(!model.diagnosticsAreReady)

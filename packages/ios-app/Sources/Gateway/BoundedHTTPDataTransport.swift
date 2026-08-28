@@ -15,8 +15,7 @@ struct BoundedHTTPDataTransport: Sendable {
         try await BoundedURLSessionDataLoader.load(request, maximumBytes: maximumBytes)
     }
 
-    /// Product-service requests carry endpoint-scoped capability material and
-    /// must never follow a redirect to another origin.
+    /// Product-service requests enforce a no-redirect capability boundary.
     static let pushService = BoundedHTTPDataTransport { request, maximumBytes in
         try await BoundedURLSessionDataLoader.load(
             request,
@@ -165,11 +164,11 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
     func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
-        willPerformHTTPRedirection newRequest: URLRequest,
-        newResponse: HTTPURLResponse,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
         completionHandler: @escaping @Sendable (URLRequest?) -> Void
     ) {
-        completionHandler(allowsRedirects ? newRequest : nil)
+        completionHandler(allowsRedirects ? request : nil)
     }
 
     func urlSession(

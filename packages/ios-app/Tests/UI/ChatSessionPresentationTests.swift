@@ -35,8 +35,6 @@ struct ChatSessionPresentationTests {
         owner.attachmentDestination = .files
         owner.queuedAttachmentDestination = .camera
         owner.photoImportTarget = SessionPresentationIdentity(sessionID: "session-a", generation: 9)
-        let resumeGeneration = try #require(owner.beginPinnedViewportResume())
-        #expect(owner.masksPinnedViewportResume)
 
         owner.suspendForBackground()
 
@@ -47,32 +45,25 @@ struct ChatSessionPresentationTests {
         #expect(owner.open.epoch == epoch)
         #expect(owner.open.phase == .ready)
         #expect(!owner.needsOpeningResume)
-        #expect(!owner.masksPinnedViewportResume)
-        #expect(!owner.ownsPinnedViewportResume(resumeGeneration))
-
-        let replacementGeneration = try #require(owner.beginPinnedViewportResume())
-        owner.finishPinnedViewportResume(resumeGeneration)
-        #expect(owner.ownsPinnedViewportResume(replacementGeneration))
-        owner.finishPinnedViewportResume(replacementGeneration)
-        #expect(!owner.masksPinnedViewportResume)
     }
 
-    @Test("pinned viewport resume never mutates conversation-open authority")
-    func pinnedViewportResumeOwnership() throws {
+    @Test("opening task reservation is singular and exact-generation owned")
+    func openingTaskOwnership() throws {
         let owner = ChatSessionPresentation(sessionID: "session-a")
-        let openingEpoch = owner.open.begin(retainingVisiblePresentation: true)
+        let firstTask = Task<Void, Never> {}
+        let generation = try #require(owner.installOpeningTask(firstTask))
 
-        let resumeGeneration = try #require(owner.beginPinnedViewportResume())
-        #expect(owner.masksPinnedViewportResume)
-        #expect(owner.open.epoch == openingEpoch)
-        #expect(owner.open.phase == .ready)
-        #expect(!owner.needsOpeningResume)
-        #expect(owner.beginPinnedViewportResume() == nil)
+        #expect(owner.openingTask != nil)
+        #expect(owner.installOpeningTask(Task<Void, Never> {}) == nil)
 
-        owner.finishPinnedViewportResume(resumeGeneration)
-        #expect(!owner.masksPinnedViewportResume)
-        #expect(owner.open.epoch == openingEpoch)
-        #expect(owner.open.phase == .ready)
+        owner.finishOpeningTask(generation &+ 1)
+        #expect(owner.openingTask != nil)
+        owner.cancelOpeningTask()
+        let replacement = try #require(owner.installOpeningTask(Task<Void, Never> {}))
+        owner.finishOpeningTask(generation)
+        #expect(owner.openingTask != nil)
+        owner.finishOpeningTask(replacement)
+        #expect(owner.openingTask == nil)
     }
 
     @Test("foreground resumes an interrupted opening but not a passive ready session")
@@ -84,10 +75,14 @@ struct ChatSessionPresentationTests {
         #expect(inProgress.needsOpeningResume)
 
         let passive = ChatSessionPresentation(sessionID: "session-b")
+        passive.modelPresentationGeneration = 4
         _ = passive.open.begin(retainingVisiblePresentation: true)
         passive.suspendForBackground()
         #expect(passive.open.phase == .ready)
         #expect(!passive.needsOpeningResume)
+
+        passive.modelPresentationGeneration = nil
+        #expect(passive.needsOpeningResume)
     }
 
     @Test("background suspension cancels an unanchored page task")

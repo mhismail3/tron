@@ -594,6 +594,85 @@ struct ChatScrollCoordinatorTests {
             )
             await frames.waitForRequest(count: 2)
             frames.releaseNext()
+            await frames.waitForRequest(count: 3)
+            frames.releaseNext()
+            await frames.waitForRequest(count: 4)
+            frames.releaseNext()
+            await Task.yield()
+            #expect(coordinator.targetReleaseGeneration == 1)
+            #expect(coordinator.consumeTargetRelease())
+        }
+    }
+
+    @Test("detached submission declines tail materialization ownership")
+    func detachedSubmissionDeclinesMaterialization() {
+        let coordinator = detachedCoordinator(at: away)
+
+        #expect(!coordinator.discreteTailInserted(
+            renderedID: "outgoing-row",
+            layoutTransactionID: 41
+        ))
+        #expect(coordinator.materializationLayoutTransactionID(for: "outgoing-row") == nil)
+        #expect(coordinator.command == nil)
+    }
+
+    @Test("pending insertion preserves the active layout owner while coalescing rows")
+    func pendingInsertionPreservesLayoutOwner() throws {
+        let coordinator = ChatScrollCoordinator()
+        #expect(coordinator.discreteTailInserted(renderedID: "first-row"))
+        let command = try #require(coordinator.command)
+        #expect(coordinator.commandApplied(command))
+
+        #expect(coordinator.discreteTailInserted(
+            renderedID: "outgoing-row",
+            layoutTransactionID: 41
+        ))
+        #expect(coordinator.discreteTailInserted(renderedID: "newest-tool-row"))
+        #expect(coordinator.materializationLayoutTransactionID(for: "outgoing-row") == 41)
+        #expect(coordinator.materializationLayoutTransactionID(for: "newest-tool-row") == nil)
+
+        coordinator.layoutTransactionSettled(41)
+        #expect(coordinator.materializationLayoutTransactionID(for: "outgoing-row") == 41)
+        coordinator.cancel()
+    }
+
+    @Test("submission lease waits for its exact layout transaction and stable frames")
+    func submissionLeaseWaitsForLayoutSettlement() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            coordinator.discreteTailInserted(
+                renderedID: "outgoing-row",
+                layoutTransactionID: 41
+            )
+            let command = try #require(coordinator.command)
+            #expect(coordinator.commandApplied(command))
+
+            coordinator.semanticFrameChanged(
+                renderedID: "outgoing-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 20, width: 100, height: 1)
+            )
+            coordinator.semanticFrameChanged(
+                renderedID: "outgoing-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 20, width: 100, height: 18)
+            )
+            await Task.yield()
+            #expect(frames.requestCount == 0)
+            #expect(!coordinator.consumeTargetRelease())
+
+            coordinator.layoutTransactionSettled(40)
+            await Task.yield()
+            #expect(frames.requestCount == 0)
+
+            coordinator.layoutTransactionSettled(41)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            await frames.waitForRequest(count: 2)
+            frames.releaseNext()
+            await frames.waitForRequest(count: 3)
+            frames.releaseNext()
             await Task.yield()
             #expect(coordinator.targetReleaseGeneration == 1)
             #expect(coordinator.consumeTargetRelease())
@@ -613,6 +692,10 @@ struct ChatScrollCoordinatorTests {
             let command = try #require(coordinator.command)
             #expect(coordinator.commandApplied(command))
             await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            await frames.waitForRequest(count: 2)
+            frames.releaseNext()
+            await frames.waitForRequest(count: 3)
             frames.releaseNext()
             await Task.yield()
             #expect(coordinator.targetReleaseGeneration == 1)
@@ -635,6 +718,10 @@ struct ChatScrollCoordinatorTests {
             coordinator.discreteTailInserted(renderedID: "second-row")
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
+            await frames.waitForRequest(count: 2)
+            frames.releaseNext()
+            await frames.waitForRequest(count: 3)
+            frames.releaseNext()
             await Task.yield()
 
             // The same stable sentinel remains applied; no target-free frame or
@@ -647,7 +734,11 @@ struct ChatScrollCoordinatorTests {
                 renderedID: "second-row", layoutEpoch: coordinator.layoutEpoch,
                 frame: CGRect(x: 0, y: 44, width: 100, height: 20)
             )
-            await frames.waitForRequest(count: 2)
+            await frames.waitForRequest(count: 4)
+            frames.releaseNext()
+            await frames.waitForRequest(count: 5)
+            frames.releaseNext()
+            await frames.waitForRequest(count: 6)
             frames.releaseNext()
             await Task.yield()
             #expect(coordinator.targetReleaseGeneration == 2)
@@ -671,18 +762,42 @@ struct ChatScrollCoordinatorTests {
             coordinator.discreteTailInserted(renderedID: "retired-outgoing-row")
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
+            await frames.waitForRequest(count: 2)
+            frames.releaseNext()
+            await frames.waitForRequest(count: 3)
+            frames.releaseNext()
             await Task.yield()
             #expect(!coordinator.consumeTargetRelease())
 
             coordinator.reconcileMaterializationRows { id in
                 id == "canonical-user-row" || id == "transcript-bottom"
             }
-            await frames.waitForRequest(count: 2)
+            await frames.waitForRequest(count: 4)
+            frames.releaseNext()
+            await frames.waitForRequest(count: 5)
+            frames.releaseNext()
+            await frames.waitForRequest(count: 6)
             frames.releaseNext()
             await Task.yield()
             #expect(coordinator.targetReleaseGeneration == 2)
             #expect(coordinator.consumeTargetRelease())
         }
+    }
+
+    @Test("foreground resume retains the native viewport and any exact target lease")
+    func foregroundResumeRetainsViewportOwnership() throws {
+        let coordinator = ChatScrollCoordinator()
+        let pinnedRevision = coordinator.pinnedPositionRevision
+        coordinator.discreteTailInserted(renderedID: "outgoing-row")
+        let command = try #require(coordinator.command)
+        #expect(coordinator.commandApplied(command))
+        #expect(!coordinator.canInstallPersistentBottomPosition)
+
+        coordinator.foregroundViewportBecameActive()
+
+        #expect(coordinator.command == nil)
+        #expect(coordinator.pinnedPositionRevision == pinnedRevision)
+        #expect(!coordinator.canInstallPersistentBottomPosition)
     }
 
     @Test("retained pinned presentation handoff republishes physical ownership")

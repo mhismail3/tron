@@ -6,8 +6,6 @@ enum ChatLayoutMutation: Hashable, Sendable {
     case keyboard
     case submission
     case transcriptGrowth
-    case historyPrepend
-    case catchUp
     case morphFlight
 }
 
@@ -76,13 +74,10 @@ struct ChatLayoutClock: Equatable, Sendable {
 @Observable
 final class ChatLayoutTransaction {
     struct Generation: Equatable, Sendable {
-        enum Phase: Equatable, Sendable { case open, animating }
-
         let id: Int
         fileprivate(set) var joined: Set<ChatLayoutMutation>
         fileprivate(set) var settled: Set<ChatLayoutMutation>
         fileprivate(set) var clock: ChatLayoutClock?
-        fileprivate(set) var phase: Phase
     }
 
     private(set) var generation: Generation?
@@ -108,8 +103,7 @@ final class ChatLayoutTransaction {
             id: nextGenerationID,
             joined: [mutation],
             settled: [],
-            clock: nil,
-            phase: .open
+            clock: nil
         )
         generation = opened
         armWatchdog(for: opened.id)
@@ -125,7 +119,6 @@ final class ChatLayoutTransaction {
                 reduceMotion: reduceMotion
             )
         }
-        current.phase = .animating
         generation = current
         return current.clock?.animation
     }

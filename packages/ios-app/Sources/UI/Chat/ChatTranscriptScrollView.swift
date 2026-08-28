@@ -30,8 +30,7 @@ private struct ChatLazyTailMaterializationRequest: Hashable {
 
 enum ChatTranscriptLayoutConstants {
     static let rowSpacing: CGFloat = 8
-    /// The marker owns the final composer affordance; stack spacing is zero so
-    /// it cannot silently add another tail gap.
+    /// The marker owns the final composer affordance with zero stack spacing.
     static let tailAffordanceHeight: CGFloat = 12
 }
 
@@ -295,10 +294,8 @@ enum ChatPhysicalTranscriptReplacementPolicy {
     }
 }
 
-/// A unified ForEach keeps this host alive while runtime/local content becomes
-/// canonical. Row state advances in one explicit, admitted transaction, but the
-/// child is never rekeyed from payload or lifecycle status; exact physical row
-/// identity remains the sole structural owner.
+/// A unified ForEach preserves this host while runtime/local content becomes
+/// canonical. Exact physical row identity owns admitted in-place updates.
 private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     let row: ChatPhysicalTranscriptRow
     let reduceMotion: Bool
@@ -321,13 +318,8 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     }
 
     var body: some View {
-        // `row.id` is the sole structural identity. Lifecycle, payload, title,
-        // progress, and canonical-settlement changes retarget this persistent
-        // host without assigning an inner `.id` that would remove its subtree.
-        // The host owns only structural continuity. Tool chips and the two
-        // admitted lifecycle replacements animate their own shallow values;
-        // a second container-level content transition can retain snapshots of
-        // rapid aggregate updates as phantom duplicate rows.
+        // `row.id` owns structural continuity. Descendants animate admitted
+        // lifecycle and payload values within this persistent host.
         content(displayed)
             .onAppear { hostedRecorder?.recordPhysicalRowAppearance(id: displayed.id) }
             .onDisappear { hostedRecorder?.recordPhysicalRowDisappearance(id: displayed.id) }
@@ -353,14 +345,13 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
         }
         var transaction = Transaction(animation: animation)
         transaction.admitsChatPromptReplacementAnimation = kind != .none
-        // The stable host owns continuity. Type-specific descendants can
-        // animate shallow values, but settlement never rekeys two row trees.
+        // Type-specific descendants animate shallow values in place.
         withTransaction(transaction) { displayed = next }
     }
 }
 
-/// The single physical transcript scroll owner. It renders one installed commit,
-/// publishes native/semantic evidence, and executes no canonical projection work.
+/// The single physical transcript scroll owner renders one installed commit and
+/// publishes native and semantic evidence.
 struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let transcriptPresentation: ChatTranscriptPresentationStore
     let scrollCoordinator: ChatScrollCoordinator
@@ -369,6 +360,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let canonicalSubmissionIDs: Set<String>
     let canonicalSubmissionAliases: [String: String]
     let isReady: Bool
+    let minimumUnderflowContentHeight: CGFloat
     let reduceMotion: Bool
     let presentationEpoch: Int
     let presentationPhase: ChatOpenPresentationPhase
@@ -383,13 +375,12 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let onEditQueuedMessage: (String) -> Void
     let onClearQueuedMessages: () -> Void
     let onMoveQueuedMessage: (String, Int) -> Void
+    let onEntranceSettled: (String) -> Void
     let onAbandonLayout: () -> Void
     let onExecuteCommand: () -> Void
     let onReleaseCommandTarget: () -> Void
     let onApplyViewportMode: (ChatViewportMode) -> Void
     let hostedRecorder: (any ChatTranscriptHostedRecording)?
-
-    @State private var minimumUnderflowContentHeight: CGFloat = 0
 
     var body: some View {
         ScrollView {
@@ -420,9 +411,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         }
                     }
                 }
-                // This eager sentinel is the only bounded realization target;
-                // transcript rows remain owned by one lazy collection and a new
-                // child is never targeted or released on a fixed timer.
+                // The eager sentinel is the lazy collection's bounded target.
                 tailMarker
             }
             .padding(.top, 12)
@@ -471,20 +460,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             guard observation.presentationEpoch == presentationEpoch else { return }
             let current = observation.geometry
             let prior = previous.geometry
-            let minimumHeight = ChatTranscriptUnderflowLayoutPolicy.minimumContentHeight(
-                containerHeight: current.containerHeight,
-                bottomInset: current.bottomInset
-            )
-            if current.containerHeight.isFinite,
-               current.containerHeight > 0,
-               current.bottomInset.isFinite,
-               abs(minimumUnderflowContentHeight - minimumHeight) > 0.5 {
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    minimumUnderflowContentHeight = minimumHeight
-                }
-            }
             hostedRecorder?.updateGeometry(current)
             if isReady, current.isAtCatchUpBoundary {
                 hostedRecorder?.recordScrollSettle(distanceFromBottom: current.distanceFromBottom)
@@ -608,7 +583,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     kind: ChatPromptLifecycleTransitionPolicy.entranceKind(for: pending.promptBehavior),
                     onEntranceConsumed: {
                         transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
-                    }
+                    },
+                    onEntranceSettled: { onEntranceSettled(renderedID) }
                 ) { ChatPendingPromptRow(presentation: pending) }
             }
         }
@@ -643,7 +619,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 kind: ChatPromptLifecycleTransitionPolicy.entranceKind(for: outgoing.promptBehavior),
                 onEntranceConsumed: {
                     transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
-                }
+                },
+                onEntranceSettled: { onEntranceSettled(renderedID) }
             ) {
                 ChatOutgoingSubmissionRow(
                     presentation: outgoing,

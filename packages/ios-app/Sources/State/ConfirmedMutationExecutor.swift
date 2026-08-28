@@ -1,14 +1,13 @@
 import Foundation
 
 enum ConfirmedMutationConnectionPolicy {
-    /// A user action may begin during a short transport handoff. Waiting before
-    /// the first byte is sent is safe: it is not mutation replay.
+    /// Pre-transmission waiting preserves single-send ownership during a short
+    /// transport handoff.
     static let initialConnectionDeadline: Duration = .seconds(8)
 }
 
-/// Resolves one command mutation against the exact gateway lifecycle generation
-/// that admitted it. A possibly-sent command is replayed only after the Gateway
-/// authoritatively reports that the stable command ID is missing.
+/// Admits a command on one gateway lifecycle generation. A terminal response
+/// owns completion; uncertain outcomes resolve through the stable command ID.
 @MainActor
 final class ConfirmedMutationExecutor {
     private struct CommandStatusParams: Codable { let method, commandId: String }
@@ -70,9 +69,7 @@ final class ConfirmedMutationExecutor {
         var retriedBeforeTransmission = false
         while true {
             do {
-                let value = try await send()
-                try lifecycle.require(admission)
-                return value
+                return try await send()
             } catch let definitelyNotSent as GatewayDefinitelyNotSentError where
                 !retriedBeforeTransmission {
                 // Local non-Codable provenance proves that no request byte left

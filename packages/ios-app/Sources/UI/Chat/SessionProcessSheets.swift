@@ -183,7 +183,8 @@ struct ProcessHistorySheet: View {
                     )
                 case .failed(let message):
                     unavailable("Unable to load history", detail: message, icon: "exclamationmark.triangle")
-                case .idle, .loading where earlier.isEmpty && !hasMounted:
+                case .idle where earlier.isEmpty && !hasMounted,
+                     .loading where earlier.isEmpty && !hasMounted:
                     TronLoadingState(label: "Loading subagent history…")
                 case .loaded where earlier.isEmpty && !hasMounted:
                     SessionProcessPlaceholder(
