@@ -10,6 +10,7 @@ const grant = {
   deviceId: "device_abcdefgh", installationId: "install_abcdefgh", grantId: "grant_abcdefgh",
   secret: Buffer.alloc(32, 9).toString("base64url") as const,
   previewsEnabled: false,
+  relayOrigin: "https://push.example.test",
 };
 
 function fakeRelay(outcomes: RelayNotificationOutcome[] = ["accepted_by_apns"]) {
@@ -19,6 +20,7 @@ function fakeRelay(outcomes: RelayNotificationOutcome[] = ["accepted_by_apns"]) 
     sent, revoked,
     client: {
       available: true,
+      relayOrigin: "https://push.example.test",
       async send(input: unknown) { sent.push(input); return outcomes.shift() ?? "accepted_by_apns"; },
       async revoke(grantId: string) { revoked.push(grantId); return "revoked" as const; },
     } as unknown as PushRelayClient,
@@ -107,7 +109,8 @@ describe("NotificationGrantStore and NotificationService", () => {
 
   it("pages canonical inbox rows and owns idempotent read state by notification or APNs request identity", async () => {
     const changed = vi.fn();
-    const { service, relay, store } = await fixture(undefined, Date.now, undefined, changed);
+    let clock = Date.parse("2026-01-01T00:00:00.000Z");
+    const { service, relay, store } = await fixture(undefined, () => clock++, undefined, changed);
     await service.upsertGrant({ ...grant, previewsEnabled: true });
     for (let index = 0; index < 3; index += 1) {
       await service.enqueue({
@@ -139,6 +142,28 @@ describe("NotificationGrantStore and NotificationService", () => {
     expect(changed.mock.calls.length).toBeGreaterThanOrEqual(6);
   });
 
+  it("rejects stale relay-origin grants and requires capability rotation", async () => {
+    const { service, relay, store } = await fixture();
+    const mismatch = await service.upsertGrant({ ...grant, relayOrigin: "https://other.example.test" });
+    expect(mismatch).toMatchObject({
+      relayOrigin: "https://push.example.test", deviceRegistered: false,
+    });
+    expect(relay.sent).toEqual([]);
+
+    const accepted = await service.upsertGrant(grant);
+    expect(accepted).toMatchObject({ deviceRegistered: true, requiresGrantRotation: false });
+    const snapshot = await service.status(grant.deviceId);
+    expect(snapshot.relayOrigin).toBe("https://push.example.test");
+
+    await store.update((document) => {
+      delete document.grants[0]!.relayOrigin;
+      return document;
+    });
+    await expect(service.status(grant.deviceId)).resolves.toMatchObject({
+      deviceRegistered: false, requiresGrantRotation: true,
+    });
+  });
+
   it("disables invalid APNs grants and retains no future audience", async () => {
     const { service, relay } = await fixture(["invalid_token"]);
     await service.upsertGrant(grant);
@@ -146,6 +171,18 @@ describe("NotificationGrantStore and NotificationService", () => {
     await vi.waitFor(async () => expect((await service.status(grant.deviceId)).deviceRegistered).toBe(false));
     await expect(service.enqueue({ sessionId: "session-one", sourceId: "tool-four", kind: "explicit", message: "hello" })).resolves.toBe("unavailable");
     expect(relay.sent).toHaveLength(1);
+  });
+
+  it("invalidates a relay-rejected grant so mobile can rotate it", async () => {
+    const { service } = await fixture(["invalid_grant"]);
+    await service.upsertGrant(grant);
+    await service.enqueue({ sessionId: "session-invalid-grant", sourceId: "tool-invalid-grant", kind: "explicit", message: "hello" });
+    await vi.waitFor(async () => expect((await service.status(grant.deviceId))).toMatchObject({
+      deviceRegistered: false, requiresGrantRotation: true,
+    }));
+    await expect(service.upsertGrant(grant)).resolves.toMatchObject({
+      deviceRegistered: false, requiresGrantRotation: true,
+    });
   });
 
   it("marks an undeliverable inbox row failed when its final target is removed", async () => {
@@ -176,6 +213,7 @@ describe("NotificationGrantStore and NotificationService", () => {
     await store.initialize();
     const relay = {
       available: true,
+      relayOrigin: "https://push.example.test",
       async send() { return "accepted_by_apns" as const; },
       async revoke() { return "retryable" as const; },
     } as unknown as PushRelayClient;
@@ -204,6 +242,7 @@ describe("NotificationGrantStore and NotificationService", () => {
     await store.initialize();
     const relay = {
       available: true,
+      relayOrigin: "https://push.example.test",
       async send() { return "accepted_by_apns" as const; },
       async revoke() { return "retryable" as const; },
     } as unknown as PushRelayClient;
@@ -308,6 +347,25 @@ describe("NotificationGrantStore and NotificationService", () => {
     expect((await store.snapshot()).pending).toEqual([]);
   });
 
+  it("polls a relay-owned provider attempt with the same request identity", async () => {
+    let clock = Date.parse("2026-01-01T00:00:00.000Z");
+    const { store, service, relay } = await fixture(["in_progress", "accepted_by_apns"], () => clock);
+    await service.upsertGrant(grant);
+    await service.enqueue({
+      sessionId: "session-in-progress", sourceId: "tool-in-progress", kind: "explicit", message: "hello",
+    });
+    await vi.waitFor(async () => expect((await store.snapshot()).pending[0]?.targets[0]).toMatchObject({
+      outcome: "retryable", attempts: 1,
+    }));
+    const requestId = relay.sent[0].requestId;
+    clock += 6_000;
+    await service.drain();
+    expect(relay.sent).toHaveLength(2);
+    expect(relay.sent[1].requestId).toBe(requestId);
+    expect((await store.snapshot()).pending).toEqual([]);
+    expect((await service.inbox()).notifications[0]).toMatchObject({ outcome: "accepted_by_apns" });
+  });
+
   it("does not notify for Ask when its typed persistent policy is disabled", async () => {
     const { service, relay } = await fixture();
     await service.upsertGrant({ ...grant, notifyWhenAskPresented: false });
@@ -332,7 +390,7 @@ describe("NotificationGrantStore and NotificationService", () => {
       }));
       return document;
     });
-    const relay = { available: false } as PushRelayClient;
+    const relay = { available: false, relayOrigin: "https://push.example.test" } as PushRelayClient;
     const service = new NotificationService(store, relay);
     await service.upsertGrant(grant);
     await expect(service.upsertGrant({

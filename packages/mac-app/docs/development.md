@@ -35,7 +35,7 @@ launcher admission, and packaging require exactly one non-empty public HTTPS
 origin and reject missing, empty, malformed, or symlinked projections. A Stable
 source update preserves the validated active payload's product configuration;
 it never reads an environment override or substitutes the source checkout's
-configuration. Direct official staging and Mac Release builds fail closed while
+configuration. `scripts/tron mac verify` additionally compares the selected stable origin with the installed signed app, so an old external selection cannot masquerade as the current product configuration; repairing that mismatch requires selecting/installing a payload from the current signed product before another source-only update. Direct official staging and Mac Release builds fail closed while
 the origin is empty. This is release configuration, never end-user setup, and
 contains no credential. Notification grants and pending delivery state remain
 under the Tron home outside immutable payload directories and survive updates.

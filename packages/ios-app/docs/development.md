@@ -757,7 +757,7 @@ from the repository-canonical maintainer input `config/PushService.xcconfig`;
 `Info.plist` and the bundled Mac Gateway embed the same exact HTTPS origin. The
 source value is empty until infrastructure inventory is complete, so development
 builds fail closed and show push as unavailable. Archive and Mac payload packaging
-reject an empty origin. The Worker admits the signed application environment
+reject an empty origin, and Mac installation verification rejects a selected stable payload whose embedded origin differs from the installed signed product. The Worker admits the signed application environment
 through App Attest: `com.tron.mobile.beta` development and `com.tron.mobile`
 development (`Tron Fast`/`ProdDebug`) use APNs sandbox, while
 `com.tron.mobile` production uses APNs production. iOS cannot select an
@@ -766,7 +766,7 @@ remains verbatim in Keychain and is passed verbatim back to `DCAppAttestService`
 Only the Worker registration projection decodes its exact 32-byte credential ID
 and re-encodes it as canonical unpadded base64url before computing the client-data
 hash and sending the request; malformed or non-32-byte identifiers fail closed
-before proof generation or relay admission. The Keychain document versions that
+before proof generation or relay admission. Every persisted endpoint grant also binds that normalized origin and route. Missing legacy identity, product-origin changes, and Gateway-certified invalid grants rotate the endpoint grant through the same bounded proof owner instead of endlessly transferring stale authority. The Keychain document versions that
 wire projection. On first load after this format was introduced, only a legacy
 missing-version document whose key was already marked rejected clears that key
 and rejection marker, durably records the current version, and retries with a
@@ -776,7 +776,7 @@ real fresh-attestation rejection cannot churn keys. Challenge requests retain a 
 installation uses a 60-second deadline so a cold mobile/Worker verification path
 does not become a false registration failure. A registration operation retries only
 ambiguous timeout or retryable 5xx twice, with bounded 250/750 ms backoff and a fresh
-challenge/proof each time. It preserves the APNs token, grants, and Keychain document;
+challenge/proof each time. It preserves the APNs token and Keychain document; unrelated valid grants remain unchanged, while only the stale profile grant is replaced;
 only an assertion 401 or the exact typed `DCError.Code.invalidKey` may rotate one key
 and admit one fresh attestation. Fresh-attestation rejection, nonretryable 4xx,
 malformed data, persistence failure, and exhaustion stop without churn. Chat and

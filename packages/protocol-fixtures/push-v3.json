@@ -28,7 +28,8 @@
       "installationId": "installation_fixture_01",
       "grantId": "grant_fixture_012345",
       "secret": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
-      "previewsEnabled": false
+      "previewsEnabled": false,
+      "relayOrigin": "https://push.example.test"
     },
     "expectedStatus": {
       "available": true,
@@ -36,7 +37,9 @@
       "deviceRegistered": true,
       "enabledDeviceCount": 1,
       "pendingCount": 0,
-      "notifyWhenAskPresented": true
+      "notifyWhenAskPresented": true,
+      "relayOrigin": "https://push.example.test",
+      "requiresGrantRotation": false
     }
   }
 }

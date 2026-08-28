@@ -73,6 +73,37 @@ describe("PushRelayClient", () => {
     await expect(client.send({ grantId: "grant_abcdefgh", secret, requestId: "request_abcdefgh", message: "input", expiresAt: "2026-01-01T00:00:00.000Z" })).resolves.toBe("ambiguous");
   });
 
+  it("distinguishes an exact request still active at the relay from terminal ambiguity", async () => {
+    let response = { status: "in_progress", reason: "provider_request_in_progress" };
+    const client = new PushRelayClient(
+      "https://push.example.test",
+      async () => new Response(JSON.stringify(response)),
+    );
+    const input = {
+      grantId: "grant_abcdefgh", secret, requestId: "request_abcdefgh",
+      message: "input", expiresAt: "2026-01-01T00:00:00.000Z",
+    };
+    await expect(client.send(input)).resolves.toBe("in_progress");
+    response = { status: "ambiguous", reason: "provider_outcome_unknown" };
+    await expect(client.send(input)).resolves.toBe("in_progress");
+    response = { status: "ambiguous", reason: "ledger_result_invalid" };
+    await expect(client.send(input)).resolves.toBe("ambiguous");
+  });
+
+  it("classifies only exact invalid relay capabilities as recoverable grant failures", async () => {
+    let response = new Response(JSON.stringify({ error: "invalid_signature" }), { status: 401 });
+    const client = new PushRelayClient("https://push.example.test", async () => response);
+    const input = {
+      grantId: "grant_abcdefgh", secret, requestId: "request_abcdefgh",
+      message: "input", expiresAt: "2026-01-01T00:00:00.000Z",
+    };
+    await expect(client.send(input)).resolves.toBe("invalid_grant");
+    response = new Response(JSON.stringify({ error: "installation_unavailable" }), { status: 410 });
+    await expect(client.send(input)).resolves.toBe("invalid_grant");
+    response = new Response(JSON.stringify({ error: "invalid_authentication_headers" }), { status: 401 });
+    await expect(client.send(input)).resolves.toBe("ambiguous");
+  });
+
   it("parses relay rate limits and exact revocation acknowledgements", async () => {
     let call = 0;
     const client = new PushRelayClient("https://push.example.test", async () => {

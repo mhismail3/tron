@@ -45,6 +45,8 @@ export interface NotificationStatus {
   enabledDeviceCount: number;
   pendingCount: number;
   notifyWhenAskPresented: boolean;
+  relayOrigin?: string;
+  requiresGrantRotation: boolean;
 }
 
 export interface NotificationInboxItem {
@@ -174,10 +176,13 @@ export class NotificationService {
   }
 
   async upsertGrant(input: {
-    deviceId: string; installationId: string; grantId: string; secret: string; previewsEnabled: boolean; notifyWhenAskPresented?: boolean;
+    deviceId: string; installationId: string; grantId: string; secret: string; previewsEnabled: boolean; relayOrigin: string; notifyWhenAskPresented?: boolean;
   }): Promise<NotificationStatus> {
     if (![input.deviceId, input.installationId, input.grantId].every(isID) || !isEndpointSecret(input.secret)) {
       throw new GatewayError("invalid_request", "Push registration credentials are malformed");
+    }
+    if (!this.relay.relayOrigin || input.relayOrigin !== this.relay.relayOrigin) {
+      return this.status(input.deviceId);
     }
     const now = this.now();
     let rotated = false;
@@ -189,6 +194,14 @@ export class NotificationService {
       const anotherDevice = document.grants.find((grant) => grant.grantId === input.grantId && grant.deviceId !== input.deviceId);
       if (anotherDevice) throw new GatewayError("conflict", "Push grant is already bound to another device");
       const previous = document.grants.find((grant) => grant.deviceId === input.deviceId);
+      if (previous && previous.grantId === input.grantId
+        && (previous.relayOrigin !== input.relayOrigin
+          || (!previous.active && previous.disabledReason === "invalid_token"))) {
+        previous.active = false;
+        previous.disabledReason = "invalid_token";
+        previous.updatedAt = iso(now);
+        return document;
+      }
       if (previous && previous.grantId === input.grantId
         && (previous.installationId !== input.installationId || previous.secret !== input.secret)) {
         throw new GatewayError("conflict", "Push grant identity changed without an endpoint rotation");
@@ -213,6 +226,7 @@ export class NotificationService {
         grantId: input.grantId,
         secret: input.secret,
         previewsEnabled: input.previewsEnabled,
+        relayOrigin: input.relayOrigin,
         active: true,
         createdAt: previous?.createdAt ?? iso(now),
         updatedAt: iso(now),
@@ -267,7 +281,10 @@ export class NotificationService {
   async status(deviceId?: string): Promise<NotificationStatus> {
     const document = await this.store.snapshot();
     const revoking = new Set(document.revocations.map((item) => item.grantId));
-    const active = document.grants.filter((grant) => grant.active && !revoking.has(grant.grantId));
+    const relayOrigin = this.relay.relayOrigin;
+    const active = document.grants.filter((grant) => grant.active && grant.relayOrigin === relayOrigin
+      && !revoking.has(grant.grantId));
+    const deviceGrant = deviceId === undefined ? undefined : document.grants.find((grant) => grant.deviceId === deviceId);
     return {
       available: this.relay.available,
       registered: active.length > 0,
@@ -275,6 +292,9 @@ export class NotificationService {
       enabledDeviceCount: active.length,
       pendingCount: document.pending.length,
       notifyWhenAskPresented: document.policy.notifyWhenAskPresented,
+      ...(relayOrigin ? { relayOrigin } : {}),
+      requiresGrantRotation: deviceGrant !== undefined && (deviceGrant.relayOrigin !== relayOrigin
+        || !deviceGrant.active || deviceGrant.disabledReason === "invalid_token"),
     };
   }
 
@@ -381,7 +401,7 @@ export class NotificationService {
         result = "suppressed";
         return document;
       }
-      const grants = document.grants.filter((grant) => grant.active);
+      const grants = document.grants.filter((grant) => grant.active && grant.relayOrigin === this.relay.relayOrigin);
       if (!this.relay.available || grants.length === 0) {
         result = "unavailable";
         return document;
@@ -493,7 +513,12 @@ export class NotificationService {
   }
 
   private async recordOutcome(intentId: string, grantId: string, outcome: RelayNotificationOutcome): Promise<void> {
-    if (outcome === "rate_limited") outcome = "retryable";
+    // The relay has already reserved this exact request ID. Poll an active
+    // provider attempt through the ordinary bounded retry schedule; replaying
+    // the ID cannot create a second APNs request. Other ambiguous results stay
+    // terminal because the relay did not certify that ownership state.
+    if (outcome === "rate_limited" || outcome === "in_progress") outcome = "retryable";
+    if (outcome === "invalid_grant") outcome = "invalid_token";
     const now = this.now();
     let inboxDidChange = false;
     await this.store.update((document) => {

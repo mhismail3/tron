@@ -77,6 +77,7 @@ export type RelayStatus =
   | "permanent_failure"
   | "invalid_token"
   | "rate_limited"
+  | "in_progress"
   | "ambiguous";
 
 export interface RelayResult {
@@ -123,6 +124,7 @@ export interface LedgerRow extends Record<string, SqlStorageValue> {
   state: string;
   response_json: string | null;
   quota_charged: number;
+  updated_at: number;
 }
 
 export const CHALLENGE_PATH = "/v3/attestation/challenge";

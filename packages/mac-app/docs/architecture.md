@@ -159,7 +159,7 @@ Stable staging, promotion, rollback, launcher selection, Swift validation, and
 packaging require its one exact non-empty public HTTPS origin; dev may carry one
 explicit empty assignment. Stable source builds preserve this validated file
 from the active immutable payload and never accept a source-tree or environment
-replacement. Notification state remains outside payload versions under the
+replacement. Installed-app verification compares the selected stable file with the signed bundled product and fails on origin drift, rather than reporting a stale sandbox/production selection as healthy. Notification state remains outside payload versions under the
 canonical Tron home.
 `promote` records expected identity, atomically publishes `current.json` while
 retaining `previous.json`, and invokes authenticated `gateway.restart`. It waits

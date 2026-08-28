@@ -37,6 +37,10 @@ const DAILY_LIMIT = 200;
 const INSTALLATION_HOURLY_LIMIT = 50;
 const INSTALLATION_DAILY_LIMIT = 300;
 const RECEIPT_RETENTION_SECONDS = 7 * 24 * 60 * 60;
+// APNs owns a 15-second timeout. A second request inside this wider bound can
+// safely poll the exact in-flight provider attempt; beyond it, a crashed Worker
+// may have left outcome ownership permanently unknowable.
+const ACTIVE_PROVIDER_ATTEMPT_SECONDS = 30;
 const DISABLED_RETENTION_SECONDS = 30 * 24 * 60 * 60;
 
 interface ChallengeRow extends Record<string, SqlStorageValue> {
@@ -384,14 +388,23 @@ export class PushRegistry {
       const now = epochSeconds();
       this.state.storage.sql.exec("DELETE FROM relay_requests WHERE updated_at < ?", now - RECEIPT_RETENTION_SECONDS);
       const existing = this.state.storage.sql.exec<LedgerRow>(
-        "SELECT grant_id, body_hash, state, response_json, quota_charged FROM relay_requests WHERE request_id = ?",
+        "SELECT grant_id, body_hash, state, response_json, quota_charged, updated_at FROM relay_requests WHERE request_id = ?",
         requestId,
       ).toArray()[0];
       if (existing) {
         if (existing.grant_id !== grant.grant_id || existing.body_hash !== bodyHash) {
           return { response: { status: "permanent_failure", reason: "request_id_conflict" }, admitted: false };
         }
-        if (existing.state === "in_progress") return { response: { status: "ambiguous", reason: "provider_outcome_unknown" }, admitted: false };
+        if (existing.state === "in_progress") {
+          const updatedAt = Number(existing.updated_at);
+          const age = Number.isFinite(updatedAt) ? Math.max(0, now - updatedAt) : Number.POSITIVE_INFINITY;
+          return {
+            response: age <= ACTIVE_PROVIDER_ATTEMPT_SECONDS
+              ? { status: "in_progress", reason: "provider_request_in_progress" }
+              : { status: "ambiguous", reason: "provider_outcome_unknown" },
+            admitted: false,
+          };
+        }
         if (existing.state === "terminal" && existing.response_json) {
           try { return { response: JSON.parse(existing.response_json) as RelayResult, admitted: false }; }
           catch { return { response: { status: "ambiguous", reason: "ledger_result_invalid" }, admitted: false }; }

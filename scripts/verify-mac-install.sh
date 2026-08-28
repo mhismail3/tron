@@ -137,6 +137,12 @@ STABLE_FINGERPRINT="" STABLE_REVISION="" STABLE_EPOCH="" STABLE_PAYLOAD_ROOT=""
 DEV_FINGERPRINT="" DEV_REVISION="" DEV_EPOCH="" DEV_PAYLOAD_ROOT=""
 BUNDLED="$APP/Contents/Resources/Gateway"
 verify_payload stable "$HOME/.tron" stable "$BUNDLED"
+if [[ -n "$STABLE_PAYLOAD_ROOT" ]] \
+  && cmp -s "$STABLE_PAYLOAD_ROOT/app/PushService.xcconfig" "$BUNDLED/app/PushService.xcconfig"; then
+  pass "stable selected payload push origin matches installed product"
+else
+  fail "stable selected payload push origin differs from installed product"
+fi
 
 authenticated_system_info() {
   local host="$1" port="$2" home="$3" payload_root="$4" token node_runtime url_host

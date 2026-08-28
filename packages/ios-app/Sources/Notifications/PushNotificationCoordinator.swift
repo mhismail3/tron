@@ -58,6 +58,8 @@ struct PushGrant: Codable, Equatable, Sendable {
     let grantID: String
     let grantSecret: String
     let tokenHash: String
+    var relayOrigin: String? = nil
+    var route: PushRoute? = nil
 }
 
 struct PushCredentialDocument: Codable, Equatable, Sendable {
@@ -271,6 +273,8 @@ struct PushWorkerClient: Sendable {
     private let configuration: PushProductConfiguration
     private let transport: BoundedHTTPDataTransport
 
+    var relayOrigin: String { configuration.origin.absoluteString }
+
     init(configuration: PushProductConfiguration, transport: BoundedHTTPDataTransport = .pushService) {
         self.configuration = configuration
         self.transport = transport
@@ -341,6 +345,7 @@ private struct PushRegistrationTransfer: Encodable, Sendable {
     let grantId: String
     let secret: String
     let previewsEnabled: Bool
+    let relayOrigin: String
 }
 
 private struct PushRegistrationRemoval: Encodable, Sendable { let commandId: String }
@@ -351,6 +356,8 @@ struct PushRegistrationStatus: Decodable, Sendable {
     let enabledDeviceCount: Int
     let pendingCount: Int
     let notifyWhenAskPresented: Bool
+    let relayOrigin: String?
+    let requiresGrantRotation: Bool?
 }
 private struct PushRegistrationRemovalResult: Decodable, Sendable { let removed: Bool }
 
@@ -564,23 +571,30 @@ final class PushNotificationCoordinator {
         }
         try validateRegistration(generation: generation, profileID: admittedContext.profile.id, token: token)
         let tokenHash = Self.hash("tron-apns-token-v1\0" + token)
-        if let grant = document.grants[admittedContext.profile.id], grant.tokenHash == tokenHash {
+        if let grant = document.grants[admittedContext.profile.id],
+           grant.tokenHash == tokenHash,
+           grant.relayOrigin == worker.relayOrigin,
+           grant.route == PushRoute.current {
             diagnostic = .transferringGrant
-            let transferred = try await transfer(
+            switch try await transfer(
                 grant,
+                relayOrigin: worker.relayOrigin,
                 client: admittedContext.client,
                 generation: generation,
                 profileID: admittedContext.profile.id,
                 token: token
-            )
-            try validateRegistration(
-                generation: generation,
-                profileID: admittedContext.profile.id,
-                token: token
-            )
-            readiness = transferred ? .ready : .pending
-            diagnostic = transferred ? .complete : .stoppedUnavailable
-            return
+            ) {
+            case .ready:
+                readiness = .ready
+                diagnostic = .complete
+                return
+            case .rotate:
+                try discardGrant(profileID: admittedContext.profile.id)
+            case .configurationMismatch, .unavailable:
+                readiness = .pending
+                diagnostic = .stoppedUnavailable
+                return
+            }
         }
 
         if document.appAttestKeyID != nil, document.appAttestKeyRejected == true {
@@ -662,7 +676,9 @@ final class PushNotificationCoordinator {
                         installationID: response.installationId,
                         grantID: response.grantId,
                         grantSecret: response.grantSecret,
-                        tokenHash: tokenHash
+                        tokenHash: tokenHash,
+                        relayOrigin: worker.relayOrigin,
+                        route: payload.route
                     )
                     var updated = document
                     updated.grants[admittedContext.profile.id] = grant
@@ -672,8 +688,9 @@ final class PushNotificationCoordinator {
                     catch { throw PushRegistrationError.persistence }
                     document = updated
                     diagnostic = .transferringGrant
-                    let transferred = try await transfer(
+                    let transferResult = try await transfer(
                         grant,
+                        relayOrigin: worker.relayOrigin,
                         client: admittedContext.client,
                         generation: generation,
                         profileID: admittedContext.profile.id,
@@ -684,8 +701,18 @@ final class PushNotificationCoordinator {
                         profileID: admittedContext.profile.id,
                         token: token
                     )
-                    readiness = transferred ? .ready : .pending
-                    diagnostic = transferred ? .complete : .stoppedUnavailable
+                    switch transferResult {
+                    case .ready:
+                        readiness = .ready
+                        diagnostic = .complete
+                    case .rotate:
+                        try discardGrant(profileID: admittedContext.profile.id)
+                        readiness = .pending
+                        diagnostic = .stoppedUnavailable
+                    case .configurationMismatch, .unavailable:
+                        readiness = .pending
+                        diagnostic = .stoppedUnavailable
+                    }
                     return
                 } catch is CancellationError {
                     throw CancellationError()
@@ -798,13 +825,16 @@ final class PushNotificationCoordinator {
         }
     }
 
+    private enum GrantTransferResult { case ready, rotate, configurationMismatch, unavailable }
+
     private func transfer(
         _ grant: PushGrant,
+        relayOrigin: String,
         client: GatewayClient,
         generation: Int,
         profileID: String,
         token: String
-    ) async throws -> Bool {
+    ) async throws -> GrantTransferResult {
         try validateRegistration(generation: generation, profileID: profileID, token: token)
         do {
             let status: PushRegistrationStatus = try await client.request(
@@ -814,12 +844,16 @@ final class PushNotificationCoordinator {
                     installationId: grant.installationID,
                     grantId: grant.grantID,
                     secret: grant.grantSecret,
-                    previewsEnabled: false
+                    previewsEnabled: false,
+                    relayOrigin: relayOrigin
                 ),
                 timeout: .seconds(8)
             )
             try validateRegistration(generation: generation, profileID: profileID, token: token)
+            guard status.relayOrigin == relayOrigin else { return .configurationMismatch }
+            if status.requiresGrantRotation == true { return .rotate }
             return status.available && status.registered && status.deviceRegistered && status.enabledDeviceCount > 0
+                ? .ready : .unavailable
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -827,8 +861,16 @@ final class PushNotificationCoordinator {
             // error type. Revalidate after every suspension before converting a
             // current failure into pending readiness.
             try validateRegistration(generation: generation, profileID: profileID, token: token)
-            return false
+            return .unavailable
         }
+    }
+
+    private func discardGrant(profileID: String) throws {
+        var updated = document
+        updated.grants.removeValue(forKey: profileID)
+        do { try credentials.save(updated) }
+        catch { throw PushRegistrationError.persistence }
+        document = updated
     }
 
     private func removeRegistration(

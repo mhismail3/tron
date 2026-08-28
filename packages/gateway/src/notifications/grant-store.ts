@@ -16,6 +16,7 @@ export interface PushGrant {
   grantId: string;
   secret: string;
   previewsEnabled: boolean;
+  relayOrigin?: string;
   active: boolean;
   disabledReason?: "invalid_token";
   createdAt: string;
@@ -123,9 +124,11 @@ function stringList(value: unknown, maximum: number): value is string[] {
 function isGrant(value: unknown): value is PushGrant {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;
-  return exact(v, ["deviceId", "installationId", "grantId", "secret", "previewsEnabled", "active", "createdAt", "updatedAt"], ["disabledReason"])
+  return exact(v, ["deviceId", "installationId", "grantId", "secret", "previewsEnabled", "active", "createdAt", "updatedAt"], ["disabledReason", "relayOrigin"])
     && id(v.deviceId) && id(v.installationId) && id(v.grantId) && isEndpointSecret(v.secret)
-    && typeof v.previewsEnabled === "boolean" && typeof v.active === "boolean"
+    && typeof v.previewsEnabled === "boolean"
+    && (v.relayOrigin === undefined || (typeof v.relayOrigin === "string" && v.relayOrigin.length <= 512))
+    && typeof v.active === "boolean"
     && (v.disabledReason === undefined || v.disabledReason === "invalid_token")
     && timestamp(v.createdAt) && timestamp(v.updatedAt);
 }

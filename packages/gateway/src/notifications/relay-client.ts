@@ -2,7 +2,7 @@ import { createHash, createHmac } from "node:crypto";
 import { isIP } from "node:net";
 import { GatewayError } from "../errors.js";
 
-export type RelayNotificationOutcome = "accepted_by_apns" | "retryable" | "invalid_token" | "permanent_failure" | "ambiguous" | "rate_limited";
+export type RelayNotificationOutcome = "accepted_by_apns" | "retryable" | "invalid_token" | "invalid_grant" | "permanent_failure" | "ambiguous" | "rate_limited" | "in_progress";
 export interface RelayFetchResponse { status: number; headers: Headers; body: ReadableStream<Uint8Array> | null; }
 export type RelayFetch = (input: string, init: RequestInit) => Promise<RelayFetchResponse>;
 
@@ -49,7 +49,7 @@ export function relaySignature(secret: string, method: "POST" | "DELETE", path: 
     .digest("hex");
 }
 
-function exactResult(value: unknown): RelayNotificationOutcome | undefined {
+function exactResult(value: unknown): { status: Exclude<RelayNotificationOutcome, "invalid_grant">; reason?: string } | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const object = value as Record<string, unknown>;
   const allowed = new Set(["status", "apnsId", "reason", "retryAfterSeconds"]);
@@ -57,8 +57,12 @@ function exactResult(value: unknown): RelayNotificationOutcome | undefined {
   if (object.apnsId !== undefined && typeof object.apnsId !== "string") return undefined;
   if (object.reason !== undefined && typeof object.reason !== "string") return undefined;
   if (object.retryAfterSeconds !== undefined && (!Number.isSafeInteger(object.retryAfterSeconds) || (object.retryAfterSeconds as number) < 1)) return undefined;
-  return ["accepted_by_apns", "retryable", "invalid_token", "permanent_failure", "ambiguous", "rate_limited"].includes(object.status)
-    ? object.status as RelayNotificationOutcome : undefined;
+  return ["accepted_by_apns", "retryable", "invalid_token", "permanent_failure", "ambiguous", "rate_limited", "in_progress"].includes(object.status)
+    ? {
+      status: object.status as Exclude<RelayNotificationOutcome, "invalid_grant">,
+      ...(typeof object.reason === "string" ? { reason: object.reason } : {}),
+    }
+    : undefined;
 }
 
 export class PushRelayClient {
@@ -70,6 +74,7 @@ export class PushRelayClient {
   ) { this.origin = fixedPushOrigin(origin); }
 
   get available(): boolean { return this.origin !== undefined; }
+  get relayOrigin(): string | undefined { return this.origin?.origin; }
 
   async send(input: {
     grantId: string;
@@ -98,8 +103,23 @@ export class PushRelayClient {
     const text = await boundedBody(response);
     let parsed: unknown;
     try { parsed = text ? JSON.parse(text) : undefined; } catch { return response.status >= 500 ? "retryable" : "ambiguous"; }
-    const outcome = exactResult(parsed);
-    if (response.status === 200 && outcome) return outcome;
+    const result = exactResult(parsed);
+    if (response.status === 200 && result) {
+      // Compatibility with relays predating the explicit in_progress status.
+      // Re-querying this exact ID is still safe: their ledger never starts a
+      // second APNs request, and the Gateway retry schedule remains bounded.
+      if (result.status === "ambiguous" && result.reason === "provider_outcome_unknown") return "in_progress";
+      return result.status;
+    }
+    // The relay intentionally exposes one bounded error key. An unknown,
+    // disabled, or mismatched grant is recoverable only by rotating the mobile
+    // capability; retrying this credential can never reach APNs.
+    const relayError = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      && Object.keys(parsed).length === 1 && typeof (parsed as Record<string, unknown>).error === "string"
+      ? (parsed as Record<string, string>).error
+      : undefined;
+    if ((response.status === 401 && relayError === "invalid_signature")
+      || (response.status === 410 && relayError === "installation_unavailable")) return "invalid_grant";
     return response.status === 429 || response.status >= 500 ? "retryable" : "ambiguous";
   }
 

@@ -120,8 +120,12 @@ authority. Disabled records are pruned after the fixed 30-day retention window.
 ## Delivery semantics
 
 The Durable Object records each request ID, grant ID, and body hash before
-contacting APNs. Terminal results replay without another APNs request. A crash
-while APNs outcome is unknown replays `ambiguous`; it does not blindly resend.
+contacting APNs. Terminal results replay without another APNs request. An
+overlapping request for an ID whose provider attempt is still inside the bounded
+30-second provider window returns `in_progress`; polling that same ID can observe
+the eventual terminal result without starting a second APNs request. A stale
+provider attempt or crash whose APNs outcome is unknown replays `ambiguous`; it
+does not blindly resend.
 Explicitly retryable outcomes may be attempted again with the same request ID.
 A request-ID reuse with a different grant or body fails permanently.
 

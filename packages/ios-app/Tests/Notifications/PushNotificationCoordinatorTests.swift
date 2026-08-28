@@ -80,6 +80,8 @@ struct PushNotificationCoordinatorTests {
         #expect(status.enabledDeviceCount == 1)
         #expect(status.pendingCount == 0)
         #expect(status.notifyWhenAskPresented)
+        #expect(status.relayOrigin == "https://push.example.test")
+        #expect(status.requiresGrantRotation == false)
     }
 
     @Test("tap admission requires one exact bounded chat route")
@@ -400,6 +402,8 @@ struct PushNotificationCoordinatorTests {
         }
         let grant = try #require(store.value?.grants[Self.profile.id])
         #expect(grant.installationID == "installation_1")
+        #expect(grant.relayOrigin == "https://push.example.test")
+        #expect(grant.route == .beta)
         #expect(store.value?.apnsToken == "0102ff")
         let requests = await requestLog.requests
         #expect(requests.map { $0.url?.path } == ["/v3/attestation/challenge", "/v3/installations"])
@@ -431,6 +435,35 @@ struct PushNotificationCoordinatorTests {
         #expect(requests.allSatisfy { $0.url?.host == "push.example.test" })
         let responseBounds = await requestLog.maximumBytes
         #expect(responseBounds.allSatisfy { $0 == 16 * 1024 })
+    }
+
+    @MainActor
+    @Test("legacy grants without relay identity rotate through the configured Worker")
+    func legacyGrantRelayMigration() async throws {
+        let legacyGrant = PushGrant(
+            profileID: profile.id,
+            installationID: "installation_legacy",
+            grantID: "grant_legacy",
+            grantSecret: String(repeating: "s", count: 32),
+            tokenHash: SHA256.hash(data: Data("tron-apns-token-v1\0\("01")".utf8))
+                .map { String(format: "%02x", $0) }.joined()
+        )
+        let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
+            appAttestKeyID: appAttestKey("key"),
+            apnsToken: "01",
+            grants: [profile.id: legacyGrant]
+        ))
+        let script = ScriptedPushTransport(installations: [.status(201)])
+        let attest = PushAttestRecorder()
+        let coordinator = makeCoordinator(store: store, script: script, attest: attest)
+
+        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        try await waitUntil { store.value?.grants[profile.id]?.relayOrigin == "https://push.example.test" }
+
+        let replacement = try #require(store.value?.grants[profile.id])
+        #expect(replacement.grantID != legacyGrant.grantID)
+        #expect(replacement.route == .beta)
+        #expect(await script.submittedModes == ["assertion"])
     }
 
     @MainActor
@@ -799,7 +832,9 @@ struct PushNotificationCoordinatorTests {
             grantID: "grant_existing",
             grantSecret: String(repeating: "s", count: 32),
             tokenHash: SHA256.hash(data: Data("tron-apns-token-v1\0\(token)".utf8))
-                .map { String(format: "%02x", $0) }.joined()
+                .map { String(format: "%02x", $0) }.joined(),
+            relayOrigin: "https://push.example.test",
+            route: .beta
         )
     }
 

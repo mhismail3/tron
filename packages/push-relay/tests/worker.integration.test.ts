@@ -120,6 +120,52 @@ describe("v3 Worker boundary", () => {
     expect(providerInit?.signal).toBeInstanceOf(AbortSignal);
   });
 
+  test("reports a fresh relay-owned provider attempt as in progress", async () => {
+    await initializeAndSeed();
+    const providerFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+    const requestId = "active-provider-request-0001";
+    const request = await signedNotification({ requestId });
+    const bodyHash = await sha256Hex(utf8(request.body as string));
+    await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO relay_requests
+         (request_id, grant_id, body_hash, state, response_json, quota_charged, updated_at)
+         VALUES (?, ?, ?, 'in_progress', NULL, 1, ?)`,
+        requestId, testGrant.grantId, bodyHash, Math.floor(Date.now() / 1000),
+      );
+    });
+
+    const response = await SELF.fetch("https://push.test/v3/notifications", request);
+    expect(await response.json()).toEqual({
+      status: "in_progress", reason: "provider_request_in_progress",
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  test("keeps a stale provider attempt terminally ambiguous", async () => {
+    await initializeAndSeed();
+    const providerFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+    const requestId = "stale-provider-request-0001";
+    const request = await signedNotification({ requestId });
+    const bodyHash = await sha256Hex(utf8(request.body as string));
+    await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO relay_requests
+         (request_id, grant_id, body_hash, state, response_json, quota_charged, updated_at)
+         VALUES (?, ?, ?, 'in_progress', NULL, 1, ?)`,
+        requestId, testGrant.grantId, bodyHash, Math.floor(Date.now() / 1000) - 31,
+      );
+    });
+
+    const response = await SELF.fetch("https://push.test/v3/notifications", request);
+    expect(await response.json()).toEqual({
+      status: "ambiguous", reason: "provider_outcome_unknown",
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
   test("rejects request-ID reuse with a different authenticated body", async () => {
     await initializeAndSeed();
     const providerFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 200 }));

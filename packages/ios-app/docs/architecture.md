@@ -838,7 +838,7 @@ Tron registers for remote alert notifications only after a Gateway profile exist
 The user permission decision is authoritative and denial never blocks pairing or
 chat. The app obtains an opaque APNs token, proves the official Beta or production
 application identity to the fixed Tron Push origin with App Attest, and transfers
-only the returned endpoint-scoped installation grant to the authenticated Gateway.
+only the returned endpoint-scoped installation grant to the authenticated Gateway. Each grant records the normalized relay origin and APNs/App Attest route that issued it; a legacy or mismatched grant is replaced through the configured Worker rather than transferred across relay authorities.
 App Attest keys, APNs token bytes, and grants use a Keychain namespace separate from
 Gateway bearer credentials. Registration is one bounded, profile-generation-owned operation:
 every retry obtains a new challenge and generates a new proof, timeout/retryable 5xx uses two
@@ -846,7 +846,7 @@ bounded backoffs, and cancellation cannot commit across a profile or APNs-token 
 An assertion 401 or the SDK's exact typed invalid-key code may clear only the App Attest key
 and permits one fresh-key attestation; fresh-attestation rejection, malformed responses,
 nonretryable 4xx, persistence failure, and exhaustion stop without credential churn. APNs
-tokens and existing grants are preserved. Settings exposes only a fixed local stage label,
+tokens are preserved. A Gateway-certified relay rejection invalidates only that endpoint grant; the next bounded reconciliation rotates it while retaining the APNs token and App Attest recovery rules. A Gateway whose product relay origin differs from iOS is treated as unavailable rather than accepting a cross-origin capability. Settings exposes only a fixed local stage label,
 never origins, identifiers, tokens, proofs, grants, response bodies, certificates, or bindings.
 Registration reconciles on connection, foreground, profile, permission, and APNs-token changes;
 Worker failure leaves push pending.
