@@ -1100,7 +1100,10 @@ with unchanged SwiftUI identity and private state. While an authoritative assist
 streaming, `ChatStreamingInlineText` keeps the complete source in layout and reveals only newly admitted lexical
 words through presentation-only foreground opacity. Stable message/block/run identities preserve the reveal ledger
 across projection snapshots; a large initial/backlogged stream catches up immediately, and completion shows the
-full source without replay. Reduce Motion and accessibility never hide authoritative text. Under exact tail bounds,
+full source without replay. The eager Markdown block stack publishes its exact wrapped vertical ideal even when its
+single outer transcript row receives a finite lazy-stack proposal; long responses therefore cannot leave viewport-sized
+or stale row estimates that separate later rows, inflate the tail, or compound across turns. Reduce Motion and
+accessibility never hide authoritative text. Under exact tail bounds,
 a pending compaction and its
 canonical entry share a presentation-only global-ordinal identity, so “Compacting context” becomes
 “Context compacted” in place without changing Gateway identity or semantic scroll maps.

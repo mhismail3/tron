@@ -64,6 +64,12 @@ struct TronMarkdownView: View {
         }
         .font(TronFont.body())
         .foregroundStyle(Color.assistantMessageText)
+        // A transcript row is one lazy child even when this eager block stack
+        // contains hundreds of paragraphs. Always publish the exact wrapped
+        // vertical ideal instead of accepting a viewport-sized/stale proposal;
+        // otherwise LazyVStack can retain an invalid estimate after a live
+        // assistant row settles and place later rows against phantom geometry.
+        .fixedSize(horizontal: false, vertical: true)
         .transcriptTextSelection(enabled: !dynamicTypeSize.isAccessibilitySize)
     }
 

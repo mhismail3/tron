@@ -6,6 +6,44 @@ import UIKit
 @MainActor
 @Suite("Hosted ChatView scroll harness", .serialized)
 struct ChatViewScrollHarnessTests {
+    @Test("long assistant Markdown keeps exact intrinsic height with bounded thinking")
+    func longAssistantIntrinsicGeometry() throws {
+        let body = (0..<120).map { index in
+            index.isMultiple(of: 8)
+                ? "## Section \(index)"
+                : "Paragraph \(index) contains enough words to wrap naturally across the chat transcript width."
+        }.joined(separator: "\n\n")
+        let textOnly = try harnessRichAssistantMessage(
+            id: "text-only",
+            presentationID: "turn-text-only",
+            thinkingLines: [],
+            text: body
+        )
+        let withThinking = try harnessRichAssistantMessage(
+            id: "with-thinking",
+            presentationID: "turn-with-thinking",
+            thinkingLines: (0..<36).map { "Private reasoning line \($0) with measurement content" },
+            text: body
+        )
+        let proposal = CGSize(width: 358, height: CGFloat.greatestFiniteMagnitude)
+        let textController = UIHostingController(
+            rootView: TranscriptRow(item: textOnly, preparedText: .empty)
+        )
+        let thinkingController = UIHostingController(
+            rootView: TranscriptRow(item: withThinking, preparedText: .empty)
+        )
+        let textHeight = textController.sizeThatFits(in: proposal).height
+        let boundedProposalHeight = textController.sizeThatFits(
+            in: CGSize(width: proposal.width, height: 400)
+        ).height
+        let thinkingHeight = thinkingController.sizeThatFits(in: proposal).height
+
+        #expect(textHeight > 400)
+        #expect(abs(boundedProposalHeight - textHeight) <= 1)
+        #expect(thinkingHeight > textHeight)
+        #expect(thinkingHeight - textHeight < 120)
+    }
+
     @Test("composer height changes are atomic and coalesced")
     func composerLayoutGenerationPolicy() {
         #expect(ChatComposerStructuralTransitionPolicy.admitsHeightChange(
@@ -1097,6 +1135,40 @@ private func harnessAssistantMessage(
         {"id":"\(id)","parentId":null,"presentationId":"\(presentationID)","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"\(id):text","ordinal":0,"type":"text","text":"\(text)"}]}
         """.utf8)
     )
+}
+
+private func harnessRichAssistantMessage(
+    id: String,
+    presentationID: String,
+    thinkingLines: [String],
+    text: String
+) throws -> TranscriptItem {
+    var content: [[String: Any]] = []
+    if !thinkingLines.isEmpty {
+        content.append([
+            "id": "\(id):thinking",
+            "ordinal": 0,
+            "thinkingRunOrdinal": 0,
+            "type": "thinking",
+            "text": thinkingLines.joined(separator: "\n")
+        ])
+    }
+    content.append([
+        "id": "\(id):text",
+        "ordinal": thinkingLines.isEmpty ? 0 : 1,
+        "type": "text",
+        "text": text
+    ])
+    let data = try JSONSerialization.data(withJSONObject: [
+        "id": id,
+        "parentId": NSNull(),
+        "presentationId": presentationID,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "kind": "message",
+        "role": "assistant",
+        "content": content
+    ])
+    return try decodeTranscriptFixture(TranscriptItem.self, from: data)
 }
 
 private func harnessCompactionItem(id: String) throws -> TranscriptItem {
