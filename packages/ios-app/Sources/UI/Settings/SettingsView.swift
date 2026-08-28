@@ -27,11 +27,11 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 12) {
+                VStack(spacing: 18) {
                     // Match the Connections surface: each logical group gets
                     // its own glass container and header instead of one long,
                     // undifferentiated card.
-                    TronSettingsGroup("Personalization & Connections", accent: .tronEmerald) {
+                    TronSettingsGroup("App & Connections", accent: .tronEmerald) {
                         settingsLink(
                             "Appearance",
                             summary: "Theme, type scale, and visual preferences",

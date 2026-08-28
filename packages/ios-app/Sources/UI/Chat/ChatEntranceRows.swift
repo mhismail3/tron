@@ -32,6 +32,10 @@ enum ChatEntranceGrowthPolicy {
         return natural * normalizedProgress(progress)
     }
 
+    static func requiresClip(progress: CGFloat) -> Bool {
+        normalizedProgress(progress) < 1
+    }
+
     static func clipRect(in bounds: CGRect, progress: CGFloat) -> CGRect {
         let hiddenVerticalOverflow = effectOverflow * (1 - normalizedProgress(progress))
         return bounds.insetBy(dx: 0, dy: hiddenVerticalOverflow)
@@ -122,10 +126,18 @@ private extension View {
     /// Keeps the measured-height entrance vertically bounded while preserving
     /// the natural horizontal shadow and press-morph region. Vertical overflow
     /// joins continuously as the row reaches its full admitted height.
+    @ViewBuilder
     func chatEntranceGrowthClip(progress: CGFloat) -> some View {
-        padding(ChatEntranceGrowthPolicy.effectOverflow)
-            .clipShape(ChatEntranceGrowthClipShape(progress: progress))
-            .padding(-ChatEntranceGrowthPolicy.effectOverflow)
+        if ChatEntranceGrowthPolicy.requiresClip(progress: progress) {
+            padding(ChatEntranceGrowthPolicy.effectOverflow)
+                .clipShape(ChatEntranceGrowthClipShape(progress: progress))
+                .padding(-ChatEntranceGrowthPolicy.effectOverflow)
+        } else {
+            // Once admission settles, remove the clipping node entirely. The
+            // transcript chip then has the same unconstrained native Liquid
+            // Glass press-and-drag region as chips in the Used Tools sheet.
+            self
+        }
     }
 }
 

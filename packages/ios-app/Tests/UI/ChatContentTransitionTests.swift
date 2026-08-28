@@ -62,6 +62,10 @@ struct ChatContentTransitionTests {
         #expect(ChatEntranceGrowthPolicy.height(natural: 120, progress: 2) == 120)
         #expect(ChatEntranceGrowthPolicy.height(natural: .infinity, progress: 1) == 0)
         #expect(ChatEntranceGrowthPolicy.height(natural: 120, progress: .nan) == 0)
+        #expect(ChatEntranceGrowthPolicy.requiresClip(progress: 0))
+        #expect(ChatEntranceGrowthPolicy.requiresClip(progress: 0.999))
+        #expect(!ChatEntranceGrowthPolicy.requiresClip(progress: 1))
+        #expect(!ChatEntranceGrowthPolicy.requiresClip(progress: 2))
 
         let overflow = ChatEntranceGrowthPolicy.effectOverflow
         let hiddenBounds = CGRect(x: 0, y: 0, width: 200, height: overflow * 2)

@@ -1159,7 +1159,7 @@ without rescanning the full timeline. The run, individual tool, Changes, and
 Technical details sheets share one inline navigation-chrome policy; principal toolbar titles
 therefore cannot reserve an empty large-title region above the scroll view. Each medium/large
 tool detail sheet explicitly top-anchors short scroll content and begins immediately below
-native toolbar chrome. Tool-detail surfaces use their own 112-point top blur while the main chat uses 176 points, without changing either radius. Its medium
+native toolbar chrome. Tool-detail surfaces use their own 108-point top blur while the main chat uses 176 points, without changing either radius. Its medium
 detent is a glance surface: a wrapping chip flow combines state and elapsed time and expresses only useful
 metadata in natural singular/plural copy. The flow caches one bounded measurement per layout pass and uses the exact same width and height proposal for placement, so a dynamically updating status chip cannot under-report its row height or overlap the following section. Pulling to large selects the expanded display density without
 changing the selected call or scroll ownership. Read/write/edit foreground a selectable path whose directory

@@ -18,7 +18,7 @@ enum TronTopBlurStyle {
         case .chat: 176
         case .dashboard: 176
         case .sheet: 124
-        case .toolDetail: 112
+        case .toolDetail: 108
         case .logs: 184
         }
     }

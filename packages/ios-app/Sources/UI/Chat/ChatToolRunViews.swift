@@ -290,6 +290,9 @@ private struct ToolActivityChip: View {
             cornerRadius: ChatToolChipShapePolicy.cornerRadius,
             style: .continuous
         ))
+        // Match ToolCard in the Used Tools sheet: keep the native glass
+        // surface's vertical hit geometry intrinsic before attaching its tap.
+        .fixedSize(horizontal: false, vertical: true)
         .toolChipInteraction(
             accessibilityLabel: accessibilityLabel(visual),
             accessibilityValue: visual.title,
