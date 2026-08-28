@@ -33,11 +33,14 @@ struct ChatNotificationView: View {
     var body: some View {
         Group {
             if presentation.hasDetailSheet {
-                Button { showingDetail = true } label: {
-                    pill.frame(minWidth: 44, minHeight: 44)
-                }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
+                pill
+                    .chatCompactPillInteraction(
+                        accessibilityLabel: accessibilityLabel,
+                        action: { showingDetail = true }
+                    )
+                    // Preserve the 44-point semantic row target without making
+                    // its empty corners compete with the glass surface gesture.
+                    .frame(minWidth: 44, minHeight: 44)
             } else {
                 pill
             }

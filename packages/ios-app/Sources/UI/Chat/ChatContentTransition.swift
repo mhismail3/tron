@@ -327,15 +327,18 @@ enum ChatPromptReplacementAnimationPolicy {
     }
 }
 
-private struct ChatStableTranscriptUpdateModifier: ViewModifier {
+private struct ChatStableTranscriptUpdateModifier<ProjectionIdentity: Equatable>: ViewModifier {
+    let projectionIdentity: ProjectionIdentity
+
     func body(content: Content) -> some View {
-        content.transaction { transaction in
-            // Tagged presentation motion and continuous native control retain
-            // their scoped animations across atomic projection replacement.
+        content.transaction(value: projectionIdentity) { transaction in
+            // Suppress inherited animation only when the installed projection
+            // changes. Native Liquid Glass begins with a discrete touch-down
+            // transaction before its continuous drag updates; an unconditional
+            // transaction transform was erasing that first animation.
             if !transaction.admitsChatToolChipAnimation,
                !transaction.admitsChatEntranceAnimation,
-               !transaction.admitsChatPromptReplacementAnimation,
-               !transaction.isContinuous {
+               !transaction.admitsChatPromptReplacementAnimation {
                 transaction.animation = nil
             }
         }
@@ -343,7 +346,11 @@ private struct ChatStableTranscriptUpdateModifier: ViewModifier {
 }
 
 extension View {
-    func chatStableTranscriptUpdates() -> some View {
-        modifier(ChatStableTranscriptUpdateModifier())
+    func chatStableTranscriptUpdates<ProjectionIdentity: Equatable>(
+        projectionIdentity: ProjectionIdentity
+    ) -> some View {
+        modifier(ChatStableTranscriptUpdateModifier(
+            projectionIdentity: projectionIdentity
+        ))
     }
 }

@@ -91,7 +91,7 @@ struct ToolCard: View {
         ))
         .fixedSize(horizontal: false, vertical: true)
         .contentTransition(.interpolate)
-        .toolChipInteraction(
+        .chatCompactPillInteraction(
             accessibilityLabel: accessibilityLabel,
             accessibilityValue: title,
             action: openDetails
@@ -293,7 +293,7 @@ private struct ToolActivityChip: View {
         // Match ToolCard in the Used Tools sheet: keep the native glass
         // surface's vertical hit geometry intrinsic before attaching its tap.
         .fixedSize(horizontal: false, vertical: true)
-        .toolChipInteraction(
+        .chatCompactPillInteraction(
             accessibilityLabel: accessibilityLabel(visual),
             accessibilityValue: visual.title,
             action: action
@@ -609,38 +609,7 @@ private struct ToolDetailSheetHost: ViewModifier {
     }
 }
 
-private struct ChatToolChipInteractionModifier: ViewModifier {
-    let accessibilityLabel: String
-    let accessibilityValue: String
-    let action: () -> Void
-
-    func body(content: Content) -> some View {
-        content
-            // Keep the interactive glass surface itself as the touch owner, as
-            // on the composer bar. Wrapping it in Button adds a second native
-            // press phase that zooms before the glass drag morph can settle.
-            .onTapGesture(perform: action)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(accessibilityLabel)
-            .accessibilityValue(accessibilityValue)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction { action() }
-    }
-}
-
 private extension View {
-    func toolChipInteraction(
-        accessibilityLabel: String,
-        accessibilityValue: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        modifier(ChatToolChipInteractionModifier(
-            accessibilityLabel: accessibilityLabel,
-            accessibilityValue: accessibilityValue,
-            action: action
-        ))
-    }
-
     func toolDetailSheet(
         route: Binding<ToolDetailRoute?>,
         detent: Binding<PresentationDetent>,

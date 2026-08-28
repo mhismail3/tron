@@ -185,14 +185,27 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Theme/TronPresentation.swift"),
             encoding: .utf8
         )
+        let compactPill = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatCompactPill.swift"),
+            encoding: .utf8
+        )
         let toolRuns = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatToolRunViews.swift"),
+            encoding: .utf8
+        )
+        let transcriptEvents = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptEventViews.swift"),
             encoding: .utf8
         )
         let contentTransition = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatContentTransition.swift"),
             encoding: .utf8
         )
+        let notification = (transcriptEvents.components(
+            separatedBy: "struct ChatNotificationView"
+        ).dropFirst().first ?? "").components(
+            separatedBy: "struct TranscriptNotice"
+        ).first ?? ""
 
         #expect(presentation.contains("enum TronToggleMotionPolicy"))
         #expect(presentation.contains("private struct TronToggleControl: View"))
@@ -205,13 +218,25 @@ struct PresentationStyleGuardTests {
         #expect(presentation.contains("Toggle(isOn: $isOn) { Text(title) }"))
 
         #expect(toolRuns.occurrences(of: "interactive: true") == 2)
-        #expect(toolRuns.occurrences(of: "        .toolChipInteraction(\n") == 2)
-        #expect(toolRuns.contains(".onTapGesture(perform: action)"))
-        #expect(toolRuns.contains(".accessibilityAddTraits(.isButton)"))
+        #expect(toolRuns.occurrences(of: "        .chatCompactPillInteraction(\n") == 2)
+        #expect(compactPill.contains("private struct ChatCompactPillInteractionModifier"))
+        #expect(compactPill.contains(".onTapGesture(perform: action)"))
+        #expect(compactPill.contains(".accessibilityAddTraits(.isButton)"))
+        #expect(transcriptEvents.contains(".chatCompactPillInteraction("))
+        #expect(!notification.contains("Button { showingDetail = true }"))
+        #expect(!notification.contains(".contentShape(Rectangle())"))
+        let interactionPosition = try #require(
+            notification.firstRange(of: ".chatCompactPillInteraction(")?.lowerBound
+        )
+        let semanticFramePosition = try #require(
+            notification.firstRange(of: ".frame(minWidth: 44, minHeight: 44)")?.lowerBound
+        )
+        #expect(interactionPosition < semanticFramePosition)
         #expect(!toolRuns.contains("ChatToolChipPressStyle"))
+        #expect(contentTransition.contains("content.transaction(value: projectionIdentity)"))
         #expect(contentTransition.contains("!transaction.admitsChatToolChipAnimation,"))
         #expect(contentTransition.contains("!transaction.admitsChatEntranceAnimation,"))
-        #expect(contentTransition.contains("!transaction.isContinuous"))
+        #expect(!contentTransition.contains("!transaction.isContinuous"))
         #expect(!contentTransition.contains("admitsChatLiveGrowthAnimation"))
     }
 
@@ -2468,11 +2493,11 @@ struct PresentationStyleGuardTests {
         let toolCard = (toolRuns.components(separatedBy: "struct ToolCard").dropFirst().first ?? "")
             .components(separatedBy: "struct ToolRunView").first ?? ""
         let toolCardLabel = (toolCard.components(separatedBy: "var body: some View").dropFirst().first ?? "")
-            .components(separatedBy: ".toolChipInteraction(").first ?? ""
+            .components(separatedBy: ".chatCompactPillInteraction(").first ?? ""
         let toolRunChip = (toolRuns.components(separatedBy: "private struct ToolActivityChip").dropFirst().first ?? "")
             .components(separatedBy: "private struct ToolRunDetailSheet").first ?? ""
         let toolRunLabel = (toolRunChip.components(separatedBy: "var body: some View").dropFirst().first ?? "")
-            .components(separatedBy: ".toolChipInteraction(").first ?? ""
+            .components(separatedBy: ".chatCompactPillInteraction(").first ?? ""
         let toolElapsed = (toolRuns.components(separatedBy: "private struct ToolElapsedText").dropFirst().first ?? "")
             .components(separatedBy: "private struct ToolRunElapsedText").first ?? ""
         let toolRunElapsed = (toolRuns.components(separatedBy: "private struct ToolRunElapsedText").dropFirst().first ?? "")
@@ -2480,7 +2505,10 @@ struct PresentationStyleGuardTests {
         #expect(transcriptEvents.contains("struct TranscriptNotice: View"))
         #expect(transcriptEvents.contains("struct ChatNotificationView: View"))
         #expect(toolRuns.contains("struct ToolRunView: View"))
-        #expect(notification.contains("pill.frame(minWidth: 44, minHeight: 44)"))
+        #expect(notification.contains(".frame(minWidth: 44, minHeight: 44)"))
+        #expect(notification.contains(".chatCompactPillInteraction("))
+        #expect(!notification.contains(".contentShape(Rectangle())"))
+        #expect(!notification.contains("Button { showingDetail = true }"))
         #expect(notification.contains(".frame(maxWidth: .infinity, minHeight: 44, alignment: .center)"))
         #expect(transcriptView.contains("LazyVStack(alignment: .leading, spacing: 0)"))
         #expect(transcriptView.contains("canonicalSubmissionIDs.contains(semanticID)"))
@@ -2497,7 +2525,7 @@ struct PresentationStyleGuardTests {
         #expect(!(transcriptEvents + toolRuns).contains("value: visualState"))
         #expect(!notification.contains(".contentTransition(.opacity)"))
         #expect(toolRuns.contains(".contentTransition(reduceMotion ? .opacity : .interpolate)"))
-        #expect(chat.contains(".chatStableTranscriptUpdates()"))
+        #expect(chat.contains(".chatStableTranscriptUpdates(projectionIdentity: installed.tag)"))
         #expect(!toolRuns.contains("value: detailTool"))
         #expect(!toolRuns.contains("value: presentation)"))
         #expect(!toolRuns.contains("value: run)"))
@@ -2524,8 +2552,8 @@ struct PresentationStyleGuardTests {
         #expect(toolRunChip.contains(".contentShape(RoundedRectangle("))
         #expect(toolCard.contains(".fixedSize(horizontal: false, vertical: true)"))
         #expect(toolRunChip.contains(".fixedSize(horizontal: false, vertical: true)"))
-        #expect(toolCard.contains(".toolChipInteraction("))
-        #expect(toolRunChip.contains(".toolChipInteraction("))
+        #expect(toolCard.contains(".chatCompactPillInteraction("))
+        #expect(toolRunChip.contains(".chatCompactPillInteraction("))
         #expect(toolCard.contains("interactive: true"))
         #expect(toolRunChip.contains("interactive: true"))
         #expect(!toolCardLabel.contains("Button"))

@@ -420,7 +420,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             // transcripts composer-aligned; overflowing transcripts are unchanged.
             .frame(minHeight: minimumUnderflowContentHeight, alignment: .bottom)
             .scrollTargetLayout()
-            .chatStableTranscriptUpdates()
+            .chatStableTranscriptUpdates(projectionIdentity: installed?.tag)
             .offset(y: isReady || reduceMotion ? 0 : 8)
             .accessibilityHidden(!isReady)
             .allowsHitTesting(isReady)
@@ -731,7 +731,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             recordToolChip: { sample in hostedRecorder?.recordToolChip(sample) }
         )
         .equatable()
-        .chatStableTranscriptUpdates()
+        .chatStableTranscriptUpdates(projectionIdentity: installed.tag)
     }
 
     /// The presentation ledger supplies the newest transcript entrance in O(1),

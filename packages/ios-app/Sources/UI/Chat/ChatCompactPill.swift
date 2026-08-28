@@ -101,6 +101,38 @@ struct ChatCompactPillSurface<Content: View>: View {
     }
 }
 
+private struct ChatCompactPillInteractionModifier: ViewModifier {
+    let accessibilityLabel: String
+    let accessibilityValue: String?
+    let action: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            // The interactive glass surface remains the only visual press
+            // owner. A wrapping Button would add a second touch-down phase.
+            .onTapGesture(perform: action)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityValue(accessibilityValue ?? "")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { action() }
+    }
+}
+
+extension View {
+    func chatCompactPillInteraction(
+        accessibilityLabel: String,
+        accessibilityValue: String? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        modifier(ChatCompactPillInteractionModifier(
+            accessibilityLabel: accessibilityLabel,
+            accessibilityValue: accessibilityValue,
+            action: action
+        ))
+    }
+}
+
 enum ChatToolChipShapePolicy {
     /// Status and failure tint changes are shallow. The Liquid Glass geometry
     /// never switches shape while a mounted tool run settles.
