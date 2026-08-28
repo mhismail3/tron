@@ -1,6 +1,5 @@
 import Observation
 import SwiftUI
-import UIKit
 
 enum ChatMorphAdmissionPolicy {
     /// Spatial morphs are intentionally reserved for compact composer content.
@@ -24,6 +23,18 @@ enum ChatMorphAdmissionPolicy {
             && sourceFrame.width > 0
             && sourceFrame.width.isFinite
             && sourceFrame.height.isFinite
+    }
+}
+
+enum ChatMorphFramePolicy {
+    static let retargetTolerance: CGFloat = 0.5
+
+    static func materiallyDiffers(_ lhs: CGRect?, from rhs: CGRect) -> Bool {
+        guard let lhs else { return true }
+        return abs(lhs.minX - rhs.minX) > retargetTolerance
+            || abs(lhs.minY - rhs.minY) > retargetTolerance
+            || abs(lhs.width - rhs.width) > retargetTolerance
+            || abs(lhs.height - rhs.height) > retargetTolerance
     }
 }
 
@@ -73,6 +84,10 @@ final class ChatMorphFrameRegistry {
 
     private(set) var flight: Flight?
     private(set) var readinessRevision = 0
+    /// Stable row-facing ownership. Endpoint retargets mutate `flight` without
+    /// invalidating the outgoing row or forcing its natural height to remeasure.
+    private var activeLifecycleID: String?
+    private var activeElementIDs: Set<ChatMorphID> = []
     private var completedLifecycleID: String?
     private var abandonedGeneration: Int?
     private var draftPromptFrame: CGRect?
@@ -105,6 +120,7 @@ final class ChatMorphFrameRegistry {
     ) -> Bool {
         guard !suppress,
               let submission = lifecycle.submission,
+              !ChatPromptBehavior(rawValue: submission.behavior).isQueuedKind,
               let lifecycleID = lifecycle.id,
               lifecycle.phase != .idle,
               flight == nil else { return false }
@@ -147,6 +163,8 @@ final class ChatMorphFrameRegistry {
             destinationFrames: [:],
             phase: .waitingForDestination
         )
+        activeLifecycleID = lifecycleID
+        activeElementIDs = Set(elements.map(\.id))
         readinessRevision &+= 1
         return true
     }
@@ -157,6 +175,8 @@ final class ChatMorphFrameRegistry {
             if flight.phase == .animating {
                 abandonedGeneration = flight.generation
                 self.flight = nil
+                activeLifecycleID = nil
+                activeElementIDs.removeAll(keepingCapacity: true)
             } else {
                 flight.destinationFrames[id] = nil
                 self.flight = flight
@@ -167,7 +187,10 @@ final class ChatMorphFrameRegistry {
         // The keyboard and bottom inset may still be settling when the row is
         // first measured. Retarget the endpoint in place so the flight remains
         // visually continuous instead of abandoning into a mid-animation jump.
-        guard flight.destinationFrames[id] != frame else { return }
+        guard ChatMorphFramePolicy.materiallyDiffers(
+            flight.destinationFrames[id],
+            from: frame
+        ) else { return }
         flight.destinationFrames[id] = frame
         self.flight = flight
         readinessRevision &+= 1
@@ -184,14 +207,14 @@ final class ChatMorphFrameRegistry {
     }
 
     func hidesDestination(_ id: ChatMorphID) -> Bool {
-        flight?.elements.contains(where: { $0.id == id }) == true
+        activeElementIDs.contains(id)
     }
 
     /// The outgoing row remains mounted for destination measurement. This
     /// value gives that row one deterministic visual owner: an admitted flight,
     /// the completed flight, or its ordinary fallback entrance.
     func entranceOwnership(for lifecycleID: String) -> EntranceOwnership {
-        if flight?.lifecycleID == lifecycleID { return .flight }
+        if activeLifecycleID == lifecycleID { return .flight }
         if completedLifecycleID == lifecycleID { return .completed }
         return .ordinary
     }
@@ -201,6 +224,8 @@ final class ChatMorphFrameRegistry {
         guard let flight, flight.lifecycleID == lifecycleID,
               flight.phase == .animating else { return nil }
         completedLifecycleID = lifecycleID
+        activeLifecycleID = nil
+        activeElementIDs.removeAll(keepingCapacity: true)
         self.flight = nil
         readinessRevision &+= 1
         return flight.generation
@@ -210,6 +235,8 @@ final class ChatMorphFrameRegistry {
     func failOpen(lifecycleID: String) -> Int? {
         guard let flight, flight.lifecycleID == lifecycleID else { return nil }
         self.flight = nil
+        activeLifecycleID = nil
+        activeElementIDs.removeAll(keepingCapacity: true)
         readinessRevision &+= 1
         return flight.generation
     }
@@ -218,6 +245,8 @@ final class ChatMorphFrameRegistry {
     func abandon() -> Int? {
         let generation = flight?.generation
         flight = nil
+        activeLifecycleID = nil
+        activeElementIDs.removeAll(keepingCapacity: true)
         completedLifecycleID = nil
         abandonedGeneration = nil
         readinessRevision &+= 1
@@ -231,13 +260,19 @@ final class ChatMorphFrameRegistry {
     }
 
     @discardableResult
-    func reconcile(installedLifecycleID: String?) -> Int? {
+    func reconcile(
+        installedLifecycleID: String?,
+        permitsFlight: Bool = true
+    ) -> Int? {
         if let completedLifecycleID, completedLifecycleID != installedLifecycleID {
             self.completedLifecycleID = nil
             readinessRevision &+= 1
         }
-        guard let flight, flight.lifecycleID != installedLifecycleID else { return nil }
+        guard let flight,
+              flight.lifecycleID != installedLifecycleID || !permitsFlight else { return nil }
         self.flight = nil
+        activeLifecycleID = nil
+        activeElementIDs.removeAll(keepingCapacity: true)
         readinessRevision &+= 1
         return flight.generation
     }
@@ -317,7 +352,7 @@ struct ChatMorphFlightLayer: View {
                 ZStack {
                     ForEach(flight.elements) { element in
                         let destination = flight.destinationFrames[element.id] ?? element.sourceFrame
-                        flightElement(element, progress: progress)
+                        flightElement(element)
                             .frame(
                                 width: interpolate(
                                     element.sourceFrame.width,
@@ -331,10 +366,9 @@ struct ChatMorphFlightLayer: View {
                                 )
                             )
                             // The interpolated frame is the hard visual
-                            // boundary. During destination measurement this
-                            // paints the source at progress zero, eliminating
-                            // the blank frame between composer removal and
-                            // flight admission.
+                            // boundary. Prompt flights use a lightweight opaque
+                            // surface below, avoiding a resized live backdrop
+                            // filter while preserving exact, undistorted text.
                             .clipShape(RoundedRectangle(
                                 cornerRadius: element.text == nil ? 14 : 22,
                                 style: .continuous
@@ -378,41 +412,12 @@ struct ChatMorphFlightLayer: View {
 
     @ViewBuilder
     private func flightElement(
-        _ element: ChatMorphFrameRegistry.Element,
-        progress: CGFloat
+        _ element: ChatMorphFrameRegistry.Element
     ) -> some View {
         if let text = element.text {
-            UserPromptText(text: text)
-                .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
-                .padding(.top, ChatPromptContainerStyle.topPadding)
-                .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
-                .modifier(UserPromptGlassModifier())
+            ChatPromptFlightSurface(text: text)
         } else if let attachment = element.attachment {
-            if attachment.mimeType.lowercased().hasPrefix("image/") {
-                AttachmentThumbnailSurface(
-                    image: attachment.preparedThumbnail.map { UIImage(cgImage: $0.image) },
-                    name: attachment.name,
-                    mimeType: attachment.mimeType
-                )
-            } else {
-                ZStack {
-                    AttachmentThumbnailSurface(
-                        image: nil,
-                        name: attachment.name,
-                        mimeType: attachment.mimeType
-                    )
-                    .opacity(1 - progress)
-                    if let blobID = attachment.transportBlobID {
-                        TranscriptFileChip(
-                            name: attachment.name,
-                            mimeType: attachment.mimeType,
-                            size: attachment.size,
-                            blobID: blobID
-                        )
-                        .opacity(progress)
-                    }
-                }
-            }
+            ChatAttachmentFlightSurface(attachment: attachment)
         }
     }
 
@@ -453,5 +458,78 @@ struct ChatMorphFlightLayer: View {
 
     private func interpolate(_ source: CGFloat, _ destination: CGFloat, _ progress: CGFloat) -> CGFloat {
         source + ((destination - source) * progress)
+    }
+}
+
+/// The source and destination own the real Liquid Glass surfaces. Rendering a
+/// third live backdrop filter while its bounds move forces an expensive blur
+/// recomposition every frame, so the short flight uses this visually matched
+/// opaque bridge and hands back to the destination at completion.
+private struct ChatPromptFlightSurface: View {
+    let text: String
+
+    var body: some View {
+        let shape = RoundedRectangle(
+            cornerRadius: ChatPromptContainerStyle.cornerRadius,
+            style: .continuous
+        )
+        UserPromptText(text: text)
+            .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
+            .padding(.top, ChatPromptContainerStyle.topPadding)
+            .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
+            .modifier(UserPromptFlightLayoutModifier())
+            .background {
+                shape.fill(Color.tronSurfaceElevated)
+                    .overlay(shape.fill(Color.tronEmerald.opacity(0.13)))
+            }
+            .overlay(shape.stroke(Color.tronEmerald.opacity(0.22), lineWidth: 0.5))
+    }
+}
+
+private struct ChatAttachmentFlightSurface: View {
+    let attachment: PendingAttachment
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        ZStack {
+            Color.tronSurfaceElevated
+            Color.tronBlue.opacity(0.16)
+            if let prepared = attachment.preparedThumbnail {
+                Image(decorative: prepared.image, scale: 1)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                VStack(spacing: 4) {
+                    Image(systemName: attachment.mimeType == "application/pdf"
+                        ? "doc.richtext.fill"
+                        : "doc.text.fill")
+                        .font(TronTypography.sans(
+                            size: TronTypography.sizeXL,
+                            weight: .semibold
+                        ))
+                        .foregroundStyle(Color.tronBlue)
+                    Text(attachment.name)
+                        .font(TronTypography.secondaryCodeDescription)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .padding(.horizontal, 5)
+                }
+            }
+        }
+        .frame(
+            width: PendingPhotoRemoveLayoutPolicy.previewSide,
+            height: PendingPhotoRemoveLayoutPolicy.previewSide
+        )
+        .clipShape(shape)
+        .overlay(shape.stroke(Color.tronBlue.opacity(0.22), lineWidth: 0.5))
+    }
+}
+
+private struct UserPromptFlightLayoutModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        BoundedTrailingContentLayout(maxWidth: UserPromptTextLayoutPolicy.maximumWidth) {
+            content.fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

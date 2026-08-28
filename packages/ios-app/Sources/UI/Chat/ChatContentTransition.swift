@@ -161,10 +161,14 @@ struct ChatContentEntranceTransform: Equatable, Sendable {
 }
 
 enum ChatContentTransitionPolicy {
-    static let promptEntranceDuration: TimeInterval = 0.24
-    static let promptFlightDuration: TimeInterval = 0.26
-    static let promptReplacementDuration: TimeInterval = 0.18
-    static let notificationReplacementDuration: TimeInterval = 0.22
+    /// Height-coupled transcript entrances share one short, non-overshooting
+    /// clock. Spring overshoot is inappropriate here because growth progress is
+    /// clamped to layout bounds and can otherwise settle through visible stalls.
+    static let transcriptEntranceDuration: TimeInterval = 0.18
+    static let promptEntranceDuration: TimeInterval = transcriptEntranceDuration
+    static let promptFlightDuration: TimeInterval = 0.18
+    static let promptReplacementDuration: TimeInterval = 0.14
+    static let notificationReplacementDuration: TimeInterval = 0.16
 
     static func hiddenTransform(
         for kind: ChatContentEntranceKind,
@@ -211,18 +215,14 @@ enum ChatContentTransitionPolicy {
     }
 
     static func revealAnimation(
-        for kind: ChatContentEntranceKind,
+        for _: ChatContentEntranceKind,
         reduceMotion: Bool
     ) -> Animation {
         if reduceMotion { return .easeOut(duration: 0.12) }
-        switch kind {
-        case .userPrompt, .queuedPrompt:
-            return .smooth(duration: promptEntranceDuration)
-        case .leadingActivity, .centeredActivity:
-            return .spring(response: 0.34, dampingFraction: 0.84, blendDuration: 0.06)
-        case .assistantContent:
-            return .smooth(duration: 0.24)
-        }
+        // Layout height and the visual transform must advance on the same
+        // monotonic curve. This keeps native bottom anchoring continuous while
+        // avoiding a spring's clamped overshoot for tool/status insertions.
+        return .smooth(duration: transcriptEntranceDuration)
     }
 
     static func attachmentAnimation(reduceMotion: Bool) -> Animation {

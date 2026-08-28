@@ -311,9 +311,14 @@ struct ChatView: View {
         }
         .onChange(of: transcriptPresentation.installed?.tag) { previousTag, _ in
             let installed = transcriptPresentation.installed
-            let installedLifecycleID = installed?.handoff.outgoingPresentation?.id
+            scrollCoordinator.reconcileMaterializationRows { renderedID in
+                installed?.containsPhysicalRowID(renderedID) == true
+            }
+            let outgoingPresentation = installed?.handoff.outgoingPresentation
+            let installedLifecycleID = outgoingPresentation?.id
             if let generation = morphRegistry.reconcile(
-                installedLifecycleID: installedLifecycleID
+                installedLifecycleID: installedLifecycleID,
+                permitsFlight: outgoingPresentation?.usesQueuedCardVisual != true
             ) {
                 layoutTransaction.settle(generation, source: .morphFlight)
             }
@@ -2119,13 +2124,10 @@ struct ChatView: View {
                 return
             }
         }
-        // A command may have applied on the preceding frame while its exact
-        // release callback is still queued. Retire only that app-owned lease
-        // before submission changes composer/transcript size; anchored user
-        // positions are never cleared here.
-        if scrollCoordinator.retireAppliedTargetForSubmission() {
-            releaseScrollPositionTarget()
-        }
+        // Keep any already-applied stable-sentinel target through submission.
+        // A new outgoing row can take over that lease without a target-free
+        // frame while the composer and keyboard change size. Detached readers
+        // have no app target and remain untouched.
         scrollCoordinator.submitted()
         // Submission and morph motion share one clock. Composer height is not a
         // participant: changing a safe-area inset over multiple animation
@@ -2176,7 +2178,7 @@ struct ChatView: View {
                     layoutTransaction.settle(morphGeneration, source: .morphFlight)
                 }
                 if let installedBeforeSubmission {
-                    _ = transcriptPresentation.graftLocalLifecycle(
+                    let grafted = transcriptPresentation.graftLocalLifecycle(
                         handoff: .outgoing(
                             presentation: ChatOutgoingSubmissionPresentation(
                                 snapshot: submission,
@@ -2187,6 +2189,16 @@ struct ChatView: View {
                         queuePresentationIDByOperationID:
                             installedBeforeSubmission.queuePresentationIDByOperationID
                     )
+                    if grafted {
+                        // Arm the stable sentinel in the same synchronous
+                        // admission as the outgoing row. Waiting for the lazy
+                        // row task leaves a frame where an older target release
+                        // can race keyboard/composer size changes and expose a
+                        // top-origin viewport.
+                        scrollCoordinator.discreteTailInserted(
+                            renderedID: submission.presentationID
+                        )
+                    }
                 }
                 return submission
             }

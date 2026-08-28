@@ -204,45 +204,77 @@ struct TranscriptRow: View, Equatable {
 }
 
 struct BoundedTrailingContentLayout: Layout {
+    struct Cache {
+        var intrinsicSize: CGSize?
+        var fittedWidth: CGFloat?
+        var fittedSize: CGSize?
+    }
+
     let maxWidth: CGFloat
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        cache = Cache()
+    }
 
     func sizeThatFits(
         proposal: ProposedViewSize,
         subviews: Subviews,
-        cache: inout ()
+        cache: inout Cache
     ) -> CGSize {
         guard let subview = subviews.first else { return .zero }
-        let availableWidth = min(maxWidth, proposal.width ?? maxWidth)
-        let intrinsic = subview.sizeThatFits(.unspecified)
-        let width = UserPromptTextLayoutPolicy.boundedContainerWidth(
-            intrinsic: intrinsic.width,
-            proposed: availableWidth,
-            maximum: maxWidth
+        return measurement(
+            availableWidth: min(maxWidth, proposal.width ?? maxWidth),
+            subview: subview,
+            cache: &cache
         )
-        let fitted = subview.sizeThatFits(ProposedViewSize(width: width, height: proposal.height))
-        return CGSize(width: width, height: fitted.height)
     }
 
     func placeSubviews(
         in bounds: CGRect,
         proposal: ProposedViewSize,
         subviews: Subviews,
-        cache: inout ()
+        cache: inout Cache
     ) {
         guard let subview = subviews.first else { return }
-        let availableWidth = min(maxWidth, bounds.width)
-        let intrinsic = subview.sizeThatFits(.unspecified)
+        let fitted = measurement(
+            availableWidth: min(maxWidth, bounds.width),
+            subview: subview,
+            cache: &cache
+        )
+        subview.place(
+            at: CGPoint(x: bounds.maxX - fitted.width, y: bounds.minY),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: fitted.width, height: fitted.height)
+        )
+    }
+
+    private func measurement(
+        availableWidth: CGFloat,
+        subview: LayoutSubview,
+        cache: inout Cache
+    ) -> CGSize {
+        let intrinsic: CGSize
+        if let cached = cache.intrinsicSize {
+            intrinsic = cached
+        } else {
+            intrinsic = subview.sizeThatFits(.unspecified)
+            cache.intrinsicSize = intrinsic
+        }
         let width = UserPromptTextLayoutPolicy.boundedContainerWidth(
             intrinsic: intrinsic.width,
             proposed: availableWidth,
             maximum: maxWidth
         )
-        let fitted = subview.sizeThatFits(ProposedViewSize(width: width, height: bounds.height))
-        subview.place(
-            at: CGPoint(x: bounds.maxX - width, y: bounds.minY),
-            anchor: .topLeading,
-            proposal: ProposedViewSize(width: width, height: fitted.height)
-        )
+        if cache.fittedWidth == width, let fitted = cache.fittedSize {
+            return fitted
+        }
+        let measured = subview.sizeThatFits(ProposedViewSize(width: width, height: nil))
+        let fitted = CGSize(width: width, height: measured.height)
+        cache.fittedWidth = width
+        cache.fittedSize = fitted
+        return fitted
     }
 }
 

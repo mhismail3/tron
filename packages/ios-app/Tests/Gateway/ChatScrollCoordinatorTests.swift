@@ -58,19 +58,6 @@ struct ChatScrollCoordinatorTests {
         coordinator.cancel()
     }
 
-    @Test("submission retires only the applied app target before layout mutation")
-    func submissionRetiresAppliedTarget() throws {
-        let coordinator = ChatScrollCoordinator()
-        coordinator.geometryChanged(previous: .zero, current: farAway)
-        coordinator.requestCatchUp(reduceMotion: true)
-        let command = try #require(coordinator.command)
-        #expect(coordinator.commandApplied(command))
-        #expect(coordinator.retireAppliedTargetForSubmission())
-        #expect(!coordinator.retireAppliedTargetForSubmission())
-        #expect(coordinator.targetReleaseGeneration == 0)
-        #expect(!coordinator.consumeTargetRelease())
-    }
-
     // MARK: Group B replacements — deleted command-arbitration mechanisms
 
     @Test("size-change anchoring is intent-based for short and overflowing pinned content")
@@ -633,7 +620,7 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
-    @Test("burst materialization requests retain one newest follow-up lease")
+    @Test("burst materialization hands the applied sentinel lease to the newest row")
     func burstMaterializationRequestsAreRetained() async throws {
         try await withTestWatchdog { @MainActor in
             let frames = ManualViewportFrameScheduler()
@@ -649,11 +636,52 @@ struct ChatScrollCoordinatorTests {
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
             await Task.yield()
+
+            // The same stable sentinel remains applied; no target-free frame or
+            // redundant second scroll command is published between insertions.
+            #expect(!coordinator.consumeTargetRelease())
+            #expect(coordinator.command == nil)
+            #expect(coordinator.targetReleaseGeneration == 1)
+
+            coordinator.semanticFrameChanged(
+                renderedID: "second-row", layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 44, width: 100, height: 20)
+            )
+            await frames.waitForRequest(count: 2)
+            frames.releaseNext()
+            await Task.yield()
+            #expect(coordinator.targetReleaseGeneration == 2)
             #expect(coordinator.consumeTargetRelease())
-            let second = try #require(coordinator.command)
-            #expect(second.origin == .tailMaterialization)
-            #expect(second.token != first.token)
             coordinator.cancel()
+        }
+    }
+
+    @Test("canonical settlement releases a transferred lease whose lifecycle row disappeared")
+    func retiredPendingMaterializationCannotLeakTarget() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            coordinator.discreteTailInserted(renderedID: "first-row")
+            let command = try #require(coordinator.command)
+            #expect(coordinator.commandApplied(command))
+            coordinator.semanticFrameChanged(
+                renderedID: "first-row", layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 20, width: 100, height: 20)
+            )
+            coordinator.discreteTailInserted(renderedID: "retired-outgoing-row")
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            await Task.yield()
+            #expect(!coordinator.consumeTargetRelease())
+
+            coordinator.reconcileMaterializationRows { id in
+                id == "canonical-user-row" || id == "transcript-bottom"
+            }
+            await frames.waitForRequest(count: 2)
+            frames.releaseNext()
+            await Task.yield()
+            #expect(coordinator.targetReleaseGeneration == 2)
+            #expect(coordinator.consumeTargetRelease())
         }
     }
 

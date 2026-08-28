@@ -75,6 +75,18 @@ struct ChatMorphFlightTests {
         ))
     }
 
+    @Test("queued card submissions use their exact bounded row entrance")
+    func queuedCardAdmission() {
+        let registry = ChatMorphFrameRegistry()
+        registry.recordDraftPrompt(frame: promptFrame)
+        #expect(!registry.stage(
+            lifecycle: lifecycle(nonce: 18, attachment: nil, behavior: "steer"),
+            generation: 4,
+            suppress: false
+        ))
+        #expect(registry.flight == nil)
+    }
+
     @Test("attachment-only submissions remain eligible for measured morphs")
     func attachmentOnlyAdmission() {
         let registry = ChatMorphFrameRegistry()
@@ -125,6 +137,20 @@ struct ChatMorphFlightTests {
         #expect(suppressed.flight == nil)
     }
 
+    @Test("destination retargeting ignores subpixel geometry churn")
+    func destinationRetargetTolerance() {
+        let base = CGRect(x: 40, y: 100, width: 250, height: 52)
+        #expect(ChatMorphFramePolicy.materiallyDiffers(nil, from: base))
+        #expect(!ChatMorphFramePolicy.materiallyDiffers(
+            base,
+            from: base.offsetBy(dx: 0.25, dy: -0.25)
+        ))
+        #expect(ChatMorphFramePolicy.materiallyDiffers(
+            base,
+            from: base.offsetBy(dx: 0, dy: 1)
+        ))
+    }
+
     @Test("a valid destination may retarget while the keyboard settles")
     func validDestinationRetargetsContinuously() throws {
         let registry = ChatMorphFrameRegistry()
@@ -155,6 +181,21 @@ struct ChatMorphFlightTests {
         #expect(registry.flight == nil)
         #expect(registry.consumeAbandonedGeneration() == 12)
         #expect(registry.consumeAbandonedGeneration() == nil)
+    }
+
+    @Test("preflight card replacement fails an ordinary prompt flight open")
+    func preflightCardRetiresFlight() throws {
+        let registry = ChatMorphFrameRegistry()
+        registry.recordDraftPrompt(frame: promptFrame)
+        let lifecycle = lifecycle(nonce: 19, attachment: nil)
+        let lifecycleID = try #require(lifecycle.id)
+        #expect(registry.stage(lifecycle: lifecycle, generation: 14, suppress: false))
+        #expect(registry.reconcile(
+            installedLifecycleID: lifecycleID,
+            permitsFlight: false
+        ) == 14)
+        #expect(registry.flight == nil)
+        #expect(registry.entranceOwnership(for: lifecycleID) == .ordinary)
     }
 
     @Test("canonical replacement and foreground retirement clear without replay")
@@ -188,7 +229,8 @@ struct ChatMorphFlightTests {
     private func lifecycle(
         nonce: UInt64,
         attachment: PendingAttachment?,
-        text: String = "Hello"
+        text: String = "Hello",
+        behavior: String? = nil
     ) -> ChatSubmissionLifecycle {
         let attachments = attachment.map { [$0] } ?? []
         return ChatSubmissionLifecycle(
@@ -198,7 +240,7 @@ struct ChatMorphFlightTests {
                 textRevision: 1,
                 outgoingText: text,
                 attachmentIDs: attachments.compactMap(\.gatewayUploadID),
-                behavior: nil,
+                behavior: behavior,
                 localNonce: nonce
             ),
             attachments: attachments

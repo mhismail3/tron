@@ -39,19 +39,33 @@ enum ChatEntranceGrowthPolicy {
 }
 
 private struct ChatEntranceGrowthLayout: Layout, Animatable {
+    struct Cache {
+        var proposedWidth: CGFloat?
+        var naturalSize: CGSize?
+    }
+
     var progress: CGFloat
     var animatableData: CGFloat {
         get { progress }
         set { progress = newValue }
     }
 
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        // Payload and Dynamic Type changes invalidate the intrinsic measurement.
+        // Animating `progress` alone does not, so the lazy row can reuse one
+        // exact measurement for every frame of its short height reveal.
+        cache = Cache()
+    }
+
     func sizeThatFits(
         proposal: ProposedViewSize,
         subviews: Subviews,
-        cache: inout ()
+        cache: inout Cache
     ) -> CGSize {
         guard let subview = subviews.first else { return .zero }
-        let natural = subview.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        let natural = naturalSize(width: proposal.width, subview: subview, cache: &cache)
         return CGSize(
             width: proposal.width ?? natural.width,
             height: ChatEntranceGrowthPolicy.height(
@@ -65,15 +79,29 @@ private struct ChatEntranceGrowthLayout: Layout, Animatable {
         in bounds: CGRect,
         proposal: ProposedViewSize,
         subviews: Subviews,
-        cache: inout ()
+        cache: inout Cache
     ) {
         guard let subview = subviews.first else { return }
-        let natural = subview.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+        let natural = naturalSize(width: bounds.width, subview: subview, cache: &cache)
         subview.place(
             at: CGPoint(x: bounds.minX, y: bounds.maxY - natural.height),
             anchor: .topLeading,
             proposal: ProposedViewSize(width: bounds.width, height: natural.height)
         )
+    }
+
+    private func naturalSize(
+        width: CGFloat?,
+        subview: LayoutSubview,
+        cache: inout Cache
+    ) -> CGSize {
+        if cache.proposedWidth == width, let naturalSize = cache.naturalSize {
+            return naturalSize
+        }
+        let measured = subview.sizeThatFits(ProposedViewSize(width: width, height: nil))
+        cache.proposedWidth = width
+        cache.naturalSize = measured
+        return measured
     }
 }
 

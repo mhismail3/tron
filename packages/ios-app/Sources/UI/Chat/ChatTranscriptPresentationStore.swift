@@ -520,6 +520,23 @@ struct InstalledChatTranscript: Hashable, Sendable {
         timeline.containsID(id) || runtimeIDSet.contains(id)
     }
 
+    func containsPhysicalRowID(_ id: String) -> Bool {
+        if containsDisplayedID(id) || id == "transcript-bottom" { return true }
+        if id == "earlier-messages", (sourceWindow.originalStart ?? 0) > 0 { return true }
+        switch handoff {
+        case .none:
+            break
+        case .pending(let pending):
+            if id == "pending-prompt-\(pending.id)" { return true }
+        case .outgoing(let outgoing, _):
+            if id == outgoing.id { return true }
+        }
+        return queuedMessages.contains { message in
+            id == (queuePresentationIDByOperationID[message.id]
+                ?? "queued-message-\(message.id)")
+        }
+    }
+
     /// Returns the stable physical host for a source row when display-only
     /// boundary composition is active. This never changes canonical/live
     /// ownership or semantic call identity.

@@ -99,10 +99,11 @@ struct ChatContentTransitionTests {
         #expect(queued.anchor == .trailing)
         #expect(queued.scale == 0.978)
         #expect(queued.offsetY == 12)
-        #expect(ChatContentTransitionPolicy.promptEntranceDuration == 0.24)
-        #expect(ChatContentTransitionPolicy.promptFlightDuration == 0.26)
-        #expect(ChatContentTransitionPolicy.promptReplacementDuration == 0.18)
-        #expect(ChatContentTransitionPolicy.notificationReplacementDuration == 0.22)
+        #expect(ChatContentTransitionPolicy.transcriptEntranceDuration == 0.18)
+        #expect(ChatContentTransitionPolicy.promptEntranceDuration == 0.18)
+        #expect(ChatContentTransitionPolicy.promptFlightDuration == 0.18)
+        #expect(ChatContentTransitionPolicy.promptReplacementDuration == 0.14)
+        #expect(ChatContentTransitionPolicy.notificationReplacementDuration == 0.16)
     }
 
     @Test("activity remains role-aligned rather than flying across the transcript")
