@@ -59,6 +59,37 @@ struct SessionProcessModelsTests {
         }
     }
 
+    @Test("history projection retains more than the mounted thirty-two row cap")
+    func historyProjectionCapacity() {
+        let rows = (0..<50).map { index in
+            makeProcess(
+                state: .completed,
+                visibility: .historical,
+                sequence: index,
+                terminalAt: "2026-01-01T00:00:01Z",
+                outputTail: nil
+            )
+        }
+        let projected = SessionProcessHistoryProjection.appending([], rows, limit: 400)
+        #expect(projected.count == 50)
+        #expect(Set(projected.map(\.processId)).count == 50)
+    }
+
+    @Test("subagent rows standardize the latest action and bound output to three lines")
+    func rowPresentation() {
+        let process = makeProcess(
+            currentTool: "bash",
+            currentPathBasename: "worktree.log",
+            outputTail: "one\ntwo\nthree\nfour\nfive"
+        )
+        #expect(SessionProcessRowPresentation.latestAction(for: process) == "bash · worktree.log")
+        #expect(SessionProcessRowPresentation.outputPreview(process.outputTail) == "three\nfour\nfive")
+        #expect(SessionProcessRowPresentation.latestAction(for: makeProcess(
+            currentTool: "bash",
+            currentPathBasename: "null"
+        )) == "bash")
+    }
+
     @Test("active and recent process rows are strictly admitted")
     func admission() {
         let active = makeProcess(state: .running, visibility: .active, sequence: 2)
@@ -245,6 +276,7 @@ struct SessionProcessModelsTests {
         sequence: Int = 1,
         terminalAt: String? = nil,
         recentUntil: String? = nil,
+        currentTool: String? = nil,
         currentPathBasename: String? = nil,
         outputTail: String? = "output"
     ) -> SessionProcessActivity {
@@ -258,7 +290,7 @@ struct SessionProcessModelsTests {
             ),
             visibility: visibility,
             startedAt: "2026-01-01T00:00:00Z", title: "worker",
-            currentPathBasename: currentPathBasename, outputTail: outputTail,
+            currentTool: currentTool, currentPathBasename: currentPathBasename, outputTail: outputTail,
             toolCallId: "call-1", runId: "run-1"
         )
     }

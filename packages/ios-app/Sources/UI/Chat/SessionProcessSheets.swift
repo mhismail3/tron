@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct SessionProcessesSheet: View {
@@ -291,25 +292,20 @@ private struct SessionProcessRow: View {
     let openTranscript: () -> Void
 
     var body: some View {
-        Group {
-            if process.childSessionRef != nil {
-                Button(action: openTranscript) { card }
-                    .buttonStyle(.plain)
-            } else {
-                card
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(process.title)
-        .accessibilityValue(accessibilityValue)
-        .accessibilityHint(accessibilityHint)
+        Button(action: openTranscript) { card }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(process.title)
+            .accessibilityValue(accessibilityValue)
+            .accessibilityHint(accessibilityHint)
     }
 
     @ViewBuilder
     private var card: some View {
         switch surfaceStyle {
         case .glass:
-            TronGlassCard(accent: cardAccent, cornerRadius: 14, interactive: process.childSessionRef != nil) {
+            TronGlassCard(accent: cardAccent, cornerRadius: 14, interactive: false) {
                 rowContent
             }
         case .scrollOptimized:
@@ -320,123 +316,95 @@ private struct SessionProcessRow: View {
     }
 
     private var rowContent: some View {
-        HStack(alignment: .top, spacing: 10) {
-            ZStack(alignment: .bottomTrailing) {
-                ProcessActivityOrb(
-                    mode: orbMode,
-                    size: 30,
-                    animationSpeedScale: ProcessActivityOrbEngine.durationSpeedScale(durationMs: process.durationMs)
-                )
-                .frame(width: 34, height: 34)
-                if process.lifecycle.state.isProblem {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .semibold))
-                        .foregroundStyle(Color.tronError)
-                        .background(Color.tronSurfaceElevated, in: Circle())
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
                 Text(process.title)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-
-                HStack(alignment: .center, spacing: 6) {
-                    statusPill
-                    if !process.executionMode.displayName.isEmpty {
-                        executionModePill
-                    }
-                    Spacer(minLength: 6)
-                    if let durationMs = process.durationMs {
-                        Text(ToolTiming.format(milliseconds: durationMs))
-                            .font(TronTypography.secondaryCodeDescription)
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .monospacedDigit()
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
+                if let durationMs = process.durationMs {
+                    Text(ToolTiming.format(milliseconds: durationMs))
+                        .font(TronTypography.secondaryCodeDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                ZStack(alignment: .bottomTrailing) {
+                    ProcessActivityOrb(
+                        mode: orbMode,
+                        size: 24,
+                        animationSpeedScale: ProcessActivityOrbEngine.durationSpeedScale(durationMs: process.durationMs)
+                    )
+                    .frame(width: 28, height: 28)
+                    if process.lifecycle.state.isProblem {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(TronTypography.caption2)
+                            .foregroundStyle(Color.tronError)
+                            .background(Color.tronSurfaceElevated, in: Circle())
                     }
                 }
+                .accessibilityHidden(true)
+            }
 
-                if hasDetailMetadata {
-                    ToolChipFlowLayout(spacing: 6) {
-                        if let currentTool = process.currentTool {
-                            ToolStaticChip(
-                                icon: "hammer",
-                                text: currentTool,
-                                accent: process.lifecycle.state.isActive ? .tronEmerald : .tronTextSecondary
-                            )
-                        }
-                        if let path = process.currentPathBasename {
-                            ToolStaticChip(icon: "doc", text: path, accent: .tronTextSecondary)
-                        }
-                        if let toolCount = process.toolCount {
-                            ToolStaticChip(icon: "wrench.and.screwdriver", text: "\(toolCount) tools", accent: .tronTextSecondary)
-                        }
-                        if let turnCount = process.turnCount {
-                            ToolStaticChip(icon: "arrow.triangle.2.circlepath", text: "\(turnCount) turns", accent: .tronTextSecondary)
-                        }
-                    }
+            ToolChipFlowLayout(spacing: 5) {
+                SessionProcessPill(icon: "circle.fill", text: statusText, accent: cardAccent)
+                if !process.executionMode.displayName.isEmpty {
+                    SessionProcessPill(
+                        icon: process.executionMode == .asynchronous ? "arrow.triangle.branch" : "arrow.right",
+                        text: process.executionMode.displayName,
+                        accent: .tronTextSecondary
+                    )
                 }
+                if let toolCount = process.toolCount {
+                    SessionProcessPill(
+                        icon: "wrench.and.screwdriver",
+                        text: "\(toolCount) tools",
+                        accent: .tronTextSecondary
+                    )
+                }
+                if let turnCount = process.turnCount {
+                    SessionProcessPill(
+                        icon: "arrow.triangle.2.circlepath",
+                        text: "\(turnCount) turns",
+                        accent: .tronTextSecondary
+                    )
+                }
+            }
 
-                if let output = process.outputTail, !output.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(process.lifecycle.state.isActive ? "LIVE OUTPUT" : "RECENT OUTPUT")
-                            .font(TronTypography.caption)
-                            .foregroundStyle(process.lifecycle.state.isActive ? Color.tronEmerald : Color.tronTextMuted)
-                        Text(output)
+            if latestAction != nil || outputPreview != nil {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(process.lifecycle.state.isActive ? "LIVE ACTIVITY" : "RECENT ACTIVITY")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(process.lifecycle.state.isActive ? Color.tronEmerald : Color.tronTextMuted)
+                    if let latestAction {
+                        Label(latestAction, systemImage: "hammer")
                             .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .semibold))
                             .foregroundStyle(Color.tronTextSecondary)
-                            .lineLimit(3)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if process.outputTruncated {
-                            Label("Showing recent output", systemImage: "text.badge.minus")
-                                .font(TronTypography.caption2)
-                                .foregroundStyle(Color.tronTextMuted)
-                        }
+                            .lineLimit(1)
                     }
-                    .accessibilityHidden(true)
+                    if let outputPreview {
+                        Text(outputPreview)
+                            .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .medium))
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .lineLimit(SessionProcessRowPresentation.outputLineLimit)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
+                .accessibilityHidden(true)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }
 
-    private var statusPill: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(cardAccent)
-                .frame(width: 4, height: 4)
-            Text(statusText)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-        }
-        .foregroundStyle(cardAccent)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .glassEffect(.regular.tint(cardAccent.opacity(0.12)), in: Capsule())
-        .accessibilityHidden(true)
+    private var latestAction: String? {
+        SessionProcessRowPresentation.latestAction(for: process)
     }
 
-    private var executionModePill: some View {
-        HStack(spacing: 4) {
-            Image(systemName: process.executionMode == .asynchronous ? "arrow.triangle.branch" : "arrow.right")
-            Text(process.executionMode.displayName)
-        }
-        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-        .foregroundStyle(Color.tronTextSecondary)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .glassEffect(.regular.tint(Color.tronSlate.opacity(0.10)), in: Capsule())
-        .accessibilityHidden(true)
-    }
-
-    private var hasDetailMetadata: Bool {
-        process.currentTool != nil
-            || process.currentPathBasename != nil
-            || process.toolCount != nil
-            || process.turnCount != nil
+    private var outputPreview: String? {
+        SessionProcessRowPresentation.outputPreview(process.outputTail)
     }
 
     private var orbMode: ProcessActivityOrbMode {
@@ -458,8 +426,7 @@ private struct SessionProcessRow: View {
             statusText,
             process.executionMode.displayName.isEmpty ? nil : process.executionMode.displayName,
             process.durationMs.map { ToolTiming.format(milliseconds: $0) },
-            process.currentTool,
-            process.currentPathBasename,
+            latestAction,
             process.toolCount.map { "\($0) tools" },
             process.turnCount.map { "\($0) turns" },
         ].compactMap { $0 }
@@ -468,8 +435,71 @@ private struct SessionProcessRow: View {
     private var accessibilityValue: String { summaryParts.joined(separator: ", ") }
 
     private var accessibilityHint: String {
-        if process.childSessionRef != nil { return "Opens the read-only subagent session in a bottom sheet" }
-        return process.lifecycle.state.isActive ? "Session is preparing" : "Session is unavailable"
+        process.lifecycle.state.isActive
+            ? "Opens the live read-only subagent session"
+            : "Opens the completed read-only subagent session"
+    }
+}
+
+private struct SessionProcessPill: View {
+    let icon: String
+    let text: String
+    let accent: Color
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(TronTypography.caption2)
+            Text(text)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(accent)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(accent.opacity(0.10), in: Capsule())
+        .overlay {
+            Capsule().stroke(accent.opacity(0.24), lineWidth: 0.75)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+enum SessionProcessRowPresentation {
+    static let outputLineLimit = 3
+    private static let maximumActionCharacters = 96
+    private static let maximumOutputLineCharacters = 180
+    private static let absentValues: Set<String> = ["null", "undefined"]
+
+    static func latestAction(for process: SessionProcessActivity) -> String? {
+        let tool = normalized(process.currentTool)
+        let path = normalized(process.currentPathBasename)
+        switch (tool, path) {
+        case let (tool?, path?): return "\(tool) · \(path)"
+        case let (tool?, nil): return tool
+        case let (nil, path?): return path
+        case (nil, nil): return nil
+        }
+    }
+
+    static func outputPreview(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let lines = raw
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .suffix(outputLineLimit)
+            .map { String($0.suffix(maximumOutputLineCharacters)) }
+        guard !lines.isEmpty else { return nil }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func normalized(_ raw: String?) -> String? {
+        guard let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              !absentValues.contains(value.lowercased()) else { return nil }
+        return String(value.prefix(maximumActionCharacters))
     }
 }
 
@@ -510,16 +540,16 @@ struct ReadOnlySubagentSessionSheet: View {
             store?.open(
                 parentSessionID: parentSessionID,
                 processID: process.processId,
-                presentationGeneration: target.generation
+                presentationGeneration: target.generation,
+                activity: mountedActivity ?? process
             )
-            store?.updateLiveActivity(mountedActivity)
         }
         .onChange(of: model.processTranscriptInvalidation) { _, change in
             guard let change else { return }
             store?.invalidate(change)
         }
-        .onChange(of: mountedActivity?.lifecycle.sequence) { _, _ in
-            store?.updateLiveActivity(mountedActivity)
+        .onChange(of: mountedActivity) { _, activity in
+            store?.updateLiveActivity(activity)
         }
         .onDisappear { store?.close() }
         .tronTopBlur(.sheet)
@@ -539,6 +569,13 @@ struct ReadOnlySubagentSessionSheet: View {
         switch store.status {
         case .idle, .opening:
             TronLoadingState(label: "Opening read-only session…")
+        case .waiting:
+            SessionProcessPlaceholder(
+                title: "Session starting",
+                detail: "Waiting for this live subagent to publish its canonical session.",
+                icon: "ellipsis.message"
+            )
+            .padding(18)
         case .unavailable:
             SessionProcessPlaceholder(
                 title: "Session unavailable",

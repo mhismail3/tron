@@ -20,7 +20,9 @@ struct SessionProcessHistoryPage: Codable, Hashable, Sendable {
         }
         var seen = Set<String>()
         let admitted = decoded.filter {
-            SessionProcessAdmissionPolicy.admits($0) && seen.insert($0.processId).inserted
+            $0.kind == .subagent
+                && SessionProcessAdmissionPolicy.admits($0)
+                && seen.insert($0.processId).inserted
         }
         guard admitted.count == decoded.count else {
             throw DecodingError.dataCorruptedError(forKey: .activities, in: values, debugDescription: "Malformed or duplicate process history row")
@@ -60,6 +62,26 @@ struct SessionProcessHistoryDetail: Codable, Hashable, Sendable {
     let activity: SessionProcessActivity
 }
 
+enum SessionProcessHistoryProjection {
+    static func appending(
+        _ existing: [SessionProcessActivity],
+        _ incoming: [SessionProcessActivity],
+        limit: Int
+    ) -> [SessionProcessActivity] {
+        guard limit > 0 else { return [] }
+        var result = Array(existing.prefix(limit))
+        var seen = Set(result.map(\.processId))
+        for activity in incoming where result.count < limit {
+            guard activity.kind == .subagent,
+                  SessionProcessAdmissionPolicy.admits(activity),
+                  seen.insert(activity.processId).inserted else { continue }
+            result.append(activity)
+        }
+        result.sort(by: SessionProcessProjection.precedes)
+        return result
+    }
+}
+
 @MainActor
 @Observable
 final class SessionProcessHistoryStore {
@@ -80,23 +102,14 @@ final class SessionProcessHistoryStore {
     private(set) var sessionID: String?
     private(set) var presentationGeneration: Int?
     private(set) var historyRevision: String?
-    private(set) var pages: [SessionProcessHistoryPage] = []
+    private(set) var processes: [SessionProcessActivity] = []
+    private var retainedPageCount = 0
     private(set) var detail: SessionProcessActivity?
     private(set) var detailGeneration: Int?
     private(set) var detailRouteID: String?
     private(set) var nextCursor: String?
 
     init(client: GatewayClient) { self.client = client }
-
-    var processes: [SessionProcessActivity] {
-        SessionProcessAdmissionPolicy.admitted(pages.flatMap(\.activities))
-    }
-
-    var supportsHistory: Bool {
-        get async {
-            await client.info?.capabilities.contains(SessionProcessAdmissionPolicy.historyCapability) == true
-        }
-    }
 
     func reset(sessionID: String, presentationGeneration: Int) {
         pageGeneration &+= 1
@@ -106,7 +119,8 @@ final class SessionProcessHistoryStore {
         self.sessionID = sessionID
         self.presentationGeneration = presentationGeneration
         historyRevision = nil
-        pages.removeAll()
+        processes.removeAll()
+        retainedPageCount = 0
         retainedHistoryBytes = 0
         detail = nil
         detailGeneration = nil
@@ -133,13 +147,9 @@ final class SessionProcessHistoryStore {
                 }
             }
             do {
-                guard await client.info?.capabilities.contains(SessionProcessAdmissionPolicy.historyCapability) == true else {
-                    await MainActor.run { [weak self] in
-                        guard let self, self.pageGeneration == generation else { return }
-                        self.status = .unavailable
-                    }
-                    return
-                }
+                // One canonical list request is faster and more reliable than
+                // waiting for a separate capability projection first. Older
+                // Gateways return a bounded unsupported response directly.
                 struct Params: Encodable {
                     let sessionId: String
                     let cursor: String?
@@ -178,7 +188,7 @@ final class SessionProcessHistoryStore {
                     let bytes = page.aggregateBytes
                         ?? (try? JSONEncoder.gateway.encode(page.activities).count)
                         ?? .max
-                    guard self.pages.count < Self.maximumRetainedPages,
+                    guard self.retainedPageCount < Self.maximumRetainedPages,
                           self.seenProcessIDs.count <= Self.maximumRetainedItems,
                           self.retainedHistoryBytes <= Self.maximumRetainedBytes - bytes else {
                         self.nextCursor = nil
@@ -186,7 +196,12 @@ final class SessionProcessHistoryStore {
                         return
                     }
                     self.historyRevision = page.historyRevision
-                    self.pages.append(page)
+                    self.processes = SessionProcessHistoryProjection.appending(
+                        self.processes,
+                        page.activities,
+                        limit: Self.maximumRetainedItems
+                    )
+                    self.retainedPageCount += 1
                     self.retainedHistoryBytes += bytes
                     self.nextCursor = page.nextCursor
                     self.status = .loaded
@@ -201,6 +216,9 @@ final class SessionProcessHistoryStore {
                     } else if let failure = error as? GatewayFailure,
                               failure.code == "conflict", failure.retryable {
                         self.status = .conflict
+                    } else if let failure = error as? GatewayFailure,
+                              ["not_found", "unavailable", "unsupported"].contains(failure.code) {
+                        self.status = .unavailable
                     } else {
                         self.status = .failed(error.localizedDescription)
                     }
@@ -213,10 +231,16 @@ final class SessionProcessHistoryStore {
         guard self.sessionID == sessionID,
               self.presentationGeneration == presentationGeneration else { return }
         pageTask?.cancel(); pageTask = nil
+        detailTask?.cancel(); detailTask = nil
         pageGeneration &+= 1
+        detailGenerationCounter &+= 1
         historyRevision = nil
-        pages.removeAll()
+        processes.removeAll()
+        retainedPageCount = 0
         retainedHistoryBytes = 0
+        detail = nil
+        detailGeneration = nil
+        detailRouteID = nil
         nextCursor = nil
         seenCursors.removeAll()
         seenProcessIDs.removeAll()
@@ -259,6 +283,7 @@ final class SessionProcessHistoryStore {
                           self.presentationGeneration == presentationGeneration,
                           self.historyRevision == revision,
                           response.activity.processId == processID,
+                          response.activity.kind == .subagent,
                           SessionProcessAdmissionPolicy.admits(response.activity) else { return }
                     self.detail = response.activity
                     self.detailGeneration = generation

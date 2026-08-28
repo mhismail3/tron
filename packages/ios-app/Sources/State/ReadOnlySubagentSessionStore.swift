@@ -142,7 +142,7 @@ enum ReadOnlyProcessTranscriptMerge {
 @Observable
 final class ReadOnlySubagentSessionStore {
     enum Status: Equatable, Sendable {
-        case idle, opening, open, loadingEarlier, reconnecting, unavailable, failed(String)
+        case idle, waiting, opening, open, loadingEarlier, reconnecting, unavailable, failed(String)
     }
 
     private let client: GatewayClient
@@ -150,7 +150,11 @@ final class ReadOnlySubagentSessionStore {
     private var openTask: Task<Void, Never>?
     private var pageTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
+    private var bindingRetryTask: Task<Void, Never>?
+    private var bindingRetryAttempts = 0
     private var pendingRefreshRevision: String?
+
+    private static let maximumBindingRetryAttempts = 2
 
     private(set) var status: Status = .idle
     private(set) var parentSessionID: String?
@@ -170,13 +174,38 @@ final class ReadOnlySubagentSessionStore {
 
     var canLoadEarlier: Bool { status == .open && transcriptStart > 0 }
 
-    func open(parentSessionID: String, processID: String, presentationGeneration: Int) {
+    func open(
+        parentSessionID: String,
+        processID: String,
+        presentationGeneration: Int,
+        activity: SessionProcessActivity? = nil
+    ) {
+        bindingRetryAttempts = 0
+        startOpen(
+            parentSessionID: parentSessionID,
+            processID: processID,
+            presentationGeneration: presentationGeneration,
+            activity: activity
+        )
+    }
+
+    private func startOpen(
+        parentSessionID: String,
+        processID: String,
+        presentationGeneration: Int,
+        activity: SessionProcessActivity?
+    ) {
         retire(sendClose: true)
         generation &+= 1
         let ownedGeneration = generation
         self.parentSessionID = parentSessionID
         self.processID = processID
         self.presentationGeneration = presentationGeneration
+        if let activity,
+           activity.processId == processID,
+           SessionProcessAdmissionPolicy.admits(activity) {
+            liveActivity = activity
+        }
         status = .opening
         openTask = Task { [weak self, client] in
             defer { Task { @MainActor [weak self] in
@@ -184,13 +213,9 @@ final class ReadOnlySubagentSessionStore {
                 self.openTask = nil
             } }
             do {
-                guard await client.info?.capabilities.contains(SessionProcessAdmissionPolicy.transcriptCapability) == true else {
-                    await MainActor.run { [weak self] in
-                        guard let self, self.generation == ownedGeneration else { return }
-                        self.status = .unavailable
-                    }
-                    return
-                }
+                // The RPC is the capability authority. Avoid waiting on a separate
+                // system.info projection before opening the latency-sensitive sheet;
+                // older Gateways return a bounded unsupported response directly.
                 struct Params: Encodable { let sessionId, processId: String }
                 let response: ProcessTranscriptOpenResponse = try await client.request(
                     "session.processTranscript.open",
@@ -224,7 +249,19 @@ final class ReadOnlySubagentSessionStore {
                 await MainActor.run { [weak self] in
                     guard let self, self.generation == ownedGeneration else { return }
                     if let failure = error as? GatewayFailure,
-                       ["not_found", "unavailable", "unsupported"].contains(failure.code) {
+                       ["not_found", "unavailable"].contains(failure.code),
+                       self.liveActivity?.lifecycle.state.isActive == true {
+                        // Active subagents can publish their child binding after the
+                        // activity row. Stay mounted and retry only when that
+                        // authoritative binding appears. If it was already projected,
+                        // allow two short bounded retries for the binding/lease race.
+                        self.status = .waiting
+                        if let activity = self.liveActivity,
+                           activity.childSessionRef != nil {
+                            self.scheduleBindingRetry(activity: activity, delay: .milliseconds(200))
+                        }
+                    } else if let failure = error as? GatewayFailure,
+                              ["not_found", "unavailable", "unsupported"].contains(failure.code) {
                         self.status = .unavailable
                     } else {
                         self.status = .failed(error.localizedDescription)
@@ -383,10 +420,12 @@ final class ReadOnlySubagentSessionStore {
               let parentSessionID,
               let processID,
               let presentationGeneration else { return }
+        let activity = liveActivity
         open(
             parentSessionID: parentSessionID,
             processID: processID,
-            presentationGeneration: presentationGeneration
+            presentationGeneration: presentationGeneration,
+            activity: activity
         )
     }
 
@@ -394,13 +433,74 @@ final class ReadOnlySubagentSessionStore {
         guard let processID else { return }
         guard let activity else {
             liveActivity = nil
+            bindingRetryTask?.cancel()
+            bindingRetryTask = nil
+            if status == .waiting { status = .unavailable }
             return
         }
-        guard activity.processId == processID else { return }
-        liveActivity = SessionProcessAdmissionPolicy.admits(activity) ? activity : nil
+        guard activity.processId == processID,
+              SessionProcessAdmissionPolicy.admits(activity) else { return }
+        liveActivity = activity
+        guard status == .waiting else { return }
+        if activity.childSessionRef != nil {
+            if activity.lifecycle.state.isActive {
+                scheduleBindingRetry(activity: activity, delay: .zero)
+            } else if let parentSessionID,
+                      let presentationGeneration {
+                open(
+                    parentSessionID: parentSessionID,
+                    processID: processID,
+                    presentationGeneration: presentationGeneration,
+                    activity: activity
+                )
+            }
+        } else if !activity.lifecycle.state.isActive {
+            status = .unavailable
+        }
     }
 
-    func close() { retire(sendClose: true) }
+    private func scheduleBindingRetry(activity: SessionProcessActivity, delay: Duration) {
+        guard bindingRetryTask == nil,
+              bindingRetryAttempts < Self.maximumBindingRetryAttempts,
+              activity.lifecycle.state.isActive,
+              activity.childSessionRef != nil,
+              let parentSessionID,
+              let processID,
+              let presentationGeneration else {
+            if bindingRetryAttempts >= Self.maximumBindingRetryAttempts,
+               activity.childSessionRef != nil {
+                status = .failed("The live subagent session is not ready yet. Try opening it again.")
+            }
+            return
+        }
+        bindingRetryAttempts += 1
+        let ownedGeneration = generation
+        bindingRetryTask = Task { [weak self] in
+            if delay > .zero {
+                do { try await Task.sleep(for: delay) }
+                catch { return }
+            }
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self,
+                      self.generation == ownedGeneration,
+                      self.status == .waiting else { return }
+                self.bindingRetryTask = nil
+                let currentActivity = self.liveActivity ?? activity
+                self.startOpen(
+                    parentSessionID: parentSessionID,
+                    processID: processID,
+                    presentationGeneration: presentationGeneration,
+                    activity: currentActivity
+                )
+            }
+        }
+    }
+
+    func close() {
+        bindingRetryAttempts = 0
+        retire(sendClose: true)
+    }
 
     private func retire(sendClose: Bool) {
         let oldLease = leaseID
@@ -408,6 +508,7 @@ final class ReadOnlySubagentSessionStore {
         openTask?.cancel(); openTask = nil
         pageTask?.cancel(); pageTask = nil
         refreshTask?.cancel(); refreshTask = nil
+        bindingRetryTask?.cancel(); bindingRetryTask = nil
         pendingRefreshRevision = nil
         leaseID = nil; childSessionRef = nil; revision = nil
         items.removeAll(); transcriptStart = 0; transcriptTotal = 0
