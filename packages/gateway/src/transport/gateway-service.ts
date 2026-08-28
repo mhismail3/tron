@@ -189,7 +189,7 @@ export class GatewayService {
         "filesystem.v1",
         "source-control.v1",
         "uploads.v1",
-        "uploads-status.v1",
+        "uploads-status.v2",
         "terminal.v1",
         "extension-presentation.v1",
         EXTENSION_ACTIVITY_HISTORY_CAPABILITY,
@@ -445,10 +445,17 @@ export class GatewayService {
       case "session.import": {
         const imported = await this.mutation(client, method, params, async () => {
           const uploadId = string(params.uploadId, "uploadId", { max: 100 });
-          const path = await this.dependencies.uploads.prepareSessionImport(uploadId);
-          const slot = await this.dependencies.sessions.importFromJsonl(path, string(params.cwd, "cwd", { max: 4_096 }));
-          await this.dependencies.uploads.remove(uploadId).catch(() => {});
-          return safeJson({ sessionId: slot.id });
+          const importLease = await this.dependencies.uploads.prepareSessionImport(uploadId);
+          try {
+            const slot = await this.dependencies.sessions.importFromJsonl(
+              importLease.path,
+              string(params.cwd, "cwd", { max: 4_096 }),
+            );
+            await this.dependencies.uploads.remove(uploadId).catch(() => {});
+            return safeJson({ sessionId: slot.id });
+          } finally {
+            await importLease.release();
+          }
         }) as { sessionId: string };
         return safeJson(imported);
       }

@@ -142,6 +142,7 @@ const legacyImport = new LegacyImportService(config.tronHome);
 
 let stopping = false;
 let uploadMaintenanceTimer: NodeJS.Timeout | undefined;
+let uploadStoragePressure: "normal" | "low" | "exhausted" = "normal";
 async function shutdown(reason: string, exitCode = 0): Promise<void> {
   if (stopping) return;
   stopping = true;
@@ -281,7 +282,17 @@ await transport.listen(async () => {
 const maintainUploads = async (): Promise<void> => {
   try {
     const liveSessionIds = new Set((await sessions.list("all")).map((session) => session.id));
-    await uploads.maintain(liveSessionIds);
+    const status = await uploads.maintain(liveSessionIds);
+    if (status.storagePressure !== uploadStoragePressure) {
+      logger.log(
+        status.storagePressure === "normal" ? "info" : "warning",
+        status.storagePressure === "normal"
+          ? `Attachment storage pressure recovered (${status.diskAvailableBytes} bytes free)`
+          : `Attachment storage pressure ${status.storagePressure} (${status.diskAvailableBytes} bytes free; ${status.minimumFreeBytes} byte floor)`,
+        { event: "uploads.storage-pressure", source: "uploads" },
+      );
+      uploadStoragePressure = status.storagePressure;
+    }
   } catch {
     logger.log(
       "warning",

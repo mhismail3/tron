@@ -121,18 +121,50 @@ credential at 4 KiB, and the one-time invitation at 16 KiB before JSON decode. L
 invitations also require owner-only regular-file boundaries (symlinks are rejected), exact versions,
 purposes, bounded identities/codes, and canonical timestamps. A pairing invitation is consumed before
 its device record is written; a failed device write explicitly issues a fresh invitation while the
-pairing mutex remains held. Uploads retain the 25 MiB per-request limit and additionally
-serialize reservation and commit against a 1,024-entry and eight-times-per-upload (200 MiB by default) aggregate ceiling. The aggregate byte bound remains the primary storage limit so many small photos do not exhaust capacity prematurely.
-A separate admission permits at most half that ratio concurrently (four default 25 MiB bodies). Authenticated request
-chunks stream directly into protected store-owned files; exact declared and observed sizes are checked before atomic
-metadata publication. Persisted upload metadata is limited to an exact 64 KiB document with canonical timestamps and fields; malformed or oversized entries self-clean before quota admission or direct materialization. Every success, rejection, overflow, truncation, or disconnect removes uncommitted staging
-and releases its slot. An authenticated client may immediately discard an unclaimed upload when its local chip or presentation is retired; claimed prompt attachments reject that operation. Remaining unclaimed uploads expire after 24 hours, malformed/partial folders self-clean, prompt attachment IDs are unique, and
-one prompt cannot materialize more than the per-request byte ceiling. A bounded maintenance pass runs
-at startup and every ten minutes: it removes stale staging, expires unclaimed files, retries live cleanup,
-and removes claimed folders only when the canonical session catalog proves their owner no longer exists.
-`uploads.status` exposes aggregate counts/bytes and health-safe capacity facts only—never IDs, session IDs,
-paths, names, or MIME data. Capacity failures include a machine-readable `entries` or `bytes` reason and
-an actionable unused-session/cleanup message; the aggregate ceiling is not silently raised. Mobile projection derives the
+pairing mutex remains held. Uploads retain the 25 MiB per-request/prompt limit. Active and unclaimed
+staging has its own 1,024-entry and eight-times-per-upload (200 MiB by default) quota; claimed canonical
+history does not consume that quota, so older sessions cannot starve a new draft. Retained ownership is
+separately bounded to 16,384 logical entries and 400 GiB of logical bytes by default; those retained
+limits are checked only when a prompt claims staging, never while a user is still attaching a draft.
+Every body reservation and temporary session-import copy conservatively preserves a 1 GiB filesystem
+free-space floor, and every import copy is owned by a release lease so success and failure both remove it. A separate admission permits at most half the staging ratio
+concurrently (four default 25 MiB bodies).
+
+Authenticated chunks stream directly into protected staging files while computing SHA-256. Commit
+atomically adopts one immutable, sharded content-addressed object and hard-links the stable logical UUID
+path to it. Exact duplicate bytes therefore occupy one physical object while filename, MIME type, prompt
+ownership, and public `upload:<uuid>` identity remain logical metadata. Version-1 UUID folders migrate
+in place during ordinary startup/maintenance inventory: the Gateway stream-hashes the existing file,
+creates or adopts its object, atomically relinks the stable path, writes version-2 metadata, and keeps the
+legacy path readable throughout. The migration is restart-idempotent; ordinary version-2 inventory checks
+inode/size ownership without rehashing every retained object. The first read verifies a digest once per
+process and caches that immutable-object proof; each maintenance pass rotates through one additional bounded
+integrity audit. A failed digest retains logical/canonical metadata, marks the object unavailable, and fails
+reads explicitly rather than silently dropping history. Orphan objects and malformed shards are removed only
+after logical inventory is reconciled.
+
+Exact declared and observed sizes are checked before atomic metadata publication. Persisted logical
+metadata remains limited to an exact 64 KiB canonical document; malformed or oversized entries self-clean
+during startup inventory or direct materialization. Ordinary upload admission and periodic maintenance use the rebuildable in-memory
+attachment index rather than reparsing retained history; only the at-most-1,024 unclaimed set is checked for expiry on each admission. Every rejection, overflow, truncation, or disconnect
+removes uncommitted staging and releases its reservation. An authenticated client may immediately discard
+an unclaimed upload when its local chip or presentation is retired; claimed prompt attachments reject that
+operation. Remaining unclaimed uploads expire after 24 hours. Prompt attachment IDs are unique, and one
+prompt cannot materialize more than the per-prompt byte ceiling. Startup performs the one physical inventory,
+legacy migration, integrity/ownership reconciliation, and orphan-object sweep. The ten-minute pass then removes
+stale bodies, expires indexed unclaimed files, retries pending cleanup, and removes claimed logical references
+only when the canonical session catalog proves their owner no longer exists; it does not rescan every retained
+metadata file. A later process start can always rebuild the disposable index from physical metadata.
+
+`uploads.status` v2 exposes staging/claimed logical counts and bytes, unique object count/bytes,
+deduplicated bytes, staging headroom, filesystem headroom/floor, pressure state, active body/import admissions,
+unavailable objects, and cleanup backlog—never IDs, session IDs, paths, names, digests, or MIME data. Capacity failures identify
+`staging_entries`, `staging_bytes`, `retained_entries`, or `disk` and include only bounded actionable
+capacity facts. Publication fsyncs object/metadata files and their parent directories after atomic
+link/rename boundaries, so acknowledged uploads are durable across power loss rather than merely process crashes.
+The local-only retained tier remains subordinate to canonical session deletion; true
+external/remote cold offload is intentionally deferred until an operator-owned destination and
+lease-protected document rehydration contract exist. Mobile projection derives the
 opaque upload identity from the validated store-owned canonical path, strips that private path, and
 exposes the identity solely as an authenticated preview route; no extra identifier is added to the model
 prompt. Unclaimed staging is never readable, while a prompt-owned file streams from its already-open

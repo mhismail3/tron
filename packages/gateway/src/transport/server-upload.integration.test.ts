@@ -58,7 +58,7 @@ async function fixture(maximumBytes = 8): Promise<{
 }> {
   const home = await mkdtemp(join(tmpdir(), "tron-upload-http-"));
   roots.push(home);
-  const uploads = new ObservableUploadStore(home, maximumBytes, { maximumAggregateBytes: maximumBytes * 2 });
+  const uploads = new ObservableUploadStore(home, maximumBytes, { maximumStagingBytes: maximumBytes * 2 });
   const gateway = new GatewayServer({
     host: "127.0.0.1",
     port: 0,

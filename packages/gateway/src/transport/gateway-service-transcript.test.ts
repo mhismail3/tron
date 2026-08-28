@@ -15,7 +15,7 @@ const client: ClientContext = {
 };
 
 describe("session transcript paging", () => {
-  it("advertises activity, history, and read-only transcript process capabilities independently", () => {
+  it("advertises independent process and scalable upload-status capabilities", () => {
     const service = new GatewayService({
       config: {
         machineId: "machine",
@@ -31,7 +31,9 @@ describe("session transcript paging", () => {
       "process-activity.v1",
       "process-history.v1",
       "process-transcript.v1",
+      "uploads-status.v2",
     ]));
+    expect(capabilities).not.toContain("uploads-status.v1");
   });
 
   it("routes bounded unified process history through an established parent session", async () => {
@@ -278,6 +280,7 @@ describe("session transcript paging", () => {
     ) => operation());
     const remove = vi.fn(async () => { throw new Error("cleanup failed"); });
     const removeSession = vi.fn(async () => { throw new Error("cleanup failed"); });
+    const releaseImport = vi.fn(async () => {});
     const sessionDeleted = vi.fn();
     const service = new GatewayService({
       sessions: {
@@ -285,7 +288,10 @@ describe("session transcript paging", () => {
         delete: async () => {},
       },
       uploads: {
-        prepareSessionImport: async () => "/owned/import.jsonl",
+        prepareSessionImport: async () => ({
+          path: "/owned/import.jsonl",
+          release: releaseImport,
+        }),
         remove,
         removeSession,
       },
@@ -303,8 +309,41 @@ describe("session transcript paging", () => {
       commandId: "command-2",
     })).resolves.toEqual({ deleted: true });
     expect(remove).toHaveBeenCalled();
+    expect(releaseImport).toHaveBeenCalledTimes(1);
     expect(sessionDeleted).toHaveBeenCalledWith("deleted");
     expect(removeSession).toHaveBeenCalledWith("deleted");
+  });
+
+  it("releases bounded import staging after a definitive import failure", async () => {
+    const execute = vi.fn(async (
+      _identity: string,
+      _method: string,
+      _commandId: string,
+      operation: () => Promise<unknown>,
+    ) => operation());
+    const releaseImport = vi.fn(async () => {});
+    const remove = vi.fn(async () => {});
+    const service = new GatewayService({
+      sessions: {
+        importFromJsonl: async () => { throw new Error("invalid import"); },
+      },
+      uploads: {
+        prepareSessionImport: async () => ({
+          path: "/owned/import.jsonl",
+          release: releaseImport,
+        }),
+        remove,
+      },
+      receipts: { execute },
+    } as unknown as GatewayServiceDependencies);
+
+    await expect(service.invoke(client, "session.import", {
+      uploadId: "00000000-0000-0000-0000-000000000001",
+      cwd: "/workspace",
+      commandId: "command-failed-import",
+    })).rejects.toThrow("invalid import");
+    expect(releaseImport).toHaveBeenCalledTimes(1);
+    expect(remove).not.toHaveBeenCalled();
   });
 
   it("joins the attention barrier before snapshotting an open revision", async () => {
