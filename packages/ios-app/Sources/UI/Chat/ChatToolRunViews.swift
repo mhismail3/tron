@@ -116,6 +116,7 @@ struct ToolCard: View {
         ChatToolPresentation(
             id: timing?.id ?? "",
             title: title,
+            toolName: timing?.toolName,
             subtitle: subtitle,
             request: request,
             response: response,
@@ -145,10 +146,10 @@ struct ToolCard: View {
         return isRunning ? .warning : .accent
     }
     private var displayTitle: String {
-        ToolDetailPresentation.displayTitle(for: title)
+        ToolDetailPresentation.displayTitle(for: detailTool)
     }
     private var icon: String {
-        error ? "exclamationmark.triangle.fill" : ToolDetailPresentation.icon(for: title)
+        error ? "exclamationmark.triangle.fill" : ToolDetailPresentation.icon(for: timing?.toolName ?? title)
     }
 }
 
@@ -201,8 +202,9 @@ struct ToolRunView: View {
                             .toolbar {
                                 ToolbarItem(placement: .principal) {
                                     TronSheetTitle(
-                                        title: ToolDetailPresentation.displayTitle(for: tool.title),
-                                        accent: accent
+                                        title: ToolDetailPresentation.displayTitle(for: tool),
+                                        accent: accent,
+                                        icon: ToolDetailPresentation.sheetTitleIcon(for: tool)
                                     )
                                 }
                                 ToolbarItem(placement: .confirmationAction) {
@@ -280,8 +282,9 @@ struct ReadOnlyToolRunView: View {
                     .toolbar {
                         ToolbarItem(placement: .principal) {
                             TronSheetTitle(
-                                title: ToolDetailPresentation.displayTitle(for: tool.title),
-                                accent: accent
+                                title: ToolDetailPresentation.displayTitle(for: tool),
+                                accent: accent,
+                                icon: ToolDetailPresentation.sheetTitleIcon(for: tool)
                             )
                         }
                         ToolbarItem(placement: .confirmationAction) {
@@ -347,8 +350,8 @@ private struct ToolActivityChip: View {
             cornerRadius: ChatToolChipShapePolicy.cornerRadius,
             style: .continuous
         ))
-        // Match ToolCard in the Used Tools sheet: keep the native glass
-        // surface's vertical hit geometry intrinsic before attaching its tap.
+        // Keep the native glass surface's vertical hit geometry intrinsic
+        // before attaching its transcript-chip tap.
         .fixedSize(horizontal: false, vertical: true)
         .chatCompactPillInteraction(
             accessibilityLabel: accessibilityLabel(visual),
@@ -405,6 +408,9 @@ private struct ToolRunDetailSheet: View {
     let run: ChatToolRunPresentation
     let tools: [ChatToolPresentation]
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedToolRoute: ToolDetailRoute?
+    @State private var selectedToolPresentation: ChatToolPresentation?
+    @State private var detailDetent: PresentationDetent = .medium
 
     private var tone: ChatNotificationTone {
         if run.failureCount > 0 { return .error }
@@ -421,8 +427,11 @@ private struct ToolRunDetailSheet: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(orderedTools) { tool in
-                        ToolCard(data: tool)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ToolRunSummaryRow(tool: tool) {
+                            detailDetent = .medium
+                            selectedToolPresentation = tool
+                            selectedToolRoute = ToolDetailRoute(toolID: tool.id)
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -449,10 +458,330 @@ private struct ToolRunDetailSheet: View {
                 }
             }
         }
+        .sheet(item: $selectedToolRoute, onDismiss: {
+            selectedToolPresentation = nil
+        }) { _ in
+            ToolRunSelectedDetailSheet(
+                tool: $selectedToolPresentation,
+                detailDetent: $detailDetent,
+                close: { selectedToolRoute = nil }
+            )
+        }
+        .onChange(of: tools) { _, currentTools in
+            guard let route = selectedToolRoute else { return }
+            guard let newestTool = route.resolve(in: currentTools) else {
+                selectedToolRoute = nil
+                return
+            }
+            selectedToolPresentation = newestTool
+        }
         .tronTopBlur(.toolDetail)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tronPresentation()
+    }
+}
+
+/// Reads the selected presentation through a binding so same-call progress
+/// updates refresh an already-open detail sheet without changing its route,
+/// detent, or scroll ownership.
+private struct ToolRunSelectedDetailSheet: View {
+    @Binding var tool: ChatToolPresentation?
+    @Binding var detailDetent: PresentationDetent
+    let close: () -> Void
+
+    var body: some View {
+        if let tool {
+            NavigationStack {
+                ToolDetailSheet(
+                    tool: tool,
+                    density: detailDetent == .large ? .expanded : .glance
+                )
+                .tronToolDetailNavigationChrome()
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        TronSheetTitle(
+                            title: ToolDetailPresentation.displayTitle(for: tool),
+                            accent: tool.error ? .tronError : .tronEmerald,
+                            icon: ToolDetailPresentation.sheetTitleIcon(for: tool)
+                        )
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(action: close) {
+                            Image(systemName: "checkmark")
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(Color.tronEmerald)
+                        }
+                        .accessibilityLabel("Done")
+                    }
+                }
+            }
+            .tronTopBlur(.toolDetail)
+            .presentationDetents([.medium, .large], selection: $detailDetent)
+            .presentationDragIndicator(.hidden)
+            .tronPresentation()
+        }
+    }
+}
+
+enum ToolRowPreviewFadePolicy {
+    static func showsFade(
+        sourceIsBounded: Bool,
+        fullHeight: CGFloat,
+        visibleHeight: CGFloat
+    ) -> Bool {
+        if sourceIsBounded { return true }
+        guard fullHeight.isFinite, visibleHeight.isFinite,
+              fullHeight > 0, visibleHeight > 0 else { return false }
+        return fullHeight > visibleHeight + 0.5
+    }
+}
+
+private enum ToolRowPreviewFadeEdge {
+    case top
+    case bottom
+}
+
+/// Bounded text uses the same partial edge mask as the compact thinking tail.
+/// Primary values fade at the bottom when more follows; result tails fade at
+/// the top when older output was omitted.
+private struct ToolRowPreviewViewport<Content: View>: View {
+    let edge: ToolRowPreviewFadeEdge
+    let sourceIsBounded: Bool
+    let maximumVisibleLines: Int?
+    let content: Content
+
+    @State private var fullHeight: CGFloat = 0
+    @State private var visibleHeight: CGFloat = 0
+
+    init(
+        edge: ToolRowPreviewFadeEdge,
+        sourceIsBounded: Bool,
+        maximumVisibleLines: Int?,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.edge = edge
+        self.sourceIsBounded = sourceIsBounded
+        self.maximumVisibleLines = maximumVisibleLines
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .lineLimit(maximumVisibleLines)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { geometry in
+                geometry.size.height
+            } action: { height in
+                visibleHeight = height
+            }
+            .background(alignment: .topLeading) {
+                content
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .hidden()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                    .onGeometryChange(for: CGFloat.self) { geometry in
+                        geometry.size.height
+                    } action: { height in
+                        fullHeight = height
+                    }
+            }
+            .mask(edgeMask)
+    }
+
+    private var showsFade: Bool {
+        ToolRowPreviewFadePolicy.showsFade(
+            sourceIsBounded: sourceIsBounded,
+            fullHeight: fullHeight,
+            visibleHeight: visibleHeight
+        )
+    }
+
+    @ViewBuilder
+    private var edgeMask: some View {
+        if showsFade {
+            switch edge {
+            case .top:
+                LinearGradient(
+                    stops: [
+                        .init(color: .black.opacity(0.38), location: 0),
+                        .init(color: .black, location: 0.18),
+                        .init(color: .black, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            case .bottom:
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: 0.82),
+                        .init(color: .black.opacity(0.38), location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        } else {
+            Color.black
+        }
+    }
+}
+
+/// One bounded, noninteractive row surface for an aggregate tool run. The
+/// button owns the complete row so no nested controls compete for activation.
+private struct ToolRunSummaryRow: View {
+    let tool: ChatToolPresentation
+    let action: () -> Void
+
+    var body: some View {
+        let presentation = ToolRunRowPresentation(tool: tool)
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
+                    Image(systemName: presentation.icon)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .frame(width: 22)
+                    Text(presentation.title)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 4) {
+                        Text(presentation.status)
+                            .font(TronTypography.secondaryCodeDescription)
+                        if presentation.elapsedMilliseconds != nil {
+                            Text("·")
+                                .font(TronTypography.secondaryCodeDescription)
+                            ToolElapsedText(tool: tool.descriptor, color: accent)
+                        }
+                    }
+                    .foregroundStyle(accent)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+
+                if let primaryLabel = presentation.primaryLabel,
+                   let primaryPreview = presentation.primaryPreview,
+                   !primaryPreview.text.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(primaryLabel.uppercased())
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronTextMuted)
+                        ToolRowPreviewViewport(
+                            edge: .bottom,
+                            sourceIsBounded: primaryPreview.isBounded,
+                            maximumVisibleLines: 3
+                        ) {
+                            primaryText(presentation, preview: primaryPreview)
+                        }
+                    }
+                }
+
+                if let output = presentation.outputPreview {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(presentation.isRunning ? "LIVE OUTPUT" : (presentation.error ? "ERROR" : "RESULT"))
+                            .font(TronTypography.caption)
+                            .foregroundStyle(presentation.isRunning ? Color.tronEmerald : Color.tronTextMuted)
+                        ToolRowPreviewViewport(
+                            edge: .top,
+                            sourceIsBounded: output.isBounded || presentation.outputTruncated,
+                            maximumVisibleLines: nil
+                        ) {
+                            Text(output.text)
+                                .font(TronTypography.code(
+                                    size: TronTypography.sizeBody2,
+                                    weight: .medium
+                                ))
+                                .foregroundStyle(Color.tronTextSecondary)
+                        }
+                    }
+                } else if presentation.hasStructuredResult {
+                    Label("Structured result available in details", systemImage: "list.bullet.rectangle")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextMuted)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .tronScrollSurface(accent: accent, cornerRadius: 12, tintOpacity: 0.10)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel(presentation))
+        .accessibilityHint("Opens tool details")
+        .accessibilityIdentifier("tool-run-summary-\(tool.id)")
+    }
+
+    private var accent: Color {
+        if tool.error { return .tronError }
+        return tool.isRunning ? .tronAmber : .tronEmerald
+    }
+
+    private func statusText(_ presentation: ToolRunRowPresentation) -> String {
+        guard let duration = presentation.elapsedMilliseconds.map(ToolTiming.format(milliseconds:)) else {
+            return presentation.status
+        }
+        return "\(presentation.status) · \(duration)"
+    }
+
+    private func accessibilityLabel(_ presentation: ToolRunRowPresentation) -> String {
+        var values = [presentation.title, statusText(presentation)]
+        if let preview = presentation.primaryPreview?.text, !preview.isEmpty {
+            values.append(accessibilityPreview(preview))
+        }
+        if let output = presentation.outputPreview {
+            values.append(presentation.isRunning ? "Live output" : (presentation.error ? "Error" : "Result"))
+            values.append(accessibilityPreview(output.text))
+            if output.isBounded || presentation.outputTruncated {
+                values.append("Output preview bounded")
+            }
+        } else if presentation.hasStructuredResult {
+            values.append("Structured result available in details")
+        } else if presentation.outputTruncated {
+            values.append("Output preview bounded")
+        }
+        return values.joined(separator: ", ")
+    }
+
+    private func accessibilityPreview(_ source: String) -> String {
+        let maximumCharacters = 240
+        let normalized = source.replacingOccurrences(of: "\n", with: " ")
+        guard normalized.count > maximumCharacters else { return normalized }
+        return String(normalized.prefix(maximumCharacters)).trimmingCharacters(in: .whitespaces) + "…"
+    }
+
+    @ViewBuilder
+    private func primaryText(
+        _ presentation: ToolRunRowPresentation,
+        preview: ToolTextPreview
+    ) -> some View {
+        if let path = presentation.primaryPath {
+            pathText(path)
+        } else {
+            Text(preview.text)
+                .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(Color.tronTextSecondary)
+        }
+    }
+
+    private func pathText(_ path: ToolPathPresentation) -> some View {
+        let text = path.directory.map {
+            let directory = Text($0).foregroundColor(Color.tronTextSecondary)
+            let basename = Text(path.basename).foregroundColor(accent)
+            return Text("\(directory)\(basename)")
+        } ?? Text(path.basename).foregroundColor(accent)
+        return text
+            .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .medium))
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -644,8 +973,9 @@ private struct ToolDetailSheetHost: ViewModifier {
                     .toolbar {
                         ToolbarItem(placement: .principal) {
                             TronSheetTitle(
-                                title: ToolDetailPresentation.displayTitle(for: tool.title),
-                                accent: accent
+                                title: ToolDetailPresentation.displayTitle(for: tool),
+                                accent: accent,
+                                icon: ToolDetailPresentation.sheetTitleIcon(for: tool)
                             )
                         }
                         ToolbarItem(placement: .confirmationAction) {

@@ -1139,8 +1139,9 @@ row retains the same one-shot entrance through completion while replacement remo
 Continuity-preserved assistant/tool rows do not manufacture a new entrance. A newly admitted visible
 agent row owns only its local reveal. Continuous Markdown growth remains display-frame-coalesced while
 the native bottom size-change anchor holds pinned readers at the tail. Detached readers receive no writes and
-Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
-the same capsule primitives while retaining left alignment, immutable routes, and detail sheets.
+Reduce Motion removes spatial effects. Agent tool buttons retain the capsule primitive,
+while aggregate run sheets use bounded static summary rows with immutable call-ID routes and
+individual detail sheets.
 
 Producer-receipted `sessionInput` custom messages are conversation input rather than tool activity. They use a distinct cyan, right-aligned interactive glass container that displays the actual message text; the container's complete rounded geometry is one hit target rather than delegating interaction to individual header/text glyphs. Its medium/large technical sheet shares the standard technical-detail title, close control, blur, metadata-card, and drill-in JSON presentation used by tool details while exposing canonical identity, trigger semantics, producer payload, and exact extension attribution when available. Custom messages without that Gateway-authored evidence retain ordinary extension/tool presentation; iOS never classifies delivery from title, text, timestamp, or custom-type names.
 
@@ -1157,20 +1158,32 @@ unmatched result remains visible when its call is outside that page. Unanchored 
 non-tool streaming content regardless of running/completed status; isolated streaming-suffix projection is
 permitted only when every runtime tool has a canonical call anchor. Consecutive
 tool-only entries with one equal nonempty Gateway-owned segment identity collapse
-into a single compact run chip whose sub-sheet keeps every tool and its individual
-detail available; missing or conflicting identity remains separate. Each exact installed projection builds one
+into a single compact run chip whose aggregate sheet presents every invocation as a
+full-width bounded summary row; tapping a row opens its individual detail surface.
+Missing or conflicting identity remains separate. Each exact installed projection builds one
 unique call-ID descriptor index, so live detail refresh resolves from bounded installed state
 without rescanning the full timeline. The run, individual tool, Changes, and
 Technical details sheets share one inline navigation-chrome policy; principal toolbar titles
 therefore cannot reserve an empty large-title region above the scroll view. Each medium/large
 tool detail sheet explicitly top-anchors short scroll content and begins immediately below
 native toolbar chrome. Tool-detail surfaces use their own 108-point top blur while the main chat uses 176 points, without changing either radius. Its medium
-detent is a glance surface: a wrapping chip flow combines state and elapsed time and expresses only useful
-metadata in natural singular/plural copy. The flow caches one bounded measurement per layout pass and uses the exact same width and height proposal for placement, so a dynamically updating status chip cannot under-report its row height or overlap the following section. Pulling to large selects the expanded display density without
-changing the selected call or scroll ownership. Read/write/edit foreground a selectable path whose directory
-uses the restrained secondary tone and whose basename uses the tool accent; command, path, pattern, and location
-values share one 12-point semibold code scale and wrap without splitting words. Code results use their separate
-readable-result scale.
+detent is a glance surface: aggregate runs use lazy full-width summary rows with
+state, elapsed time, high-signal request context, and at most the newest two bounded
+readable output lines. Each row vertically centers status with its title, places the
+primary command/path below its label at full width, fades an overflowing primary value
+at the bottom, and fades a bounded result tail at the top to disclose earlier output
+without a separate warning line. Single-tool detail retains its wrapping metadata flow.
+The flow caches one bounded measurement per layout pass and uses the exact same width
+and height proposal for placement, so a dynamically updating status chip cannot
+under-report its row height or overlap the following section. Pulling to large selects
+the expanded display density without changing the selected call or scroll ownership.
+Read/write/edit foreground a selectable path whose directory uses the restrained
+secondary tone and whose basename uses the tool accent; command, path, pattern, and
+location values share one 12-point semibold code scale and wrap without splitting words.
+Command and file detail surfaces move their semantic icon from the primary value
+container to the left of the centered sheet title, leaving primary content aligned like
+the result container. Edit results precede any Changes action. Code results use their
+separate readable-result scale.
 Edit uses an authoritative returned patch when present, otherwise it previews only exact requested old/new
 blocks. An admitted inline preview places its full-diff action in a full-width interactive row below the diff. Exactly one verified requested change with exactly one authoritative diff unit containing a real
 addition or removal may appear inline: medium uses a compact bounded head/tail glance and large reveals the

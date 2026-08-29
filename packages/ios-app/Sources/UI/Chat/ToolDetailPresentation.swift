@@ -565,6 +565,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
     let kind: ToolDetailKind
     let displayTitle: String
     let icon: String
+    let sheetTitleIcon: String?
     let primaryLabel: String?
     let primaryValue: String?
     let primaryPreview: ToolTextPreview?
@@ -578,31 +579,12 @@ struct ToolDetailPresentation: Hashable, Sendable {
 
     init(tool: ChatToolPresentation) {
         let request = tool.request?.objectValue
-        kind = switch tool.title {
-        case "read": .read
-        case "write": .write
-        case "edit": .edit
-        case "bash": .bash
-        case "grep": .grep
-        case "find": .find
-        case "ls": .list
-        default: .generic
-        }
+        let rawToolName = tool.toolName ?? tool.title
+        kind = Self.kind(for: rawToolName)
         displayTitle = Self.displayTitle(for: tool.title)
-        icon = Self.icon(for: tool.title)
-
-        let primary: (label: String, value: String)? = switch kind {
-        case .read, .write, .edit:
-            Self.firstString(in: request, keys: ["path", "filePath"]).map { ("File", $0) }
-        case .bash:
-            Self.firstString(in: request, keys: ["command"]).map { ("Command", $0) }
-        case .grep, .find:
-            Self.firstString(in: request, keys: ["pattern"]).map { ("Pattern", $0) }
-        case .list:
-            ("Directory", Self.firstString(in: request, keys: ["path"]) ?? ".")
-        case .generic:
-            Self.genericPrimary(in: request)
-        }
+        icon = Self.icon(for: rawToolName)
+        sheetTitleIcon = Self.sheetTitleIcon(for: rawToolName)
+        let primary = Self.primary(kind: kind, request: request)
         primaryLabel = primary?.label
         primaryValue = primary?.value
         primaryPreview = primary.map { ToolTextPreview.make($0.value) }
@@ -618,6 +600,45 @@ struct ToolDetailPresentation: Hashable, Sendable {
         readableResultPreview = readableResult.map(ToolTextPreview.make)
         structuredResult = Self.structuredResult(tool: tool, readableResult: readableResult)
         usesCodeResult = [.read, .write, .edit, .bash, .grep, .find, .list].contains(kind)
+    }
+
+    static func kind(for title: String) -> ToolDetailKind {
+        switch title {
+        case "read": .read
+        case "write": .write
+        case "edit": .edit
+        case "bash": .bash
+        case "grep": .grep
+        case "find": .find
+        case "ls": .list
+        default: .generic
+        }
+    }
+
+    static func primary(
+        kind: ToolDetailKind,
+        request: [String: JSONValue]?
+    ) -> (label: String, value: String)? {
+        switch kind {
+        case .read, .write, .edit:
+            firstString(in: request, keys: ["path", "filePath"]).map { ("File", $0) }
+        case .bash:
+            firstString(in: request, keys: ["command"]).map { ("Command", $0) }
+        case .grep, .find:
+            firstString(in: request, keys: ["pattern"]).map { ("Pattern", $0) }
+        case .list:
+            ("Directory", firstString(in: request, keys: ["path"]) ?? ".")
+        case .generic:
+            genericPrimary(in: request)
+        }
+    }
+
+    static func displayTitle(for tool: ChatToolPresentation) -> String {
+        displayTitle(for: tool.title)
+    }
+
+    static func sheetTitleIcon(for tool: ChatToolPresentation) -> String? {
+        sheetTitleIcon(for: tool.toolName ?? tool.title)
     }
 
     static func displayTitle(for title: String) -> String {
@@ -643,6 +664,15 @@ struct ToolDetailPresentation: Hashable, Sendable {
         case "find": "doc.text.magnifyingglass"
         case "ls": "folder"
         default: "wrench.and.screwdriver"
+        }
+    }
+
+    private static func sheetTitleIcon(for toolName: String) -> String? {
+        switch kind(for: toolName) {
+        case .read, .write, .edit, .bash:
+            icon(for: toolName)
+        case .grep, .find, .list, .generic:
+            nil
         }
     }
 
@@ -741,7 +771,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
         return values
     }
 
-    private static func readableResult(tool: ChatToolPresentation) -> String? {
+    static func readableResult(tool: ChatToolPresentation) -> String? {
         if !tool.content.isEmpty { return tool.content }
         if let value = readableString(in: tool.response) { return value }
         guard let fallback = tool.fallbackContent, fallback != tool.request else { return nil }
@@ -754,7 +784,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
         return firstString(in: object, keys: ["content", "output", "text", "message", "summary", "answer", "result"])
     }
 
-    private static func structuredResult(tool: ChatToolPresentation, readableResult: String?) -> JSONValue? {
+    static func structuredResult(tool: ChatToolPresentation, readableResult: String?) -> JSONValue? {
         if let response = tool.response {
             if let text = response.stringValue, text == readableResult { return nil }
             return response
@@ -762,6 +792,130 @@ struct ToolDetailPresentation: Hashable, Sendable {
         guard let fallback = tool.fallbackContent, fallback != tool.request else { return nil }
         if let text = fallback.stringValue, text == readableResult { return nil }
         return fallback
+    }
+}
+
+/// A bounded suffix preview for aggregate tool rows. This intentionally keeps
+/// only the newest nonempty logical lines: live output is a current display
+/// frame, not an append-only log, and the full result remains in the detail view.
+struct ToolOutputTailPreview: Hashable, Sendable {
+    static let maximumLines = 2
+    static let maximumLineCharacters = 180
+
+    let text: String
+    let isBounded: Bool
+    let renderedLineCount: Int
+
+    static func make(_ source: String) -> ToolOutputTailPreview? {
+        guard !source.isEmpty else { return nil }
+        var lines: [String] = []
+        lines.reserveCapacity(Self.maximumLines)
+        var current: [Character] = []
+        current.reserveCapacity(Self.maximumLineCharacters)
+        var hasNonWhitespace = false
+        var lineWasBounded = false
+        var boundedOutput = false
+        var omittedLines = false
+
+        func finishLine() {
+            let rendered = String(current.reversed())
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if hasNonWhitespace, !rendered.isEmpty {
+                if lines.count < Self.maximumLines {
+                    lines.append(rendered)
+                    if lineWasBounded { boundedOutput = true }
+                } else {
+                    omittedLines = true
+                }
+            }
+            // Clear even blank logical lines; otherwise trailing whitespace
+            // would leak into the next retained line while walking backwards.
+            current.removeAll(keepingCapacity: true)
+            hasNonWhitespace = false
+            lineWasBounded = false
+        }
+
+        // Walk from the suffix so a pathological output frame never requires
+        // an unbounded split array. Each retained line is bounded before it is
+        // materialized; after the requested lines are complete, stop at the
+        // first older non-whitespace character needed to prove omission.
+        for character in source.reversed() {
+            // Swift represents CRLF as one extended grapheme cluster, so
+            // recognize both forms while scanning the suffix.
+            if character == "\n" || character == "\r\n" {
+                finishLine()
+                continue
+            }
+            if lines.count == Self.maximumLines {
+                if !character.isWhitespace {
+                    omittedLines = true
+                    break
+                }
+                continue
+            }
+            if character == "\r", current.isEmpty { continue }
+            if !character.isWhitespace { hasNonWhitespace = true }
+            if current.count < Self.maximumLineCharacters {
+                current.append(character)
+            } else if !character.isWhitespace {
+                lineWasBounded = true
+            }
+        }
+        if !omittedLines { finishLine() }
+        guard !lines.isEmpty else { return nil }
+
+        return ToolOutputTailPreview(
+            text: lines.reversed().joined(separator: "\n"),
+            isBounded: boundedOutput || omittedLines,
+            renderedLineCount: lines.count
+        )
+    }
+}
+
+/// Lightweight aggregate-sheet data. It deliberately extracts only bounded
+/// semantic fields and never prepares diffs or full technical JSON.
+struct ToolRunRowPresentation: Hashable, Sendable {
+    let id: String
+    let title: String
+    let icon: String
+    let status: String
+    let isRunning: Bool
+    let error: Bool
+    let elapsedMilliseconds: Int?
+    let primaryLabel: String?
+    let primaryPreview: ToolTextPreview?
+    let primaryPath: ToolPathPresentation?
+    let outputPreview: ToolOutputTailPreview?
+    let hasStructuredResult: Bool
+    let outputTruncated: Bool
+
+    init(tool: ChatToolPresentation, at date: Date = .now) {
+        let rawToolName = tool.toolName ?? tool.title
+        let kind = ToolDetailPresentation.kind(for: rawToolName)
+        let request = tool.request?.objectValue
+        let primary = ToolDetailPresentation.primary(kind: kind, request: request)
+        let readableResult = ToolDetailPresentation.readableResult(tool: tool)
+        id = tool.id
+        title = ToolDetailPresentation.displayTitle(for: tool)
+        icon = ToolDetailPresentation.icon(for: rawToolName)
+        status = tool.subtitle
+        isRunning = tool.isRunning
+        error = tool.error
+        elapsedMilliseconds = tool.elapsedMilliseconds(at: date)
+        primaryLabel = primary?.label
+        primaryPreview = primary.map { ToolTextPreview.make($0.value) }
+        if [.read, .write, .edit].contains(kind), let primaryPreview {
+            primaryPath = ToolPathPresentation.make(primaryPreview)
+        } else {
+            primaryPath = nil
+        }
+        outputPreview = readableResult.flatMap { ToolOutputTailPreview.make($0) }
+        hasStructuredResult = outputPreview == nil
+            && ToolDetailPresentation.structuredResult(
+                tool: tool,
+                readableResult: readableResult
+            ) != nil
+        outputTruncated = tool.outputTruncated
     }
 }
 

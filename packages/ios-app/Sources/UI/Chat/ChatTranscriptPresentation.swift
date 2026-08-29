@@ -947,6 +947,8 @@ struct ChatToolPayload: Hashable, Sendable {
 
 struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     let id: String
+    /// Raw protocol tool name. `title` may be an extension-authored display label.
+    let toolName: String?
     let title: String
     let subtitle: String
     let error: Bool
@@ -965,6 +967,7 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
 
     init(_ tool: ChatToolPresentation) {
         id = tool.id
+        toolName = tool.toolName
         title = tool.title
         subtitle = tool.subtitle
         error = tool.error
@@ -1028,6 +1031,8 @@ struct ChatToolPayloadIndex: Hashable, Sendable {
 
 struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     let id: String
+    /// Raw protocol tool name. The title remains the user-facing label.
+    let toolName: String?
     let title: String
     let subtitle: String
     let request: JSONValue?
@@ -1051,6 +1056,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     init(
         id: String,
         title: String,
+        toolName: String? = nil,
         subtitle: String,
         request: JSONValue?,
         response: JSONValue?,
@@ -1071,6 +1077,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         groupFinalized: Bool? = nil
     ) {
         self.id = id
+        self.toolName = toolName
         self.title = title
         self.subtitle = subtitle
         self.request = request
@@ -1094,6 +1101,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
 
     init(descriptor: ChatToolDescriptor, payload: ChatToolPayload) {
         id = descriptor.id
+        toolName = descriptor.toolName
         title = descriptor.title
         subtitle = descriptor.subtitle
         request = payload.request

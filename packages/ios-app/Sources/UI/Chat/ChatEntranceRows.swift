@@ -134,8 +134,8 @@ private extension View {
                 .padding(-ChatEntranceGrowthPolicy.effectOverflow)
         } else {
             // Once admission settles, remove the clipping node entirely. The
-            // transcript chip then has the same unconstrained native Liquid
-            // Glass press-and-drag region as chips in the Used Tools sheet.
+            // transcript chip then has its unconstrained native Liquid Glass
+            // press-and-drag region.
             self
         }
     }

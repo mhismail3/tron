@@ -14,8 +14,8 @@ struct ToolDetailSheet: View {
             VStack(alignment: .leading, spacing: 12) {
                 chipSection(presentation)
                 primarySection(presentation)
-                diffSection(presentation)
                 resultSection(presentation)
+                diffSection(presentation)
                 technicalDetailsButton
             }
             .padding(.horizontal, 16)
@@ -59,27 +59,20 @@ struct ToolDetailSheet: View {
            !preview.text.isEmpty {
             VStack(alignment: .leading, spacing: 7) {
                 sectionLabel(label)
-                HStack(alignment: .center, spacing: 10) {
-                    Image(systemName: presentation.icon)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(accent)
-                        .frame(width: 22)
-                    if let path = presentation.primaryPath {
-                        pathText(path)
-                    } else if presentation.kind == .bash {
-                        Text(verbatim: preview.text)
-                            .font(primaryValueFont)
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                Group {
+                    if presentation.sheetTitleIcon != nil {
+                        primaryValue(presentation, preview: preview)
                     } else {
-                        Text(preview.text)
-                            .font(primaryValueFont)
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(alignment: .center, spacing: 10) {
+                            Image(systemName: presentation.icon)
+                                .font(TronTypography.sans(
+                                    size: TronTypography.sizeBody,
+                                    weight: .semibold
+                                ))
+                                .foregroundStyle(accent)
+                                .frame(width: 22)
+                            primaryValue(presentation, preview: preview)
+                        }
                     }
                 }
                 .padding(12)
@@ -89,6 +82,30 @@ struct ToolDetailSheet: View {
                 }
             }
             .accessibilityElement(children: .contain)
+        }
+    }
+
+    @ViewBuilder
+    private func primaryValue(
+        _ presentation: ToolDetailPresentation,
+        preview: ToolTextPreview
+    ) -> some View {
+        if let path = presentation.primaryPath {
+            pathText(path)
+        } else if presentation.kind == .bash {
+            Text(verbatim: preview.text)
+                .font(primaryValueFont)
+                .foregroundStyle(Color.tronTextSecondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(preview.text)
+                .font(primaryValueFont)
+                .foregroundStyle(Color.tronTextSecondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

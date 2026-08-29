@@ -59,6 +59,8 @@ struct ToolDetailPresentationTests {
             #expect(presentation.kind == fixture.2)
             #expect(presentation.primaryLabel == fixture.3)
             #expect(presentation.primaryValue == fixture.4)
+            let expectsTitleIcon = [ToolDetailKind.read, .write, .edit, .bash].contains(fixture.2)
+            #expect((presentation.sheetTitleIcon != nil) == expectsTitleIcon)
         }
     }
 
@@ -681,6 +683,94 @@ struct ToolDetailPresentationTests {
         #expect(ToolTechnicalResultResolver.resolve(tool("bash")) == .null)
     }
 
+    @Test("aggregate rows use raw names, bounded semantic context, and output tails")
+    func aggregateRowPresentation() {
+        let labeled = ChatToolPresentation(
+            id: "labeled-bash", title: "Shell", toolName: "bash", subtitle: "Running",
+            request: .object(["command": .string("swift test")]), response: nil,
+            content: "first\n\nsecond\nthird", fallbackContent: nil, error: false,
+            startedAt: "2026-01-01T00:00:00Z", completedAt: nil, durationMs: 2_000,
+            lastProgressAt: "2026-01-01T00:00:02Z", progressSequence: 2
+        )
+        let row = ToolRunRowPresentation(tool: labeled, at: Date(timeIntervalSince1970: 2))
+        #expect(row.title == "Shell")
+        #expect(row.icon == "terminal")
+        #expect(row.primaryLabel == "Command")
+        #expect(row.primaryPreview?.text == "swift test")
+        #expect(row.outputPreview?.text == "second\nthird")
+        #expect(row.outputPreview?.isBounded == true)
+        #expect(row.outputPreview?.renderedLineCount == 2)
+        #expect(row.isRunning)
+        #expect(row.elapsedMilliseconds == 2_000)
+
+        let generic = ToolRunRowPresentation(tool: tool(
+            "custom", request: .object(["task": .string("inspect")]),
+            response: .object(["items": .array([.string("one")])])
+        ))
+        #expect(generic.primaryLabel == "Task")
+        #expect(generic.hasStructuredResult)
+        #expect(generic.outputPreview == nil)
+
+        let bounded = ToolRunRowPresentation(tool: tool(
+            "bash", request: .object(["command": .string("build")]),
+            content: "done", outputTruncated: true
+        ))
+        #expect(bounded.outputPreview?.text == "done")
+        #expect(bounded.outputTruncated)
+
+        let settled = ChatToolPresentation(
+            id: labeled.id, title: labeled.title, toolName: labeled.toolName, subtitle: "Completed",
+            request: labeled.request, response: .object(["content": .string("final")]),
+            content: "final", fallbackContent: nil, error: false,
+            startedAt: labeled.startedAt, completedAt: "2026-01-01T00:00:03Z", durationMs: 3_000,
+            lastProgressAt: "2026-01-01T00:00:03Z", progressSequence: 3
+        )
+        let settledRow = ToolRunRowPresentation(tool: settled)
+        #expect(settledRow.id == row.id)
+        #expect(!settledRow.isRunning)
+        #expect(settledRow.outputPreview?.text == "final")
+
+        let ordered = ChatToolRunPresentation(tools: [labeled, tool("read")])
+        #expect(ordered.reverseChronologicalTools.map(\.id) == ["call-read", "labeled-bash"])
+    }
+
+    @Test("output tail policy handles CRLF, blanks, Unicode, and long lines without unbounded output")
+    func boundedOutputTail() {
+        #expect(ToolOutputTailPreview.make("one\r\ntwo\r\n\r\n")?.text == "one\ntwo")
+        #expect(ToolOutputTailPreview.make("  \n\n newest \n")?.text == "newest")
+        let unicode = String(repeating: "🙂", count: 120)
+            + String(repeating: "x", count: 180) + "TAIL\nfinished"
+        let preview = ToolOutputTailPreview.make(unicode)
+        #expect(preview?.text == "\(String(repeating: "x", count: 176))TAIL\nfinished")
+        #expect(preview?.isBounded == true)
+        #expect(preview?.renderedLineCount == 2)
+        #expect(ToolOutputTailPreview.make("\n\n") == nil)
+    }
+
+    @Test("aggregate preview fades disclose omitted content only")
+    func aggregatePreviewFadePolicy() {
+        #expect(!ToolRowPreviewFadePolicy.showsFade(
+            sourceIsBounded: false,
+            fullHeight: 40,
+            visibleHeight: 40
+        ))
+        #expect(ToolRowPreviewFadePolicy.showsFade(
+            sourceIsBounded: true,
+            fullHeight: 40,
+            visibleHeight: 40
+        ))
+        #expect(ToolRowPreviewFadePolicy.showsFade(
+            sourceIsBounded: false,
+            fullHeight: 61,
+            visibleHeight: 40
+        ))
+        #expect(!ToolRowPreviewFadePolicy.showsFade(
+            sourceIsBounded: false,
+            fullHeight: .infinity,
+            visibleHeight: 40
+        ))
+    }
+
     @Test("unknown tools remain generic and surface structured results")
     func genericFallback() {
         let response: JSONValue = .object(["items": .array([.string("one"), .string("two")])])
@@ -698,6 +788,7 @@ struct ToolDetailPresentationTests {
 
     private func tool(
         _ title: String,
+        toolName: String? = nil,
         subtitle: String = "Completed",
         request: JSONValue? = nil,
         response: JSONValue? = nil,
@@ -708,6 +799,7 @@ struct ToolDetailPresentationTests {
         ChatToolPresentation(
             id: "call-\(title)",
             title: title,
+            toolName: toolName,
             subtitle: subtitle,
             request: request,
             response: response,

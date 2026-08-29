@@ -607,9 +607,18 @@ struct TronSegmentedControl<Value: Hashable>: View {
 struct TronSheetTitle: View {
     let title: String
     var accent: Color = .tronEmerald
+    var icon: String? = nil
 
     var body: some View {
-        TronTitleLabel(title: title, accent: accent)
+        HStack(spacing: 7) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .accessibilityHidden(true)
+            }
+            TronTitleLabel(title: title, accent: accent)
+        }
     }
 }
 

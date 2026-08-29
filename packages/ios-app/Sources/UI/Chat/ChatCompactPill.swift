@@ -186,7 +186,7 @@ struct ChatCompactPillVisualState: Hashable, Sendable {
             detail: single?.subtitle.lowercased() ?? run.status,
             icon: run.failureCount > 0
                 ? "exclamationmark.triangle.fill"
-                : single.map { ToolDetailPresentation.icon(for: $0.title) }
+                : single.map { ToolDetailPresentation.icon(for: $0.toolName ?? $0.title) }
                     ?? "square.stack.3d.up",
             tone: tone,
             material: .glass,

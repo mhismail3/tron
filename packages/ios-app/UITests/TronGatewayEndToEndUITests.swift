@@ -113,8 +113,13 @@ final class TronGatewayEndToEndUITests: XCTestCase {
 
         settledGroup.tap()
         XCTAssertTrue(app.staticTexts["Used 3 tools"].waitForExistence(timeout: 4))
-        let completedCommand = app.staticTexts["Run command"].firstMatch
+        let completedCommand = app.buttons["tool-run-summary-e2e-tool-3"]
         XCTAssertTrue(completedCommand.waitForExistence(timeout: 4))
+        XCTAssertTrue(app.buttons["tool-run-summary-e2e-tool-2"].exists)
+        XCTAssertTrue(app.buttons["tool-run-summary-e2e-tool-1"].exists)
+        XCTAssertGreaterThan(completedCommand.frame.width, app.frame.width - 64)
+        XCTAssertTrue(completedCommand.label.contains("printf third-output"))
+        XCTAssertTrue(completedCommand.label.contains("third-output"))
         completedCommand.tap()
         XCTAssertTrue(app.staticTexts["Run command"].waitForExistence(timeout: 4))
         let technicalDetails = app.buttons.matching(

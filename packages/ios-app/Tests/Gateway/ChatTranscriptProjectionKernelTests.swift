@@ -920,6 +920,7 @@ struct ChatTranscriptProjectionKernelTests {
             return
         }
         #expect(tool.extensionOrigin == ExtensionToolOrigin(source: "pi-subagents"))
+        #expect(tool.toolName == "subagent")
         #expect(tool.title == "Subagent")
     }
 
