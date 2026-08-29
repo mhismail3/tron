@@ -339,6 +339,7 @@ export class RuntimeSlot {
     timer: NodeJS.Timeout | undefined;
     asyncDir: string;
     readRetries: number;
+    bindingRetries: number;
   }>();
   private readonly extensionActivityReadGenerations = new Map<string, number>();
   private readonly extensionArtifactWarnings = new Map<string, number>();
@@ -3120,6 +3121,15 @@ export class RuntimeSlot {
         asyncDir: realAsyncDir,
         terminal: activity.status !== "running" || Boolean(ownership.terminal),
       });
+      if (activity.status === "running") {
+        const tracked = this.extensionActivityWatchers.get(toolCallId);
+        if (this.activityNeedsChildSessionBinding(activity.children)
+          && this.artifactPublishesChildSession(artifactValue)) {
+          this.scheduleExtensionBindingRetry(toolCallId, realAsyncDir);
+        } else if (tracked?.asyncDir === realAsyncDir) {
+          tracked.bindingRetries = 0;
+        }
+      }
       if (activity.status !== "running") {
         this.stopExtensionActivityWatcher(toolCallId);
         claimedReceiptOwner = undefined;
@@ -3134,6 +3144,46 @@ export class RuntimeSlot {
         `${previous.runId ?? "run"}\0${toolCallId}`,
       );
     }
+  }
+
+  private artifactPublishesChildSession(value: unknown): boolean {
+    const root = value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : undefined;
+    const details = root?.details && typeof root.details === "object" && !Array.isArray(root.details)
+      ? root.details as Record<string, unknown>
+      : root;
+    if (!details) return false;
+    const visit = (candidate: unknown, depth: number): boolean => {
+      if (depth > 4 || !candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+      const record = candidate as Record<string, unknown>;
+      const progress = record.progress && typeof record.progress === "object" && !Array.isArray(record.progress)
+        ? record.progress as Record<string, unknown>
+        : undefined;
+      if (typeof record.sessionFile === "string" || typeof progress?.sessionFile === "string") return true;
+      for (const key of ["results", "steps", "children", "progress"] as const) {
+        const nested = record[key];
+        if (Array.isArray(nested) && nested.slice(0, 64).some((child) => visit(child, depth + 1))) return true;
+      }
+      return false;
+    };
+    return visit(details, 0);
+  }
+
+  private activityNeedsChildSessionBinding(children: readonly ExtensionRunChild[]): boolean {
+    return children.some((child) => child.childSessionRef === undefined
+      || child.children !== undefined && this.activityNeedsChildSessionBinding(child.children));
+  }
+
+  private scheduleExtensionBindingRetry(toolCallId: string, asyncDir: string): void {
+    const tracked = this.extensionActivityWatchers.get(toolCallId);
+    if (!tracked || tracked.asyncDir !== asyncDir || tracked.timer || tracked.bindingRetries >= 4) return;
+    tracked.bindingRetries += 1;
+    tracked.timer = setTimeout(() => {
+      tracked.timer = undefined;
+      void this.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
+    }, tracked.bindingRetries * 150);
+    tracked.timer.unref();
   }
 
   private startExtensionActivityWatcher(toolCallId: string, asyncDir: string): void {
@@ -3158,6 +3208,7 @@ export class RuntimeSlot {
         if (!tracked) return;
         if (tracked.timer) clearTimeout(tracked.timer);
         tracked.readRetries = 0;
+        tracked.bindingRetries = 0;
         tracked.timer = setTimeout(() => {
           tracked.timer = undefined;
           void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
@@ -3170,6 +3221,7 @@ export class RuntimeSlot {
         timer: undefined,
         asyncDir: realAsyncDir,
         readRetries: 0,
+        bindingRetries: 0,
       });
       void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
     } catch {
@@ -4011,6 +4063,17 @@ export class RuntimeSlot {
   private processForViewer(processId: string): SessionProcessActivity | undefined {
     return this.processActivities.get(processId)
       ?? processHistoryDetail(this.runtime.session.sessionManager, processId);
+  }
+
+  async reconcileProcessChildSessionBinding(processId: string): Promise<void> {
+    if (this.processChildSessionBinding(processId)) return;
+    const process = this.processActivities.get(processId);
+    if (!process || process.kind !== "subagent" || !process.runId || !process.toolCallId) return;
+    const ownership = this.extensionRunOwnership.get(process.runId);
+    if (!ownership?.asyncDir || ownership.toolCallId !== process.toolCallId) return;
+    const asyncDir = this.canonicalExtensionArtifactDirectory(ownership.asyncDir);
+    if (!asyncDir) return;
+    await this.refreshExtensionActivityFromArtifact(ownership.toolCallId, asyncDir);
   }
 
   processChildSessionBinding(processId: string): { ref: string; producerId: string; sessionOwnerId?: string; runId?: string } | undefined {

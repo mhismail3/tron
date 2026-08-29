@@ -113,6 +113,12 @@ struct SessionProcessPresentationGuardTests {
         #expect(store.contains("guard status == .waiting else { return }"))
         #expect(store.contains("private static let maximumBindingRetryAttempts = 2"))
         #expect(store.contains("scheduleBindingRetry(activity: activity, delay: .milliseconds(200))"))
+        let retryAdmission = try #require(
+            store.components(separatedBy: "private func scheduleBindingRetry").dropFirst().first?
+                .components(separatedBy: "else {").first
+        )
+        #expect(!retryAdmission.contains("activity.childSessionRef != nil"))
+        #expect(store.contains("} else if !activity.lifecycle.state.isActive {\n            bindingRetryTask?.cancel()\n            bindingRetryTask = nil\n            status = .unavailable"))
     }
 
     @Test("orb pauses for reduced motion visibility and scene lifecycle")

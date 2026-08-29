@@ -85,29 +85,24 @@ parent independently. Foreground pi-subagents progress arrives before its termin
 and only when every bounded child has the producer-authored stable index, agent, and known
 lifecycle state. Generic extensions keep requiring the explicit run ID convention.
 
-Current pi-subagents status can represent a child step with `sessionFile` but no step
-`runId`, and its Pi child header can omit `parentSession`. Tron therefore supports two
-fail-closed child schemes:
-
-1. A child header explicitly names the canonical parent and all path/header identities
-   agree.
-2. For the current producer shape, the exact tool-owned status artifact names a regular
-   child file under the canonical parent child root using
-   `<child-run>/run-N/session.jsonl`, and the bounded structural session marker ends with
-   the same `subagent-…-<child-run>-N` token.
-
-The second scheme derives the persistent child producer ID only after canonical path,
-regular-file, non-symlink, inode, containment, status ownership, structural marker, and
-ambiguity checks. Before that path exists, a bounded producer-authored foreground index may
-identify a disposable live row only inside its canonical parent tool call; labels and array
-position never authorize a child session. A conflicting explicit child ID, wrong token,
-foreign path, wrong parent, duplicate identity, symlink, replacement, or malformed append
-fails closed.
+A child Pi header can omit `parentSession`, so transcript ownership always needs separate
+producer evidence. Foreground rows use the exact installed pi-subagents bounded index
+contract. Exact-owned async artifacts use explicit `childId`, workflow key, child `runId`,
+or canonical `step:N` for process identity, while fresh filesystem ownership is proven
+separately by the root run, a status-matched private recovery descriptor, or the workflow
+child `runId`. pi-subagents 0.59 and newer publish a foreground workflow child's run ID at
+launch; an older status frame containing only a workflow key and session path remains
+visible but cannot authorize a live transcript. Filenames, structural marker strings,
+labels, titles, paths, and generic array position never become ownership evidence.
 
 Async artifact observation installs a directory watcher and performs bounded retries when
-an atomic status replacement overlaps the initial read. An admitted async directory
-Gateway-authors `executionMode: asynchronous` even when the producer reports
-`mode: workflow`; a direct synchronous workflow result remains synchronous.
+an atomic status replacement overlaps the initial read or the exact child JSONL appears
+just after status publication. An explicit transcript-open request performs one more exact
+artifact reconciliation. A conflicting identity, foreign path, wrong parent or owner,
+duplicate identity, symlink, replacement, malformed header, or unsupported producer
+contract fails closed. An admitted async directory Gateway-authors
+`executionMode: asynchronous` even when the producer reports `mode: workflow`; a direct
+synchronous workflow result remains synchronous.
 
 ## Canonical history
 

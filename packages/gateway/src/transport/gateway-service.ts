@@ -582,6 +582,7 @@ export class GatewayService {
         const slot = await this.openedSlot(client, params);
         if (!client.sendEvent) throw new GatewayError("unsupported", "This connection cannot observe subagent transcripts");
         const processId = string(params.processId, "processId", { max: 256 });
+        await slot.reconcileProcessChildSessionBinding(processId);
         const binding = slot.processChildSessionBinding(processId);
         if (!binding?.runId) throw new GatewayError("not_found", "Subagent session ownership is unavailable");
         const live = slot.processChildSessionPath(processId);

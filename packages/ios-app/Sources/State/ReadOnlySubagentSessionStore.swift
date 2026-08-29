@@ -266,12 +266,12 @@ final class ReadOnlySubagentSessionStore {
                        ["not_found", "unavailable"].contains(failure.code),
                        self.liveActivity?.lifecycle.state.isActive == true {
                         // Active subagents can publish their child binding after the
-                        // activity row. Stay mounted and retry only when that
-                        // authoritative binding appears. If it was already projected,
-                        // allow two short bounded retries for the binding/lease race.
+                        // activity row. The RPC remains the capability authority, so
+                        // two short retries may also trigger Gateway reconciliation
+                        // before a process delta arrives; no path or identity is
+                        // inferred on-device.
                         self.status = .waiting
-                        if let activity = self.liveActivity,
-                           activity.childSessionRef != nil {
+                        if let activity = self.liveActivity {
                             self.scheduleBindingRetry(activity: activity, delay: .milliseconds(200))
                         }
                     } else if let failure = error as? GatewayFailure,
@@ -457,6 +457,7 @@ final class ReadOnlySubagentSessionStore {
     func updateLiveActivity(_ activity: SessionProcessActivity?) {
         guard let processID else { return }
         let wasActive = liveActivity?.lifecycle.state.isActive == true
+        let hadChildBinding = liveActivity?.childSessionRef != nil
         guard let activity else {
             liveActivity = nil
             if wasActive { rebuildPresentation() }
@@ -494,6 +495,11 @@ final class ReadOnlySubagentSessionStore {
         if wasActive != activity.lifecycle.state.isActive { rebuildPresentation() }
         guard status == .waiting else { return }
         if activity.childSessionRef != nil {
+            if !hadChildBinding {
+                bindingRetryAttempts = 0
+                bindingRetryTask?.cancel()
+                bindingRetryTask = nil
+            }
             if activity.lifecycle.state.isActive {
                 scheduleBindingRetry(activity: activity, delay: .zero)
             } else if let parentSessionID,
@@ -506,6 +512,8 @@ final class ReadOnlySubagentSessionStore {
                 )
             }
         } else if !activity.lifecycle.state.isActive {
+            bindingRetryTask?.cancel()
+            bindingRetryTask = nil
             status = .unavailable
         }
     }
@@ -514,7 +522,6 @@ final class ReadOnlySubagentSessionStore {
         guard bindingRetryTask == nil,
               bindingRetryAttempts < Self.maximumBindingRetryAttempts,
               activity.lifecycle.state.isActive,
-              activity.childSessionRef != nil,
               let parentSessionID,
               let processID,
               let presentationGeneration else {

@@ -102,6 +102,28 @@ function branchFromParsedSession(entries: FileEntry[]): {
   };
 }
 
+async function readOpenedSessionHeader(
+  handle: Awaited<ReturnType<typeof open>>,
+  byteCount: number,
+): Promise<{ sessionId: string; parentSession?: string } | undefined> {
+  if (!Number.isSafeInteger(byteCount) || byteCount <= 0) return undefined;
+  const length = Math.min(byteCount, DEFAULT_CATALOG_DISCOVERY_LIMITS.maximumHeaderBytesPerFile);
+  const bytes = Buffer.alloc(length);
+  const { bytesRead } = await handle.read(bytes, 0, length, 0);
+  const newline = bytes.subarray(0, bytesRead).indexOf(0x0a);
+  if (newline < 0) return undefined;
+  try {
+    const header = JSON.parse(bytes.subarray(0, newline).toString("utf8")) as Record<string, unknown>;
+    if (header.type !== "session" || typeof header.id !== "string" || !header.id) return undefined;
+    const parentSession = typeof header.parentSession === "string" && header.parentSession
+      ? header.parentSession
+      : undefined;
+    return { sessionId: header.id, ...(parentSession ? { parentSession } : {}) };
+  } catch {
+    return undefined;
+  }
+}
+
 async function readOpenedSession(
   handle: Awaited<ReturnType<typeof open>>,
   byteCount: number,
@@ -2132,16 +2154,24 @@ export class RuntimeRegistry {
       }
       const afterHandle = await handle.stat();
       const afterPath = await lstat(admitted.path).catch(() => undefined);
+      const sameSizeMutation = afterHandle.size === metadata.size && afterHandle.mtimeMs !== metadata.mtimeMs;
       if (!afterPath?.isFile() || afterPath.isSymbolicLink()
-        || afterPath.dev !== metadata.dev || afterPath.ino !== metadata.ino) {
-        throw new GatewayError("conflict", "Subagent session file was replaced", true);
-      }
-      if (afterHandle.size !== metadata.size || afterHandle.mtimeMs !== metadata.mtimeMs) {
+        || afterPath.dev !== metadata.dev || afterPath.ino !== metadata.ino
+        || afterHandle.dev !== metadata.dev || afterHandle.ino !== metadata.ino
+        || afterHandle.size < metadata.size || sameSizeMutation) {
         throw new GatewayError("busy", "Subagent session changed during projection", true);
       }
+      const confirmedHeader = await readOpenedSessionHeader(handle, afterHandle.size);
+      if (!confirmedHeader || confirmedHeader.sessionId !== childSessionRef
+        || confirmedHeader.parentSession !== parsed.parentSession) {
+        throw new GatewayError("conflict", "Subagent session identity changed", true);
+      }
       const leafEntryId = parsed.leafEntryId;
+      // The page owns the immutable prefix ending at metadata.size. A concurrent
+      // canonical append belongs to the next watcher revision and must not
+      // invalidate this already-open snapshot.
       const revision = createHash("sha256")
-        .update(`${childSessionRef}\0${afterHandle.dev}\0${afterHandle.ino}\0${afterHandle.size}\0${afterHandle.mtimeMs}\0${leafEntryId ?? ""}`)
+        .update(`${childSessionRef}\0${metadata.dev}\0${metadata.ino}\0${metadata.size}\0${metadata.mtimeMs}\0${leafEntryId ?? ""}`)
         .digest("hex").slice(0, 32);
       return { ...page, ...(leafEntryId ? { leafEntryId } : {}), revision, fileIdentity };
     } finally {
@@ -2193,15 +2223,10 @@ export class RuntimeRegistry {
       handle = await open(canonical, "r");
       const opened = await handle.stat();
       if (!opened.isFile() || opened.dev !== metadata.dev || opened.ino !== metadata.ino) return undefined;
-      if (opened.size > 0) {
-        const final = Buffer.alloc(1);
-        const read = await handle.read(final, 0, 1, opened.size - 1);
-        if (read.bytesRead !== 1 || final[0] !== 0x0a) return undefined;
-      }
-      const parsed = await readOpenedSession(handle, opened.size);
-      if (!parsed || parsed.sessionId !== childSessionRef) return undefined;
-      if (parsed.parentSession) {
-        const headerParent = await realpath(parsed.parentSession).catch(() => undefined);
+      const header = await readOpenedSessionHeader(handle, opened.size);
+      if (!header || header.sessionId !== childSessionRef) return undefined;
+      if (header.parentSession) {
+        const headerParent = await realpath(header.parentSession).catch(() => undefined);
         if (headerParent !== parentCanonical) return undefined;
       } else if (forkContext) {
         return undefined;
@@ -2209,7 +2234,12 @@ export class RuntimeRegistry {
       const after = await lstat(canonical);
       if (!after.isFile() || after.isSymbolicLink() || after.dev !== opened.dev || after.ino !== opened.ino) return undefined;
       const afterOpened = await handle.stat();
-      if (afterOpened.size !== opened.size || afterOpened.mtimeMs !== opened.mtimeMs) return undefined;
+      if (afterOpened.dev !== opened.dev || afterOpened.ino !== opened.ino
+        || afterOpened.size < opened.size
+        || (afterOpened.size === opened.size && afterOpened.mtimeMs !== opened.mtimeMs)) return undefined;
+      const confirmedHeader = await readOpenedSessionHeader(handle, afterOpened.size);
+      if (!confirmedHeader || confirmedHeader.sessionId !== header.sessionId
+        || confirmedHeader.parentSession !== header.parentSession) return undefined;
       return { path: canonical, fileIdentity: `${opened.dev}:${opened.ino}` };
     } catch { return undefined; }
     finally { await handle?.close().catch(() => {}); }

@@ -898,14 +898,19 @@ array position into ownership.
 
 For an exact-owned asynchronous pi-subagents artifact, Gateway applies the producer's stable
 child contract: explicit `childId`, then workflow key, then child `runId`, with `step:N` as the
-canonical bounded top-level default. Thus ordinary single/parallel/chain artifacts have an exact child
+canonical bounded top-level default. A fresh workflow child's `runId` is also its separately validated
+session-path owner and must be present from launch; pi-subagents 0.59 and newer publish that evidence
+for foreground workflow children. Older artifacts that expose only a workflow key and path remain
+visible but cannot authorize a live transcript. Thus ordinary single/parallel/chain artifacts have an exact child
 row before and after terminal persistence even when a step has no independent run ID. A single async
 run may reserve its fresh child path under the parent fan-out root rather than its detached async run
 ID. In that shape, Gateway reads the exact-owned private recovery descriptor and accepts its root only
 when descriptor version, source run, exact session file, and fan-out contract all match the live status
 step; a missing, foreign, replaced, or malformed descriptor leaves the transcript unavailable. The
 same producer identity enriches that row with a validated session reference rather than
-re-keying it. Bare launcher acknowledgements remain hidden until the lifecycle artifact
+re-keying it. If status publishes the owned session target just before Pi creates its canonical JSONL,
+Gateway retries that exact artifact binding on a bounded backoff and once on an explicit transcript-open
+request; no ambient path scan or client inference participates. Bare launcher acknowledgements remain hidden until the lifecycle artifact
 contains child execution evidence. This keeps the composer activity overview continuous
 without treating labels or generic extension array positions as ownership.
 Absolute session and
@@ -947,11 +952,16 @@ The `process-transcript.v1` capability authorizes `session.processTranscript.ope
 connection-owned lease watches only the validated canonical child file, installs that
 watch before capturing its initial page, latches any append in the baseline-publication
 window, emits bounded invalidation events, and reopens it through a read-only projection
-for canonical paging. Page and live-refresh requests serialize per lease and recheck the
-client's expected revision inside that lane, so a canceled mobile prepend cannot race a
-refresh and advance the same lease generation out of order.
+for canonical paging. In-flight opens reserve the same per-client and per-parent capacity
+as established leases. Page and invalidation/live-refresh requests serialize per lease and
+recheck the client's expected revision inside that lane, so an older observer read or a
+canceled mobile prepend cannot race a refresh and advance the same lease generation out of order.
 Open, page, and invalidation reads each revalidate the exact live parent process/tool/run
-binding, exact reserved child path, header identity, and original file identity. Fresh children are
+binding, exact reserved child path, header identity, and original file identity. Ownership admission
+reads only the immutable bounded header, so an in-progress tail append cannot masquerade as an
+identity replacement. Page projection pins one newline-complete prefix from the already-open inode;
+a later canonical append advances the lease through its watcher rather than invalidating that prefix.
+Fresh children are
 admitted only at `<parent-stem>/<session-owner>/run-N/session.jsonl`, with exactly three relative
 path components. The session owner is separately proven as either the exact root run (ordinary
 single/parallel/chain, including the status-matched private recovery descriptor for a detached single

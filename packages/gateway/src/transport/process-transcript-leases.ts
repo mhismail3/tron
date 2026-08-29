@@ -34,6 +34,8 @@ type Lease = {
  * It stores no transcript mirror and never acquires a child runtime. */
 export class ProcessTranscriptLeaseStore {
   private readonly leases = new Map<string, Lease>();
+  private readonly openingByClient = new Map<string, number>();
+  private readonly openingByClientSession = new Map<string, Map<string, number>>();
 
   constructor(private readonly sessions: RuntimeRegistry) {}
 
@@ -46,11 +48,25 @@ export class ProcessTranscriptLeaseStore {
     preferredPath: string | undefined,
     notify: (topic: string, sessionId: string, payload: JsonValue) => void,
   ): Promise<ProcessTranscriptLease> {
-    const clientLeases = [...this.leases.values()].filter((lease) => lease.clientId === clientId);
-    if (clientLeases.length >= MAX_LEASES_PER_CLIENT
-      || clientLeases.filter((lease) => lease.parentSessionId === parentSessionId).length >= MAX_LEASES_PER_CLIENT_SESSION) {
-      throw new GatewayError("busy", "Read-only subagent viewer capacity is full", true);
+    const releaseOpening = this.reserveOpening(clientId, parentSessionId);
+    try {
+      return await this.openReserved(
+        clientId, parentSessionId, processId, childSessionRef, runId, preferredPath, notify,
+      );
+    } finally {
+      releaseOpening();
     }
+  }
+
+  private async openReserved(
+    clientId: string,
+    parentSessionId: string,
+    processId: string,
+    childSessionRef: string,
+    runId: string,
+    preferredPath: string | undefined,
+    notify: (topic: string, sessionId: string, payload: JsonValue) => void,
+  ): Promise<ProcessTranscriptLease> {
     const admission = await this.sessions.resolveReadOnlySubagentPath(
       childSessionRef, preferredPath, parentSessionId, processId, runId,
     );
@@ -204,6 +220,39 @@ export class ProcessTranscriptLeaseStore {
     }
   }
 
+  private reserveOpening(clientId: string, parentSessionId: string): () => void {
+    let activeClient = 0;
+    let activeSession = 0;
+    for (const lease of this.leases.values()) {
+      if (lease.clientId !== clientId) continue;
+      activeClient += 1;
+      if (lease.parentSessionId === parentSessionId) activeSession += 1;
+    }
+    const clientOpenings = this.openingByClient.get(clientId) ?? 0;
+    const sessionOpenings = this.openingByClientSession.get(clientId)?.get(parentSessionId) ?? 0;
+    if (activeClient + clientOpenings >= MAX_LEASES_PER_CLIENT
+      || activeSession + sessionOpenings >= MAX_LEASES_PER_CLIENT_SESSION) {
+      throw new GatewayError("busy", "Read-only subagent viewer capacity is full", true);
+    }
+    this.openingByClient.set(clientId, clientOpenings + 1);
+    const sessions = this.openingByClientSession.get(clientId) ?? new Map<string, number>();
+    sessions.set(parentSessionId, sessionOpenings + 1);
+    this.openingByClientSession.set(clientId, sessions);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const remainingClient = (this.openingByClient.get(clientId) ?? 1) - 1;
+      if (remainingClient > 0) this.openingByClient.set(clientId, remainingClient);
+      else this.openingByClient.delete(clientId);
+      const currentSessions = this.openingByClientSession.get(clientId);
+      const remainingSession = (currentSessions?.get(parentSessionId) ?? 1) - 1;
+      if (remainingSession > 0) currentSessions?.set(parentSessionId, remainingSession);
+      else currentSessions?.delete(parentSessionId);
+      if (currentSessions?.size === 0) this.openingByClientSession.delete(clientId);
+    };
+  }
+
   private owned(clientId: string, leaseId: string): Lease {
     const lease = this.leases.get(leaseId);
     if (!lease || lease.clientId !== clientId) throw new GatewayError("not_found", "Subagent transcript lease is unavailable");
@@ -221,34 +270,38 @@ export class ProcessTranscriptLeaseStore {
   }
 
   private async invalidate(leaseId: string): Promise<void> {
-    const lease = this.leases.get(leaseId);
-    if (!lease) return;
-    try {
-      const page = await this.sessions.readOnlySubagentTranscriptPage(
-        lease.childSessionRef,
-        lease.path,
-        lease.parentSessionId,
-        lease.processId,
-        lease.runId,
-        undefined,
-        undefined,
-        lease.fileIdentity,
-      );
-      if (page.revision === lease.revision || page.revision === lease.pendingRevision) return;
-      lease.pendingRevision = page.revision;
-      lease.notify("session.processTranscript.changed", lease.parentSessionId, {
-        leaseId: lease.id,
-        processId: lease.processId,
-        revision: page.revision,
-        total: page.total,
-        ...(page.leafEntryId ? { leafEntryId: page.leafEntryId } : {}),
-      });
-    } catch (error) {
-      if (error instanceof GatewayError && error.code === "busy" && error.retryable) {
-        this.scheduleInvalidation(leaseId);
-        return;
+    const admittedLease = this.leases.get(leaseId);
+    if (!admittedLease) return;
+    await admittedLease.pageMutex.run(async () => {
+      const lease = this.leases.get(leaseId);
+      if (lease !== admittedLease) return;
+      try {
+        const page = await this.sessions.readOnlySubagentTranscriptPage(
+          lease.childSessionRef,
+          lease.path,
+          lease.parentSessionId,
+          lease.processId,
+          lease.runId,
+          undefined,
+          undefined,
+          lease.fileIdentity,
+        );
+        if (page.revision === lease.revision || page.revision === lease.pendingRevision) return;
+        lease.pendingRevision = page.revision;
+        lease.notify("session.processTranscript.changed", lease.parentSessionId, {
+          leaseId: lease.id,
+          processId: lease.processId,
+          revision: page.revision,
+          total: page.total,
+          ...(page.leafEntryId ? { leafEntryId: page.leafEntryId } : {}),
+        });
+      } catch (error) {
+        if (error instanceof GatewayError && error.code === "busy" && error.retryable) {
+          this.scheduleInvalidation(leaseId);
+          return;
+        }
+        this.closeOwned(lease.clientId, lease.id, "session unavailable");
       }
-      this.closeOwned(lease.clientId, lease.id, "session unavailable");
-    }
+    });
   }
 }

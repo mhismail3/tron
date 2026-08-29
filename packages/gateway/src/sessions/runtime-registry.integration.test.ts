@@ -2638,6 +2638,66 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(slot.snapshot().processOverview).toMatchObject({ visibility: "active", activeCount: 1 });
   });
 
+  it("retries a live child binding when the canonical session appears after status publication", async () => {
+    const fixture = await coldFixture("delayed-live-child-session");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const rootRunId = "delayed-workflow-root";
+    const childRunId = "delayed-workflow-child";
+    const toolCallId = "delayed-workflow-tool";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", rootRunId);
+    const parentFile = slot.sessionFile!;
+    const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), childRunId, "run-0");
+    const childFile = join(childDirectory, "session.jsonl");
+    await Promise.all([mkdir(asyncDir, { recursive: true }), mkdir(childDirectory, { recursive: true })]);
+    const started = Date.now() - 1_000;
+    const startedAt = new Date(started).toISOString();
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3,
+      runId: rootRunId,
+      state: "running",
+      startedAt: started,
+      lastUpdate: started + 500,
+      mode: "workflow",
+      steps: [{
+        workflowKey: "delayed-child",
+        runId: childRunId,
+        agent: "worker",
+        status: "running",
+        sessionFile: childFile,
+      }],
+    }));
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
+      startExtensionActivityWatcher: (toolCallId: string, asyncDir: string) => void;
+    };
+    internal.extensionActivities.set(toolCallId, {
+      id: toolCallId, activityId: "delayed-workflow-activity", runId: rootRunId, toolCallId,
+      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      startedAt, updatedAt: startedAt, children: [],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
+    });
+    internal.extensionRunOwnership.set(rootRunId, { toolCallId, asyncDir, terminal: false });
+    internal.startExtensionActivityWatcher(toolCallId, asyncDir);
+    await waitUntil(() => slot.snapshot().processActivities?.some((activity) =>
+      activity.kind === "subagent" && activity.childSessionRef === undefined) === true);
+
+    const childManager = SessionManager.create(fixture.cwd, childDirectory, { id: "delayed-child-session" });
+    childManager.appendMessage(fauxAssistantMessage("published after artifact status"));
+    await rename(childManager.getSessionFile()!, childFile);
+
+    await waitUntil(() => slot.snapshot().processActivities?.some((activity) =>
+      activity.kind === "subagent" && activity.childSessionRef === "delayed-child-session") === true);
+    const process = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
+    expect(process).toMatchObject({ childSessionRef: "delayed-child-session", visibility: "active" });
+    expect(slot.processChildSessionBinding(process!.processId)).toMatchObject({
+      ref: "delayed-child-session",
+      producerId: "delayed-child",
+      sessionOwnerId: childRunId,
+      runId: rootRunId,
+    });
+  });
+
   it("admits the exact fresh child path for read-only process viewing", async () => {
     const fixture = await coldFixture("validated-child-session");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
@@ -2730,6 +2790,33 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(page.total).toBeGreaterThan(0);
     expect(page.revision).toMatch(/^[a-f0-9]{32}$/u);
     expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
+
+    // Ownership reads only the immutable session header, so an in-progress
+    // canonical append cannot transiently become an identity change. Page
+    // projection still waits for that JSONL entry's terminating newline.
+    const existingLines = (await readFile(childFile, "utf8")).trimEnd().split("\n");
+    const parentId = (JSON.parse(existingLines.at(-1)!) as { id: string }).id;
+    const appendedEntry = JSON.stringify({
+      type: "message",
+      id: "live-child-append",
+      parentId,
+      timestamp: new Date().toISOString(),
+      message: fauxAssistantMessage("live appended transcript"),
+    });
+    await appendFile(childFile, appendedEntry);
+    await expect(fixture.registry.resolveReadOnlySubagentPath(
+      "validated-child-session", admission.path, slot.id, process!.processId, runId,
+    )).resolves.toMatchObject({ path: admission.path, fileIdentity: admission.fileIdentity });
+    await expect(fixture.registry.readOnlySubagentTranscriptPage(
+      "validated-child-session", admission.path, slot.id, process!.processId, runId,
+      undefined, undefined, admission.fileIdentity,
+    )).rejects.toMatchObject({ code: "busy", retryable: true });
+    await appendFile(childFile, "\n");
+    await expect(fixture.registry.readOnlySubagentTranscriptPage(
+      "validated-child-session", admission.path, slot.id, process!.processId, runId,
+      undefined, undefined, admission.fileIdentity,
+    )).resolves.toMatchObject({ fileIdentity: admission.fileIdentity });
+
     await expect(fixture.registry.resolveReadOnlySubagentPath(
       "validated-child-session", admission.path, slot.id, "wrong-process", runId,
     )).rejects.toMatchObject({ code: "not_found" });

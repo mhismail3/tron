@@ -76,6 +76,45 @@ describe("ProcessTranscriptLeaseStore", () => {
     store.releaseClient("client-1");
   });
 
+  it("serializes invalidation behind the acknowledged page lane", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-process-invalidation-lane-"));
+    roots.push(root);
+    const path = join(root, "child.jsonl");
+    await writeFile(path, "{}\n");
+    let releasePage: (() => void) | undefined;
+    let reads = 0;
+    const sessions = {
+      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
+      readOnlySubagentTranscriptPage: vi.fn(async () => {
+        reads += 1;
+        if (reads === 1) return page("revision-1");
+        if (reads === 2) {
+          await new Promise<void>((resolve) => { releasePage = resolve; });
+        }
+        return page("revision-2", 1);
+      }),
+    } as unknown as RuntimeRegistry;
+    const notify = vi.fn();
+    const store = new ProcessTranscriptLeaseStore(sessions);
+    const opened = await store.open(
+      "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify,
+    );
+    const requestedPage = store.page(
+      "client-1", opened.leaseId, undefined, undefined, "revision-1",
+    );
+    await vi.waitFor(() => expect(reads).toBe(2));
+    const invalidation = (store as unknown as { invalidate: (leaseId: string) => Promise<void> })
+      .invalidate(opened.leaseId);
+    await Promise.resolve();
+    expect(reads).toBe(2);
+    releasePage?.();
+    await expect(requestedPage).resolves.toMatchObject({ revision: "revision-2" });
+    await invalidation;
+    expect(reads).toBe(3);
+    expect(notify).not.toHaveBeenCalled();
+    store.releaseClient("client-1");
+  });
+
   it("releases every child observer with its parent presentation", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-process-parent-"));
     roots.push(root);
@@ -196,6 +235,59 @@ describe("ProcessTranscriptLeaseStore", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("reserves capacity while concurrent child viewers are opening", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-process-opening-capacity-"));
+    roots.push(root);
+    const path = join(root, "child.jsonl");
+    await writeFile(path, "{}\n");
+    let releaseAdmissions: (() => void) | undefined;
+    const admissionBarrier = new Promise<void>((resolve) => { releaseAdmissions = resolve; });
+    const sessions = {
+      resolveReadOnlySubagentPath: vi.fn(async () => {
+        await admissionBarrier;
+        return admission(path);
+      }),
+      readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
+    } as unknown as RuntimeRegistry;
+    const store = new ProcessTranscriptLeaseStore(sessions);
+    const first = store.open("client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn());
+    const second = store.open("client-1", "parent-1", "process-2", "child-2", "run-1", undefined, vi.fn());
+    await vi.waitFor(() => expect(sessions.resolveReadOnlySubagentPath).toHaveBeenCalledTimes(2));
+    await expect(store.open(
+      "client-1", "parent-1", "process-3", "child-3", "run-1", undefined, vi.fn(),
+    )).rejects.toMatchObject({ code: "busy", retryable: true });
+    releaseAdmissions?.();
+    await Promise.all([first, second]);
+    store.releaseClient("client-1");
+  });
+
+  it("reserves the total client capacity across concurrent parent opens", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-process-client-capacity-"));
+    roots.push(root);
+    const path = join(root, "child.jsonl");
+    await writeFile(path, "{}\n");
+    let releaseAdmissions: (() => void) | undefined;
+    const admissionBarrier = new Promise<void>((resolve) => { releaseAdmissions = resolve; });
+    const sessions = {
+      resolveReadOnlySubagentPath: vi.fn(async () => {
+        await admissionBarrier;
+        return admission(path);
+      }),
+      readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
+    } as unknown as RuntimeRegistry;
+    const store = new ProcessTranscriptLeaseStore(sessions);
+    const openings = Array.from({ length: 8 }, (_, index) => store.open(
+      "client-1", `parent-${index}`, `process-${index}`, `child-${index}`, "run-1", undefined, vi.fn(),
+    ));
+    await vi.waitFor(() => expect(sessions.resolveReadOnlySubagentPath).toHaveBeenCalledTimes(8));
+    await expect(store.open(
+      "client-1", "parent-9", "process-9", "child-9", "run-1", undefined, vi.fn(),
+    )).rejects.toMatchObject({ code: "busy", retryable: true });
+    releaseAdmissions?.();
+    await Promise.all(openings);
+    store.releaseClient("client-1");
   });
 
   it("enforces a bounded lease count for each client and parent session", async () => {
