@@ -757,7 +757,7 @@ struct GatewayConnectionDetailView: View {
             ) {
                 Button("Configure") { configuringSourceRepository = true }
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .tronSettingsAccent()
+                    .tronSettingsButtonForeground(settingsTheme?.accent ?? .tronEmerald)
                     .padding(.horizontal, 10)
                     .frame(minHeight: 36)
                     .buttonStyle(.plain)
@@ -783,8 +783,13 @@ struct GatewayConnectionDetailView: View {
                 .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
         }
         .buttonStyle(.plain)
-        .foregroundStyle(accent)
-        .tronGlassSurface(accent: accent, tintOpacity: 0.16, interactive: true)
+        .tronSettingsButtonForeground(accent)
+        .tronGlassSurface(
+            accent: accent,
+            tintOpacity: 0.16,
+            interactive: true,
+            respectsSettingsTheme: false
+        )
         .opacity(disabled ? 0.48 : 1)
         .disabled(disabled)
     }

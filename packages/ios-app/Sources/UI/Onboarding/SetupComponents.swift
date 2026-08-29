@@ -96,7 +96,7 @@ struct ProviderSetupRow: View {
             Button { showsConfiguration = true } label: {
                 Text(provider.configured ? "Configure" : "Connect")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                .tronSettingsButtonForeground(settingsTheme?.accent ?? .tronEmerald)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(minHeight: 44, alignment: .center)
@@ -410,7 +410,7 @@ struct ModelPicker: View {
                     } label: {
                         Label("Search models", systemImage: "magnifyingglass")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
+                            .tronSettingsButtonForeground(settingsTheme?.accent ?? .tronEmerald)
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                             .padding(.horizontal, TronSpacing.inputHorizontal)
                             .contentShape(Capsule())

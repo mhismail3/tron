@@ -944,8 +944,9 @@ divider-owned rows in three category containers rather than one backdrop per des
 Connections, purple Agent, and blue Workspace & Diagnostics. Row icons and dividers use the owning
 container accent. Each progressive destination installs that row accent as an environment-owned visual theme
 for ordinary titles, controls, icons, dividers, fields, and containers, including nested sheets; informational
-text cards mix the same hue toward slate while explicit warning, error, destructive, and log-level colors remain
-semantic. Each row carries a concise secondary summary while retaining progressive destination construction
+text cards mix the same hue toward slate. Settings action text resolves to white against dark Liquid Glass and to
+the button accent in light mode. Project Trust and Gateway actions opt into semantic container accents rather
+than inheriting the section tint, while warning, error, destructive, and log-level state colors remain semantic. Each row carries a concise secondary summary while retaining progressive destination construction
 and exact dashboard/project scope admission. Settings rows share one semantic value policy rather than sheet-local typography: stable
 explanations and identities use the selected reading family; live or user-selectable values use the
 code family. A row with a distinct trailing control places its value on the secondary line and gives

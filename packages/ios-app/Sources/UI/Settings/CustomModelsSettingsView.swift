@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CustomModelsSettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     private let target = CustomModelTarget.global
     @State private var document = ""
@@ -69,8 +70,7 @@ struct CustomModelsSettingsView: View {
                     TronInfoCard(
                         icon: "key.slash",
                         text: "Secret-looking values are hidden. Tron preserves them when you save; manage provider credentials from Providers.",
-                        accent: .tronAmber,
-                        usesSemanticAccent: true
+                        accent: .tronAmber
                     )
                 }
             }
@@ -174,7 +174,9 @@ struct CustomModelsSettingsView: View {
                     icon: "plus",
                     title: "Add Provider",
                     accent: .tronEmerald,
-                    titleColor: settingsTheme?.accent ?? .tronEmerald
+                    titleColor: TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme)
+                        ? .white
+                        : settingsTheme?.accent ?? .tronEmerald
                 )
             }
             .buttonStyle(.plain)

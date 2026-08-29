@@ -51,6 +51,12 @@ struct SettingsRowSemanticsTests {
         #expect(TronToggleMotionPolicy.thumbScale(isStretched: true, reduceMotion: true) == 1)
     }
 
+    @Test("settings button labels use high contrast in dark mode")
+    func settingsButtonContrast() {
+        #expect(TronSettingsButtonContrastPolicy.usesWhiteForeground(in: .dark))
+        #expect(!TronSettingsButtonContrastPolicy.usesWhiteForeground(in: .light))
+    }
+
     @Test("progressive settings retain their originating accent and secondary info tone")
     func progressiveSettingsVisualTheme() throws {
         let settings = try String(
@@ -74,6 +80,7 @@ struct SettingsRowSemanticsTests {
         #expect(presentation.contains("informationalAccent = accent.mix(with: .tronSlate, by: 0.58)"))
         #expect(presentation.contains("settingsTheme?.informationalAccent ?? accent"))
         #expect(presentation.contains("func tronSettingsAccent("))
+        #expect(presentation.contains("func tronSettingsButtonForeground("))
         #expect(presentation.contains("var usesSemanticAccent = false"))
         #expect(presentation.contains("respectsSettingsTheme: false"))
     }

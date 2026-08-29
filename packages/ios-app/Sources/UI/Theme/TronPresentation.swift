@@ -209,6 +209,12 @@ extension View {
         modifier(TronSettingsAccentModifier(fallback: fallback))
     }
 
+    /// Keeps tinted settings buttons legible against dark Liquid Glass while
+    /// retaining their semantic or section accent in light mode.
+    func tronSettingsButtonForeground(_ accent: Color) -> some View {
+        modifier(TronSettingsButtonForegroundModifier(accent: accent))
+    }
+
     /// Native top/bottom blur and fade for a scroll owner. Keep this on the
     /// concrete ScrollView/List inside NavigationStack, matching the previous
     /// non-gateway app's working toolbar-preference placement.
@@ -268,17 +274,44 @@ extension View {
 
 // MARK: - Buttons
 
+enum TronSettingsButtonContrastPolicy {
+    static func usesWhiteForeground(in colorScheme: ColorScheme) -> Bool {
+        colorScheme == .dark
+    }
+}
+
+private struct TronSettingsButtonForegroundModifier: ViewModifier {
+    let accent: Color
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
+
+    func body(content: Content) -> some View {
+        content.foregroundStyle(
+            isEnabled
+                ? TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme) ? .white : accent
+                : Color.tronTextMuted
+        )
+    }
+}
+
 struct TronActionButtonStyle: ButtonStyle {
     enum Role { case standard, primary, destructive }
 
     let role: Role
     let expands: Bool
+    let explicitAccent: Color?
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
-    init(role: Role = .standard, expands: Bool = true) {
+    init(
+        role: Role = .standard,
+        expands: Bool = true,
+        accent: Color? = nil
+    ) {
         self.role = role
         self.expands = expands
+        explicitAccent = accent
     }
 
     func makeBody(configuration: Configuration) -> some View {
@@ -298,15 +331,18 @@ struct TronActionButtonStyle: ButtonStyle {
     }
 
     private var accent: Color {
-        switch role {
-        case .standard, .primary: settingsTheme?.accent ?? .tronEmerald
-        case .destructive: .tronError
+        if let explicitAccent { return explicitAccent }
+        return switch role {
+        case .standard, .primary: settingsTheme?.accent ?? Color.tronEmerald
+        case .destructive: Color.tronError
         }
     }
 
     private var foreground: Color {
         guard isEnabled else { return .tronTextMuted }
-        return role == .destructive ? .tronError : settingsTheme?.accent ?? .tronAccentText
+        return TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme)
+            ? .white
+            : accent
     }
 
     private var tintOpacity: Double {
@@ -321,13 +357,18 @@ struct TronActionButtonStyle: ButtonStyle {
 struct TronRowButtonStyle: ButtonStyle {
     let accent: Color
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.colorScheme) private var colorScheme
 
     init(accent: Color = .tronAccentText) { self.accent = accent }
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-            .foregroundStyle(isEnabled ? accent : Color.tronTextMuted)
+            .foregroundStyle(
+                isEnabled
+                    ? TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme) ? .white : accent
+                    : Color.tronTextMuted
+            )
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
             .opacity(configuration.isPressed ? 0.64 : (isEnabled ? 1 : 0.48))
@@ -1448,6 +1489,7 @@ struct TronInlineMenu<Content: View>: View {
     let title: String
     let accent: Color
     let content: Content
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     init(_ title: String, accent: Color = .tronAccentText, @ViewBuilder content: () -> Content) {
@@ -1461,7 +1503,11 @@ struct TronInlineMenu<Content: View>: View {
         Menu { content } label: {
             Text(title)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(resolvedAccent)
+                .foregroundStyle(
+                    TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme)
+                        ? .white
+                        : resolvedAccent
+                )
                 .padding(.horizontal, 10)
                 .frame(minHeight: 36)
                 .glassEffect(.regular.tint(resolvedAccent.opacity(0.10)).interactive(), in: Capsule())

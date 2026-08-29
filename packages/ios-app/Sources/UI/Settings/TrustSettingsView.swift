@@ -48,6 +48,7 @@ struct ProjectTrustSummary: Equatable, Sendable {
 
 struct TrustSettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     let target: TrustTarget?
     @State private var inspection: JSONValue?
 
@@ -74,16 +75,14 @@ struct TrustSettingsView: View {
                     informationalCard(
                         title: "No workspace selected",
                         detail: "Open a session to inspect its project trust.",
-                        icon: "folder.badge.questionmark",
-                        accent: .tronSlate
+                        icon: "folder.badge.questionmark"
                     )
                 }
 
                 TronInfoCard(
                     icon: "exclamationmark.shield",
                     text: "Trust gates project-local settings, extensions, skills, prompts, packages, and system prompt files. It is not a sandbox.",
-                    accent: .tronAmber,
-                    usesSemanticAccent: true
+                    accent: .tronAmber
                 )
             }
             .padding(20)
@@ -94,16 +93,16 @@ struct TrustSettingsView: View {
     }
 
     private func trustSummaryCard(_ summary: ProjectTrustSummary) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let accent = summary.effectiveDecision == false
+            ? Color.tronError
+            : settingsTheme?.accent ?? .tronBlue
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: summary.stateIcon)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(summary.effectiveDecision == false ? Color.tronError : Color.tronAmber)
+                    .foregroundStyle(accent)
                     .frame(width: 38, height: 38)
-                    .background(
-                        (summary.effectiveDecision == false ? Color.tronError : Color.tronAmber).opacity(0.12),
-                        in: Circle()
-                    )
+                    .background(accent.opacity(0.12), in: Circle())
                 VStack(alignment: .leading, spacing: 4) {
                     Text(summary.stateTitle)
                         .font(TronTypography.headline)
@@ -116,7 +115,7 @@ struct TrustSettingsView: View {
                 Spacer(minLength: 8)
             }
 
-            Divider().overlay(Color.tronAmber.opacity(0.18))
+            Divider().overlay(accent.opacity(0.18))
             trustMetadataRow("Workspace", summary.cwd)
             trustMetadataRow("Default policy", summary.defaultDecisionLabel)
             trustMetadataRow("Saved decision", summary.savedDecisionLabel)
@@ -124,7 +123,7 @@ struct TrustSettingsView: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .tronGlassSurface(
-            accent: .tronAmber,
+            accent: accent,
             tintOpacity: 0.10,
             respectsSettingsTheme: false
         )
@@ -161,15 +160,21 @@ struct TrustSettingsView: View {
             VStack(spacing: 10) {
                 if summary.effectiveDecision != true {
                     Button("Trust Project", systemImage: "checkmark.shield") { update(true) }
-                        .buttonStyle(TronActionButtonStyle(role: .primary))
+                        .buttonStyle(TronActionButtonStyle(
+                            role: .primary,
+                            accent: .tronSuccess
+                        ))
                 }
                 if summary.effectiveDecision != false {
                     Button("Do Not Load Project Resources", systemImage: "nosign", role: .destructive) { update(false) }
-                        .buttonStyle(TronActionButtonStyle(role: .destructive))
+                        .buttonStyle(TronActionButtonStyle(
+                            role: .destructive,
+                            accent: .tronError
+                        ))
                 }
                 if summary.savedDecision != nil {
                     Button("Clear Saved Decision", systemImage: "arrow.counterclockwise") { update(nil) }
-                        .buttonStyle(TronActionButtonStyle())
+                        .buttonStyle(TronActionButtonStyle(accent: .tronAmber))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -177,8 +182,9 @@ struct TrustSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func informationalCard(title: String, detail: String, icon: String, accent: Color) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+    private func informationalCard(title: String, detail: String, icon: String) -> some View {
+        let accent = settingsTheme?.informationalAccent ?? .tronSlate
+        return HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
                 .foregroundStyle(accent)
                 .frame(width: 24)

@@ -134,8 +134,7 @@ struct PackagesSettingsView: View {
                 TronInfoCard(
                     icon: "exclamationmark.shield",
                     text: "Agent packages and extensions run with your Mac user authority. Review their source before installing.",
-                    accent: .tronAmber,
-                    usesSemanticAccent: true
+                    accent: .tronAmber
                 )
             }
             .padding(.horizontal, 20)
