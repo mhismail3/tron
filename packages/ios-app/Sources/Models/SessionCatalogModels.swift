@@ -163,6 +163,38 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+struct SessionAttentionProjection: Codable, Hashable, Sendable {
+    let completionRevision: Int
+    let attentionRevision: Int
+    let isUnread: Bool
+
+    init(completionRevision: Int, attentionRevision: Int, isUnread: Bool) {
+        self.completionRevision = completionRevision
+        self.attentionRevision = attentionRevision
+        self.isUnread = isUnread
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case completionRevision, attentionRevision, isUnread
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let completion = try container.decode(Int.self, forKey: .completionRevision)
+        let attention = try container.decode(Int.self, forKey: .attentionRevision)
+        guard completion >= 0, attention >= 0 else {
+            throw DecodingError.dataCorruptedError(
+                forKey: completion < 0 ? .completionRevision : .attentionRevision,
+                in: container,
+                debugDescription: "Invalid attention projection revision"
+            )
+        }
+        completionRevision = completion
+        attentionRevision = attention
+        isUnread = try container.decode(Bool.self, forKey: .isUnread)
+    }
+}
+
 struct SessionSummaryUpdate: Codable, Hashable, Sendable {
     let sessionId: String
     let summaryRevision: Int
