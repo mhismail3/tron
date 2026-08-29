@@ -82,7 +82,8 @@ struct TrustSettingsView: View {
                 TronInfoCard(
                     icon: "exclamationmark.shield",
                     text: "Trust gates project-local settings, extensions, skills, prompts, packages, and system prompt files. It is not a sandbox.",
-                    accent: .tronAmber
+                    accent: .tronAmber,
+                    usesSemanticAccent: true
                 )
             }
             .padding(20)
@@ -122,7 +123,11 @@ struct TrustSettingsView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.10)
+        .tronGlassSurface(
+            accent: .tronAmber,
+            tintOpacity: 0.10,
+            respectsSettingsTheme: false
+        )
     }
 
     private func trustMetadataRow(_ title: String, _ value: String) -> some View {
@@ -188,7 +193,11 @@ struct TrustSettingsView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .tronGlassSurface(accent: accent, tintOpacity: 0.08)
+        .tronGlassSurface(
+            accent: accent,
+            tintOpacity: 0.08,
+            respectsSettingsTheme: false
+        )
     }
 
     private func load() async {

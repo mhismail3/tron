@@ -940,9 +940,13 @@ very tall scrolling collections use the shared static scroll surface instead:
 it preserves tint, border, geometry, and hit regions without installing a live
 backdrop filter for every row or a multi-screen card. Long settings screens use
 lazy outer stacks, while their small divider-owned sections remain eager. The main Settings sheet places its
-complete divider-owned row list inside one Liquid Glass container rather than category headers or one
-backdrop per destination; each row carries a concise secondary summary while retaining progressive
-destination construction and exact dashboard/project scope admission. Settings rows share one semantic value policy rather than sheet-local typography: stable
+divider-owned rows in three category containers rather than one backdrop per destination: emerald App &
+Connections, purple Agent, and blue Workspace & Diagnostics. Row icons and dividers use the owning
+container accent. Each progressive destination installs that row accent as an environment-owned visual theme
+for ordinary titles, controls, icons, dividers, fields, and containers, including nested sheets; informational
+text cards mix the same hue toward slate while explicit warning, error, destructive, and log-level colors remain
+semantic. Each row carries a concise secondary summary while retaining progressive destination construction
+and exact dashboard/project scope admission. Settings rows share one semantic value policy rather than sheet-local typography: stable
 explanations and identities use the selected reading family; live or user-selectable values use the
 code family. A row with a distinct trailing control places its value on the secondary line and gives
 the control a stable reading-family action label. Without a trailing control, the dynamic value is
@@ -1020,8 +1024,9 @@ or model choices disclose as progressively stacked sub-sheets rather than
 horizontal navigation pushes; Appearance uses the custom Liquid Glass segmented
 color-mode control with a compact 40-point color-mode height and keeps font axes directly beneath each
 font choice before its preview. Text and code previews share the same 14-point row padding without an
-extra code-only minimum height. Draft-backed settings save from a disabled-until-dirty leading toolbar
-button rather than a trailing page action; its compact appearance uses the
+extra code-only minimum height. Explanatory font and resource copy uses the shared informational card role
+so its greyer inherited hue does not compete with editable settings groups. Draft-backed settings save from a
+disabled-until-dirty leading toolbar button rather than a trailing page action; its compact appearance uses the
 system toolbar glass without nesting a second button surface. Resource path
 editors share one padded, top-leading multiline field treatment, while numeric
 settings use the shared larger numeric scale. Provider rows use icon-free trailing Connect or Configure text actions instead of local menus. Each action

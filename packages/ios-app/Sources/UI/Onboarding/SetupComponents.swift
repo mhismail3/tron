@@ -66,16 +66,19 @@ struct ProviderSetupRow: View {
     let provider: ProviderSummary
     var sessionID: String? = nil
     @State private var showsConfiguration = false
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     private var providerTarget: ProviderCatalogTarget {
         sessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
     }
 
     var body: some View {
+        let rowAccent = settingsTheme?.accent
+            ?? (provider.configured ? Color.tronEmerald : Color.tronTextSecondary)
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: provider.configured ? "checkmark.seal.fill" : "key")
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(provider.configured ? Color.tronEmerald : Color.tronTextSecondary)
+                .foregroundStyle(rowAccent)
                 .frame(width: 22, height: 22)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
@@ -93,7 +96,7 @@ struct ProviderSetupRow: View {
             Button { showsConfiguration = true } label: {
                 Text(provider.configured ? "Configure" : "Connect")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(Color.tronEmerald)
+                .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(minHeight: 44, alignment: .center)
@@ -119,6 +122,7 @@ private struct ProviderConfigurationSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     let provider: ProviderSummary
     let target: ProviderCatalogTarget
     @State private var activeOperationID: String?
@@ -171,7 +175,7 @@ private struct ProviderConfigurationSheet: View {
                     Button { close() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
                     }
                     .disabled(beginningMethod != nil || clearing)
                     .accessibilityLabel("Done")
@@ -246,7 +250,8 @@ private struct ProviderConfigurationSheet: View {
             TronInfoCard(
                 icon: "exclamationmark.triangle",
                 text: "This provider does not advertise a supported connection method.",
-                accent: .tronAmber
+                accent: .tronAmber,
+                usesSemanticAccent: true
             )
         } else {
             TronSettingsGroup("Connection Options", accent: .tronEmerald) {
@@ -347,6 +352,7 @@ struct ModelPicker: View {
     @State private var search = ""
     @State private var showingSearch = false
     @State private var closingSearch = false
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -355,7 +361,10 @@ struct ModelPicker: View {
                     Button { selection = model.ref } label: {
                         HStack(spacing: 12) {
                             Image(systemName: selection == model.ref ? "checkmark.circle.fill" : "cpu")
-                                .foregroundStyle(selection == model.ref ? Color.tronEmerald : Color.tronSlate)
+                                .foregroundStyle(
+                                    settingsTheme?.accent
+                                        ?? (selection == model.ref ? Color.tronEmerald : Color.tronSlate)
+                                )
                                 .frame(width: 22)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(model.displayName)
@@ -401,11 +410,14 @@ struct ModelPicker: View {
                     } label: {
                         Label("Search models", systemImage: "magnifyingglass")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronEmerald)
+                            .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                             .padding(.horizontal, TronSpacing.inputHorizontal)
                             .contentShape(Capsule())
-                            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.16)).interactive(), in: .capsule)
+                            .glassEffect(
+                                .regular.tint((settingsTheme?.accent ?? .tronEmerald).opacity(0.16)).interactive(),
+                                in: .capsule
+                            )
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Search models")

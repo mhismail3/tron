@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CustomModelsSettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     private let target = CustomModelTarget.global
     @State private var document = ""
     @State private var documentRoot: [String: JSONValue] = [:]
@@ -26,7 +27,7 @@ struct CustomModelsSettingsView: View {
                     HStack(alignment: .center, spacing: TronSpacing.xl) {
                         Image(systemName: "curlybraces")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronCyan)
+                            .foregroundStyle(settingsTheme?.accent ?? .tronCyan)
                             .frame(width: 20, height: 20, alignment: .center)
                             .accessibilityHidden(true)
                         Text("Advanced JSON has unsaved edits. Save it directly, or reload it into the guided editor.")
@@ -68,7 +69,8 @@ struct CustomModelsSettingsView: View {
                     TronInfoCard(
                         icon: "key.slash",
                         text: "Secret-looking values are hidden. Tron preserves them when you save; manage provider credentials from Providers.",
-                        accent: .tronAmber
+                        accent: .tronAmber,
+                        usesSemanticAccent: true
                     )
                 }
             }
@@ -127,7 +129,7 @@ struct CustomModelsSettingsView: View {
                         Button { showingAdvanced = false } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronEmerald)
+                                .tronSettingsAccent()
                         }
                         .accessibilityLabel("Done")
                     }
@@ -172,7 +174,7 @@ struct CustomModelsSettingsView: View {
                     icon: "plus",
                     title: "Add Provider",
                     accent: .tronEmerald,
-                    titleColor: .tronEmerald
+                    titleColor: settingsTheme?.accent ?? .tronEmerald
                 )
             }
             .buttonStyle(.plain)
@@ -203,7 +205,7 @@ struct CustomModelsSettingsView: View {
         return HStack(alignment: .center, spacing: TronSpacing.xl) {
             Image(systemName: "cpu")
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(Color.tronEmerald)
+                .tronSettingsAccent()
                 .frame(width: 22, height: 22, alignment: .center)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
@@ -572,7 +574,7 @@ private struct CustomModelProviderRow<Label: View, Destination: View>: View {
                             Button { isPresented = false } label: {
                                 Image(systemName: "checkmark")
                                     .font(TronTypography.buttonSM)
-                                    .foregroundStyle(Color.tronEmerald)
+                                    .tronSettingsAccent()
                             }
                             .accessibilityLabel("Done")
                         }

@@ -94,7 +94,7 @@ struct GatewayLogsSettingsView: View {
                 Button { Task { await loadLogs(preserveExistingOnEmpty: false) } } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(TronTypography.buttonSM)
-                        .foregroundStyle(Color.tronEmerald)
+                        .tronSettingsAccent()
                 }
                 .disabled(loading || !automaticLoadID.isReady)
                 .accessibilityLabel("Refresh logs")
@@ -102,7 +102,7 @@ struct GatewayLogsSettingsView: View {
                 Button { copyVisibleLogs() } label: {
                     Image(systemName: copySucceeded ? "checkmark" : "doc.on.doc")
                         .font(TronTypography.buttonSM)
-                        .foregroundStyle(Color.tronEmerald)
+                        .tronSettingsAccent()
                         .contentTransition(.symbolEffect(.replace.downUp))
                 }
                 .disabled(visibleItems.isEmpty)
@@ -372,7 +372,11 @@ struct GatewayLogDetailView: View {
                         .textSelection(.enabled)
                         .padding(14)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .tronGlassSurface(accent: record.record.accent, tintOpacity: 0.08)
+                        .tronGlassSurface(
+                            accent: record.record.accent,
+                            tintOpacity: 0.08,
+                            respectsSettingsTheme: false
+                        )
                 }
                 .padding(18)
             }
@@ -382,7 +386,7 @@ struct GatewayLogDetailView: View {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "Log Entry", accent: record.record.accent) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
-                        Image(systemName: "checkmark").foregroundStyle(Color.tronEmerald)
+                        Image(systemName: "checkmark").tronSettingsAccent()
                     }
                     .accessibilityLabel("Done")
                 }

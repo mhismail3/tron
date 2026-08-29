@@ -35,13 +35,15 @@ struct SettingsView: View {
                         settingsLink(
                             "Appearance",
                             summary: "Theme, type scale, and visual preferences",
-                            icon: "circle.lefthalf.filled"
+                            icon: "circle.lefthalf.filled",
+                            accent: .tronEmerald
                         ) { AppearanceSettingsView() }
-                        settingsDivider()
+                        settingsDivider(accent: .tronEmerald)
                         settingsLink(
                             "Connections",
                             summary: "Pair and manage Mac gateways",
-                            icon: "desktopcomputer"
+                            icon: "desktopcomputer",
+                            accent: .tronEmerald
                         ) { ConnectionsSettingsView() }
                     }
 
@@ -49,15 +51,17 @@ struct SettingsView: View {
                         settingsLink(
                             "Providers",
                             summary: "Authentication and provider credentials",
-                            icon: "key"
+                            icon: "key",
+                            accent: .tronPurple
                         ) {
                             ProvidersSettingsView(sessionID: projectSessionID)
                         }
-                        settingsDivider()
+                        settingsDivider(accent: .tronPurple)
                         settingsLink(
                             "Models and Defaults",
                             summary: "Default model, thinking, and selection policy",
-                            icon: "cpu"
+                            icon: "cpu",
+                            accent: .tronPurple
                         ) {
                             AgentDefaultsSettingsView(
                                 allowsProjectScope: scope == .project,
@@ -65,19 +69,21 @@ struct SettingsView: View {
                                 projectCWD: projectCWD
                             )
                         }
-                        settingsDivider()
+                        settingsDivider(accent: .tronPurple)
                         settingsLink(
                             "Runtime Behavior",
                             summary: "Prompt queue, retries, and compaction behavior",
-                            icon: "gearshape.2"
+                            icon: "gearshape.2",
+                            accent: .tronPurple
                         ) {
                             RuntimeBehaviorSettingsView(projectCWD: projectCWD)
                         }
-                        settingsDivider()
+                        settingsDivider(accent: .tronPurple)
                         settingsLink(
                             "Custom Models",
                             summary: "Saved model definitions and aliases",
-                            icon: "slider.horizontal.3"
+                            icon: "slider.horizontal.3",
+                            accent: .tronPurple
                         ) { CustomModelsSettingsView() }
                     }
 
@@ -85,24 +91,27 @@ struct SettingsView: View {
                         settingsLink(
                             "Resource Paths",
                             summary: "Instructions, skills, and project resources",
-                            icon: "folder.badge.gearshape"
+                            icon: "folder.badge.gearshape",
+                            accent: .tronBlue
                         ) {
                             ResourceSettingsView(projectCWD: projectCWD)
                         }
-                        settingsDivider()
+                        settingsDivider(accent: .tronBlue)
                         settingsLink(
                             "Packages and Resources",
                             summary: "Installed packages and executable resources",
-                            icon: "shippingbox"
+                            icon: "shippingbox",
+                            accent: .tronBlue
                         ) {
                             PackagesSettingsView(projectCWD: projectCWD)
                         }
                         if scope == .project {
-                            settingsDivider()
+                            settingsDivider(accent: .tronBlue)
                             settingsLink(
                                 "Project Trust",
                                 summary: "Review executable workspace resource trust",
-                                icon: "checkmark.shield"
+                                icon: "checkmark.shield",
+                                accent: .tronBlue
                             ) {
                                 TrustSettingsView(
                                     target: projectCWD.flatMap(TrustTarget.init(cwd:))
@@ -110,20 +119,22 @@ struct SettingsView: View {
                             }
                         }
                         if scope == .dashboard {
-                            settingsDivider()
+                            settingsDivider(accent: .tronBlue)
                             settingsLink(
                                 "Import",
                                 summary: "Restore a session export",
-                                icon: "tray.and.arrow.down"
+                                icon: "tray.and.arrow.down",
+                                accent: .tronBlue
                             ) {
                                 ImportSettingsView(onImported: onImported)
                             }
                         }
-                        settingsDivider()
+                        settingsDivider(accent: .tronBlue)
                         settingsLink(
                             "Logs",
                             summary: "Recent diagnostics from paired Mac gateways",
-                            icon: "text.alignleft"
+                            icon: "text.alignleft",
+                            accent: .tronBlue
                         ) {
                             GatewayLogsSettingsView()
                         }
@@ -173,22 +184,28 @@ struct SettingsView: View {
         _ title: String,
         summary: String,
         icon: String,
+        accent: Color,
         @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
-        TronProgressiveSheetLink(accessibilityLabel: title, destination: destination) {
+        TronProgressiveSheetLink(
+            accessibilityLabel: title,
+            accent: accent,
+            destination: destination
+        ) {
             TronSettingsRow(
                 icon: icon,
                 title: title,
                 subtitle: summary,
                 subtitleLineLimit: 2,
+                accent: accent,
                 subtitleColor: .tronTextSecondary
             )
             .contentShape(Rectangle())
         }
     }
 
-    private func settingsDivider() -> some View {
-        TronSettingsDivider(accent: .tronEmerald)
+    private func settingsDivider(accent: Color) -> some View {
+        TronSettingsDivider(accent: accent)
     }
 }
 
@@ -198,14 +215,18 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     /// settings payloads are not built while the parent sheet is scrolling.
     let destination: () -> Destination
     let label: Label
+    let accent: Color?
     @State private var isPresented = false
+    @Environment(\.tronSettingsVisualTheme) private var inheritedTheme
 
     init(
         accessibilityLabel: String,
+        accent: Color? = nil,
         @ViewBuilder destination: @escaping () -> Destination,
         @ViewBuilder label: () -> Label
     ) {
         self.accessibilityLabel = accessibilityLabel
+        self.accent = accent
         self.destination = destination
         self.label = label()
     }
@@ -216,13 +237,13 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
             .accessibilityLabel(accessibilityLabel)
             .sheet(isPresented: $isPresented) {
                 NavigationStack {
-                    destination()
+                    destinationContent
                         .toolbar {
                             ToolbarItem(placement: .confirmationAction) {
                                 Button { isPresented = false } label: {
                                     Image(systemName: "checkmark")
                                         .font(TronTypography.buttonSM)
-                                        .foregroundStyle(Color.tronEmerald)
+                                        .foregroundStyle(accent ?? inheritedTheme?.accent ?? .tronEmerald)
                                 }
                                 .accessibilityLabel("Done")
                             }
@@ -232,5 +253,14 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
                 .tronPresentation()
                 .presentationDragIndicator(.hidden)
             }
+    }
+
+    @ViewBuilder
+    private var destinationContent: some View {
+        if let accent {
+            destination().tronSettingsVisualTheme(accent: accent)
+        } else {
+            destination()
+        }
     }
 }

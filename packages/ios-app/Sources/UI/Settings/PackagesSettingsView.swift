@@ -73,7 +73,11 @@ struct PackagesSettingsView: View {
                     }
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.09)
+                    .tronGlassSurface(
+                        accent: .tronAmber,
+                        tintOpacity: 0.09,
+                        respectsSettingsTheme: false
+                    )
                 }
 
                 TronSettingsGroup("Installed", surfaceStyle: .scrollOptimized) {
@@ -130,7 +134,8 @@ struct PackagesSettingsView: View {
                 TronInfoCard(
                     icon: "exclamationmark.shield",
                     text: "Agent packages and extensions run with your Mac user authority. Review their source before installing.",
-                    accent: .tronAmber
+                    accent: .tronAmber,
+                    usesSemanticAccent: true
                 )
             }
             .padding(.horizontal, 20)
@@ -347,7 +352,7 @@ struct PackagesSettingsView: View {
                 Button { showingInstall = false } label: {
                     Image(systemName: "checkmark")
                         .font(TronTypography.buttonSM)
-                        .foregroundStyle(Color.tronEmerald)
+                        .tronSettingsAccent()
                 }
                 .accessibilityLabel("Done")
             }

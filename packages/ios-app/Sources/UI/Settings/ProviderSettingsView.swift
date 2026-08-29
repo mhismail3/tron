@@ -34,7 +34,8 @@ struct ProvidersSettingsView: View {
                         text: loadFailed
                             ? "Providers could not be loaded. Check the Gateway connection and try Reload."
                             : "No providers are available from this Gateway.",
-                        accent: loadFailed ? .tronAmber : .tronSlate
+                        accent: loadFailed ? .tronAmber : .tronSlate,
+                        usesSemanticAccent: loadFailed
                     )
                 } else {
                     ForEach(providers) { provider in

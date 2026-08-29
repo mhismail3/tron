@@ -98,12 +98,16 @@ struct AppearanceSettingsView: View {
                     }
                 }
 
-                TronSettingsGroup("About Fonts", accent: .tronSlate) {
-                    Text("Text and code font choices match the established Tron experience. Terminal themes on the Mac remain independent.")
-                        .font(TronTypography.bodySM)
+                VStack(alignment: .leading, spacing: TronSpacing.md) {
+                    Text("About Fonts")
+                        .font(TronTypography.sheetSectionHeader)
                         .foregroundStyle(Color.tronTextPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(14)
+                        .accessibilityAddTraits(.isHeader)
+                    TronInfoCard(
+                        icon: "info.circle",
+                        text: "Text and code font choices match the established Tron experience. Terminal themes on the Mac remain independent.",
+                        accent: .tronSlate
+                    )
                 }
             }
             .padding(.horizontal, 20)

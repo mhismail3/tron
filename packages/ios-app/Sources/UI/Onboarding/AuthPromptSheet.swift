@@ -60,7 +60,7 @@ private struct AuthPromptContent: View {
                     } label: {
                         HStack(alignment: .top, spacing: TronSpacing.md) {
                             Image(systemName: "chevron.right.circle")
-                                .foregroundStyle(Color.tronEmerald)
+                                .tronSettingsAccent()
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: TronSpacing.xs) {
                                 Text(option.label)

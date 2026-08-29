@@ -60,6 +60,49 @@ enum TronTypography {
 
 // MARK: - App-wide surface policy
 
+/// A progressive settings destination inherits the accent of the row that
+/// opened it. Informational cards keep the same hue while shifting toward the
+/// neutral slate palette so explanatory copy stays visually secondary.
+struct TronSettingsVisualTheme {
+    let accent: Color
+    let informationalAccent: Color
+
+    init(accent: Color) {
+        self.accent = accent
+        informationalAccent = accent.mix(with: .tronSlate, by: 0.58)
+    }
+}
+
+private struct TronSettingsVisualThemeKey: EnvironmentKey {
+    static let defaultValue: TronSettingsVisualTheme? = nil
+}
+
+extension EnvironmentValues {
+    var tronSettingsVisualTheme: TronSettingsVisualTheme? {
+        get { self[TronSettingsVisualThemeKey.self] }
+        set { self[TronSettingsVisualThemeKey.self] = newValue }
+    }
+}
+
+private struct TronSettingsVisualThemeModifier: ViewModifier {
+    let accent: Color
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.tronSettingsVisualTheme, TronSettingsVisualTheme(accent: accent))
+            .tint(accent)
+    }
+}
+
+private struct TronSettingsAccentModifier: ViewModifier {
+    let fallback: Color
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    func body(content: Content) -> some View {
+        content.foregroundStyle(settingsTheme?.accent ?? fallback)
+    }
+}
+
 private struct TronPresentationModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
@@ -106,13 +149,16 @@ private struct TronGlassSurfaceModifier: ViewModifier {
     let cornerRadius: CGFloat
     let tintOpacity: Double
     let interactive: Bool
+    let respectsSettingsTheme: Bool
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let resolvedAccent = respectsSettingsTheme ? settingsTheme?.accent ?? accent : accent
         content
             .contentShape(shape)
             .glassEffect(
-                .regular.tint(accent.opacity(tintOpacity)).interactive(interactive),
+                .regular.tint(resolvedAccent.opacity(tintOpacity)).interactive(interactive),
                 in: shape
             )
     }
@@ -126,18 +172,20 @@ private struct TronScrollSurfaceModifier: ViewModifier {
     let accent: Color
     let cornerRadius: CGFloat
     let tintOpacity: Double
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let resolvedAccent = settingsTheme?.accent ?? accent
         content
             .contentShape(shape)
             .background {
                 shape
                     .fill(Color.tronSurfaceElevated.opacity(0.78))
-                    .overlay { shape.fill(accent.opacity(tintOpacity)) }
+                    .overlay { shape.fill(resolvedAccent.opacity(tintOpacity)) }
             }
             .overlay {
-                shape.stroke(accent.opacity(0.22), lineWidth: 0.5)
+                shape.stroke(resolvedAccent.opacity(0.22), lineWidth: 0.5)
             }
     }
 }
@@ -147,6 +195,18 @@ extension View {
     /// Tron's selected family and emerald interaction color.
     func tronPresentation() -> some View {
         modifier(TronPresentationModifier())
+    }
+
+    /// Applies one visual identity to a progressive settings destination and
+    /// every nested sheet it presents.
+    func tronSettingsVisualTheme(accent: Color) -> some View {
+        modifier(TronSettingsVisualThemeModifier(accent: accent))
+    }
+
+    /// Resolves direct icon/action paint through the active settings theme while
+    /// retaining the supplied historical color outside Settings.
+    func tronSettingsAccent(_ fallback: Color = .tronEmerald) -> some View {
+        modifier(TronSettingsAccentModifier(fallback: fallback))
     }
 
     /// Native top/bottom blur and fade for a scroll owner. Keep this on the
@@ -167,13 +227,15 @@ extension View {
         accent: Color = .tronEmerald,
         cornerRadius: CGFloat = 12,
         tintOpacity: Double = 0.14,
-        interactive: Bool = false
+        interactive: Bool = false,
+        respectsSettingsTheme: Bool = true
     ) -> some View {
         modifier(TronGlassSurfaceModifier(
             accent: accent,
             cornerRadius: cornerRadius,
             tintOpacity: tintOpacity,
-            interactive: interactive
+            interactive: interactive,
+            respectsSettingsTheme: respectsSettingsTheme
         ))
     }
 
@@ -212,6 +274,7 @@ struct TronActionButtonStyle: ButtonStyle {
     let role: Role
     let expands: Bool
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     init(role: Role = .standard, expands: Bool = true) {
         self.role = role
@@ -236,14 +299,14 @@ struct TronActionButtonStyle: ButtonStyle {
 
     private var accent: Color {
         switch role {
-        case .standard, .primary: .tronEmerald
+        case .standard, .primary: settingsTheme?.accent ?? .tronEmerald
         case .destructive: .tronError
         }
     }
 
     private var foreground: Color {
         guard isEnabled else { return .tronTextMuted }
-        return role == .destructive ? .tronError : .tronAccentText
+        return role == .destructive ? .tronError : settingsTheme?.accent ?? .tronAccentText
     }
 
     private var tintOpacity: Double {
@@ -302,6 +365,7 @@ struct TronPrimaryActionButton: View {
     var isEnabled = true
     var role: TronActionButtonStyle.Role = .primary
     let action: () -> Void
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     var body: some View {
         Button(action: action) {
@@ -319,7 +383,9 @@ struct TronPrimaryActionButton: View {
         .accessibilityLabel(title)
     }
 
-    private var accent: Color { role == .destructive ? .tronError : .tronEmerald }
+    private var accent: Color {
+        role == .destructive ? .tronError : settingsTheme?.accent ?? .tronEmerald
+    }
 }
 
 // MARK: - Fields and editors
@@ -330,13 +396,14 @@ private struct TronFieldSurfaceModifier: ViewModifier {
     let dense: Bool
     let surfaceTint: Color
     let border: Color
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     func body(content: Content) -> some View {
         content
             .textFieldStyle(.plain)
             .font(monospaced ? TronTypography.code(size: TronTypography.sizeBody) : TronTypography.input)
             .foregroundStyle(Color.tronTextPrimary)
-            .tint(Color.tronEmerald)
+            .tint(settingsTheme?.accent ?? .tronEmerald)
             .padding(.horizontal, compact ? TronSpacing.md : TronSpacing.section)
             .padding(.vertical, dense ? TronSpacing.xs : compact ? TronSpacing.sm : TronSpacing.md)
             .frame(minHeight: dense ? 48 : 52)
@@ -355,13 +422,15 @@ private struct TronInlineFieldModifier: ViewModifier {
     let composer: Bool
     let monospaced: Bool
     let numeric: Bool
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     func body(content: Content) -> some View {
+        let accent = settingsTheme?.accent ?? .tronEmerald
         content
             .textFieldStyle(.plain)
             .font(composer ? TronTypography.input : numeric ? TronTypography.numericValue : monospaced ? TronTypography.codeContent : TronTypography.bodySM)
-            .foregroundStyle(composer ? Color.tronEmerald : Color.tronTextPrimary)
-            .tint(Color.tronEmerald)
+            .foregroundStyle(composer ? accent : Color.tronTextPrimary)
+            .tint(accent)
     }
 }
 
@@ -384,12 +453,13 @@ private struct TronComposerFieldModifier: ViewModifier {
 
 private struct TronTextEditorSurfaceModifier: ViewModifier {
     let monospaced: Bool
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     func body(content: Content) -> some View {
         content
             .font(monospaced ? TronTypography.codeBlock : TronTypography.body)
             .foregroundStyle(Color.tronTextPrimary)
-            .tint(Color.tronEmerald)
+            .tint(settingsTheme?.accent ?? .tronEmerald)
             .scrollContentBackground(.hidden)
             .padding(TronSpacing.md)
             .background(Color.tronSurfaceElevated.opacity(0.55), in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
@@ -495,8 +565,10 @@ struct TronSearchBar: View {
     var onClose: (() -> Void)?
     var onFocusChange: ((Bool) -> Void)?
     @FocusState private var focused: Bool
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     var body: some View {
+        let accent = settingsTheme?.accent ?? accent
         HStack(spacing: 8) {
             HStack(spacing: TronSpacing.lg) {
                 Image(systemName: "magnifyingglass")
@@ -571,6 +643,9 @@ struct TronSegmentedControl<Value: Hashable>: View {
     @Binding var selection: Value
     var accent: Color = .tronEmerald
     var minimumHeight: CGFloat = 44
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    private var resolvedAccent: Color { settingsTheme?.accent ?? accent }
 
     var body: some View {
         GlassEffectContainer(spacing: TronSpacing.xs) {
@@ -592,7 +667,7 @@ struct TronSegmentedControl<Value: Hashable>: View {
                     }
                     .buttonStyle(.plain)
                     .glassEffect(
-                        .regular.tint(accent.opacity(selected ? 0.28 : 0.08)).interactive(),
+                        .regular.tint(resolvedAccent.opacity(selected ? 0.28 : 0.08)).interactive(),
                         in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
                     )
                     .accessibilityAddTraits(selected ? .isSelected : [])
@@ -608,16 +683,19 @@ struct TronSheetTitle: View {
     let title: String
     var accent: Color = .tronEmerald
     var icon: String? = nil
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    private var resolvedAccent: Color { settingsTheme?.accent ?? accent }
 
     var body: some View {
         HStack(spacing: 7) {
             if let icon {
                 Image(systemName: icon)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(accent)
+                    .foregroundStyle(resolvedAccent)
                     .accessibilityHidden(true)
             }
-            TronTitleLabel(title: title, accent: accent)
+            TronTitleLabel(title: title, accent: resolvedAccent)
         }
     }
 }
@@ -805,9 +883,10 @@ struct TronSaveToolbarButton: View {
     let isSaving: Bool
     let isEnabled: Bool
     let action: () -> Void
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     private var actionColor: Color {
-        isEnabled && !isSaving ? .tronEmerald : .tronTextMuted
+        isEnabled && !isSaving ? settingsTheme?.accent ?? .tronEmerald : .tronTextMuted
     }
 
     var body: some View {
@@ -829,6 +908,7 @@ struct TronSaveToolbarButton: View {
 struct TronReloadToolbarButton: View {
     let isReloading: Bool
     let action: () -> Void
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     var body: some View {
         Button(action: action) {
@@ -837,7 +917,7 @@ struct TronReloadToolbarButton: View {
             } else {
                 Image(systemName: "arrow.clockwise")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(Color.tronEmerald)
+                    .foregroundStyle(settingsTheme?.accent ?? .tronEmerald)
             }
         }
         .disabled(isReloading)
@@ -878,6 +958,7 @@ struct TronGlassCard<Content: View>: View {
     let cornerRadius: CGFloat
     let interactive: Bool
     let content: Content
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     init(
         accent: Color = .tronEmerald,
@@ -895,7 +976,7 @@ struct TronGlassCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
             .tronGlassSurface(
-                accent: accent,
+                accent: settingsTheme?.accent ?? accent,
                 cornerRadius: cornerRadius,
                 tintOpacity: 0.14,
                 interactive: interactive
@@ -916,6 +997,7 @@ struct TronSettingsGroup<Content: View>: View {
     let accent: Color
     let surfaceStyle: TronSettingsGroupSurfaceStyle
     let content: Content
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     init(
         _ title: String,
@@ -969,11 +1051,11 @@ struct TronSettingsGroup<Content: View>: View {
             }
             switch surfaceStyle {
             case .glass:
-                TronGlassCard(accent: accent) { content }
+                TronGlassCard(accent: settingsTheme?.accent ?? accent) { content }
             case .scrollOptimized:
                 VStack(alignment: .leading, spacing: 0) { content }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .tronScrollSurface(accent: accent, tintOpacity: 0.10)
+                    .tronScrollSurface(accent: settingsTheme?.accent ?? accent, tintOpacity: 0.10)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1004,6 +1086,7 @@ struct TronSettingsRow<Trailing: View>: View {
     let titleColor: Color
     let subtitleColor: Color
     let trailing: Trailing
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     init(
         icon: String,
@@ -1031,7 +1114,7 @@ struct TronSettingsRow<Trailing: View>: View {
         HStack(alignment: .center, spacing: TronSpacing.xl) {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(accent)
+                .foregroundStyle(settingsTheme?.accent ?? accent)
                 .frame(width: 22, height: 22, alignment: .center)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
@@ -1087,12 +1170,19 @@ struct TronInfoCard: View {
     let icon: String
     let text: String
     var accent: Color = .tronCyan
+    var usesSemanticAccent = false
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    private var resolvedAccent: Color {
+        guard !usesSemanticAccent else { return accent }
+        return settingsTheme?.informationalAccent ?? accent
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: TronSpacing.xl) {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(accent)
+                .foregroundStyle(resolvedAccent)
                 .frame(width: 22, height: 22, alignment: .center)
                 .accessibilityHidden(true)
             Text(text)
@@ -1105,14 +1195,22 @@ struct TronInfoCard: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .tronGlassSurface(accent: accent, tintOpacity: 0.09)
+        .tronGlassSurface(
+            accent: resolvedAccent,
+            tintOpacity: 0.09,
+            respectsSettingsTheme: false
+        )
     }
 }
 
 struct TronSettingsDivider: View {
     var accent: Color = .tronEmerald
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
     var body: some View {
-        Divider().overlay(accent.opacity(0.14)).padding(.leading, 52)
+        Divider()
+            .overlay((settingsTheme?.accent ?? accent).opacity(0.14))
+            .padding(.leading, 52)
     }
 }
 
@@ -1159,6 +1257,7 @@ struct TronValueRow<Trailing: View>: View {
     private let valuePlacement: TronSettingsValuePlacement
     let accent: Color
     let trailing: Trailing
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     init(
         icon: String,
@@ -1210,7 +1309,7 @@ struct TronValueRow<Trailing: View>: View {
         HStack(alignment: .center, spacing: TronSpacing.xl) {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(accent)
+                .foregroundStyle(settingsTheme?.accent ?? accent)
                 .frame(width: 22)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
@@ -1314,6 +1413,7 @@ struct TronToggleRow: View {
     let detail: String?
     let accent: Color
     @Binding var isOn: Bool
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     init(
         icon: String,
@@ -1330,9 +1430,10 @@ struct TronToggleRow: View {
     }
 
     var body: some View {
+        let resolvedAccent = settingsTheme?.accent ?? accent
         Button { isOn.toggle() } label: {
-            TronValueRow(icon: icon, title: title, detail: detail, accent: accent) {
-                TronToggleControl(isOn: isOn, accent: accent)
+            TronValueRow(icon: icon, title: title, detail: detail, accent: resolvedAccent) {
+                TronToggleControl(isOn: isOn, accent: resolvedAccent)
             }
         }
         .buttonStyle(.plain)
@@ -1347,6 +1448,7 @@ struct TronInlineMenu<Content: View>: View {
     let title: String
     let accent: Color
     let content: Content
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     init(_ title: String, accent: Color = .tronAccentText, @ViewBuilder content: () -> Content) {
         self.title = title
@@ -1355,13 +1457,14 @@ struct TronInlineMenu<Content: View>: View {
     }
 
     var body: some View {
+        let resolvedAccent = settingsTheme?.accent ?? accent
         Menu { content } label: {
             Text(title)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(accent)
+                .foregroundStyle(resolvedAccent)
                 .padding(.horizontal, 10)
                 .frame(minHeight: 36)
-                .glassEffect(.regular.tint(accent.opacity(0.10)).interactive(), in: Capsule())
+                .glassEffect(.regular.tint(resolvedAccent.opacity(0.10)).interactive(), in: Capsule())
         }
         .accessibilityLabel(title)
     }
@@ -1453,8 +1556,10 @@ struct TronPulseLoadingIndicator: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     var body: some View {
+        let resolvedAccent = settingsTheme?.accent ?? accent
         TimelineView(.animation(
             minimumInterval: 1 / 30,
             paused: TronPulseLoadingIndicatorEngine.animationPaused(
@@ -1474,7 +1579,7 @@ struct TronPulseLoadingIndicator: View {
                             width: radius * 2,
                             height: radius * 2
                         )),
-                        with: .color(accent.opacity(0.72))
+                        with: .color(resolvedAccent.opacity(0.72))
                     )
                 } else {
                     let time = ProcessInfo.processInfo.systemUptime
@@ -1492,7 +1597,7 @@ struct TronPulseLoadingIndicator: View {
                                 width: radius * 2,
                                 height: radius * 2
                             )),
-                            with: .color(accent.opacity(
+                            with: .color(resolvedAccent.opacity(
                                 TronPulseLoadingIndicatorEngine.opacity(progress: progress)
                             ))
                         )
@@ -1508,10 +1613,11 @@ struct TronPulseLoadingIndicator: View {
 struct TronLoadingState: View {
     let label: String
     var accent: Color = .tronEmerald
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     var body: some View {
         HStack(spacing: TronSpacing.md) {
-            TronPulseLoadingIndicator(accent: accent)
+            TronPulseLoadingIndicator(accent: settingsTheme?.accent ?? accent)
             Text(label)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(Color.tronTextSecondary)

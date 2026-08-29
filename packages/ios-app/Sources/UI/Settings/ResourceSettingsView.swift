@@ -229,20 +229,11 @@ struct ResourceSettingsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    HStack(alignment: .center, spacing: TronSpacing.xl) {
-                        Image(systemName: "info.circle")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronCyan)
-                            .frame(width: 22, height: 22, alignment: .center)
-                            .accessibilityHidden(true)
-                        Text(value.explanation)
-                            .font(TronTypography.bodySM)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
+                    TronInfoCard(
+                        icon: "info.circle",
+                        text: value.explanation,
+                        accent: .tronCyan
+                    )
                     pathEditor(value)
                     if value.acceptsMultipleLines {
                         TronCaption("Enter one file, directory, glob, or exclusion per line.")
@@ -259,7 +250,7 @@ struct ResourceSettingsView: View {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: value.title) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { editor = nil } label: {
-                        Image(systemName: "checkmark").foregroundStyle(Color.tronEmerald)
+                        Image(systemName: "checkmark").tronSettingsAccent()
                     }
                     .accessibilityLabel("Done")
                 }

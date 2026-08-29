@@ -195,12 +195,11 @@ struct ProjectResourcesView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if model.resources?.objectValue != nil {
-                        Label("These are resolved resources actually available to this session. Open a row to inspect its source, path, capabilities, or schema.", systemImage: "info.circle")
-                            .font(TronTypography.bodySM)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .padding(14)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
+                        TronInfoCard(
+                            icon: "info.circle",
+                            text: "These are resolved resources actually available to this session. Open a row to inspect its source, path, capabilities, or schema.",
+                            accent: .tronCyan
+                        )
                         ForEach(overviewSections) { section in
                             resourceGroup(section)
                         }
@@ -249,7 +248,7 @@ struct ProjectResourcesView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronSettingsAccent()
                     }
                     .accessibilityLabel("Done")
                 }
@@ -409,13 +408,11 @@ private struct ProjectResourceDetailSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    Text(presentation.purpose)
-                        .font(TronTypography.body)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .tronGlassSurface(accent: selection.kind.accent, tintOpacity: 0.10)
+                    TronInfoCard(
+                        icon: selection.kind.icon,
+                        text: presentation.purpose,
+                        accent: selection.kind.accent
+                    )
 
                     if presentation.invocation != nil
                         || presentation.availability != nil
@@ -455,13 +452,16 @@ private struct ProjectResourceDetailSheet: View {
                     }
 
                     if let guidance = presentation.guidance, !guidance.isEmpty {
-                        TronSettingsGroup("Usage Guidance", accent: selection.kind.accent) {
-                            Text(guidance)
-                                .font(TronTypography.bodySM)
+                        VStack(alignment: .leading, spacing: TronSpacing.md) {
+                            Text("Usage Guidance")
+                                .font(TronTypography.sheetSectionHeader)
                                 .foregroundStyle(Color.tronTextPrimary)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(14)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .accessibilityAddTraits(.isHeader)
+                            TronInfoCard(
+                                icon: "lightbulb",
+                                text: guidance,
+                                accent: selection.kind.accent
+                            )
                         }
                     }
 
@@ -501,7 +501,7 @@ private struct ProjectResourceDetailSheet: View {
                     Button(action: onDone) {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .tronSettingsAccent()
                     }
                     .accessibilityLabel("Done")
                 }

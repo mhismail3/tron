@@ -421,6 +421,7 @@ struct GatewayConnectionDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     let profile: GatewayProfile
     @State private var info: GatewayInfo?
     @State private var updateStatus: GatewayUpdateStatus?
@@ -606,7 +607,7 @@ struct GatewayConnectionDetailView: View {
                 Button { dismiss() } label: {
                     Image(systemName: "checkmark")
                         .font(TronTypography.buttonSM)
-                        .foregroundStyle(Color.tronEmerald)
+                        .tronSettingsAccent()
                 }
                 .accessibilityLabel("Done")
             }
@@ -756,12 +757,12 @@ struct GatewayConnectionDetailView: View {
             ) {
                 Button("Configure") { configuringSourceRepository = true }
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(Color.tronEmerald)
+                    .tronSettingsAccent()
                     .padding(.horizontal, 10)
                     .frame(minHeight: 36)
                     .buttonStyle(.plain)
                     .glassEffect(
-                        .regular.tint(Color.tronEmerald.opacity(0.10)).interactive(),
+                        .regular.tint((settingsTheme?.accent ?? .tronEmerald).opacity(0.10)).interactive(),
                         in: Capsule()
                     )
                     .disabled(updateIsActive)
@@ -968,7 +969,7 @@ private struct GatewayTechnicalDetailsSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronCyan)
+                            .tronSettingsAccent(.tronCyan)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -987,7 +988,7 @@ private struct GatewayTechnicalIdentityRow: View {
         HStack(alignment: .top, spacing: TronSpacing.xl) {
             Image(systemName: detail.icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(Color.tronCyan)
+                .tronSettingsAccent(.tronCyan)
                 .frame(width: 22, height: 20)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 5) {
@@ -1067,14 +1068,13 @@ struct ImportSettingsView: View {
                 .buttonStyle(TronActionButtonStyle(role: .primary))
                 .disabled(importing || !model.legacyImportAvailable || !(1...65_535).contains(port))
 
-                Text(model.legacyImportAvailable
-                     ? "Start the retired Tron server on this Mac at the port above before using legacy migration. Existing imports are skipped safely."
-                     : "No secure legacy Tron credential was found on this Mac.")
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .tronGlassSurface(accent: .tronSlate, tintOpacity: 0.08)
+                TronInfoCard(
+                    icon: "info.circle",
+                    text: model.legacyImportAvailable
+                        ? "Start the retired Tron server on this Mac at the port above before using legacy migration. Existing imports are skipped safely."
+                        : "No secure legacy Tron credential was found on this Mac.",
+                    accent: .tronSlate
+                )
             }
             .padding(20)
         }
