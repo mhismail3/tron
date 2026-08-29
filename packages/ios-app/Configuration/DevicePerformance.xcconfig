@@ -1,0 +1,11 @@
+// DevicePerformance.xcconfig - Hosted-test instrumentation on the production identity
+#include "Debug.xcconfig"
+
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG HOSTED_TEST
+PRODUCT_BUNDLE_IDENTIFIER = com.tron.mobile
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+TRON_BUILD_ROLE = device-performance
+TRON_PUSH_ROUTE = production-sandbox
+TRON_PRIVATE_BLUR_ENABLED = NO
+TRON_APNS_ENVIRONMENT = development
+TRON_APP_ATTEST_ENVIRONMENT = development

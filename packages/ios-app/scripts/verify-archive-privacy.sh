@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 archive_path="${1:?usage: verify-archive-privacy.sh <path-to-xcarchive>}"
 applications="$archive_path/Products/Applications"
@@ -27,4 +28,7 @@ for manifest in "$app_manifest" "$extension_manifest"; do
   plutil -lint "$manifest" >/dev/null
 done
 
-echo "privacy manifests verified for app and extension"
+python3 "$repo_root/scripts/validate-ios-artifact.py" "$app" \
+  --configuration Release --extension "$extension" --require-profile
+
+echo "privacy and signed Release metadata verified for app and extension"

@@ -37,6 +37,18 @@
 - Do not open one canonical session concurrently in another runtime client; the
   session format has no cross-process lock.
 
+## Agent routing
+
+- Project skills live only under `.agents/skills/`; do not create harness-specific
+  copies or duplicate detailed procedures in this file.
+- For iOS build, test, simulator, signing, archive, or physical-device work, load
+  `.agents/skills/tron-ios/SKILL.md` and use its routing table.
+- Use repository device helpers rather than inventing scheme/configuration pairs.
+  Physical development uses `Tron Device` + `LocalDevice`; `Release` is
+  archive-only, and signed artifacts are the authority for Apple environments.
+- Never erase iOS application or Keychain data to recover from a build/signing
+  mismatch, and do not install on a device another session currently owns.
+
 ## Validation
 
 Prefer focused checks while iterating. Do not repeatedly run full or multi-minute
@@ -54,9 +66,9 @@ npx vitest run <owning-test-file>
 
 # iOS: compile once, then execute only the owner
 cd packages/ios-app && xcodegen generate
-xcodebuild build-for-testing -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+xcodebuild build-for-testing -project TronMobile.xcodeproj -scheme 'Tron Development' \
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/<Suite>
 

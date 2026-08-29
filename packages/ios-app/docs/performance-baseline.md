@@ -28,12 +28,13 @@ physical memory are the more stable comparison values.
 | Target | Runtime | Build | Refresh mode | Thermal | Low Power |
 |---|---|---|---:|---|---|
 | iPhone 17 Pro simulator | iOS 26.4.1 | `Test` | 60 Hz maximum | nominal | off |
-| Pinned `iPhone18,2` | iOS 27.0 | `DeviceTest` | 120 Hz maximum | nominal | off |
+| Pinned `iPhone18,2` | iOS 27.0 | `DevicePerformance` | 120 Hz maximum | nominal | off |
 
-`DeviceTest` is a debug, `HOSTED_TEST` configuration using the provisioned app
+`DevicePerformance` is a debug, `HOSTED_TEST` configuration using the provisioned app
 identity. It exists only to run the same deterministic hosted fixture on the
 pinned phone; it is not a distribution configuration, and the scheme's archive
-action explicitly uses `Prod` rather than `DeviceTest`.
+scheme has no archive action; Release is reserved for the separate `Tron Release`
+archive/analyze/profile scheme.
 
 ## Results
 
@@ -141,7 +142,7 @@ explicit environment value is enabled, so normal focused/full suites remain fast
 ```bash
 # Simulator
 TRON_PERFORMANCE_BASELINE_VALUE=1 xcodebuild test-without-building \
-  -project TronMobile.xcodeproj -scheme 'Tron Fast' -configuration Test \
+  -project TronMobile.xcodeproj -scheme 'Tron Development' -configuration Test \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/ChatPerformanceBaselineTests \
   -resultBundlePath /tmp/tron-perf-simulator.xcresult
@@ -149,7 +150,7 @@ TRON_PERFORMANCE_BASELINE_VALUE=1 xcodebuild test-without-building \
 # Provisioned pinned device
 TRON_PERFORMANCE_BASELINE_VALUE=1 xcodebuild test-without-building \
   -project TronMobile.xcodeproj -scheme 'Tron Device Performance' \
-  -configuration DeviceTest -destination 'platform=iOS,id=<pinned-device-udid>' \
+  -configuration DevicePerformance -destination 'platform=iOS,id=<pinned-device-udid>' \
   -derivedDataPath /tmp/tron-perf-device-derived \
   -only-testing:TronMobileTests/ChatPerformanceBaselineTests \
   -resultBundlePath /tmp/tron-perf-device.xcresult

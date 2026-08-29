@@ -24,6 +24,20 @@
 	<false/>
 	<key>TRONCanonicalVersion</key>
 	<string>$(TRON_CANONICAL_VERSION)</string>
+	<!-- Build metadata is intentionally emitted into every artifact so the
+	     signed product, rather than a scheme name, is the verification source. -->
+	<key>TRONBuildRole</key>
+	<string>$(TRON_BUILD_ROLE)</string>
+	<key>TRONConfiguration</key>
+	<string>$(CONFIGURATION)</string>
+	<key>TRONPushRoute</key>
+	<string>$(TRON_PUSH_ROUTE)</string>
+	<key>TRONAPNsEnvironment</key>
+	<string>$(TRON_APNS_ENVIRONMENT)</string>
+	<key>TRONAppAttestEnvironment</key>
+	<string>$(TRON_APP_ATTEST_ENVIRONMENT)</string>
+	<key>TRONPrivateBlurEnabled</key>
+	<string>$(TRON_PRIVATE_BLUR_ENABLED)</string>
 	<key>TRONMacDownloadURL</key>
 	<string>$(TRON_MAC_DOWNLOAD_URL)</string>
 	<key>TRONPushServiceOrigin</key>

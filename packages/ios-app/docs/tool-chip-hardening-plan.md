@@ -499,7 +499,7 @@ cd packages/ios-app
 xcodegen generate
 xcodebuild build-for-testing \
   -project TronMobile.xcodeproj \
-  -scheme 'Tron Fast' \
+  -scheme 'Tron Development' \
   -configuration Test \
   -destination 'generic/platform=iOS'
 ```

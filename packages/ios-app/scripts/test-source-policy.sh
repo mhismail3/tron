@@ -37,7 +37,7 @@ PY
 generated_root="$(mktemp -d "${TMPDIR:-/tmp}/tron-ios-source-policy.XXXXXX")"
 cleanup() { rm -rf "$generated_root"; }
 trap cleanup EXIT
-PATH="/opt/homebrew/bin:$PATH" xcodegen generate \
+PATH="$ROOT/../../.ci-tools/bin:/opt/homebrew/bin:$PATH" xcodegen generate \
   --spec "$PROJECT" --project "$generated_root" --project-root "$ROOT" --quiet \
   || fail "xcodegen could not render the iOS project"
 generated_project="$generated_root/TronMobile.xcodeproj/project.pbxproj"

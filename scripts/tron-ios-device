@@ -7,8 +7,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IOS_DIR="$ROOT_DIR/packages/ios-app"
 PROJECT="TronMobile.xcodeproj"
 DERIVED_DATA="build/DerivedData"
-SCHEME="${TRON_IOS_SCHEME:-Tron}"
-CONFIG="${TRON_IOS_CONFIGURATION:-Prod}"
+PHYSICAL_BUNDLE_ID="com.tron.mobile"
+SCHEME="${TRON_IOS_SCHEME:-Tron Device}"
+CONFIG="${TRON_IOS_CONFIGURATION:-LocalDevice}"
 DEVICE_ID="${TRON_IOS_DEVICE_ID:-}"
 DEVICE_NAME="${TRON_IOS_DEVICE_NAME:-}"
 LAUNCH_AFTER_INSTALL=1
@@ -26,8 +27,13 @@ Usage:
 Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
   TRON_IOS_DEVICE_NAME     Physical iOS device name
-  TRON_IOS_SCHEME          Xcode scheme to build/launch, defaults to Tron
-  TRON_IOS_CONFIGURATION   Xcode configuration, defaults to Prod
+  TRON_IOS_SCHEME          Install compatibility input; defaults to Tron Device
+  TRON_IOS_CONFIGURATION   Install compatibility input; defaults to LocalDevice
+
+The canonical install pair is Tron Device + LocalDevice. The exact legacy
+Tron Fast + ProdDebug pair remains accepted only for the untouched Codex
+compatibility environment. Release and DevicePerformance are never ordinary
+install targets.
   TRON_IOS_REQUIRED_SDK_MAJOR
                            Fail before building unless iphoneos uses this SDK major
   TRON_IOS_LAUNCH_TIMEOUT_SECONDS
@@ -42,6 +48,40 @@ USAGE
 die() {
     echo "error: $*" >&2
     exit 1
+}
+
+xcodegen_command() {
+    if [[ -n "${TRON_XCODEGEN:-}" && -x "$TRON_XCODEGEN" ]]; then
+        printf '%s\n' "$TRON_XCODEGEN"
+    elif [[ -x "$ROOT_DIR/.ci-tools/bin/xcodegen" ]]; then
+        printf '%s\n' "$ROOT_DIR/.ci-tools/bin/xcodegen"
+    elif command -v xcodegen >/dev/null 2>&1; then
+        command -v xcodegen
+    else
+        die "xcodegen is unavailable; run scripts/install-ci-tools.sh xcodegen (repository-managed fallback: $ROOT_DIR/.ci-tools/bin/xcodegen)"
+    fi
+}
+
+validate_install_pair() {
+    if [[ "$SCHEME" == "Tron Device" && "$CONFIG" == "LocalDevice" ]]; then
+        return
+    fi
+    if [[ "$SCHEME" == "Tron Fast" && "$CONFIG" == "ProdDebug" ]]; then
+        echo "warning: using the temporary legacy Tron Fast + ProdDebug compatibility pair (mapped to Tron Device + LocalDevice)" >&2
+        SCHEME="Tron Device"
+        CONFIG="LocalDevice"
+        return
+    fi
+    if [[ "$SCHEME" == "Tron Release" || "$CONFIG" == "Release" ]]; then
+        die "refusing Release install; production signing/release delivery is manual and must use an archive"
+    fi
+    if [[ "$SCHEME" == "Tron Device Performance" || "$CONFIG" == "DevicePerformance" ]]; then
+        die "refusing DevicePerformance install; use its test action, not an ordinary device install"
+    fi
+    if [[ "$SCHEME" == "Tron" && "$CONFIG" == "Prod" ]]; then
+        die "refusing retired Tron + Prod install pair; use Tron Device + LocalDevice"
+    fi
+    die "unsupported device install pair '$SCHEME' + '$CONFIG'; use Tron Device + LocalDevice"
 }
 
 require_full_xcode() {
@@ -155,14 +195,6 @@ resolve_device_id() {
     die "set TRON_IOS_DEVICE_ID or TRON_IOS_DEVICE_NAME when zero or multiple physical devices are selectable"
 }
 
-bundle_id_for_project() {
-    cd "$IOS_DIR"
-    xcodebuild -showBuildSettings -project "$PROJECT" \
-        -scheme "$SCHEME" \
-        -configuration "$CONFIG" 2>/dev/null \
-        | awk -F' = ' '/^[[:space:]]*PRODUCT_BUNDLE_IDENTIFIER/ {print $2; exit}'
-}
-
 pretty_xcode_output() {
     if command -v xcbeautify >/dev/null 2>&1; then
         xcbeautify --quiet
@@ -192,10 +224,9 @@ build_install_launch() {
     xcodebuild -version
     printf 'iPhoneOS SDK %s\n' "$(xcrun --sdk iphoneos --show-sdk-version)"
     cd "$IOS_DIR"
-    xcodegen generate
+    "$(xcodegen_command)" generate
 
-    local bundle_id
-    bundle_id="$(bundle_id_for_project)"
+    local bundle_id="$PHYSICAL_BUNDLE_ID"
 
     local ts log xcresult
     ts="$(date +%s)-$$"
@@ -243,6 +274,8 @@ build_install_launch() {
     local app
     app="$DERIVED_DATA/Build/Products/${CONFIG}-iphoneos/TronMobile.app"
     [ -d "$app" ] || die "expected app bundle not found at $app"
+    python3 "$ROOT_DIR/scripts/validate-ios-artifact.py" "$app" \
+        --configuration "$CONFIG" --require-profile
 
     xcrun devicectl device install app --device "$device_id" "$app"
 
@@ -274,13 +307,10 @@ launch_installed_app() {
     device_id="$(resolve_device_id)"
     [ -n "$device_id" ] || die "could not resolve a physical iOS device"
 
-    cd "$IOS_DIR"
-    xcodegen generate >/dev/null
-
-    local bundle_id
-    bundle_id="$(bundle_id_for_project)"
-    [ -n "$bundle_id" ] || die "could not resolve bundle ID"
-    launch_app_for_device "$device_id" "$bundle_id"
+    # Launching an installed app is independent of build configuration. This
+    # keeps retained external-harness launch actions working after the matrix
+    # rename without preserving obsolete Xcode schemes.
+    launch_app_for_device "$device_id" "$PHYSICAL_BUNDLE_ID"
 }
 
 tronmobile_pids() {
@@ -346,6 +376,7 @@ main() {
     case "$cmd" in
         install)
             parse_common_args "$@"
+            validate_install_pair
             build_install_launch
             ;;
         launch)

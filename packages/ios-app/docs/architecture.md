@@ -251,8 +251,8 @@ snapshot through the same read gate and skip only the network opening handshake.
 The hosted harness still mounts the production chat, lazy transcript, composer
 inset, and native scroll view; a display-link recorder coalesces geometry and
 semantic row-frame observations to at most one sample per presented frame. These
-hooks are absent from Beta and production builds and own no session policy or
-runtime state. The
+hooks are absent from Development and Release builds and own no session policy
+or runtime state. The
 composer remains mounted and visible throughout opening so transient synchronization
 cannot remove the primary chat control; sending stays disabled until the authoritative
 baseline is ready. A failed transport/sync open shows an explicit retry surface. Once that mounted chat is ready, reconnect and
@@ -846,7 +846,7 @@ implies aborting an accepted run.
 
 Tron registers for remote alert notifications only after a Gateway profile exists.
 The user permission decision is authoritative and denial never blocks pairing or
-chat. The app obtains an opaque APNs token, proves the official Beta or production
+chat. The app obtains an opaque APNs token, proves its signed Development or Release
 application identity to the fixed Tron Push origin with App Attest, and transfers
 only the returned endpoint-scoped installation grant to the authenticated Gateway. Each grant records the normalized relay origin and APNs/App Attest route that issued it; a legacy or mismatched grant is replaced through the configured Worker rather than transferred across relay authorities.
 App Attest keys, APNs token bytes, and grants use a Keychain namespace separate from
