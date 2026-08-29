@@ -2054,6 +2054,7 @@ export class RuntimeRegistry {
         expectedParentPath,
         expectedRunId,
         binding.producerId,
+        binding.sessionOwnerId,
       );
       if (!admitted) continue;
       if (entry) {
@@ -2155,9 +2156,12 @@ export class RuntimeRegistry {
     expectedParentPath: string,
     expectedRunId: string,
     expectedProducerId: string,
+    expectedSessionOwnerId?: string,
   ): Promise<ReadOnlySubagentAdmission | undefined> {
     if (!expectedRunId || /[\\/\0]/u.test(expectedRunId)
-      || !expectedProducerId || /[\\/\0]/u.test(expectedProducerId)) return undefined;
+      || !expectedProducerId || /[\\/\0]/u.test(expectedProducerId)
+      || expectedSessionOwnerId !== undefined
+        && (Buffer.byteLength(expectedSessionOwnerId) > 256 || /[\\/\0]/u.test(expectedSessionOwnerId))) return undefined;
     let canonical: string;
     let metadata: Awaited<ReturnType<typeof lstat>>;
     try {
@@ -2180,7 +2184,8 @@ export class RuntimeRegistry {
     const forkContext = parts.length === 2 && parts[0] === "forks"
       && parts[1] !== ".jsonl" && parts[1]!.endsWith(".jsonl");
     const freshContext = parts.length === 3 && parts[0] !== "forks"
-      && parts[0] === expectedProducerId && SUBAGENT_RUN_DIRECTORY.test(parts[1]!)
+      && (parts[0] === expectedRunId || parts[0] === expectedSessionOwnerId)
+      && SUBAGENT_RUN_DIRECTORY.test(parts[1]!)
       && parts[2] === "session.jsonl";
     if (!forkContext && !freshContext) return undefined;
     let handle: Awaited<ReturnType<typeof open>> | undefined;

@@ -560,8 +560,10 @@ struct ReadOnlySubagentSessionSheet: View {
     }
 
     private var mountedActivity: SessionProcessActivity? {
-        model.authoritativeSnapshot(for: parentSessionID)?.processActivities?
-            .first(where: { $0.processId == process.processId })
+        SessionProcessProjection.mountedActivity(
+            selected: process,
+            activities: model.authoritativeSnapshot(for: parentSessionID)?.processActivities ?? []
+        )
     }
 
     @ViewBuilder

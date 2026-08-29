@@ -68,7 +68,7 @@ import {
 } from "./projection.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, currentExtensionOwner, extensionOwnerFor } from "../extensions/owner-attribution.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates, type ExtensionArtifactRejectionReason } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { SESSION_INPUT_RECEIPT_TYPE, makeSessionInputReceipt } from "./session-input-receipts.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
@@ -134,6 +134,7 @@ const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
 const STREAMING_PROGRESS_FLUSH_MS = 150;
 const DEFAULT_RUNTIME_DISPOSAL_GRACE_MS = 5_000;
 const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
+const MAX_VALIDATED_CHILD_SESSION_PATHS = 2_048;
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 const MAX_EXTENSION_EVENT_TAIL_BYTES = 64 * 1_024;
 const MAX_EXTENSION_EVENT_LINES = 256;
@@ -357,7 +358,9 @@ export class RuntimeSlot {
   private readonly processIDsByToolCall = new Map<string, Set<string>>();
   private readonly pendingProcessRemovalsByToolCall = new Map<string, Set<string>>();
   private readonly validatedChildSessionPaths = new Map<string, string>();
-  private readonly childSessionProducerIDs = new Map<string, string>();
+  /** Exact process-scoped binding; a reused child session ref must never
+   * overwrite the producer identity of another current or historical row. */
+  private readonly childSessionBindings = new Map<string, { ref: string; producerId: string; sessionOwnerId?: string }>();
   private processRevision = 0;
   private processAsOf = new Date().toISOString();
   /** Bounded runtime timing enriches the mobile projection without changing Pi
@@ -930,8 +933,9 @@ export class RuntimeSlot {
   private childSessionReferences(
     value: unknown,
     activity: ExtensionRunActivity,
-  ): Map<string, { ref: string; producerId: string }> {
-    const references = new Map<string, { ref: string; producerId: string }>();
+    identityStrategy: ExtensionRunChildIdentityStrategy,
+  ): Map<string, { ref: string; producerId: string; sessionOwnerId?: string }> {
+    const references = new Map<string, { ref: string; producerId: string; sessionOwnerId?: string }>();
     const ambiguous = new Set<string>();
     if (!activity.runId) return references;
     const wrapper = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -948,22 +952,26 @@ export class RuntimeSlot {
       const record = candidate as Record<string, unknown>;
       const progress = record.progress && typeof record.progress === "object" && !Array.isArray(record.progress)
         ? record.progress as Record<string, unknown> : undefined;
-      const childID = [record.runId, record.id, record.asyncId, progress?.runId, progress?.id, progress?.asyncId]
+      const childDepth = Math.max(0, depth - 1);
+      const producerId = extensionRunChildProducerId(record, index, childDepth, identityStrategy);
+      const sessionOwnerId = [record.runId, progress?.runId]
         .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
       const rawLabel = [progress?.agent, record.agent]
         .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
-      const stableIndex = [record.index, progress?.index]
-        .find((item): item is number => typeof item === "number" && Number.isSafeInteger(item) && item >= 0 && item < 64);
-      const projectionID = childID
-        ?? (stableIndex === undefined ? `${rawLabel ?? `Child ${index + 1}`}:${index}` : `foreground-index:${stableIndex}`);
+      const projectionID = producerId ?? `${rawLabel ?? `Child ${index + 1}`}:${index}`;
       const sessionFile = [record.sessionFile, progress?.sessionFile]
         .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
-      if (isChild && sessionFile && childID !== activity.runId) {
-        const admitted = this.validateChildSessionFile(sessionFile, activity.runId!, childID);
+      if (isChild && sessionFile && producerId !== activity.runId) {
+        const admitted = this.validateChildSessionFile(sessionFile, activity.runId!, producerId, sessionOwnerId);
         if (admitted) {
-          const evidence = { ref: admitted.ref, producerId: admitted.producerId };
+          const evidence = {
+            ref: admitted.ref,
+            producerId: admitted.producerId,
+            ...(admitted.sessionOwnerId ? { sessionOwnerId: admitted.sessionOwnerId } : {}),
+          };
           const prior = references.get(projectionID);
-          if (prior && (prior.ref !== evidence.ref || prior.producerId !== evidence.producerId)) {
+          if (prior && (prior.ref !== evidence.ref || prior.producerId !== evidence.producerId
+            || prior.sessionOwnerId !== evidence.sessionOwnerId)) {
             references.delete(projectionID);
             ambiguous.add(projectionID);
           } else if (!ambiguous.has(projectionID)) references.set(projectionID, evidence);
@@ -1009,8 +1017,11 @@ export class RuntimeSlot {
     candidate: string,
     expectedRunId: string,
     declaredChildId?: string,
-  ): { ref: string; path: string; producerId: string } | undefined {
-    if (!isAbsolute(candidate) || candidate.length > 4_096 || !expectedRunId || /[\\/\0]/u.test(expectedRunId)) return undefined;
+    declaredSessionOwnerId?: string,
+  ): { ref: string; path: string; producerId: string; sessionOwnerId?: string } | undefined {
+    if (!isAbsolute(candidate) || candidate.length > 4_096 || !expectedRunId || /[\\/\0]/u.test(expectedRunId)
+      || declaredSessionOwnerId !== undefined
+        && (Buffer.byteLength(declaredSessionOwnerId) > 256 || /[\\/\0]/u.test(declaredSessionOwnerId))) return undefined;
     let canonical: string;
     let identity: { dev: number; ino: number };
     try {
@@ -1033,14 +1044,18 @@ export class RuntimeSlot {
     const freshContext = pathParts.length === 3 && pathParts[0] !== "forks"
       && pathParts[2] === "session.jsonl" && /^run-\d+$/u.test(pathParts[1]!);
     if (!forkContext && !freshContext) return undefined;
-    // Fresh contexts bind producer identity to the reserved path. Fork contexts
-    // have no producer path component, so only the exact lifecycle artifact's
-    // child ID may supply it; filenames and transcript presentation never do.
-    const pathProducerId = freshContext ? pathParts[0] : undefined;
-    if (freshContext && declaredChildId && pathProducerId !== declaredChildId) return undefined;
-    if (forkContext && !declaredChildId) return undefined;
-    const producerId = forkContext ? declaredChildId : pathProducerId;
-    if (!producerId || Buffer.byteLength(producerId) > 256 || /[\\/\0]/u.test(producerId)) return undefined;
+    // A fresh path may be reserved by the root run (ordinary single/parallel/
+    // chain) or by a detached workflow child. Keep that filesystem owner
+    // separate from the stable child producer identity used by process rows.
+    // Fork paths encode neither, so their exact artifact child identity remains
+    // mandatory; filenames and transcript presentation never become evidence.
+    const pathOwnerId = freshContext ? pathParts[0] : undefined;
+    if (freshContext && pathOwnerId !== expectedRunId && pathOwnerId !== declaredSessionOwnerId) return undefined;
+    // A path proves containment, never child ownership. Every admitted context
+    // also needs a distinct producer identity from the trusted lifecycle shape.
+    if (!declaredChildId) return undefined;
+    const producerId = declaredChildId;
+    if (Buffer.byteLength(producerId) > 256 || /[\\/\0]/u.test(producerId)) return undefined;
     let descriptor: number | undefined;
     try {
       descriptor = openSync(canonical, "r");
@@ -1059,15 +1074,25 @@ export class RuntimeSlot {
       if (!after.isFile() || after.isSymbolicLink() || after.dev !== opened.dev || after.ino !== opened.ino) return undefined;
       const ref = header.id;
       if (!ref || ref === this.id || Buffer.byteLength(ref) > 256) return undefined;
-      this.validatedChildSessionPaths.set(ref, canonical);
-      this.childSessionProducerIDs.set(ref, producerId);
-      return { ref, path: canonical, producerId };
+      const bindingKey = `${ref}\0${producerId}`;
+      this.validatedChildSessionPaths.delete(bindingKey);
+      this.validatedChildSessionPaths.set(bindingKey, canonical);
+      while (this.validatedChildSessionPaths.size > MAX_VALIDATED_CHILD_SESSION_PATHS) {
+        const oldest = this.validatedChildSessionPaths.keys().next().value;
+        if (oldest === undefined) break;
+        this.validatedChildSessionPaths.delete(oldest);
+      }
+      return { ref, path: canonical, producerId, ...(pathOwnerId ? { sessionOwnerId: pathOwnerId } : {}) };
     } catch { return undefined; }
     finally { if (descriptor !== undefined) closeSync(descriptor); }
   }
 
-  private attachChildSessionReferences(activity: ExtensionRunActivity, value: unknown): ExtensionRunActivity {
-    const references = this.childSessionReferences(value, activity);
+  private attachChildSessionReferences(
+    activity: ExtensionRunActivity,
+    value: unknown,
+    identityStrategy: ExtensionRunChildIdentityStrategy = "declared",
+  ): ExtensionRunActivity {
+    const references = this.childSessionReferences(value, activity, identityStrategy);
     if (references.size === 0) return activity;
     const attach = (children: ExtensionRunActivity["children"]): ExtensionRunActivity["children"] => children.map((child) => {
       const evidence = references.get(child.id);
@@ -1077,6 +1102,7 @@ export class RuntimeSlot {
           id: evidence.producerId,
           producerId: evidence.producerId,
           childSessionRef: evidence.ref,
+          ...(evidence.sessionOwnerId ? { sessionOwnerId: evidence.sessionOwnerId } : {}),
         } : {}),
         ...(child.children ? { children: attach(child.children) } : {}),
       };
@@ -1127,7 +1153,7 @@ export class RuntimeSlot {
     this.processIDsByToolCall.clear();
     this.pendingProcessRemovalsByToolCall.clear();
     this.validatedChildSessionPaths.clear();
-    this.childSessionProducerIDs.clear();
+    this.childSessionBindings.clear();
     this.processRevision += 1;
     this.processAsOf = new Date().toISOString();
   }
@@ -1176,17 +1202,55 @@ export class RuntimeSlot {
     this.processAsOf = new Date().toISOString();
   }
 
-  private syncSubagentProcesses(activity: ExtensionRunActivity): void {
-    const rememberProducers = (children: readonly ExtensionRunChild[]): void => {
+  private childSessionBindingFromActivity(
+    processId: string,
+    activity: ExtensionRunActivity,
+  ): { ref: string; producerId: string; sessionOwnerId?: string } | undefined {
+    const process = subagentProcessesFromActivity(this.id, activity)
+      .find((candidate) => candidate.processId === processId);
+    if (!process?.childSessionRef) return undefined;
+    const candidates = new Map<string, { ref: string; producerId: string; sessionOwnerId?: string }>();
+    const visit = (children: readonly ExtensionRunChild[]): void => {
       for (const child of children) {
-        if (child.producerId && child.childSessionRef) {
-          this.childSessionProducerIDs.set(child.childSessionRef, child.producerId);
+        const childSessionRef = child.childSessionRef;
+        if (childSessionRef && childSessionRef === process.childSessionRef && child.producerId) {
+          const candidate = {
+            ref: childSessionRef,
+            producerId: child.producerId,
+            ...(child.sessionOwnerId ? { sessionOwnerId: child.sessionOwnerId } : {}),
+          };
+          candidates.set(`${candidate.producerId}\0${candidate.sessionOwnerId ?? ""}`, candidate);
         }
-        if (child.children) rememberProducers(child.children);
+        if (child.children) visit(child.children);
       }
     };
-    rememberProducers(activity.children);
-    this.replaceProcessesForToolCall(activity.toolCallId, subagentProcessesFromActivity(this.id, activity));
+    visit(activity.children);
+    return candidates.size === 1 ? [...candidates.values()][0] : undefined;
+  }
+
+  private canonicalChildSessionBinding(processId: string): { ref: string; producerId: string; sessionOwnerId?: string } | undefined {
+    let admitted: { ref: string; producerId: string; sessionOwnerId?: string } | undefined;
+    for (const { receipt } of extensionActivityReceipts(this.sessionManager.getBranch(), this.id)) {
+      const candidate = this.childSessionBindingFromActivity(processId, extensionReceiptActivity(receipt));
+      if (!candidate) continue;
+      if (admitted && (admitted.ref !== candidate.ref || admitted.producerId !== candidate.producerId
+        || admitted.sessionOwnerId !== candidate.sessionOwnerId)) return undefined;
+      admitted = candidate;
+    }
+    return admitted;
+  }
+
+  private syncSubagentProcesses(activity: ExtensionRunActivity): void {
+    const projected = subagentProcessesFromActivity(this.id, activity);
+    for (const processId of this.processIDsByToolCall.get(activity.toolCallId) ?? []) {
+      this.childSessionBindings.delete(processId);
+    }
+    this.replaceProcessesForToolCall(activity.toolCallId, projected);
+    for (const process of projected) {
+      if (!this.processActivities.has(process.processId)) continue;
+      const binding = this.childSessionBindingFromActivity(process.processId, activity);
+      if (binding) this.childSessionBindings.set(process.processId, binding);
+    }
   }
 
   private currentProcessProjection(): { activities: SessionProcessActivity[]; overview: SessionProcessOverview } {
@@ -2712,7 +2776,8 @@ export class RuntimeSlot {
         observedAt,
         ...(terminalAt ? { terminalAt } : {}),
         ...(recentUntil ? { recentUntil } : {}),
-      }), artifactValue);
+        childIdentityStrategy: "piArtifact",
+      }), artifactValue, "piArtifact");
       // Ambient discovery is another producer of lifecycle candidates. Apply
       // the same Gateway terminal latch and sequence admission as live tool
       // events before replacing an existing row.
@@ -2975,7 +3040,8 @@ export class RuntimeSlot {
         observedAt,
         ...(terminalAt ? { terminalAt } : {}),
         ...(recentUntil ? { recentUntil } : {}),
-      }), artifactValue);
+        childIdentityStrategy: "piArtifact",
+      }), artifactValue, "piArtifact");
       const current = this.extensionActivities.get(toolCallId);
       if (!current) return;
       if (admitExtensionRunActivity(current, activity) === current) return;
@@ -3122,8 +3188,12 @@ export class RuntimeSlot {
   ): ExtensionRunActivity | undefined {
     if (!extensionOrigin) return undefined;
     const current = this.extensionActivities.get(toolCallId);
-    const admittedForegroundSubagent = this.isForegroundSubagentTool(toolName, extensionOrigin)
-      && hasForegroundSubagentRunActivity(value);
+    const foregroundSubagentOwner = this.isForegroundSubagentTool(toolName, extensionOrigin);
+    const admittedForegroundSubagent = foregroundSubagentOwner && hasForegroundSubagentRunActivity(value);
+    const childIdentityStrategy: ExtensionRunChildIdentityStrategy = foregroundSubagentOwner
+      && current?.mode !== "asynchronous"
+      && usesForegroundSubagentChildIdentity(value, { allowTerminalResults: status !== "running" })
+      ? "piForeground" : "declared";
     if (!current && !hasStructuredExtensionRunActivity(value) && !admittedForegroundSubagent) return undefined;
     const activityKey = current?.activityId ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
     const terminalStates = ["completed", "failed", "stopped", "rejected"];
@@ -3173,7 +3243,8 @@ export class RuntimeSlot {
       observedAt,
       ...(terminalAt ? { terminalAt } : {}),
       ...(recentUntil ? { recentUntil } : {}),
-    }), value);
+      childIdentityStrategy,
+    }), value, childIdentityStrategy);
     if (admitExtensionRunActivity(current, activity) === current) return current;
     const terminalReceiptOwner = terminal ? this.claimExtensionReceiptOwnership(activityKey) : undefined;
     if (terminal && !terminalReceiptOwner) return current;
@@ -3213,6 +3284,7 @@ export class RuntimeSlot {
         observedAt,
         ...(terminalAt ? { terminalAt } : {}),
         ...(recentUntil ? { recentUntil } : {}),
+        childIdentityStrategy,
         previous: current
           ? {
               ...synthetic,
@@ -3220,7 +3292,7 @@ export class RuntimeSlot {
               children: current.children.length > 0 ? current.children : synthetic.children,
             }
           : synthetic,
-      }), value);
+      }), value, childIdentityStrategy);
       this.extensionActivities.delete(toolCallId);
       this.extensionActivities.set(toolCallId, merged);
       this.upsertExtensionActivity(merged);
@@ -3498,6 +3570,7 @@ export class RuntimeSlot {
     let removed = false;
     for (const processId of frame.expiredProcessIds) {
       if (!this.processActivities.delete(processId)) continue;
+      this.childSessionBindings.delete(processId);
       removed = true;
       for (const [toolCallId, processIDs] of this.processIDsByToolCall) {
         processIDs.delete(processId);
@@ -3883,12 +3956,11 @@ export class RuntimeSlot {
       ?? processHistoryDetail(this.runtime.session.sessionManager, processId);
   }
 
-  processChildSessionBinding(processId: string): { ref: string; producerId: string; runId?: string } | undefined {
+  processChildSessionBinding(processId: string): { ref: string; producerId: string; sessionOwnerId?: string; runId?: string } | undefined {
     const process = this.processForViewer(processId);
-    const producerId = process?.childSessionRef
-      ? this.childSessionProducerIDs.get(process.childSessionRef) : undefined;
-    return process?.childSessionRef && producerId
-      ? { ref: process.childSessionRef, producerId, ...(process.runId ? { runId: process.runId } : {}) }
+    const binding = this.childSessionBindings.get(processId) ?? this.canonicalChildSessionBinding(processId);
+    return process?.childSessionRef && binding?.ref === process.childSessionRef
+      ? { ...binding, ...(process.runId ? { runId: process.runId } : {}) }
       : undefined;
   }
 
@@ -3898,8 +3970,13 @@ export class RuntimeSlot {
 
   processChildSessionPath(processId: string): { ref: string; producerId: string; path: string; runId?: string } | undefined {
     const binding = this.processChildSessionBinding(processId);
-    const path = binding ? this.validatedChildSessionPaths.get(binding.ref) : undefined;
-    return binding && path ? { ...binding, path } : undefined;
+    const path = binding ? this.validatedChildSessionPaths.get(`${binding.ref}\0${binding.producerId}`) : undefined;
+    return binding && path ? {
+      ref: binding.ref,
+      producerId: binding.producerId,
+      path,
+      ...(binding.runId ? { runId: binding.runId } : {}),
+    } : undefined;
   }
 
   publishSnapshot(): void {
@@ -5011,7 +5088,7 @@ export class RuntimeSlot {
     this.processIDsByToolCall.clear();
     this.pendingProcessRemovalsByToolCall.clear();
     this.validatedChildSessionPaths.clear();
-    this.childSessionProducerIDs.clear();
+    this.childSessionBindings.clear();
     if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
     if (this.progressFlushTimer) clearTimeout(this.progressFlushTimer);
     this.progressFlushTimer = undefined;

@@ -427,6 +427,27 @@ enum SessionProcessProjection {
         )
     }
 
+    /// Keep an already-presented single-run sheet attached when Gateway replaces
+    /// a temporary aggregate with its exact child row. Multiple matching
+    /// children are intentionally ambiguous and fail closed.
+    static func mountedActivity(
+        selected: SessionProcessActivity,
+        activities: [SessionProcessActivity]
+    ) -> SessionProcessActivity? {
+        let admitted = SessionProcessAdmissionPolicy.admitted(activities)
+        if let exact = admitted.first(where: { $0.processId == selected.processId }) { return exact }
+        guard selected.kind == .subagent,
+              let toolCallID = selected.toolCallId,
+              let runID = selected.runId else { return nil }
+        let successors = admitted.filter {
+            $0.kind == .subagent
+                && $0.toolCallId == toolCallID
+                && $0.runId == runID
+                && $0.processId != selected.processId
+        }
+        return successors.count == 1 ? successors[0] : nil
+    }
+
     static func precedes(_ lhs: SessionProcessActivity, _ rhs: SessionProcessActivity) -> Bool {
         let lhsBucket = lhs.visibility == .active ? 0 : 1
         let rhsBucket = rhs.visibility == .active ? 0 : 1

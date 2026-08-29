@@ -162,6 +162,8 @@ final class ReadOnlySubagentSessionStore {
     private(set) var status: Status = .idle
     private(set) var parentSessionID: String?
     private(set) var processID: String?
+    private var selectedToolCallID: String?
+    private var selectedRunID: String?
     private(set) var presentationGeneration: Int?
     private(set) var leaseID: String?
     private(set) var childSessionRef: String?
@@ -186,6 +188,8 @@ final class ReadOnlySubagentSessionStore {
         activity: SessionProcessActivity? = nil
     ) {
         bindingRetryAttempts = 0
+        selectedToolCallID = activity?.processId == processID ? activity?.toolCallId : nil
+        selectedRunID = activity?.processId == processID ? activity?.runId : nil
         startOpen(
             parentSessionID: parentSessionID,
             processID: processID,
@@ -461,8 +465,31 @@ final class ReadOnlySubagentSessionStore {
             if status == .waiting { status = .unavailable }
             return
         }
-        guard activity.processId == processID,
-              SessionProcessAdmissionPolicy.admits(activity) else { return }
+        guard SessionProcessAdmissionPolicy.admits(activity) else { return }
+        if activity.processId != processID {
+            guard [.opening, .waiting].contains(status),
+                  activity.kind == .subagent,
+                  activity.toolCallId == selectedToolCallID,
+                  activity.runId == selectedRunID,
+                  selectedToolCallID != nil,
+                  selectedRunID != nil else { return }
+            // Gateway can replace a short-lived aggregate with the sole exact
+            // child. Retarget only under the immutable tool/run correlation;
+            // ambiguous candidates are filtered by SessionProcessProjection.
+            self.processID = activity.processId
+            bindingRetryAttempts = 0
+            bindingRetryTask?.cancel()
+            bindingRetryTask = nil
+            if let parentSessionID, let presentationGeneration {
+                startOpen(
+                    parentSessionID: parentSessionID,
+                    processID: activity.processId,
+                    presentationGeneration: presentationGeneration,
+                    activity: activity
+                )
+            }
+            return
+        }
         liveActivity = activity
         if wasActive != activity.lifecycle.state.isActive { rebuildPresentation() }
         guard status == .waiting else { return }
@@ -523,6 +550,8 @@ final class ReadOnlySubagentSessionStore {
 
     func close() {
         bindingRetryAttempts = 0
+        selectedToolCallID = nil
+        selectedRunID = nil
         retire(sendClose: true)
     }
 

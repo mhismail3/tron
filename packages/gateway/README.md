@@ -887,20 +887,23 @@ this surface and continue through their existing transcript/tool presentation.
 source/mode/lifecycle, bounded current-tool/output facts,
 an optional bounded `durationMs` derived only from existing producer timing or canonical
 start/terminal timestamps, and an optional opaque validated child-session reference. The
-installed pi-subagents foreground producer emits progress before its terminal root `runId`;
-Gateway admits that shape only when the exact `subagent` tool owner matches the installed
-pi-subagents extension and every bounded child carries its stable safe-integer index, agent,
-and recognized lifecycle state. That producer index is scoped by the canonical parent tool
-call and may identify only a disposable live process row; it cannot authorize a child file.
-Generic extension tools continue to require explicit structured `runId`/`asyncId` evidence.
-For an admitted asynchronous artifact, a workflow step may not publish its child
-`runId` until persistence completes. While such a step is queued or running, Gateway
-projects the exact artifact-owned workflow root as a temporary active row; it is replaced
-by identified child rows as lifecycle evidence arrives. If terminal admission wins the race
-with child persistence, that same root settles into recent state and can still be atomically
-re-keyed by later terminal enrichment. This keeps the composer activity overview continuous
-for the full delegated run without treating label/index compatibility IDs as child ownership
-or turning a bare launcher acknowledgement into a phantom process.
+installed pi-subagents foreground producer uses one bounded child index consistently
+across progress and terminal result arrays. Gateway admits that positional identity only when
+the exact `subagent` tool owner matches the installed pi-subagents extension and the bounded
+shape has unique safe-integer indexes (or the terminal result array preserves the already
+owned child order), an agent, and recognized lifecycle evidence. The normalized
+`foreground-index:N` producer is scoped by the canonical parent tool call. Generic extension
+tools continue to require explicit structured `runId`/`asyncId` evidence and can never turn
+array position into ownership.
+
+For an exact-owned asynchronous pi-subagents artifact, Gateway applies the producer's stable
+child contract: explicit `childId`, then workflow key, then child `runId`, with `step:N` as the
+canonical bounded top-level default. Thus ordinary single/parallel/chain artifacts have an exact child
+row before and after terminal persistence even when a step has no independent run ID. The
+same producer identity enriches that row with a validated session reference rather than
+re-keying it. Bare launcher acknowledgements remain hidden until the lifecycle artifact
+contains child execution evidence. This keeps the composer activity overview continuous
+without treating labels or generic extension array positions as ownership.
 Absolute session and
 artifact paths, PIDs, environment values, and unbounded task/output data never cross
 the wire. Bounded delegated-output previews conservatively mask environment assignments,
@@ -917,8 +920,9 @@ recent subagents from their canonical receipts after runtime acquisition. Existi
 compatibility fields do not extend the process deadline. Active work always outranks
 recent terminal work. Expiry removes only the disposable projection while retaining a
 bounded terminal tombstone so late advisory artifacts cannot resurrect the same process.
-Process replacement deltas carry exact removed process IDs, including removal-only frames,
-so a re-keyed or retired producer row cannot remain mounted on iOS.
+Process replacement deltas carry exact removed process IDs, including removal-only frames.
+A native sheet may follow a temporary aggregate only when exactly one admitted successor has
+the same immutable tool-call and root-run correlation; ambiguous replacements fail closed.
 
 `session.processHistory.list` and `.get` page only normalized subagent terminal receipts
 under one bounded branch-derived revision and opaque cursor. Pagination stops before a row that exhausts the current page's byte
@@ -928,8 +932,10 @@ canonical generation changes. Old `tron.extension-activity.v1` entries remain re
 extension history;
 process history admits individual historical children only when the receipt records their
 exact producer ID and a known synchronous or asynchronous execution mode. Supervisor/control
-receipts and unknown modes fail closed rather than authoring invalid process DTOs. Newer receipts may add that identity and a validated opaque
-child-session ID but continue to omit paths, task text, and output.
+receipts and unknown modes fail closed rather than authoring invalid process DTOs. Canonical
+receipts retain the exact child producer, optional fresh-session owner, and validated opaque
+child-session ID so historical transcript authorization does not depend on an unbounded runtime
+cache; they continue to omit paths, task text, and output.
 
 The companion `process-history.v1` capability advertises canonical history reads.
 The `process-transcript.v1` capability authorizes `session.processTranscript.open`,
@@ -942,12 +948,15 @@ client's expected revision inside that lane, so a canceled mobile prepend cannot
 refresh and advance the same lease generation out of order.
 Open, page, and invalidation reads each revalidate the exact live parent process/tool/run
 binding, exact reserved child path, header identity, and original file identity. Fresh children are
-admitted only at `<parent-stem>/<producer>/run-N/session.jsonl`, with exactly three relative path
-components and the producer ID bound to the path. Fork-context children are admitted only at
-`<parent-stem>/forks/<fork-session>.jsonl` when their header resolves to the mounted parent; their
-producer ID comes only from the exact tool-owned lifecycle artifact's child ID, never a filename,
-name, or title. Fresh children may omit the parent header because the artifact and producer-bound
-path remain authoritative. Session names and `session_info` never participate in admission. Replacement
+admitted only at `<parent-stem>/<session-owner>/run-N/session.jsonl`, with exactly three relative
+path components. The session owner is separately proven as either the exact root run (ordinary
+single/parallel/chain) or an exact artifact child `runId` (detached workflow child); it is never
+inferred from the process producer. Fork-context children are admitted only at
+`<parent-stem>/forks/<fork-session>.jsonl` when their header resolves to the mounted parent. In
+both layouts the process producer comes only from the trusted lifecycle identity contract, never
+a filename, name, title, or generic extension array position. Fresh children may omit the parent
+header because exact tool/run ownership plus the separately validated session-owner path remain
+authoritative. Session names and `session_info` never participate in admission. Replacement
 or ambiguity closes/fails the lease. Transcript projection
 parses the already-open, identity-pinned descriptor through a pure read-only branch adapter
 under an explicit 64 MiB per-session parse budget, so a replace/read/swap-back race cannot

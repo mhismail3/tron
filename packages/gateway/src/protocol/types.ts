@@ -240,6 +240,9 @@ export interface ExtensionRunChild {
   label: string;
   /** Opaque validated child-session identity. Absolute paths never cross the wire. */
   childSessionRef?: string;
+  /** Exact run that reserved a fresh child path when it differs from this
+   * stable process producer. Opaque and absent for fork-context children. */
+  sessionOwnerId?: string;
   /** Coarse compatibility status retained for older native clients. */
   status: ExtensionRunStatus;
   /** Rich delegated-run state, independent of the parent tool status. */

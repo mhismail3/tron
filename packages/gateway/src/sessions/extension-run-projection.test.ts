@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity } from "./extension-run-projection.js";
+import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, usesForegroundSubagentChildIdentity } from "./extension-run-projection.js";
 
 const base = {
   id: "tool-call",
@@ -108,11 +108,46 @@ describe("projectExtensionRunActivity", () => {
     expect(hasForegroundSubagentRunActivity({ details: { mode: "single", results: [] } })).toBe(false);
     expect(hasForegroundSubagentRunActivity({ details: { mode: "single", results: [{ agent: "reviewer", status: "running" }] } })).toBe(false);
     expect(hasForegroundSubagentRunActivity({ details: { mode: "single", results: [{ index: Number.MAX_SAFE_INTEGER, agent: "reviewer", status: "running" }] } })).toBe(false);
-    expect(hasForegroundSubagentRunActivity({ details: { mode: "parallel", results: [
+    const duplicateIndexes = { details: { mode: "parallel", results: [
       { index: 0, agent: "reviewer", status: "running" },
       { index: 0, agent: "worker", status: "running" },
-    ] } })).toBe(false);
+    ] } };
+    expect(hasForegroundSubagentRunActivity(duplicateIndexes)).toBe(false);
+    expect(usesForegroundSubagentChildIdentity(duplicateIndexes)).toBe(false);
     expect(hasForegroundSubagentRunActivity({ details: { mode: "single", results: [{ index: 0, agent: "reviewer", status: "ordinary" }] } })).toBe(false);
+  });
+
+  it("keeps canonical pi-subagents child identity stable across live, artifact, and terminal frames", () => {
+    const live = { details: { mode: "single", runId: "parent", progress: [
+      { index: 0, runId: "advisory-child-run", agent: "worker", status: "running", currentTool: "read" },
+    ] } };
+    const terminal = { details: { mode: "single", runId: "parent", results: [
+      { agent: "worker", status: "completed", sessionFile: "/private/fork.jsonl" },
+    ] } };
+    expect(usesForegroundSubagentChildIdentity(live)).toBe(true);
+    expect(usesForegroundSubagentChildIdentity(terminal)).toBe(false);
+    expect(usesForegroundSubagentChildIdentity(terminal, { allowTerminalResults: true })).toBe(true);
+    expect(projectExtensionRunActivity(live, { ...base, childIdentityStrategy: "piForeground" }).children[0]?.producerId)
+      .toBe("foreground-index:0");
+    expect(projectExtensionRunActivity(terminal, { ...base, status: "completed", childIdentityStrategy: "piForeground" }).children[0]?.producerId)
+      .toBe("foreground-index:0");
+
+    const runningArtifact = { mode: "single", runId: "parent", state: "running", steps: [
+      { agent: "worker", status: "running", sessionFile: "/private/fork.jsonl" },
+    ] };
+    const terminalArtifact = { ...runningArtifact, state: "complete", steps: [
+      { agent: "worker", status: "complete", sessionFile: "/private/fork.jsonl" },
+    ] };
+    expect(projectExtensionRunActivity(runningArtifact, { ...base, childIdentityStrategy: "piArtifact" }).children[0]?.producerId)
+      .toBe("step:0");
+    expect(projectExtensionRunActivity(terminalArtifact, { ...base, status: "completed", childIdentityStrategy: "piArtifact" }).children[0]?.producerId)
+      .toBe("step:0");
+    expect(projectExtensionRunActivity({ ...runningArtifact, steps: [
+      { workflowKey: "audit", runId: "late-detached-run", agent: "worker", status: "running" },
+    ] }, { ...base, childIdentityStrategy: "piArtifact" }).children[0]?.producerId).toBe("audit");
+
+    // Generic extensions cannot turn array position into ownership evidence.
+    expect(projectExtensionRunActivity(runningArtifact, base).children[0]?.producerId).toBeUndefined();
   });
 
   it("keeps detached async launch receipts current until lifecycle termination", () => {

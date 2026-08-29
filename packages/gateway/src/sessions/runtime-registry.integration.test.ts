@@ -2646,11 +2646,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const activityId = "validated-child-activity";
     const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
     const parentFile = slot.sessionFile!;
-    const childProducerId = "child-run";
-    const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), childProducerId, "run-0");
+    const childProducerId = "step:0";
+    const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), runId, "run-0");
     await Promise.all([mkdir(asyncDir, { recursive: true }), mkdir(childDirectory, { recursive: true })]);
-    // Match the current producer: the exact lifecycle artifact and canonical
-    // reserved path authorize the child while the header omits parentSession.
+    // Match the current producer: the root run reserves the fresh session
+    // directory while the stable artifact step owns the child process row.
     const childManager = SessionManager.create(fixture.cwd, childDirectory, {
       id: "validated-child-session",
     });
@@ -2736,6 +2736,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await waitUntil(() => slot.processHistory(undefined, 25, { kind: "subagent" }).activities.length === 1);
     expect(slot.processHistory(undefined, 25, { kind: "subagent" }).activities[0])
       .toMatchObject({ childSessionRef: "validated-child-session" });
+    // Historical opening must derive its exact binding from the canonical
+    // receipt rather than an unbounded runtime cache.
+    (slot as unknown as { childSessionBindings: Map<string, unknown> }).childSessionBindings.clear();
+    expect(slot.processChildSessionBinding(process!.processId)).toMatchObject({
+      ref: "validated-child-session", producerId: childProducerId, sessionOwnerId: runId, runId,
+    });
 
     const replacement = `${childFile}.replacement`;
     await writeFile(replacement, await readFile(childFile));
@@ -2745,6 +2751,67 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       "validated-child-session", admission.path, slot.id, process!.processId, runId,
       undefined, undefined, admission.fileIdentity,
     )).rejects.toMatchObject({ code: "conflict", retryable: true });
+  });
+
+  it("separates a workflow producer identity from its fresh child-run path owner", async () => {
+    const fixture = await coldFixture("validated-workflow-child-owner");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const parentFile = slot.sessionFile!;
+    const rootRunId = "workflow-root";
+    const childRunId = "workflow-child-run";
+    const producerId = "workflow-key";
+    const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), childRunId, "run-0");
+    await mkdir(childDirectory, { recursive: true });
+    const childManager = SessionManager.create(fixture.cwd, childDirectory, { id: "workflow-child-session" });
+    childManager.appendMessage(fauxAssistantMessage("workflow child transcript"));
+    const childFile = join(childDirectory, "session.jsonl");
+    await rename(childManager.getSessionFile()!, childFile);
+    const startedAt = new Date(Date.now() - 1_000).toISOString();
+    const activity: ExtensionRunActivity = {
+      id: "workflow-tool", activityId: "workflow-activity", runId: rootRunId, toolCallId: "workflow-tool",
+      source: { source: "pi-subagents" }, title: "Subagents", mode: "workflow", status: "running",
+      startedAt, updatedAt: startedAt,
+      children: [{ id: producerId, producerId, label: "worker", status: "running", lifecycle: "running" }],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
+    };
+    const internal = slot as unknown as {
+      attachChildSessionReferences: (activity: ExtensionRunActivity, value: unknown, strategy: "piArtifact") => ExtensionRunActivity;
+      syncSubagentProcesses: (activity: ExtensionRunActivity) => void;
+    };
+    const attached = internal.attachChildSessionReferences(activity, {
+      runId: rootRunId,
+      steps: [{ workflowKey: producerId, runId: childRunId, agent: "worker", status: "running", sessionFile: childFile }],
+    }, "piArtifact");
+    internal.syncSubagentProcesses(attached);
+    const process = slot.snapshot().processActivities?.find((candidate) => candidate.kind === "subagent");
+    expect(process).toMatchObject({ childSessionRef: "workflow-child-session" });
+    expect(slot.processChildSessionBinding(process!.processId)).toMatchObject({
+      ref: "workflow-child-session", producerId, sessionOwnerId: childRunId, runId: rootRunId,
+    });
+    expect((await fixture.registry.readOnlySubagentTranscriptPage(
+      "workflow-child-session", await realpath(childFile), slot.id, process!.processId, rootRunId,
+    )).total).toBeGreaterThan(0);
+  });
+
+  it("fails closed when one child session ref has conflicting process producers", async () => {
+    const fixture = await coldFixture("ambiguous-child-producers");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const startedAt = new Date(Date.now() - 1_000).toISOString();
+    const activity: ExtensionRunActivity = {
+      id: "ambiguous-tool", activityId: "ambiguous-activity", runId: "ambiguous-run", toolCallId: "ambiguous-tool",
+      source: { source: "pi-subagents" }, title: "Subagents", mode: "workflow", status: "running",
+      startedAt, updatedAt: startedAt,
+      children: ["first", "second"].map((producerId) => ({
+        id: producerId, producerId, label: producerId, status: "running" as const,
+        lifecycle: "running" as const, childSessionRef: "same-child-session",
+      })),
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
+    };
+    const internal = slot as unknown as { syncSubagentProcesses: (activity: ExtensionRunActivity) => void };
+    internal.syncSubagentProcesses(activity);
+    const processes = slot.snapshot().processActivities?.filter((candidate) => candidate.kind === "subagent") ?? [];
+    expect(processes).toHaveLength(2);
+    expect(processes.every((process) => slot.processChildSessionBinding(process.processId) === undefined)).toBe(true);
   });
 
   it("admits a fork-context transcript only from its artifact child identity and mounted parent", async () => {
@@ -2788,6 +2855,63 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     );
     expect((await fixture.registry.readOnlySubagentTranscriptPage(
       fork.getSessionId(), admission.path, slot.id, process!.processId, "fork-run",
+    )).total).toBeGreaterThan(0);
+  });
+
+  it("binds the canonical single-run fork step before and after terminal persistence", async () => {
+    const fixture = await coldFixture("validated-single-fork-context");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const parentFile = slot.sessionFile!;
+    const forksDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), "forks");
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "single-run");
+    await Promise.all([mkdir(forksDirectory, { recursive: true }), mkdir(asyncDir, { recursive: true })]);
+    const fork = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
+    fork.appendMessage(fauxAssistantMessage("single fork transcript"));
+    const forkFile = fork.getSessionFile()!;
+    const started = Date.now() - 1_000;
+    const startedAt = new Date(started).toISOString();
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
+      refreshExtensionActivityFromArtifact: (toolCallId: string, asyncDir: string) => Promise<void>;
+    };
+    internal.extensionActivities.set("single-tool", {
+      id: "single-tool", activityId: "single-activity", runId: "single-run", toolCallId: "single-tool",
+      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      startedAt, updatedAt: startedAt, children: [],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
+    });
+    internal.extensionRunOwnership.set("single-run", { toolCallId: "single-tool", asyncDir, terminal: false });
+    const statusPath = join(asyncDir, "status.json");
+    await writeFile(statusPath, JSON.stringify({
+      runId: "single-run", state: "running", startedAt: started, lastUpdate: started + 500,
+      mode: "single",
+      steps: [{ agent: "worker", status: "running", sessionFile: forkFile }],
+    }));
+
+    await internal.refreshExtensionActivityFromArtifact("single-tool", asyncDir);
+    const active = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
+    expect(active).toMatchObject({ source: "delegatedAgent", childSessionRef: fork.getSessionId(), visibility: "active" });
+    expect(slot.processChildSessionPath(active!.processId)).toEqual({
+      ref: fork.getSessionId(), producerId: "step:0", runId: "single-run", path: await realpath(forkFile),
+    });
+
+    await writeFile(statusPath, JSON.stringify({
+      runId: "single-run", state: "complete", startedAt: started, endedAt: started + 700, lastUpdate: started + 800,
+      mode: "single",
+      steps: [{ agent: "worker", status: "complete", sessionFile: forkFile }],
+    }));
+    await internal.refreshExtensionActivityFromArtifact("single-tool", asyncDir);
+    const recent = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
+    expect(recent).toMatchObject({
+      processId: active!.processId,
+      source: "delegatedAgent",
+      childSessionRef: fork.getSessionId(),
+      visibility: "recent",
+      lifecycle: { state: "completed" },
+    });
+    expect((await fixture.registry.readOnlySubagentTranscriptPage(
+      fork.getSessionId(), (await realpath(forkFile)), slot.id, recent!.processId, "single-run",
     )).total).toBeGreaterThan(0);
   });
 

@@ -227,6 +227,7 @@ describe("Gateway administrative restart", () => {
       grantId: `grant-${commandId}`,
       secret: "s".repeat(43),
       previewsEnabled: false,
+      relayOrigin: "https://push.example.test",
     });
 
     const first = gateway.invoke(client, "push.registration.upsert", params("command-one"));

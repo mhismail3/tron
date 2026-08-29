@@ -308,12 +308,48 @@ function progressRecord(value: unknown): Record<string, unknown> | undefined {
   return record(candidate.progress) ?? candidate;
 }
 
+export type ExtensionRunChildIdentityStrategy = "declared" | "piForeground" | "piArtifact";
+
+/** Resolve only producer-authored child identities. The two pi-subagents
+ * strategies are selected by RuntimeSlot after proving the installed extension
+ * owner or its exact owned lifecycle artifact. Array position is never trusted
+ * for a generic extension. */
+export function extensionRunChildProducerId(
+  value: unknown,
+  index: number,
+  depth: number,
+  strategy: ExtensionRunChildIdentityStrategy,
+): string | undefined {
+  const source = record(value);
+  if (!source) return undefined;
+  const progress = progressRecord(source);
+  const declared = text(source.childId ?? progress?.childId, 256);
+  const runIdentity = text(source.runId ?? source.id ?? source.asyncId ?? progress?.runId ?? progress?.id ?? progress?.asyncId, 256);
+  if (strategy === "piArtifact") {
+    const workflowKey = text(source.workflowKey ?? progress?.workflowKey, 256);
+    const artifactRunIdentity = text(source.runId ?? progress?.runId, 256);
+    return declared ?? workflowKey ?? artifactRunIdentity ?? (depth === 0 ? `step:${index}` : undefined);
+  }
+  if (strategy === "piForeground" && depth === 0) {
+    const stableIndex = number(source.index ?? progress?.index) ?? index;
+    return stableIndex >= 0 && stableIndex < MAX_CHILDREN_TOTAL
+      ? `foreground-index:${stableIndex}`
+      : undefined;
+  }
+  const stableIndex = number(source.index ?? progress?.index);
+  return declared ?? runIdentity
+    ?? (stableIndex !== undefined && stableIndex >= 0 && stableIndex < MAX_CHILDREN_TOTAL
+      ? `foreground-index:${stableIndex}`
+      : undefined);
+}
+
 function child(
   value: unknown,
   index: number,
   fallbackStatus: ExtensionRunStatus,
   depth: number,
   budget: { remaining: number },
+  identityStrategy: ExtensionRunChildIdentityStrategy,
 ): ExtensionRunChild | undefined {
   if (budget.remaining <= 0) return undefined;
   budget.remaining -= 1;
@@ -326,7 +362,7 @@ function child(
     : Array.isArray(source.steps) ? source.steps : [];
   const nested = nestedValues
     .slice(0, MAX_CHILDREN)
-    .map((item, nestedIndex) => child(item, nestedIndex, fallbackStatus, depth + 1, budget))
+    .map((item, nestedIndex) => child(item, nestedIndex, fallbackStatus, depth + 1, budget, identityStrategy))
     .filter((item): item is ExtensionRunChild => Boolean(item));
   const childLifecycle = extensionLifecycleState(progress?.state ?? progress?.status ?? source.state ?? source.status,
     fallbackStatus === "failed" ? "failed" : fallbackStatus === "completed" ? "completed" : "running");
@@ -345,15 +381,7 @@ function child(
       ?? source.output
       ?? source.error
   );
-  const stableIndex = number(source.index ?? progress?.index);
-  // Foreground pi-subagents progress has no child run ID until persistence,
-  // but its producer-authored index is stable for the entire tool call. The
-  // process ID also includes the canonical parent toolCallId, so this bounded
-  // identity cannot collide across calls.
-  const producerId = text(source.runId ?? source.id ?? source.asyncId, 256)
-    ?? (stableIndex !== undefined && stableIndex >= 0 && stableIndex < MAX_CHILDREN_TOTAL
-      ? `foreground-index:${stableIndex}`
-      : undefined);
+  const producerId = extensionRunChildProducerId(source, index, depth, identityStrategy);
   return {
     id: producerId ?? `${label}:${index}`,
     ...(producerId ? { producerId } : {}),
@@ -377,6 +405,37 @@ function child(
 function detailsFrom(value: unknown): Record<string, unknown> | undefined {
   const root = record(value);
   return record(root?.details) ?? root;
+}
+
+/** True for the synchronous child/result contract. RuntimeSlot still proves
+ * the installed pi-subagents owner before selecting its positional identity. */
+export function usesForegroundSubagentChildIdentity(
+  value: unknown,
+  options: { allowTerminalResults?: boolean } = {},
+): boolean {
+  const details = detailsFrom(value);
+  if (!details
+    || !["single", "parallel", "chain"].includes(text(details.mode, 32) ?? "")
+    || extensionRunAsyncDir(value) !== undefined) return false;
+  const progress = Array.isArray(details.progress) ? details.progress : [];
+  const results = Array.isArray(details.results) ? details.results : [];
+  const candidates = progress.length > 0 ? progress : results;
+  if (candidates.length === 0 || candidates.length > MAX_CHILDREN) return false;
+  const explicitIndexes: Array<number | undefined> = [];
+  for (const candidate of candidates) {
+    const source = record(candidate);
+    const projected = progressRecord(candidate);
+    if (!source || !projected || !text(projected.agent ?? source.agent, 256)) return false;
+    explicitIndexes.push(number(source.index ?? projected.index));
+  }
+  if (explicitIndexes.some((index) => index !== undefined)) {
+    if (explicitIndexes.some((index) => index === undefined || index < 0 || index >= MAX_CHILDREN_TOTAL)) return false;
+    return new Set(explicitIndexes).size === explicitIndexes.length;
+  }
+  // Terminal foreground results omit index; their bounded producer-owned array
+  // order is the same child order used by live progress for this exact tool.
+  // Running frames never receive this positional exception.
+  return progress.length === 0 && options.allowTerminalResults === true;
 }
 
 /** Exact current foreground pi-subagents progress convention. RuntimeSlot
@@ -474,6 +533,8 @@ export function projectExtensionRunActivity(
     observedAt?: string;
     terminalAt?: string;
     recentUntil?: string;
+    /** Gateway-selected identity contract after extension/artifact ownership proof. */
+    childIdentityStrategy?: ExtensionRunChildIdentityStrategy;
   },
 ): ExtensionRunActivity {
   const details = detailsFrom(value);
@@ -509,9 +570,10 @@ export function projectExtensionRunActivity(
     : terminalStatus
       ?? (priorTerminal ? previous!.status : detachedRun ? "running" : base.status);
   const completedAt = activityStatus === "running" ? undefined : base.completedAt ?? previous?.completedAt;
+  const childBudget = { remaining: MAX_CHILDREN_TOTAL };
   const children = candidates
     .slice(0, MAX_CHILDREN)
-    .map((item, index) => child(item, index, activityStatus, 0, { remaining: MAX_CHILDREN_TOTAL }))
+    .map((item, index) => child(item, index, activityStatus, 0, childBudget, base.childIdentityStrategy ?? "declared"))
     .filter((item): item is ExtensionRunChild => Boolean(item));
   const firstProgress = candidates.length > 0 ? progressRecord(candidates[0]) : undefined;
   // Aggregate fields belong to the lifecycle root. A first child must never

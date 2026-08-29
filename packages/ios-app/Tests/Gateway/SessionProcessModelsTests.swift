@@ -103,6 +103,25 @@ struct SessionProcessModelsTests {
         #expect(SessionProcessProjection.sections([recent, active]).recent.map(\.id) == [recent.id])
     }
 
+    @Test("a mounted aggregate follows only one exact tool and run successor")
+    func mountedAggregateSuccessor() {
+        let selected = makeProcess(sequence: 1)
+        let successor = makeProcess(sequence: 2)
+        let ambiguous = makeProcess(sequence: 3)
+        #expect(SessionProcessProjection.mountedActivity(
+            selected: selected,
+            activities: [selected, successor]
+        )?.processId == selected.processId)
+        #expect(SessionProcessProjection.mountedActivity(
+            selected: selected,
+            activities: [successor]
+        )?.processId == successor.processId)
+        #expect(SessionProcessProjection.mountedActivity(
+            selected: selected,
+            activities: [successor, ambiguous]
+        ) == nil)
+    }
+
     @Test("terminal truth and privacy bounds fail closed")
     func invalidRows() {
         #expect(!SessionProcessAdmissionPolicy.admits(makeProcess(
@@ -280,13 +299,18 @@ struct SessionProcessModelsTests {
         currentPathBasename: String? = nil,
         outputTail: String? = "output"
     ) -> SessionProcessActivity {
-        SessionProcessActivity(
+        let effectiveRecentUntil = recentUntil ?? (
+            terminalAt != nil && (visibility == .recent || visibility == .historical)
+                ? "2026-01-01T00:05:01Z"
+                : nil
+        )
+        return SessionProcessActivity(
             processId: "process-\(sequence)-\(state.rawValue)", kind: .subagent,
             executionMode: .asynchronous, source: .delegatedAgent,
             lifecycle: SessionProcessLifecycle(
                 state: state, sequence: sequence,
                 observedAt: terminalAt ?? "2026-01-01T00:00:02Z",
-                terminalAt: terminalAt, recentUntil: recentUntil
+                terminalAt: terminalAt, recentUntil: effectiveRecentUntil
             ),
             visibility: visibility,
             startedAt: "2026-01-01T00:00:00Z", title: "worker",
