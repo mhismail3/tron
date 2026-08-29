@@ -782,12 +782,22 @@ struct ChatTranscriptGeometry: Equatable {
         let contentBottom = contentHeight + bottomInset
         guard contentBottom.isFinite, offsetY.isFinite else { return false }
         // A visible edge beyond a short content edge is normal bottom-aligned
-        // blank space. Physical tail evidence handles deliberate overshoot.
-        if contentBottom <= containerHeight + 2 { return false }
+        // blank space, but an offset below the legal bottom is impossible and
+        // must not be mistaken for an underflow presentation.
+        let maximumOffset = max(0, contentBottom - containerHeight)
         if let visibleBottomY {
-            return visibleBottomY.isFinite && visibleBottomY > contentBottom + 2
+            guard visibleBottomY.isFinite else { return false }
+            if contentBottom <= containerHeight + 2 {
+                // A short transcript naturally leaves blank space below its
+                // content. An in-bounds visible edge still cannot accompany an
+                // offset below the legal bottom.
+                return visibleBottomY <= contentBottom + 2
+                    && offsetY > maximumOffset + 2
+            }
+            return offsetY > maximumOffset + 2
+                || visibleBottomY > contentBottom + 2
         }
-        return offsetY > contentBottom - containerHeight + 2
+        return offsetY > maximumOffset + 2
     }
     var hasScrollableOverflow: Bool {
         let contentBottom = contentHeight + bottomInset
@@ -809,11 +819,18 @@ struct ChatTranscriptGeometry: Equatable {
         guard isValid else { return false }
         let contentBottom = contentHeight + bottomInset
         guard contentBottom.isFinite, offsetY.isFinite else { return false }
-        if contentBottom <= containerHeight + 2 { return true }
+        let maximumOffset = max(0, contentBottom - containerHeight)
         if let visibleBottomY {
-            return visibleBottomY.isFinite && visibleBottomY <= contentBottom + 2
+            guard visibleBottomY.isFinite else { return false }
+            if contentBottom <= containerHeight + 2 {
+                // Native underflow alignment may expose legal blank space after
+                // the short content edge.
+                return visibleBottomY > contentBottom + 2
+                    || offsetY <= maximumOffset + 2
+            }
+            return offsetY <= maximumOffset + 2
+                && visibleBottomY <= contentBottom + 2
         }
-        let maximumOffset = contentBottom - containerHeight
         return offsetY <= maximumOffset + 2
     }
 

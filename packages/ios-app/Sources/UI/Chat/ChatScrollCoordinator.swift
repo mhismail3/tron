@@ -314,6 +314,7 @@ final class ChatScrollCoordinator {
         // new sample exceeds capacity.
         if renderedID == "transcript-bottom" {
             refreshPhysicalTailEvidence(markerFrame: frame)
+            reconcileRetainedViewport(with: geometry)
         }
         if appliedTargetOrigin == .tailMaterialization,
            (tailMaterialization?.renderedID == renderedID || renderedID == "transcript-bottom") {
@@ -377,6 +378,17 @@ final class ChatScrollCoordinator {
             pinAtTail()
         }
         directPositionOwnership = false
+    }
+
+    /// A mounted projection can change row heights without changing canonical
+    /// identity (for example lifecycle-only, tool, or compaction settlement).
+    /// Rebase all semantic and physical evidence before delayed callbacks from
+    /// the previous tree are allowed to settle a lease.
+    func projectionInstalled() {
+        advanceLayoutEpoch()
+        geometryRevision &+= 1
+        evaluateLayoutRestoreIfReady()
+        evaluatePrependIfReady()
     }
 
     func installedLayoutEpochChanged() {
@@ -464,8 +476,18 @@ final class ChatScrollCoordinator {
 
     private func reconcileRetainedViewport(with current: ChatTranscriptGeometry) {
         guard retainedViewportReconciliationPending, current.isValid else { return }
+        if isUserInteracting || !current.isAtCatchUpBoundary {
+            retainedViewportReconciliationPending = false
+            return
+        }
+        let hasCurrentAlignedTail = physicalTailEvidence.map {
+            $0.presentationEpoch == presentation
+                && $0.layoutEpoch == layoutEpoch
+                && $0.classification == .aligned
+        } == true
+        guard hasCurrentAlignedTail else { return }
         retainedViewportReconciliationPending = false
-        if !isUserInteracting, current.isAtCatchUpBoundary { pinAtTail() }
+        pinAtTail()
     }
 
     func positionOpeningTail(targetRenderedID: String?) async -> Bool {
@@ -686,6 +708,30 @@ final class ChatScrollCoordinator {
     func foregroundViewportBecameActive() {
         guard viewportMode == .pinned, !isUserInteracting else { return }
         retainedViewportReconciliationPending = true
+        if catchUpPhase != .none {
+            // Background suspension can interrupt before command application;
+            // clear the whole catch-up owner so it cannot block later sends.
+            cancelCatchUp(restoringAnchored: false)
+        }
+        // A ScrollPosition target is tied to the old native scroll tree. Retain
+        // pinned intent, but retire that stale lease before the new tree emits
+        // evidence; otherwise it can block repair or replay against a changed
+        // content hierarchy. Detached readers never enter this branch.
+        if command != nil || appliedTargetCommandToken != nil {
+            clearCommand()
+            retireAppliedTargetWithoutCallback()
+            pinnedPositionRevision &+= 1
+        }
+        if physicalTailRepairCommandToken != nil {
+            retireAppliedTargetWithoutCallback()
+            pinnedPositionRevision &+= 1
+        }
+        // Native geometry can remain numerically unchanged while the backing
+        // UIScrollView is rebuilt. Rebase the semantic epoch so the next
+        // marker callback measures the new tree instead of trusting a stale
+        // aligned sample from before suspension.
+        advanceLayoutEpoch()
+        geometryRevision &+= 1
         if openingTailPhase.isActive {
             scheduleOpeningTailFrame()
             return
@@ -1084,9 +1130,15 @@ final class ChatScrollCoordinator {
             && context.targetSample!.frame.minY < geometry.containerHeight
         let underflowLayoutIsInstalled = ChatTranscriptUnderflowLayoutPolicy
             .isPhysicallyInstalled(geometry)
+        // Underflow has legal blank space below its content, so its eager marker
+        // need only be freshly visible in the current layout. Overflow still
+        // requires exact marker alignment. Requiring marker visibility in both
+        // cases prevents a provisional height alone from exposing a blank view.
+        let hasPhysicalTailProof = targetIsVisible
+            && (underflowLayoutIsInstalled || openingTailEvidenceIsAligned)
         let physicallyPositioned = geometry.isPlausibleOpeningViewport
             && geometry.isAtCatchUpBoundary
-            && (underflowLayoutIsInstalled || (targetIsVisible && openingTailEvidenceIsAligned))
+            && hasPhysicalTailProof
         if physicallyPositioned {
             switch openingTailPhase {
             case .positioning(var value):
@@ -1189,13 +1241,14 @@ final class ChatScrollCoordinator {
     private var openingTailViewportIsPhysicallySettled: Bool {
         guard geometry.isPlausibleOpeningViewport,
               geometry.isAtCatchUpBoundary else { return false }
-        if ChatTranscriptUnderflowLayoutPolicy.isPhysicallyInstalled(geometry) {
-            return true
-        }
         guard let sample = openingTailPhase.context?.targetSample,
               sample.layoutEpoch == layoutEpoch else { return false }
-        return openingTailEvidenceIsAligned
-            && sample.frame.maxY > 0 && sample.frame.minY < geometry.containerHeight
+        let targetIsVisible = sample.frame.maxY > 0
+            && sample.frame.minY < geometry.containerHeight
+        let underflowLayoutIsInstalled = ChatTranscriptUnderflowLayoutPolicy
+            .isPhysicallyInstalled(geometry)
+        return targetIsVisible
+            && (underflowLayoutIsInstalled || openingTailEvidenceIsAligned)
     }
 
     private func finishOpeningTailSettlement() {
@@ -1431,7 +1484,14 @@ final class ChatScrollCoordinator {
               targetReleaseToken == nil,
               materialization.requiredLayoutEpoch == nil
                 || materialization.requiredLayoutEpoch == layoutEpoch else { return }
+        guard let physicalEvidence = physicalTailEvidence,
+              physicalEvidence.presentationEpoch == presentation,
+              physicalEvidence.layoutEpoch == layoutEpoch,
+              physicalEvidence.classification == .aligned else { return }
         if let renderedID = materialization.renderedID {
+            // Row and marker callbacks are independent native observations; the
+            // marker may arrive first. Require both fresh samples, not an
+            // artificial ordering between their revisions.
             guard let sample = semanticFrames[renderedID],
                   sample.layoutEpoch == layoutEpoch,
                   sample.revision > (materialization.requiredRevision ?? -1) else { return }
@@ -1547,7 +1607,25 @@ final class ChatScrollCoordinator {
 
     private func advanceLayoutEpoch() {
         layoutEpoch &+= 1
+        // A pending materialization command can outlive a projection install.
+        // Rebase its evidence before application so the command cannot be
+        // permanently rejected as belonging to the prior layout epoch.
+        if command?.origin == .tailMaterialization {
+            tailMaterialization?.requiredLayoutEpoch = layoutEpoch
+            tailMaterialization?.requiredRevision = semanticFrameRevision
+            tailMaterializationEvidenceRevision &+= 1
+        }
         // Materialization leases require evidence from the current layout epoch.
+        if command?.origin == .physicalTailRepair {
+            clearCommand()
+        }
+        if appliedTargetOrigin == .physicalTailRepair {
+            // Projection installation invalidates the native target tree. Retire
+            // the applied repair target atomically so its cancelled acknowledgement
+            // cannot strand ScrollPosition ownership across the new layout.
+            retireAppliedTargetWithoutCallback()
+            pinnedPositionRevision &+= 1
+        }
         if appliedTargetOrigin == .tailMaterialization {
             targetReleaseTask?.cancel()
             targetReleaseTask = nil
@@ -1567,7 +1645,9 @@ final class ChatScrollCoordinator {
         physicalTailRepairIssuedEvidenceRevision = nil
         physicalTailRepairFailedDisplacement = nil
         physicalTailRepairBlockedUntilEvidenceRevision = nil
-        pendingTailMaterialization = nil
+        // Preserve an admitted pending insertion across an epoch change. The
+        // projection reconciliation callback still removes it when its exact
+        // row disappears; dropping it here would strand the active sentinel.
         physicalTailEvidence = nil
         semanticFrames.removeAll(keepingCapacity: true)
     }
@@ -1715,6 +1795,12 @@ final class ChatScrollCoordinator {
                 self.physicalTailRepairFailedDisplacement =
                     self.physicalTailEvidence?.signedDisplacement
                 self.retireAppliedTargetWithoutCallback()
+                // Do not leave a stale target silently owning the ready view.
+                // One target-free pinned revision lets SwiftUI rebase its native
+                // scroll tree; later fresh marker evidence may admit the bounded
+                // repair budget again without creating a command loop.
+                self.retainedViewportReconciliationPending = true
+                self.pinnedPositionRevision &+= 1
                 return
             }
             self.physicalTailRepairCommandToken = nil

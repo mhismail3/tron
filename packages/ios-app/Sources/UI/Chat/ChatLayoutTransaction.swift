@@ -81,6 +81,13 @@ final class ChatLayoutTransaction {
     }
 
     private(set) var generation: Generation?
+    /// Only a completed generation may authorize scroll-lease settlement.
+    /// Abandonment is intentionally observable as a different terminal fact so
+    /// interrupted background/layout work cannot masquerade as success.
+    private(set) var settledGenerationID: Int?
+    private(set) var abandonedGenerationID: Int?
+    private(set) var settlementEventRevision = 0
+    private(set) var pendingSettlementGenerationIDs: [Int] = []
     private var nextGenerationID = 0
     private var keyboardTransition: ChatKeyboardTransition?
     private var reduceMotion = false
@@ -143,13 +150,30 @@ final class ChatLayoutTransaction {
     func abandon() {
         watchdogTask?.cancel()
         watchdogTask = nil
+        if let id = generation?.id { abandonedGenerationID = id }
         generation = nil
+    }
+
+    /// Records every completion in a bounded queue because SwiftUI may coalesce
+    /// multiple observable mutations before delivering an `onChange` callback.
+    func consumeSettlementEvents() -> [Int] {
+        let events = pendingSettlementGenerationIDs
+        pendingSettlementGenerationIDs.removeAll(keepingCapacity: true)
+        return events
     }
 
     private func finish(_ id: Int) {
         guard generation?.id == id else { return }
         watchdogTask?.cancel()
         watchdogTask = nil
+        settledGenerationID = id
+        pendingSettlementGenerationIDs.append(id)
+        if pendingSettlementGenerationIDs.count > 32 {
+            pendingSettlementGenerationIDs.removeFirst(
+                pendingSettlementGenerationIDs.count - 32
+            )
+        }
+        settlementEventRevision &+= 1
         generation = nil
     }
 

@@ -259,8 +259,10 @@ struct ChatView: View {
         .onChange(of: reduceMotion) { _, enabled in
             layoutTransaction.configure(keyboard: keyboardObserver.transition, reduceMotion: enabled)
         }
-        .onChange(of: layoutTransaction.generation?.id) { previous, current in
-            layoutGenerationChanged(previous: previous, current: current)
+        .onChange(of: layoutTransaction.settlementEventRevision) { _, _ in
+            for settledID in layoutTransaction.consumeSettlementEvents() {
+                scrollCoordinator.layoutTransactionSettled(settledID)
+            }
         }
         .onChange(of: scenePhase) { _, current in
             scenePhaseChanged(current)
@@ -320,6 +322,18 @@ struct ChatView: View {
             let projectionLayoutChanged = previousTag.map { previousTag in
                 installed.map { !previousTag.matchesProjectionPayload(of: $0.tag) } ?? true
             } ?? true
+            let physicalProjectionChanged = previousTag.map { previous in
+                guard let installed else { return true }
+                return previous.layoutIdentity != installed.tag.layoutIdentity
+                    || previous.handoffIdentity != installed.tag.handoffIdentity
+            } ?? true
+            if physicalProjectionChanged {
+                // Every mounted tag change that can alter row heights, including
+                // a lifecycle-only or compaction/tool settlement replacement,
+                // invalidates delayed marker callbacks before they can prove the
+                // new physical layout. Authority-only tag changes stay inert.
+                scrollCoordinator.projectionInstalled()
+            }
             if projectionLayoutChanged {
                 scrollCoordinator.installedTranscriptChanged(installed)
             }
@@ -339,11 +353,6 @@ struct ChatView: View {
             transcriptPresentation.handleMemoryPressure()
         }
         .onDisappear(perform: retirePresentation)
-    }
-
-    private func layoutGenerationChanged(previous: Int?, current: Int?) {
-        guard let previous, current == nil else { return }
-        scrollCoordinator.layoutTransactionSettled(previous)
     }
 
     private func scenePhaseChanged(_ current: ScenePhase) {
@@ -1115,7 +1124,15 @@ struct ChatView: View {
             sessionPresentation.modelPresentationGeneration = nil
             transcriptPresentation.reset()
         }
-        let epoch = sessionPresentation.open.begin(retainingVisiblePresentation: retainsVisiblePresentation)
+        // A retained pinned surface must revalidate its native viewport before
+        // becoming visible again. A retained detached reader remains ready and
+        // anchored; it must never be repinned by resume reconciliation.
+        let retainedPinnedRevalidation = retainsVisiblePresentation
+            && scrollCoordinator.viewportMode == .pinned
+        let epoch = sessionPresentation.open.begin(
+            retainingVisiblePresentation: retainsVisiblePresentation
+                && !retainedPinnedRevalidation
+        )
         scrollCoordinator.resetForPresentation(
             epoch,
             retainingVisibleViewport: retainsVisiblePresentation
@@ -1151,11 +1168,42 @@ struct ChatView: View {
             let installed = try await installCurrentTranscriptProjection(
                 presentationGeneration: generation
             )
-            if retainsVisiblePresentation {
+            if retainsVisiblePresentation && !retainedPinnedRevalidation {
                 guard !Task.isCancelled,
                       transcriptProjectionSource == installed.tag,
                       sessionPresentation.open.epoch == epoch,
                       sessionPresentation.open.phase == .ready else {
+                    performanceSignposts.end(interval, result: .discarded, metrics: .none)
+                    await retireOpeningGeneration(
+                        generation,
+                        retainingVisiblePresentation: true
+                    )
+                    return
+                }
+                openedGeneration = nil
+                _ = await completeFirstReadyFrame(interval, epoch: epoch)
+                return
+            }
+            if retainedPinnedRevalidation {
+                guard !Task.isCancelled,
+                      transcriptProjectionSource == installed.tag,
+                      sessionPresentation.open.installAuthoritativeBaseline(
+                          sessionID: sessionID,
+                          epoch: epoch
+                      ) else {
+                    performanceSignposts.end(interval, result: .discarded, metrics: .none)
+                    await retireOpeningGeneration(
+                        generation,
+                        retainingVisiblePresentation: true
+                    )
+                    return
+                }
+                let positioned = await positionLatestTail(
+                    epoch: epoch,
+                    targetRenderedID: physicalOpeningTailID(for: installed)
+                )
+                guard positioned,
+                      revealPositionedTranscript(epoch: epoch) else {
                     performanceSignposts.end(interval, result: .discarded, metrics: .none)
                     await retireOpeningGeneration(
                         generation,
@@ -1255,8 +1303,11 @@ struct ChatView: View {
         if !retainsVisiblePresentation {
             transcriptPresentation.reset()
         }
+        let retainedPinnedRevalidation = retainsVisiblePresentation
+            && scrollCoordinator.viewportMode == .pinned
         let epoch = sessionPresentation.open.begin(
             retainingVisiblePresentation: retainsVisiblePresentation
+                && !retainedPinnedRevalidation
         )
         let interval = performanceSignposts.begin(.firstReadyFrame)
         guard selectedAuthoritativeSnapshot != nil,
@@ -1288,9 +1339,14 @@ struct ChatView: View {
             )
             return
         }
-        guard sessionPresentation.open.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
-            performanceSignposts.end(interval, result: .discarded, metrics: .none)
-            return
+        if !retainsVisiblePresentation || retainedPinnedRevalidation {
+            guard sessionPresentation.open.installAuthoritativeBaseline(
+                sessionID: sessionID,
+                epoch: epoch
+            ) else {
+                performanceSignposts.end(interval, result: .discarded, metrics: .none)
+                return
+            }
         }
         probe.installScrollControls(
             geometry: { previous, current, viewport in
@@ -1390,6 +1446,12 @@ struct ChatView: View {
                 scrollCoordinator.cancel()
             }
         )
+        if retainsVisiblePresentation && !retainedPinnedRevalidation {
+            let presented = await completeFirstReadyFrame(interval, epoch: epoch)
+            if presented { probe.markReady() }
+            probe.recordReadyFrameCompletion()
+            return
+        }
         let positioned = await positionLatestTail(
             epoch: epoch,
             targetRenderedID: physicalOpeningTailID(for: installed)
