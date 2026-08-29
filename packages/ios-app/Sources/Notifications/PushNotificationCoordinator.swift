@@ -11,15 +11,17 @@ enum PushRoute: String, Codable, Sendable {
     case productionSandbox = "production-sandbox"
     case production
 
-    static var current: Self {
-        #if BETA
-        .beta
-        #elseif DEBUG
-        .productionSandbox
-        #else
-        .production
-        #endif
+    /// The route is emitted into the app's Info.plist by the active xcconfig.
+    /// Signed artifact metadata is authoritative; missing or malformed metadata
+    /// fails closed. Passing a bundle is the deterministic test seam.
+    static func current(bundle: Bundle = .main) -> Self? {
+        guard let raw = bundle.object(forInfoDictionaryKey: "TRONPushRoute") as? String else {
+            return nil
+        }
+        return Self(rawValue: raw)
     }
+
+    static var current: Self? { current() }
 }
 
 enum PushReadiness: Equatable, Sendable {
@@ -600,6 +602,9 @@ final class PushNotificationCoordinator {
         if document.appAttestKeyID != nil, document.appAttestKeyRejected == true {
             throw PushRegistrationError.rejected(401)
         }
+        guard let route = PushRoute.current else {
+            throw PushRegistrationError.invalidConfiguration
+        }
         var mode: ProofMode = document.appAttestKeyID == nil ? .attestation : .assertion
         var recoveredInvalidKey = false
         var retryIndex = 0
@@ -635,7 +640,7 @@ final class PushNotificationCoordinator {
                     challenge: challenge.challenge,
                     keyId: try Self.canonicalAppAttestCredentialID(keyID),
                     apnsToken: token,
-                    route: .current,
+                    route: route,
                     bindingHash: bindingHash
                 )
                 let clientDataHash = Data(SHA256.hash(data: try PushWorkerClient.canonicalData(payload)))

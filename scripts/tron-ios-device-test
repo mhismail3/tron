@@ -14,4 +14,31 @@ if [[ "$actual" != "31188" ]]; then
     exit 1
 fi
 
-printf 'tron-ios-device process parsing tests passed\n'
+unset TRON_IOS_SCHEME TRON_IOS_CONFIGURATION
+# shellcheck disable=SC1090
+source "$root_dir/scripts/tron-ios-device"
+[[ "$SCHEME" == "Tron Device" && "$CONFIG" == "LocalDevice" ]] || {
+    echo "device helper defaults are not the canonical install pair" >&2
+    exit 1
+}
+[[ "$PHYSICAL_BUNDLE_ID" == "com.tron.mobile" ]] || {
+    echo "device helper launch identity is not canonical" >&2
+    exit 1
+}
+SCHEME="Tron Fast" CONFIG="ProdDebug" validate_install_pair >/dev/null 2>&1
+[[ "$SCHEME" == "Tron Device" && "$CONFIG" == "LocalDevice" ]] || {
+    echo "legacy safe pair did not map to canonical pair" >&2
+    exit 1
+}
+set +e
+TRON_IOS_SCHEME=Tron TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-device install --no-launch >/tmp/tron-ios-device-reject.$$ 2>&1
+rejected=$?
+set -e
+grep -Fq "use Tron Device + LocalDevice" /tmp/tron-ios-device-reject.$$ || {
+    cat /tmp/tron-ios-device-reject.$$ >&2
+    rm -f /tmp/tron-ios-device-reject.$$
+    exit 1
+}
+rm -f /tmp/tron-ios-device-reject.$$
+[[ "$rejected" -ne 0 ]] || { echo "unsafe legacy pair was accepted" >&2; exit 1; }
+printf 'tron-ios-device defaults, rejection, and process parsing tests passed\n'

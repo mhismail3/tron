@@ -1,5 +1,11 @@
-// Test.xcconfig - Debug settings for the dedicated hosted-test app identity
+// Test.xcconfig - Hosted-test app identity; beta relay route is not a real APNs lane
 #include "Debug.xcconfig"
 
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG BETA HOSTED_TEST
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG HOSTED_TEST
+PRODUCT_BUNDLE_IDENTIFIER = com.tron.mobile.testhost
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIconBeta
+TRON_BUILD_ROLE = hosted-test
+TRON_PUSH_ROUTE = beta
+TRON_PRIVATE_BLUR_ENABLED = NO
+TRON_APNS_ENVIRONMENT = none
+TRON_APP_ATTEST_ENVIRONMENT = none

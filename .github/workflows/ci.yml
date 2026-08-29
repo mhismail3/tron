@@ -36,7 +36,13 @@ jobs:
             packages/mac-app/scripts/test-gateway-payload-verifier.sh \
             packages/mac-app/scripts/test-tron-gateway-launcher.sh \
             packages/mac-app/scripts/package-dmg.sh \
-            packages/ios-app/scripts/test-source-policy.sh
+            packages/ios-app/scripts/test-source-policy.sh \
+            packages/ios-app/scripts/test-build-matrix-policy.sh \
+            packages/ios-app/scripts/test-verify-archive-privacy.sh \
+            packages/ios-app/scripts/verify-archive-privacy.sh \
+            scripts/test-agent-policy.sh \
+            scripts/test-ios-artifact-validator.sh \
+            scripts/tron-ios-device-test
 
   gateway:
     runs-on: macos-15
@@ -71,6 +77,11 @@ jobs:
       - run: scripts/install-ci-tools.sh xcodegen
       - run: scripts/verify-ci-toolchain.sh node ios xcodegen
       - run: packages/ios-app/scripts/test-source-policy.sh
+      - run: packages/ios-app/scripts/test-build-matrix-policy.sh
+      - run: scripts/test-agent-policy.sh
+      - run: scripts/test-ios-artifact-validator.sh
+      - run: packages/ios-app/scripts/test-verify-archive-privacy.sh
+      - run: scripts/tron-ios-device-test
       - run: scripts/ios-ci-test.sh
 
   mac:

@@ -112,15 +112,22 @@ either native build. The Mac Xcode target automatically stages the bundled
 Gateway, its production dependencies, and pinned Node runtimes when the
 payload is missing; a global Pi installation is not required.
 
+The iOS matrix has five configurations: Development for simulator work,
+Test for the isolated hosted test host, LocalDevice for ordinary development
+device installs, DevicePerformance for hosted performance tests, and Release
+for manual archives only. Use `scripts/tron-ios-device` for its safe
+Tron Device + LocalDevice default; signed artifact metadata and entitlements
+are the final push-route and signing authority.
+
 ### Focused native tests
 
 Build for testing once, then use `test-without-building` while iterating:
 
 ```bash
 cd packages/ios-app
-xcodebuild build-for-testing -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+xcodebuild build-for-testing -project TronMobile.xcodeproj -scheme 'Tron Development' \
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/SnapshotCacheTests
 

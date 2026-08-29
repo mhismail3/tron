@@ -37,11 +37,12 @@ xcodegen generate
 log_ci_event ci_started \
   "destination='$destination' parallel_workers=$parallel_workers enumerate_tests=$enumerate_tests"
 start_build="$(date +%s)"
-log_ci_event build_started "scheme=Tron_Beta action=build-for-testing"
+log_ci_event build_started "scheme='Tron Development' action=build-for-testing"
 set +e
 xcodebuild build-for-testing \
   -project TronMobile.xcodeproj \
-  -scheme 'Tron Beta' \
+  -scheme 'Tron Development' \
+  -configuration Test \
   -destination "$destination" \
   -derivedDataPath "$derived_data" \
   -showBuildTimingSummary \
@@ -66,7 +67,8 @@ if [[ "$build_status" -eq 0 ]]; then
     log_ci_event enumeration_started "format=json style=flat"
     xcodebuild test-without-building \
       -project TronMobile.xcodeproj \
-      -scheme 'Tron Beta' \
+      -scheme 'Tron Development' \
+      -configuration Test \
       -destination "$destination" \
       -derivedDataPath "$derived_data" \
       -enumerate-tests \
@@ -82,7 +84,8 @@ if [[ "$build_status" -eq 0 ]]; then
   set +e
   xcodebuild test-without-building \
     -project TronMobile.xcodeproj \
-    -scheme 'Tron Beta' \
+    -scheme 'Tron Development' \
+    -configuration Test \
     -destination "$destination" \
     -derivedDataPath "$derived_data" \
     -resultBundlePath "$result_bundle" \

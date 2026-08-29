@@ -35,6 +35,11 @@ struct PushNotificationCoordinatorTests {
         #expect(PushProductConfiguration.admit(URL(string: "https://bad..example")!) == nil)
     }
 
+    @Test("push routing fails closed when artifact metadata is absent")
+    func missingRouteMetadataFailsClosed() {
+        #expect(PushRoute.current(bundle: Bundle(for: PushFixtureBundleMarker.self)) == nil)
+    }
+
     @Test("registration payload matches the shared cross-runtime canonical fixture")
     func canonicalRegistration() throws {
         let bundle = Bundle(for: PushFixtureBundleMarker.self)

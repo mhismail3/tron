@@ -1,7 +1,6 @@
-// Prod.xcconfig - Release build with production bundle ID
+// Release.xcconfig - Optimized production build
 #include "Base.xcconfig"
 
-// Release settings
 DEBUG_INFORMATION_FORMAT = dwarf-with-dsym
 SWIFT_OPTIMIZATION_LEVEL = -O
 SWIFT_COMPILATION_MODE = wholemodule
@@ -9,6 +8,10 @@ COPY_PHASE_STRIP = NO
 ENABLE_NS_ASSERTIONS = NO
 MTL_ENABLE_DEBUG_INFO = NO
 
-// Production variant
 PRODUCT_BUNDLE_IDENTIFIER = com.tron.mobile
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+TRON_BUILD_ROLE = release
+TRON_PUSH_ROUTE = production
+TRON_PRIVATE_BLUR_ENABLED = NO
+TRON_APNS_ENVIRONMENT = production
+TRON_APP_ATTEST_ENVIRONMENT = production

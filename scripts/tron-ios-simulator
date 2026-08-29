@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reuse one local iPhone simulator and preserve the paired Tron Beta app container.
+# Reuse one local iPhone simulator and preserve the paired Development app container.
 
 set -euo pipefail
 
@@ -9,8 +9,8 @@ STATE_DIR="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}"
 STATE_FILE="$STATE_DIR/ios-simulator-udid"
 SIMULATOR_ID="${TRON_IOS_SIMULATOR_ID:-}"
 SIMULATOR_NAME="${TRON_IOS_SIMULATOR_NAME:-iPhone 17 Pro}"
-DERIVED_DATA="${TRON_IOS_SIMULATOR_DERIVED_DATA:-/tmp/tron-ios-beta-derived}"
-TEST_DERIVED_DATA="${TRON_IOS_TEST_DERIVED_DATA:-/tmp/tron-ios-beta-tests-derived}"
+DERIVED_DATA="${TRON_IOS_SIMULATOR_DERIVED_DATA:-/tmp/tron-ios-development-derived}"
+TEST_DERIVED_DATA="${TRON_IOS_TEST_DERIVED_DATA:-/tmp/tron-ios-tests-derived}"
 BUNDLE_ID="com.tron.mobile.beta"
 
 usage() {
@@ -24,12 +24,12 @@ Usage:
   scripts/tron-ios-simulator iterate [BASE_REF]
 
 Commands:
-  start      Boot the remembered simulator and launch its verified Tron Beta app.
-  install    Build/install Tron Beta without erasing its paired app container.
-  status     Show the remembered simulator and validate its installed Tron Beta app.
+  start      Boot the remembered simulator and launch its verified Tron Development app.
+  install    Build/install Tron Development without erasing its paired app container.
+  status     Show the remembered simulator and validate its installed Tron Development app.
   remember   Save an explicit simulator ID, or the Simulator app's current device.
   check-affected  Run the conservative test selection for changes since BASE_REF.
-  iterate    Run affected tests, then rebuild/install/launch Tron Beta.
+  iterate    Run affected tests, then rebuild/install/launch Tron Development.
 
 Environment overrides:
   TRON_IOS_SIMULATOR_ID            Simulator UUID to use and remember
@@ -38,12 +38,12 @@ Environment overrides:
   TRON_IOS_SIMULATOR_DERIVED_DATA  Stable DerivedData path
   TRON_IOS_TEST_DERIVED_DATA       Separate stable test DerivedData path
 
-This helper intentionally uses the beta bundle ID and never uninstalls or erases
+This helper intentionally uses the Development bundle ID and never uninstalls or erases
 the app. Pairing is stored in that bundle's data container on the remembered
 simulator, so changing simulator UUIDs, bundle IDs, or erasing data requires a
 new pairing. Hosted test actions use a separate app identity and must use a
 disposable simulator for isolation; the launch guard also catches older or
-manual invocations that replaced Beta with a linker-signed XCTest host.
+manual invocations that replaced Development with a linker-signed XCTest host.
 USAGE
 }
 
@@ -112,19 +112,19 @@ boot_simulator() {
     xcrun simctl bootstatus "$simulator_id" -b
 }
 
-launch_beta() {
+launch_development() {
     local simulator_id="$1"
     local installed_identifier
-    installed_identifier="$(installed_beta_code_identifier "$simulator_id" || true)"
+    installed_identifier="$(installed_development_code_identifier "$simulator_id" || true)"
 
     [ "$installed_identifier" = "$BUNDLE_ID" ] \
-        || die "installed Tron Beta artifact has code identifier '${installed_identifier:-missing}' (an XCTest host may have replaced it); run scripts/tron-ios-simulator install"
+        || die "installed Tron Development artifact has code identifier '${installed_identifier:-missing}' (an XCTest host may have replaced it); run scripts/tron-ios-simulator install"
 
     xcrun simctl launch "$simulator_id" "$BUNDLE_ID" >/dev/null \
-        || die "Tron Beta is not installed; run scripts/tron-ios-simulator install"
+        || die "Tron Development is not installed; run scripts/tron-ios-simulator install"
 }
 
-installed_beta_code_identifier() {
+installed_development_code_identifier() {
     local simulator_id="$1"
     local app
     app="$(xcrun simctl get_app_container "$simulator_id" "$BUNDLE_ID" app 2>/dev/null)" \
@@ -133,7 +133,7 @@ installed_beta_code_identifier() {
         | awk -F= '/^Identifier=/{ print $2; exit }'
 }
 
-install_beta() {
+install_development() {
     local simulator_id="$1"
     boot_simulator "$simulator_id"
     (
@@ -141,17 +141,17 @@ install_beta() {
         xcodegen generate
         xcodebuild build \
             -project TronMobile.xcodeproj \
-            -scheme "Tron Beta" \
-            -configuration Beta \
+            -scheme "Tron Development" \
+            -configuration Development \
             -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "$DERIVED_DATA"
     )
 
-    local app="$DERIVED_DATA/Build/Products/Beta-iphonesimulator/TronMobile.app"
+    local app="$DERIVED_DATA/Build/Products/Development-iphonesimulator/TronMobile.app"
     [ -d "$app" ] || die "expected simulator app not found: $app"
     xcrun simctl terminate "$simulator_id" "$BUNDLE_ID" 2>/dev/null || true
     xcrun simctl install "$simulator_id" "$app"
-    launch_beta "$simulator_id"
+    launch_development "$simulator_id"
 }
 
 check_affected() {
@@ -168,13 +168,13 @@ check_affected() {
         xcodegen generate
         xcodebuild build-for-testing \
             -project TronMobile.xcodeproj \
-            -scheme "Tron Beta" \
+            -scheme "Tron Development" \
             -configuration Test \
             -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "$TEST_DERIVED_DATA"
         xcodebuild test-without-building \
             -project TronMobile.xcodeproj \
-            -scheme "Tron Beta" \
+            -scheme "Tron Development" \
             -configuration Test \
             -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "$TEST_DERIVED_DATA" \
@@ -190,18 +190,18 @@ show_status() {
     echo "Remembered simulator: $device_line"
     echo "State file: $STATE_FILE"
     if [[ "$device_line" != *"(Booted)"* ]]; then
-        echo "Tron Beta: validation unavailable while simulator is not booted (run start)"
+        echo "Tron Development: validation unavailable while simulator is not booted (run start)"
         return
     fi
     if xcrun simctl get_app_container "$simulator_id" "$BUNDLE_ID" data >/dev/null 2>&1; then
-        installed_identifier="$(installed_beta_code_identifier "$simulator_id" || true)"
+        installed_identifier="$(installed_development_code_identifier "$simulator_id" || true)"
         if [ "$installed_identifier" = "$BUNDLE_ID" ]; then
-            echo "Tron Beta: installed and verified (pairing container preserved)"
+            echo "Tron Development: installed and verified (pairing container preserved)"
         else
-            echo "Tron Beta: invalid installed artifact (${installed_identifier:-missing}; pairing container preserved — run install)"
+            echo "Tron Development: invalid installed artifact (${installed_identifier:-missing}; pairing container preserved — run install)"
         fi
     else
-        echo "Tron Beta: not installed"
+        echo "Tron Development: not installed"
     fi
 }
 
@@ -210,11 +210,11 @@ case "$command" in
     start)
         simulator_id="$(resolve_simulator_id)"
         boot_simulator "$simulator_id"
-        launch_beta "$simulator_id"
+        launch_development "$simulator_id"
         ;;
     install)
         simulator_id="$(resolve_simulator_id)"
-        install_beta "$simulator_id"
+        install_development "$simulator_id"
         ;;
     status)
         simulator_id="$(resolve_simulator_id)"
@@ -233,7 +233,7 @@ case "$command" in
     iterate)
         simulator_id="$(resolve_simulator_id)"
         check_affected "$simulator_id" "${2:-origin/main}"
-        install_beta "$simulator_id"
+        install_development "$simulator_id"
         ;;
     -h|--help|help)
         usage

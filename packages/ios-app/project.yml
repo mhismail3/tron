@@ -7,6 +7,38 @@ options:
   developmentLanguage: en
   generateEmptyDirectories: false
   createIntermediateGroups: true
+  # XcodeGen materializes empty action nodes for omitted scheme actions. Strip
+  # those nodes after generation so unsafe actions do not exist in Xcode.
+  postGenCommand: |
+    python3 - <<'PY'
+    from pathlib import Path
+    import xml.etree.ElementTree as ET
+
+    scheme_dir = Path("TronMobile.xcodeproj/xcshareddata/xcschemes")
+    expected = {
+        "Tron Development",
+        "Tron Device",
+        "Tron UI Validation",
+        "Tron Device Performance",
+        "Tron Release",
+    }
+    paths = {path.stem: path for path in scheme_dir.glob("*.xcscheme")}
+    if set(paths) != expected:
+        raise SystemExit(f"unexpected generated schemes: {sorted(paths)}")
+    for name, path in paths.items():
+        tree = ET.parse(path)
+        root = tree.getroot()
+        removed = ("TestAction", "LaunchAction") if name == "Tron Release" else (
+            "ProfileAction", "AnalyzeAction", "ArchiveAction"
+        )
+        for tag in removed:
+            node = root.find(tag)
+            if node is None:
+                raise SystemExit(f"{name} is missing generated {tag}")
+            root.remove(node)
+        ET.indent(tree, space="   ")
+        tree.write(path, encoding="UTF-8", xml_declaration=True)
+    PY
 
 packages:
   SwiftTerm:
@@ -14,18 +46,18 @@ packages:
     exactVersion: 1.16.0
 
 configFiles:
-  Beta: Configuration/Beta.xcconfig
-  ProdDebug: Configuration/ProdDebug.xcconfig
-  Prod: Configuration/Prod.xcconfig
+  Development: Configuration/Development.xcconfig
   Test: Configuration/Test.xcconfig
-  DeviceTest: Configuration/DeviceTest.xcconfig
+  LocalDevice: Configuration/LocalDevice.xcconfig
+  DevicePerformance: Configuration/DevicePerformance.xcconfig
+  Release: Configuration/Release.xcconfig
 
 configs:
-  Beta: debug
-  ProdDebug: debug
-  Prod: release
+  Development: debug
   Test: debug
-  DeviceTest: debug
+  LocalDevice: debug
+  DevicePerformance: debug
+  Release: release
 
 settings:
   base:
@@ -62,7 +94,7 @@ targets:
       - name: Validate product push configuration
         basedOnDependencyAnalysis: false
         script: |
-          if [[ "${ACTION:-}" == "install" ]]; then
+          if [[ "${ACTION:-}" == "install" || "${CONFIGURATION:-}" == "Release" ]]; then
             "$SRCROOT/../../scripts/validate-push-service-config.sh" "$SRCROOT/../../config/PushService.xcconfig" >/dev/null
           else
             "$SRCROOT/../../scripts/validate-push-service-config.sh" --allow-empty "$SRCROOT/../../config/PushService.xcconfig" >/dev/null
@@ -80,18 +112,16 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         GENERATE_INFOPLIST_FILE: NO
         SWIFT_EMIT_LOC_STRINGS: YES
-        # CI supplies this indirection only for manually managed App Store
-        # archives so each target resolves its own provisioning profile.
-        TRON_APPSTORE_PROFILE_SPECIFIER: "$(IOS_APP_PROFILE_SPECIFIER)"
+        PROVISIONING_PROFILE_SPECIFIER: "$(IOS_APP_PROFILE_SPECIFIER)"
       configs:
-        Beta:
-          CODE_SIGN_ENTITLEMENTS: TronMobileBeta.entitlements
-        ProdDebug:
-          CODE_SIGN_ENTITLEMENTS: TronMobileProdDebug.entitlements
-        Prod:
-          CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements
-        DeviceTest:
-          CODE_SIGN_ENTITLEMENTS: TronMobileProdDebug.entitlements
+        Development:
+          CODE_SIGN_ENTITLEMENTS: TronMobileDevelopment.entitlements
+        LocalDevice:
+          CODE_SIGN_ENTITLEMENTS: TronMobileLocalDevice.entitlements
+        DevicePerformance:
+          CODE_SIGN_ENTITLEMENTS: TronMobileLocalDevice.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: TronMobileRelease.entitlements
         Test:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.testhost
           CODE_SIGN_ENTITLEMENTS: ""
@@ -106,21 +136,13 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
         INFOPLIST_FILE: ShareExtension/Info.plist
-        CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtension.entitlements
+        CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProduction.entitlements
         GENERATE_INFOPLIST_FILE: NO
-        TRON_APPSTORE_PROFILE_SPECIFIER: "$(IOS_SHARE_PROFILE_SPECIFIER)"
+        PROVISIONING_PROFILE_SPECIFIER: "$(IOS_SHARE_PROFILE_SPECIFIER)"
       configs:
-        Beta:
+        Development:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.beta.ShareExtension
-        ProdDebug:
-          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
-          CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements
-        Prod:
-          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
-          CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements
-        DeviceTest:
-          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
-          CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements
+          CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionDevelopment.entitlements
         Test:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.testhost.ShareExtension
           CODE_SIGN_ENTITLEMENTS: ""
@@ -164,46 +186,31 @@ targets:
         TEST_TARGET_NAME: TronMobile
 
 schemes:
-  Tron:
+  Tron Development:
     build:
       targets:
         TronMobile: all
         TronShareExtension: all
         TronMobileTests: [test]
     run:
-      config: Prod
-      debugEnabled: false
-    # Hosted tests always use the dedicated Test identity. It inherits debug
-    # testability without replacing a paired Beta or production app container.
+      config: Development
     test:
       config: Test
       targets:
         - TronMobileTests
-    profile:
-      config: Prod
-    analyze:
-      config: Prod
-    archive:
-      config: Prod
 
-  Tron Beta:
+  Tron Device:
     build:
       targets:
         TronMobile: all
         TronShareExtension: all
         TronMobileTests: [test]
     run:
-      config: Beta
+      config: LocalDevice
     test:
       config: Test
       targets:
         - TronMobileTests
-    profile:
-      config: Beta
-    analyze:
-      config: Beta
-    archive:
-      config: Beta
 
   Tron UI Validation:
     build:
@@ -212,7 +219,7 @@ schemes:
         TronShareExtension: all
         TronMobileUITests: [test]
     run:
-      config: Beta
+      config: Development
     test:
       config: Test
       environmentVariables:
@@ -221,12 +228,6 @@ schemes:
         TRON_E2E_WORKSPACE: "$(TRON_E2E_WORKSPACE_VALUE)"
       targets:
         - TronMobileUITests
-    profile:
-      config: Beta
-    analyze:
-      config: Beta
-    archive:
-      config: Beta
 
   Tron Device Performance:
     build:
@@ -235,38 +236,22 @@ schemes:
         TronShareExtension: all
         TronMobileTests: [test]
     run:
-      config: DeviceTest
+      config: DevicePerformance
     test:
-      config: DeviceTest
+      config: DevicePerformance
       environmentVariables:
         TRON_PERFORMANCE_BASELINE: "$(TRON_PERFORMANCE_BASELINE_VALUE)"
       targets:
         - TronMobileTests
-    profile:
-      config: DeviceTest
-    analyze:
-      config: DeviceTest
-    # Keep hosted-test compilation out of every archive action.
-    archive:
-      config: Prod
 
-  Tron Fast:
+  Tron Release:
     build:
       targets:
         TronMobile: all
         TronShareExtension: all
-        TronMobileTests: [test]
-    run:
-      config: ProdDebug
-    test:
-      config: Test
-      environmentVariables:
-        TRON_PERFORMANCE_BASELINE: "$(TRON_PERFORMANCE_BASELINE_VALUE)"
-      targets:
-        - TronMobileTests
     profile:
-      config: ProdDebug
+      config: Release
     analyze:
-      config: ProdDebug
+      config: Release
     archive:
-      config: Prod
+      config: Release
