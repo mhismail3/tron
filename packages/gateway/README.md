@@ -899,7 +899,11 @@ array position into ownership.
 For an exact-owned asynchronous pi-subagents artifact, Gateway applies the producer's stable
 child contract: explicit `childId`, then workflow key, then child `runId`, with `step:N` as the
 canonical bounded top-level default. Thus ordinary single/parallel/chain artifacts have an exact child
-row before and after terminal persistence even when a step has no independent run ID. The
+row before and after terminal persistence even when a step has no independent run ID. A single async
+run may reserve its fresh child path under the parent fan-out root rather than its detached async run
+ID. In that shape, Gateway reads the exact-owned private recovery descriptor and accepts its root only
+when descriptor version, source run, exact session file, and fan-out contract all match the live status
+step; a missing, foreign, replaced, or malformed descriptor leaves the transcript unavailable. The
 same producer identity enriches that row with a validated session reference rather than
 re-keying it. Bare launcher acknowledgements remain hidden until the lifecycle artifact
 contains child execution evidence. This keeps the composer activity overview continuous
@@ -950,8 +954,9 @@ Open, page, and invalidation reads each revalidate the exact live parent process
 binding, exact reserved child path, header identity, and original file identity. Fresh children are
 admitted only at `<parent-stem>/<session-owner>/run-N/session.jsonl`, with exactly three relative
 path components. The session owner is separately proven as either the exact root run (ordinary
-single/parallel/chain) or an exact artifact child `runId` (detached workflow child); it is never
-inferred from the process producer. Fork-context children are admitted only at
+single/parallel/chain, including the status-matched private recovery descriptor for a detached single
+run) or an exact artifact child `runId` (detached workflow child); it is never inferred from the path
+or process producer. Fork-context children are admitted only at
 `<parent-stem>/forks/<fork-session>.jsonl` when their header resolves to the mounted parent. In
 both layouts the process producer comes only from the trusted lifecycle identity contract, never
 a filename, name, title, or generic extension array position. Fresh children may omit the parent

@@ -2753,6 +2753,96 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     )).rejects.toMatchObject({ code: "conflict", retryable: true });
   });
 
+  it("binds a live async single child through its exact recovery root owner", async () => {
+    const fixture = await coldFixture("validated-async-single-recovery-owner");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const parentFile = slot.sessionFile!;
+    const asyncRunId = "async-single-run";
+    const rootRunId = "parent-root-run";
+    const toolCallId = "async-single-tool";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", asyncRunId);
+    const childDirectory = join(dirname(parentFile), basename(parentFile, ".jsonl"), rootRunId, "run-0");
+    await Promise.all([mkdir(asyncDir, { recursive: true }), mkdir(childDirectory, { recursive: true })]);
+    const childManager = SessionManager.create(fixture.cwd, childDirectory, { id: "async-single-child-session" });
+    childManager.appendMessage(fauxAssistantMessage("live async single transcript"));
+    const childFile = join(childDirectory, "session.jsonl");
+    await rename(childManager.getSessionFile()!, childFile);
+    const started = Date.now() - 1_000;
+    const startedAt = new Date(started).toISOString();
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
+      refreshExtensionActivityFromArtifact: (toolCallId: string, asyncDir: string) => Promise<void>;
+    };
+    internal.extensionActivities.set(toolCallId, {
+      id: toolCallId, activityId: "async-single-activity", runId: asyncRunId, toolCallId,
+      source: { source: "pi-subagents" }, title: "Subagents", status: "running",
+      startedAt, updatedAt: startedAt, children: [],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
+    });
+    internal.extensionRunOwnership.set(asyncRunId, { toolCallId, asyncDir, terminal: false });
+    const statusPath = join(asyncDir, "status.json");
+    const descriptorPath = join(asyncDir, "recovery-descriptor.json");
+    await writeFile(statusPath, JSON.stringify({
+      lifecycleArtifactVersion: 3,
+      runId: asyncRunId,
+      state: "running",
+      startedAt: started,
+      lastUpdate: started + 500,
+      mode: "single",
+      // A raw status field cannot nominate the fresh path owner; only the
+      // matching private descriptor may produce Gateway-attested evidence.
+      steps: [{ agent: "worker", status: "running", sessionFile: childFile, sessionOwnerId: rootRunId }],
+    }));
+    await writeFile(descriptorPath, JSON.stringify({
+      version: 1,
+      sourceRunId: "foreign-async-run",
+      sessionFile: childFile,
+      runFanoutBudget: { version: 1, rootRunId, directory: "/private/opaque", limit: 64 },
+    }));
+
+    await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
+    const unbound = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
+    expect(unbound).toMatchObject({ source: "delegatedAgent", visibility: "active" });
+    expect(unbound).not.toHaveProperty("childSessionRef");
+    expect(slot.processChildSessionBinding(unbound!.processId)).toBeUndefined();
+
+    // The descriptor is private producer evidence: its exact source run,
+    // session file, and fan-out root must agree before the path owner is used.
+    await writeFile(descriptorPath, JSON.stringify({
+      version: 1,
+      sourceRunId: asyncRunId,
+      sessionFile: childFile,
+      runFanoutBudget: { version: 1, rootRunId, directory: "/private/opaque", limit: 64 },
+    }));
+    await writeFile(statusPath, JSON.stringify({
+      lifecycleArtifactVersion: 3,
+      runId: asyncRunId,
+      state: "running",
+      startedAt: started,
+      lastUpdate: started + 700,
+      mode: "single",
+      steps: [{ agent: "worker", status: "running", sessionFile: childFile }],
+    }));
+    await internal.refreshExtensionActivityFromArtifact(toolCallId, asyncDir);
+
+    const bound = slot.snapshot().processActivities?.find((activity) => activity.kind === "subagent");
+    expect(bound).toMatchObject({
+      processId: unbound!.processId,
+      childSessionRef: "async-single-child-session",
+      visibility: "active",
+    });
+    expect(slot.processChildSessionBinding(bound!.processId)).toMatchObject({
+      ref: "async-single-child-session",
+      producerId: "step:0",
+      sessionOwnerId: rootRunId,
+      runId: asyncRunId,
+    });
+    expect((await fixture.registry.readOnlySubagentTranscriptPage(
+      "async-single-child-session", await realpath(childFile), slot.id, bound!.processId, asyncRunId,
+    )).total).toBeGreaterThan(0);
+  });
+
   it("separates a workflow producer identity from its fresh child-run path owner", async () => {
     const fixture = await coldFixture("validated-workflow-child-owner");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());

@@ -135,6 +135,7 @@ const STREAMING_PROGRESS_FLUSH_MS = 150;
 const DEFAULT_RUNTIME_DISPOSAL_GRACE_MS = 5_000;
 const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
 const MAX_VALIDATED_CHILD_SESSION_PATHS = 2_048;
+const RECOVERY_SESSION_OWNER = Symbol("recovery-session-owner");
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 const MAX_EXTENSION_EVENT_TAIL_BYTES = 64 * 1_024;
 const MAX_EXTENSION_EVENT_LINES = 256;
@@ -954,7 +955,10 @@ export class RuntimeSlot {
         ? record.progress as Record<string, unknown> : undefined;
       const childDepth = Math.max(0, depth - 1);
       const producerId = extensionRunChildProducerId(record, index, childDepth, identityStrategy);
-      const sessionOwnerId = [record.runId, progress?.runId]
+      const recoverySessionOwner = identityStrategy === "piArtifact"
+        ? (record as Record<PropertyKey, unknown>)[RECOVERY_SESSION_OWNER]
+        : undefined;
+      const sessionOwnerId = [recoverySessionOwner, record.runId, progress?.runId]
         .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
       const rawLabel = [progress?.agent, record.agent]
         .find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim();
@@ -2393,7 +2397,7 @@ export class RuntimeSlot {
   private extensionArtifactPathAllowed(asyncPath: string): boolean {
     if (!isAbsolute(asyncPath)) return false;
     // Do not normalize away traversal before applying the allowlist. The only
-    // accepted inputs are the run directory or its direct status/events file.
+    // accepted inputs are the run directory or its direct lifecycle contract files.
     const lexicalParts = asyncPath.split(/[\\/]/u).filter(Boolean);
     if (lexicalParts.some((part) => part === "." || part === "..")) return false;
     const canonicalRoot = (value: string): string => {
@@ -2408,7 +2412,8 @@ export class RuntimeSlot {
         && temporaryParts.length >= 3
         && temporaryParts.length <= 4
         && temporaryParts[2] !== ""
-        && (temporaryParts.length === 3 || temporaryParts[3] === "status.json" || temporaryParts[3] === "events.jsonl");
+        && (temporaryParts.length === 3 || temporaryParts[3] === "status.json"
+          || temporaryParts[3] === "events.jsonl" || temporaryParts[3] === "recovery-descriptor.json");
       if (temporaryRun) return true;
 
       const projectRelative = relative(projectRoot, value);
@@ -2418,7 +2423,8 @@ export class RuntimeSlot {
       return projectParts.length >= 1
         && projectParts.length <= 2
         && projectParts[0] !== ""
-        && (projectParts.length === 1 || projectParts[1] === "status.json" || projectParts[1] === "events.jsonl");
+        && (projectParts.length === 1 || projectParts[1] === "status.json"
+          || projectParts[1] === "events.jsonl" || projectParts[1] === "recovery-descriptor.json");
     };
     const candidate = resolve(asyncPath);
     // Validate the canonical target. The lexical segment check above rejects
@@ -2453,7 +2459,7 @@ export class RuntimeSlot {
 
   private async openOwnedExtensionArtifact(
     asyncDir: string,
-    name: "status.json" | "events.jsonl",
+    name: "status.json" | "events.jsonl" | "recovery-descriptor.json",
     expectedDirectory?: ExtensionArtifactDirectoryIdentity,
   ): Promise<OpenedExtensionArtifact | undefined> {
     const canonicalAsyncDir = realpathSync(asyncDir);
@@ -2498,7 +2504,58 @@ export class RuntimeSlot {
         );
       }
       const parsed: unknown = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
-      return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+      return this.attachRecoverySessionOwner(asyncDir, parsed as Record<string, unknown>, opened.directory);
+    } finally {
+      await opened.handle.close();
+    }
+  }
+
+  /** Async single-run status steps intentionally keep the stable child producer
+   * positional, while their fresh session directory is reserved by the root
+   * fan-out run. The exact-owned private recovery descriptor is the producer's
+   * canonical bridge between those identities; neither the path segment nor a
+   * presentation field may nominate the owner. */
+  private async attachRecoverySessionOwner(
+    asyncDir: string,
+    status: Record<string, unknown>,
+    directoryIdentity: ExtensionArtifactDirectoryIdentity,
+  ): Promise<Record<string, unknown>> {
+    if (status.mode !== "single" || typeof status.runId !== "string" || !status.runId
+      || Buffer.byteLength(status.runId) > 256 || /[\\/\0]/u.test(status.runId)
+      || !Array.isArray(status.steps) || status.steps.length !== 1) return status;
+    const step = status.steps[0];
+    if (!step || typeof step !== "object" || Array.isArray(step)) return status;
+    const stepRecord = step as Record<string, unknown>;
+    const sessionFile = typeof stepRecord.sessionFile === "string" ? stepRecord.sessionFile : undefined;
+    if (!sessionFile || !isAbsolute(sessionFile)) return status;
+    const opened = await this.openOwnedExtensionArtifact(
+      asyncDir,
+      "recovery-descriptor.json",
+      directoryIdentity,
+    ).catch(() => undefined);
+    if (!opened) return status;
+    try {
+      const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
+      const { bytesRead } = await opened.handle.read(buffer, 0, buffer.length, 0);
+      if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) return status;
+      const parsed: unknown = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return status;
+      const descriptor = parsed as Record<string, unknown>;
+      const budget = descriptor.runFanoutBudget;
+      if (descriptor.version !== 1 || descriptor.sourceRunId !== status.runId
+        || descriptor.sessionFile !== sessionFile
+        || !budget || typeof budget !== "object" || Array.isArray(budget)) return status;
+      const budgetRecord = budget as Record<string, unknown>;
+      const sessionOwnerId = budgetRecord.rootRunId;
+      if (budgetRecord.version !== 1 || typeof sessionOwnerId !== "string" || !sessionOwnerId
+        || Buffer.byteLength(sessionOwnerId) > 256 || /[\\/\0]/u.test(sessionOwnerId)) return status;
+      return {
+        ...status,
+        steps: [{ ...stepRecord, [RECOVERY_SESSION_OWNER]: sessionOwnerId }],
+      };
+    } catch {
+      return status;
     } finally {
       await opened.handle.close();
     }
