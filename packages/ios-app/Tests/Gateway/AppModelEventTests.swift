@@ -599,6 +599,56 @@ struct AppModelEventTests {
         #expect(model.sessions.first?.firstMessage == "Original")
     }
 
+    @Test("alternating active summaries update rows without changing their order")
+    func activeDashboardOrderIsStable() async {
+        let model = AppModel()
+        model.sessions = [
+            SessionSummary(
+                id: "older-active", name: "Older", cwd: "/workspace", parentSessionId: nil,
+                createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:10:00Z",
+                activeSince: "2026-01-01T00:00:00Z", messageCount: 1,
+                firstMessage: "Older", phase: .running, summaryRevision: 1
+            ),
+            SessionSummary(
+                id: "newer-active", name: "Newer", cwd: "/workspace", parentSessionId: nil,
+                createdAt: "2026-01-01T00:05:00Z", updatedAt: "2026-01-01T00:09:00Z",
+                activeSince: "2026-01-01T00:05:00Z", messageCount: 1,
+                firstMessage: "Newer", phase: .running, summaryRevision: 1
+            ),
+        ]
+        #expect(model.visibleSessions.map(\.id) == ["newer-active", "older-active"])
+
+        for (sessionID, revision, timestamp) in [
+            ("older-active", 2, "2026-01-01T00:20:00Z"),
+            ("newer-active", 2, "2026-01-01T00:21:00Z"),
+            ("older-active", 3, "2026-01-01T00:22:00Z"),
+        ] {
+            await model.handle(GatewayEvent(
+                type: "event", topic: "session.summary", sessionId: nil,
+                payload: .object([
+                    "sessionId": .string(sessionID), "summaryRevision": .number(Double(revision)),
+                    "phase": .string("running"),
+                    "updatedAt": .string(timestamp),
+                    "activeSince": .string(sessionID == "older-active"
+                        ? "2026-01-01T00:00:00Z"
+                        : "2026-01-01T00:05:00Z"),
+                    "messageCount": .number(Double(revision)), "firstMessage": .string(sessionID),
+                ])
+            ))
+            #expect(model.visibleSessions.map(\.id) == ["newer-active", "older-active"])
+        }
+
+        await model.handle(GatewayEvent(
+            type: "event", topic: "session.summary", sessionId: nil,
+            payload: .object([
+                "sessionId": .string("newer-active"), "summaryRevision": .number(3),
+                "phase": .string("idle"), "updatedAt": .string("2026-01-01T00:23:00Z"),
+                "messageCount": .number(3), "firstMessage": .string("newer-active"),
+            ])
+        ))
+        #expect(model.visibleSessions.map(\.id) == ["older-active", "newer-active"])
+    }
+
     @Test("disconnect marks dashboard activity as resuming without fabricating interruption")
     func disconnectClearsLiveDashboardPhase() async {
         let model = AppModel()

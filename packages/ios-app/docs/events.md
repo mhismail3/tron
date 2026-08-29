@@ -35,7 +35,10 @@ admits and reduces mounted-session topics:
   known dashboard rows synchronously without subscribing every device to every transcript or
   issuing a list request. A summary makes only that row live before full catalog completion;
   unknown summaries request discovery without fabricating a row. The same row projection carries
-  Gateway-canonical completion/read-through attention. A final prompt response becomes unread only
+  Gateway-canonical completion/read-through attention. Its additive `activeSince` remains fixed for one
+  continuous active period, so live `updatedAt` progress and heartbeat updates refresh row content
+  without repeatedly reordering concurrent work; older Gateways fall back to stable profile-qualified
+  identity for active-row ties. A final prompt response becomes unread only
   at truthful settlement; opening acknowledges only the completion revision installed by that
   exact presentation/connection owner, transient retries retain the same absolute revision, and
   explicit Mark Read/Unread mutations use command receipts. Cached rows may show

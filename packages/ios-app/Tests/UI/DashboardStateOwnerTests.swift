@@ -588,7 +588,13 @@ struct DashboardStateOwnerTests {
         var owner = SessionCatalogCoordinator()
         let first = owner.beginLoad()
         let firstPublished = owner.publishAuthoritative([summary(revision: 1)], admission: first)
-        let updated = owner.apply(update(revision: 3, phase: .running, completionRevision: 2, isUnread: true))
+        let updated = owner.apply(update(
+            revision: 3,
+            phase: .running,
+            activeSince: "2026-01-01T00:00:00Z",
+            completionRevision: 2,
+            isUnread: true
+        ))
         let stale = owner.apply(update(revision: 2, phase: .idle))
         #expect(firstPublished)
         #expect(updated == .updated)
@@ -599,6 +605,7 @@ struct DashboardStateOwnerTests {
         #expect(refreshed)
         #expect(owner.sessions.first?.summaryRevision == 3)
         #expect(owner.sessions.first?.phase == .running)
+        #expect(owner.sessions.first?.activeSince == "2026-01-01T00:00:00Z")
         #expect(owner.sessions.first?.completionRevision == 2)
         #expect(owner.sessions.first?.isUnread == true)
     }
@@ -750,6 +757,7 @@ struct DashboardStateOwnerTests {
     private func update(
         revision: Int,
         phase: SessionPhase,
+        activeSince: String? = nil,
         completionRevision: Int = 0,
         isUnread: Bool = false
     ) -> SessionSummaryUpdate {
@@ -759,6 +767,7 @@ struct DashboardStateOwnerTests {
             phase: phase,
             name: "Updated",
             updatedAt: "2026-01-01T00:00:01Z",
+            activeSince: activeSince,
             messageCount: revision,
             firstMessage: "Updated",
             completionRevision: completionRevision,

@@ -33,7 +33,7 @@ struct SnapshotCacheTests {
         let summary = SessionSummary(
             id: "session", name: nil, cwd: "/workspace", parentSessionId: nil,
             createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
-            messageCount: 0, firstMessage: "", phase: .running
+            activeSince: "2026-01-01T00:00:00Z", messageCount: 0, firstMessage: "", phase: .running
         )
         await cache.save(profileID: "profile", sessions: [summary])
         let file = try #require(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first)
@@ -51,6 +51,7 @@ struct SnapshotCacheTests {
         try legacyData.write(to: file, options: .atomic)
         let loaded = await cache.load(profileID: "profile")
         #expect(loaded.sessions.map(\.id) == [summary.id])
+        #expect(loaded.sessions.first?.activeSince == summary.activeSince)
         let events = signposts.events()
         #expect(events.count == 4)
         #expect(events[0] == .begin(.cacheSave))

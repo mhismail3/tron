@@ -9,6 +9,7 @@ struct SessionSummaryPresentationTests {
         kind: SessionSummary.Kind = .user,
         parent: String? = nil,
         updatedAt: String = "2026-01-01T00:00:00Z",
+        activeSince: String? = nil,
         phase: SessionPhase = .idle
     ) -> SessionSummary {
         SessionSummary(
@@ -19,6 +20,7 @@ struct SessionSummaryPresentationTests {
             parentSessionId: parent,
             createdAt: updatedAt,
             updatedAt: updatedAt,
+            activeSince: activeSince,
             messageCount: 1,
             firstMessage: id,
             phase: phase
@@ -50,8 +52,47 @@ struct SessionSummaryPresentationTests {
         let laterFraction = session("fraction", updatedAt: "2026-01-01T00:00:00.900Z")
         let equivalentFraction = session("equivalent", updatedAt: "2026-01-01T00:00:00.000Z")
 
-        #expect(SessionSummary.orderedByRecency([wholeSecond, laterFraction]).map(\.id) == ["fraction", "whole"])
-        #expect(SessionSummary.orderedByRecency([wholeSecond, equivalentFraction]).map(\.id) == ["equivalent", "whole"])
+        #expect(SessionSummary.orderedForDashboard([wholeSecond, laterFraction]).map(\.id) == ["fraction", "whole"])
+        #expect(SessionSummary.orderedForDashboard([wholeSecond, equivalentFraction]).map(\.id) == ["equivalent", "whole"])
+    }
+
+    @Test("active dashboard ordering ignores live timestamp churn")
+    func activeOrderingStability() {
+        let olderActive = session(
+            "older-active",
+            updatedAt: "2026-01-01T00:10:30Z",
+            activeSince: "2026-01-01T00:00:00Z",
+            phase: .running
+        )
+        let newerActive = session(
+            "newer-active",
+            updatedAt: "2026-01-01T00:10:20Z",
+            activeSince: "2026-01-01T00:05:00Z",
+            phase: .retrying
+        )
+        let newestHistory = session("history", updatedAt: "2026-01-01T00:11:00Z")
+
+        #expect(SessionSummary.orderedForDashboard([olderActive, newestHistory, newerActive]).map(\.id)
+            == ["newer-active", "older-active", "history"])
+
+        let heartbeat = session(
+            "older-active",
+            updatedAt: "2026-01-01T00:12:00Z",
+            activeSince: olderActive.activeSince,
+            phase: .running
+        )
+        #expect(SessionSummary.orderedForDashboard([heartbeat, newestHistory, newerActive]).map(\.id)
+            == ["newer-active", "older-active", "history"])
+    }
+
+    @Test("rolling-upgrade active rows use stable identity instead of live timestamps")
+    func rollingUpgradeActiveOrdering() {
+        let later = session("z-active", updatedAt: "2026-01-01T00:20:00Z", phase: .running)
+        let earlier = session("a-active", updatedAt: "2026-01-01T00:10:00Z", phase: .running)
+        let advanced = session("z-active", updatedAt: "2026-01-01T00:30:00Z", phase: .running)
+
+        #expect(SessionSummary.orderedForDashboard([later, earlier]).map(\.id) == ["a-active", "z-active"])
+        #expect(SessionSummary.orderedForDashboard([advanced, earlier]).map(\.id) == ["a-active", "z-active"])
     }
 
     @Test("relative activity changes as the dashboard clock advances")

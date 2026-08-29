@@ -57,6 +57,8 @@ export interface SessionSummary {
   parentSessionId?: string;
   createdAt: string;
   updatedAt: string;
+  /** Stable Gateway-observed start of the current active dashboard period. */
+  activeSince?: string;
   messageCount: number;
   firstMessage: string;
   phase: SessionPhase;
@@ -75,6 +77,8 @@ export interface SessionSummaryUpdate {
   phase: SessionPhase;
   name?: string;
   updatedAt: string;
+  /** Stable Gateway-observed start of the current active dashboard period. */
+  activeSince?: string;
   messageCount: number;
   firstMessage: string;
   completionRevision?: number;

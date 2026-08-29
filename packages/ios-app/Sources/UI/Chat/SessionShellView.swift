@@ -563,7 +563,7 @@ struct SessionShellView: View {
     }
 
     private var recentActivityHeader: some View {
-        Text("Recent Activity · newest first")
+        Text("Recent Activity · active first")
             .font(TronTypography.sheetSectionHeader)
             .foregroundStyle(Color.tronEmerald)
             .textCase(nil)
@@ -686,20 +686,11 @@ struct SessionShellView: View {
     }
 
     private var recentSessions: [SessionSummary] {
-        SessionSummary.orderedByRecency(filteredSessions)
+        filteredSessions
     }
 
     private var workspaceGroups: [SessionListWorkspaceGroup] {
         SessionListWorkspaceGroup.groups(from: filteredSessions)
-            .map { group in
-                SessionListWorkspaceGroup(
-                    path: group.path,
-                    name: group.name,
-                    profileID: group.profileID,
-                    profileLabel: group.profileLabel,
-                    sessions: SessionSummary.orderedByRecency(group.sessions)
-                )
-            }
             .sorted {
                 $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending
             }

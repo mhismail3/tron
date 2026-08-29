@@ -16,6 +16,8 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     let parentSessionId: String?
     let createdAt: String
     let updatedAt: String
+    /// Stable Gateway-observed start of the current active dashboard period.
+    let activeSince: String?
     let messageCount: Int
     let firstMessage: String
     let phase: SessionPhase
@@ -29,7 +31,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
 
     init(
         id: String, name: String?, cwd: String, kind: Kind = .user, parentSessionId: String?,
-        createdAt: String, updatedAt: String, messageCount: Int,
+        createdAt: String, updatedAt: String, activeSince: String? = nil, messageCount: Int,
         firstMessage: String, phase: SessionPhase, summaryRevision: Int? = nil,
         completionRevision: Int = 0, attentionRevision: Int = 0, isUnread: Bool = false,
         gatewayProfileID: String? = nil, gatewayProfileLabel: String? = nil
@@ -41,6 +43,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         self.parentSessionId = parentSessionId
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.activeSince = activeSince
         self.messageCount = messageCount
         self.firstMessage = firstMessage
         self.phase = phase
@@ -53,7 +56,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, cwd, kind, parentSessionId, createdAt, updatedAt, messageCount, firstMessage, phase, summaryRevision
+        case id, name, cwd, kind, parentSessionId, createdAt, updatedAt, activeSince, messageCount, firstMessage, phase, summaryRevision
         case completionRevision, attentionRevision, isUnread
     }
 
@@ -66,6 +69,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         parentSessionId = try container.decodeIfPresent(String.self, forKey: .parentSessionId)
         createdAt = try container.decode(String.self, forKey: .createdAt)
         updatedAt = try container.decode(String.self, forKey: .updatedAt)
+        activeSince = try container.decodeIfPresent(String.self, forKey: .activeSince)
         messageCount = try container.decode(Int.self, forKey: .messageCount)
         firstMessage = try container.decode(String.self, forKey: .firstMessage)
         phase = try container.decode(SessionPhase.self, forKey: .phase)
@@ -94,6 +98,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
             parentSessionId: parentSessionId,
             createdAt: createdAt,
             updatedAt: updatedAt,
+            activeSince: activeSince,
             messageCount: messageCount,
             firstMessage: firstMessage,
             phase: phase,
@@ -128,10 +133,18 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         sessions.filter { $0.kind == .user }
     }
 
-    static func orderedByRecency(_ sessions: [SessionSummary]) -> [SessionSummary] {
+    static func orderedForDashboard(_ sessions: [SessionSummary]) -> [SessionSummary] {
         sessions
-            .map { (summary: $0, instant: GatewayTimestamp.parse($0.updatedAt)) }
+            .map { summary in
+                let orderingTimestamp = summary.phase.isActive ? summary.activeSince : summary.updatedAt
+                return (
+                    summary: summary,
+                    active: summary.phase.isActive,
+                    instant: orderingTimestamp.flatMap(GatewayTimestamp.parse)
+                )
+            }
             .sorted { left, right in
+                if left.active != right.active { return left.active }
                 switch (left.instant, right.instant) {
                 case let (leftDate?, rightDate?) where leftDate != rightDate:
                     return leftDate > rightDate
@@ -140,8 +153,9 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
                 case (nil, _?):
                     return false
                 default:
-                    // Equivalent instants may use different ISO precision. Keep
-                    // row order deterministic without treating text shape as chronology.
+                    // Identity deterministically resolves equivalent or invalid
+                    // instants. Older Gateways omit activeSince, so this also
+                    // keeps their active rows stable as live updatedAt advances.
                     return left.summary.dashboardID < right.summary.dashboardID
                 }
             }
@@ -155,6 +169,7 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
     let phase: SessionPhase
     let name: String?
     let updatedAt: String
+    let activeSince: String?
     let messageCount: Int
     let firstMessage: String
     let completionRevision: Int
@@ -163,7 +178,7 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
 
     init(
         sessionId: String, summaryRevision: Int, phase: SessionPhase, name: String?,
-        updatedAt: String, messageCount: Int, firstMessage: String,
+        updatedAt: String, activeSince: String? = nil, messageCount: Int, firstMessage: String,
         completionRevision: Int = 0, attentionRevision: Int = 0, isUnread: Bool = false
     ) {
         self.sessionId = sessionId
@@ -171,6 +186,7 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
         self.phase = phase
         self.name = name
         self.updatedAt = updatedAt
+        self.activeSince = activeSince
         self.messageCount = messageCount
         self.firstMessage = firstMessage
         self.completionRevision = completionRevision
@@ -179,7 +195,7 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case sessionId, summaryRevision, phase, name, updatedAt, messageCount, firstMessage
+        case sessionId, summaryRevision, phase, name, updatedAt, activeSince, messageCount, firstMessage
         case completionRevision, attentionRevision, isUnread
     }
 
@@ -190,6 +206,7 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
         phase = try container.decode(SessionPhase.self, forKey: .phase)
         name = try container.decodeIfPresent(String.self, forKey: .name)
         updatedAt = try container.decode(String.self, forKey: .updatedAt)
+        activeSince = try container.decodeIfPresent(String.self, forKey: .activeSince)
         messageCount = try container.decode(Int.self, forKey: .messageCount)
         firstMessage = try container.decode(String.self, forKey: .firstMessage)
         let decodedCompletionRevision = try container.decodeIfPresent(Int.self, forKey: .completionRevision) ?? 0

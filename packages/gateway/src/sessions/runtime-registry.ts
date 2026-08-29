@@ -74,6 +74,36 @@ function assertProcessSessionRef(value: string): void {
   }
 }
 
+interface DashboardOrderableSession {
+  id: string;
+  phase: SessionSummary["phase"];
+  updatedAt: string;
+  activeSince?: string;
+}
+
+function orderDashboardSessions<T extends DashboardOrderableSession>(sessions: readonly T[]): T[] {
+  const active = (phase: SessionSummary["phase"]) => phase === "running" || phase === "compacting" || phase === "retrying";
+  const compareTimestamp = (left: string | undefined, right: string | undefined): number => {
+    const leftInstant = left === undefined ? Number.NaN : Date.parse(left);
+    const rightInstant = right === undefined ? Number.NaN : Date.parse(right);
+    const leftValid = Number.isFinite(leftInstant);
+    const rightValid = Number.isFinite(rightInstant);
+    if (leftValid && rightValid && leftInstant !== rightInstant) return rightInstant - leftInstant;
+    if (leftValid !== rightValid) return rightValid ? 1 : -1;
+    return 0;
+  };
+  return [...sessions].sort((left, right) => {
+    const leftActive = active(left.phase);
+    const rightActive = active(right.phase);
+    if (leftActive !== rightActive) return leftActive ? -1 : 1;
+    const byTime = compareTimestamp(
+      leftActive ? left.activeSince : left.updatedAt,
+      rightActive ? right.activeSince : right.updatedAt,
+    );
+    return byTime !== 0 ? byTime : left.id.localeCompare(right.id);
+  });
+}
+
 function branchFromParsedSession(entries: FileEntry[]): {
   sessionId: string;
   parentSession?: string;
@@ -290,6 +320,7 @@ interface CatalogPageSeed {
   readonly parentSessionId?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly activeSince?: string;
   readonly messageCount: number;
   readonly firstMessage: string;
   readonly phase: SessionSummary["phase"];
@@ -1908,6 +1939,7 @@ export class RuntimeRegistry {
         ...(parentSessionId ? { parentSessionId } : {}),
         createdAt: session.created.toISOString(),
         updatedAt: latest?.updatedAt ?? session.modified.toISOString(),
+        ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
         messageCount: latest?.messageCount ?? session.messageCount,
         firstMessage: latest?.firstMessage ?? session.firstMessage,
         phase: latest?.phase ?? (this.slots.get(session.id) ? this.slots.get(session.id)!.catalogPhase : this.interrupted.has(session.id) ? "interrupted" : "idle"),
@@ -1926,6 +1958,7 @@ export class RuntimeRegistry {
           kind: "user",
           createdAt: slot.catalogCreatedAt,
           updatedAt: latest?.updatedAt ?? slot.catalogCreatedAt,
+          ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
           messageCount: latest?.messageCount ?? 0,
           firstMessage: latest?.firstMessage ?? "",
           phase: latest?.phase ?? slot.catalogPhase,
@@ -1934,12 +1967,7 @@ export class RuntimeRegistry {
         });
       }
     }
-    return seeds.sort((left, right) => {
-      const l = Date.parse(left.updatedAt); const r = Date.parse(right.updatedAt);
-      if (Number.isFinite(l) && Number.isFinite(r) && l !== r) return r - l;
-      if (Number.isFinite(l) !== Number.isFinite(r)) return Number.isFinite(r) ? 1 : -1;
-      return left.id.localeCompare(right.id);
-    });
+    return orderDashboardSessions(seeds);
   }
 
   private createCatalogPageSource(generation: string, listRevision: number, seeds: readonly CatalogPageSeed[]): CatalogPageSource {
@@ -1951,6 +1979,7 @@ export class RuntimeRegistry {
       + Buffer.byteLength(seed.id) + Buffer.byteLength(seed.cwd) + Buffer.byteLength(seed.kind)
       + Buffer.byteLength(seed.createdAt) + Buffer.byteLength(seed.updatedAt)
       + Buffer.byteLength(seed.firstMessage) + Buffer.byteLength(seed.phase)
+      + (seed.activeSince ? Buffer.byteLength(seed.activeSince) : 0)
       + (seed.name ? Buffer.byteLength(seed.name) : 0)
       + (seed.parentSessionId ? Buffer.byteLength(seed.parentSessionId) : 0)
       // Object/reference, number, and boolean storage for the seed and captured
@@ -1966,6 +1995,7 @@ export class RuntimeRegistry {
         ...(seed.parentSessionId ? { parentSessionId: seed.parentSessionId } : {}),
         createdAt: seed.createdAt,
         updatedAt: seed.updatedAt,
+        ...(seed.activeSince ? { activeSince: seed.activeSince } : {}),
         messageCount: seed.messageCount,
         firstMessage: seed.firstMessage,
         phase: seed.phase,

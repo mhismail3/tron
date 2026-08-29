@@ -1792,7 +1792,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     });
   });
 
-  it("orders catalog summaries by parsed instants across ISO precision", async () => {
+  it("orders history by parsed recency while active heartbeats keep stable positions", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-time-precision-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -1816,6 +1816,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await registry.initialize();
     const internals = registry as unknown as {
       latestSummaries: Map<string, SessionSummaryUpdate>;
+      publishRevisionedSummary: (summary: SessionSummaryUpdate) => void;
     };
     const summary = (sessionId: string, updatedAt: string): SessionSummaryUpdate => ({
       sessionId,
@@ -1835,6 +1836,33 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(catalog.sessions.map((session) => session.id).slice(0, 2)).toEqual([
       fraction.getSessionId(),
       whole.getSessionId(),
+    ]);
+
+    internals.publishRevisionedSummary({
+      ...summary(whole.getSessionId(), "2026-01-01T00:10:00Z"),
+      phase: "running",
+      activeSince: "2026-01-01T00:02:00Z",
+    });
+    internals.publishRevisionedSummary({
+      ...summary(fraction.getSessionId(), "2026-01-01T00:20:00Z"),
+      phase: "running",
+      activeSince: "2026-01-01T00:01:00Z",
+    });
+    const activeCatalog = await registry.catalog("user");
+    expect(activeCatalog.sessions.map((session) => session.id).slice(0, 2)).toEqual([
+      whole.getSessionId(),
+      fraction.getSessionId(),
+    ]);
+
+    internals.publishRevisionedSummary({
+      ...summary(fraction.getSessionId(), "2026-01-01T00:30:00Z"),
+      phase: "running",
+      activeSince: "2026-01-01T00:01:00Z",
+    });
+    const heartbeatCatalog = await registry.catalog("user");
+    expect(heartbeatCatalog.sessions.map((session) => session.id).slice(0, 2)).toEqual([
+      whole.getSessionId(),
+      fraction.getSessionId(),
     ]);
   });
 
@@ -2003,10 +2031,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       expect.objectContaining({ sessionId: second.id, phase: "running" }),
     ]));
     const beforeHeartbeat = summaryUpdates.findLast((update) => update.sessionId === first.id)!;
+    expect(beforeHeartbeat.activeSince).toBeDefined();
     await new Promise((resolve) => setTimeout(resolve, 2));
     (first as unknown as { publishActivityHeartbeat: () => void }).publishActivityHeartbeat();
     const afterHeartbeat = summaryUpdates.findLast((update) => update.sessionId === first.id)!;
     expect(Date.parse(afterHeartbeat.updatedAt)).toBeGreaterThan(Date.parse(beforeHeartbeat.updatedAt));
+    expect(afterHeartbeat.activeSince).toBe(beforeHeartbeat.activeSince);
 
     registry.unsubscribeClient("phone");
     expect(first.isBusy).toBe(true);
@@ -2029,6 +2059,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(summaryUpdates.filter((update) => update.phase === "idle").map((update) => update.sessionId)).toEqual(
       expect.arrayContaining([first.id, second.id]),
     );
+    expect(summaryUpdates.filter((update) => update.phase === "idle").every(
+      (update) => update.activeSince === undefined,
+    )).toBe(true);
   });
 
   it("lets accepted follow-up queue work execute naturally during administrative drain", async () => {
@@ -2215,17 +2248,20 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
 
     const active = fixture.summaries.at(-1)!;
     expect(active).toMatchObject({ sessionId: slot.id, phase: "running" });
+    expect(active.activeSince).toBeDefined();
     expect(Date.parse(active.updatedAt)).toBeGreaterThan(Date.parse(startedAt));
     await new Promise((resolve) => setTimeout(resolve, 2));
     internal.publishActivityHeartbeat();
     const heartbeat = fixture.summaries.at(-1)!;
     expect(Date.parse(heartbeat.updatedAt)).toBeGreaterThan(Date.parse(active.updatedAt));
+    expect(heartbeat.activeSince).toBe(active.activeSince);
     const activeCatalog = await fixture.registry.catalog("user");
     expect(activeCatalog.listRevision).toBe(beforeActivity.listRevision);
     expect(activeCatalog.sessions[0]).toMatchObject({
       id: slot.id,
       phase: "running",
       updatedAt: heartbeat.updatedAt,
+      activeSince: active.activeSince,
     });
 
     const terminalAt = new Date().toISOString();
@@ -2248,6 +2284,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     internal.upsertExtensionActivity(completed);
     internal.publishExtensionActivity(completed);
     expect(fixture.summaries.at(-1)).toMatchObject({ sessionId: slot.id, phase: "idle" });
+    expect(fixture.summaries.at(-1)!.activeSince).toBeUndefined();
     expect(Date.parse(fixture.summaries.at(-1)!.updatedAt))
       .toBeGreaterThanOrEqual(Date.parse(heartbeat.updatedAt));
   });

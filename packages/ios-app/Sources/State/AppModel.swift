@@ -705,7 +705,7 @@ final class AppModel {
         _ = profileRevision
         let projected = dashboardSessionsByProfile.values.flatMap { $0 }
         let values = projected.isEmpty ? sessions : projected
-        return SessionSummary.orderedByRecency(SessionSummary.dashboardSessions(values))
+        return SessionSummary.orderedForDashboard(SessionSummary.dashboardSessions(values))
     }
 
     func dashboardActivity(for sessionID: String) -> DashboardSessionActivity {

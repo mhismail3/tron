@@ -101,7 +101,7 @@ enum DashboardSessionSortMode: String, CaseIterable, Identifiable, Sendable {
     var detail: String {
         switch self {
         case .projectServer: "Group sessions by project folder and server."
-        case .recent: "Show one newest-first list with project and server details."
+        case .recent: "Show active sessions first, then the newest history across servers."
         }
     }
 }
@@ -379,6 +379,7 @@ struct SessionCatalogCoordinator: Equatable {
             parentSessionId: summary.parentSessionId,
             createdAt: summary.createdAt,
             updatedAt: update.updatedAt,
+            activeSince: update.activeSince,
             messageCount: update.messageCount,
             firstMessage: update.firstMessage,
             phase: update.phase,

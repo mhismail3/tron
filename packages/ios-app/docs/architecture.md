@@ -96,7 +96,7 @@ rejects more than 50 pages/25,000 identities, duplicate IDs, cursor cycles, and 
 publishes only a complete catalog. A mixed revision from an older Gateway or an expired continuation lease restarts silently once from a nil
 cursor; it is expected optimistic invalidation, not the former actionable “Sessions changed while loading
 the dashboard” alert. Known revisioned `session.summary` events apply synchronously without a list read,
-and mounted transcript snapshots cannot overwrite those global row fields. Dashboard recency orders parsed Gateway instants with profile-qualified identity as the deterministic tie-breaker, so equivalent whole/fractional ISO representations never become chronology. Visible rows use a 30-second `TimelineView` cadence to age relative labels even when no catalog event occurs; live Gateway summary heartbeats independently advance active foreground and detached-extension timestamps and row order. Completion attention is one
+and mounted transcript snapshots cannot overwrite those global row fields. Dashboard ordering keeps active rows first and uses the Gateway-observed `activeSince` boundary to hold their relative positions while progress and heartbeats continue; settled history orders parsed `updatedAt` instants with profile-qualified identity as the deterministic tie-breaker, so equivalent whole/fractional ISO representations never become chronology. Older Gateways that omit the additive boundary use profile-qualified identity among active rows instead of their volatile live timestamp. Visible rows use a 30-second `TimelineView` cadence to age relative labels even when no catalog event occurs; live Gateway summary heartbeats independently advance active foreground and detached-extension freshness without moving those active rows. Completion attention is one
 of those Gateway-canonical row fields: only final settled prompt responses advance it, Mark Read/Unread
 uses an absolute command-receipt mutation, and a successful open acknowledges only its returned
 completion revision after the snapshot installs. That acknowledgement retries transient failures against
@@ -330,7 +330,8 @@ oversized frames, reconnect, and foreground activation use that same path. Unkno
 still advance the cursor so a newer app can add hints without forcing false gaps.
 Dashboard phase/name/count updates use a separate bounded global `session.summary`
 projection: every connected client sees active/settled rows without subscribing to
-every transcript, while an opened chat receives the full sequenced snapshot and
+every transcript. Its optional `activeSince` is stable for one continuous active period,
+while `updatedAt` remains live freshness; an opened chat receives the full sequenced snapshot and
 stream/tool events. Structure, context, and resource invalidations refresh any
 already-presented History, Fork, Manage Session, or Project Resources surface.
 Global settings, provider/model catalog, package, and custom-model event hints each

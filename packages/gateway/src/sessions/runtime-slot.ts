@@ -374,6 +374,9 @@ export class RuntimeSlot {
    * summaries. It is never written into Pi JSONL; the registry may retain the
    * last published summary for revision continuity until Gateway restart. */
   private latestDashboardActivityAt: string | undefined;
+  /** Stable for one continuous dashboard-active period. Live progress and
+   * heartbeats advance latestDashboardActivityAt without moving the row. */
+  private dashboardActiveSince: string | undefined;
   private summaryContentDirty = true;
   private cachedSummaryContent: {
     name?: string;
@@ -708,6 +711,20 @@ export class RuntimeSlot {
       ? Number.NEGATIVE_INFINITY
       : Date.parse(this.latestDashboardActivityAt);
     if (!Number.isFinite(current) || candidate > current) this.latestDashboardActivityAt = at;
+  }
+
+  private currentDashboardActiveSince(): string | undefined {
+    if (!this.hasCurrentDashboardWork()) {
+      this.dashboardActiveSince = undefined;
+      return undefined;
+    }
+    if (!this.dashboardActiveSince) {
+      const operationStartedAt = this.operation?.startedAt;
+      this.dashboardActiveSince = operationStartedAt && Number.isFinite(Date.parse(operationStartedAt))
+        ? operationStartedAt
+        : this.latestDashboardActivityAt ?? new Date().toISOString();
+    }
+    return this.dashboardActiveSince;
   }
 
   private ensureAgentProjection(): void {
@@ -1607,12 +1624,14 @@ export class RuntimeSlot {
     const updatedAt = Number.isFinite(liveTime) && (!Number.isFinite(canonicalTime) || liveTime > canonicalTime)
       ? this.latestDashboardActivityAt!
       : canonical.updatedAt;
+    const activeSince = this.currentDashboardActiveSince();
     return {
       sessionId: this.id,
       summaryRevision: 0,
       phase: this.dashboardPhase,
       ...canonical,
       updatedAt,
+      ...(activeSince ? { activeSince } : {}),
     };
   }
 
@@ -4117,6 +4136,7 @@ export class RuntimeSlot {
       || summary.phase !== this.lastPublishedSummary.phase
       || summary.name !== this.lastPublishedSummary.name
       || summary.updatedAt !== this.lastPublishedSummary.updatedAt
+      || summary.activeSince !== this.lastPublishedSummary.activeSince
       || summary.messageCount !== this.lastPublishedSummary.messageCount
       || summary.firstMessage !== this.lastPublishedSummary.firstMessage) {
       this.lastPublishedSummary = summary;

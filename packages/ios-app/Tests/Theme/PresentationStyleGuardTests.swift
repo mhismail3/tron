@@ -2475,9 +2475,14 @@ struct PresentationStyleGuardTests {
         #expect(!shell.contains("HistoricalSessionRow(session: session, selected:"))
         #expect(!shell.contains("let selected: Bool"))
         #expect(shell.contains(".foregroundStyle(Color.tronEmerald)"))
+        let appModel = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/AppModel.swift"),
+            encoding: .utf8
+        )
         #expect(shell.contains("TimelineView(.periodic(from: .now, by: DashboardActivityClock.refreshInterval))"))
-        #expect(shell.contains("SessionSummary.orderedByRecency(filteredSessions)"))
-        #expect(shell.contains("SessionSummary.orderedByRecency(group.sessions)"))
+        #expect(shell.contains("Text(\"Recent Activity · active first\")"))
+        #expect(appModel.contains("SessionSummary.orderedForDashboard(SessionSummary.dashboardSessions(values))"))
+        #expect(!shell.contains("orderedByRecency"))
         #expect(!shell.contains("$0.updatedAt > $1.updatedAt"))
     }
 
