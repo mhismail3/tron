@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { SessionEntry, SessionManager, SessionTreeNode as PiSessionTreeNode } from "@earendil-works/pi-coding-agent";
 
-type TranscriptSessionReader = Pick<SessionManager, "getBranch">;
+type TranscriptSessionReader = Pick<SessionManager, "getBranch"> & Partial<Pick<SessionManager, "getSessionId">>;
 
 /**
  * Returns exact tool-call IDs whose results are already owned by the current
@@ -20,11 +20,13 @@ export function canonicalToolResultCallIDs(manager: TranscriptSessionReader): Re
 }
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
+import { trustedExtensionOriginKind } from "../extensions/owner-attribution.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { BlobStore } from "./blob-store.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
-import type { CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, SessionInputMetadata, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
-import { SESSION_INPUT_RECEIPT_TYPE, sessionInputMetadataByEntry } from "./session-input-receipts.js";
+import type { ChatOrigin, ChatSemanticMetadata, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
+import { contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, parseInvocationReceipt, type InvocationProjection } from "./invocation-receipts.js";
 
 const MAX_TEXT = 64_000;
 const MAX_SKILL_INVOCATION_BYTES = 4 * 1_048_576;
@@ -54,8 +56,94 @@ function boundedText(value: string): string {
   return value.length <= MAX_TEXT ? value : `${value.slice(0, MAX_TEXT)}\n… output truncated by gateway`;
 }
 
+function semanticForCustom(
+  display: boolean,
+  contextDelivery?: ContextDeliveryMetadata,
+  sequence = 0,
+): ChatSemanticMetadata {
+  const origin: ChatOrigin = contextDelivery?.origin?.owner
+    ? { kind: trustedExtensionOriginKind(contextDelivery.origin.owner), ownerId: contextDelivery.origin.owner.id, title: contextDelivery.origin.owner.title, confidence: "receipt" }
+    : { kind: "unknown", confidence: "unknown" };
+  return {
+    version: 1,
+    direction: display ? "inboundContext" : "hiddenInternal",
+    contextEffect: display ? "modelInput" : contextDelivery ? "hiddenModelInput" : "none",
+    delivery: contextDelivery?.delivery ?? "stored",
+    visibility: display ? "visible" : "hidden",
+    kind: "message",
+    origin,
+    sequence,
+  };
+}
+
+function semanticForMessage(role: "user" | "assistant" | "toolResult", invocation?: InvocationProjection): ChatSemanticMetadata {
+  const isUser = role === "user";
+  const isTool = role === "toolResult";
+  return {
+    version: 1,
+    direction: isUser ? "inboundContext" : isTool ? "agentInvocation" : "agentOutput",
+    contextEffect: isTool ? "toolResult" : "modelInput",
+    delivery: isTool ? "toolResult" : "stored",
+    visibility: "visible",
+    kind: isTool ? "tool" : "prompt",
+    origin: { kind: isUser ? "user" : isTool ? "assistant" : "assistant", confidence: "boundary" },
+    sequence: 0,
+    ...(invocation?.resourceInvocation ? { resourceInvocation: invocation.resourceInvocation } : {}),
+    ...(invocation ? { invocationId: invocation.invocationId, operationId: invocation.operationId } : {}),
+  };
+}
+
+function semanticForCommand(receipt: ReturnType<typeof parseInvocationReceipt>): ChatSemanticMetadata {
+  return {
+    version: 1,
+    direction: "inboundContext",
+    contextEffect: "none",
+    delivery: "stored",
+    visibility: "visible",
+    kind: "command",
+    origin: receipt?.origin ?? { kind: "extension", confidence: "receipt" },
+    ...(receipt?.invocationId ? { invocationId: receipt.invocationId } : {}),
+    ...(receipt?.operationId ? { operationId: receipt.operationId } : {}),
+    ...(receipt?.lifecycle ? { lifecycle: receipt.lifecycle } : {}),
+    ...(receipt?.name ? {
+      resourceInvocation: {
+        source: "extension",
+        name: receipt.name,
+        arguments: receipt.arguments ?? "",
+      },
+    } : {}),
+    sequence: receipt?.sequence ?? 0,
+  };
+}
+
+function semanticForStatus(sequence = 0): ChatSemanticMetadata {
+  return {
+    version: 1,
+    direction: "ambientStatus",
+    contextEffect: "none",
+    delivery: "stored",
+    visibility: "visible",
+    kind: "status",
+    origin: { kind: "gateway", confidence: "boundary" },
+    sequence,
+  };
+}
+
+function semanticForState(sequence = 0): ChatSemanticMetadata {
+  return {
+    version: 1,
+    direction: "hiddenInternal",
+    contextEffect: "none",
+    delivery: "stored",
+    visibility: "hidden",
+    kind: "state",
+    origin: { kind: "extension", confidence: "unknown" },
+    sequence,
+  };
+}
+
 export interface ProjectedSkillInvocation {
-  skillName: string;
+  resourceName: string;
   text: string;
 }
 
@@ -70,9 +158,9 @@ export function projectSkillInvocation(value: string): ProjectedSkillInvocation 
   const header = value.slice(0, headerEnd + 1);
   const match = /^<skill name="([A-Za-z0-9][A-Za-z0-9._-]*)" location="([^"\r\n]+)">$/.exec(header);
   if (!match) return undefined;
-  const [, skillName, location] = match;
-  if (!skillName || !location
-      || Buffer.byteLength(skillName) > MAX_SKILL_NAME_BYTES
+  const [, resourceName, location] = match;
+  if (!resourceName || !location
+      || Buffer.byteLength(resourceName) > MAX_SKILL_NAME_BYTES
       || Buffer.byteLength(location) > MAX_SKILL_PATH_BYTES) return undefined;
   const bodyStart = headerEnd + 2;
   const referenceEnd = value.indexOf("\n\n", bodyStart);
@@ -87,7 +175,7 @@ export function projectSkillInvocation(value: string): ProjectedSkillInvocation 
   if (closingIndex < referenceEnd + 2) return undefined;
   const tail = value.slice(closingIndex + closing.length);
   if (tail !== "" && !tail.startsWith("\n\n")) return undefined;
-  return { skillName, text: tail === "" ? "" : tail.slice(2) };
+  return { resourceName, text: tail === "" ? "" : tail.slice(2) };
 }
 
 function projectedSkillText(value: string): string {
@@ -853,7 +941,7 @@ export function projectMessage(
   presentationId = id,
   finalizedToolGroups = true,
   toolLabels?: ReadonlyMap<string, string>,
-  sessionInput?: SessionInputMetadata,
+  contextDelivery?: ContextDeliveryMetadata,
   segmentId?: string,
 ): TranscriptItem | undefined {
   switch (message.role) {
@@ -861,6 +949,7 @@ export function projectMessage(
       return {
         id, parentId, timestamp, kind: "message", role: "user", presentationId,
         content: projectContent(projectableUserContent(message.content), blobs, presentationId, true),
+        semantic: semanticForMessage("user"),
       };
     case "assistant":
       return {
@@ -884,6 +973,7 @@ export function projectMessage(
         stopReason: message.stopReason,
         ...(message.errorMessage ? { errorMessage: boundedText(message.errorMessage) } : {}),
         usage: projectJson(message.usage),
+        semantic: semanticForMessage("assistant"),
       };
     case "toolResult":
       return {
@@ -900,6 +990,7 @@ export function projectMessage(
         isError: message.isError,
         ...(message.details === undefined ? {} : { details: projectJson(message.details) }),
         ...(message.usage === undefined ? {} : { usage: projectJson(message.usage) }),
+        semantic: semanticForMessage("toolResult"),
         ...(toolMetadata ? {
           startedAt: toolMetadata.startedAt,
           ...(toolMetadata.completedAt ? { completedAt: toolMetadata.completedAt } : {}),
@@ -933,9 +1024,22 @@ export function projectMessage(
         truncated: message.truncated,
         ...(message.fullOutputPath ? { fullOutputPath: message.fullOutputPath } : {}),
         ...(message.excludeFromContext === undefined ? {} : { excludeFromContext: message.excludeFromContext }),
+        semantic: {
+          version: 1,
+          direction: "agentInvocation",
+          contextEffect: message.excludeFromContext ? "none" : "toolResult",
+          delivery: "toolResult",
+          visibility: "visible",
+          kind: "tool",
+          origin: { kind: "assistant", confidence: "boundary" },
+          sequence: 0,
+        },
       };
     case "custom":
-      if (!message.display && !sessionInput) return undefined;
+      // Producer-hidden custom messages remain context-only. They are
+      // intentionally excluded from the ordinary chat projection; canonical
+      // JSONL and typed receipts retain them for audit/reconciliation.
+      if (!message.display) return undefined;
       return {
         id,
         parentId,
@@ -944,10 +1048,10 @@ export function projectMessage(
         customType: message.customType,
         content: projectContent(message.content, blobs, id),
         ...(message.details === undefined ? {} : { details: projectJson(message.details) }),
-        ...(sessionInput ? { sessionInput } : {}),
+        semantic: semanticForCustom(message.display === true, contextDelivery),
       };
     case "branchSummary":
-      return { id, parentId, timestamp, kind: "branchSummary", summary: boundedText(message.summary) };
+      return { id, parentId, timestamp, kind: "branchSummary", summary: boundedText(message.summary), semantic: semanticForStatus() };
     case "compactionSummary":
       return {
         id,
@@ -956,6 +1060,7 @@ export function projectMessage(
         kind: "compaction",
         summary: boundedText(message.summary),
         tokensBefore: message.tokensBefore,
+        semantic: semanticForStatus(),
       };
     default:
       return undefined;
@@ -968,7 +1073,7 @@ export function projectEntry(
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
   presentationIDs?: ReadonlyMap<string, string>,
   toolLabels?: ReadonlyMap<string, string>,
-  sessionInput?: SessionInputMetadata,
+  contextDelivery?: ContextDeliveryMetadata,
   segmentId?: string,
 ): TranscriptItem | undefined {
   switch (entry.type) {
@@ -983,11 +1088,11 @@ export function projectEntry(
         presentationIDs?.get(entry.id) ?? entry.id,
         entry.message.role === "assistant",
         toolLabels,
-        sessionInput,
+        contextDelivery,
         segmentId,
       );
     case "custom_message":
-      if (!entry.display && !sessionInput) return undefined;
+      if (!entry.display) return undefined;
       return {
         id: entry.id,
         parentId: entry.parentId,
@@ -996,21 +1101,25 @@ export function projectEntry(
         customType: entry.customType,
         content: projectContent(entry.content, blobs, entry.id),
         ...(entry.details === undefined ? {} : { details: projectJson(entry.details) }),
-        ...(sessionInput ? { sessionInput } : {}),
+        semantic: semanticForCustom(entry.display === true, contextDelivery),
       };
-    case "custom":
-      // Canonical lifecycle receipts are session audit facts, not transcript,
-      // tree, or model-visible conversation entries.
-      if (entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE
-          || entry.customType === SESSION_INPUT_RECEIPT_TYPE) return undefined;
+    case "custom": {
+      // Arbitrary extension state and receipt records stay canonical in Pi
+      // JSONL, but never consume a chat transcript/tree row. Only one
+      // validated invocation start is the typed command row; later records
+      // fold into that row by invocation identity.
+      if (entry.customType !== INVOCATION_RECEIPT_TYPE) return undefined;
+      const invocation = parseInvocationReceipt(entry.data);
+      if (!invocation || invocation.receiptKind !== "start" || invocation.source !== "extension") return undefined;
       return {
         id: entry.id,
         parentId: entry.parentId,
         timestamp: entry.timestamp,
         kind: "customEntry",
         customType: entry.customType,
-        ...(entry.data === undefined ? {} : { data: projectJson(entry.data) }),
+        semantic: semanticForCommand(invocation),
       };
+    }
     case "compaction": {
       const presentationId = presentationIDs?.get(entry.id);
       return {
@@ -1024,6 +1133,7 @@ export function projectEntry(
         ...(entry.details === undefined ? {} : { details: projectJson(entry.details) }),
         ...(entry.usage === undefined ? {} : { usage: projectJson(entry.usage) }),
         ...(entry.fromHook === undefined ? {} : { fromHook: entry.fromHook }),
+        semantic: semanticForStatus(),
       };
     }
     case "branch_summary":
@@ -1036,6 +1146,7 @@ export function projectEntry(
         ...(entry.details === undefined ? {} : { details: projectJson(entry.details) }),
         ...(entry.usage === undefined ? {} : { usage: projectJson(entry.usage) }),
         ...(entry.fromHook === undefined ? {} : { fromHook: entry.fromHook }),
+        semantic: semanticForStatus(),
       };
     case "model_change":
       return {
@@ -1044,9 +1155,10 @@ export function projectEntry(
         timestamp: entry.timestamp,
         kind: "modelChange",
         modelRef: { provider: entry.provider, id: entry.modelId },
+        semantic: semanticForStatus(),
       };
     case "thinking_level_change":
-      return { id: entry.id, parentId: entry.parentId, timestamp: entry.timestamp, kind: "thinkingChange", level: entry.thinkingLevel };
+      return { id: entry.id, parentId: entry.parentId, timestamp: entry.timestamp, kind: "thinkingChange", level: entry.thinkingLevel, semantic: semanticForStatus() };
     case "label":
       return {
         id: entry.id,
@@ -1055,6 +1167,7 @@ export function projectEntry(
         kind: "label",
         targetId: entry.targetId,
         ...(entry.label ? { label: entry.label } : {}),
+        semantic: semanticForStatus(),
       };
     case "session_info":
       return undefined;
@@ -1260,9 +1373,9 @@ function projectedTreeNode(
   blobs: BlobStore,
   depth: number,
   currentPath: Set<string>,
-  sessionInput?: SessionInputMetadata,
+  contextDelivery?: ContextDeliveryMetadata,
 ): SessionTreeNode {
-  const item = projectEntry(node.entry, blobs, undefined, undefined, undefined, sessionInput);
+  const item = projectEntry(node.entry, blobs, undefined, undefined, undefined, contextDelivery);
   return {
     id: node.entry.id,
     parentId: node.entry.parentId,
@@ -1305,7 +1418,7 @@ function validateSourceTreeNode(source: PiSessionTreeNode, expectedParentId: str
 export function projectTree(manager: SessionManager, blobs: BlobStore): SessionTreeNode[] {
   const canonicalRoots = manager.getTree();
   const currentPath = new Set(manager.getBranch().map((entry) => entry.id));
-  const sessionInputs = sessionInputMetadataByEntry(manager.getEntries());
+  const contextDelivery = contextDeliveryMetadataByEntry(manager.getEntries());
   const byId = new Map<string, TreeProjectionRef>();
   const seenSourceIDs = new Set<string>();
   const work: Array<{ source: PiSessionTreeNode; depth: number; parentId: string | null }> = [];
@@ -1315,17 +1428,25 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
   while (work.length > 0) {
     const { source, depth, parentId } = work.pop()!;
     validateSourceTreeNode(source, parentId, depth);
+    if (source.entry.type === "custom" && source.entry.customType === INVOCATION_RECEIPT_TYPE
+        && parseInvocationReceipt(source.entry.data) === undefined) {
+      throw new GatewayError("conflict", "Session contains a malformed Gateway invocation receipt");
+    }
     const id = source.entry.id;
     if (seenSourceIDs.has(id)) throw new GatewayError("conflict", "Session tree contains a duplicate canonical entry ID");
     seenSourceIDs.add(id);
-    const isReceipt = source.entry.type === "custom" && (
-      source.entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE
-      || source.entry.customType === SESSION_INPUT_RECEIPT_TYPE
+    const treeInvocation = source.entry.type === "custom"
+      && source.entry.customType === INVOCATION_RECEIPT_TYPE
+      ? parseInvocationReceipt(source.entry.data)
+      : undefined;
+    const isHiddenCanonical = source.entry.type === "custom" && (
+      treeInvocation?.receiptKind !== "start" || treeInvocation.source !== "extension"
     );
-    if (!isReceipt) byId.set(id, { source, depth });
+    if (!isHiddenCanonical) byId.set(id, { source, depth });
+    const childDepth = isHiddenCanonical ? depth : depth + 1;
     // Preserve descendants while omitting reserved audit nodes themselves.
     for (let index = source.children.length - 1; index >= 0; index -= 1) {
-      work.push({ source: source.children[index]!, depth: isReceipt ? depth : depth + 1, parentId: id });
+      work.push({ source: source.children[index]!, depth: childDepth, parentId: id });
     }
   }
 
@@ -1335,9 +1456,11 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
     validateCanonicalEntry(entry);
     if (canonicalEntryIDs.has(entry.id)) throw new GatewayError("conflict", "Session tree contains a duplicate canonical entry ID");
     canonicalEntryIDs.add(entry.id);
+    const entryInvocation = entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
+      ? parseInvocationReceipt(entry.data)
+      : undefined;
     const omittedReceipt = entry.type === "custom" && (
-      entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE
-      || entry.customType === SESSION_INPUT_RECEIPT_TYPE
+      entryInvocation?.receiptKind !== "start" || entryInvocation.source !== "extension"
     );
     if (!omittedReceipt && !byId.has(entry.id)) {
       throw new GatewayError("conflict", "Session tree omits a canonical entry");
@@ -1353,13 +1476,13 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
     const ref = byId.get(entries[index]!.id);
     if (!ref) continue;
     const candidate = projectedTreeNode(
-      ref.source, treeProjectionProbe, ref.depth, currentPath, sessionInputs.get(ref.source.entry.id),
+      ref.source, treeProjectionProbe, ref.depth, currentPath, contextDelivery.get(ref.source.entry.id),
     );
     validateProjectedTreeNode(candidate);
     const nodeBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
     if (bytes + nodeBytes > TREE_PROJECTION_BYTES) break;
     const admitted = projectedTreeNode(
-      ref.source, blobs, ref.depth, currentPath, sessionInputs.get(ref.source.entry.id),
+      ref.source, blobs, ref.depth, currentPath, contextDelivery.get(ref.source.entry.id),
     );
     validateProjectedTreeNode(admitted);
     bytes += Buffer.byteLength(JSON.stringify(admitted)) + 1;
@@ -1378,28 +1501,34 @@ function projectableTranscriptEntries(
   presentationIDs?: ReadonlyMap<string, string>,
 ): {
   entries: SessionEntry[];
-  sessionInputs: ReadonlyMap<string, SessionInputMetadata>;
+  contextDelivery: ReadonlyMap<string, ContextDeliveryMetadata>;
   toolSegmentIDs: ReadonlyMap<string, string>;
 } {
   const branch = manager.getBranch();
-  const sessionInputs = sessionInputMetadataByEntry(branch);
+  const contextDelivery = contextDeliveryMetadataByEntry(branch);
   const entries: SessionEntry[] = [];
   const toolSegmentIDs = new Map<string, string>();
   let ownerId: string | undefined;
   for (const entry of branch) {
+    if (entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
+        && parseInvocationReceipt(entry.data) === undefined) {
+      throw new GatewayError("conflict", "Session contains a malformed Gateway invocation receipt");
+    }
+    const invocation = entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
+      ? parseInvocationReceipt(entry.data)
+      : undefined;
     const projectable = entry.type !== "session_info"
       && !(entry.type === "custom" && (
-        entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE
-        || entry.customType === SESSION_INPUT_RECEIPT_TYPE
+        invocation?.receiptKind !== "start" || invocation.source !== "extension"
       ))
-      && !(entry.type === "custom_message" && !entry.display && !sessionInputs.has(entry.id))
+      && !(entry.type === "custom_message" && !entry.display)
       && !(entry.type === "message" && entry.message.role === "custom"
-        && !entry.message.display && !sessionInputs.has(entry.id));
+        && !entry.message.display);
     if (!projectable) continue;
     entries.push(entry);
 
     const presentationId = presentationIDs?.get(entry.id) ?? entry.id;
-    if (sessionInputs.has(entry.id)) {
+    if (contextDelivery.has(entry.id)) {
       ownerId = presentationId;
       continue;
     }
@@ -1430,7 +1559,13 @@ function projectableTranscriptEntries(
     const lastBarrierIndex = content.findLastIndex((part) => part.type !== "toolCall");
     if (lastToolIndex < 0 || lastBarrierIndex > lastToolIndex) ownerId = undefined;
   }
-  return { entries, sessionInputs, toolSegmentIDs };
+  return { entries, contextDelivery, toolSegmentIDs };
+}
+
+function durableInvocationLifecycle(lifecycle: InvocationProjection["lifecycle"]): InvocationProjection["lifecycle"] {
+  return ["completed", "failed", "interrupted", "outcomeUnknown"].includes(lifecycle)
+    ? lifecycle
+    : "outcomeUnknown";
 }
 
 export function projectTranscript(
@@ -1439,7 +1574,15 @@ export function projectTranscript(
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
   toolLabels?: ReadonlyMap<string, string>,
 ): TranscriptItem[] {
-  const { entries, sessionInputs, toolSegmentIDs } = projectableTranscriptEntries(manager);
+  const { entries, contextDelivery, toolSegmentIDs } = projectableTranscriptEntries(manager);
+  const invocationValues = invocationProjection(invocationReceipts(
+    manager.getBranch(),
+    manager.getSessionId?.(),
+  ));
+  const invocationStates = new Map(invocationValues.map((value) => [value.invocationId, value.lifecycle]));
+  const invocationByCanonicalEntry = new Map(invocationValues
+    .filter(value => value.canonicalEntryId !== undefined)
+    .map(value => [value.canonicalEntryId!, value]));
   return entries.map((entry) => {
     const projected = projectEntry(
       entry,
@@ -1447,10 +1590,30 @@ export function projectTranscript(
       toolMetadata,
       undefined,
       toolLabels,
-      sessionInputs.get(entry.id),
+      contextDelivery.get(entry.id),
       toolSegmentIDs.get(entry.id),
     );
     if (!projected) throw new Error("projectable transcript entry produced no item");
+    const boundInvocation = invocationByCanonicalEntry.get(entry.id);
+    if (boundInvocation && projected.semantic) {
+      return { ...projected, semantic: {
+        ...projected.semantic,
+        invocationId: boundInvocation.invocationId,
+        operationId: boundInvocation.operationId,
+        kind: "resourcePrompt",
+        ...(boundInvocation.resourceInvocation ? { resourceInvocation: boundInvocation.resourceInvocation } : {}),
+        lifecycle: boundInvocation.lifecycle,
+      } };
+    }
+    if (projected.semantic?.invocationId && invocationStates.has(projected.semantic.invocationId)) {
+      const lifecycle = invocationStates.get(projected.semantic.invocationId)!;
+      return { ...projected, semantic: {
+        ...projected.semantic,
+        lifecycle: projected.semantic.kind === "command"
+          ? durableInvocationLifecycle(lifecycle)
+          : lifecycle,
+      } };
+    }
     return projected;
   });
 }
@@ -1477,10 +1640,18 @@ export function projectTranscriptPage(
   presentationIDs?: ReadonlyMap<string, string>,
   toolLabels?: ReadonlyMap<string, string>,
 ): TranscriptPage {
-  const { entries, sessionInputs, toolSegmentIDs } = projectableTranscriptEntries(
+  const { entries, contextDelivery, toolSegmentIDs } = projectableTranscriptEntries(
     manager,
     presentationIDs,
   );
+  const invocationValues = invocationProjection(invocationReceipts(
+    manager.getBranch(),
+    manager.getSessionId?.(),
+  ));
+  const invocationStates = new Map(invocationValues.map((value) => [value.invocationId, value.lifecycle]));
+  const invocationByCanonicalEntry = new Map(invocationValues
+    .filter(value => value.canonicalEntryId !== undefined)
+    .map(value => [value.canonicalEntryId!, value]));
   const end = Math.max(0, Math.min(before ?? entries.length, entries.length));
   if (expectedNextEntryId !== undefined && entries[end]?.id !== expectedNextEntryId) {
     throw new Error("session transcript anchor changed");
@@ -1496,22 +1667,39 @@ export function projectTranscriptPage(
       toolMetadata,
       presentationIDs,
       toolLabels,
-      sessionInputs.get(entry.id),
+      contextDelivery.get(entry.id),
       toolSegmentIDs.get(entry.id),
     );
     if (!item) throw new Error("projectable transcript entry produced no item");
-    const itemBytes = Buffer.byteLength(JSON.stringify(item)) + 1;
+    const boundInvocation = invocationByCanonicalEntry.get(entry.id);
+    const enriched = boundInvocation && item.semantic
+      ? { ...item, semantic: {
+          ...item.semantic,
+          invocationId: boundInvocation.invocationId,
+          operationId: boundInvocation.operationId,
+          kind: "resourcePrompt" as const,
+          ...(boundInvocation.resourceInvocation ? { resourceInvocation: boundInvocation.resourceInvocation } : {}),
+          lifecycle: boundInvocation.lifecycle,
+        } }
+      : item.semantic?.invocationId && invocationStates.has(item.semantic.invocationId)
+        ? { ...item, semantic: {
+            ...item.semantic,
+            lifecycle: item.semantic.kind === "command"
+              ? durableInvocationLifecycle(invocationStates.get(item.semantic.invocationId)!)
+              : invocationStates.get(item.semantic.invocationId)!,
+          } }
+        : item;
+    const itemBytes = Buffer.byteLength(JSON.stringify(enriched)) + 1;
     if (bytes + itemBytes > byteBudget && selected.length > 0) break;
     if (itemBytes > byteBudget) {
       // session.transcript responses are not passed through the snapshot fitter.
       // Compact an unexpectedly oversized legal item before returning it so the
       // page both advances and stays inside its production wire budget.
-      const compacted = compactTranscriptPageItem(item, Math.max(256, byteBudget - 3));
-      selected.unshift(compacted);
+      selected.unshift(compactTranscriptPageItem(enriched, Math.max(256, byteBudget - 3)));
       start -= 1;
       break;
     }
-    selected.unshift(item);
+    selected.unshift(enriched);
     bytes += itemBytes;
     start -= 1;
   }

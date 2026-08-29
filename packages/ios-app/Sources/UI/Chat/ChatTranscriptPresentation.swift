@@ -322,6 +322,7 @@ struct ChatOutgoingSubmissionPresentation: Equatable, Hashable, Identifiable, Se
     let text: String
     let attachmentIDs: [String]
     let behavior: String?
+    let resourceInvocation: ComposerResourceInvocation?
     let transportActive: Bool
     let preflightCompacting: Bool
 
@@ -334,6 +335,7 @@ struct ChatOutgoingSubmissionPresentation: Equatable, Hashable, Identifiable, Se
         text = snapshot.outgoingText
         attachmentIDs = snapshot.attachmentIDs
         behavior = snapshot.behavior
+        resourceInvocation = snapshot.resourceInvocation
         self.transportActive = transportActive
         self.preflightCompacting = preflightCompacting
     }

@@ -64,7 +64,7 @@ struct SessionSnapshotEventAdmissionTests {
         }
         #expect(SessionSnapshotQueueAdmissionPolicy.admit(snapshot))
 
-        snapshot.queuedItems?.append(
+        snapshot.queuedItems.append(
             .init(id: "overflow", behavior: .followUp, text: "overflow", attachmentCount: 0)
         )
         #expect(!SessionSnapshotQueueAdmissionPolicy.admit(snapshot))

@@ -281,7 +281,9 @@ struct SessionScenarioBuilder: Sendable {
                 latestCacheHitRate: nil,
                 cost: 0
             ),
-            queued: .init(steering: [], followUp: []),
+            queueRevision: 0,
+            queuedItems: [],
+            automaticCompactionEnabled: true,
             transcript: [],
             transcriptStart: nil,
             transcriptTotal: nil,

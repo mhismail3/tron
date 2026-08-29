@@ -193,13 +193,116 @@ struct ExtensionToolOrigin: Codable, Hashable, Sendable {
     }
 }
 
-struct SessionInputMetadata: Codable, Hashable, Sendable {
-    enum Source: String, Codable, Sendable { case `extension` }
-    enum Trigger: String, Codable, Sendable { case turn }
+enum ChatDirection: String, Codable, Sendable { case inboundContext, agentOutput, agentInvocation, ambientStatus, hiddenInternal }
+enum ChatContextEffect: String, Codable, Sendable { case none, modelInput, hiddenModelInput, toolResult }
+enum ChatDelivery: String, Codable, Sendable { case stored, nextTurn, steer, followUp, triggeredTurn, continuedTurn, beforeAgentStart, toolResult, unknown }
+enum ChatOriginKind: String, Codable, Sendable { case user, subagent, `extension`, process, gateway, assistant, unknown }
+enum ChatSemanticKind: String, Codable, Sendable { case prompt, resourcePrompt, command, message, tool, status, state, unknown }
+enum ChatSemanticVisibility: String, Codable, Sendable { case visible, hidden }
 
-    let source: Source
-    let trigger: Trigger
-    let origin: ExtensionToolOrigin?
+enum ChatOriginConfidence: String, Codable, Sendable { case boundary, receipt, adapter, unknown }
+
+private func admitsSemanticString(_ value: String, maximumBytes: Int) -> Bool {
+    !value.isEmpty && value.utf8.count <= maximumBytes
+        && !value.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7f }
+}
+
+struct ChatOrigin: Codable, Hashable, Sendable {
+    let kind: ChatOriginKind
+    let ownerId: String?
+    let title: String?
+    let confidence: ChatOriginConfidence
+
+    private enum CodingKeys: String, CodingKey { case kind, ownerId, title, confidence }
+
+    init(kind: ChatOriginKind, ownerId: String? = nil, title: String? = nil, confidence: ChatOriginConfidence) {
+        self.kind = kind; self.ownerId = ownerId; self.title = title; self.confidence = confidence
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try values.decode(ChatOriginKind.self, forKey: .kind)
+        ownerId = try values.decodeIfPresent(String.self, forKey: .ownerId)
+        title = try values.decodeIfPresent(String.self, forKey: .title)
+        confidence = try values.decode(ChatOriginConfidence.self, forKey: .confidence)
+        guard ownerId.map({ admitsSemanticString($0, maximumBytes: 256) }) ?? true,
+              title.map({ admitsSemanticString($0, maximumBytes: 512) }) ?? true else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .ownerId,
+                in: values,
+                debugDescription: "Chat origin metadata is invalid or oversized"
+            )
+        }
+    }
+}
+
+struct ChatSemanticMetadata: Codable, Hashable, Sendable {
+    let version: Int
+    let direction: ChatDirection
+    let contextEffect: ChatContextEffect
+    let delivery: ChatDelivery
+    let visibility: ChatSemanticVisibility
+    let kind: ChatSemanticKind
+    let origin: ChatOrigin
+    let invocationId: String?
+    let operationId: String?
+    let sequence: Int
+    let lifecycle: InvocationLifecycle?
+    let resourceInvocation: ComposerResourceInvocation?
+
+    private enum CodingKeys: String, CodingKey {
+        case version, direction, contextEffect, delivery, visibility, kind, origin,
+             invocationId, operationId, sequence, lifecycle, resourceInvocation
+    }
+
+    init(
+        version: Int = 1,
+        direction: ChatDirection,
+        contextEffect: ChatContextEffect,
+        delivery: ChatDelivery,
+        visibility: ChatSemanticVisibility,
+        kind: ChatSemanticKind,
+        origin: ChatOrigin,
+        invocationId: String? = nil,
+        operationId: String? = nil,
+        sequence: Int,
+        lifecycle: InvocationLifecycle? = nil,
+        resourceInvocation: ComposerResourceInvocation? = nil
+    ) {
+        self.version = version; self.direction = direction; self.contextEffect = contextEffect
+        self.delivery = delivery; self.visibility = visibility; self.kind = kind; self.origin = origin
+        self.invocationId = invocationId; self.operationId = operationId; self.sequence = sequence
+        self.lifecycle = lifecycle; self.resourceInvocation = resourceInvocation
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        version = try values.decode(Int.self, forKey: .version)
+        direction = try values.decode(ChatDirection.self, forKey: .direction)
+        contextEffect = try values.decode(ChatContextEffect.self, forKey: .contextEffect)
+        delivery = try values.decode(ChatDelivery.self, forKey: .delivery)
+        visibility = try values.decode(ChatSemanticVisibility.self, forKey: .visibility)
+        kind = try values.decode(ChatSemanticKind.self, forKey: .kind)
+        origin = try values.decode(ChatOrigin.self, forKey: .origin)
+        invocationId = try values.decodeIfPresent(String.self, forKey: .invocationId)
+        operationId = try values.decodeIfPresent(String.self, forKey: .operationId)
+        sequence = try values.decode(Int.self, forKey: .sequence)
+        lifecycle = try values.decodeIfPresent(InvocationLifecycle.self, forKey: .lifecycle)
+        resourceInvocation = try values.decodeIfPresent(ComposerResourceInvocation.self, forKey: .resourceInvocation)
+        guard version == 1, sequence >= 0,
+              invocationId.map({ admitsSemanticString($0, maximumBytes: 256) }) ?? true,
+              operationId.map({ admitsSemanticString($0, maximumBytes: 256) }) ?? true,
+              resourceInvocation.map({
+                  admitsSemanticString($0.name, maximumBytes: 512)
+                      && $0.arguments.utf8.count <= 64_000
+              }) ?? true else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .version,
+                in: values,
+                debugDescription: "Chat semantic metadata is invalid or oversized"
+            )
+        }
+    }
 }
 
 struct MessageTranscriptItem: TranscriptPayload {
@@ -226,12 +329,13 @@ struct MessageTranscriptItem: TranscriptPayload {
     let lastProgressAt: String?
     let progressSequence: Int?
     let toolSegmentId: String?
+    let semantic: ChatSemanticMetadata?
     var extensionOrigin: ExtensionToolOrigin? = nil
 
     private enum CodingKeys: String, CodingKey {
         case id, parentId, timestamp, kind, role, presentationId, content, provider, modelId, stopReason,
              errorMessage, toolCallId, toolName, toolLabel, isError, details, usage, startedAt,
-             completedAt, durationMs, lastProgressAt, progressSequence, toolSegmentId, extensionOrigin
+             completedAt, durationMs, lastProgressAt, progressSequence, toolSegmentId, semantic, extensionOrigin
     }
 
     init(
@@ -241,6 +345,7 @@ struct MessageTranscriptItem: TranscriptPayload {
         toolLabel: String? = nil, isError: Bool? = nil, details: JSONValue? = nil, usage: JSONValue? = nil, startedAt: String? = nil,
         completedAt: String? = nil, durationMs: Int? = nil, lastProgressAt: String? = nil,
         progressSequence: Int? = nil, toolSegmentId: String? = nil,
+        semantic: ChatSemanticMetadata? = nil,
         extensionOrigin: ExtensionToolOrigin? = nil
     ) {
         self.id = id; self.parentId = parentId; self.timestamp = timestamp; self.kind = kind; self.role = role
@@ -249,6 +354,7 @@ struct MessageTranscriptItem: TranscriptPayload {
         self.toolLabel = toolLabel; self.isError = isError; self.details = details; self.usage = usage; self.startedAt = startedAt; self.completedAt = completedAt
         self.durationMs = durationMs; self.lastProgressAt = lastProgressAt; self.progressSequence = progressSequence
         self.toolSegmentId = toolSegmentId
+        self.semantic = semantic
         self.extensionOrigin = extensionOrigin
     }
 
@@ -293,6 +399,7 @@ struct MessageTranscriptItem: TranscriptPayload {
         lastProgressAt = try values.decodeIfPresent(String.self, forKey: .lastProgressAt)
         progressSequence = try values.decodeIfPresent(Int.self, forKey: .progressSequence)
         toolSegmentId = try values.decodeIfPresent(String.self, forKey: .toolSegmentId)
+        semantic = try values.decodeIfPresent(ChatSemanticMetadata.self, forKey: .semantic)
         if let toolSegmentId, role != .toolResult || toolSegmentId.isEmpty {
             throw DecodingError.dataCorruptedError(
                 forKey: .toolSegmentId,
@@ -326,7 +433,7 @@ struct CustomMessageTranscriptItem: TranscriptPayload {
     let customType: String
     let content: [ContentPart]
     let details: JSONValue?
-    let sessionInput: SessionInputMetadata?
+    let semantic: ChatSemanticMetadata?
 }
 
 struct CustomEntryTranscriptItem: TranscriptPayload {
@@ -336,6 +443,7 @@ struct CustomEntryTranscriptItem: TranscriptPayload {
     let kind: TranscriptItem.Kind
     let customType: String
     let data: JSONValue?
+    let semantic: ChatSemanticMetadata?
 }
 
 struct SummaryTranscriptItem: TranscriptPayload {
@@ -551,8 +659,13 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
         default: nil
         }
     }
-    var sessionInput: SessionInputMetadata? {
-        if case .customMessage(let value) = self { value.sessionInput } else { nil }
+    var semantic: ChatSemanticMetadata? {
+        switch self {
+        case .message(let value): value.semantic
+        case .customMessage(let value): value.semantic
+        case .customEntry(let value): value.semantic
+        default: nil
+        }
     }
     var customData: JSONValue? { if case .customEntry(let value) = self { value.data } else { nil } }
     var summary: String? { if case .summary(let value) = self { value.summary } else { nil } }

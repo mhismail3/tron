@@ -316,7 +316,6 @@ struct ChatTranscriptPresentationStoreTests {
             queued.queuedItems = [
                 .init(id: "queued", behavior: .steer, text: "next", attachmentCount: 1),
             ]
-            queued.queued = .init(steering: ["next"], followUp: [])
             let queuedTag = ChatTranscriptProjectionTag(
                 snapshot: queued,
                 presentationGeneration: 7,
@@ -335,7 +334,6 @@ struct ChatTranscriptPresentationStoreTests {
             consumed.eventSequence += 1
             consumed.queueRevision = 5
             consumed.queuedItems = []
-            consumed.queued = .init(steering: [], followUp: [])
             consumed.transcript.append(contentsOf: SessionScenarioBuilder(seed: 1_212)
                 .historyPage(count: 1, longRowBytes: 16))
             consumed.transcriptTotal = consumed.transcript.count
@@ -364,7 +362,6 @@ struct ChatTranscriptPresentationStoreTests {
                 .init(id: "duplicate", behavior: .steer, text: "one", attachmentCount: 0),
                 .init(id: "duplicate", behavior: .followUp, text: "two", attachmentCount: 0),
             ]
-            snapshot.queued = .init(steering: ["one"], followUp: ["two"])
             let tag = ChatTranscriptProjectionTag(
                 snapshot: snapshot,
                 presentationGeneration: 7,
@@ -414,7 +411,6 @@ struct ChatTranscriptPresentationStoreTests {
             snapshot.queuedItems = [
                 .init(id: "collision", behavior: .steer, text: "collision", attachmentCount: 0)
             ]
-            snapshot.queued = .init(steering: ["collision"], followUp: [])
             let aliases = ["collision": "transcript-bottom"]
             let tag = ChatTranscriptProjectionTag(
                 snapshot: snapshot,
@@ -444,10 +440,6 @@ struct ChatTranscriptPresentationStoreTests {
             snapshot.queuedItems = (0..<SessionSnapshot.maximumQueuedMessages + 1).map { index in
                 .init(id: "queued-\(index)", behavior: .steer, text: "message-\(index)", attachmentCount: 0)
             }
-            snapshot.queued = .init(
-                steering: snapshot.queuedItems!.map(\.text),
-                followUp: []
-            )
             let tag = ChatTranscriptProjectionTag(
                 snapshot: snapshot,
                 presentationGeneration: 7,
@@ -471,7 +463,6 @@ struct ChatTranscriptPresentationStoreTests {
             snapshot.queuedItems = [
                 .init(id: "queued", behavior: .steer, text: "next", attachmentCount: 0),
             ]
-            snapshot.queued = .init(steering: ["next"], followUp: [])
             let store = ChatTranscriptPresentationStore()
             let supportedTag = ChatTranscriptProjectionTag(
                 snapshot: snapshot,
@@ -513,7 +504,6 @@ struct ChatTranscriptPresentationStoreTests {
             snapshot.queuedItems = [
                 .init(id: "queued", behavior: .steer, text: "next", attachmentCount: 0),
             ]
-            snapshot.queued = .init(steering: ["next"], followUp: [])
             let store = ChatTranscriptPresentationStore()
             let unsupportedTag = ChatTranscriptProjectionTag(
                 snapshot: snapshot,
@@ -557,7 +547,6 @@ struct ChatTranscriptPresentationStoreTests {
             baseline.queuedItems = [
                 .init(id: "queued", behavior: .steer, text: "next", attachmentCount: 0),
             ]
-            baseline.queued = .init(steering: ["next"], followUp: [])
             let barrier = TranscriptProjectionBarrier()
             let store = ChatTranscriptPresentationStore(workGate: barrier.block)
             let baselineTag = ChatTranscriptProjectionTag(
@@ -645,7 +634,6 @@ struct ChatTranscriptPresentationStoreTests {
             snapshot.queuedItems = [
                 .init(id: "queued", behavior: .steer, text: "next", attachmentCount: 0),
             ]
-            snapshot.queued = .init(steering: ["next"], followUp: [])
             #expect(!ChatTextPreparationPolicy.sources(in: snapshot).isEmpty)
             let aliases = ["queued": "local-presentation"]
             let tag = ChatTranscriptProjectionTag(
@@ -686,7 +674,6 @@ struct ChatTranscriptPresentationStoreTests {
             snapshot.queuedItems = [
                 .init(id: "queued", behavior: .steer, text: "next", attachmentCount: 0),
             ]
-            snapshot.queued = .init(steering: ["next"], followUp: [])
             let aliases = ["queued": "local-presentation"]
             let firstTag = ChatTranscriptProjectionTag(
                 snapshot: snapshot,
@@ -723,7 +710,6 @@ struct ChatTranscriptPresentationStoreTests {
             snapshot.revision += 1
             snapshot.eventSequence += 1
             snapshot.queuedItems = []
-            snapshot.queued = .init(steering: [], followUp: [])
             let retiredTag = ChatTranscriptProjectionTag(
                 snapshot: snapshot,
                 presentationGeneration: 7

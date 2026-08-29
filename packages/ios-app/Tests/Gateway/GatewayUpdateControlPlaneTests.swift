@@ -7,15 +7,15 @@ import Testing
 struct GatewayUpdateControlPlaneTests {
     @Test("GatewayInfo requires a bounded authenticated channel while runtime identity remains optional")
     func gatewayInfoChannelAdmission() throws {
-        let data = Data(#"{"gatewayVersion":"1","piVersion":"2","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+        let data = Data(#"{"gatewayVersion":"1","piVersion":"2","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8)
         let info = try JSONDecoder.gateway.decode(GatewayInfo.self, from: data)
         #expect(info.machineGroupID == "machine")
         #expect(info.gatewayChannel == "stable")
         #expect(info.sourceRevision == nil)
         #expect(info.runtimeEpoch == nil)
         for malformed in [
-            #"{"gatewayVersion":"1","piVersion":"2","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":[]}"#,
-            #"{"gatewayVersion":"1","piVersion":"2","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"preview","capabilities":[]}"#,
+            #"{"gatewayVersion":"1","piVersion":"2","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine","machineName":"Mac","capabilities":[]}"#,
+            #"{"gatewayVersion":"1","piVersion":"2","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine","machineName":"Mac","gatewayChannel":"preview","capabilities":[]}"#,
         ] {
             #expect(throws: Error.self) {
                 _ = try JSONDecoder.gateway.decode(GatewayInfo.self, from: Data(malformed.utf8))
@@ -46,7 +46,7 @@ struct GatewayUpdateControlPlaneTests {
     @Test("server detail keeps opaque identities behind technical details and unifies source configuration")
     func serverDetailPresentation() throws {
         let info = GatewayInfo(
-            gatewayVersion: "1", piVersion: "2", protocolVersion: 3, minProtocolVersion: 3,
+            gatewayVersion: "1", piVersion: "2", protocolVersion: 4, minProtocolVersion: 4,
             machineId: "machine", machineName: "Mac", capabilities: ["gateway-update.v1"],
             sourceRevision: "source-revision", runtimeEpoch: "runtime-epoch"
         )
@@ -131,7 +131,7 @@ struct GatewayUpdateControlPlaneTests {
         #expect(debug.commandId == "debug-command")
 
         let capableInfo = GatewayInfo(
-            gatewayVersion: "1", piVersion: "1", protocolVersion: 3, minProtocolVersion: 3,
+            gatewayVersion: "1", piVersion: "1", protocolVersion: 4, minProtocolVersion: 4,
             machineId: "machine", machineName: "Mac", capabilities: ["gateway-update.v1"],
             gatewayChannel: "stable"
         )

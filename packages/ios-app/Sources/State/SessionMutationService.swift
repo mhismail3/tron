@@ -73,14 +73,14 @@ final class SessionMutationService {
         sessionID: String,
         uploadIDs: [String],
         behavior: String?,
-        skillName: String? = nil
+        resourceInvocation: ComposerResourceInvocation? = nil
     ) async throws -> String {
         struct Params: Codable {
             let sessionId: String
             let text: String
             let uploadIds: [String]
             let behavior: String?
-            let skillName: String?
+            let resourceInvocation: ComposerResourceInvocation?
             let commandId: String
         }
         struct Response: Codable { let operationId: String }
@@ -90,7 +90,7 @@ final class SessionMutationService {
             text: text,
             uploadIds: uploadIDs,
             behavior: behavior,
-            skillName: skillName,
+            resourceInvocation: resourceInvocation,
             commandId: commandID
         )
         let response: Response = try await executor.perform(method: "session.prompt", commandID: commandID) {
@@ -143,11 +143,12 @@ final class SessionMutationService {
         }
     }
 
-    func clearQueue(sessionID: String) async throws -> SessionSnapshot.QueuedMessages {
+    func clearQueue(sessionID: String) async throws {
         struct Params: Codable { let sessionId, commandId: String }
+        struct Response: Codable { let cleared: Bool }
         let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, commandId: commandID)
-        return try await executor.perform(method: "session.clearQueue", commandID: commandID) {
+        let _: Response = try await executor.perform(method: "session.clearQueue", commandID: commandID) {
             try await client.request("session.clearQueue", params)
         }
     }

@@ -7,9 +7,9 @@ import Testing
 struct MenuBarLogReaderTests {
     @Test("accepts only the exact supported server hello")
     func decodesServerHello() {
-        let accepted = #"{"type":"hello","protocolVersion":3,"minProtocolVersion":3}"#
-        let older = #"{"type":"hello","protocolVersion":2,"minProtocolVersion":2}"#
-        let future = #"{"type":"hello","protocolVersion":4,"minProtocolVersion":3}"#
+        let accepted = #"{"type":"hello","protocolVersion":4,"minProtocolVersion":4}"#
+        let older = #"{"type":"hello","protocolVersion":3,"minProtocolVersion":3}"#
+        let future = #"{"type":"hello","protocolVersion":5,"minProtocolVersion":4}"#
         #expect(MenuBarLogReader.decodeHello(data: Data(accepted.utf8)) == .accepted)
         #expect(MenuBarLogReader.decodeHello(data: Data(older.utf8)) == .rejected)
         #expect(MenuBarLogReader.decodeHello(data: Data(future.utf8)) == .rejected)

@@ -152,13 +152,13 @@ struct ChatContentTransitionTests {
 
         let empty = ChatComposerAccessoryLayoutIdentity(
             attachmentIDs: [],
-            selectedSkillID: nil,
+            selectedResourceID: nil,
             resourcePickerKind: nil,
             resourceResultIDs: []
         )
         let attachment = ChatComposerAccessoryLayoutIdentity(
             attachmentIDs: ["photo"],
-            selectedSkillID: nil,
+            selectedResourceID: nil,
             resourcePickerKind: nil,
             resourceResultIDs: []
         )

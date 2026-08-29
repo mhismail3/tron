@@ -10,8 +10,22 @@ import { GatewayError } from "../errors.js";
  * the gateway presentation projection. AsyncLocalStorage preserves it across
  * promises and timers without guessing attribution for unattributed calls. */
 const ownerStorage = new AsyncLocalStorage<ExtensionOwner>();
+// Adapter classification is established once at the trusted extension-load
+// boundary; transcript code never guesses from customType, text, or renderer
+// registration.
+const trustedSubagentOwnerIDs = new Set<string>();
+const trustedSubagentAdapterSource = "npm:pi-subagents";
+export interface InvocationExecutionContext {
+  invocationId: string;
+  operationId: string;
+}
+const invocationStorage = new AsyncLocalStorage<InvocationExecutionContext>();
 
 export function currentExtensionOwner(): ExtensionOwner | undefined { return ownerStorage.getStore(); }
+export function currentInvocationContext(): InvocationExecutionContext | undefined { return invocationStorage.getStore(); }
+export function withInvocationContext<T>(context: InvocationExecutionContext, operation: () => T): T {
+  return invocationStorage.run(context, operation);
+}
 
 function humanizedDisplayName(extension: Extension): string {
   const sourcePath = extension.sourceInfo.baseDir || extension.sourceInfo.path || extension.resolvedPath || extension.path;
@@ -25,7 +39,12 @@ export function extensionOwnerFor(extension: Extension): ExtensionOwner {
   const source = extension.sourceInfo.source;
   const identity = `${source}\0${extension.resolvedPath}`;
   const id = `extension:${createHash("sha256").update(identity).digest("base64url")}`;
+  if (source === trustedSubagentAdapterSource) trustedSubagentOwnerIDs.add(id);
   return { id, title: humanizedDisplayName(extension), source };
+}
+
+export function trustedExtensionOriginKind(owner: ExtensionOwner): "subagent" | "extension" {
+  return trustedSubagentOwnerIDs.has(owner.id) ? "subagent" : "extension";
 }
 
 function owned<T extends (...args: any[]) => any>(fn: T, owner: ExtensionOwner): T {

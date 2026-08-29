@@ -246,6 +246,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
             HStack(alignment: .top, spacing: 10) {
                 Spacer(minLength: 24)
                 VStack(alignment: .trailing, spacing: 4) {
+                    resourceChip
                     attachmentStrip
                     if !presentation.text.isEmpty {
                         UserPromptText(text: presentation.text)
@@ -279,6 +280,23 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
         ]
         .compactMap { $0 }
         .joined(separator: ": ")
+    }
+
+    @ViewBuilder
+    private var resourceChip: some View {
+        if let resource = presentation.resourceInvocation, !resource.isExtensionCommand {
+            ChatCompactPillSurface(tone: .accent, material: .glass, interactive: false) {
+                ChatCompactPillLabel(
+                    icon: resource.source == .skill ? "sparkles" : "command",
+                    title: resource.source == .skill ? "Skill" : "Prompt",
+                    detail: ComposerResourceNameFormatter.friendly(resource.name),
+                    tone: .accent,
+                    iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
+                    titleWeight: .bold
+                )
+            }
+            .accessibilityLabel("\(resource.source == .skill ? "Skill" : "Prompt") \(resource.name)")
+        }
     }
 
     @ViewBuilder

@@ -90,7 +90,7 @@ struct PresentationStyleGuardTests {
         #expect(!action.contains("font("))
     }
 
-    @Test("triggered session messages are trailing tappable conversation rows")
+    @Test("inbound producer messages are trailing tappable context rows")
     func triggeredSessionMessagesAreTrailingAndTappable() throws {
         let row = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
@@ -109,15 +109,15 @@ struct PresentationStyleGuardTests {
             encoding: .utf8
         )
 
-        #expect(row.contains("item.role == .user || item.sessionInput != nil"))
-        #expect(row.contains("SessionInputMessageView(item: item)"))
+        #expect(row.contains("item.role == .user || item.semantic?.direction == .inboundContext"))
+        #expect(row.contains("InboundProducerMessageView(item: item)"))
         #expect(message.contains("Button { showingDetails = true }"))
         #expect(message.contains("ChatCompactPillSurface("))
         #expect(message.contains("ChatCompactPillLabel("))
-        #expect(message.contains("title: originTitle"))
+        #expect(message.contains("title: \"\\(originLabel) · \\(originTitle)\""))
         #expect(message.contains("detail: status"))
         #expect(!message.contains("UserPromptText(text: messageText)"))
-        #expect(message.contains("SessionInputDetailsSheet(item: item)"))
+        #expect(message.contains("InboundContextDetailsSheet(item: item)"))
         #expect(message.contains("TronMarkdownView(text: messageText, streaming: false)"))
         #expect(message.contains("TronTechnicalMetadataSection("))
         #expect(message.contains("TronTechnicalJSONRow("))
@@ -127,7 +127,7 @@ struct PresentationStyleGuardTests {
         #expect(message.contains("Image(systemName: \"checkmark\")"))
         #expect(!message.contains("TronToolbarTextLabel(\"Done\""))
         #expect(toolDetails.contains("TronTechnicalMetadataSection("))
-        #expect(kernel.contains("guard item.sessionInput == nil else { return [] }"))
+        #expect(kernel.contains("custom_message is inbound model context, never a tool run"))
     }
 
     @Test("dashboard settings action is icon-only and accessible")
@@ -2723,7 +2723,7 @@ struct PresentationStyleGuardTests {
         #expect(composerOwner.contains("ChatContentTransitionPolicy.attachmentTransition("))
         #expect(composerOwner.contains("ChatContentTransitionPolicy.composerSurfaceTransition("))
         #expect(composerOwner.contains("value: pendingAttachments.map(\\.id)"))
-        #expect(composerOwner.contains("value: selectedSkill?.id"))
+        #expect(composerOwner.contains("value: selectedResource?.id"))
         #expect(composerOwner.contains("value: resourcePicker?.kind"))
         #expect(!composerStage.contains(".accessibilityHidden(!isTranscriptReady)"))
         #expect(!composerStage.contains(".allowsHitTesting(isTranscriptReady)"))
@@ -2786,7 +2786,7 @@ struct PresentationStyleGuardTests {
             encoding: .utf8
         )
         let attachments = try #require(composer.range(of: "                attachmentStrip"))
-        let skill = try #require(composer.range(of: "                selectedSkillStrip"))
+        let skill = try #require(composer.range(of: "                selectedResourceStrip"))
         let suggestions = try #require(composer.range(of: "                resourcePickerView"))
         let input = try #require(composer.range(of: "GlassEffectContainer(spacing: 8)"))
         let contentStart = try #require(picker.range(of: "private var contentSection"))
@@ -2801,7 +2801,7 @@ struct PresentationStyleGuardTests {
         #expect(!composer.contains(".move(edge: .bottom)"))
         #expect(composer.contains("ChatComposerStructuralHost("))
         #expect(composer.contains("attachmentIDs: pendingAttachments.map(\\.id)"))
-        #expect(composer.contains("selectedSkillID: selectedSkill?.id"))
+        #expect(composer.contains("selectedResourceID: selectedResource?.id"))
         #expect(composer.contains("resourcePickerKind: resourcePicker?.kind"))
         #expect(composer.contains("resourceResultIDs: resourceResults.map(\\.id)"))
         #expect(composer.contains("reduceMotion: reduceMotion"))

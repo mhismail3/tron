@@ -1,6 +1,43 @@
 import SwiftUI
 
-enum SessionInputCompactPresentationPolicy {
+enum InboundProducerPresentationPolicy {
+    static func label(for origin: ChatOriginKind?) -> String {
+        switch origin {
+        case .subagent: return "Subagent"
+        case .process: return "Process"
+        case .extension: return "Extension"
+        case .user: return "User"
+        case .gateway: return "Tron"
+        case .assistant: return "Assistant"
+        case .unknown, nil: return "Producer"
+        }
+    }
+
+    static func tone(for origin: ChatOriginKind?) -> ChatNotificationTone {
+        switch origin {
+        case .subagent, .process: return .information
+        case .user: return .accent
+        case .gateway: return .neutral
+        case .extension, .assistant, .unknown, nil: return .neutral
+        }
+    }
+
+    static func deliveryLabel(for delivery: ChatDelivery?) -> String {
+        switch delivery {
+        case .stored: return "Stored for model context"
+        case .nextTurn: return "Delivered on the next turn"
+        case .steer: return "Steered the active turn"
+        case .followUp: return "Queued as a follow-up"
+        case .triggeredTurn: return "Triggered an agent turn"
+        case .continuedTurn: return "Continued the agent turn"
+        case .beforeAgentStart: return "Delivered before agent start"
+        case .toolResult: return "Delivered as a tool result"
+        case .unknown, nil: return "Unknown"
+        }
+    }
+}
+
+enum InboundContextCompactPresentationPolicy {
     static func status(details: JSONValue?, message: String) -> String {
         let supplied = details?.objectValue?["status"]?.stringValue
             ?? details?.objectValue?["state"]?.stringValue
@@ -20,15 +57,15 @@ enum SessionInputCompactPresentationPolicy {
     }
 }
 
-/// A producer-authored message delivered into the mounted session's agent turn.
-/// This is conversation input, not a tool invocation, so it shares the trailing
-/// edge with user and steering messages while retaining distinct provenance.
-struct SessionInputMessageView: View {
+/// A producer-authored message delivered into the mounted session's agent
+/// context. Inbound context is always trailing; provenance changes its tone and
+/// label but never changes direction.
+struct InboundProducerMessageView: View {
     let item: TranscriptItem
     @State private var showingDetails = false
 
     private var originTitle: String {
-        item.sessionInput?.origin?.owner?.title ?? "Extension message"
+        item.semantic?.origin.title ?? "Unknown producer"
     }
 
     private var messageText: String {
@@ -37,18 +74,22 @@ struct SessionInputMessageView: View {
     }
 
     private var status: String {
-        SessionInputCompactPresentationPolicy.status(
+        InboundContextCompactPresentationPolicy.status(
             details: item.details,
             message: messageText
         )
     }
 
     private var durationMilliseconds: Int? {
-        SessionInputCompactPresentationPolicy.durationMilliseconds(details: item.details)
+        InboundContextCompactPresentationPolicy.durationMilliseconds(details: item.details)
     }
 
     private var tone: ChatNotificationTone {
-        status == "Failed" ? .error : status == "Completed" ? .accent : .information
+        InboundProducerPresentationPolicy.tone(for: item.semantic?.origin.kind)
+    }
+
+    private var originLabel: String {
+        InboundProducerPresentationPolicy.label(for: item.semantic?.origin.kind)
     }
 
     var body: some View {
@@ -61,7 +102,7 @@ struct SessionInputMessageView: View {
             ) {
                 ChatCompactPillLabel(
                     icon: "arrow.down.message.fill",
-                    title: originTitle,
+                    title: "\(originLabel) · \(originTitle)",
                     detail: status,
                     tone: tone,
                     iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
@@ -76,22 +117,20 @@ struct SessionInputMessageView: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Message from \(originTitle), \(status). \(messageText)")
+        .accessibilityLabel("Inbound context from \(originLabel), \(originTitle), \(status). \(messageText)")
         .accessibilityHint("Shows the full message and technical details")
         .sheet(isPresented: $showingDetails) {
-            SessionInputDetailsSheet(item: item)
+            InboundContextDetailsSheet(item: item)
         }
     }
 }
 
-private struct SessionInputDetailsSheet: View {
+private struct InboundContextDetailsSheet: View {
     let item: TranscriptItem
     @Environment(\.dismiss) private var dismiss
     @State private var detent: PresentationDetent = .medium
 
     private let accent = Color.tronCyan
-
-    private var origin: ExtensionToolOrigin? { item.sessionInput?.origin }
 
     private var messageText: String {
         let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -100,10 +139,14 @@ private struct SessionInputDetailsSheet: View {
 
     private var originMetadata: [TronTechnicalMetadataItem] {
         [
-            .init(title: "Extension", value: origin?.owner?.title ?? "Unknown extension", icon: "puzzlepiece.extension"),
-            .init(title: "Source", value: origin?.source ?? "Not attributed", icon: "externaldrive"),
-            .init(title: "Custom type", value: item.customType ?? "Unknown", icon: "tag"),
-            .init(title: "Delivery", value: "Triggered an agent turn", icon: "arrow.turn.down.right"),
+            .init(title: "Producer", value: item.semantic?.origin.title ?? "Unknown producer", icon: "person.crop.circle"),
+            .init(title: "Origin", value: item.semantic?.origin.kind.rawValue ?? "unknown", icon: "externaldrive"),
+            .init(title: "Confidence", value: item.semantic?.origin.confidence.rawValue ?? "unknown", icon: "checkmark.shield"),
+            .init(
+                title: "Delivery",
+                value: InboundProducerPresentationPolicy.deliveryLabel(for: item.semantic?.delivery),
+                icon: "arrow.turn.down.right"
+            ),
         ]
     }
 

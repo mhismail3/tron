@@ -157,7 +157,19 @@ struct SessionEventSynchronizerTests {
             baseline: .init(runtimeGeneration: "generation", eventSequence: 0)
         ) == nil)
         coordinator.restartBuffer(for: lease)
-        #expect(coordinator.drainBufferedEvents(for: lease, baseline: nil) == [])
+        #expect(coordinator.admit(event(sequence: 4, admittedBytes: 400)) == .buffered)
+        #expect(coordinator.drainBufferedEvents(for: lease, baseline: nil) == [
+            event(sequence: 4, admittedBytes: 400),
+        ])
+    }
+
+    @Test("aggregate byte overflow requires another authoritative attempt")
+    func byteOverflow() {
+        let coordinator = SessionSynchronizationCoordinator(maximumBufferedEvents: 8, maximumBufferedBytes: 512)
+        let lease = coordinator.acquire(sessionID: "session", intent: .reconnect(presentationGeneration: 3))
+        #expect(coordinator.admit(event(sequence: 1, admittedBytes: 400)) == .buffered)
+        #expect(coordinator.admit(event(sequence: 2, admittedBytes: 200)) == .overflow("session"))
+        #expect(coordinator.drainBufferedEvents(for: lease, baseline: nil) == nil)
     }
 
     @Test("reset resolves all shared work as unsuccessful")
@@ -260,7 +272,7 @@ struct SessionEventSynchronizerTests {
         #expect(coordinator.admit(other) == .deliver(other))
     }
 
-    private func event(sequence: Int, generation: String = "generation") -> GatewayEvent {
+    private func event(sequence: Int, generation: String = "generation", admittedBytes: Int = 0) -> GatewayEvent {
         GatewayEvent(
             type: "event",
             topic: "session.future",
@@ -270,7 +282,8 @@ struct SessionEventSynchronizerTests {
                 "eventSequence": .number(Double(sequence)),
                 "revision": .number(Double(sequence)),
                 "data": .object([:]),
-            ])
+            ]),
+            admittedBytes: admittedBytes
         )
     }
 }

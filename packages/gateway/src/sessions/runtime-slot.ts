@@ -21,6 +21,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import type {
+  ChatOrigin,
   CommandDetail,
   CommandInfo,
   ExtensionRunActivity,
@@ -40,6 +41,7 @@ import type {
   SessionSummaryUpdate,
   SessionTreeNode,
   ToolExecutionState,
+  ResourceInvocation,
 } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { TrustService } from "../admin/trust-service.js";
@@ -67,10 +69,11 @@ import {
   type TranscriptPage,
 } from "./projection.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
-import { attributeExtensions, currentExtensionOwner, extensionOwnerFor } from "../extensions/owner-attribution.js";
+import { attributeExtensions, currentExtensionOwner, currentInvocationContext, extensionOwnerFor, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
-import { SESSION_INPUT_RECEIPT_TYPE, makeSessionInputReceipt } from "./session-input-receipts.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import { ProcessActivityRecency, type ProcessActivityExpiryFrame } from "./process-activity-recency.js";
 import {
@@ -91,7 +94,7 @@ type QueueBehavior = QueuedMessageState["behavior"];
 
 type RuntimeQueuedMessage = QueuedMessageState & {
   runtimeText: string;
-  skillName?: string;
+  resourceInvocation?: ResourceInvocation;
   attachmentEnvelope: string;
   images: ImageContent[];
   ordinal: number;
@@ -302,6 +305,10 @@ export class RuntimeSlot {
   private activeExports = 0;
   private operation: SessionOperationState | undefined;
   private pendingExtensionCommand: SessionOperationState | undefined;
+  /** Gateway-owned causal graph. Canonical receipts remain the durable source;
+   * these bounded maps are only the live projection used by snapshots. */
+  private readonly invocations = new Map<string, InvocationProjection>();
+  private readonly invocationFailures = new Map<string, string>();
   private retry: RetryState | undefined;
   private resourceReloadOptions: { resolveProjectTrust: () => Promise<boolean> } | undefined;
   private projectTrustReloadOverride: boolean | undefined;
@@ -400,9 +407,15 @@ export class RuntimeSlot {
   private pendingPrompt: PendingPromptState | undefined;
   /** Exact Pi message object claimed by the foreground pending prompt. */
   private pendingPromptMessage: AgentMessage | undefined;
-  /** Exact custom messages observed inside an active agent run. Their producer
-   * receipt is appended only after Pi persists that same message object. */
-  private readonly pendingSessionInputMessages = new WeakMap<AgentMessage, {
+  /** Canonical user messages produced by queued resource/plain invocations. */
+  private readonly pendingInvocationUserMessages = new WeakMap<AgentMessage, {
+    operationId: string;
+    invocationId: string;
+  }>();
+  /** Exact custom messages observed at Pi's message boundary. Their producer
+   * and delivery receipt is appended only after Pi persists that same object. */
+  private readonly pendingContextMessages = new WeakMap<AgentMessage, {
+    delivery: "stored" | "triggeredTurn";
     origin?: ExtensionToolOrigin;
   }>();
   private pendingManualCompaction: PendingManualCompaction | undefined;
@@ -903,7 +916,14 @@ export class RuntimeSlot {
       commandContextActions: this.commandActions(),
       abortHandler: () => void this.abort(),
       shutdownHandler: () => this.requestExtensionShutdown(),
-      onError: (error) => this.emit("session.extensionError", safeJson(error)),
+      onError: (error) => {
+        const context = currentInvocationContext();
+        const invocationId = context?.invocationId;
+        if (invocationId && this.pendingExtensionCommand?.invocationId === invocationId) {
+          this.invocationFailures.set(invocationId, "extension-error");
+        }
+        this.emit("session.extensionError", safeJson({ error, ...(invocationId ? { invocationId } : {}) }));
+      },
     });
     const nextUnsubscribe = session.subscribe((event) => this.onEvent(event));
     try {
@@ -1693,6 +1713,69 @@ export class RuntimeSlot {
     return write;
   }
 
+  private persistCanonicalCustomEntry(
+    customType: string,
+    data: JsonValue,
+    identity: string,
+    owner?: GatewayWorkHandle,
+  ): Promise<void> {
+    return this.trackOwnershipWrite(
+      () => this.retryDurableWrite(`canonical:${customType}:${identity}`, async () => {
+        const exists = this.sessionManager.getBranch().some((entry) => {
+          if (entry.type !== "custom" || entry.customType !== customType) return false;
+          const value = entry.data as { receiptId?: unknown; targetEntryId?: unknown };
+          return value?.receiptId === identity || value?.targetEntryId === identity;
+        });
+        if (!exists) this.sessionManager.appendCustomEntry(customType, data);
+      }),
+      owner,
+    );
+  }
+
+  private persistInvocationReceipt(receipt: ReturnType<typeof makeInvocationReceipt>, owner?: GatewayWorkHandle): Promise<void> {
+    return this.persistCanonicalCustomEntry(INVOCATION_RECEIPT_TYPE, receiptJSON(receipt), receipt.receiptId, owner);
+  }
+
+  private invocationForOperation(operationId: string | undefined): InvocationProjection | undefined {
+    if (!operationId) return undefined;
+    const live = [...this.invocations.values()].find(
+      invocation => invocation.operationId === operationId,
+    );
+    if (live) return live;
+    const canonical = invocationProjection(invocationReceipts(
+      this.sessionManager.getBranch(),
+      this.id,
+    )).find(invocation => invocation.operationId === operationId);
+    if (canonical) this.invocations.set(canonical.invocationId, canonical);
+    return canonical;
+  }
+
+  private async terminalizeInvocation(
+    operationId: string | undefined,
+    lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown",
+    errorCode?: string,
+    owner?: GatewayWorkHandle,
+  ): Promise<void> {
+    const invocation = this.invocationForOperation(operationId);
+    if (!invocation || ["completed", "failed", "interrupted", "outcomeUnknown"].includes(invocation.lifecycle)) return;
+    await this.persistInvocationReceipt(makeInvocationReceipt({
+      version: 1,
+      receiptId: `terminal:${invocation.invocationId}`,
+      receiptKind: "terminal",
+      invocationId: invocation.invocationId,
+      operationId: invocation.operationId,
+      sessionId: this.id,
+      source: invocation.source,
+      ...(invocation.name ? { name: invocation.name } : {}),
+      lifecycle,
+      ...(errorCode ? { errorCode } : {}),
+      origin: invocation.origin,
+      sequence: this.revision + 1,
+      createdAt: new Date().toISOString(),
+    }), owner ?? this.operationWork.get(invocation.operationId));
+    this.invocations.delete(invocation.invocationId);
+  }
+
   private enqueueMarkerOwnership(operationId: string): Promise<void> {
     // An existing operation token already owns this marker write. Avoid spending
     // derived capacity for a second representation of the same accepted work.
@@ -1799,6 +1882,12 @@ export class RuntimeSlot {
         }
       }
       if (lastError !== undefined) throw lastError;
+      await this.terminalizeInvocation(
+        completion.operationId,
+        "completed",
+        undefined,
+        item.fallbackWork,
+      );
       if (!this.pendingManualCompaction) {
         await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
@@ -1934,7 +2023,13 @@ export class RuntimeSlot {
         this.toolStartedAtMonotonicMs.clear();
         this.nextToolOrder = 0;
         this.activeOperationId ??= requiresDistinctAgentOwner ? randomUUID() : (preflightOwner ?? randomUUID());
-        this.operation ??= { id: this.activeOperationId, kind: "prompt", startedAt: new Date().toISOString() };
+        const activeInvocation = this.invocationForOperation(this.activeOperationId);
+        this.operation ??= {
+          id: this.activeOperationId,
+          kind: "prompt",
+          startedAt: new Date().toISOString(),
+          ...(activeInvocation ? { invocationId: activeInvocation.invocationId } : {}),
+        };
         this.beginDerivedOperationWork(this.activeOperationId, "foreground-agent-operation");
         void this.enqueueMarkerOwnership(this.activeOperationId)
           .catch(() => this.runtime.session.abort());
@@ -2013,7 +2108,8 @@ export class RuntimeSlot {
           }
           if (settledOperationId) {
             this.operationWork.get(settledOperationId)?.transition("terminal-receipt-persistence");
-            const markerClear = this.clearMarkerOwnership(settledOperationId);
+            const markerClear = this.terminalizeInvocation(settledOperationId, "completed")
+              .then(() => this.clearMarkerOwnership(settledOperationId));
             // The foreground token remains the exact owner; do not create a second
             // receipt token or report drain completion while marker I/O is active.
             void markerClear.then(
@@ -2141,23 +2237,30 @@ export class RuntimeSlot {
         if (event.message.role === "assistant") {
           this.flushPendingProgress();
           this.captureStreamIdentity(event.message, true);
-        } else if (event.message.role === "user"
-          && this.pendingPrompt
-          && this.pendingPromptMessage === undefined) {
+        } else if (event.message.role === "user") {
           // Foreground admission is serialized. Claim the exact Pi object;
           // repeated text and crossing user callbacks cannot impersonate it.
-          this.pendingPromptMessage = event.message;
-        } else if (event.message.role === "custom" && this.hasActiveAgentRun) {
-          // A displayed custom message is not necessarily session input. Only
-          // the exact message object delivered inside an active run receives a
-          // durable trigger receipt; type, title, text, and display flags never
-          // classify it.
+          if (this.pendingPrompt && this.pendingPromptMessage === undefined) {
+            this.pendingPromptMessage = event.message;
+          } else {
+            const operationId = this.activeOperationId;
+            const invocation = this.invocationForOperation(operationId);
+            if (operationId && invocation) {
+              this.pendingInvocationUserMessages.set(event.message, {
+                operationId,
+                invocationId: invocation.invocationId,
+              });
+            }
+          }
+        } else if (event.message.role === "custom") {
+          // Every Pi custom_message is model-context input, including an idle
+          // non-triggering message retained for a later turn. Capture producer
+          // identity only at the Gateway callback boundary; customType, text,
+          // details, and renderer registration are never attribution evidence.
           const callbackOwner = currentExtensionOwner();
-          const origin = callbackOwner
-            ? { source: callbackOwner.source, owner: callbackOwner }
-            : this.extensionMessageOrigin(event.message.customType);
-          this.pendingSessionInputMessages.set(event.message, {
-            ...(origin ? { origin } : {}),
+          this.pendingContextMessages.set(event.message, {
+            delivery: this.hasActiveAgentRun ? "triggeredTurn" : "stored",
+            ...(callbackOwner ? { origin: { source: callbackOwner.source, owner: callbackOwner } } : {}),
           });
         }
         break;
@@ -2348,51 +2451,85 @@ export class RuntimeSlot {
           this.finalizeToolInvocationGroups(event.message);
           this.bindCanonicalPresentation(event.message);
         } else if (event.message.role === "custom") {
-          const input = this.pendingSessionInputMessages.get(event.message);
+          const input = this.pendingContextMessages.get(event.message);
           if (input) {
-            this.pendingSessionInputMessages.delete(event.message);
+            this.pendingContextMessages.delete(event.message);
             const parentBeforePersistence = this.sessionManager.getLeafId();
             const message = event.message;
-            queueMicrotask(() => {
-              const canonicalID = this.sessionManager.getLeafId();
-              const candidate = canonicalID ? this.sessionManager.getEntry(canonicalID) : undefined;
-              const matches = candidate?.type === "custom_message"
-                ? candidate.customType === message.customType
-                  && candidate.parentId === parentBeforePersistence
-                : candidate?.type === "message"
-                  && candidate.message.role === "custom"
-                  && candidate.message === message
-                  && candidate.parentId === parentBeforePersistence;
-              if (!matches || !canonicalID) return;
-              this.sessionManager.appendCustomEntry(
-                SESSION_INPUT_RECEIPT_TYPE,
-                makeSessionInputReceipt(canonicalID, input.origin),
+            // Canonicalize the exact custom message on the session lane. This
+            // prevents a concurrent branch mutation from appending a receipt
+            // to the wrong leaf and makes failures owned/retryable rather than
+            // detached microtask exceptions.
+            void this.lane.run(async () => {
+              // Resolve against the complete canonical branch, not its current
+              // leaf: assistant/tool entries can be appended before this lane
+              // continuation runs. Object identity is the admission key; the
+              // content reference is only used for Pi's wrapped custom_message
+              // representation, with the captured parent as an additional guard.
+              const candidate = this.sessionManager.getBranch().find((entry) =>
+                entry.parentId === parentBeforePersistence
+                && ((entry.type === "message" && entry.message === message)
+                  || (entry.type === "custom_message"
+                    && entry.content === message.content)));
+              const canonicalID = candidate?.id;
+              if (!canonicalID) return;
+              await this.persistCanonicalCustomEntry(
+                CONTEXT_DELIVERY_RECEIPT_TYPE,
+                safeJson(makeContextDeliveryReceipt(canonicalID, input.delivery, input.origin)),
+                canonicalID,
               );
               this.scheduleSnapshot();
-            });
+            }).catch((error) => this.emit("session.extensionError", safeJson({ message: error instanceof Error ? error.message : String(error) })));
+
           }
-        } else if (event.message.role === "user"
-          && this.pendingPrompt
-          && this.pendingPromptMessage === event.message) {
-          const operationID = this.pendingPrompt.id;
+        } else if (event.message.role === "user") {
+          const queuedBinding = this.pendingInvocationUserMessages.get(event.message);
+          if (queuedBinding) this.pendingInvocationUserMessages.delete(event.message);
+          const operationID = this.pendingPromptMessage === event.message
+            ? this.pendingPrompt?.id
+            : queuedBinding?.operationId;
+          const invocationID = operationID
+            ? queuedBinding?.invocationId ?? this.invocationForOperation(operationID)?.invocationId
+            : undefined;
+          if (!operationID || !invocationID) {
+            this.scheduleSnapshot();
+            break;
+          }
           const message = event.message;
           // AgentSession persists immediately after listeners return. Resolve
-          // that exact object in the next microtask, then expose operation ID as
-          // its bounded presentation identity for causal mobile settlement.
-          queueMicrotask(() => {
-            const canonicalID = this.sessionManager.getLeafId();
-            const candidate = canonicalID ? this.sessionManager.getEntry(canonicalID) : undefined;
-            if (candidate?.type !== "message"
-              || candidate.message.role !== "user"
-              || candidate.message !== message) return;
+          // that exact object on the session lane and scan the whole branch;
+          // later assistant/tool entries must not hide the canonical target.
+          void this.lane.run(async () => {
+            const candidate = this.sessionManager.getBranch().find((entry) =>
+              entry.type === "message" && entry.message.role === "user" && entry.message === message);
+            if (!candidate || candidate.type !== "message") return;
             this.rememberPresentationID(candidate.id, operationID);
+            const invocation = this.invocations.get(invocationID);
+            await this.persistCanonicalCustomEntry(
+              INVOCATION_RECEIPT_TYPE,
+              receiptJSON(makeInvocationReceipt({
+                version: 1,
+                receiptId: `binding:${invocationID}`,
+                receiptKind: "binding",
+                invocationId: invocationID,
+                operationId: operationID,
+                sessionId: this.id,
+                source: invocation?.source ?? "plain",
+                ...(invocation?.name ? { name: invocation.name } : {}),
+                canonicalEntryId: candidate.id,
+                sequence: this.revision + 1,
+                createdAt: new Date().toISOString(),
+              })),
+              `binding:${invocationID}`,
+              this.operationWork.get(operationID),
+            );
             if (this.pendingPrompt?.id === operationID
               && this.pendingPromptMessage === message) {
               this.pendingPrompt = undefined;
               this.pendingPromptMessage = undefined;
             }
             this.scheduleSnapshot();
-          });
+          }).catch((error) => this.emit("session.operationFailed", safeJson({ operationId: operationID, message: error instanceof Error ? error.message : String(error) })));
         }
         this.scheduleSnapshot();
         break;
@@ -3566,6 +3703,20 @@ export class RuntimeSlot {
     return this.toolLabels();
   }
 
+  private extensionCommandOrigin(commandName: string): ChatOrigin {
+    const extensions = this.runtime?.session.resourceLoader.getExtensions().extensions.filter(
+      extension => extension.commands.has(commandName),
+    ) ?? [];
+    if (extensions.length !== 1) return { kind: "unknown", confidence: "unknown" };
+    const owner = extensionOwnerFor(extensions[0]!);
+    return {
+      kind: trustedExtensionOriginKind(owner),
+      ownerId: owner.id,
+      title: owner.title,
+      confidence: "adapter",
+    };
+  }
+
   private extensionToolOrigin(toolName: string): ExtensionToolOrigin | undefined {
     const session = this.runtime?.session;
     if (!session) return undefined;
@@ -3576,15 +3727,6 @@ export class RuntimeSlot {
     const extension = extensions[0]!;
     if (tool.sourceInfo.path !== extension.path && tool.sourceInfo.path !== extension.resolvedPath) return undefined;
     return this.projectExtensionOrigin(extension);
-  }
-
-  private extensionMessageOrigin(customType: string): ExtensionToolOrigin | undefined {
-    const session = this.runtime?.session;
-    if (!session) return undefined;
-    const extensions = session.resourceLoader.getExtensions().extensions.filter(
-      extension => extension.messageRenderers.has(customType),
-    );
-    return extensions.length === 1 ? this.projectExtensionOrigin(extensions[0]!) : undefined;
   }
 
   private projectExtensionOrigin(extension: Extension): ExtensionToolOrigin | undefined {
@@ -3757,7 +3899,7 @@ export class RuntimeSlot {
           behavior,
           text: admission?.text ?? runtimeText,
           attachmentCount: admission?.attachmentCount ?? 0,
-          ...(admission?.skillName === undefined ? {} : { skillName: admission.skillName }),
+          ...(admission?.resourceInvocation === undefined ? {} : { resourceInvocation: admission.resourceInvocation }),
           ...(admission?.photoCount === undefined ? {} : { photoCount: admission.photoCount }),
           ...(admission?.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: admission.fileAttachmentCount }),
           ...(admission?.attachments === undefined ? {} : { attachments: admission.attachments }),
@@ -3796,7 +3938,14 @@ export class RuntimeSlot {
           // the already-started foreground run; retire only the synthetic owner.
           const syntheticOwner = this.activeOperationId;
           this.activeOperationId = item.id;
-          this.operation = { id: item.id, kind: "prompt", startedAt: new Date().toISOString() };
+          this.operation = {
+            id: item.id,
+            kind: "prompt",
+            startedAt: new Date().toISOString(),
+            ...(this.invocationForOperation(item.id)?.invocationId
+              ? { invocationId: this.invocationForOperation(item.id)!.invocationId }
+              : {}),
+          };
           // Queue removal can follow agent_start. Durably transfer the marker
           // before retiring the synthetic event-time owner, so completion stamps
           // cannot race a missing exact marker.
@@ -3819,7 +3968,7 @@ export class RuntimeSlot {
         || item.behavior !== next.behavior
         || item.text !== next.text
         || item.runtimeText !== next.runtimeText
-        || item.skillName !== next.skillName
+        || JSON.stringify(item.resourceInvocation) !== JSON.stringify(next.resourceInvocation)
         || item.attachmentCount !== next.attachmentCount
         || item.photoCount !== next.photoCount
         || item.fileAttachmentCount !== next.fileAttachmentCount
@@ -3832,7 +3981,7 @@ export class RuntimeSlot {
   private projectedQueue(): QueuedMessageState[] {
     this.reconcileQueuedMessages();
     return this.queuedMessages.map(({
-      id, behavior, text, attachmentCount, photoCount, fileAttachmentCount, attachments,
+      id, behavior, text, attachmentCount, photoCount, fileAttachmentCount, attachments, resourceInvocation,
     }) => ({
       id,
       behavior,
@@ -3841,6 +3990,7 @@ export class RuntimeSlot {
       ...(photoCount === undefined ? {} : { photoCount }),
       ...(fileAttachmentCount === undefined ? {} : { fileAttachmentCount }),
       ...(attachments === undefined ? {} : { attachments }),
+      ...(resourceInvocation === undefined ? {} : { resourceInvocation }),
     }));
   }
 
@@ -3848,7 +3998,7 @@ export class RuntimeSlot {
     return [text.trim(), attachmentEnvelope].filter(Boolean).join("\n\n");
   }
 
-  private static validateQueue(items: Array<Pick<QueuedMessageState, "text" | "attachmentCount"> & { skillName?: string }>): void {
+  private static validateQueue(items: Array<Pick<QueuedMessageState, "text" | "attachmentCount"> & { resourceInvocation?: ResourceInvocation }>): void {
     if (items.length > MAXIMUM_QUEUED_MESSAGES) {
       throw new GatewayError("invalid_request", `At most ${MAXIMUM_QUEUED_MESSAGES} messages may be queued`);
     }
@@ -3858,7 +4008,7 @@ export class RuntimeSlot {
       if (bytes > MAXIMUM_QUEUED_MESSAGE_BYTES) {
         throw new GatewayError("invalid_request", "A queued message is too large to manage safely");
       }
-      if (item.text.trim().length === 0 && item.attachmentCount === 0 && item.skillName === undefined) {
+      if (item.text.trim().length === 0 && item.attachmentCount === 0 && item.resourceInvocation === undefined) {
         throw new GatewayError("invalid_request", "Queued messages cannot be empty");
       }
       totalBytes += bytes;
@@ -3916,12 +4066,28 @@ export class RuntimeSlot {
         );
       })()
       : undefined;
-    const transcriptPage = this.transcriptPage();
+    const canonicalTranscriptPage = this.transcriptPage();
+    const liveCommand = this.pendingExtensionCommand;
+    const liveCommandLifecycle = this.ui.presentation.state().pendingInteractions.length > 0
+      ? "waitingForInput" as const
+      : "running" as const;
+    const transcriptPage: TranscriptPage = liveCommand
+      ? {
+          ...canonicalTranscriptPage,
+          items: canonicalTranscriptPage.items.map(item =>
+            item.semantic?.kind === "command"
+              && item.semantic.operationId === liveCommand.id
+              ? { ...item, semantic: { ...item.semantic, lifecycle: liveCommandLifecycle } }
+              : item),
+        }
+      : canonicalTranscriptPage;
     // transcriptPage is intentionally bounded; use the full canonical branch
     // for ownership so paged-out results cannot leave a duplicate runtime row.
     const canonicalToolResultIDs = canonicalToolResultCallIDs(session.sessionManager);
     const queuedItems = this.projectedQueue();
     const processProjection = this.currentProcessProjection();
+    // Canonical receipts are authoritative after runtime recreation; live maps
+    // only enrich the current projection and never replace persisted facts.
     return fitSessionSnapshot({
       sessionId: session.sessionId,
       runtimeGeneration: this.runtimeGeneration,
@@ -3945,7 +4111,6 @@ export class RuntimeSlot {
         ...(latestCacheHitRate === undefined ? {} : { latestCacheHitRate }),
         cost: stats.cost,
       },
-      queued: { steering: [...session.getSteeringMessages()], followUp: [...session.getFollowUpMessages()] },
       queueRevision: this.queueRevision,
       queuedItems,
       ...(this.pendingPrompt ? { pendingPrompt: this.pendingPrompt } : {}),
@@ -3957,7 +4122,6 @@ export class RuntimeSlot {
       ...(streaming ? { streaming } : {}),
       ...(session.sessionManager.getLeafId() ? { leafEntryId: session.sessionManager.getLeafId()! } : {}),
       ...(this.operation ? { operation: this.operation } : {}),
-      ...(this.pendingExtensionCommand ? { extensionCommand: this.pendingExtensionCommand } : {}),
       ...(this.retry ? { retry: this.retry } : {}),
       toolExecutions: [...this.toolExecutions.values()]
         .filter((tool) => !canonicalToolResultIDs.has(tool.toolCallId))
@@ -4150,13 +4314,14 @@ export class RuntimeSlot {
     behavior?: QueueBehavior,
     queueDisplay?: {
       text: string;
-      skillName?: string;
+      resourceInvocation?: ResourceInvocation;
       attachmentEnvelope: string;
       attachmentCount: number;
       photoCount?: number;
       fileAttachmentCount?: number;
       attachments?: QueuedMessageState["attachments"];
     },
+    onAdmitted?: (result: { operationId: string }) => void,
   ): Promise<{ operationId: string }> {
     return this.lane.run(async () => {
       this.assertUsable();
@@ -4179,26 +4344,57 @@ export class RuntimeSlot {
           || queueDisplay.attachments.length !== queueDisplay.attachmentCount)) {
         throw new GatewayError("invalid_request", "Prompt attachment descriptors do not match the bounded attachment count");
       }
-      if (queueDisplay?.skillName !== undefined) {
-        const invocationName = `skill:${queueDisplay.skillName}`;
+      if (queueDisplay?.resourceInvocation !== undefined) {
+        const resource = queueDisplay.resourceInvocation;
+        const catalogName = resource.source === "skill"
+          ? `skill:${resource.name.startsWith("skill:") ? resource.name.slice("skill:".length) : resource.name}`
+          : resource.name;
         const commands = this.commands();
-        const skillMatches = commands.filter(
-          (command) => command.source === "skill" && command.name === invocationName,
+        const matches = commands.filter(
+          command => command.source === resource.source && command.name === catalogName,
         );
-        const collidesWithExtension = commands.some(
-          (command) => command.source === "extension" && command.name === invocationName,
-        );
-        if (skillMatches.length !== 1 || collidesWithExtension
-            || (text !== `/${invocationName}` && !text.startsWith(`/${invocationName} `))) {
-          throw new GatewayError("conflict", "The selected skill is no longer unambiguous for this session");
+        const shadowed = resource.source !== "extension"
+          && commands.some(command => command.source === "extension" && command.name === catalogName);
+        if (matches.length !== 1 || shadowed) {
+          throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
         }
       }
-      const extensionCommandName = text.startsWith("/") ? text.slice(1).split(/\s/u, 1)[0] : undefined;
+      // Pi 0.84.1 uses the first literal ASCII space as its command
+      // delimiter. Keep admission byte-for-byte identical: tabs/newlines are
+      // part of the command name and therefore remain ordinary prompt text.
+      const extensionCommandName = text.startsWith("/")
+        ? text.slice(1).split(" ", 1)[0]
+        : undefined;
       const isExactExtensionCommand = extensionCommandName !== undefined
         && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
       const queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
       const operationId = randomUUID();
-      if (session.isStreaming && !behavior && !isExactExtensionCommand) throw new GatewayError("busy", "Session is running; choose steer or follow-up");
+      const invocationId = randomUUID();
+      const invocationSource: InvocationProjection["source"] = isExactExtensionCommand
+        ? "extension"
+        : queueDisplay?.resourceInvocation?.source ?? "plain";
+      const invocationName = isExactExtensionCommand
+        ? extensionCommandName
+        : queueDisplay?.resourceInvocation?.name;
+      const invocation: InvocationProjection = {
+        version: 1,
+        invocationId,
+        operationId,
+        source: invocationSource,
+        ...(invocationName ? { name: invocationName } : {}),
+        ...(queueDisplay?.resourceInvocation?.arguments === undefined ? {} : { arguments: queueDisplay.resourceInvocation.arguments }),
+        disposition: isExactExtensionCommand ? "extensionCommand" : queuesIntoActiveRun ? "queuedPrompt" : "canonicalPrompt",
+        lifecycle: "staged",
+        origin: invocationSource === "extension" && invocationName
+          ? this.extensionCommandOrigin(invocationName)
+          : { kind: "user", confidence: "boundary" },
+        sequence: this.revision + 1,
+        updatedAt: new Date().toISOString(),
+      };
+      if (session.isStreaming && !behavior && !isExactExtensionCommand) {
+        this.invocations.delete(invocationId);
+        throw new GatewayError("busy", "Session is running; choose steer or follow-up");
+      }
       if (queuesIntoActiveRun) {
         this.reconcileQueuedMessages();
         if (this.pendingQueueAdmission) {
@@ -4218,14 +4414,14 @@ export class RuntimeSlot {
         RuntimeSlot.validateQueue([...this.queuedMessages, {
           text: display.text,
           attachmentCount: display.attachmentCount,
-          ...(display.skillName === undefined ? {} : { skillName: display.skillName }),
+          ...(display.resourceInvocation === undefined ? {} : { resourceInvocation: display.resourceInvocation }),
         }]);
         this.pendingQueueAdmission = {
           // The returned operation identity is also the stable projected queue
           // identity, giving clients an exact settlement receipt.
           id: operationId, behavior: behavior!, text: display.text,
           attachmentCount: display.attachmentCount,
-          ...(display.skillName === undefined ? {} : { skillName: display.skillName }),
+          ...(display.resourceInvocation === undefined ? {} : { resourceInvocation: display.resourceInvocation }),
           ...(display.photoCount === undefined ? {} : { photoCount: display.photoCount }),
           ...(display.fileAttachmentCount === undefined
             ? {}
@@ -4240,15 +4436,43 @@ export class RuntimeSlot {
       let acceptedResolve!: (accepted: boolean) => void;
       const accepted = new Promise<boolean>((resolve) => { acceptedResolve = resolve; });
       let sdkRun: Promise<void>;
+      let startPersisted = false;
       try {
+        this.invocations.set(invocationId, invocation);
+        while (this.invocations.size > 128) this.invocations.delete(this.invocations.keys().next().value!);
         operationWork = this.beginOperationWork(operationId);
         // Exact preflight ownership begins synchronously before marker I/O, so a
         // drain that starts while the marker is pending snapshots this owner.
         this.lifecycle.beginPreflight(operationId);
         preflightStarted = true;
 
+        // Canonical invocation ownership must precede every extension side
+        // effect. This custom entry is intentionally hidden from model context
+        // and ordinary transcript projection, but survives runtime restart.
+        const startReceipt = makeInvocationReceipt({
+          version: 1,
+          receiptId: `start:${invocationId}`,
+          receiptKind: "start",
+          invocationId,
+          operationId,
+          sessionId: this.id,
+          source: invocationSource,
+          ...(invocationName ? { name: invocationName } : {}),
+          ...(queueDisplay?.resourceInvocation?.arguments
+            ? { arguments: queueDisplay.resourceInvocation.arguments }
+            : queueDisplay?.text ? { arguments: queueDisplay.text } : {}),
+          lifecycle: "staged",
+          origin: invocation.origin,
+          sequence: this.revision + 1,
+          createdAt: new Date().toISOString(),
+        });
+        // Durable staging precedes the Pi call so an extension handler can
+        // never emit output before Gateway has recorded its invocation owner.
+        await this.persistInvocationReceipt(startReceipt, operationWork);
+        startPersisted = true;
+
         if (isExactExtensionCommand) {
-          this.pendingExtensionCommand = { id: operationId, kind: "command", startedAt: new Date().toISOString() };
+          this.pendingExtensionCommand = { id: operationId, kind: "command", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
           // Exact commands run before Pi's preflight callback and can wait on UI
           // indefinitely. Persist the provisional admission before invoking Pi.
           await this.enqueueMarkerOwnership(operationId);
@@ -4256,7 +4480,7 @@ export class RuntimeSlot {
           this.publishSnapshot();
         } else if (!queuesIntoActiveRun) {
           this.activeOperationId = operationId;
-          this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString() };
+          this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
           this.pendingPromptMessage = undefined;
           this.pendingPrompt = {
             id: operationId,
@@ -4284,12 +4508,17 @@ export class RuntimeSlot {
           this.publishSnapshot();
         }
 
-        sdkRun = session.prompt(text, {
+        sdkRun = withInvocationContext({ invocationId, operationId }, () => session.prompt(text, {
           images,
           ...(queuesIntoActiveRun ? { streamingBehavior: behavior } : {}),
           source: "rpc",
           preflightResult: acceptedResolve,
-        });
+        }));
+        // Pi awaits an extension command handler before invoking its preflight
+        // callback. The Gateway has already durably admitted the exact command
+        // and started its SDK promise, so release the RPC response while this
+        // session lane continues to serialize the handler and its side effects.
+        if (isExactExtensionCommand) onAdmitted?.({ operationId });
       } catch (error) {
         if (preflightStarted) this.lifecycle.cancelPreflight(operationId);
         this.pendingQueueAdmission = undefined;
@@ -4300,11 +4529,29 @@ export class RuntimeSlot {
           this.pendingPromptMessage = undefined;
         }
         if (this.pendingExtensionCommand?.id === operationId) this.pendingExtensionCommand = undefined;
+        if (startPersisted) {
+          await this.persistInvocationReceipt(makeInvocationReceipt({
+            version: 1,
+            receiptId: `terminal:${invocationId}`,
+            receiptKind: "terminal",
+            invocationId,
+            operationId,
+            sessionId: this.id,
+            source: invocationSource,
+            ...(invocationName ? { name: invocationName } : {}),
+            lifecycle: "outcomeUnknown",
+            origin: invocation.origin,
+            sequence: this.revision + 1,
+            createdAt: new Date().toISOString(),
+          }), operationWork);
+        }
+        this.invocations.delete(invocationId);
         this.settleOperationWork(operationId);
         throw error;
       }
       let runSettled = false;
       let commandSettled = false;
+      let terminalReceiptPersisted = false;
       let admissionFinalized = false;
       const promptRun = this.lifecycle.trackPrompt(sdkRun, () => {
         runSettled = true;
@@ -4356,6 +4603,22 @@ export class RuntimeSlot {
       this.lifecycle.resolvePreflight(operationId, admitted);
       admissionFinalized = true;
       if (!admitted) {
+        await this.persistInvocationReceipt(makeInvocationReceipt({
+          version: 1,
+          receiptId: `terminal:${invocationId}`,
+          receiptKind: "terminal",
+          invocationId,
+          operationId,
+          sessionId: this.id,
+          source: invocationSource,
+          ...(invocationName ? { name: invocationName } : {}),
+          lifecycle: "failed",
+          errorCode: "preflight-rejected",
+          origin: invocation.origin,
+          sequence: this.revision + 1,
+          createdAt: new Date().toISOString(),
+        }), operationWork);
+        this.invocations.delete(invocationId);
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
         if (this.operation?.id === operationId) this.operation = undefined;
         if (this.pendingPrompt?.id === operationId) {
@@ -4370,6 +4633,23 @@ export class RuntimeSlot {
         throw new GatewayError("invalid_request", "The agent runtime rejected the prompt before admission");
       }
 
+      await this.persistInvocationReceipt(makeInvocationReceipt({
+        version: 1,
+        receiptId: `accepted:${invocationId}`,
+        receiptKind: "transition",
+        invocationId,
+        operationId,
+        sessionId: this.id,
+        source: invocationSource,
+        lifecycle: "accepted",
+        sequence: this.revision + 1,
+        createdAt: new Date().toISOString(),
+      }), operationWork);
+      this.invocations.set(invocationId, {
+        ...invocation,
+        lifecycle: queuesIntoActiveRun ? "queued" : "accepted",
+        updatedAt: new Date().toISOString(),
+      });
       if (isExactExtensionCommand) operationWork.transition("extension-command-prompt-ui");
       else if (queuesIntoActiveRun) operationWork.transition("queued-mutation");
       else {
@@ -4378,10 +4658,36 @@ export class RuntimeSlot {
       }
       this.revision += 1;
       this.publishSnapshot();
+      if (!isExactExtensionCommand) onAdmitted?.({ operationId });
 
       if (isExactExtensionCommand) {
         const finishCommand = async () => {
           if (this.pendingExtensionCommand?.id !== operationId) return;
+          // Latch the terminal fact before marker transfer or attention
+          // settlement. Those branches may return early while a continuation
+          // owns the assistant completion; the invocation must already be
+          // durably terminal in that overlap window.
+          if (!terminalReceiptPersisted) {
+            const terminalLifecycle = this.invocationFailures.delete(invocationId)
+              ? "failed"
+              : commandSettled ? "completed" : "outcomeUnknown";
+            await this.persistInvocationReceipt(makeInvocationReceipt({
+              version: 1,
+              receiptId: `terminal:${invocationId}`,
+              receiptKind: "terminal",
+              invocationId,
+              operationId,
+              sessionId: this.id,
+              source: invocationSource,
+              ...(invocationName ? { name: invocationName } : {}),
+              lifecycle: terminalLifecycle,
+              origin: invocation.origin,
+              sequence: this.revision + 1,
+              createdAt: new Date().toISOString(),
+            }), this.operationWork.get(operationId));
+            terminalReceiptPersisted = true;
+            this.invocations.delete(invocationId);
+          }
           if (this.hasActiveAgentRun && this.activeOperationId !== undefined) {
             // Transfer marker ownership back to the foreground/new agent run:
             // commit its record before retiring the command's provisional one.
@@ -4430,24 +4736,27 @@ export class RuntimeSlot {
       throw new GatewayError("conflict", "The active operation changed before it could be stopped", true);
     }
     const session = this.runtime.session;
+    const abortedOperationId = this.operation?.id;
     switch (kind) {
       case "compaction": session.abortCompaction(); break;
       case "retry": session.abortRetry(); break;
       case "branchSummary": session.abortBranchSummary(); break;
       case "bash": session.abortBash(); break;
-      case "agent": await session.abort(); break;
+      case "agent":
+        await session.abort();
+        await this.terminalizeInvocation(abortedOperationId, "interrupted", "user-abort");
+        break;
     }
     this.revision += 1;
     this.publishSnapshot();
   }
 
-  async clearQueue(): Promise<{ steering: string[]; followUp: string[] }> {
+  async clearQueue(): Promise<void> {
     return this.lane.run(() => {
       this.assertUsable();
       this.suppressQueueEvents = true;
-      let cleared: { steering: string[]; followUp: string[] };
       try {
-        cleared = this.runtime.session.clearQueue();
+        this.runtime.session.clearQueue();
       } finally {
         this.suppressQueueEvents = false;
       }
@@ -4456,7 +4765,6 @@ export class RuntimeSlot {
       this.queueRevision += 1;
       this.revision += 1;
       this.publishSnapshot();
-      return { steering: [...cleared.steering], followUp: [...cleared.followUp] };
     });
   }
 
@@ -4490,9 +4798,9 @@ export class RuntimeSlot {
           text,
           runtimeText: text === previous.text
             ? previous.runtimeText
-            : previous.skillName === undefined
+            : previous.resourceInvocation === undefined
               ? visibleRuntimeText
-              : `/skill:${previous.skillName}${visibleRuntimeText ? ` ${visibleRuntimeText}` : ""}`,
+              : `/${previous.resourceInvocation.source === "skill" ? `skill:${previous.resourceInvocation.name}` : previous.resourceInvocation.name}${visibleRuntimeText ? ` ${visibleRuntimeText}` : ""}`,
           ordinal: this.nextQueueOrdinal++,
         };
       });
@@ -4503,13 +4811,13 @@ export class RuntimeSlot {
         commands.filter((command) => command.source === "extension").map((command) => command.name),
       );
       for (const item of next) {
-        if (item.skillName !== undefined) {
-          const invocationName = `skill:${item.skillName}`;
-          const skillMatches = commands.filter(
-            (command) => command.source === "skill" && command.name === invocationName,
-          );
-          if (skillMatches.length !== 1 || extensionCommands.has(invocationName)) {
-            throw new GatewayError("conflict", "A queued skill is no longer unambiguous for this session", true);
+        if (item.resourceInvocation !== undefined) {
+          const resource = item.resourceInvocation;
+          const invocationName = resource.source === "skill" && !resource.name.startsWith("skill:")
+            ? `skill:${resource.name}` : resource.name;
+          const matches = commands.filter(command => command.source === resource.source && command.name === invocationName);
+          if (matches.length !== 1 || (resource.source === "skill" && extensionCommands.has(invocationName))) {
+            throw new GatewayError("conflict", "A queued resource is no longer unambiguous for this session", true);
           }
         }
         if (!item.runtimeText.startsWith("/")) continue;

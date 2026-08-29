@@ -5,7 +5,7 @@ import SwiftUI
 struct ChatComposerView: View {
     let snapshot: SessionSnapshot?
     let pendingAttachments: [PendingAttachment]
-    let selectedSkill: ComposerResourceEntry?
+    let selectedResource: ComposerResourceEntry?
     let resourcePicker: ComposerResourcePickerSource?
     let resourceResults: [ComposerResourceEntry]
     let morphRegistry: ChatMorphFrameRegistry
@@ -28,12 +28,12 @@ struct ChatComposerView: View {
     let isCommandReady: Bool
     let attachmentMenuState: ChatAttachmentMenuState
     let attachmentActionsEnabled: Bool
-    let skillPickerAvailable: Bool
+    let resourcePickerAvailable: Bool
     let glassNamespace: Namespace.ID
 
     let onProcessesTap: () -> Void
     let onRemoveAttachment: (String) -> Void
-    let onRemoveSkill: () -> Void
+    let onRemoveResource: () -> Void
     let onSelectResource: (ComposerResourceEntry) -> Void
     let onDismissResourcePicker: () -> Void
     let onShowContext: () -> Void
@@ -48,7 +48,7 @@ struct ChatComposerView: View {
         ChatComposerStructuralHost(
             accessoryIdentity: ChatComposerAccessoryLayoutIdentity(
                 attachmentIDs: pendingAttachments.map(\.id),
-                selectedSkillID: selectedSkill?.id,
+                selectedResourceID: selectedResource?.id,
                 resourcePickerKind: resourcePicker?.kind,
                 resourceResultIDs: resourceResults.map(\.id)
             ),
@@ -58,7 +58,7 @@ struct ChatComposerView: View {
         ) {
             VStack(spacing: 10) {
                 attachmentStrip
-                selectedSkillStrip
+                selectedResourceStrip
                 resourcePickerView
                 GlassEffectContainer(spacing: 8) {
                     HStack(alignment: .bottom, spacing: 8) {
@@ -101,7 +101,7 @@ struct ChatComposerView: View {
             )
             .animation(
                 ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion),
-                value: selectedSkill?.id
+                value: selectedResource?.id
             )
             .animation(
                 ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion),
@@ -145,14 +145,14 @@ struct ChatComposerView: View {
     }
 
     @ViewBuilder
-    private var selectedSkillStrip: some View {
-        if let selectedSkill {
+    private var selectedResourceStrip: some View {
+        if let selectedResource {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ComposerSkillChip(
+                    ComposerResourceChip(
                         sessionID: snapshot?.sessionId,
-                        skill: selectedSkill,
-                        onRemove: onRemoveSkill
+                        resource: selectedResource,
+                        onRemove: onRemoveResource
                     )
                 }
                 .padding(.horizontal, 16)
@@ -262,7 +262,7 @@ struct ChatComposerView: View {
                 .accessibilityHidden(true)
             ComposerAttachmentMenuButton(
                 isEnabled: attachmentActionsEnabled,
-                showsSkills: skillPickerAvailable,
+                showsSkills: resourcePickerAvailable,
                 onSelect: onSelectAttachmentDestination
             )
             .frame(width: ComposerControlMetrics.hitTarget, height: ComposerControlMetrics.hitTarget)

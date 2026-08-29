@@ -221,7 +221,7 @@ struct ChatView: View {
             guard !Task.isCancelled else { return }
             composerResourceCatalog = catalog
             if ownsCatalog, let composerScope {
-                model.composerDrafts.reconcileSelectedSkill(for: composerScope, commands: commands)
+                model.composerDrafts.reconcileSelectedResource(for: composerScope, commands: commands)
             }
             if let picker = composerResourcePicker {
                 composerResourceResults = catalog.entries(kind: picker.kind, query: picker.query)
@@ -877,9 +877,9 @@ struct ChatView: View {
         presentationTarget.map(model.composerDrafts.submittedAttachments(for:)) ?? []
     }
 
-    private var selectedComposerSkill: ComposerResourceEntry? {
+    private var selectedComposerResource: ComposerResourceEntry? {
         guard let composerScope,
-              let command = model.composerDrafts.selectedSkill(for: composerScope) else { return nil }
+              let command = model.composerDrafts.selectedResource(for: composerScope) else { return nil }
         return ComposerResourceEntry(command: command)
     }
 
@@ -943,6 +943,11 @@ struct ChatView: View {
     private func transcriptHandoffCommit(snapshot: SessionSnapshot) -> ChatTranscriptHandoffCommit {
         if let target = presentationTarget,
            let submission = model.composerDrafts.outgoingSubmission(for: target) {
+            // Extension commands have no canonical user message. Their sole
+            // transcript identity is the Gateway invocation-start receipt;
+            // never hand the outgoing submission to the ordinary prompt graft,
+            // even after the first projection has been skipped.
+            if submission.resourceInvocation?.isExtensionCommand == true { return .none }
             let canonicalIDs = model.composerDrafts.canonicalSubmissionIDs(
                 target: target,
                 canonicalTranscript: snapshot.transcript
@@ -1675,7 +1680,7 @@ struct ChatView: View {
         ChatComposerView(
             snapshot: selectedAuthoritativeSnapshot,
             pendingAttachments: pendingAttachments,
-            selectedSkill: selectedComposerSkill,
+            selectedResource: selectedComposerResource,
             resourcePicker: composerResourcePicker,
             resourceResults: composerResourceResults,
             morphRegistry: morphRegistry,
@@ -1701,7 +1706,7 @@ struct ChatView: View {
             isCommandReady: admitsLiveSessionCommands,
             attachmentMenuState: attachmentMenuState,
             attachmentActionsEnabled: attachmentActionsEnabled,
-            skillPickerAvailable: skillPickerAvailable,
+            resourcePickerAvailable: resourcePickerAvailable,
             glassNamespace: composerGlassNamespace,
             onProcessesTap: {
                 sessionPresentation.showProcesses = true
@@ -1713,9 +1718,9 @@ struct ChatView: View {
                 guard let target = presentationTarget else { return }
                 model.composerDrafts.removeAttachment(id, target: target)
             },
-            onRemoveSkill: {
+            onRemoveResource: {
                 guard let composerScope else { return }
-                model.composerDrafts.removeSelectedSkill(for: composerScope)
+                model.composerDrafts.removeSelectedResource(for: composerScope)
             },
             onSelectResource: selectComposerResource,
             onDismissResourcePicker: dismissComposerResourcePicker,
@@ -1839,8 +1844,8 @@ struct ChatView: View {
         model.gatewayInfo?.capabilities.contains("skill-prompt.v1") == true
     }
 
-    private var skillPickerAvailable: Bool {
-        guard supportsSkillPrompt, let presentationTarget else { return false }
+    private var resourcePickerAvailable: Bool {
+        guard let presentationTarget else { return false }
         return model.commandCatalogTarget == presentationTarget
     }
 
@@ -1922,7 +1927,7 @@ struct ChatView: View {
         if let token = ComposerSuggestionTriggerPolicy.activeToken(
             in: composerText,
             selection: composerSelection
-        ), token.kind != .skill || skillPickerAvailable {
+        ), token.kind != .skill || resourcePickerAvailable {
             sessionPresentation.attachmentPresentationTask?.cancel()
             sessionPresentation.attachmentPresentationTask = nil
             if composerResourcePicker != .token(token) {
@@ -1953,30 +1958,27 @@ struct ChatView: View {
                 commands: composerResourceCatalog.commands
             )
             applyComposerReplacement(replacement)
-            model.composerDrafts.selectSkill(entry.commandInfo, for: composerScope)
+            model.composerDrafts.selectResource(entry.commandInfo, for: composerScope)
         case .command:
-            let base: (text: String, selection: NSRange)
-            let replacementRange: NSRange
+            let replacement: (text: String, selection: NSRange)
             if case .token(let token) = composerResourcePicker {
-                base = (composerText, composerSelection)
-                replacementRange = token.replacementRange
+                guard let tokenReplacement = ComposerSuggestionTriggerPolicy.replacing(
+                    text: composerText,
+                    range: token.replacementRange,
+                    with: ""
+                ) else { return }
+                replacement = tokenReplacement
             } else {
-                // A command selected from the menu becomes the leading Pi
-                // command; replace an existing exact command while retaining
-                // its editable arguments.
-                base = ComposerCommandCompletionPolicy.removingLeadingCommand(
+                // A selected command/template is represented by the chip; its
+                // editable arguments remain ordinary composer text without a
+                // leading slash or trigger token.
+                replacement = ComposerCommandCompletionPolicy.removingLeadingCommand(
                     text: composerText,
                     selection: composerSelection,
                     commands: composerResourceCatalog.commands
                 )
-                replacementRange = NSRange(location: 0, length: 0)
             }
-            guard let replacement = ComposerSuggestionTriggerPolicy.replacing(
-                text: base.text,
-                range: replacementRange,
-                with: "/\(entry.invocationName) "
-            ) else { return }
-            model.composerDrafts.removeSelectedSkill(for: composerScope)
+            model.composerDrafts.selectResource(entry.commandInfo, for: composerScope)
             applyComposerReplacement(replacement)
         }
         dismissComposerResourcePicker()
@@ -2141,6 +2143,34 @@ struct ChatView: View {
         }
     }
 
+    private func composerResourceInvocation() -> ComposerResourceInvocation? {
+        let value = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.first == "/" else {
+            if let scope = composerScope, let resource = model.composerDrafts.selectedResource(for: scope) {
+                let source: ComposerResourceInvocation.Source = switch resource.source {
+                case .skill: .skill
+                case .prompt: .prompt
+                case .extension: .extension
+                }
+                return ComposerResourceInvocation(
+                    source: source,
+                    name: source == .skill && resource.name.hasPrefix("skill:")
+                        ? String(resource.name.dropFirst("skill:".count))
+                        : resource.name,
+                    arguments: value
+                )
+            }
+            return nil
+        }
+        // Pi 0.84.1 uses a literal ASCII space to delimit the command name.
+        // Keep this admission parser identical to Gateway and do not execute
+        // slash text embedded later in prose.
+        let token = String(value.dropFirst().split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
+        guard let command = model.commands.first(where: { $0.source == .extension && $0.name == token }) else { return nil }
+        let arguments = value.dropFirst().dropFirst(token.count)
+        return ComposerResourceInvocation(source: .extension, name: command.name, arguments: String(arguments).trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
     @MainActor
     private func send(behavior explicitBehavior: String? = nil) {
         guard sessionPresentation.openingTask == nil,
@@ -2164,18 +2194,24 @@ struct ChatView: View {
             return
         }
         if let composerScope,
-           let selected = model.composerDrafts.selectedSkill(for: composerScope) {
-            guard supportsSkillPrompt, model.commandCatalogTarget == target else {
+           let selected = model.composerDrafts.selectedResource(for: composerScope) {
+            guard model.commandCatalogTarget == target else {
                 model.presentComposerActionError(
-                    "Skills are still loading for this session.",
+                    "Resources are still loading for this session.",
                     target: target
                 )
                 return
             }
-            guard model.commands.filter({ $0 == selected }).count == 1 else {
-                model.composerDrafts.removeSelectedSkill(for: composerScope)
+            let matches = model.commands.filter {
+                $0.source == selected.source && $0.name == selected.name
+            }
+            let shadowed = selected.source != .extension && model.commands.contains {
+                $0.source == .extension && $0.name == selected.name
+            }
+            guard matches.count == 1, !shadowed else {
+                model.composerDrafts.removeSelectedResource(for: composerScope)
                 model.presentComposerActionError(
-                    "That skill is no longer available for this session.",
+                    "That resource is no longer available for this session.",
                     target: target
                 )
                 return
@@ -2210,6 +2246,7 @@ struct ChatView: View {
                 let submission = try model.beginComposerSubmission(
                     target: target,
                     behavior: behavior,
+                    resourceInvocation: composerResourceInvocation(),
                     canonicalTranscript: model.transcriptSnapshot(for: sessionID)?.transcript ?? [],
                     queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? []
                 )
@@ -2219,6 +2256,7 @@ struct ChatView: View {
                     }
                     .prefix(ComposerAttachmentPolicy.maximumCount)
                     .map { $0.frozenForHandoff() }
+                let isExtensionCommand = submission.resourceInvocation?.isExtensionCommand == true
                 let morphGeneration = layoutTransaction.join(.morphFlight)
                 let stagedMorph = morphRegistry.stage(
                     lifecycle: model.composerDrafts.submissionLifecycle(for: target),
@@ -2228,7 +2266,10 @@ struct ChatView: View {
                 if !stagedMorph {
                     layoutTransaction.settle(morphGeneration, source: .morphFlight)
                 }
-                let grafted = transcriptPresentation.graftLocalLifecycle(
+                // Exact extension commands do not create a canonical user
+                // message in Pi. Never graft a prompt bubble that can become a
+                // phantom row; the canonical invocation receipt owns its row.
+                let grafted = isExtensionCommand ? false : transcriptPresentation.graftLocalLifecycle(
                     handoff: .outgoing(
                         presentation: ChatOutgoingSubmissionPresentation(
                             snapshot: submission,

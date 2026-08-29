@@ -75,16 +75,19 @@ final class SessionSynchronizationCoordinator {
         let intent: Intent
         let outcome: SharedOutcome
         var events: [GatewayEvent] = []
+        var bufferedBytes = 0
         var overflowed = false
         var requiresRetry = false
     }
 
     private let maximumBufferedEvents: Int
+    private let maximumBufferedBytes: Int
     private var synchronizations: [String: Synchronization] = [:]
     private var freshInstallSessionIDs = Set<String>()
 
-    init(maximumBufferedEvents: Int = 1_024) {
+    init(maximumBufferedEvents: Int = 1_024, maximumBufferedBytes: Int = 2 * 1_024 * 1_024) {
         self.maximumBufferedEvents = maximumBufferedEvents
+        self.maximumBufferedBytes = maximumBufferedBytes
     }
 
     func acquire(sessionID: String, intent: Intent) -> Lease {
@@ -126,13 +129,19 @@ final class SessionSynchronizationCoordinator {
               var synchronization = synchronizations[sessionID] else {
             return .deliver(event)
         }
-        if synchronization.events.count >= maximumBufferedEvents {
+        let eventBytes = event.admittedBytes > 0 ? event.admittedBytes : 256
+        if synchronization.events.count >= maximumBufferedEvents
+            || synchronization.bufferedBytes > maximumBufferedBytes - eventBytes {
             synchronization.events.removeAll(keepingCapacity: false)
+            synchronization.bufferedBytes = 0
             synchronization.overflowed = true
             synchronizations[sessionID] = synchronization
             return .overflow(sessionID)
         }
-        if !synchronization.overflowed { synchronization.events.append(event) }
+        if !synchronization.overflowed {
+            synchronization.events.append(event)
+            synchronization.bufferedBytes += eventBytes
+        }
         synchronizations[sessionID] = synchronization
         return .buffered
     }
@@ -143,6 +152,7 @@ final class SessionSynchronizationCoordinator {
         guard !synchronization.overflowed else { return nil }
         let events = synchronization.events
         synchronization.events.removeAll(keepingCapacity: true)
+        synchronization.bufferedBytes = 0
         synchronizations[lease.sessionID] = synchronization
         guard let baseline else { return events }
         return events.filter { event in
@@ -187,6 +197,7 @@ final class SessionSynchronizationCoordinator {
         guard var synchronization = synchronizations[lease.sessionID],
               synchronization.token == lease.token else { return }
         synchronization.events.removeAll(keepingCapacity: false)
+        synchronization.bufferedBytes = 0
         synchronization.overflowed = false
         synchronization.requiresRetry = false
         synchronizations[lease.sessionID] = synchronization

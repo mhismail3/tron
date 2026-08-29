@@ -121,13 +121,13 @@ private final class TestWebSocketTask: GatewayWebSocketTransport.WebSocketTask, 
 struct ServerPingDecodeTests {
     @Test("matching system.info response projects the gateway version")
     func matchingCanonicalResponseProjectsVersion() {
-        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","gatewayChannel":"stable","machineName":"Mac","piVersion":"0.84.1","capabilities":[]}}"#
+        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine","gatewayChannel":"stable","machineName":"Mac","piVersion":"0.84.1","capabilities":[]}}"#
         #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(ServerPingInfo(version: "0.1.0", gatewayChannel: "stable")))
     }
 
     @Test("matching system.info response retains runtime provenance")
     func matchingResponseProjectsRuntimeIdentity() {
-        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","gatewayChannel":"dev","sourceRevision":"revision-1","buildFingerprint":"fingerprint-1","runtimeEpoch":"epoch-1"}}"#
+        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine","gatewayChannel":"dev","sourceRevision":"revision-1","buildFingerprint":"fingerprint-1","runtimeEpoch":"epoch-1"}}"#
         #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(ServerPingInfo(
             version: "0.1.0",
             gatewayChannel: "dev",
@@ -140,20 +140,20 @@ struct ServerPingDecodeTests {
     @Test("gateway channel is bounded when present")
     func gatewayChannelIsBounded() {
         let oversized = String(repeating: "x", count: GatewayPayloadStore.channelComponentLimit + 1)
-        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","gatewayChannel":"\#(oversized)"}}"#
+        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine","gatewayChannel":"\#(oversized)"}}"#
         #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .malformed)
     }
 
     @Test("missing required gateway identity is malformed")
     func missingCanonicalFieldsIsMalformed() {
-        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":3,"minProtocolVersion":3,"machineId":""}}"#
+        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":4,"minProtocolVersion":4,"machineId":""}}"#
         #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .malformed)
     }
 
     @Test("protocol versions must exactly match the supported transport")
     func incompatibleProtocolIsMalformed() {
         let older = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine"}}"#
-        let future = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":4,"minProtocolVersion":3,"machineId":"machine"}}"#
+        let future = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":5,"minProtocolVersion":4,"machineId":"machine"}}"#
         let inverted = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":1,"minProtocolVersion":3,"machineId":"machine"}}"#
         #expect(ServerPing.decodeFrame(data: Data(older.utf8)) == .malformed)
         #expect(ServerPing.decodeFrame(data: Data(future.utf8)) == .malformed)
@@ -168,9 +168,9 @@ struct ServerPingDecodeTests {
 
     @Test("server hello must be exact before system.info is sent")
     func serverHelloRequiresExactTransportVersions() {
-        let valid = #"{"type":"hello","protocolVersion":3,"minProtocolVersion":3}"#
-        let older = #"{"type":"hello","protocolVersion":2,"minProtocolVersion":2}"#
-        let future = #"{"type":"hello","protocolVersion":4,"minProtocolVersion":3}"#
+        let valid = #"{"type":"hello","protocolVersion":4,"minProtocolVersion":4}"#
+        let older = #"{"type":"hello","protocolVersion":3,"minProtocolVersion":3}"#
+        let future = #"{"type":"hello","protocolVersion":5,"minProtocolVersion":4}"#
         #expect(ServerPing.decodeHello(data: Data(valid.utf8)))
         #expect(!ServerPing.decodeHello(data: Data(older.utf8)))
         #expect(!ServerPing.decodeHello(data: Data(future.utf8)))
@@ -178,7 +178,7 @@ struct ServerPingDecodeTests {
 
     @Test("system.info responses are not accepted as the server hello")
     func responseCannotSatisfyHelloGate() {
-        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","gatewayChannel":"stable"}}"#
+        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine","gatewayChannel":"stable"}}"#
         #expect(!ServerPing.decodeHello(data: Data(body.utf8)))
         #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(ServerPingInfo(version: "0.1.0", gatewayChannel: "stable")))
     }

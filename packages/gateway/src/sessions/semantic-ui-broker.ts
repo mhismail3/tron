@@ -25,7 +25,7 @@ import {
   ExtensionPresentationStore,
 } from "../extensions/host/extension-presentation-store.js";
 import { stripTerminalControls } from "../extensions/host/terminal-sanitizer.js";
-import { currentExtensionOwner } from "../extensions/owner-attribution.js";
+import { currentExtensionOwner, currentInvocationContext } from "../extensions/owner-attribution.js";
 
 interface PendingInteraction {
   wire: ExtensionInteraction;
@@ -315,9 +315,16 @@ export class SemanticUIBroker {
 
     return new Promise((resolve, reject) => {
       const timeout = options?.timeout;
+      const owner = currentExtensionOwner();
+      const invocation = currentInvocationContext();
       const wire: ExtensionInteraction = {
         id: crypto.randomUUID(), hostEpoch: this.hostEpoch, presentationRevision: 0, ...input,
         ...(timeout ? { expiresAt: new Date(Date.now() + timeout).toISOString() } : {}),
+        ...(owner ? { owner } : {}),
+        ...(invocation ? {
+          invocationId: invocation.invocationId,
+          operationId: invocation.operationId,
+        } : {}),
       };
       const interactions = [...this.interactions(), wire];
       if (encodedBytes(interactions) > MAX_INTERACTION_BYTES) return reject(new GatewayError("busy", "Extension UI interactions reached their bounded capacity", true));

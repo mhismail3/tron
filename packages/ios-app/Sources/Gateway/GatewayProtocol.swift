@@ -98,17 +98,20 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
     let topic: String
     let sessionId: String?
     let payload: JSONValue
+    /// Trusted encoded frame size supplied before synchronization admission.
+    let admittedBytes: Int
     let preparation: GatewayEventPreparation
 
     private enum CodingKeys: String, CodingKey {
         case type, topic, sessionId, payload
     }
 
-    init(type: String, topic: String, sessionId: String?, payload: JSONValue) {
+    init(type: String, topic: String, sessionId: String?, payload: JSONValue, admittedBytes: Int = 0) {
         self.type = type
         self.topic = topic
         self.sessionId = sessionId
         self.payload = payload
+        self.admittedBytes = max(0, admittedBytes)
         preparation = Self.prepare(topic: topic, adapter: JSONValuePayloadAdapter(payload: payload))
     }
 
@@ -118,6 +121,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
         topic = try container.decode(String.self, forKey: .topic)
         sessionId = try container.decodeIfPresent(String.self, forKey: .sessionId)
         payload = try container.decode(JSONValue.self, forKey: .payload)
+        admittedBytes = 0
         let payloadDecoder = try container.superDecoder(forKey: .payload)
         preparation = Self.prepare(topic: topic, adapter: DecoderPayloadAdapter(decoder: payloadDecoder))
     }

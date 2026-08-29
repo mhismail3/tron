@@ -1,6 +1,6 @@
-// Tron protocol v3 is an intentionally small, versioned mobile contract. Pi
-// objects must be projected into these bounded values rather than serialized
-// directly; Pi JSONL and configuration files remain canonical.
+// Tron protocol v4 is a typed, bounded mobile contract. Pi objects must be
+// projected into these values rather than serialized directly; Pi JSONL and
+// configuration files remain canonical.
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
@@ -112,6 +112,8 @@ interface TranscriptBase {
   id: string;
   parentId: string | null;
   timestamp: string;
+  /** Typed direction/context/provenance semantics for every projected row. */
+  semantic?: ChatSemanticMetadata;
 }
 
 export type TranscriptItem =
@@ -163,9 +165,6 @@ export type TranscriptItem =
       customType: string;
       content: ContentPart[];
       details?: JsonValue;
-      /** Producer-authored evidence that this custom message was delivered as
-       * session input and caused or continued an agent turn. */
-      sessionInput?: SessionInputMetadata;
     }
   | TranscriptBase & {
       kind: "customEntry";
@@ -204,11 +203,38 @@ export interface ExtensionToolOrigin {
   owner?: ExtensionOwner;
 }
 
-export interface SessionInputMetadata {
+export type ChatDirection = "inboundContext" | "agentOutput" | "agentInvocation" | "ambientStatus" | "hiddenInternal";
+export type ChatContextEffect = "none" | "modelInput" | "hiddenModelInput" | "toolResult";
+export type ChatDelivery = "stored" | "nextTurn" | "steer" | "followUp" | "triggeredTurn" | "continuedTurn" | "beforeAgentStart" | "toolResult" | "unknown";
+export type ChatOriginKind = "user" | "subagent" | "extension" | "process" | "gateway" | "assistant" | "unknown";
+export type ChatSemanticKind = "prompt" | "resourcePrompt" | "command" | "message" | "tool" | "status" | "state" | "unknown";
+
+export interface ChatOrigin {
+  kind: ChatOriginKind;
+  ownerId?: string;
+  title?: string;
+  confidence: "boundary" | "receipt" | "adapter" | "unknown";
+}
+
+/** Independent semantic axes used by every transcript renderer. */
+export interface ChatSemanticMetadata {
+  version: 1;
+  direction: ChatDirection;
+  contextEffect: ChatContextEffect;
+  delivery: ChatDelivery;
+  visibility: "visible" | "hidden";
+  kind: ChatSemanticKind;
+  origin: ChatOrigin;
+  invocationId?: string;
+  operationId?: string;
+  sequence: number;
+  lifecycle?: InvocationLifecycle;
+  resourceInvocation?: ResourceInvocation;
+}
+
+export interface ContextDeliveryMetadata {
   source: "extension";
-  trigger: "turn";
-  /** Exact extension attribution when the callback or registered renderer
-   * supplied one. Absence remains unknown rather than inferred from text. */
+  delivery: "stored" | "triggeredTurn";
   origin?: ExtensionToolOrigin;
 }
 
@@ -436,11 +462,17 @@ export interface RetryState {
   errorMessage?: string;
 }
 
+export type InvocationLifecycle =
+  | "staged" | "accepted" | "running" | "waitingForInput" | "queued"
+  | "retrying" | "settling" | "completed" | "failed" | "interrupted" | "outcomeUnknown";
+
 export interface SessionOperationState {
   id?: string;
   kind: "prompt" | "command" | "compaction" | "branchSummary" | "bash" | "retry";
   startedAt: string;
   reason?: string;
+  invocationId?: string;
+  lifecycle?: InvocationLifecycle;
 }
 
 export interface ExtensionQuestionnaireOption {
@@ -475,6 +507,9 @@ interface ExtensionInteractionBase {
   title: string;
   message?: string;
   expiresAt?: string;
+  owner?: ExtensionOwner;
+  invocationId?: string;
+  operationId?: string;
 }
 
 /** Method-discriminated in Gateway code while retaining the existing flat JSON shape. */
@@ -510,11 +545,13 @@ export type ExtensionInteraction =
       questionnaire?: never;
     });
 
+type ExtensionInteractionOwnedFields = "id" | "hostEpoch" | "presentationRevision"
+  | "expiresAt" | "owner" | "invocationId" | "operationId";
 export type ExtensionInteractionInput =
-  | Omit<Extract<ExtensionInteraction, { method: "select" }>, "id" | "hostEpoch" | "presentationRevision" | "expiresAt">
-  | Omit<Extract<ExtensionInteraction, { method: "confirm" }>, "id" | "hostEpoch" | "presentationRevision" | "expiresAt">
-  | Omit<Extract<ExtensionInteraction, { method: "input" }>, "id" | "hostEpoch" | "presentationRevision" | "expiresAt">
-  | Omit<Extract<ExtensionInteraction, { method: "editor" }>, "id" | "hostEpoch" | "presentationRevision" | "expiresAt">;
+  | Omit<Extract<ExtensionInteraction, { method: "select" }>, ExtensionInteractionOwnedFields>
+  | Omit<Extract<ExtensionInteraction, { method: "confirm" }>, ExtensionInteractionOwnedFields>
+  | Omit<Extract<ExtensionInteraction, { method: "input" }>, ExtensionInteractionOwnedFields>
+  | Omit<Extract<ExtensionInteraction, { method: "editor" }>, ExtensionInteractionOwnedFields>;
 
 export interface ExtensionOwner {
   id: string;
@@ -665,33 +702,39 @@ export interface PromptAttachmentState {
   size: number;
 }
 
+export interface ResourceInvocation {
+  source: "skill" | "prompt" | "extension";
+  name: string;
+  arguments: string;
+}
+
 export interface QueuedMessageState {
   id: string;
   behavior: "steer" | "followUp";
   text: string;
-  /** Total uploaded items retained for rolling protocol compatibility. */
+  /** Total uploaded items represented by this queued prompt. */
   attachmentCount: number;
-  /** Optional typed counts added without breaking older clients. */
   photoCount?: number;
   fileAttachmentCount?: number;
-  /** Bounded exact descriptors added without breaking older clients. */
+  /** Bounded exact descriptors; payload bytes remain outside snapshots. */
   attachments?: PromptAttachmentState[];
+  resourceInvocation?: ResourceInvocation;
 }
 
 /** A prompt admitted before its canonical user entry exists, usually while
  * Pi performs automatic compaction during prompt preflight. */
 export interface PendingPromptState {
   id: string;
-  /** Additive for clients that want to suppress a stale pre-canonical row. */
   createdAt?: string;
   behavior?: "steer" | "followUp";
   text: string;
-  /** Total uploaded items retained for rolling protocol compatibility. */
+  /** Total uploaded items represented by this pending prompt. */
   attachmentCount: number;
   photoCount?: number;
   fileAttachmentCount?: number;
-  /** Bounded exact descriptors added without breaking older clients. */
+  /** Bounded exact descriptors; payload bytes remain outside snapshots. */
   attachments?: PromptAttachmentState[];
+  resourceInvocation?: ResourceInvocation;
 }
 
 export interface SessionSnapshot {
@@ -708,24 +751,20 @@ export interface SessionSnapshot {
   availableThinkingLevels: string[];
   contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
   stats: SessionStats;
-  /** Legacy Pi queue projection retained for rolling protocol compatibility. */
-  queued: { steering: string[]; followUp: string[] };
-  queueRevision?: number;
-  queuedItems?: QueuedMessageState[];
+  queueRevision: number;
+  queuedItems: QueuedMessageState[];
   /** Prompt admission awaiting its canonical user transcript entry. */
   pendingPrompt?: PendingPromptState;
   /** Gateway-owned manual compaction waiting for the active run to settle. */
   compactionQueued?: boolean;
-  /** Effective runtime setting; optional for rolling protocol compatibility. */
-  automaticCompactionEnabled?: boolean;
+  /** Effective runtime compaction setting. */
+  automaticCompactionEnabled: boolean;
   transcript: TranscriptItem[];
   transcriptStart: number;
   transcriptTotal: number;
   streaming?: TranscriptItem;
   leafEntryId?: string;
   operation?: SessionOperationState;
-  /** Exact Pi extension command handler currently admitted, independent of foreground agent work. */
-  extensionCommand?: SessionOperationState;
   retry?: RetryState;
   toolExecutions: ToolExecutionState[];
   /** Bounded recent extension-owned run history. Live entries are also carried

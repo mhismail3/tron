@@ -3921,15 +3921,13 @@ export default function (pi) {
     await waitUntil(() => !slot.isBusy);
     const settled = slot.snapshot();
     expect(settled).toMatchObject({ phase: "idle" });
-    expect(settled.transcript.find((item) => item.kind === "customMessage")).toMatchObject({
-      customType: "test-continuation",
-      content: [{ type: "text", text: "continue-1" }],
-      sessionInput: {
-        source: "extension",
-        trigger: "turn",
-        origin: { owner: { id: expect.stringMatching(/^extension:/) } },
-      },
-    });
+    // Producer-hidden continuation context is model input but not ordinary
+    // transcript UI. Its canonical receipt remains available in the branch.
+    expect(settled.transcript.find((item) => item.kind === "customMessage")).toBeUndefined();
+    expect(settled.transcript.some((item) =>
+      item.role === "user"
+        && item.semantic?.invocationId !== undefined
+        && item.semantic.lifecycle === "completed")).toBe(true);
     expect(registry.attentionProjection(slot.id).completionRevision).toBe(4);
     const completionIds = complete.mock.calls.map(([, completionId]) => completionId);
     expect(completionIds).toHaveLength(5);
@@ -4697,21 +4695,21 @@ export default function (pi) {
     });
     await slot.prompt("/skill:review queued skill", [], "steer", {
       text: "queued skill",
-      skillName: "review",
+      resourceInvocation: { source: "skill", name: "review", arguments: "queued skill" },
       attachmentEnvelope: "",
       attachmentCount: 0,
     });
     const queued = slot.snapshot();
     expect(queued.queuedItems).toHaveLength(4);
-    expect(queued.queuedItems?.map((item) => item.behavior)).toEqual(["steer", "steer", "steer", "followUp"]);
-    expect(queued.queuedItems?.map((item) => item.text)).toEqual([
+    expect(queued.queuedItems.map((item) => item.behavior)).toEqual(["steer", "steer", "steer", "followUp"]);
+    expect(queued.queuedItems.map((item) => item.text)).toEqual([
       "first steer", "first steer", "queued skill", "later follow-up",
     ]);
-    expect(new Set(queued.queuedItems?.map((item) => item.id)).size).toBe(4);
-    expect(queued.queuedItems?.[0]?.attachments).toEqual([attachment]);
+    expect(new Set(queued.queuedItems.map((item) => item.id)).size).toBe(4);
+    expect(queued.queuedItems[0]?.attachments).toEqual([attachment]);
 
-    const [first, duplicate, skill, followUp] = queued.queuedItems!;
-    const replaced = await slot.replaceQueue(queued.queueRevision!, [
+    const [first, duplicate, skill, followUp] = queued.queuedItems;
+    const replaced = await slot.replaceQueue(queued.queueRevision, [
       { id: duplicate!.id, behavior: "steer", text: duplicate!.text },
       { id: followUp!.id, behavior: "steer", text: "edited and earlier" },
       { id: first!.id, behavior: "followUp", text: first!.text },
@@ -4730,14 +4728,13 @@ export default function (pi) {
     expect(queuedRuntime.some(
       (text) => text.startsWith('<skill name="review"') && text.endsWith("edited skill"),
     )).toBe(true);
-    await expect(slot.replaceQueue(queued.queueRevision!, [])).rejects.toMatchObject({ code: "conflict" });
+    await expect(slot.replaceQueue(queued.queueRevision, [])).rejects.toMatchObject({ code: "conflict" });
 
     const removed = await slot.replaceQueue(replaced.queueRevision, [replaced.items[1]!]);
     expect(removed.items).toHaveLength(1);
     expect(removed.items[0]?.id).toBe(followUp!.id);
 
-    const cleared = await slot.clearQueue();
-    expect(cleared.steering).toEqual(["edited and earlier"]);
+    await slot.clearQueue();
     expect(slot.snapshot().queuedItems).toEqual([]);
     await expect(slot.replaceQueue(removed.queueRevision, removed.items))
       .rejects.toMatchObject({ code: "conflict" });
@@ -6077,28 +6074,37 @@ export default function (pi) {
     const recoveredPending = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
     slot.respondToInteraction(recoveredPending.id, recoveredPending.hostEpoch, recoveredPending.presentationRevision, false, true);
     await expect(recoveredCommand).resolves.toEqual({ operationId: expect.any(String) });
-    await waitUntil(() => slot.snapshot().extensionCommand === undefined);
+    await waitUntil(() => (slot as any).pendingExtensionCommand === undefined);
     expect(failedMarker.mock.calls.length).toBeGreaterThanOrEqual(2);
     failedMarker.mockRestore();
 
-    const command = slot.prompt("/during-stream");
+    let resolveAdmission!: (result: { operationId: string }) => void;
+    const admission = new Promise<{ operationId: string }>((resolve) => { resolveAdmission = resolve; });
+    const command = slot.prompt(
+      "/during-stream",
+      [],
+      undefined,
+      undefined,
+      resolveAdmission,
+    );
+    await expect(admission).resolves.toEqual({ operationId: expect.any(String) });
     await waitUntil(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1);
     const pending = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
     const during = slot.snapshot();
     expect(during.phase).toBe("running");
     expect(during.operation?.kind).toBe("prompt");
-    expect(during.extensionCommand?.kind).toBe("command");
+    expect((slot as any).pendingExtensionCommand?.kind).toBe("command");
     const marker = JSON.parse(await readFile(join(root, "tron", "gateway", "runtime-markers", `${slot.id}.json`), "utf8")) as {
       operations: Array<{ operationId: string }>;
     };
-    expect(marker.operations.map((operation) => operation.operationId)).toContain(during.extensionCommand?.id);
+    expect(marker.operations.map((operation) => operation.operationId)).toContain((slot as any).pendingExtensionCommand?.id);
     let drainSettled = false;
     const drain = registry.waitUntilIdle().then(() => { drainSettled = true; });
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(drainSettled).toBe(false);
     slot.respondToInteraction(pending.id, pending.hostEpoch, pending.presentationRevision, true, false);
     await expect(command).resolves.toEqual({ operationId: expect.any(String) });
-    await waitUntil(() => slot.snapshot().extensionCommand === undefined);
+    await waitUntil(() => (slot as any).pendingExtensionCommand === undefined);
     expect(slot.snapshot().extensionPresentation.semanticState.statuses["stream-command"]).toBe("accepted");
     let releaseMarkerClear!: () => void;
     const markerClearBarrier = new Promise<void>((resolve) => { releaseMarkerClear = resolve; });
@@ -6117,6 +6123,44 @@ export default function (pi) {
     await waitUntil(() => slot.catalogPhase === "idle");
     await drain;
     expect(drainSettled).toBe(true);
+  });
+
+  it("records a caught extension-command handler error as a failed canonical invocation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-extension-command-failure-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+    await writeFile(join(extensionDir, "failing-command.ts"), `export default function (pi) {
+      pi.registerCommand("fail-command", {
+        description: "Fail deterministically",
+        handler: async () => { throw new Error("expected command failure"); },
+      });
+    }\n`);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust,
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+
+    await expect(slot.prompt("/fail-command")).resolves.toEqual({ operationId: expect.any(String) });
+    await waitUntil(() => (slot as any).pendingExtensionCommand === undefined);
+    const command = slot.snapshot().transcript.find(item => item.semantic?.kind === "command");
+    expect(command).toMatchObject({
+      semantic: {
+        lifecycle: "failed",
+        resourceInvocation: { source: "extension", name: "fail-command" },
+      },
+    });
   });
 
   it("keeps exact extension-shutdown ownership through a failed close retry", async () => {

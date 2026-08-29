@@ -843,7 +843,7 @@ struct PushNotificationCoordinatorTests {
     ) async throws -> (GatewayClient, ScriptedGatewaySocket) {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"0.84.1","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine-1","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"0.84.1","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine-1","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8))
         _ = try await client.connect(profile: profile, token: "token")
         return (client, socket)
     }

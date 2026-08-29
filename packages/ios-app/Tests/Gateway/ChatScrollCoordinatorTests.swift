@@ -1542,7 +1542,7 @@ private func installedToolTranscript(
       "sessionId":"scroll-session","runtimeGeneration":"runtime","revision":1,"eventSequence":1,"phase":"running","cwd":"/workspace",
       "model":{"provider":"test","id":"model"},"thinkingLevel":"high","availableThinkingLevels":["off","high"],
       "stats":{"userMessages":0,"assistantMessages":0,"toolCalls":0,"toolResults":0,"totalMessages":0,"tokens":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cost":0},
-      "queued":{"steering":[],"followUp":[]},"transcript":[],"transcriptStart":0,"transcriptTotal":0,
+      "queueRevision":0,"queuedItems":[],"automaticCompactionEnabled":true,"transcript":[],"transcriptStart":0,"transcriptTotal":0,
       "toolExecutions":[],"extensionPresentation":{"version":2,"hostEpoch":"host","revision":0,"capabilities":[],"diagnostics":[],"semanticState":{"statuses":{},"working":{"visible":false},"widgets":[],"toolsExpanded":false,"editorRevision":0,"editorText":""},"surfaces":[],"pendingInteractions":[]},"diagnostics":[]
     }
     """.utf8))

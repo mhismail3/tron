@@ -29,7 +29,7 @@ describe("two-phase session synchronization protocol", () => {
     const failNext = { value: false };
     const oversizedNext = { value: false };
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 4, minProtocolVersion: 4, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       invoke: async (context: any, method: string, params: any) => {
@@ -87,7 +87,7 @@ describe("two-phase session synchronization protocol", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 3 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
     while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
 
     const request = (id: string, method: string, sessionId: string, extra: Record<string, unknown> = {}) => {
@@ -170,7 +170,7 @@ describe("two-phase session synchronization protocol", () => {
     const mobileFrames: any[] = [];
     mobile.on("message", (raw) => mobileFrames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => mobile.once("open", () => resolve()));
-    mobile.send(JSON.stringify({ type: "hello", protocolVersion: 3, clientRole: "mobile" }));
+    mobile.send(JSON.stringify({ type: "hello", protocolVersion: 4, clientRole: "mobile" }));
     while (!mobileFrames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
     const mobileOpenSync = async (prefix: string, sessionId: string) => {
       const expectedCount = (startedCounts.get(sessionId) ?? 0) + 1;
@@ -219,7 +219,7 @@ describe("two-phase session synchronization protocol", () => {
       const barrier = new SessionSyncBarrier();
       socket.on("message", (raw) => {
         const frame = JSON.parse(raw.toString()) as any;
-        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 3, minProtocolVersion: 3 }));
+        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 4, minProtocolVersion: 4 }));
         if (frame.method === "session.open") {
           barrier.begin("token");
           barrier.offer({ type: "event", topic: "session.progress", sessionId: "session", payload: { runtimeGeneration: "generation", eventSequence: 2, revision: 2, data: {} } });
@@ -238,7 +238,7 @@ describe("two-phase session synchronization protocol", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 3 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
     while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
     socket.send(JSON.stringify({ type: "request", id: "open", method: "session.open", params: { sessionId: "session" } }));
     while (!frames.some((frame) => frame.id === "open")) await new Promise((resolve) => setTimeout(resolve, 1));
@@ -274,7 +274,7 @@ describe("synchronization catch-up overflow recovery", () => {
     const openCounts = new Map<string, number>();
     const recoveryStarted = new Promise<void>((resolve) => { recoveryStartedResolve = resolve; });
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 4, minProtocolVersion: 4, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       recoverySnapshot: async (sessionId: string) => {
@@ -349,7 +349,7 @@ describe("synchronization catch-up overflow recovery", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 3 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
     while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
 
     const openAndSync = async (idPrefix: string, sessionId: string) => {
@@ -473,7 +473,7 @@ describe("connection-wide synchronization ownership", () => {
     let pendingOpenStartedResolve: (() => void) | undefined;
     const pendingOpenStarted = new Promise<void>((resolve) => { pendingOpenStartedResolve = resolve; });
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 4, minProtocolVersion: 4, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: (terminalId: string, sessionId: string) => terminalId === "terminal-before" && sessionId === "before",
       releaseClient: vi.fn(),
       releaseSessionProcessTranscripts: vi.fn(),
@@ -523,7 +523,7 @@ describe("connection-wide synchronization ownership", () => {
     const frames: any[] = [];
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 3 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
     const waitFor = async (predicate: () => boolean) => {
       const deadline = Date.now() + 5_000;
       while (!predicate()) {

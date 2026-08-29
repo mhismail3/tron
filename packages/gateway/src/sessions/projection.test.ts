@@ -4,7 +4,8 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { BlobStore } from "./blob-store.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
-import { SESSION_INPUT_RECEIPT_TYPE, makeSessionInputReceipt } from "./session-input-receipts.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
+import { makeInvocationReceipt, INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
 import type { SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import {
   admitCommandCatalog,
@@ -310,17 +311,143 @@ describe("transcript projection", () => {
     manager.appendCustomEntry("state", { count: 1 });
     manager.appendLabelChange(assistant, "checkpoint");
     const transcript = projectTranscript(manager, new BlobStore());
-    expect(transcript.map((item) => item.id)).toEqual([first, assistant, modelChange, manager.getEntries()[3]!.id, manager.getLeafId()]);
+    // appendEntry/custom state is canonical extension state, not chat content.
+    expect(transcript.map((item) => item.id)).toEqual([first, assistant, modelChange, manager.getLeafId()]);
     expect(transcript[0]).toMatchObject({
       kind: "message",
       content: [{ id: `${first}:0`, type: "text", text: "hello" }],
     });
     expect(transcript[2]).toMatchObject({ kind: "modelChange", modelRef: { provider: "provider", id: "next-model" } });
-    expect(transcript[3]).toMatchObject({ kind: "customEntry", customType: "state", data: { count: 1 } });
-    expect(transcript[4]).toMatchObject({ kind: "label", targetId: assistant, label: "checkpoint" });
+    expect(transcript[3]).toMatchObject({ kind: "label", targetId: assistant, label: "checkpoint" });
   });
 
-  it("projects only receipt-backed triggered custom messages as session input", () => {
+  it("projects one ordered invocation start row while folding terminal receipts", () => {
+    const manager = SessionManager.inMemory("/tmp/project");
+    const user = manager.appendMessage({ role: "user", content: "before", timestamp: 1 });
+    const invocation = makeInvocationReceipt({
+      version: 1, receiptId: "start:inv", receiptKind: "start", invocationId: "inv",
+      operationId: "op", sessionId: manager.getSessionId(), source: "extension", name: "goal",
+      lifecycle: "staged", sequence: 2, createdAt: "2026-01-01T00:00:00.000Z",
+      origin: { kind: "extension", confidence: "boundary" },
+    });
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, invocation);
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: "accepted:inv", receiptKind: "transition", invocationId: "inv",
+      operationId: "op", sessionId: manager.getSessionId(), source: "extension", lifecycle: "accepted",
+      sequence: 3, createdAt: "2026-01-01T00:00:00.500Z",
+    }));
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: "terminal:inv", receiptKind: "terminal", invocationId: "inv",
+      operationId: "op", sessionId: manager.getSessionId(), source: "extension", name: "goal",
+      lifecycle: "completed", origin: { kind: "extension", confidence: "boundary" },
+      sequence: 4, createdAt: "2026-01-01T00:00:01.000Z",
+    }));
+    const assistant = manager.appendMessage({
+      role: "assistant", content: [{ type: "text", text: "after" }], api: "openai-responses",
+      provider: "test", model: "model", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "stop", timestamp: 4,
+    });
+    const transcript = projectTranscript(manager, new BlobStore());
+    expect(transcript.map(item => item.id)).toEqual([user, manager.getEntries()[1]!.id, assistant]);
+    expect(transcript[0]).toMatchObject({ semantic: { kind: "prompt", origin: { kind: "user" } } });
+    expect(transcript[1]).toMatchObject({ kind: "customEntry", semantic: { invocationId: "inv", lifecycle: "completed", kind: "command" } });
+    expect(transcript.filter(item => item.customType === INVOCATION_RECEIPT_TYPE)).toHaveLength(1);
+    const tree = projectTree(manager, new BlobStore());
+    expect(tree.filter(item => item.kind === "customEntry")).toHaveLength(1);
+    expect(tree.filter(item => item.kind === "customEntry")[0]).toMatchObject({ preview: INVOCATION_RECEIPT_TYPE });
+  });
+
+  it("folds a skill invocation into its canonical user row without a receipt row", () => {
+    const manager = SessionManager.inMemory("/tmp/project");
+    const start = makeInvocationReceipt({
+      version: 1, receiptId: "start:skill", receiptKind: "start", invocationId: "skill",
+      operationId: "skill-op", sessionId: manager.getSessionId(), source: "skill", name: "review",
+      arguments: "Inspect this", lifecycle: "staged", sequence: 1,
+      createdAt: "2026-01-01T00:00:00.000Z", origin: { kind: "user", confidence: "boundary" },
+    });
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, start);
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: "accepted:skill", receiptKind: "transition", invocationId: "skill",
+      operationId: "skill-op", sessionId: manager.getSessionId(), source: "skill",
+      lifecycle: "accepted", sequence: 2, createdAt: "2026-01-01T00:00:00.100Z",
+    }));
+    const user = manager.appendMessage({ role: "user", content: "expanded skill input", timestamp: 2 });
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: "binding:skill", receiptKind: "binding", invocationId: "skill",
+      operationId: "skill-op", sessionId: manager.getSessionId(), source: "skill",
+      canonicalEntryId: user, sequence: 3, createdAt: "2026-01-01T00:00:00.200Z",
+    }));
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: "terminal:skill", receiptKind: "terminal", invocationId: "skill",
+      operationId: "skill-op", sessionId: manager.getSessionId(), source: "skill",
+      lifecycle: "completed", sequence: 4, createdAt: "2026-01-01T00:00:00.300Z",
+    }));
+
+    const transcript = projectTranscript(manager, new BlobStore());
+    expect(transcript).toHaveLength(1);
+    expect(transcript[0]).toMatchObject({
+      id: user,
+      kind: "message",
+      semantic: {
+        kind: "resourcePrompt",
+        lifecycle: "completed",
+        resourceInvocation: { source: "skill", name: "review", arguments: "Inspect this" },
+      },
+    });
+  });
+
+  it("rejects a forged invocation customType without the Gateway writer marker", () => {
+    const manager = SessionManager.inMemory("/tmp/project");
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, {
+      version: 1, receiptId: "start:forged", receiptKind: "start", invocationId: "forged",
+      operationId: "op", sessionId: manager.getSessionId(), source: "extension", lifecycle: "accepted",
+      sequence: 1, createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(() => projectTranscript(manager, new BlobStore())).toThrow("malformed");
+    expect(() => projectTree(manager, new BlobStore())).toThrow("malformed");
+  });
+
+  it("resolves a context receipt after later branch entries by exact target ID", () => {
+    const manager = SessionManager.inMemory("/tmp/project");
+    const target = manager.appendCustomMessageEntry("context", [{ type: "text", text: "background input" }], true);
+    manager.appendMessage({ role: "assistant", content: [{ type: "text", text: "later" }], api: "openai-responses", provider: "test", model: "model", usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: 2 });
+    manager.appendCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt(target, "triggeredTurn", { source: "trusted-adapter", owner: { id: "extension:trusted", title: "Trusted", source: "trusted-adapter" } }));
+    const transcript = projectTranscript(manager, new BlobStore());
+    expect(transcript[0]).toMatchObject({
+      id: target,
+      kind: "customMessage",
+      semantic: {
+        direction: "inboundContext",
+        contextEffect: "modelInput",
+        delivery: "triggeredTurn",
+        origin: { kind: "extension", title: "Trusted" },
+      },
+    });
+  });
+
+  it("attributes visible stored custom context without claiming a triggered turn", () => {
+    const manager = SessionManager.inMemory("/tmp/project");
+    const target = manager.appendCustomMessageEntry(
+      "extension-notice",
+      [{ type: "text", text: "Available to the next model turn" }],
+      true,
+    );
+    manager.appendCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt(
+      target,
+      "stored",
+      { source: "extension:test", owner: { id: "extension:test", title: "Test Extension", source: "extension:test" } },
+    ));
+    expect(projectTranscript(manager, new BlobStore())[0]).toMatchObject({
+      semantic: {
+        direction: "inboundContext",
+        contextEffect: "modelInput",
+        delivery: "stored",
+        origin: { kind: "extension", title: "Test Extension" },
+      },
+    });
+  });
+
+  it("keeps producer-hidden context messages out of ordinary chat", () => {
     const manager = SessionManager.inMemory("/tmp/project");
     manager.appendCustomMessageEntry("hidden-status", [{ type: "text", text: "not delivered" }], false);
     const input = manager.appendCustomMessageEntry(
@@ -329,31 +456,16 @@ describe("transcript projection", () => {
       false,
       { runId: "run-1" },
     );
-    manager.appendCustomEntry(SESSION_INPUT_RECEIPT_TYPE, makeSessionInputReceipt(input, {
+    manager.appendCustomEntry(CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt(input, "triggeredTurn", {
       source: "npm:pi-subagents",
       owner: { id: "extension:opaque", title: "Pi Subagents", source: "npm:pi-subagents" },
     }));
 
     const transcript = projectTranscript(manager, new BlobStore());
-    expect(transcript).toHaveLength(1);
-    expect(transcript[0]).toMatchObject({
-      id: input,
-      kind: "customMessage",
-      customType: "subagent-notify",
-      content: [{ text: "Background worker finished" }],
-      details: { runId: "run-1" },
-      sessionInput: {
-        source: "extension",
-        trigger: "turn",
-        origin: {
-          source: "npm:pi-subagents",
-          owner: { id: "extension:opaque", title: "Pi Subagents", source: "npm:pi-subagents" },
-        },
-      },
-    });
+    expect(transcript).toHaveLength(0);
     const page = projectTranscriptPage(manager, new BlobStore());
-    expect(page).toMatchObject({ start: 0, end: 1, total: 1, items: [{ id: input }] });
-    expect(transcript.some((item) => item.customType === SESSION_INPUT_RECEIPT_TYPE)).toBe(false);
+    expect(page).toMatchObject({ start: 0, end: 0, total: 0, items: [] });
+    expect(transcript.some((item) => item.customType === CONTEXT_DELIVERY_RECEIPT_TYPE)).toBe(false);
   });
 
   it("omits oversized or capacity-excess images without failing the snapshot", () => {
@@ -419,7 +531,7 @@ describe("transcript projection", () => {
   it("projects Pi skill envelopes as exact user arguments and preserves attachment extraction", () => {
     const envelope = `<skill name="review" location="/private/skills/review/SKILL.md">\nReferences are relative to /private/skills/review.\n\nReview carefully.\n</skill>\n\nInspect this\n\n<attachment name="notes.txt" mime-type="text/plain" size="4" path="/private/upload/content.txt" />`;
     expect(projectSkillInvocation(envelope)).toEqual({
-      skillName: "review",
+      resourceName: "review",
       text: `Inspect this\n\n<attachment name="notes.txt" mime-type="text/plain" size="4" path="/private/upload/content.txt" />`,
     });
     const item = projectMessage(
@@ -442,7 +554,7 @@ describe("transcript projection", () => {
 
   it("uses the final Pi delimiter when skill Markdown contains an envelope-like close", () => {
     const envelope = `<skill name="review" location="/private/skills/review/SKILL.md">\nReferences are relative to /private/skills/review.\n\nExplain this literal:\n</skill>\n\nwithout treating it as the envelope close\n</skill>\n\nInspect this`;
-    expect(projectSkillInvocation(envelope)).toEqual({ skillName: "review", text: "Inspect this" });
+    expect(projectSkillInvocation(envelope)).toEqual({ resourceName: "review", text: "Inspect this" });
   });
 
   it("fails closed for malformed skill envelopes", () => {

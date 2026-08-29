@@ -23,25 +23,19 @@ struct TranscriptRow: View, Equatable {
                     outputTruncated: item.truncated == true
                 )
             case .customMessage:
-                if item.sessionInput != nil {
-                    SessionInputMessageView(item: item)
-                } else {
-                    ToolCard(
-                        title: item.customType ?? "Extension",
-                        subtitle: "Extension message",
-                        content: item.text,
-                        response: item.details,
-                        fallbackContent: item.text.isEmpty ? item.details : nil
-                    )
-                }
+                // Every projected custom_message is model input under Pi's
+                // session semantics. It is not a tool result and is rendered
+                // on the inbound edge with explicit producer provenance.
+                InboundProducerMessageView(item: item)
             case .customEntry:
-                ToolCard(
-                    title: item.customType ?? "Extension state",
-                    subtitle: "Extension state",
-                    content: "",
-                    response: item.customData,
-                    fallbackContent: item.customData
-                )
+                if item.semantic?.kind == .command {
+                    CommandLifecycleView(item: item)
+                } else {
+                    // appendEntry/custom entries are extension state, not chat
+                    // content. Only typed command receipts have a transcript
+                    // presentation; unadapted state remains absent.
+                    EmptyView()
+                }
             case .compaction, .branchSummary, .modelChange, .thinkingChange, .label:
                 if let notification = ChatNotificationPresentation.canonical(item, globalOrdinal: nil) {
                     ChatNotificationView(presentation: notification)
@@ -52,7 +46,7 @@ struct TranscriptRow: View, Equatable {
     }
 
     private var isTrailingSessionMessage: Bool {
-        item.role == .user || item.sessionInput != nil
+        item.role == .user || item.semantic?.direction == .inboundContext
     }
 
     @ViewBuilder private var message: some View {
@@ -67,6 +61,9 @@ struct TranscriptRow: View, Equatable {
             )
         } else {
             VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 4) {
+                if let resource = item.semantic?.resourceInvocation {
+                    CanonicalResourceChip(resource: resource)
+                }
                 if !displayedAttachments.isEmpty {
                     attachmentStrip
                 }

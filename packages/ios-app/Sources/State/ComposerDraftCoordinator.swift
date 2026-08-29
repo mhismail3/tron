@@ -227,6 +227,15 @@ enum ComposerAttachmentPolicy {
     }
 }
 
+struct ComposerResourceInvocation: Codable, Equatable, Hashable, Sendable {
+    enum Source: String, Codable, Sendable { case skill, prompt, `extension` }
+    let source: Source
+    let name: String
+    let arguments: String
+
+    var isExtensionCommand: Bool { source == .extension }
+}
+
 struct ComposerSubmissionSnapshot: Equatable, Sendable {
     let target: SessionPresentationIdentity
     let textRevision: Int
@@ -234,7 +243,7 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
     /// User-visible text. Skill transport metadata is deliberately separate so
     /// optimistic, queued, and canonical presentation never expose `/skill:`.
     let outgoingText: String
-    let skillName: String?
+    let resourceInvocation: ComposerResourceInvocation?
     let attachmentIDs: [String]
     let behavior: String?
     let baselineQueuedMessageIDs: Set<String>
@@ -243,7 +252,7 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
         target: SessionPresentationIdentity,
         textRevision: Int,
         outgoingText: String,
-        skillName: String? = nil,
+        resourceInvocation: ComposerResourceInvocation? = nil,
         attachmentIDs: [String],
         behavior: String?,
         baselineQueuedMessageIDs: Set<String> = [],
@@ -253,7 +262,7 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
         self.textRevision = textRevision
         self.localNonce = localNonce
         self.outgoingText = outgoingText
-        self.skillName = skillName
+        self.resourceInvocation = resourceInvocation
         self.attachmentIDs = attachmentIDs
         self.behavior = behavior
         self.baselineQueuedMessageIDs = baselineQueuedMessageIDs
@@ -346,7 +355,7 @@ typealias ComposerSendOperation = @MainActor @Sendable (
     _ sessionID: String,
     _ uploadIDs: [String],
     _ behavior: String?,
-    _ skillName: String?
+    _ resourceInvocation: ComposerResourceInvocation?
 ) async throws -> String
 
 typealias ComposerAttachmentPreviewPreparation = @Sendable (
@@ -407,9 +416,9 @@ final class ComposerDraftCoordinator {
         let snapshot: ComposerSubmissionSnapshot
         let submittedAttachments: [PendingAttachment]
         let scope: ComposerDraftScope
-        let submittedSkill: CommandInfo?
-        let skillMutationRevision: Int
-        var canRestoreSubmittedSkill: Bool
+        let submittedResource: CommandInfo?
+        let resourceMutationRevision: Int
+        var canRestoreSubmittedResource: Bool
         let baselineTranscriptIDs: Set<String>
         let lifecycleGeneration: Int
         var transportState: SubmissionTransportState
@@ -446,8 +455,8 @@ final class ComposerDraftCoordinator {
     @ObservationIgnored private let admitsLifecycleGeneration: @MainActor (Int) -> Bool
 
     private var drafts: [ComposerDraftScope: Draft] = [:]
-    private var selectedSkillByScope: [ComposerDraftScope: CommandInfo] = [:]
-    private var skillMutationRevisionByScope: [ComposerDraftScope: Int] = [:]
+    private var selectedResourceByScope: [ComposerDraftScope: CommandInfo] = [:]
+    private var resourceMutationRevisionByScope: [ComposerDraftScope: Int] = [:]
     private var preparedOpenBySession: [String: PreparedOpen] = [:]
     private var lease: PresentationLease?
     /// Unsent attachment payloads follow durable profile/session scope. Only
@@ -540,44 +549,54 @@ final class ComposerDraftCoordinator {
         evictInactiveDraftsIfNeeded()
     }
 
-    func selectedSkill(for scope: ComposerDraftScope) -> CommandInfo? {
-        selectedSkillByScope[scope]
+    func selectedResource(for scope: ComposerDraftScope) -> CommandInfo? {
+        selectedResourceByScope[scope]
     }
 
-    func selectSkill(_ command: CommandInfo, for scope: ComposerDraftScope) {
-        guard command.source == .skill,
-              command.name.hasPrefix("skill:"),
-              command.name.count > "skill:".count else { return }
-        selectedSkillByScope[scope] = command
-        skillMutationRevisionByScope[scope, default: 0] &+= 1
+    func selectResource(_ command: CommandInfo, for scope: ComposerDraftScope) {
+        guard !command.name.isEmpty else { return }
+        selectedResourceByScope[scope] = command
+        resourceMutationRevisionByScope[scope, default: 0] &+= 1
         touch(scope, installing: nil)
     }
 
-    func removeSelectedSkill(for scope: ComposerDraftScope) {
-        selectedSkillByScope[scope] = nil
-        skillMutationRevisionByScope[scope, default: 0] &+= 1
+    func removeSelectedResource(for scope: ComposerDraftScope) {
+        selectedResourceByScope[scope] = nil
+        resourceMutationRevisionByScope[scope, default: 0] &+= 1
     }
 
-    /// Catalog replacement is authoritative. A retired, changed, or
-    /// cross-source ambiguous skill can never remain staged or be resurrected
-    /// by a late definitive transport failure.
-    func reconcileSelectedSkill(for scope: ComposerDraftScope, commands: [CommandInfo]) {
-        if let selected = selectedSkillByScope[scope],
-           !Self.skillIsUnambiguous(selected, in: commands) {
-            selectedSkillByScope[scope] = nil
-            skillMutationRevisionByScope[scope, default: 0] &+= 1
+    /// Catalog replacement is authoritative. A retired or shadowed resource
+    /// cannot remain staged or be resurrected by a late transport failure;
+    /// metadata-only refreshes preserve the stable source/name selection.
+    func reconcileSelectedResource(for scope: ComposerDraftScope, commands: [CommandInfo]) {
+        if let selected = selectedResourceByScope[scope] {
+            let matches = commands.filter {
+                $0.source == selected.source && $0.name == selected.name
+            }
+            let shadowed = selected.source != .extension && commands.contains {
+                $0.source == .extension && $0.name == selected.name
+            }
+            if matches.count == 1, !shadowed {
+                selectedResourceByScope[scope] = matches[0]
+            } else {
+                selectedResourceByScope[scope] = nil
+                resourceMutationRevisionByScope[scope, default: 0] &+= 1
+            }
         }
         guard let scope = lease?.scope,
               var admission = submissionByScope[scope],
-              let submitted = admission.submittedSkill,
-              !Self.skillIsUnambiguous(submitted, in: commands) else { return }
-        admission.canRestoreSubmittedSkill = false
+              let submitted = admission.submittedResource,
+              !Self.resourceIsUnambiguous(submitted, in: commands) else { return }
+        admission.canRestoreSubmittedResource = false
         submissionByScope[scope] = admission
     }
 
-    private static func skillIsUnambiguous(_ selected: CommandInfo, in commands: [CommandInfo]) -> Bool {
-        commands.filter { $0 == selected }.count == 1
-            && !commands.contains { $0.source == .extension && $0.name == selected.name }
+    private static func resourceIsUnambiguous(_ selected: CommandInfo, in commands: [CommandInfo]) -> Bool {
+        // Source/name is the stable invocation identity. Descriptions, paths,
+        // and resource metadata may legitimately change during reload.
+        commands.filter { $0.source == selected.source && $0.name == selected.name }.count == 1
+            && (selected.source == .extension
+                || !commands.contains { $0.source == .extension && $0.name == selected.name })
     }
 
     func openMountedPresentation(
@@ -725,7 +744,8 @@ final class ComposerDraftCoordinator {
             canonicalTranscript.compactMap { item in
                 guard item.kind == .message,
                       item.role == .user,
-                      item.presentationId == operationID,
+                      (item.presentationId == operationID
+                        || item.semantic?.operationId == operationID),
                       !admission.baselineTranscriptIDs.contains(item.id) else { return nil }
                 return item.id
             }
@@ -903,7 +923,8 @@ final class ComposerDraftCoordinator {
             canonicalTranscript.compactMap { item in
                 guard item.kind == .message,
                       item.role == .user,
-                      item.presentationId == operationID,
+                      (item.presentationId == operationID
+                        || item.semantic?.operationId == operationID),
                       !admission.baselineTranscriptIDs.contains(item.id) else { return nil }
                 return item.id
             }
@@ -917,14 +938,13 @@ final class ComposerDraftCoordinator {
             ) ? item.id : nil
         }
         // The Gateway's operation-bound presentation identity is causal and
-        // wins over repeated-text ambiguity. Legacy Gateways retain the bounded
-        // exact-content fallback.
+        // wins over repeated-text ambiguity. Exact-content matching is allowed
+        // only before the transport response supplies that identity.
         let canonicalMatches = admission.operationID == nil
             ? fallbackMatches
             : exactOperationMatches
-        // A repeated prompt can produce multiple new canonical matches in one
-        // legacy snapshot. Keep the admission alive until the authoritative
-        // stream makes exactly one causal candidate available.
+        // A response-race snapshot can contain multiple same-text candidates.
+        // Keep the admission alive until authoritative identity is unambiguous.
         let transcriptObserved = canonicalMatches.count == 1
         if transcriptObserved, admission.canonicalHandoffID == nil {
             admission.canonicalHandoffID = canonicalMatches[0]
@@ -1341,12 +1361,14 @@ final class ComposerDraftCoordinator {
     func beginSubmission(
         target: SessionPresentationIdentity,
         behavior: String?,
+        resourceInvocation: ComposerResourceInvocation? = nil,
         canonicalTranscript: [TranscriptItem] = [],
         queuedMessages: [SessionSnapshot.QueuedMessage] = []
     ) throws -> ComposerSubmissionSnapshot {
         try beginSubmissionAdmission(
             target: target,
             behavior: behavior,
+            resourceInvocation: resourceInvocation,
             canonicalTranscript: canonicalTranscript,
             queuedMessages: queuedMessages
         ).snapshot
@@ -1363,7 +1385,10 @@ final class ComposerDraftCoordinator {
         // Route remounts preserve the admission, but a profile/lifecycle
         // replacement must stop it before any mutation can enter the new
         // Gateway connection.
-        try requireOutcome(admission)
+        // Lifecycle replacement must stop transport before its first
+        // suspension. Once transport is in flight, outcome-only admission
+        // intentionally lets accepted work survive a route remount.
+        try require(admission)
         let operationID: String
         do {
             operationID = try await sendOperation(
@@ -1371,7 +1396,7 @@ final class ComposerDraftCoordinator {
                 submission.target.sessionID,
                 admission.snapshot.attachmentIDs,
                 admission.snapshot.behavior,
-                admission.snapshot.skillName
+                admission.snapshot.resourceInvocation
             )
         } catch {
             // A route may disappear after admission. The exact submission
@@ -1388,6 +1413,15 @@ final class ComposerDraftCoordinator {
         try requireOutcome(admission)
         markOperationAccepted(operationID, admission: admission)
         markTransportAccepted(admission)
+        // Pi extension-command prompt completion means the handler has returned;
+        // there is no canonical user message to reconcile. Retire only this
+        // composer admission while the Gateway command receipt owns transcript
+        // lifecycle and any downstream turns independently.
+        if admission.snapshot.resourceInvocation?.isExtensionCommand == true,
+           let accepted = submissionByScope[admission.scope],
+           accepted.id == admission.id {
+            retireSubmissionForLifecycleReset(accepted)
+        }
     }
 
     /// Installs a target-routed editor request. Empty drafts accept immediately;
@@ -1438,8 +1472,8 @@ final class ComposerDraftCoordinator {
         textMutationRevisionByScope[scope] = nil
         restoreTasks[scope]?.cancel()
         restoreTasks[scope] = nil
-        selectedSkillByScope[scope] = nil
-        skillMutationRevisionByScope[scope] = nil
+        selectedResourceByScope[scope] = nil
+        resourceMutationRevisionByScope[scope] = nil
         preparedOpenBySession[sessionID] = nil
         submissionByScope[scope] = nil
         if lease?.scope == scope { revokePresentation() }
@@ -1464,8 +1498,8 @@ final class ComposerDraftCoordinator {
             $0.key.profileID != profileID
         }
         restoreTasks = restoreTasks.filter { $0.key.profileID != profileID }
-        selectedSkillByScope = selectedSkillByScope.filter { $0.key.profileID != profileID }
-        skillMutationRevisionByScope = skillMutationRevisionByScope.filter { $0.key.profileID != profileID }
+        selectedResourceByScope = selectedResourceByScope.filter { $0.key.profileID != profileID }
+        resourceMutationRevisionByScope = resourceMutationRevisionByScope.filter { $0.key.profileID != profileID }
         preparedOpenBySession = preparedOpenBySession.filter { $0.value.scope.profileID != profileID }
         submissionByScope = submissionByScope.filter { $0.key.profileID != profileID }
         if lease?.scope.profileID == profileID { revokePresentation() }
@@ -1722,6 +1756,7 @@ final class ComposerDraftCoordinator {
     private func beginSubmissionAdmission(
         target: SessionPresentationIdentity,
         behavior: String?,
+        resourceInvocation: ComposerResourceInvocation?,
         canonicalTranscript: [TranscriptItem],
         queuedMessages: [SessionSnapshot.QueuedMessage]
     ) throws -> SubmissionAdmission {
@@ -1747,8 +1782,21 @@ final class ComposerDraftCoordinator {
         let draft = drafts[scope] ?? Draft(text: "", revision: 0, lastAccess: sequence)
         let outgoing = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachmentsByScope[scope] ?? []
-        let submittedSkill = selectedSkillByScope[scope]
-        let skillName = submittedSkill.map { String($0.name.dropFirst("skill:".count)) }
+        let submittedResource = selectedResourceByScope[scope]
+        let selectedResource = resourceInvocation ?? submittedResource.map {
+            let source: ComposerResourceInvocation.Source = switch $0.source {
+            case .skill: .skill
+            case .prompt: .prompt
+            case .extension: .extension
+            }
+            return ComposerResourceInvocation(
+                source: source,
+                name: source == .skill && $0.name.hasPrefix("skill:")
+                    ? String($0.name.dropFirst("skill:".count))
+                    : $0.name,
+                arguments: outgoing
+            )
+        }
         guard submittedAttachments.allSatisfy({ $0.gatewayUploadID != nil }) else {
             throw GatewayFailure(
                 code: "upload_failed",
@@ -1758,13 +1806,23 @@ final class ComposerDraftCoordinator {
             )
         }
         let attachmentIDs = submittedAttachments.compactMap(\.gatewayUploadID)
-        guard !outgoing.isEmpty || !attachmentIDs.isEmpty else { throw CancellationError() }
+        if selectedResource?.isExtensionCommand == true, !attachmentIDs.isEmpty {
+            throw GatewayFailure(
+                code: "command_attachments_unsupported",
+                message: "Extension commands cannot include attachments.",
+                retryable: false,
+                details: nil
+            )
+        }
+        guard !outgoing.isEmpty || !attachmentIDs.isEmpty || selectedResource != nil else {
+            throw CancellationError()
+        }
         sequence &+= 1
         let snapshot = ComposerSubmissionSnapshot(
             target: target,
             textRevision: draft.revision,
             outgoingText: outgoing,
-            skillName: skillName,
+            resourceInvocation: selectedResource,
             attachmentIDs: attachmentIDs,
             behavior: behavior,
             baselineQueuedMessageIDs: Set(queuedMessages.map(\.id)),
@@ -1775,9 +1833,9 @@ final class ComposerDraftCoordinator {
             snapshot: snapshot,
             submittedAttachments: submittedAttachments,
             scope: scope,
-            submittedSkill: submittedSkill,
-            skillMutationRevision: skillMutationRevisionByScope[scope, default: 0],
-            canRestoreSubmittedSkill: true,
+            submittedResource: submittedResource,
+            resourceMutationRevision: resourceMutationRevisionByScope[scope, default: 0],
+            canRestoreSubmittedResource: true,
             baselineTranscriptIDs: Set(canonicalTranscript.map(\.id)),
             lifecycleGeneration: lease.lifecycleGeneration,
             transportState: .sending,
@@ -1794,7 +1852,7 @@ final class ComposerDraftCoordinator {
         settledQueueHandoffs[target] = nil
         submissionByScope[scope] = admission
         setText("", for: scope)
-        selectedSkillByScope[scope] = nil
+        selectedResourceByScope[scope] = nil
         return admission
     }
 
@@ -1838,10 +1896,10 @@ final class ComposerDraftCoordinator {
             )
             schedulePersistence(for: scope)
         }
-        if currentAdmission.canRestoreSubmittedSkill,
-           skillMutationRevisionByScope[scope, default: 0] == currentAdmission.skillMutationRevision,
-           selectedSkillByScope[scope] == nil {
-            selectedSkillByScope[scope] = currentAdmission.submittedSkill
+        if currentAdmission.canRestoreSubmittedResource,
+           resourceMutationRevisionByScope[scope, default: 0] == currentAdmission.resourceMutationRevision,
+           selectedResourceByScope[scope] == nil {
+            selectedResourceByScope[scope] = currentAdmission.submittedResource
         }
         if lease?.scope == scope {
             submissionByScope[scope] = nil
@@ -2151,8 +2209,8 @@ final class ComposerDraftCoordinator {
             textMutationRevisionByScope[scope] = nil
             dirtyScopes.remove(scope)
             enqueuePersistence { store in await store.remove(scope) }
-            selectedSkillByScope[scope] = nil
-            skillMutationRevisionByScope[scope] = nil
+            selectedResourceByScope[scope] = nil
+            resourceMutationRevisionByScope[scope] = nil
             // Safe bounded eviction may retire an accepted presentation-only
             // lifecycle, but never an unresolved transport operation.
             if submissionByScope[scope]?.transportState != .sending {

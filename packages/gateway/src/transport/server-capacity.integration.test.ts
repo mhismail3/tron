@@ -120,7 +120,7 @@ describe("WebSocket connection and outbound capacity", () => {
       sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: {
-        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
+        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 4, minProtocolVersion: 4, machineId: "machine", machineName: "test", capabilities: [] }),
         terminalBelongsToSession: () => false,
         releaseClient: vi.fn(),
         invoke: vi.fn(),
@@ -137,7 +137,7 @@ describe("WebSocket connection and outbound capacity", () => {
       if (frame.topic === "test.large") sequences.push(frame.payload.sequence);
     });
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 3 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
     await waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.handshake"));
 
     const payload = "x".repeat(512 * 1_024);
@@ -159,7 +159,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 4, minProtocolVersion: 4, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       invoke: vi.fn(),
@@ -185,7 +185,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const frames: any[] = [];
     first.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => first.once("open", () => resolve()));
-    first.send(JSON.stringify({ type: "hello", protocolVersion: 3 }));
+    first.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
     await waitUntil(() => frames.some((frame) => frame.type === "hello"));
 
     const rejected = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });

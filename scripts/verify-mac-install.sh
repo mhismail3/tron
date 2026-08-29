@@ -177,7 +177,7 @@ const WebSocket = require("ws");
 const ws = new WebSocket(process.env.VERIFY_URL, { headers: { authorization: `Bearer ${process.env.VERIFY_TOKEN}` }, perMessageDeflate: false });
 const timer = setTimeout(() => { ws.terminate(); process.exit(2); }, 3000);
 const requestId = "verify-mac-system-info";
-ws.on("open", () => ws.send(JSON.stringify({ type: "hello", protocolVersion: 3 })));
+ws.on("open", () => ws.send(JSON.stringify({ type: "hello", protocolVersion: 4, minProtocolVersion: 4 })));
 ws.on("message", raw => {
   let frame; try { frame = JSON.parse(raw.toString()); } catch { return; }
   if (frame.type === "hello") ws.send(JSON.stringify({ type: "request", id: requestId, method: "system.info", params: {} }));

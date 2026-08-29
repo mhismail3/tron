@@ -1161,8 +1161,7 @@ final class ChatTranscriptPresentationStore {
            installed.sourceWindow == InstalledChatTranscript.SourceWindow(snapshot: snapshot),
            installed.queuedMessages == snapshot.displayedQueuedMessages,
            installed.queueRevision == snapshot.queueRevision,
-           installed.supportsQueueManagement
-               == (tag.queueManagementCapability && snapshot.queuedItems != nil),
+           installed.supportsQueueManagement == tag.queueManagementCapability,
            installed.runtimeItems == ChatTranscriptProjectionKernel.runtimeItems(in: snapshot) {
             desiredTag = tag
             let replacement = installed.replacingLifecycle(
@@ -1441,10 +1440,7 @@ final class ChatTranscriptPresentationStore {
                     queuedMessages: next.snapshot.displayedQueuedMessages,
                     queuePresentationIDByOperationID: next.queuePresentationIDByOperationID,
                     queueRevision: next.snapshot.queueRevision,
-                    // Rich queue facts are only manageable when this exact
-                    // commit also carries the explicit Gateway capability.
-                    supportsQueueManagement: next.tag.queueManagementCapability
-                        && next.snapshot.queuedItems != nil,
+                    supportsQueueManagement: next.tag.queueManagementCapability,
                     sourceWindow: .init(snapshot: next.snapshot)
                 )
                 guard built.isInternallyConsistent,

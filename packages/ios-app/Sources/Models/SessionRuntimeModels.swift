@@ -329,12 +329,21 @@ struct RetryState: Codable, Hashable, Sendable {
     let errorMessage: String?
 }
 
+enum InvocationLifecycle: String, Codable, Sendable {
+    case staged, accepted, running, waitingForInput, queued, retrying, settling, completed, failed, interrupted, outcomeUnknown
+}
 struct SessionOperationState: Codable, Hashable, Sendable {
     enum Kind: String, Codable, Sendable { case prompt, command, compaction, branchSummary, bash, retry }
     let id: String?
     let kind: Kind
     let startedAt: String
     let reason: String?
+    let invocationId: String?
+    let lifecycle: InvocationLifecycle?
+    init(id: String? = nil, kind: Kind, startedAt: String, reason: String? = nil, invocationId: String? = nil, lifecycle: InvocationLifecycle? = nil) {
+        self.id = id; self.kind = kind; self.startedAt = startedAt; self.reason = reason
+        self.invocationId = invocationId; self.lifecycle = lifecycle
+    }
 }
 
 struct RuntimeDiagnostic: Codable, Hashable, Sendable {
@@ -379,29 +388,25 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     var availableThinkingLevels: [String]
     var contextUsage: ContextUsage?
     var stats: SessionStats
-    var queued: QueuedMessages
-    var queueRevision: Int? = nil
-    var queuedItems: [QueuedMessage]? = nil
+    var queueRevision: Int
+    var queuedItems: [QueuedMessage]
     var pendingPrompt: PendingPrompt? = nil
     var compactionQueued: Bool? = nil
-    var automaticCompactionEnabled: Bool? = nil
+    var automaticCompactionEnabled: Bool
     var transcript: [TranscriptItem]
     var transcriptStart: Int?
     var transcriptTotal: Int?
     var streaming: TranscriptItem?
     var leafEntryId: String?
     var operation: SessionOperationState?
-    var extensionCommand: SessionOperationState? = nil
     var retry: RetryState?
     var toolExecutions: [ToolExecutionState]
     var extensionActivities: [ExtensionRunActivity]? = nil
     var extensionActivityOmissions: ExtensionActivityOmissions? = nil
     /// Monotonic Gateway facts for the disposable current/recent projection.
-    /// Optional keeps rolling compatibility with older Gateway snapshots.
     var liveActivityRevision: Int? = nil
     var extensionActivityAsOf: String? = nil
-    /// Atomic, disposable process projection. New Gateways provide both
-    /// fields; older Gateways omit both and never revive the retired hub.
+    /// Atomic, disposable process projection.
     var processOverview: SessionProcessOverview? = nil
     var processActivities: [SessionProcessActivity]? = nil
     var extensionPresentation: ExtensionPresentationState
@@ -409,11 +414,6 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     /// Set only on the disposable offline cache projection. Gateway snapshots
     /// leave this absent so canonical runtime state remains authoritative.
     var isCachedProjection: Bool? = nil
-
-    struct QueuedMessages: Codable, Hashable, Sendable {
-        let steering: [String]
-        let followUp: [String]
-    }
 
     struct PromptAttachment: Codable, Hashable, Identifiable, Sendable {
         let id: String
@@ -430,13 +430,13 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
         let id: String
         var behavior: Behavior
         var text: String
-        /// Total uploaded items retained for rolling Gateway compatibility.
+        /// Total uploaded items represented by this queued prompt.
         let attachmentCount: Int
-        /// Optional typed counts from newer Gateways.
         var photoCount: Int? = nil
         var fileAttachmentCount: Int? = nil
         /// Optional exact descriptors from newer Gateways; payload bytes remain remote.
         var attachments: [PromptAttachment]? = nil
+        var resourceInvocation: ComposerResourceInvocation? = nil
     }
 
     struct PendingPrompt: Codable, Hashable, Identifiable, Sendable {
@@ -449,26 +449,10 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
         var fileAttachmentCount: Int? = nil
         /// Optional exact descriptors from newer Gateways; payload bytes remain remote.
         var attachments: [PromptAttachment]? = nil
+        var resourceInvocation: ComposerResourceInvocation? = nil
     }
 
-    var displayedQueuedMessages: [QueuedMessage] {
-        if let queuedItems { return queuedItems }
-        return queued.steering.enumerated().map { index, text in
-            QueuedMessage(
-                id: "legacy-steer-\(index)",
-                behavior: .steer,
-                text: text,
-                attachmentCount: 0
-            )
-        } + queued.followUp.enumerated().map { index, text in
-            QueuedMessage(
-                id: "legacy-follow-up-\(index)",
-                behavior: .followUp,
-                text: text,
-                attachmentCount: 0
-            )
-        }
-    }
+    var displayedQueuedMessages: [QueuedMessage] { queuedItems }
 }
 
 struct SessionEventEnvelope: Codable, Hashable, Sendable {

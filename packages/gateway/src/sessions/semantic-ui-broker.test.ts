@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SemanticUIBroker } from "./semantic-ui-broker.js";
 import { ExtensionPresentationStore } from "../extensions/host/extension-presentation-store.js";
 import type { JsonValue } from "../protocol/types.js";
+import { withInvocationContext } from "../extensions/owner-attribution.js";
 
 function brokerWith(broadcast: (topic: string, payload: JsonValue) => void = () => {}): SemanticUIBroker {
   return new SemanticUIBroker(new ExtensionPresentationStore((topic, payload) => broadcast(topic, payload)));
@@ -67,6 +68,27 @@ describe("SemanticUIBroker", () => {
     expect(broker.interactions()[0]?.options).toHaveLength(64);
     broker.cancelAll();
     await expect(sixtyFour).rejects.toMatchObject({ code: "cancelled" });
+  });
+
+  it("binds interaction requests to the exact invocation context", async () => {
+    const broker = brokerWith(() => {});
+    const result = withInvocationContext(
+      { invocationId: "invocation", operationId: "operation" },
+      () => broker.context().confirm("Confirm", "Proceed?"),
+    );
+    const interaction = broker.interactions()[0]!;
+    expect(interaction).toMatchObject({
+      invocationId: "invocation",
+      operationId: "operation",
+    });
+    broker.respond(
+      interaction.id,
+      interaction.hostEpoch,
+      interaction.presentationRevision,
+      true,
+      false,
+    );
+    await expect(result).resolves.toBe(true);
   });
 
   it("survives client churn until a response arrives", async () => {

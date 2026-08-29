@@ -5,7 +5,7 @@ import SwiftUI
 /// removal receives one value-scoped smooth transition through that same owner.
 struct ChatComposerAccessoryLayoutIdentity: Equatable {
     let attachmentIDs: [String]
-    let selectedSkillID: String?
+    let selectedResourceID: String?
     let resourcePickerKind: ComposerResourceEntry.Kind?
     let resourceResultIDs: [String]
 }

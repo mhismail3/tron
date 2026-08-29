@@ -139,12 +139,16 @@ struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
     let prefill: String?
     let expiresAt: String?
     let questionnaire: ExtensionQuestionnaireDescriptor?
+    let owner: ExtensionOwner?
+    let invocationId: String?
+    let operationId: String?
 
-    init(id: String, hostEpoch: String, presentationRevision: Int, method: Method, title: String, message: String? = nil, options: [String]? = nil, placeholder: String? = nil, prefill: String? = nil, expiresAt: String? = nil, questionnaire: ExtensionQuestionnaireDescriptor? = nil) {
+    init(id: String, hostEpoch: String, presentationRevision: Int, method: Method, title: String, message: String? = nil, options: [String]? = nil, placeholder: String? = nil, prefill: String? = nil, expiresAt: String? = nil, questionnaire: ExtensionQuestionnaireDescriptor? = nil, owner: ExtensionOwner? = nil, invocationId: String? = nil, operationId: String? = nil) {
         self.id = id; self.hostEpoch = hostEpoch; self.presentationRevision = presentationRevision; self.method = method
         self.title = title; self.message = message; self.options = options; self.placeholder = placeholder; self.prefill = prefill; self.expiresAt = expiresAt; self.questionnaire = questionnaire
+        self.owner = owner; self.invocationId = invocationId; self.operationId = operationId
     }
-    private enum CodingKeys: String, CodingKey { case id, hostEpoch, presentationRevision, method, title, message, options, placeholder, prefill, expiresAt, questionnaire }
+    private enum CodingKeys: String, CodingKey { case id, hostEpoch, presentationRevision, method, title, message, options, placeholder, prefill, expiresAt, questionnaire, owner, invocationId, operationId }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -158,6 +162,17 @@ struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
         prefill = try container.decodeIfPresent(String.self, forKey: .prefill)
         expiresAt = try container.decodeIfPresent(String.self, forKey: .expiresAt)
         questionnaire = try container.decodeIfPresent(ExtensionQuestionnaireDescriptor.self, forKey: .questionnaire)
+        owner = try container.decodeIfPresent(ExtensionOwner.self, forKey: .owner)
+        invocationId = try container.decodeIfPresent(String.self, forKey: .invocationId)
+        operationId = try container.decodeIfPresent(String.self, forKey: .operationId)
+        guard invocationId.map({ !$0.isEmpty && $0.utf8.count <= 256 }) ?? true,
+              operationId.map({ !$0.isEmpty && $0.utf8.count <= 256 }) ?? true else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .invocationId,
+                in: container,
+                debugDescription: "Extension interaction causality is invalid"
+            )
+        }
     }
 }
 

@@ -1,5 +1,30 @@
 # Tron Gateway
 
+## Protocol v4 chat semantics
+
+The Gateway is the sole live owner of invocation, operation, and activity
+identity. Canonical Pi JSONL remains authoritative; Gateway-owned bounded
+`tron.chat-invocation.v1` records persist causal start/terminal/binding facts in
+the same session branch and never enter model context. A missing terminal record
+after an accepted start is `outcomeUnknown` and is never automatically replayed.
+
+Transcript order is canonical branch order, never timestamp or activity recency.
+The v4 projection separates inbound context, agent output/invocations, ambient
+status, and hidden state. `custom_message` is model input; `custom`/`appendEntry`
+is extension state. Producer attribution is only exact at a Gateway callback
+boundary, receipt, trusted adapter, or registered tool ownership; unknown remains
+unknown. Every projection is bounded by count and byte limits and malformed
+recognized data fails closed for authoritative resynchronization.
+
+Protocol v4 deliberately has no v3 runtime path. The deployed v3 update helper
+cannot promote a candidate whose required range is strictly v4, so that one-time
+major transition must use the Mac app's manual local Release reinstall runbook:
+install the Mac app containing the v4 Gateway payload while preserving
+`~/.tron`, verify the registered Gateway, and only then install a v4-only iOS
+client. Do not widen the advertised minimum or allow a mixed v3/v4 pair merely
+to bypass that handoff. Ordinary same-major updates continue through the owned
+Gateway update flow.
+
 Tron Gateway is the minimal always-running Mac service behind the Tron iPhone
 app. It embeds `@earendil-works/pi-coding-agent` 0.84.1 through supported SDK
 exports. User-facing copy calls the product and agent **Tron**; source may use
@@ -228,7 +253,7 @@ configured, in which case `gateway-update.v1` appears in capabilities. Candidate
 Every WebSocket starts with:
 
 ```json
-{"type":"hello","protocolVersion":3}
+{"type":"hello","protocolVersion":4}
 ```
 
 The hello, pairing response, and authenticated `system.info` identify the runtime
@@ -391,7 +416,7 @@ deferred.
 
 Live and canonical transcript projections preserve the canonical tool name while optionally carrying the bounded human-readable `label` declared by the mounted Pi extension tool definition; native clients use that label for presentation and never derive extension titles from snake_case names. Project Resources exposes the same label beside the canonical name. Live tool projections may also carry an optional extension provenance record derived from the public Pi tool `sourceInfo` and the loaded extension inventory. The Gateway emits that record only when exactly one extension owns the tool and the source path agrees; unknown or ambiguous ownership omits provenance and fails open to the ordinary tool projection. This metadata is disposable presentation state and never modifies Pi JSONL.
 
-Custom extension messages are classified as session input only from the exact Pi message object observed inside an active agent run. After Pi persists that message, Gateway appends a bounded `tron.session-input.v1` canonical receipt naming the exact custom-message entry and its producer attribution when available. Transcript projection requires that receipt to be the immediate canonical child of its target, filters the receipt itself, and exposes the target as `sessionInput`; text, title, custom type, timestamps, and `display` never infer delivery. This lets hidden `triggerTurn` messages such as background-completion wakes and supervisor requests remain visible as conversation input after reconnect or Gateway restart, while non-triggering custom messages retain ordinary extension/tool presentation. When an extension-owned tool returns the public structured delegated-run convention (`details.runId`/`asyncId` plus bounded `results[].progress`), the Gateway additionally projects `ExtensionRunActivity` with stable child identities, active time, tool/turn counts, current tool/path, and a bounded output tail. It is carried on the live tool projection and retained as a bounded recent `extensionActivities` snapshot; native clients must not infer it from rendered widget text or open a child JSONL concurrently. The runtime also admits the explicit `pi-subagents` lifecycle-artifact contract: allowlisted `status.json` files are matched to the canonical session file, read with a hard byte bound, and projected as one workflow activity with bounded child progress so detached async runs remain visible after the launching tool returns. Temporary runtime roots and the project-local `.pi/subagents/async-subagent-runs` layout are scanned under one hard work budget; exact live `asyncDir` bindings refresh before bounded ambient enumeration, and terminal ambient evidence outranks decorative live enrichment. A bounded Gateway-owned `runId` binding maps lifecycle events and artifacts to one real tool-call identity; a synthetic `subagent:<runId>` identity is used only for an initially unmatched, session-owned artifact and is re-keyed when the real tool call arrives. Terminal lifecycle status is authoritative, while later artifacts only enrich retained details and cannot resurrect a completed run; terminal recency uses the producer's completion time rather than the later discovery time. Current artifacts are admitted by their exact schema version; historical versioned or unversioned artifacts can supply terminal evidence only after an exact canonical tool-call/`asyncDir` binding proves ownership, so a Gateway reload cannot strand already-finished delegated work in restart drain. Watchers stop on terminal state, disposal, and retention eviction.
+Every canonical `custom_message` is context-bearing input under Pi semantics. Producer-visible messages project as right-aligned inbound context; producer-hidden messages remain absent from ordinary chat. At the exact Pi message boundary, Gateway captures owner identity from the wrapped extension callback and whether the message was stored for a later turn or delivered during active work. After Pi persists that exact object, Gateway appends a bounded `tron.context-delivery.v4` receipt targeting the canonical entry. Receipts may follow later branch entries, so projection validates exact target identity and target-before-receipt branch order rather than current-leaf adjacency. Text, title, custom type, timestamps, details, and renderer registration never infer producer identity or delivery. Canonical `custom`/`appendEntry` state remains available to extensions but is omitted from chat and tree projection unless it is a validated Gateway invocation-start receipt. When an extension-owned tool returns the public structured delegated-run convention (`details.runId`/`asyncId` plus bounded `results[].progress`), the Gateway additionally projects `ExtensionRunActivity` with stable child identities, active time, tool/turn counts, current tool/path, and a bounded output tail. It is carried on the live tool projection and retained as a bounded recent `extensionActivities` snapshot; native clients must not infer it from rendered widget text or open a child JSONL concurrently. The runtime also admits the explicit `pi-subagents` lifecycle-artifact contract: allowlisted `status.json` files are matched to the canonical session file, read with a hard byte bound, and projected as one workflow activity with bounded child progress so detached async runs remain visible after the launching tool returns. Temporary runtime roots and the project-local `.pi/subagents/async-subagent-runs` layout are scanned under one hard work budget; exact live `asyncDir` bindings refresh before bounded ambient enumeration, and terminal ambient evidence outranks decorative live enrichment. A bounded Gateway-owned `runId` binding maps lifecycle events and artifacts to one real tool-call identity; a synthetic `subagent:<runId>` identity is used only for an initially unmatched, session-owned artifact and is re-keyed when the real tool call arrives. Terminal lifecycle status is authoritative, while later artifacts only enrich retained details and cannot resurrect a completed run; terminal recency uses the producer's completion time rather than the later discovery time. Current artifacts are admitted by their exact schema version; historical versioned or unversioned artifacts can supply terminal evidence only after an exact canonical tool-call/`asyncDir` binding proves ownership, so a Gateway reload cannot strand already-finished delegated work in restart drain. Watchers stop on terminal state, disposal, and retention eviction.
 
 Remote restart is advertised only when `TRON_GATEWAY_SUPERVISED=1` is present from a managed LaunchAgent or repository background supervisor; direct foreground processes fail closed for remote restart. Planned restart exits with code 75 only after the registry drain completes. A handled signal in a supervised runtime also exits 75, while an ordinary foreground signal remains a clean exit; process replacement belongs to the supervisor.
 
@@ -683,15 +708,15 @@ Each row includes the runtime loader's source, scope, origin, and path when avai
 `session.commandDetail` read requires one exact current `source:name` identity and returns
 that selected prompt, skill, or extension source document only; content is UTF-8 bounded
 to 96 KiB with original byte count and explicit truncation metadata, so catalog loading
-never reads or copies every resource body. `session.prompt`
-may carry one optional, 512-byte-bounded `skillName` alongside nonempty text or attachments when hello advertises `skill-prompt.v1`. The Gateway admits it only when the live
-runtime catalog contains exactly one matching `source == skill` / `skill:<name>` command and no colliding extension command, then
-adds Pi's `/skill:<name>` prefix only at runtime admission while retaining the original prompt
-for pending and queue presentation. Queue ownership retains the private skill identity across text/behavior edits and revalidates it before rebuilding Pi's queue. Canonical mobile projection recognizes only Pi's exact,
-4 MiB-bounded persisted skill envelope, strips the private skill body/path, and projects its
-user arguments through the existing attachment extractor. Malformed or newer skill-looking
-envelopes become a generic omission rather than leaking private skill bodies/paths or being destructively guessed.
-Absence of `skillName` retains rolling-compatible prompt behavior.
+never reads or copies every resource body. Protocol-v4 `session.prompt` accepts one typed
+`resourceInvocation` with source, canonical name, and visible arguments. The Gateway revalidates
+exact live `(source,name)` identity and extension-command precedence before constructing Pi's
+normalized leading invocation. Pending and queued projections retain the same typed resource;
+canonical binding receipts attach it to the resulting user entry so native chips survive restart
+without exposing expanded skill contents or private paths. Canonical mobile projection recognizes
+only Pi's exact 4 MiB-bounded persisted skill envelope, strips the private skill body/path, and
+projects its user arguments through the existing attachment extractor. Malformed skill-looking
+envelopes become a generic omission rather than leaking or destructively guessing private data.
 Summarizing tree navigation owns foreground branch-summary state only for the exact
 awaited call; success, extension cancellation, and provider failure all retire that
 state and publish the settled snapshot before the serialized mutation lane advances.

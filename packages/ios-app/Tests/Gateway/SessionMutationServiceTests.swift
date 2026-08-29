@@ -55,7 +55,7 @@ struct SessionMutationServiceTests {
                     sessionID: "session-a",
                     uploadIDs: ["upload-a"],
                     behavior: "steer",
-                    skillName: "review"
+                    resourceInvocation: ComposerResourceInvocation(source: .skill, name: "review", arguments: "")
                 )
             }
             let prompt = try await request(in: harness.socket, frameIndex: frameIndex)
@@ -65,13 +65,15 @@ struct SessionMutationServiceTests {
             #expect(prompt.params?["text"] == .string("hello"))
             #expect(prompt.params?["uploadIds"] == .array([.string("upload-a")]))
             #expect(prompt.params?["behavior"] == .string("steer"))
-            #expect(prompt.params?["skillName"] == .string("review"))
+            #expect(prompt.params?["resourceInvocation"] == .object([
+                "source": .string("skill"), "name": .string("review"), "arguments": .string("")
+            ]))
             try expectCommandID(prompt)
             await harness.socket.enqueue(successResponse(
                 id: prompt.id,
                 result: .object(["operationId": .string("operation")])
             ))
-            try await valueOfOwnedTask(prompting)
+            _ = try await valueOfOwnedTask(prompting)
 
             let clearing = Task { try await harness.service.clearQueue(sessionID: "session-b") }
             let clear = try await request(in: harness.socket, frameIndex: frameIndex)
@@ -81,14 +83,9 @@ struct SessionMutationServiceTests {
             try expectCommandID(clear)
             await harness.socket.enqueue(successResponse(
                 id: clear.id,
-                result: .object([
-                    "steering": .array([.string("queued")]),
-                    "followUp": .array([.string("later")]),
-                ])
+                result: .object(["cleared": .bool(true)])
             ))
-            let queue = try await valueOfOwnedTask(clearing)
-            #expect(queue.steering == ["queued"])
-            #expect(queue.followUp == ["later"])
+            try await valueOfOwnedTask(clearing)
 
             let replacing = Task {
                 try await harness.service.replaceQueue(
@@ -400,6 +397,8 @@ struct SessionMutationServiceTests {
                 try await valueOfOwnedTask(mutation)
                 Issue.record("unrelated boolean response unexpectedly decoded as updated")
             } catch is DecodingError {
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "invalid_response")
             } catch {
                 Issue.record("unexpected response error: \(error)")
             }
@@ -675,7 +674,7 @@ struct SessionMutationServiceTests {
     }
 
     private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
     }
 
     private func successResponse(id: String, result: JSONValue) -> Data {

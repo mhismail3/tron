@@ -360,13 +360,13 @@ final class AppModel {
             },
             attachmentFileAccess: composerAttachmentFileAccess,
             draftStore: composerDraftStore,
-            send: { text, sessionID, uploadIDs, behavior, skillName in
+            send: { text, sessionID, uploadIDs, behavior, resourceInvocation in
                 try await sessionMutations.prompt(
                     text,
                     sessionID: sessionID,
                     uploadIDs: uploadIDs,
                     behavior: behavior,
-                    skillName: skillName
+                    resourceInvocation: resourceInvocation
                 )
             },
             admitsLifecycleGeneration: { lifecycle.admits(.init(generation: $0, connectionID: nil)) }
@@ -596,11 +596,24 @@ final class AppModel {
     /// Live commands require the exact mounted subscription and authoritative
     /// snapshot, not merely a retained transcript or presentation lease.
     func admitsLiveSessionCommands(_ target: SessionPresentationTarget) -> Bool {
-        connectionState == .connected
-            && !isReconcilingForeground
-            && ownsPresentation(target)
-            && sessionPresentation.hasInstalledSubscription(for: target.sessionID)
-            && authoritativeSnapshot(for: target.sessionID)?.sessionId == target.sessionID
+        guard connectionState == .connected,
+              !isReconcilingForeground,
+              ownsPresentation(target),
+              sessionPresentation.hasInstalledSubscription(for: target.sessionID),
+              let snapshot = authoritativeSnapshot(for: target.sessionID),
+              snapshot.sessionId == target.sessionID else { return false }
+        // Extension interactions remain independently answerable, but another
+        // composer mutation must not queue invisibly behind a command handler
+        // that is running or waiting for input on the serialized session lane.
+        return !snapshot.transcript.contains { item in
+            guard item.semantic?.kind == .command else { return false }
+            switch item.semantic?.lifecycle {
+            case .completed, .failed, .interrupted, .outcomeUnknown:
+                return false
+            case .staged, .accepted, .running, .waitingForInput, .queued, .retrying, .settling, nil:
+                return true
+            }
+        }
     }
 
     func revokePresentationIntake(_ target: SessionPresentationTarget) {
@@ -1998,6 +2011,7 @@ final class AppModel {
     func beginComposerSubmission(
         target: SessionPresentationTarget,
         behavior: String? = nil,
+        resourceInvocation: ComposerResourceInvocation? = nil,
         canonicalTranscript: [TranscriptItem] = [],
         queuedMessages: [SessionSnapshot.QueuedMessage] = []
     ) throws -> ComposerSubmissionSnapshot {
@@ -2005,6 +2019,7 @@ final class AppModel {
         return try composerDrafts.beginSubmission(
             target: target,
             behavior: behavior,
+            resourceInvocation: resourceInvocation,
             canonicalTranscript: canonicalTranscript,
             queuedMessages: queuedMessages
         )
@@ -2017,12 +2032,14 @@ final class AppModel {
     func sendComposer(
         target: SessionPresentationTarget,
         behavior: String? = nil,
+        resourceInvocation: ComposerResourceInvocation? = nil,
         canonicalTranscript: [TranscriptItem] = [],
         queuedMessages: [SessionSnapshot.QueuedMessage] = []
     ) async throws {
         let submission = try beginComposerSubmission(
             target: target,
             behavior: behavior,
+            resourceInvocation: resourceInvocation,
             canonicalTranscript: canonicalTranscript,
             queuedMessages: queuedMessages
         )
@@ -2045,12 +2062,12 @@ final class AppModel {
         } catch { surface(error) }
     }
 
-    func clearQueue(sessionID: String) async throws -> SessionSnapshot.QueuedMessages {
+    func clearQueue(sessionID: String) async throws {
         guard let target = presentationTarget(for: sessionID),
               admitsLiveSessionCommands(target) else { throw CancellationError() }
         // The confirmed response proves command completion, not the sequenced
         // queue projection. Gateway snapshot/event authority clears the rows.
-        return try await sessionMutations.clearQueue(sessionID: sessionID)
+        try await sessionMutations.clearQueue(sessionID: sessionID)
     }
 
     func replaceQueue(

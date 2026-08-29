@@ -39,7 +39,7 @@ describe("terminal attachment revocation after session deletion", () => {
     const port = await unusedPort();
     let gateway!: GatewayServer;
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 4, minProtocolVersion: 4, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: (terminalId: string, sessionId: string) => terminalId === "terminal-1" && sessionId === "session-1",
       releaseClient: vi.fn(),
       invoke: async (context: any, method: string, params: Record<string, string>) => {
@@ -90,7 +90,7 @@ describe("terminal attachment revocation after session deletion", () => {
       const frames: any[] = [];
       socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
       await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-      socket.send(JSON.stringify({ type: "hello", protocolVersion: 3 }));
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
       await waitUntil(() => frames.some((frame) => frame.type === "hello"));
       return { socket, frames };
     };
@@ -146,7 +146,7 @@ describe("terminal attachment revocation after session deletion", () => {
     await sessions.initialize();
     const slot = await sessions.create(cwd);
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 4, minProtocolVersion: 4, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: (terminalId: string, sessionId: string) => terminalId === "terminal-1" && sessionId === slot.id,
       releaseClient: vi.fn(),
       invoke: async (context: any, method: string, params: Record<string, string>) => {
@@ -193,7 +193,7 @@ describe("terminal attachment revocation after session deletion", () => {
       const frames: any[] = [];
       socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
       await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-      socket.send(JSON.stringify({ type: "hello", protocolVersion: 3 }));
+      socket.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
       await waitUntil(() => frames.some((frame) => frame.type === "hello"));
       return { socket, frames };
     };

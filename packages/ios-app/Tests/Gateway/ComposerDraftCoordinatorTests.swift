@@ -943,8 +943,8 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
-    @Test("one staged skill replaces its predecessor and definitive send failure restores it")
-    func selectedSkillLifecycle() async throws {
+    @Test("one staged resource replaces its predecessor and definitive send failure restores it")
+    func selectedResourceLifecycle() async throws {
         try await withTestWatchdog { @MainActor in
             let harness = ComposerHarness()
             let target = SessionPresentationIdentity(sessionID: "session", generation: 40)
@@ -960,42 +960,68 @@ struct ComposerDraftCoordinatorTests {
                 name: "skill:repair", description: "Repair", argumentHint: nil,
                 source: .skill, sourcePath: "/skills/repair"
             )
-            harness.coordinator.selectSkill(review, for: scope)
-            harness.coordinator.selectSkill(repair, for: scope)
-            #expect(harness.coordinator.selectedSkill(for: scope) == repair)
-            harness.coordinator.removeSelectedSkill(for: scope)
-            #expect(harness.coordinator.selectedSkill(for: scope) == nil)
-            harness.coordinator.selectSkill(repair, for: scope)
+            harness.coordinator.selectResource(review, for: scope)
+            harness.coordinator.selectResource(repair, for: scope)
+            #expect(harness.coordinator.selectedResource(for: scope) == repair)
+            harness.coordinator.removeSelectedResource(for: scope)
+            #expect(harness.coordinator.selectedResource(for: scope) == nil)
+            harness.coordinator.selectResource(repair, for: scope)
 
             let sending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
             try await harness.waitForSends(1)
             #expect(harness.sendCalls[0].text == "Inspect this")
-            #expect(harness.sendCalls[0].skillName == "repair")
-            #expect(harness.coordinator.selectedSkill(for: scope) == nil)
+            #expect(harness.sendCalls[0].resourceInvocation == ComposerResourceInvocation(source: .skill, name: "repair", arguments: "Inspect this"))
+            #expect(harness.coordinator.selectedResource(for: scope) == nil)
             harness.completeSend(index: 0, result: .failure(ComposerSyntheticError.current))
             await #expect(throws: ComposerSyntheticError.self) { try await valueOfOwnedTask(sending) }
             #expect(harness.coordinator.text(for: scope) == "Inspect this")
-            #expect(harness.coordinator.selectedSkill(for: scope) == repair)
+            #expect(harness.coordinator.selectedResource(for: scope) == repair)
 
-            harness.coordinator.reconcileSelectedSkill(for: scope, commands: [review])
-            #expect(harness.coordinator.selectedSkill(for: scope) == nil)
+            harness.coordinator.reconcileSelectedResource(for: scope, commands: [review])
+            #expect(harness.coordinator.selectedResource(for: scope) == nil)
 
-            harness.coordinator.selectSkill(repair, for: scope)
+            harness.coordinator.selectResource(repair, for: scope)
             let mutatedWhileSending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
             try await harness.waitForSends(2)
-            harness.coordinator.selectSkill(review, for: scope)
-            harness.coordinator.removeSelectedSkill(for: scope)
+            harness.coordinator.selectResource(review, for: scope)
+            harness.coordinator.removeSelectedResource(for: scope)
             harness.completeSend(index: 1, result: .failure(ComposerSyntheticError.current))
             await #expect(throws: ComposerSyntheticError.self) { try await valueOfOwnedTask(mutatedWhileSending) }
-            #expect(harness.coordinator.selectedSkill(for: scope) == nil)
+            #expect(harness.coordinator.selectedResource(for: scope) == nil)
 
-            harness.coordinator.selectSkill(repair, for: scope)
+            harness.coordinator.selectResource(repair, for: scope)
             let retiredWhileSending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
             try await harness.waitForSends(3)
-            harness.coordinator.reconcileSelectedSkill(for: scope, commands: [review])
+            harness.coordinator.reconcileSelectedResource(for: scope, commands: [review])
             harness.completeSend(index: 2, result: .failure(ComposerSyntheticError.current))
             await #expect(throws: ComposerSyntheticError.self) { try await valueOfOwnedTask(retiredWhileSending) }
-            #expect(harness.coordinator.selectedSkill(for: scope) == nil)
+            #expect(harness.coordinator.selectedResource(for: scope) == nil)
+        }
+    }
+
+    @Test("a no-argument extension command retires on transport completion without canonical user input")
+    func extensionCommandRetiresWithoutUserMessage() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "command-session", generation: 41)
+            let scope = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: ""
+            )
+            harness.coordinator.selectResource(CommandInfo(
+                name: "goal", description: "Manage goal", argumentHint: nil,
+                source: .extension, sourcePath: nil
+            ), for: scope)
+
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
+            try await harness.waitForSends(1)
+            #expect(harness.sendCalls[0].resourceInvocation == ComposerResourceInvocation(
+                source: .extension, name: "goal", arguments: ""
+            ))
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            #expect(!harness.coordinator.hasPendingSubmission(target: target))
+            #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
         }
     }
 
@@ -1036,11 +1062,21 @@ struct ComposerDraftCoordinatorTests {
             #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
             let exact = TranscriptItem.message(MessageTranscriptItem(
                 id: "exact", parentId: nil, timestamp: "2025-01-01T00:00:00Z",
-                kind: .message, role: .user, presentationId: "operation-0",
+                kind: .message, role: .user, presentationId: "canonical-entry",
                 content: [ContentPart(id: "text", ordinal: 0, thinkingRunOrdinal: nil, type: .text, text: "same", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil)],
                 provider: nil, modelId: nil, stopReason: nil, errorMessage: nil, toolCallId: nil,
                 toolName: nil, isError: nil, details: nil, usage: nil, startedAt: nil,
-                completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil
+                completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil,
+                semantic: ChatSemanticMetadata(
+                    direction: .inboundContext,
+                    contextEffect: .modelInput,
+                    delivery: .stored,
+                    visibility: .visible,
+                    kind: .prompt,
+                    origin: ChatOrigin(kind: .user, confidence: .boundary),
+                    operationId: "operation-0",
+                    sequence: 0
+                )
             ))
             harness.coordinator.reconcileSubmission(
                 target: target,
@@ -2492,14 +2528,14 @@ private struct ComposerSendCall: Equatable {
     let sessionID: String
     let uploadIDs: [String]
     let behavior: String?
-    let skillName: String?
+    let resourceInvocation: ComposerResourceInvocation?
 
-    init(text: String, sessionID: String, uploadIDs: [String], behavior: String?, skillName: String? = nil) {
+    init(text: String, sessionID: String, uploadIDs: [String], behavior: String?, resourceInvocation: ComposerResourceInvocation? = nil) {
         self.text = text
         self.sessionID = sessionID
         self.uploadIDs = uploadIDs
         self.behavior = behavior
-        self.skillName = skillName
+        self.resourceInvocation = resourceInvocation
     }
 }
 
@@ -2661,12 +2697,12 @@ private final class ComposerHarness {
             Issue.record("unexpected file upload")
             throw CancellationError()
         },
-        send: { [weak self] text, sessionID, uploadIDs, behavior, skillName in
+        send: { [weak self] text, sessionID, uploadIDs, behavior, resourceInvocation in
             guard let self else { throw CancellationError() }
             let index = self.sendCalls.count
             self.sendCalls.append(.init(
                 text: text, sessionID: sessionID, uploadIDs: uploadIDs, behavior: behavior,
-                skillName: skillName
+                resourceInvocation: resourceInvocation
             ))
             self.sendBarrierContinuation.yield(self.sendCalls.count)
             try await withCheckedThrowingContinuation { continuation in

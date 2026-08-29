@@ -6,7 +6,7 @@ import { GatewayError } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
 import type { JsonValue } from "../protocol/types.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
-import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text } from "../util/validation.js";
+import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text as boundedText } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../sessions/extension-activity-history.js";
@@ -642,36 +642,65 @@ export class GatewayService {
           const slot = await this.openedSlot(client, params);
           const text = typeof params.text === "string" ? params.text.trim() : "";
           const uploadIds = params.uploadIds === undefined ? [] : arrayOfStrings(params.uploadIds, "uploadIds", 10);
-          const skillName = optionalString(params.skillName, "skillName", 512);
-          if (!text && uploadIds.length === 0) {
+          const resourceInvocation = params.resourceInvocation === undefined || params.resourceInvocation === null
+            ? undefined
+            : object(params.resourceInvocation, "resourceInvocation");
+          const resourceSource = resourceInvocation === undefined
+            ? undefined
+            : oneOf(resourceInvocation.source, "resourceInvocation.source", ["skill", "prompt", "extension"] as const);
+          const resourceName = resourceInvocation === undefined
+            ? undefined : string(resourceInvocation.name, "resourceInvocation.name", { max: 512 });
+          const resourceArguments = resourceInvocation === undefined
+            ? undefined : boundedText(resourceInvocation.arguments, "resourceInvocation.arguments", 64_000);
+          if (!text && !resourceArguments && uploadIds.length === 0) {
             throw new GatewayError("invalid_request", "Prompt text or attachments are required");
           }
-          if (skillName !== undefined) {
-            const expected = `skill:${skillName}`;
+          const catalogResourceName = resourceSource === "skill"
+            ? `skill:${resourceName!.startsWith("skill:") ? resourceName!.slice("skill:".length) : resourceName!}`
+            : resourceName;
+          if (resourceSource !== undefined) {
             const commands = slot.commands();
-            const matches = commands.filter((command) => command.source === "skill" && command.name === expected);
-            const collidesWithExtension = commands.some(
-              (command) => command.source === "extension" && command.name === expected,
+            const matches = commands.filter(
+              (command) => command.source === resourceSource && command.name === catalogResourceName,
             );
-            if (matches.length !== 1 || collidesWithExtension) {
-              throw new GatewayError("conflict", "The selected skill is no longer unambiguous for this session");
+            const shadowed = resourceSource !== "extension" && commands.some(
+              (command) => command.source === "extension" && command.name === catalogResourceName,
+            );
+            if (matches.length !== 1 || shadowed) {
+              throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
             }
           }
           const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
-          const visiblePrompt = [text, attachments.envelope].filter(Boolean).join("\n\n");
-          const prompt = skillName === undefined
+          const visiblePrompt = [resourceArguments ?? text, attachments.envelope].filter(Boolean).join("\n\n");
+          const prompt = resourceSource === undefined
             ? visiblePrompt
-            : `/skill:${skillName}${visiblePrompt ? ` ${visiblePrompt}` : ""}`;
+            : `/${catalogResourceName!}${visiblePrompt ? ` ${visiblePrompt}` : ""}`;
           const behavior = params.behavior === undefined ? undefined : oneOf(params.behavior, "behavior", ["steer", "followUp"] as const);
-          return safeJson(await slot.prompt(prompt, attachments.images, behavior, {
+          let resolveAdmission!: (result: { operationId: string }) => void;
+          let rejectAdmission!: (error: unknown) => void;
+          const admission = new Promise<{ operationId: string }>((resolve, reject) => {
+            resolveAdmission = resolve;
+            rejectAdmission = reject;
+          });
+          const execution = slot.prompt(prompt, attachments.images, behavior, {
             text,
-            ...(skillName === undefined ? {} : { skillName }),
+            ...(resourceSource === undefined ? {} : {
+              resourceInvocation: {
+                source: resourceSource,
+                name: resourceSource === "skill" && resourceName!.startsWith("skill:")
+                  ? resourceName!.slice("skill:".length)
+                  : resourceName!,
+                arguments: resourceArguments ?? text,
+              },
+            }),
             attachmentEnvelope: attachments.envelope,
             attachmentCount: uploadIds.length,
             ...(attachments.photoCount > 0 ? { photoCount: attachments.photoCount } : {}),
             ...(attachments.fileAttachmentCount > 0 ? { fileAttachmentCount: attachments.fileAttachmentCount } : {}),
             ...(attachments.attachments.length > 0 ? { attachments: attachments.attachments } : {}),
-          }));
+          }, resolveAdmission);
+          void execution.then(resolveAdmission, rejectAdmission);
+          return safeJson(await admission);
         });
       case "session.abort":
         return this.mutation(client, method, params, async () => {
@@ -684,7 +713,10 @@ export class GatewayService {
           return { aborted: true };
         }, true);
       case "session.clearQueue":
-        return this.mutation(client, method, params, async () => safeJson(await (await this.openedSlot(client, params)).clearQueue()), true);
+        return this.mutation(client, method, params, async () => {
+          await (await this.openedSlot(client, params)).clearQueue();
+          return { cleared: true };
+        }, true);
       case "session.queue.replace":
         return this.mutation(client, method, params, async () => {
           if (!Array.isArray(params.items)) throw new GatewayError("invalid_request", "items must be an array");
@@ -798,7 +830,7 @@ export class GatewayService {
           string(params.hostEpoch, "hostEpoch", { max: 100 }),
           integer(params.baseRevision, "baseRevision", 0, Number.MAX_SAFE_INTEGER),
           string(params.operationId, "operationId", { max: 256 }),
-          text(params.text, "text", 192 * 1_024),
+          boundedText(params.text, "text", 192 * 1_024),
         ), true);
       case "extension.toolsExpanded":
         return this.mutation(client, method, params, async () => (await this.openedSlot(client, params)).setExtensionToolsExpanded(

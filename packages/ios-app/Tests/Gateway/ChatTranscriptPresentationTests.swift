@@ -6,24 +6,32 @@ import Testing
 struct ChatTranscriptPresentationTests {
     @Test("producer session messages derive one compact status and optional duration")
     func compactSessionInputPresentation() {
-        #expect(SessionInputCompactPresentationPolicy.status(
+        #expect(InboundContextCompactPresentationPolicy.status(
             details: .object(["status": .string("in_progress")]),
             message: "ignored"
         ) == "In Progress")
-        #expect(SessionInputCompactPresentationPolicy.status(
+        #expect(InboundContextCompactPresentationPolicy.status(
             details: nil,
             message: "Background task failed"
         ) == "Failed")
-        #expect(SessionInputCompactPresentationPolicy.status(
+        #expect(InboundContextCompactPresentationPolicy.status(
             details: nil,
             message: "Worker finished"
         ) == "Completed")
-        #expect(SessionInputCompactPresentationPolicy.durationMilliseconds(
+        #expect(InboundContextCompactPresentationPolicy.durationMilliseconds(
             details: .object(["durationMs": .number(42)])
         ) == 42)
-        #expect(SessionInputCompactPresentationPolicy.durationMilliseconds(
+        #expect(InboundContextCompactPresentationPolicy.durationMilliseconds(
             details: .object(["elapsedMs": .number(-4)])
         ) == 0)
+    }
+
+    @Test("inbound delivery metadata remains truthful in technical details")
+    func inboundDeliveryLabels() {
+        #expect(InboundProducerPresentationPolicy.deliveryLabel(for: .stored) == "Stored for model context")
+        #expect(InboundProducerPresentationPolicy.deliveryLabel(for: .triggeredTurn) == "Triggered an agent turn")
+        #expect(InboundProducerPresentationPolicy.deliveryLabel(for: .followUp) == "Queued as a follow-up")
+        #expect(InboundProducerPresentationPolicy.deliveryLabel(for: nil) == "Unknown")
     }
 
     @Test("prompt behavior normalizes wire values before first rendering")
@@ -2217,7 +2225,7 @@ struct ChatTranscriptPresentationTests {
           "sessionId":"session","runtimeGeneration":"generation","revision":1,"eventSequence":1,"phase":"idle","cwd":"/workspace",
           "model":{"provider":"openai-codex","id":"gpt-5.6-sol"},"thinkingLevel":"high","availableThinkingLevels":["off","high"],
           "stats":{"userMessages":1,"assistantMessages":0,"toolCalls":0,"toolResults":0,"totalMessages":1,"tokens":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cost":0},
-          "queued":{"steering":[],"followUp":[]},"transcript":\(transcript),"transcriptStart":0,"transcriptTotal":3,
+          "queueRevision":0,"queuedItems":[],"automaticCompactionEnabled":true,"transcript":\(transcript),"transcriptStart":0,"transcriptTotal":3,
           "toolExecutions":[],"extensionPresentation":{"version":2,"hostEpoch":"host","revision":0,"capabilities":[],"diagnostics":[],"semanticState":{"statuses":{},"working":{"visible":false},"widgets":[],"toolsExpanded":false,"editorRevision":0,"editorText":""},"surfaces":[],"pendingInteractions":[]},"diagnostics":[]
         }
         """.utf8))

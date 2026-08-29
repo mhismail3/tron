@@ -68,24 +68,32 @@ enum ComposerResourceContentPresentation {
     static func body(_ content: String, source: CommandInfo.Source) -> String {
         guard source != .extension else { return content }
 
-        var openingStart = content.startIndex
-        if content[openingStart...].hasPrefix("\u{FEFF}") {
-            openingStart = content.index(after: openingStart)
+        // Markdown resources may begin with a UTF-8 BOM decoded as U+FEFF.
+        // Remove it at the Unicode-scalar boundary: U+FEFF can share a Swift
+        // grapheme cluster with the opening hyphens and is not reliably found
+        // as a standalone Character substring.
+        var normalized = content
+        if normalized.unicodeScalars.first?.value == 0xFEFF {
+            let firstContentScalar = normalized.unicodeScalars.index(
+                after: normalized.unicodeScalars.startIndex
+            )
+            normalized = String(normalized.unicodeScalars[firstContentScalar...])
         }
-        guard let openingEnd = content[openingStart...].firstIndex(of: "\n") else { return content }
-        let opening = content[openingStart..<openingEnd].trimmingCharacters(in: .newlines)
-        guard opening == "---" || opening == "---\r" else { return content }
+        normalized = normalized.replacingOccurrences(of: "\r\n", with: "\n")
+        guard let openingEnd = normalized.firstIndex(of: "\n") else { return content }
+        let opening = normalized[normalized.startIndex..<openingEnd].trimmingCharacters(in: .whitespacesAndNewlines)
+        guard opening == "---" else { return content }
 
-        var lineStart = content.index(after: openingEnd)
-        while lineStart < content.endIndex {
-            let lineEnd = content[lineStart...].firstIndex(of: "\n") ?? content.endIndex
-            let line = content[lineStart..<lineEnd]
-            if line == "---" || line == "---\r" || line == "..." || line == "...\r" {
-                guard lineEnd < content.endIndex else { return "" }
-                return String(content[content.index(after: lineEnd)...])
+        var lineStart = normalized.index(after: openingEnd)
+        while lineStart < normalized.endIndex {
+            let lineEnd = normalized[lineStart...].firstIndex(of: "\n") ?? normalized.endIndex
+            let line = normalized[lineStart..<lineEnd].trimmingCharacters(in: .whitespacesAndNewlines)
+            if line == "---" || line == "..." {
+                guard lineEnd < normalized.endIndex else { return "" }
+                return String(normalized[normalized.index(after: lineEnd)...])
             }
-            guard lineEnd < content.endIndex else { break }
-            lineStart = content.index(after: lineEnd)
+            guard lineEnd < normalized.endIndex else { break }
+            lineStart = normalized.index(after: lineEnd)
         }
         return content
     }
@@ -675,9 +683,9 @@ private struct ComposerResourceDetailSheet: View {
     }
 }
 
-struct ComposerSkillChip: View {
+struct ComposerResourceChip: View {
     let sessionID: String?
-    let skill: ComposerResourceEntry
+    let resource: ComposerResourceEntry
     let onRemove: () -> Void
     @State private var showsDetail = false
 
@@ -691,15 +699,15 @@ struct ComposerSkillChip: View {
             HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
                 Button { showsDetail = true } label: {
                     ChatCompactPillLabel(
-                        icon: "sparkles",
-                        title: skill.friendlyName,
+                        icon: resource.commandInfo.source == .skill ? "sparkles" : "command",
+                        title: resource.friendlyName,
                         tone: .information,
                         iconSize: TronTypography.sizeBody,
                         titleWeight: .bold
                     )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Show skill details, \(skill.friendlyName)")
+                .accessibilityLabel("Show resource details, \(resource.friendlyName)")
 
                 Button(action: onRemove) {
                     Image(systemName: "xmark.circle.fill")
@@ -709,14 +717,14 @@ struct ComposerSkillChip: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Remove skill, \(skill.friendlyName)")
+                .accessibilityLabel("Remove resource, \(resource.friendlyName)")
             }
         }
         .accessibilityElement(children: .contain)
         .sheet(isPresented: $showsDetail) {
             ComposerResourceDetailSheet(
                 sessionID: sessionID,
-                entry: skill,
+                entry: resource,
                 accent: .tronCyan,
                 prefix: "@"
             )

@@ -1,5 +1,24 @@
 # Gateway events
 
+## Protocol v4 chat semantics
+
+Session events are live invalidation hints; the authoritative snapshot and
+canonical Pi JSONL determine transcript order and lifecycle truth. Typed chat
+metadata separates direction, context effect, provenance, visibility, delivery,
+semantic kind, and causal invocation/operation IDs. Inbound model context is
+right aligned; assistant output and agent-requested tools remain left aligned;
+non-context status is centered; hidden internal state has no chat row. User input
+is green, trusted subagent/process input blue, extension or unknown input gray,
+and Gateway status muted, with labels/icons for accessibility.
+
+`custom_message` is model context regardless of whether it triggers a turn or is
+producer-visible. Producer-hidden messages remain hidden in ordinary chat.
+`custom`/`appendEntry` is context-free extension state and is hidden unless a
+trusted typed adapter promotes it to a centered status. No generic extension
+message/state is rendered as a ToolCard. Invocation receipts are bounded
+canonical records used to reconcile accepted commands and resource prompts after
+restart; uncertain side effects are never replayed automatically.
+
 Tron events are transient presentation and invalidation signals delivered by
 `GatewayClient`. They are not a durable journal and are not reconstructed into a
 local database. Each delivery carries the local connection-epoch identity; `AppModel`
@@ -63,10 +82,9 @@ admits and reduces mounted-session topics:
   path allowed to replace a cursor or runtime baseline. The same snapshot carries the full
   bounded queue projection (at most 32 authoritative items, including total attachment count and optional photo/file counts)
   and queue revision; queue updates therefore replace the visible
-  queued-message cards atomically rather than applying per-row mobile deltas. A Gateway advertising
-  `queue-management.v1` must supply both rich fields; iOS admits Edit/Remove only for that
-  authoritative pair. Legacy string-only projections remain visibly locked and direct the user to
-  update Tron on Mac. A mutation response never rewrites queue projection locally: clear,
+  queued-message cards atomically rather than applying per-row mobile deltas. Protocol v4 requires
+  both rich fields; iOS admits Edit/Remove only for that authoritative pair. A mutation response
+  never rewrites queue projection locally: clear,
   edit, reorder, and remove keep controls inert until a strictly newer sequenced queue revision
   installs from the Gateway. While that mutation is pending, its exact changed/removed operation IDs
   cannot claim queue-to-canonical continuity. If a canonical snapshot would settle one of those IDs,
@@ -80,16 +98,15 @@ admits and reduces mounted-session topics:
   read-only. An explicit user-admitted earlier-page request owns one exact local token through
   paging, projection installation, and anchored prepend settlement (or unanchored installation),
   while reducer/scroll loading only corroborates that transaction and never supplies another label.
-- `compactionQueued` is an optional rolling snapshot field owned by the Gateway's
+- `compactionQueued` is a bounded snapshot field owned by the Gateway's
   single pending maintenance slot. iOS renders it as explicit runtime feedback and never
   inserts a transcript entry or retries the mutation. The row is replaced by existing
   compacting feedback when the Gateway picks up the work, then by the canonical JSONL
   compaction entry. Current Gateways publish one immediate contiguous authoritative snapshot
   at `compaction_end`; it contains the fitted current tail/leaf (including hook-appended suffix)
   and truthful restored prompt/automatic-idle operation state; manual marker cleanup remains compacting
-  until durable settlement. iOS retains typed `session.compaction`
-  decoding only for rolling compatibility with older Gateways and requests rebaseline for an
-  inexact legacy delta.
+  until durable settlement. The typed `session.compaction` delta must identify one exact
+  canonical compaction item; an inexact delta requests rebaseline.
   Stop derives its typed abort kind from the same authoritative operation and includes that
   operation ID. Gateway rejects a delayed tap if a newer operation has replaced it, preventing
   a stale compaction/agent control from aborting its successor.
@@ -99,10 +116,7 @@ admits and reduces mounted-session topics:
   semantically ordinary (never a fabricated `queuedItem`) but uses the shared emerald queue-card visual
   with “Message” / “After compaction” until its canonical user entry arrives. Gateway binds that entry's
   bounded `presentationId` to the prompt operation ID, which iOS consumes before legacy text
-  matching. Once the operation ID is known, text/attachment equivalence is never accepted as causal settlement. A sequenced `session.operationFailed` carrying that ID retires and restores only the exact accepted admission. Submission transport ownership is profile/session scoped across route generations, so leaving and reopening projects the same sending/accepted row without replaying the RPC. One unified physical row namespace spans committed, live/runtime, lifecycle, and queue content: Gateway projection binds the compaction operation ID to its canonical compaction entry, so the spinner and canonical pill update under one operation-based physical ID even when transcript bounds move from inexact to exact. The canonical entry ID remains its semantic identity. An exact operation-bound canonical handoff may likewise reuse the prior lifecycle's physical ID while retaining its canonical semantic ID. Optional skill selection travels as bounded `session.prompt.skillName` metadata rather than
-  editor text. The Gateway validates it against the exact live skill catalog, retains the original prompt in
-  `pendingPrompt` and queue items, and removes Pi's canonical skill envelope during bounded transcript projection,
-  so no lifecycle frame exposes `/skill:` or private skill contents. Picker metadata comes from the bounded catalog; opening one resource detail performs a separate exact `session.commandDetail` read for that current `source:name`, bounded source body, and truncation facts. `session.resourcesChanged` revokes command-catalog readiness and starts one generation-gated reload for the exact mounted subscription before retained skill state can reconcile. An active upload for the exact presentation closes send admission synchronously; stale UI actions retain the draft, attachments, and skill until upload completion. Its initial role-aware entrance remains one-shot; composer collapse and the outgoing graft share one pre-mutation viewport generation, while only the exact lifecycle-to-canonical successor receives the focused replacement morph. Optimistic composer settlement consumes every
+  matching. Once the operation ID is known, text/attachment equivalence is never accepted as causal settlement. A sequenced `session.operationFailed` carrying that ID retires and restores only the exact accepted admission. Submission transport ownership is profile/session scoped across route generations, so leaving and reopening projects the same sending/accepted row without replaying the RPC. One unified physical row namespace spans committed, live/runtime, lifecycle, and queue content: Gateway projection binds the compaction operation ID to its canonical compaction entry, so the spinner and canonical pill update under one operation-based physical ID even when transcript bounds move from inexact to exact. The canonical entry ID remains its semantic identity. An exact operation-bound canonical handoff may likewise reuse the prior lifecycle's physical ID while retaining its canonical semantic ID. Skill, prompt-template, and extension selection travels as one bounded typed `resourceInvocation` rather than editor command text. The Gateway validates exact live `(source,name)` identity and extension precedence, retains the visible arguments in pending/queue projections, and removes Pi's expanded skill envelope during bounded transcript projection. Canonical binding receipts restore the resource chip after reconnect without exposing skill contents or private paths. Picker metadata comes from the bounded catalog; opening one resource detail performs a separate exact `session.commandDetail` read for that current `source:name`, bounded source body, and truncation facts. `session.resourcesChanged` revokes command-catalog readiness and starts one generation-gated reload for the exact mounted subscription before retained resource state can reconcile. An active upload for the exact presentation closes send admission synchronously; stale UI actions retain the draft, attachments, and selected resource until upload completion. Its initial role-aware entrance remains one-shot; composer collapse and the outgoing graft share one pre-mutation viewport generation, while only the exact lifecycle-to-canonical successor receives the focused replacement morph. Optimistic composer settlement consumes every
   authoritative session-reducer publication directly rather than waiting for delayed transcript formatting. The lifecycle-to-canonical header/status collapse uses one explicitly admitted prompt spring and a short fade under Reduce Motion; unrelated transcript updates do not inherit that transaction, and no scroll command is added. For queued steering/follow-up, the returned prompt operation ID is also the Gateway's
   stable queue-item ID, so a concurrent same-text item cannot settle the wrong optimistic admission. That exact
 operation identity may coalesce the optimistic queue-kind row with its newly admitted authoritative queue card; baseline
@@ -112,8 +126,7 @@ unknown values stay neutral, and each newly admitted prompt uses its role-aware 
 Queue admission and canonical handoff receipts suppress every later entrance; pending/queued-to-canonical replacement preserves canonical semantic IDs while one bounded one-to-one causal alias retains physical row identity. Repeated text, unrelated rows, and alias collisions fail closed. Replacement installs directly visible with only the focused container/header morph and no hidden mount state. Exact off-main-prepared file
 previews map through upload blob identity, and prepared image previews transfer by order only when complete count/MIME facts
 agree; settlement performs no decode, while ambiguity uses normal media loading. Attachment-only canonical settlement uses an exact attachment metadata multiset even when Pi
-  persists synthesized envelope text. `automaticCompactionEnabled` likewise reports
-  runtime truth rather than a mobile inference; older snapshots may omit these fields.
+  persists synthesized envelope text. `automaticCompactionEnabled` reports runtime truth rather than a mobile inference.
   Transcript projection captures the authoritative snapshot and composer handoff
   as one immutable commit; pending/outgoing rows render only from installed
   handoff state, while canonical reconciliation installs handoff `none`. A
@@ -125,7 +138,7 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
 - `session.extensionPresentation` remains the leased transport for semantic updates and native select/confirm/input/editor/questionnaire sheets. Read-only statuses, widgets, and service activity no longer create an ambient composer or Manage Session surface; interactive prompts and editor ownership are unchanged. In particular, there is no Pi Subagents composer pill or generic extension summary route. Normal canonical `subagent` calls remain ordinary transcript tool chips, while the process orb/native **Subagents** sheet is the sole above-composer progress surface;
 - the snapshot `processOverview` authority with its optional nonempty `processActivities` rows and compact `session.processActivity` events drive the current/recent projection only for admitted synchronous/asynchronous subagents; assistant commands remain ordinary transcript/tool activity. A delta carries an optional exact process upsert, bounded explicit removals, and one same-revision shallow overview. `SessionPresentationStore` applies that replacement atomically and resynchronizes instead of installing an overview around a stale or rejected row; it never rebuilds transcript projection or moves chat scroll state. Terminal lifecycle is latched; delayed full frames cannot resurrect or erase newer process evidence. The Gateway emits a replacement at the exact five-minute expiry even without another chat event. A mounted read-only sheet follows a replaced aggregate only when exactly one admitted row retains the same tool-call and root-run correlation; ambiguous replacements fail closed. The composer sheet reads mounted rows only, while `SessionProcessHistoryStore` loads canonical pages from `session.processHistory.list/get` for the exact presentation/history generation;
 - `session.processTranscript.changed` is a lease-scoped invalidation, not a parent session-cursor event. `GatewayProtocol` dispatches it before the generic `session.*` envelope path. A mounted `ReadOnlySubagentSessionStore` accepts only its exact lease and newer revision, refreshes the newest page through that same lease, and retains already loaded earlier pages when canonical overlap proves append-only continuity. Branch replacement or an unbridgeable gap falls back to the new canonical tail rather than fabricating adjacency. `open/page/close` responses preserve page range, canonical boundary, unique ID, and generation checks; transient current tool/output remains outside canonical transcript rows;
-- custom messages carrying Gateway-authored `sessionInput` evidence enter the ordered timeline as a right-aligned single-line producer status chip, including hidden extension wake messages that triggered or continued an agent turn. Supplied status/duration are projected shallowly; the full message, receipt, target, origin, canonical identity, and payload remain in its detail sheet. Producer attribution is optional and never guessed. Non-triggering custom messages remain ordinary extension/tool rows;
+- producer-visible `custom_message` entries enter the ordered timeline as right-aligned inbound context, whether stored for a later model turn or triggering work immediately. Gateway-authored context-delivery receipts preserve exact producer attribution and delivery mode after reconnect; unknown provenance stays neutral and is never guessed from custom type, text, or details. Producer-hidden custom messages remain absent from ordinary chat, while `custom`/`appendEntry` state never becomes a tool or message row;
 - chat rendering joins canonical calls, live progress, and canonical results by
   `toolCallId` into one ordered timeline. At finalized assistant `message_end`, the
   Gateway publishes complete contiguous declaration groups before their tool starts.

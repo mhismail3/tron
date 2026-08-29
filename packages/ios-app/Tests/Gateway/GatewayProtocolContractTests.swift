@@ -13,7 +13,6 @@ struct GatewayProtocolContractTests {
           "availableThinkingLevels":["off","high"],
           "contextUsage":{"tokens":120,"contextWindow":1000,"percent":12},
           "stats":{"userMessages":1,"assistantMessages":0,"toolCalls":0,"toolResults":0,"totalMessages":1,"tokens":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"latestCacheHitRate":99.7,"cost":0},
-          "queued":{"steering":[],"followUp":["later"]},
           "queueRevision":4,
           "queuedItems":[{"id":"queued-1","behavior":"followUp","text":"later","attachmentCount":2}],
           "pendingPrompt":{"id":"prompt-1","createdAt":"2026-01-01T00:00:02Z","behavior":"steer","text":"waiting","attachmentCount":1},
@@ -55,15 +54,14 @@ struct GatewayProtocolContractTests {
             attachmentCount: 2
         )])
 
-        var legacyObject = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        legacyObject.removeValue(forKey: "compactionQueued")
-        legacyObject.removeValue(forKey: "automaticCompactionEnabled")
-        let legacy = try JSONDecoder.gateway.decode(
-            SessionSnapshot.self,
-            from: JSONSerialization.data(withJSONObject: legacyObject)
-        )
-        #expect(legacy.compactionQueued == nil)
-        #expect(legacy.automaticCompactionEnabled == nil)
+        var missingRequired = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        missingRequired.removeValue(forKey: "automaticCompactionEnabled")
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder.gateway.decode(
+                SessionSnapshot.self,
+                from: JSONSerialization.data(withJSONObject: missingRequired)
+            )
+        }
     }
 
     @Test("message presentation identity and content ordinals are required")

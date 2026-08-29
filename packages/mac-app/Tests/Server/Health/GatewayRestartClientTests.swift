@@ -6,9 +6,9 @@ import Testing
 struct GatewayRestartClientTests {
     @Test("hello requires the exact supported protocol and minimum")
     func helloValidationIsFailClosed() {
-        let valid = #"{"type":"hello","protocolVersion":3,"minProtocolVersion":3}"#
-        let older = #"{"type":"hello","protocolVersion":2,"minProtocolVersion":2}"#
-        let future = #"{"type":"hello","protocolVersion":4,"minProtocolVersion":3}"#
+        let valid = #"{"type":"hello","protocolVersion":4,"minProtocolVersion":4}"#
+        let older = #"{"type":"hello","protocolVersion":3,"minProtocolVersion":3}"#
+        let future = #"{"type":"hello","protocolVersion":5,"minProtocolVersion":4}"#
         #expect(GatewayRestartClient.decodeHello(data: Data(valid.utf8)))
         #expect(!GatewayRestartClient.decodeHello(data: Data(older.utf8)))
         #expect(!GatewayRestartClient.decodeHello(data: Data(future.utf8)))

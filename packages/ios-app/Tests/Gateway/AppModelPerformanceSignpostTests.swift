@@ -804,14 +804,18 @@ struct AppModelPerformanceSignpostTests {
         }
     }
 
-    @Test("queue projection clears only after mutation confirmation")
+    @Test("queue mutation confirmation does not replace authoritative projection")
     func clearQueueOrdering() async throws {
         try await withTestWatchdog {
             let harness = try await makeHarness()
             var snapshot = try SessionScenarioBuilder(seed: 59).openingTail(targetEncodedBytes: 4_096)
-            snapshot.queued = .init(steering: ["steer"], followUp: ["follow"])
+            snapshot.queueRevision = 1
+            snapshot.queuedItems = [
+                .init(id: "steer", behavior: .steer, text: "steer", attachmentCount: 0),
+                .init(id: "follow", behavior: .followUp, text: "follow", attachmentCount: 0),
+            ]
             let sessionID = snapshot.sessionId
-            let expectedQueue = snapshot.queued
+            let expectedQueue = snapshot.queuedItems
             await MainActor.run {
                 harness.model.installHostedSubscribedSnapshot(snapshot, token: "queue-token")
             }
@@ -821,20 +825,17 @@ struct AppModelPerformanceSignpostTests {
             let mutation = try await request(in: harness.socket, frameIndex: 1)
             #expect(mutation.method == "session.clearQueue")
             #expect(await MainActor.run {
-                harness.model.authoritativeSnapshot(for: sessionID)?.queued
+                harness.model.authoritativeSnapshot(for: sessionID)?.queuedItems
             } == expectedQueue)
             await harness.socket.enqueue(successResponse(
                 id: mutation.id,
-                result: .object([
-                    "steering": .array([.string("steer")]),
-                    "followUp": .array([.string("follow")]),
-                ])
+                result: .object(["cleared": .bool(true)])
             ))
 
-            #expect(try await valueOfOwnedTask(clearing) == expectedQueue)
+            try await valueOfOwnedTask(clearing)
             #expect(await MainActor.run {
-                harness.model.authoritativeSnapshot(for: sessionID)?.queued
-            } == .init(steering: [], followUp: []))
+                harness.model.authoritativeSnapshot(for: sessionID)?.queuedItems
+            } == expectedQueue)
             await harness.client.close()
         }
     }
@@ -1345,7 +1346,7 @@ struct AppModelPerformanceSignpostTests {
     }
 
     private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
     }
 
     private func successResponse(id: String, result: JSONValue) -> Data {

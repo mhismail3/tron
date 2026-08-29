@@ -189,9 +189,9 @@ test("tailscale host selection and restart handshake are bounded and determinist
     "100.64.0.999", "100.64.0.1.example", "100.63.255.255", "100.128.0.1", "100.64.0.1%en0",
     "fd7a:115c:a1e0:garbage::1", "fd7a:115c:a1e1::1", "fd7a:115c:a1e0::1%utun0",
   ]) assert.equal(isTailscaleAddress(malformed), false, malformed);
-  assert.equal(protocolHandshakeCompatible({ type: "hello", protocolVersion: 3, minProtocolVersion: 3 }), true);
+  assert.equal(protocolHandshakeCompatible({ type: "hello", protocolVersion: 4, minProtocolVersion: 4 }), true);
   assert.equal(protocolHandshakeCompatible({ type: "hello", protocolVersion: 2, minProtocolVersion: 2 }), false);
-  assert.equal(protocolHandshakeCompatible({ type: "hello", protocolVersion: 3 }), false);
+  assert.equal(protocolHandshakeCompatible({ type: "hello", protocolVersion: 4 }), false);
 });
 
 test("local credential validation is exact and fails closed", () => {
@@ -410,7 +410,7 @@ async function makePreflightFixture(root) {
   await mkdir(join(payload, "app", "node_modules", "node-pty", "prebuilds", `darwin-${process.arch}`), { recursive: true });
   await mkdir(join(payload, "runtime"), { recursive: true });
   await writeFile(join(payload, "app", "dist", "index.js"), "x".repeat(1_024));
-  await writeFile(join(payload, "app", "dist", "version.js"), "export const PROTOCOL_VERSION = 3; export const MIN_PROTOCOL_VERSION = 3;\n");
+  await writeFile(join(payload, "app", "dist", "version.js"), "export const PROTOCOL_VERSION = 4; export const MIN_PROTOCOL_VERSION = 4;\n");
   await writeFile(join(payload, "app", "package.json"), "{}\n");
   await writeFile(join(payload, "app", "package-lock.json"), "{}\n");
   await writeFile(join(payload, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
@@ -544,12 +544,12 @@ test("preflight imports candidate protocol values and rejects incompatible range
   try {
     const payload = await makePreflightFixture(root);
     const run = async (_tool, args) => args[0] === "-e"
-      ? { code: 0, output: JSON.stringify({ protocolVersion: 3, minProtocolVersion: 3 }) }
+      ? { code: 0, output: JSON.stringify({ protocolVersion: 4, minProtocolVersion: 4 }) }
       : { code: 0, output: "" };
     await preflightPayload(payload, run);
     await assert.rejects(
       preflightPayload(payload, async (_tool, args) => args[0] === "-e"
-        ? { code: 0, output: JSON.stringify({ protocolVersion: 4, minProtocolVersion: 4 }) }
+        ? { code: 0, output: JSON.stringify({ protocolVersion: 3, minProtocolVersion: 3 }) }
         : { code: 0, output: "" }),
       /protocol range is incompatible/
     );

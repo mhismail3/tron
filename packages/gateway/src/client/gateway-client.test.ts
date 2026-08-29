@@ -27,7 +27,7 @@ describe("stable gateway protocol client", () => {
       expect(request.headers.authorization).toBe("Bearer local-token");
       socket.on("message", (raw) => {
         const frame = JSON.parse(raw.toString()) as any;
-        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 3, minProtocolVersion: 3 }));
+        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 4, minProtocolVersion: 4 }));
         if (frame.type === "request") {
           socket.send(JSON.stringify({ type: "response", id: frame.id, ok: true, result: { value: 1 } }));
           socket.send(JSON.stringify({ type: "event", topic: "session.snapshot", sessionId: "session", payload: { revision: 1 } }));
@@ -70,7 +70,7 @@ describe("stable gateway protocol client", () => {
       if (connectionCount === 1) firstServerSocket = socket; else secondServerSocket = socket;
       socket.on("message", (raw) => {
         const frame = JSON.parse(raw.toString()) as any;
-        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 3, minProtocolVersion: 3 }));
+        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 4, minProtocolVersion: 4 }));
         if (frame.type === "request" && connectionCount > 1) {
           setTimeout(() => socket.send(JSON.stringify({ type: "response", id: frame.id, ok: true, result: { replacement: true } })), 5);
         }
@@ -97,7 +97,7 @@ describe("stable gateway protocol client", () => {
     sockets.on("connection", (socket) => {
       socket.on("message", (raw) => {
         const frame = JSON.parse(raw.toString()) as any;
-        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 3, minProtocolVersion: 3 }));
+        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 4, minProtocolVersion: 4 }));
         if (frame.type === "request") socket.terminate();
       });
     });

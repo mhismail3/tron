@@ -2198,7 +2198,6 @@ final class SessionPresentationStore {
             guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
             snapshot.phase = .interrupted
             snapshot.operation = nil
-            snapshot.extensionCommand = nil
             effects.append(.notice("An extension closed this session runtime.", type: "info"))
             advance(&snapshot, envelope)
         case "session.operationFailed", "session.extensionError":

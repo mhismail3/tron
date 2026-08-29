@@ -831,6 +831,10 @@ enum ChatTranscriptProjectionKernel {
             .union(additionalVisibleCallIDs)
         var conversationHasBegun = (transcriptStart ?? 0) > 0
         return fragments.filter { fragment in
+            // Internal custom state and producer-hidden context are canonical
+            // facts, not ordinary chat rows. They remain available to Gateway
+            // receipts/audit but cannot create physical transcript rows.
+            if fragment.source.semantic?.direction == .hiddenInternal { return false }
             if fragment.beginsConversation { conversationHasBegun = true }
             if fragment.isConfiguration { return conversationHasBegun }
             if let resultID = fragment.toolResultID { return !visibleCallIDs.contains(resultID) }
@@ -1576,22 +1580,12 @@ enum ChatTranscriptProjectionKernel {
         case .bash:
             return []
         case .customMessage:
-            guard item.sessionInput == nil else { return [] }
-            return [ChatToolPresentation(
-                id: item.id, title: item.customType ?? "Extension", subtitle: "Extension message",
-                request: nil, response: item.details, content: item.text,
-                fallbackContent: item.text.isEmpty ? item.details : nil, error: false,
-                startedAt: item.startedAt, completedAt: item.completedAt, durationMs: item.durationMs,
-                lastProgressAt: item.lastProgressAt, progressSequence: item.progressSequence
-            )]
+            // custom_message is inbound model context, never a tool run.
+            return []
         case .customEntry:
-            return [ChatToolPresentation(
-                id: item.id, title: item.customType ?? "Extension state", subtitle: "Extension state",
-                request: nil, response: item.customData, content: "", fallbackContent: item.customData,
-                error: false, startedAt: item.startedAt, completedAt: item.completedAt,
-                durationMs: item.durationMs, lastProgressAt: item.lastProgressAt,
-                progressSequence: item.progressSequence
-            )]
+            // appendEntry is context-free extension state and is hidden unless
+            // a future explicit status adapter promotes it to a notification.
+            return []
         case .message where item.role == .toolResult:
             return [toolResultPresentation(item)]
         case .message:

@@ -177,6 +177,7 @@ describe("session transcript paging", () => {
       [],
       undefined,
       expect.objectContaining({ attachmentCount: 1, attachments: [descriptor] }),
+      expect.any(Function),
     );
   });
 
@@ -203,7 +204,7 @@ describe("session transcript paging", () => {
     await expect(service.invoke(client, "session.prompt", {
       sessionId: "session",
       text: "Inspect this change",
-      skillName: "review",
+      resourceInvocation: { source: "skill", name: "review", arguments: "Inspect this change" },
       commandId: "00000000-0000-4000-8000-000000000003",
     })).resolves.toEqual({ operationId: "skill-operation" });
     expect(prompt).toHaveBeenCalledWith(
@@ -211,18 +212,19 @@ describe("session transcript paging", () => {
       [],
       undefined,
       expect.objectContaining({ text: "Inspect this change" }),
+      expect.any(Function),
     );
 
     await expect(service.invoke(client, "session.prompt", {
       sessionId: "session",
       text: "Inspect this change",
-      skillName: "retired",
+      resourceInvocation: { source: "skill", name: "retired", arguments: "Inspect this change" },
       commandId: "00000000-0000-4000-8000-000000000004",
     })).rejects.toMatchObject({ code: "conflict", retryable: false });
     await expect(service.invoke(client, "session.prompt", {
       sessionId: "session",
       text: "",
-      skillName: "review",
+      resourceInvocation: { source: "skill", name: "review", arguments: "" },
       commandId: "00000000-0000-4000-8000-000000000005",
     })).rejects.toMatchObject({ code: "invalid_request" });
     commands.mockReturnValue([
@@ -232,7 +234,7 @@ describe("session transcript paging", () => {
     await expect(service.invoke(client, "session.prompt", {
       sessionId: "session",
       text: "Inspect this change",
-      skillName: "review",
+      resourceInvocation: { source: "skill", name: "review", arguments: "Inspect this change" },
       commandId: "00000000-0000-4000-8000-000000000006",
     })).rejects.toMatchObject({ code: "conflict", retryable: false });
     expect(prompt).toHaveBeenCalledTimes(1);

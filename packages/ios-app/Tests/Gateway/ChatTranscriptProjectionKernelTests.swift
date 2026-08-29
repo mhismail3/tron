@@ -927,7 +927,7 @@ struct ChatTranscriptProjectionKernelTests {
     @Test("triggered extension messages remain trailing conversation input instead of tool runs")
     func triggeredExtensionMessageIsConversationInput() throws {
         var snapshot = try fixture(transcript: """
-        [{"id":"notice","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customMessage","customType":"subagent-notify","content":[{"id":"text","ordinal":0,"type":"text","text":"Background worker finished"}],"details":{"runId":"run-1"},"sessionInput":{"source":"extension","trigger":"turn","origin":{"source":"npm:pi-subagents","owner":{"id":"extension:opaque","title":"Pi Subagents","source":"npm:pi-subagents"}}}}]
+        [{"id":"notice","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customMessage","customType":"subagent-notify","content":[{"id":"text","ordinal":0,"type":"text","text":"Background worker finished"}],"details":{"runId":"run-1"},"semantic":{"version":1,"direction":"inboundContext","contextEffect":"modelInput","delivery":"triggeredTurn","visibility":"visible","kind":"message","origin":{"kind":"subagent","ownerId":"extension:opaque","title":"Pi Subagents","confidence":"receipt"},"sequence":0}}]
         """)
         snapshot.transcriptTotal = 1
 
@@ -939,8 +939,29 @@ struct ChatTranscriptProjectionKernelTests {
         }
         #expect(item.id == "notice")
         #expect(item.text == "Background worker finished")
-        #expect(item.sessionInput?.trigger == .turn)
-        #expect(item.sessionInput?.origin?.owner?.title == "Pi Subagents")
+        #expect(item.semantic?.delivery == .triggeredTurn)
+        #expect(item.semantic?.origin.title == "Pi Subagents")
+        #expect(candidate.toolPayloads.callIDs.isEmpty)
+    }
+
+    @Test("canonical command receipts remain ordered transcript rows rather than user or tool rows")
+    func commandReceiptIsDedicatedTranscriptRow() throws {
+        var snapshot = try fixture(transcript: """
+        [{"id":"command","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"inboundContext","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"adapter"},"invocationId":"invocation","operationId":"operation","sequence":1,"lifecycle":"running","resourceInvocation":{"source":"extension","name":"goal","arguments":"count to 20"}}}]
+        """)
+        snapshot.transcriptTotal = 1
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(candidate.timeline.items.count == 1)
+        guard case .transcript(let item) = candidate.timeline.items.first else {
+            Issue.record("Expected a dedicated canonical command row")
+            return
+        }
+        #expect(item.id == "command")
+        #expect(item.semantic?.kind == .command)
+        #expect(item.semantic?.resourceInvocation == ComposerResourceInvocation(
+            source: .extension, name: "goal", arguments: "count to 20"
+        ))
         #expect(candidate.toolPayloads.callIDs.isEmpty)
     }
 
@@ -1705,7 +1726,7 @@ struct ChatTranscriptProjectionKernelTests {
           "sessionId":"session","runtimeGeneration":"generation","revision":1,"eventSequence":1,"phase":"idle","cwd":"/workspace",
           "model":{"provider":"test","id":"model"},"thinkingLevel":"high","availableThinkingLevels":["off","high"],
           "stats":{"userMessages":0,"assistantMessages":0,"toolCalls":0,"toolResults":0,"totalMessages":0,"tokens":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cost":0},
-          "queued":{"steering":[],"followUp":[]},"transcript":\(transcript),"transcriptStart":0,"transcriptTotal":0,
+          "queueRevision":0,"queuedItems":[],"automaticCompactionEnabled":true,"transcript":\(transcript),"transcriptStart":0,"transcriptTotal":0,
           "toolExecutions":[],"extensionPresentation":{"version":2,"hostEpoch":"host","revision":0,"capabilities":[],"diagnostics":[],"semanticState":{"statuses":{},"working":{"visible":false},"widgets":[],"toolsExpanded":false,"editorRevision":0,"editorText":""},"surfaces":[],"pendingInteractions":[]},"diagnostics":[]
         }
         """.utf8))
