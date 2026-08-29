@@ -412,6 +412,7 @@ final class ChatScrollCoordinator {
             evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
             return
         }
+        let previousGeometry = geometry
         // The status-bar tap uses UIKit's native scroll-to-top path and may
         // not publish `isPositionedByUser` or an interacting phase. Treat its
         // unmistakable retreat from the tail as direct ownership before a
@@ -420,9 +421,12 @@ final class ChatScrollCoordinator {
         if !openingTailSettlementPending,
            !hasAutomaticViewportTarget,
            viewportMode == .pinned,
-           geometry.isAtCatchUpBoundary,
+           previousGeometry.isAtCatchUpBoundary,
+           previousGeometry.hasScrollableOverflow,
            current.isValid,
-           current.offsetY < geometry.offsetY - 2,
+           current.hasScrollableOverflow,
+           !current.hasStructuralChange(from: previousGeometry),
+           current.offsetY < previousGeometry.offsetY - 2,
            !current.isAtCatchUpBoundary {
             beginDirectInteraction(allowsBottomRubberBand: false)
         }
@@ -442,6 +446,9 @@ final class ChatScrollCoordinator {
         if (isUserInteracting || directPositionOwnership),
            viewportMode == .pinned,
            current.isValid,
+           current.hasScrollableOverflow,
+           !current.hasStructuralChange(from: previousGeometry),
+           current.offsetY < previousGeometry.offsetY - 2,
            !current.isAtCatchUpBoundary,
            !current.isPastBottomEdge {
             viewportMode.reduce(.userTookOver)
@@ -927,6 +934,12 @@ final class ChatScrollCoordinator {
                 }
             } else if catchUpPhase == .final {
                 catchUpPhase = .settling
+                // Native geometry can reach the tail before SwiftUI reports
+                // command application. Re-evaluate that already-admitted fact
+                // so catch-up cannot remain stuck and revoke draft actions.
+                if !isUserInteracting, geometry.isAtCatchUpBoundary {
+                    finishCatchUpPinned()
+                }
             }
         }
         if var restore = layoutRestore, restore.correctionCommandToken == applied.token {

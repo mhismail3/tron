@@ -157,6 +157,7 @@ struct ChatViewScrollHarnessTests {
                 try await Task.sleep(for: .milliseconds(100))
                 let grown = harness.probeObservation
 
+                #expect(!grown.isDetached)
                 #expect(grown.committedHistoryRowEvaluationCount == evaluationBaseline)
                 #expect(grown.projectionInstallCount == installBaseline)
                 #expect(grown.remountedWhileSemanticIDDisplayed == remountBaseline)

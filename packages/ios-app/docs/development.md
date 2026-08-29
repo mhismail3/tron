@@ -480,8 +480,10 @@ intents can change durable viewport authority. `ChatScrollCoordinatorTests` asse
 the native bottom size-change anchor absorbs pinned continuous stream/composer/keyboard and existing-row growth with zero app offset writes; a genuinely new lazy physical row owns at most one stable-sentinel materialization lease until fresh current-layout semantic geometry, row-frame-before-request and request-before-row-frame ordering both settle, and burst requests are retained/coalesced, while detached growth remains target-free;
 direct return clears catch-up and unread; bottom rubber-band callbacks remain pinned and keep catch-up
 hidden in both geometry/ownership orders, while the same gesture detaches as soon as valid geometry moves
-beyond the tail boundary; catch-up emits one explicit tail intent and restores unread if
-interrupted; retained resets preserve anchoring; opening targets only the exact physical tail; semantic
+beyond the tail boundary; composer reflow in empty, short, or overflowing pinned content cannot impersonate
+the offset-only status-bar retreat; catch-up emits one explicit tail intent, restores unread if interrupted,
+and rechecks geometry-first physical settlement when command application arrives so draft authority cannot
+remain stranded; retained resets preserve anchoring; opening targets only the exact physical tail; semantic
 frames remain bounded; and anchor correction preserves the captured offset. Exact layout-epoch restore
 and prepend transactions still require newer semantic and geometry evidence, remain bounded to two
 corrections, and retire missing restore evidence after one second. Explicit paging supersedes a stale

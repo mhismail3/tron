@@ -789,6 +789,10 @@ struct ChatTranscriptGeometry: Equatable {
         }
         return offsetY > contentBottom - containerHeight + 2
     }
+    var hasScrollableOverflow: Bool {
+        let contentBottom = contentHeight + bottomInset
+        return isValid && contentBottom.isFinite && contentBottom > containerHeight + 2
+    }
     var isAtBottom: Bool { isValid && !isPastBottomEdge && distanceFromBottom <= 80 }
     var isAtExactBottom: Bool { isValid && !isPastBottomEdge && distanceFromBottom <= 2 }
     /// Physical scroll settling commonly stops a few points above the computed
@@ -816,6 +820,11 @@ struct ChatTranscriptGeometry: Equatable {
     func hasViewportChange(from previous: Self) -> Bool {
         abs(containerHeight - previous.containerHeight) > 0.5
             || abs(bottomInset - previous.bottomInset) > 0.5
+    }
+
+    func hasStructuralChange(from previous: Self) -> Bool {
+        hasViewportChange(from: previous)
+            || abs(contentHeight - previous.contentHeight) > 0.5
     }
 }
 

@@ -92,6 +92,32 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.userScrolledAway)
     }
 
+    @Test("composer layout changes cannot impersonate a status-bar retreat")
+    func composerLayoutChangePreservesPinnedIntent() {
+        let underflow = ChatScrollCoordinator()
+        let shortBottom = ChatTranscriptGeometry(
+            offsetY: -80, contentHeight: 320, containerHeight: 400
+        )
+        let shortComposerGrowth = ChatTranscriptGeometry(
+            offsetY: -160, contentHeight: 240, containerHeight: 320
+        )
+        underflow.geometryChanged(previous: .zero, current: shortBottom)
+        underflow.scrollPositionChanged(isPositionedByUser: true)
+        underflow.viewportChanged(previous: shortBottom, current: shortComposerGrowth)
+        #expect(underflow.viewportMode == .pinned)
+        #expect(!underflow.shouldShowCatchUpButton)
+
+        let overflow = ChatScrollCoordinator()
+        let longComposerGrowth = ChatTranscriptGeometry(
+            offsetY: 480, contentHeight: 1_000, containerHeight: 320
+        )
+        overflow.geometryChanged(previous: .zero, current: bottom)
+        overflow.scrollPositionChanged(isPositionedByUser: true)
+        overflow.viewportChanged(previous: bottom, current: longComposerGrowth)
+        #expect(overflow.viewportMode == .pinned)
+        #expect(!overflow.shouldShowCatchUpButton)
+    }
+
     @Test("native pinned size anchoring absorbs discrete and streaming growth without commands")
     func pinnedNativeEdgeEliminatesFollowCommandStream() throws {
         let coordinator = ChatScrollCoordinator()
@@ -549,6 +575,26 @@ struct ChatScrollCoordinatorTests {
         settled.geometryChanged(previous: away, current: bottom)
         #expect(settled.viewportMode == .pinned)
         #expect(!settled.hasUnreadContent)
+    }
+
+    @Test("geometry-first catch-up settlement restores draft submission authority")
+    func geometryFirstCatchUpRestoresSubmissionAuthority() throws {
+        let coordinator = detachedCoordinator(at: away)
+        #expect(coordinator.admitsSubmission)
+
+        coordinator.requestCatchUp(reduceMotion: true)
+        let command = try #require(coordinator.command)
+        #expect(!coordinator.admitsSubmission)
+
+        // SwiftUI can publish the physically settled geometry before it
+        // acknowledges application of the ScrollPosition command.
+        coordinator.geometryChanged(previous: away, current: bottom)
+        #expect(!coordinator.admitsSubmission)
+        coordinator.commandApplied(command)
+
+        #expect(coordinator.admitsSubmission)
+        #expect(coordinator.viewportMode == .pinned)
+        #expect(!coordinator.shouldShowCatchUpButton)
     }
 
     @Test("presentation reset revokes an unacknowledged opening command")

@@ -631,8 +631,10 @@ selects the native bottom size-change anchor as the sole physical size/inset own
 `.anchored` selects top retention and keeps the `ScrollPosition` target-free so direct
 native ownership preserves the reader's position.
 Transcript growth, keyboard frames, and composer measurements are not mode inputs. Consequently pinned content
-and inset growth require zero app offset writes, and detached growth cannot pull the reader.
-Short and empty transcripts remain physically bottom-aligned; blank space belongs above the newest content.
+and inset growth require zero app offset writes, and detached growth cannot pull the reader. The status-bar
+scroll fallback admits only an offset-only retreat in genuinely overflowing content, so empty/short composer
+reflow cannot fabricate reader takeover or expose catch-up. Short and empty transcripts remain physically
+bottom-aligned; blank space belongs above the newest content.
 
 Mode changes come only from explicit intent: native/direct/accessibility movement away from the
 tail anchors; a bottom-starting pull that remains within the tail boundary or native past-bottom
@@ -649,7 +651,9 @@ lease remains through the reveal's stable frames before releasing to native size
 anchoring. Direct interaction abandons
 opening immediately. Catch-up retains its
 staged long-distance approach and unread ownership until physical settlement; interruption
-restores anchored/unread state. An installed projection captured while anchored advances an
+restores anchored/unread state. Command application re-evaluates an already-admitted tail boundary,
+so geometry/application callback inversion cannot strand catch-up or composer submission authority.
+An installed projection captured while anchored advances an
 exact layout epoch and restores a surviving semantic anchor within one point, with at most two
 corrections and a one-second deadline when layout evidence never arrives. Prepend uses the same
 fresh semantic-and-geometry proof and bounded correction, while anchorless history still loads
