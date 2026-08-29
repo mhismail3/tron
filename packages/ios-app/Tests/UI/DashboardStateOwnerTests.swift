@@ -623,6 +623,60 @@ struct DashboardStateOwnerTests {
         #expect(owner.sessions.first?.phase == .idle)
     }
 
+    @Test("selected authoritative rows are not hidden by background profile buckets")
+    func selectedProfileFallback() {
+        let selected = SessionSummary(
+            id: "same-id", name: "Selected", cwd: "/selected", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            messageCount: 0, firstMessage: "", phase: .idle, summaryRevision: 1
+        )
+        let background = SessionSummary(
+            id: "background-id", name: "Background", cwd: "/background", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            messageCount: 0, firstMessage: "", phase: .idle, summaryRevision: 1
+        ).withGatewaySource(id: "background", label: "Background")
+        let values = AppModel.dashboardProjection(
+            selectedProfileID: "selected",
+            selectedProfileLabel: "Selected",
+            selectedSessions: [selected],
+            buckets: ["background": [background]]
+        )
+        #expect(Set(values.map(\.dashboardID)) == Set(["selected:same-id", "background:background-id"]))
+    }
+
+    @Test("attention responses update cold rows monotonically without fabricating unknown rows")
+    func attentionProjection() {
+        var owner = SessionCatalogCoordinator()
+        let load = owner.beginLoad()
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load)
+        #expect(published)
+        let appliedAttention = owner.applyAttention(
+            sessionID: "session",
+            SessionAttentionProjection(completionRevision: 0, attentionRevision: 2, isUnread: true)
+        )
+        #expect(appliedAttention)
+        #expect(owner.sessions.first?.isUnread == true)
+        let staleUpdate = SessionSummaryUpdate(
+            sessionId: "session", summaryRevision: 2, phase: .running, name: "Older attention",
+            updatedAt: "2026-01-01T00:00:02Z", messageCount: 2, firstMessage: "Older",
+            completionRevision: 0, attentionRevision: 1, isUnread: false
+        )
+        let staleUpdateResult = owner.apply(staleUpdate)
+        #expect(staleUpdateResult == .updated)
+        #expect(owner.sessions.first?.isUnread == true)
+        let staleAttention = owner.applyAttention(
+            sessionID: "session",
+            SessionAttentionProjection(completionRevision: 0, attentionRevision: 1, isUnread: false)
+        )
+        #expect(!staleAttention)
+        let unknownAttention = owner.applyAttention(
+            sessionID: "unknown",
+            SessionAttentionProjection(completionRevision: 0, attentionRevision: 3, isUnread: true)
+        )
+        #expect(!unknownAttention)
+        #expect(owner.sessions.count == 1)
+    }
+
     @Test("cached and disconnected phases retain provenance without fabricating interruption")
     func catalogFreshnessAndActivity() {
         var owner = SessionCatalogCoordinator()

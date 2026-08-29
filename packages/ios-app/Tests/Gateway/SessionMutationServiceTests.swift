@@ -400,6 +400,8 @@ struct SessionMutationServiceTests {
                 try await valueOfOwnedTask(mutation)
                 Issue.record("unrelated boolean response unexpectedly decoded as updated")
             } catch is DecodingError {
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "invalid_response")
             } catch {
                 Issue.record("unexpected response error: \(error)")
             }
@@ -548,9 +550,16 @@ struct SessionMutationServiceTests {
             try expectCommandID(request)
             await harness.socket.enqueue(successResponse(
                 id: request.id,
-                result: .object(["isUnread": .bool(false)])
+                result: .object([
+                    "completionRevision": .number(7),
+                    "attentionRevision": .number(3),
+                    "isUnread": .bool(false),
+                ])
             ))
-            try await valueOfOwnedTask(mutation)
+            let projection = try await valueOfOwnedTask(mutation)
+            #expect(projection.completionRevision == 7)
+            #expect(projection.attentionRevision == 3)
+            #expect(!projection.isUnread)
             await harness.client.close()
         }
     }

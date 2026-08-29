@@ -98,8 +98,9 @@ cursor; it is expected optimistic invalidation, not the former actionable “Ses
 the dashboard” alert. Known revisioned `session.summary` events apply synchronously without a list read,
 and mounted transcript snapshots cannot overwrite those global row fields. Dashboard ordering keeps active rows first and uses the Gateway-observed `activeSince` boundary to hold their relative positions while progress and heartbeats continue; settled history orders parsed `updatedAt` instants with profile-qualified identity as the deterministic tie-breaker, so equivalent whole/fractional ISO representations never become chronology. Older Gateways that omit the additive boundary use profile-qualified identity among active rows instead of their volatile live timestamp. Visible rows use a 30-second `TimelineView` cadence to age relative labels even when no catalog event occurs; live Gateway summary heartbeats independently advance active foreground and detached-extension freshness without moving those active rows. Completion attention is one
 of those Gateway-canonical row fields: only final settled prompt responses advance it, Mark Read/Unread
-uses an absolute command-receipt mutation, and a successful open acknowledges only its returned
-completion revision after the snapshot installs. That acknowledgement retries transient failures against
+uses an absolute command-receipt mutation whose complete attention projection applies immediately even
+for cold rows, and a successful open acknowledges only its returned completion revision after the
+snapshot installs. That acknowledgement retries transient failures against
 one fixed presentation/connection owner and revision; cancellation retires it, while an older Gateway
 without the additive method remains rolling-upgrade compatible. The local snapshot cache is display-only and older peers
 missing additive attention fields decode as read during rolling upgrade. The dashboard groups user
