@@ -66,6 +66,32 @@ struct ChatLayoutTransactionTests {
         transaction.abandon()
         transaction.settle(generation, source: .submission)
         #expect(transaction.generation == nil)
+        #expect(transaction.abandonedGenerationID == generation)
+        #expect(transaction.settledGenerationID == nil)
+    }
+
+    @Test("successful settlement is distinct from abandonment")
+    func settlementPublishesOnlyCompletedGeneration() {
+        let transaction = ChatLayoutTransaction()
+        let generation = transaction.join(.submission)
+        transaction.settle(generation, source: .submission)
+
+        #expect(transaction.generation == nil)
+        #expect(transaction.settledGenerationID == generation)
+        #expect(transaction.abandonedGenerationID == nil)
+    }
+
+    @Test("settlement events retain consecutive generations")
+    func consecutiveSettlementsAreNotCoalesced() {
+        let transaction = ChatLayoutTransaction()
+        let first = transaction.join(.submission)
+        transaction.settle(first, source: .submission)
+        let second = transaction.join(.transcriptGrowth)
+        transaction.settle(second, source: .transcriptGrowth)
+
+        #expect(transaction.settlementEventRevision == 2)
+        #expect(transaction.consumeSettlementEvents() == [first, second])
+        #expect(transaction.consumeSettlementEvents().isEmpty)
     }
 
     @Test("Reduce Motion is instant")

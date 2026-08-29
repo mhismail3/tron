@@ -716,9 +716,39 @@ final class AppModel {
 
     var visibleSessions: [SessionSummary] {
         _ = profileRevision
-        let projected = dashboardSessionsByProfile.values.flatMap { $0 }
-        let values = projected.isEmpty ? sessions : projected
+        let selectedProfile = profiles.selected
+        let values = Self.dashboardProjection(
+            selectedProfileID: selectedProfile?.id,
+            selectedProfileLabel: selectedProfile?.label,
+            selectedSessions: sessions,
+            buckets: dashboardSessionsByProfile
+        )
         return SessionSummary.orderedForDashboard(SessionSummary.dashboardSessions(values))
+    }
+
+    nonisolated static func dashboardProjection(
+        selectedProfileID: String?,
+        selectedProfileLabel: String?,
+        selectedSessions: [SessionSummary],
+        buckets: [String: [SessionSummary]]
+    ) -> [SessionSummary] {
+        // A selected profile without an installed bucket is still authoritative;
+        // retain background buckets without letting them hide its rows. Merge by
+        // source-qualified dashboard identity so equal session IDs stay distinct.
+        guard let selectedProfileID, buckets[selectedProfileID] == nil else {
+            return buckets.values.flatMap { $0 }.isEmpty ? selectedSessions : buckets.values.flatMap { $0 }
+        }
+        var merged = buckets.values.flatMap { $0 }.reduce(into: [String: SessionSummary]()) { result, session in
+            result[session.dashboardID] = session
+        }
+        for session in selectedSessions {
+            let sourced = session.withGatewaySource(
+                id: selectedProfileID,
+                label: selectedProfileLabel ?? selectedProfileID
+            )
+            merged[sourced.dashboardID] = sourced
+        }
+        return Array(merged.values)
     }
 
     func dashboardActivity(for sessionID: String) -> DashboardSessionActivity {
@@ -2105,12 +2135,19 @@ final class AppModel {
     }
 
     func setSessionUnread(_ session: SessionSummary, unread: Bool) async throws {
-        try await performOnOwningGateway(session) {
+        let projection = try await performOnOwningGateway(session) {
             try await self.sessionMutations.setAttention(
                 sessionID: session.id,
                 unread: unread,
                 throughCompletionRevision: session.completionRevision
             )
+        }
+        // The response is authoritative for cold rows where Gateway cannot
+        // broadcast a full summary. Apply it monotonically; unknown rows remain
+        // absent until a catalog admission publishes them.
+        if sessionCatalog.applyAttention(sessionID: session.id, projection) {
+            installSelectedDashboardCatalog()
+            scheduleCacheCheckpoint()
         }
     }
 

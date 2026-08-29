@@ -103,14 +103,13 @@ final class SessionMutationService {
         sessionID: String,
         unread: Bool,
         throughCompletionRevision: Int
-    ) async throws {
+    ) async throws -> SessionAttentionProjection {
         struct Params: Codable {
             let sessionId: String
             let unread: Bool
             let throughCompletionRevision: Int
             let commandId: String
         }
-        struct Response: Codable { let isUnread: Bool }
         let commandID = uuidSource.next().uuidString
         let params = Params(
             sessionId: sessionID,
@@ -118,8 +117,8 @@ final class SessionMutationService {
             throughCompletionRevision: throughCompletionRevision,
             commandId: commandID
         )
-        let _: Response = try await executor.perform(method: "session.attention.set", commandID: commandID) {
-            try await client.request("session.attention.set", params, timeout: .seconds(15))
+        return try await executor.perform(method: "session.attention.set", commandID: commandID) {
+            try await client.request("session.attention.set", params, as: SessionAttentionProjection.self, timeout: .seconds(15))
         }
     }
 

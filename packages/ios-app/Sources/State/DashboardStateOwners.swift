@@ -306,13 +306,67 @@ struct SessionCatalogCoordinator: Equatable {
            update.summaryRevision <= (sessions[index].summaryRevision ?? 0) {
             return .stale
         }
-        liveUpdates[update.sessionId] = update
+        let retained = liveUpdates[update.sessionId]
+        let admitted = retained.map { merging(update, preservingAttentionFrom: $0) } ?? update
+        liveUpdates[update.sessionId] = admitted
         liveSessionIDs.insert(update.sessionId)
         guard let index = indicesByID[update.sessionId], sessions.indices.contains(index) else {
             return .unknownSession
         }
-        sessions[index] = applying(update, to: sessions[index])
+        sessions[index] = applying(admitted, to: sessions[index])
         return .updated
+    }
+
+    /// Applies the authoritative attention mutation response without inventing
+    /// a row for an unknown session. Attention revisions are independent of
+    /// summary revisions, so a late response cannot overwrite newer state.
+    @discardableResult
+    mutating func applyAttention(
+        sessionID: String,
+        _ projection: SessionAttentionProjection
+    ) -> Bool {
+        guard let index = indicesByID[sessionID], sessions.indices.contains(index) else { return false }
+        let current = sessions[index]
+        guard projection.attentionRevision > current.attentionRevision,
+              projection.completionRevision >= current.completionRevision else { return false }
+        if let update = liveUpdates[sessionID] {
+            guard projection.attentionRevision > update.attentionRevision,
+                  projection.completionRevision >= update.completionRevision else { return false }
+            liveUpdates[sessionID] = SessionSummaryUpdate(
+                sessionId: update.sessionId,
+                summaryRevision: update.summaryRevision,
+                phase: update.phase,
+                name: update.name,
+                updatedAt: update.updatedAt,
+                activeSince: update.activeSince,
+                messageCount: update.messageCount,
+                firstMessage: update.firstMessage,
+                completionRevision: projection.completionRevision,
+                attentionRevision: projection.attentionRevision,
+                isUnread: projection.isUnread
+            )
+        }
+        sessions[index] = SessionSummary(
+            id: current.id,
+            name: current.name,
+            cwd: current.cwd,
+            kind: current.kind,
+            parentSessionId: current.parentSessionId,
+            createdAt: current.createdAt,
+            updatedAt: current.updatedAt,
+            activeSince: current.activeSince,
+            messageCount: current.messageCount,
+            firstMessage: current.firstMessage,
+            phase: current.phase,
+            summaryRevision: current.summaryRevision,
+            completionRevision: projection.completionRevision,
+            attentionRevision: projection.attentionRevision,
+            isUnread: projection.isUnread,
+            gatewayProfileID: current.gatewayProfileID,
+            gatewayProfileLabel: current.gatewayProfileLabel
+        )
+        liveSessionIDs.insert(sessionID)
+        return true
     }
 
     mutating func installCached(_ cached: [SessionSummary]) {
@@ -367,11 +421,34 @@ struct SessionCatalogCoordinator: Equatable {
         indicesByID = Dictionary(uniqueKeysWithValues: sessions.enumerated().map { ($0.element.id, $0.offset) })
     }
 
+    private func merging(
+        _ update: SessionSummaryUpdate,
+        preservingAttentionFrom prior: SessionSummaryUpdate
+    ) -> SessionSummaryUpdate {
+        let preserve = update.completionRevision < prior.completionRevision
+            || update.attentionRevision < prior.attentionRevision
+        return SessionSummaryUpdate(
+            sessionId: update.sessionId,
+            summaryRevision: update.summaryRevision,
+            phase: update.phase,
+            name: update.name,
+            updatedAt: update.updatedAt,
+            activeSince: update.activeSince,
+            messageCount: update.messageCount,
+            firstMessage: update.firstMessage,
+            completionRevision: preserve ? prior.completionRevision : update.completionRevision,
+            attentionRevision: preserve ? prior.attentionRevision : update.attentionRevision,
+            isUnread: preserve ? prior.isUnread : update.isUnread
+        )
+    }
+
     private func applying(
         _ update: SessionSummaryUpdate,
         to summary: SessionSummary
     ) -> SessionSummary {
-        SessionSummary(
+        let preserve = update.completionRevision < summary.completionRevision
+            || update.attentionRevision < summary.attentionRevision
+        return SessionSummary(
             id: summary.id,
             name: update.name,
             cwd: summary.cwd,
@@ -384,9 +461,9 @@ struct SessionCatalogCoordinator: Equatable {
             firstMessage: update.firstMessage,
             phase: update.phase,
             summaryRevision: update.summaryRevision,
-            completionRevision: update.completionRevision,
-            attentionRevision: update.attentionRevision,
-            isUnread: update.isUnread,
+            completionRevision: preserve ? summary.completionRevision : update.completionRevision,
+            attentionRevision: preserve ? summary.attentionRevision : update.attentionRevision,
+            isUnread: preserve ? summary.isUnread : update.isUnread,
             gatewayProfileID: summary.gatewayProfileID,
             gatewayProfileLabel: summary.gatewayProfileLabel
         )

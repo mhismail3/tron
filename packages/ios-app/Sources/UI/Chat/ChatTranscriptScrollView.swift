@@ -47,6 +47,17 @@ enum ChatTranscriptUnderflowLayoutPolicy {
             containerHeight: geometry.containerHeight,
             bottomInset: geometry.bottomInset
         )
+        let contentBottom = geometry.contentHeight + geometry.bottomInset
+        let maximumOffset = max(0, contentBottom - geometry.containerHeight)
+        if let visibleBottomY = geometry.visibleBottomY {
+            guard visibleBottomY.isFinite else { return false }
+            if visibleBottomY <= contentBottom + 2,
+               geometry.offsetY > maximumOffset + 2 {
+                return false
+            }
+        } else if geometry.offsetY > maximumOffset + 2 {
+            return false
+        }
         return geometry.contentHeight + 2 >= minimum
             && geometry.contentHeight <= visibleHeight + 2
     }

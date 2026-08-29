@@ -580,6 +580,8 @@ struct ChatViewScrollHarnessTests {
                 #expect(revealed.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
                 #expect(revealed.observation.tailMaterializationCommandCount == materializationBaseline + 1)
                 #expect(revealed.observation.physicalRowAppearanceCounts["turn-agent"] == 1)
+                #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
+                #expect(!revealed.observation.visibleRowIDs.isEmpty)
 
                 var final = intermediate
                 final.phase = .idle
@@ -602,6 +604,8 @@ struct ChatViewScrollHarnessTests {
                 #expect(settled.observation.tailMaterializationCommandCount == materializationBaseline + 1)
                 #expect(settled.observation.physicalRowAppearanceCounts["turn-agent"] == 1)
                 #expect((settled.observation.physicalRowDisappearanceCounts["turn-agent"] ?? 0) == 0)
+                #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
+                #expect(!settled.observation.visibleRowIDs.isEmpty)
 
                 let compactionOrdinal = try #require(final.transcriptTotal)
                 let compactionRowID = "notification-compaction-slot-\(compactionOrdinal)"
@@ -616,6 +620,8 @@ struct ChatViewScrollHarnessTests {
                 }
                 #expect(progress.observation.physicalRowAppearanceCounts[compactionRowID] == 1)
                 #expect(progress.observation.tailMaterializationCommandCount == materializationBaseline + 2)
+                #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
+                #expect(!progress.observation.visibleRowIDs.isEmpty)
 
                 var compacted = compacting
                 compacted.transcript.append(try harnessCompactionItem(id: "canonical-compaction"))
@@ -631,6 +637,8 @@ struct ChatViewScrollHarnessTests {
                 #expect(compactionSettled.observation.tailMaterializationCommandCount == materializationBaseline + 2)
                 #expect(compactionSettled.observation.physicalRowAppearanceCounts[compactionRowID] == 1)
                 #expect((compactionSettled.observation.physicalRowDisappearanceCounts[compactionRowID] ?? 0) == 0)
+                #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
+                #expect(!compactionSettled.observation.visibleRowIDs.isEmpty)
             }
         }
     }

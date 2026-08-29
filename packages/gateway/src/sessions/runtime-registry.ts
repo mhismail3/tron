@@ -736,7 +736,13 @@ export class RuntimeRegistry {
           // the captured page-overlay generation directly.
           const latest = this.latestSummaries.get(sessionId);
           if (latest) this.publishRevisionedSummary({ ...latest, sessionId, ...result.projection });
-          else this.catalogProjectionGeneration += 1;
+          else {
+            // Cold rows have no retained summary to merge. Invalidate every
+            // connected catalog owner so it refetches the authoritative
+            // attention projection; never fabricate a summary event here.
+            this.catalogProjectionGeneration += 1;
+            this.options.sessionListChanged();
+          }
         }
         return result.projection;
       });
@@ -974,6 +980,7 @@ export class RuntimeRegistry {
             perCandidateHeaderBytes,
             reserveHeaderBytes,
             refundHeaderBytes,
+            true,
           );
           if (header.unstable) unstableCanonicalFiles = true;
           const identity = header.identity;
@@ -999,12 +1006,16 @@ export class RuntimeRegistry {
           .update(identity?.cwd ?? "").update("\0")
           .update(identity?.fileIdentity ?? "").update("\0")
           .update(identity?.parentSessionPath ?? "").update("\n");
+        const liveOwner = identity !== undefined && this.isLiveRuntimeOwnedPath(path, identity.id);
         factsDigest.update(path).update("\0")
           .update(identity?.id ?? "").update("\0")
           .update(identity?.cwd ?? "").update("\0")
           .update(identity?.fileIdentity ?? "").update("\0")
-          .update(identity ? String(identity.size) : "").update("\0")
-          .update(identity ? String(identity.mtimeMs) : "").update("\n");
+          // A Gateway-owned JSONL may grow while its header is being read. Its
+          // inode and identity remain structural authority; cold/unowned files
+          // retain size/mtime validation so external rewrites cannot slip by.
+          .update(identity ? (liveOwner ? "live-append" : String(identity.size)) : "").update("\0")
+          .update(identity ? (liveOwner ? "live-append" : String(identity.mtimeMs)) : "").update("\n");
         if (identity) identitiesByPath.set(path, identity);
       }
     }
@@ -1017,11 +1028,20 @@ export class RuntimeRegistry {
     };
   }
 
+  private isLiveRuntimeOwnedPath(path: string, sessionID: string): boolean {
+    const canonicalPath = resolve(path);
+    return [...this.slots.values()].some((slot) => !slot.isDisposed
+      && slot.id === sessionID
+      && slot.persistedSessionFile !== undefined
+      && resolve(slot.persistedSessionFile) === canonicalPath);
+  }
+
   private async readCatalogHeader(
     path: string,
     maximumBytes: number,
     reserveBytes: (count: number) => boolean,
     refundBytes: (count: number) => void,
+    allowAppendOnlyLiveOwner = false,
   ): Promise<{ identity?: CatalogHeaderIdentity; unstable?: boolean }> {
     const firstReadLength = Math.min(512, maximumBytes);
     if (!reserveBytes(firstReadLength)) return {};
@@ -1080,11 +1100,15 @@ export class RuntimeRegistry {
       if (!identity) return undefined;
       const after = await handle.stat();
       const afterPath = await lstat(path);
-      if (!after.isFile() || after.dev !== opened.dev || after.ino !== opened.ino
-        || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs
-        || !afterPath.isFile() || afterPath.isSymbolicLink()
-        || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino
-        || afterPath.size !== opened.size || afterPath.mtimeMs !== opened.mtimeMs) return undefined;
+      const sameFile = after.isFile() && after.dev === opened.dev && after.ino === opened.ino
+        && afterPath.isFile() && !afterPath.isSymbolicLink()
+        && afterPath.dev === opened.dev && afterPath.ino === opened.ino;
+      const unchanged = after.size === opened.size && after.mtimeMs === opened.mtimeMs
+        && afterPath.size === opened.size && afterPath.mtimeMs === opened.mtimeMs;
+      const appendOnly = allowAppendOnlyLiveOwner
+        && this.isLiveRuntimeOwnedPath(path, identity.id)
+        && (after.size > opened.size || afterPath.size > opened.size);
+      if (!sameFile || (!unchanged && !appendOnly)) return undefined;
       return identity;
     };
     try {
@@ -1260,11 +1284,11 @@ export class RuntimeRegistry {
   }
 
   async pageSource(scope: "user" | "all" = "user"): Promise<CatalogPageSource> {
-    const projectionGeneration = this.catalogProjectionGeneration;
+    // Structural materialization is the admission boundary. Live summary and
+    // attention overlays are captured synchronously below, after I/O completes,
+    // so ordinary heartbeat churn cannot starve catalog reads.
     const materialized = await this.sharedCatalogMaterialization();
-    if (projectionGeneration !== this.catalogProjectionGeneration) {
-      throw new GatewayError("busy", "Session catalog changed during projection", true);
-    }
+    const projectionGeneration = this.catalogProjectionGeneration;
     const generation = `${materialized.listRevision}:${projectionGeneration}:${scope}`;
     const existing = this.catalogPageSources.get(generation)?.deref();
     if (existing) return existing;
@@ -1306,25 +1330,21 @@ export class RuntimeRegistry {
     structureDigest: string;
     generation: string;
   }> {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const projectionGeneration = this.catalogProjectionGeneration;
-      const materialized = await this.sharedCatalogMaterialization();
-      // Mutable live summaries are not structural authority, but a catalog page
-      // must not label a pre-update projection with the newer generation. Bound
-      // retries so a continuously streaming session cannot livelock catalog I/O.
-      if (projectionGeneration !== this.catalogProjectionGeneration) continue;
-      const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs);
-      const source = this.createCatalogPageSource(`${materialized.listRevision}:${projectionGeneration}:${scope}`, materialized.listRevision, seeds);
-      return {
-        infos: materialized.infos,
-        sessions: await source.page(0, seeds.length),
-        ambiguousIDs: materialized.ambiguousIDs,
-        listRevision: materialized.listRevision,
-        structureDigest: materialized.structureDigest,
-        generation: source.generation,
-      };
-    }
-    throw new GatewayError("busy", "Session catalog changed during projection", true);
+    // Capture mutable overlays only after structural I/O has completed. The
+    // seed construction is synchronous, making this one immutable cut without
+    // rejecting it when another heartbeat arrives during discovery.
+    const materialized = await this.sharedCatalogMaterialization();
+    const projectionGeneration = this.catalogProjectionGeneration;
+    const seeds = this.buildCatalogPageSeeds(materialized.infos, scope, materialized.ambiguousIDs);
+    const source = this.createCatalogPageSource(`${materialized.listRevision}:${projectionGeneration}:${scope}`, materialized.listRevision, seeds);
+    return {
+      infos: materialized.infos,
+      sessions: await source.page(0, seeds.length),
+      ambiguousIDs: materialized.ambiguousIDs,
+      listRevision: materialized.listRevision,
+      structureDigest: materialized.structureDigest,
+      generation: source.generation,
+    };
   }
 
   private sharedCatalogSessionInfos(refresh = false): Promise<CatalogSessionInfo[]> {
@@ -1359,7 +1379,7 @@ export class RuntimeRegistry {
   }
 
   private sharedCatalogMaterialization(): Promise<Awaited<ReturnType<RuntimeRegistry["materializeCatalogSnapshot"]>>> {
-    const key = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}:${this.revision}:${this.catalogProjectionGeneration}`;
+    const key = `${this.catalogStructuralGeneration}:${this.catalogAcquisitionInvalidationGeneration}`;
     if (this.catalogMaterializationPromise && this.catalogMaterializationKey === key) {
       return this.catalogMaterializationPromise;
     }
@@ -2553,22 +2573,29 @@ export class RuntimeRegistry {
     let deleted = false;
     try {
       await this.mutex.run(async () => {
-        const catalog = await this.catalogSnapshot("all");
-        this.requireUnambiguousSessionId(sessionId);
-        const summary = catalog.sessions.find((session) => session.id === sessionId);
-        if (!summary) throw new GatewayError("not_found", "Tron session was not found");
-        if (await this.projectTrustReloading(summary.cwd)) {
-          throw new GatewayError("busy", "Project trust is being reconfigured", true);
-        }
+        // Deletion needs structural identity and ownership, not a mutable
+        // presentation projection. Acquisition admission remains hardened by
+        // exact path/inode and is revalidated by removeCanonicalCatalogFile.
+        // Take a fresh bounded structural cut rather than trusting a cached
+        // admission that another client may have populated before a duplicate
+        // or replacement appeared on disk.
+        const evidence = await this.catalogStructureEvidence();
+        const acquisition = await this.buildCatalogAcquisition(evidence);
+        this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
+        const entry = acquisition.entriesByID.get(sessionId);
         const slot = this.slots.get(sessionId);
-        if (slot?.isBusy) throw new GatewayError("busy", "Stop the active session before deleting it");
-        if (summary.kind === "subagent") {
-          throw new GatewayError("conflict", "Delete the originating user session instead of mutating its runtime-owned subagent session");
-        }
-        const info = catalog.infos.find((candidate) => candidate.id === sessionId);
-        if (!info && (!slot || slot.persistedSessionFile !== undefined)) {
+        if (!entry && (!slot || slot.persistedSessionFile !== undefined)) {
           throw new GatewayError("not_found", "Tron session was removed before it could be deleted");
         }
+        if (entry?.structuralSubagent) {
+          throw new GatewayError("conflict", "Delete the originating user session instead of mutating its runtime-owned subagent session");
+        }
+        const cwd = entry?.cwd ?? slot?.cwd;
+        if (!cwd) throw new GatewayError("not_found", "Tron session was not found");
+        if (await this.projectTrustReloading(cwd)) {
+          throw new GatewayError("busy", "Project trust is being reconfigured", true);
+        }
+        if (slot?.isBusy) throw new GatewayError("busy", "Stop the active session before deleting it");
         this.cancelIdleEviction(sessionId, slot);
         if (slot) await slot.dispose();
         this.slots.delete(sessionId);
@@ -2577,17 +2604,17 @@ export class RuntimeRegistry {
         this.latestSummaries.delete(sessionId);
         this.interrupted.delete(sessionId);
         await this.markers.clear(sessionId);
-        if (info) {
+        if (entry) {
           // Canonical deletion commits before projection cleanup. If cleanup fails,
           // restart reconciliation prunes the now-unowned record; it can never
           // resurrect catalog membership or publish a summary.
           await this.removeCanonicalCatalogFile(
-            info.path,
+            entry.path,
             sessionId,
-            info.fileIdentity,
-            catalog.structureDigest,
+            entry.fileIdentity,
+            acquisition.structureDigest,
           );
-          if (!(await this.removeIndexedCatalogFile(info.path))) this.invalidateCatalogAcquisition();
+          if (!(await this.removeIndexedCatalogFile(entry.path))) this.invalidateCatalogAcquisition();
         } else {
           this.invalidateCatalogAdmission();
         }

@@ -547,9 +547,16 @@ struct SessionMutationServiceTests {
             try expectCommandID(request)
             await harness.socket.enqueue(successResponse(
                 id: request.id,
-                result: .object(["isUnread": .bool(false)])
+                result: .object([
+                    "completionRevision": .number(7),
+                    "attentionRevision": .number(3),
+                    "isUnread": .bool(false),
+                ])
             ))
-            try await valueOfOwnedTask(mutation)
+            let projection = try await valueOfOwnedTask(mutation)
+            #expect(projection.completionRevision == 7)
+            #expect(projection.attentionRevision == 3)
+            #expect(!projection.isUnread)
             await harness.client.close()
         }
     }

@@ -60,9 +60,11 @@ admits and reduces mounted-session topics:
   identity for active-row ties. A final prompt response becomes unread only
   at truthful settlement; opening acknowledges only the completion revision installed by that
   exact presentation/connection owner, transient retries retain the same absolute revision, and
-  explicit Mark Read/Unread mutations use command receipts. Cached rows may show
-  stale offline attention but never own it, while foreground and background profile event streams
-  converge every dashboard. `session.listChanged` marks
+  explicit Mark Read/Unread mutations use command receipts and apply the returned
+  monotonic attention projection immediately, including for a cold row with no live summary.
+  Cached rows may show stale offline attention but never own it, while foreground and background
+  profile event streams converge every dashboard; Gateway invalidates the catalog when it cannot
+  broadcast a full summary rather than fabricating an unknown row. `session.listChanged` marks
   the shared traversal dirty instead of cancel/restarting it. User-scoped 500-row pagination
   has exact page/item/identity/cursor bounds and publishes atomically. Mixed page revisions
   and expired continuation leases restart once from a nil cursor and then retain the previous catalog silently; this expected

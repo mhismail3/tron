@@ -98,8 +98,9 @@ cursor; it is expected optimistic invalidation, not the former actionable “Ses
 the dashboard” alert. Known revisioned `session.summary` events apply synchronously without a list read,
 and mounted transcript snapshots cannot overwrite those global row fields. Dashboard ordering keeps active rows first and uses the Gateway-observed `activeSince` boundary to hold their relative positions while progress and heartbeats continue; settled history orders parsed `updatedAt` instants with profile-qualified identity as the deterministic tie-breaker, so equivalent whole/fractional ISO representations never become chronology. Older Gateways that omit the additive boundary use profile-qualified identity among active rows instead of their volatile live timestamp. Visible rows use a 30-second `TimelineView` cadence to age relative labels even when no catalog event occurs; live Gateway summary heartbeats independently advance active foreground and detached-extension freshness without moving those active rows. Completion attention is one
 of those Gateway-canonical row fields: only final settled prompt responses advance it, Mark Read/Unread
-uses an absolute command-receipt mutation, and a successful open acknowledges only its returned
-completion revision after the snapshot installs. That acknowledgement retries transient failures against
+uses an absolute command-receipt mutation whose complete attention projection applies immediately even
+for cold rows, and a successful open acknowledges only its returned completion revision after the
+snapshot installs. That acknowledgement retries transient failures against
 one fixed presentation/connection owner and revision; cancellation retires it, while an older Gateway
 without the additive method remains rolling-upgrade compatible. The local snapshot cache is display-only and older peers
 missing additive attention fields decode as read during rolling upgrade. The dashboard groups user
@@ -242,10 +243,22 @@ that ready state was presented. Opening uses one exact eager-marker `ScrollPosit
 command when the marker is not yet realized, rejects native overflow overshoot as a
 bottom boundary, and retains that command through animation completion plus two
 unchanged presented frames before releasing the binding. Its bounded deadline only
-retries or fails positioning; it never certifies an unverified ready frame. Ordinary
+retries or fails positioning; it never certifies an unverified ready frame. A retained
+pinned presentation re-enters this same physical-marker positioning gate on resume;
+a retained detached reader remains anchored and is never repinned. Foreground
+activation retires any target belonging to the suspended native scroll tree before
+revalidating current marker evidence. Every installed projection, including
+lifecycle-only and compaction/tool height changes, advances the layout epoch so delayed
+frames cannot prove a replacement tree. A visible pinned presentation therefore
+requires fresh, current-layout marker proof; overflow requires alignment, while
+underflow requires the eager marker to be visible. Row existence, forced underflow
+height alone, elapsed frames, or an abandoned layout generation are not proof. Ordinary
 pinned resizing then belongs to the native size-change anchor; detached readers remain
-unpositioned. Scene suspension never resets a ready retained scroll view. Foreground activation keeps its current `ScrollPosition` and any exact target lease installed; current same-presentation displacement or a fresh resumed-scene marker sample may arm the existing bounded signed-marker repair. Reconnect and responsive foreground refresh both freeze projection intake under one aggregate lifecycle admission and advance one completion generation after mounted restoration plus catalog refresh succeed. Detached readers retain their native viewport ownership.
-Short and empty transcripts receive one synchronous minimum height from the transcript container proposal and its post-composer safe-area inset; overflowing transcripts are unaffected. Scroll geometry observes the resulting layout directly. The coalesced native observation still carries opening phase so geometry captured before positioning is re-admitted without a callback-order race. This keeps underflow bottom-owned through keyboard contraction, while signed-marker repair remains reserved for proven overflow drift.
+unpositioned. Reconnect and responsive foreground refresh both freeze projection intake
+under one aggregate lifecycle admission and advance one completion generation after
+mounted restoration plus catalog refresh succeed. Detached readers retain their native
+viewport ownership.
+Short and empty transcripts receive one synchronous minimum height from the transcript container proposal and its post-composer safe-area inset; overflowing transcripts are unaffected. Impossible offsets below the legal short-content bottom are rejected rather than clamped into an apparent catch-up boundary. Scroll geometry observes the resulting layout directly. The coalesced native observation still carries opening phase so geometry captured before positioning is re-admitted without a callback-order race. This keeps underflow bottom-owned through keyboard contraction while requiring physical marker proof for opening and bounded materialization repair.
 Test builds can admit one synthetic authoritative
 snapshot through the same read gate and skip only the network opening handshake.
 The hosted harness still mounts the production chat, lazy transcript, composer
@@ -546,8 +559,7 @@ stream updates without reviving the retired Engine, local event reconstruction, 
 proxy architecture. Explicit scroll commands keep their exact target until their opening, catch-up,
 semantic-restore, or prepend settlement evidence arrives, then release only that token on the next presented frame. Submission transfers any already-applied target directly to the stable sentinel and binds that lease to the exact `ChatLayoutTransaction` shared by outgoing-row entrance, morph, keyboard, and submission. Materialization is necessary but not sufficient: after every participant settles, two unchanged display boundaries and a final evidence check must cross before the binding is cleared. One mode-qualified native size-change anchor then owns continuous streaming and payload growth. A genuinely new lazy physical row
 may lease the stable tail sentinel; status, progress, completion, and canonical settlement retain that
-`ScrollPosition` target. A retained presentation accepts only same-presentation signed-marker evidence before physical repair, so a view physically at the tail keeps pinned authority while a genuinely displaced reader remains anchored
-in an order native anchoring cannot retain; anchored readers receive no automatic follow. Compact
+`ScrollPosition` target. A retained pinned presentation re-enters physical-marker positioning and accepts only same-presentation evidence before repair, while a genuinely displaced reader remains anchored; anchored readers receive no automatic follow. Stale applied targets are retired when the native tree is rebuilt, and projection layout epochs invalidate delayed marker callbacks. Compact
 measured prompts may use one clipped composer-to-row morph; long prompts fail over to the shorter, subtler row-local
 fade/slide entrance. New-row admission animates a measured layout fraction so
 existing pinned content moves continuously rather than jumping. Its vertical reveal clip owns a

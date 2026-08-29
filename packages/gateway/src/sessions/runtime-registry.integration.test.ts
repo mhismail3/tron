@@ -32,6 +32,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     maximumLiveRuntimes?: number;
     workRegistry?: GatewayWorkRegistry;
     phaseObserver?: (phase: "catalog-warming" | "attention-recovery") => void;
+    sessionListChanged?: () => void;
   } = {}) {
     const root = await mkdtemp(join(tmpdir(), `tron-cold-acquire-${label}-`));
     const agentDir = join(root, "agent");
@@ -57,7 +58,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       trust: new TrustService(agentDir),
       broadcast: (_sessionId, topic, payload) => events.push({ topic, payload }),
       sessionSummaryChanged: (summary) => summaries.push(summary),
-      sessionListChanged: () => {},
+      sessionListChanged: options.sessionListChanged ?? (() => {}),
     });
     registries.push(registry);
     const startupEvidence = options.phaseObserver
@@ -93,6 +94,48 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // A later page source may validate a different cut, but startup itself has
     // exactly one bounded structural evidence acquisition for reconciliation.
     expect(fixture.startupEvidence).toHaveBeenCalledTimes(1);
+  });
+
+  it("admits a page source after in-flight live summary churn", async () => {
+    const fixture = await coldFixture("page-source-summary-churn");
+    const internals = fixture.registry as unknown as {
+      materializeCatalogSnapshot: () => Promise<unknown>;
+      publishRevisionedSummary: (summary: SessionSummaryUpdate) => void;
+    };
+    const original = internals.materializeCatalogSnapshot.bind(fixture.registry);
+    let entered!: () => void;
+    let release!: () => void;
+    const captured = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const materialize = vi.spyOn(internals, "materializeCatalogSnapshot").mockImplementation(async () => {
+      const result = await original();
+      entered();
+      await gate;
+      return result;
+    });
+    try {
+      const listing = fixture.registry.pageSource("user");
+      await captured;
+      internals.publishRevisionedSummary({
+        sessionId: fixture.manager.getSessionId(),
+        summaryRevision: 1,
+        phase: "running",
+        updatedAt: new Date().toISOString(),
+        messageCount: 1,
+        firstMessage: "cold acquisition page-source-summary-churn",
+        completionRevision: 0,
+        attentionRevision: 0,
+        isUnread: false,
+      });
+      release();
+      const source = await listing;
+      await expect(source.page(0, 1)).resolves.toMatchObject([
+        expect.objectContaining({ id: fixture.manager.getSessionId(), phase: "running" }),
+      ]);
+    } finally {
+      release();
+      materialize.mockRestore();
+    }
   });
 
   it("builds page sources without full catalog projection and captures overlays per generation", async () => {
@@ -859,7 +902,23 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
-  it("fails closed with retryable busy when a canonical file ends in a partial line", async () => {
+  it("admits a complete append only for the matching live-owned session identity", async () => {
+    const fixture = await coldFixture("live-append");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internals = fixture.registry as unknown as {
+      isLiveRuntimeOwnedPath: (path: string, sessionID: string) => boolean;
+    };
+    const ownedPath = slot.persistedSessionFile ?? fixture.sessionFile;
+    expect(internals.isLiveRuntimeOwnedPath(ownedPath, slot.id)).toBe(true);
+    expect(internals.isLiveRuntimeOwnedPath(ownedPath, "unrelated-session")).toBe(false);
+    await fixture.registry.catalog("all");
+    fixture.manager.appendMessage(fauxAssistantMessage("live append"));
+    await expect(fixture.registry.catalog("all")).resolves.toMatchObject({
+      sessions: expect.arrayContaining([expect.objectContaining({ id: fixture.manager.getSessionId() })]),
+    });
+  });
+
+  it("fails closed with retryable busy when an unowned canonical file ends in a partial line", async () => {
     const fixture = await coldFixture("partial-final-line");
     await fixture.registry.catalog("all");
     await appendFile(fixture.sessionFile, "{\"type\":\"message\"");
@@ -879,6 +938,39 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await fixture.registry.delete(live.id);
     expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id)).not.toContain(live.id);
     expect(materialize).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates connected catalogs when cold attention has no live summary", async () => {
+    const listChanged = vi.fn();
+    const fixture = await coldFixture("cold-attention", { sessionListChanged: listChanged });
+    const before = listChanged.mock.calls.length;
+    const unread = await fixture.registry.setAttention(fixture.manager.getSessionId(), true);
+    expect(unread.isUnread).toBe(true);
+    expect(listChanged.mock.calls.length).toBe(before + 1);
+  });
+
+  it("converges empty create/list/delete while live summaries churn", async () => {
+    const fixture = await coldFixture("create-list-delete-churn");
+    const live = await fixture.registry.create(fixture.cwd);
+    const internals = fixture.registry as unknown as {
+      publishRevisionedSummary: (summary: SessionSummaryUpdate) => void;
+    };
+    for (let revision = 1; revision <= 8; revision += 1) {
+      internals.publishRevisionedSummary({
+        sessionId: live.id,
+        summaryRevision: revision,
+        phase: "running",
+        updatedAt: new Date().toISOString(),
+        messageCount: revision,
+        firstMessage: "created live session",
+        completionRevision: 0,
+        attentionRevision: 0,
+        isUnread: false,
+      });
+    }
+    expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id)).toContain(live.id);
+    await fixture.registry.delete(live.id);
+    expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id)).not.toContain(live.id);
   });
 
   it("admits unread and read attention for an empty live-only session", async () => {
@@ -950,7 +1042,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       await fixture.registry.catalog("all");
       // Generic acquisition-budget incompleteness may use the stable full
       // metadata fallback, but it is never certified as a reusable index.
-      expect(materialize).toHaveBeenCalledTimes(3);
+      expect(materialize).toHaveBeenCalledTimes(2);
     } finally {
       evidenceSpy.mockRestore();
     }
@@ -1275,18 +1367,18 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     })}\n`;
     await writeFile(external, externalContent);
     const internals = fixture.registry as unknown as {
-      catalogSnapshot: (scope: "user" | "all") => Promise<unknown>;
+      catalogStructureEvidence: () => Promise<unknown>;
     };
-    const original = internals.catalogSnapshot.bind(fixture.registry);
+    const original = internals.catalogStructureEvidence.bind(fixture.registry);
     let replaced = false;
-    vi.spyOn(internals, "catalogSnapshot").mockImplementation(async (scope) => {
-      const snapshot = await original(scope);
+    vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
+      const evidence = await original();
       if (!replaced) {
         replaced = true;
         await rename(fixture.sessionFile, moved);
         await symlink(external, fixture.sessionFile);
       }
-      return snapshot;
+      return evidence;
     });
 
     await expect(fixture.registry.delete(fixture.manager.getSessionId())).rejects.toMatchObject({
@@ -1626,7 +1718,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }).catalogAcquisition();
     expect(acquisition.entriesByID.get(childId)?.structuralSubagent).toBe(true);
     await expect(registry.acquire(childId)).rejects.toMatchObject({ code: "conflict" });
-    await expect(registry.delete(childId)).rejects.toMatchObject({ code: "not_found" });
+    await expect(registry.delete(childId)).rejects.toMatchObject({ code: "conflict" });
     expect(existsSync(childFile)).toBe(true);
   });
 
@@ -1955,8 +2047,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const existing = (await originalSessionInfos()).find((session) => session.id === slot.id)!;
     const duplicate = {
       ...existing,
-      path: join(root, "duplicate", `${slot.id}.jsonl`),
+      path: join(agentDir, "sessions", "duplicate", `${slot.id}.jsonl`),
     };
+    await mkdir(dirname(duplicate.path), { recursive: true });
+    await copyFile(slot.persistedSessionFile!, duplicate.path);
     let reverseDiscoveryOrder = false;
     const discovery = vi.spyOn(internals, "sessionInfos").mockImplementation(async () => (
       reverseDiscoveryOrder ? [duplicate, existing] : [existing, duplicate]
@@ -1968,10 +2062,11 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const reordered = await registry.catalog("all");
     expect(reordered.listRevision).toBe(conflicted.listRevision);
     expect(reordered.sessions.find((session) => session.id === slot.id)).toBeUndefined();
-    // Open admission uses current canonical headers rather than the stale global
-    // ambiguity last projected by a mocked full catalog.
-    expect((await registry.acquire(slot.id)).id).toBe(slot.id);
+    // Both runtime acquisition and deletion fail closed against the current
+    // canonical duplicate rather than trusting a stale projected row.
+    await expect(registry.acquire(slot.id)).rejects.toMatchObject({ code: "conflict" });
     await expect(registry.delete(slot.id)).rejects.toMatchObject({ code: "conflict" });
+    await rm(duplicate.path);
 
     discovery.mockRestore();
     const repaired = await registry.catalog("all");
