@@ -357,8 +357,13 @@ auth acknowledgements as idempotent no-ops so completion/response reordering can
 misleading operation-not-found error.
 
 `ProviderOAuthBrowserSession` owns the system authentication browser. It admits only HTTPS authorization
-URLs with a Gateway-derived HTTP loopback callback descriptor, waits for explicitly loopback-bound
-IPv4/IPv6 `NWListener` readiness, accepts one bounded exact-path GET, and uses a nonce-only
+URLs with a Gateway-derived HTTP loopback callback descriptor and binds fixed-port POSIX sockets directly
+to `127.0.0.1` and/or `::1` (`IPV6_V6ONLY`) before browser presentation. Network.framework's fixed
+`NWListener` local-endpoint path fails with physical-device `EINVAL`, while wildcard listeners would expose
+callback bearer data to non-loopback interfaces. One dedicated serial socket queue owns nonblocking
+accept/read/write work, Dispatch-source cancellation closes descriptors before restart admission, and a
+browser-session generation rejects callbacks from replaced system sessions. The socket owner admits at most
+eight clients, retires incomplete headers after five seconds, accepts one bounded exact-path GET, and uses a nonce-only
 `com.tron.mobile.oauth` redirect to close `ASWebAuthenticationSession`; authorization codes never enter the
 custom-scheme URL. iOS forwards the complete callback URL only to the matching Pi `manual_code`
 prompt. When Pi exposes no such prompt, the app sends only the callback ID and encoded query to the

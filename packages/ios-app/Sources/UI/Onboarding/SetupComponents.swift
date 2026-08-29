@@ -24,6 +24,15 @@ enum ProviderConfigurationPresentation {
             : "Store the credential on the paired Mac."
     }
 
+    static func automaticallyBegunMethod(for provider: ProviderSummary) -> String? {
+        guard !provider.configured,
+              provider.authMethods.count == 1,
+              let method = provider.authMethods.first else { return nil }
+        let normalized = method.lowercased().replacingOccurrences(of: "_", with: "-")
+        guard normalized == "oauth" || normalized == "api-key" else { return nil }
+        return method
+    }
+
     static func clearTitle(for provider: ProviderSummary) -> String {
         let authority = [provider.authSource, provider.credentialType]
             .compactMap { $0?.lowercased() }
@@ -109,11 +118,13 @@ struct ProviderSetupRow: View {
 private struct ProviderConfigurationSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let provider: ProviderSummary
     let target: ProviderCatalogTarget
     @State private var activeOperationID: String?
     @State private var owningProfileID: String?
     @State private var beginningMethod: String?
+    @State private var attemptedAutomaticBegin = false
     @State private var clearing = false
 
     private var currentOperationID: String? {
@@ -122,6 +133,29 @@ private struct ProviderConfigurationSheet: View {
 
     private var isPresentingOwnedAuth: Bool {
         activeOperationID != nil && currentOperationID == activeOperationID
+    }
+
+    private var automaticMethod: String? {
+        ProviderConfigurationPresentation.automaticallyBegunMethod(for: provider)
+    }
+
+    private var isAutomaticallyBeginning: Bool {
+        automaticMethod != nil && (!attemptedAutomaticBegin || beginningMethod != nil)
+    }
+
+    private var presentationPhase: String {
+        if isPresentingOwnedAuth {
+            return "auth:\(currentOperationID ?? ""):\(model.authEvent?.kind.rawValue ?? ""):\(model.authPrompt?.id ?? "")"
+        }
+        return isAutomaticallyBeginning ? "automatic-begin" : "configuration"
+    }
+
+    private var revealTransition: AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top))
+    }
+
+    private var revealAnimation: Animation {
+        reduceMotion ? .linear(duration: 0.12) : .snappy(duration: 0.24)
     }
 
     var body: some View {
@@ -152,6 +186,7 @@ private struct ProviderConfigurationSheet: View {
         .interactiveDismissDisabled(isPresentingOwnedAuth || beginningMethod != nil)
         .onAppear {
             if owningProfileID == nil { owningProfileID = model.profiles.selected?.id }
+            beginAutomaticallyIfNeeded()
         }
         .onChange(of: model.profiles.selected?.id) { _, selectedProfileID in
             guard let owningProfileID, selectedProfileID != owningProfileID else { return }
@@ -187,63 +222,84 @@ private struct ProviderConfigurationSheet: View {
 
                 if isPresentingOwnedAuth {
                     ProviderAuthFlowContent()
+                        .transition(revealTransition)
+                } else if isAutomaticallyBeginning {
+                    TronLoadingState(label: "Loading login options…", accent: .tronEmerald)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(revealTransition)
                 } else {
-                    if provider.authMethods.isEmpty {
-                        TronInfoCard(
-                            icon: "exclamationmark.triangle",
-                            text: "This provider does not advertise a supported connection method.",
-                            accent: .tronAmber
-                        )
-                    } else {
-                        TronSettingsGroup("Connection Options", accent: .tronEmerald) {
-                            VStack(spacing: 0) {
-                                ForEach(Array(provider.authMethods.enumerated()), id: \.offset) { index, method in
-                                    if index > 0 { TronSettingsDivider(accent: .tronEmerald) }
-                                    Button { begin(method) } label: {
-                                        HStack(spacing: 0) {
-                                            TronSettingsRow(
-                                                icon: ProviderConfigurationPresentation.isLoginMethod(method) ? "person.crop.circle.badge.checkmark" : "key.fill",
-                                                title: ProviderConfigurationPresentation.actionTitle(
-                                                    method: method,
-                                                    configured: provider.configured
-                                                ),
-                                                subtitle: ProviderConfigurationPresentation.actionDetail(
-                                                    method: method,
-                                                    configured: provider.configured
-                                                ),
-                                                accent: .tronEmerald
-                                            )
-                                            if beginningMethod == method {
-                                                TronPulseLoadingIndicator(size: 18)
-                                                    .padding(.trailing, 14)
-                                            }
-                                        }
-                                        .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .disabled(beginningMethod != nil || clearing)
-                                }
-                            }
-                        }
-                    }
-
-                    if provider.configured {
-                        TronPrimaryActionButton(
-                            title: clearing ? "Clearing…" : ProviderConfigurationPresentation.clearTitle(for: provider),
-                            systemImage: "trash",
-                            isBusy: clearing,
-                            isEnabled: beginningMethod == nil && !clearing,
-                            role: .destructive
-                        ) { clearCredentials() }
-                    }
+                    connectionControls
+                        .transition(revealTransition)
                 }
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)
             .padding(.bottom, 20)
+            .animation(revealAnimation, value: presentationPhase)
         }
         .tronScrollEdgeChrome()
         .scrollDismissesKeyboard(.interactively)
+    }
+
+    @ViewBuilder private var connectionControls: some View {
+        if provider.authMethods.isEmpty {
+            TronInfoCard(
+                icon: "exclamationmark.triangle",
+                text: "This provider does not advertise a supported connection method.",
+                accent: .tronAmber
+            )
+        } else {
+            TronSettingsGroup("Connection Options", accent: .tronEmerald) {
+                VStack(spacing: 0) {
+                    ForEach(Array(provider.authMethods.enumerated()), id: \.offset) { index, method in
+                        if index > 0 { TronSettingsDivider(accent: .tronEmerald) }
+                        Button { begin(method) } label: {
+                            HStack(spacing: 0) {
+                                TronSettingsRow(
+                                    icon: ProviderConfigurationPresentation.isLoginMethod(method) ? "person.crop.circle.badge.checkmark" : "key.fill",
+                                    title: ProviderConfigurationPresentation.actionTitle(
+                                        method: method,
+                                        configured: provider.configured
+                                    ),
+                                    subtitle: ProviderConfigurationPresentation.actionDetail(
+                                        method: method,
+                                        configured: provider.configured
+                                    ),
+                                    accent: .tronEmerald
+                                )
+                                if beginningMethod == method {
+                                    TronPulseLoadingIndicator(size: 18)
+                                        .padding(.trailing, 14)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(beginningMethod != nil || clearing)
+                    }
+                }
+            }
+        }
+
+        if provider.configured {
+            TronPrimaryActionButton(
+                title: clearing ? "Clearing…" : ProviderConfigurationPresentation.clearTitle(for: provider),
+                systemImage: "trash",
+                isBusy: clearing,
+                isEnabled: beginningMethod == nil && !clearing,
+                role: .destructive
+            ) { clearCredentials() }
+        }
+    }
+
+    private func beginAutomaticallyIfNeeded() {
+        guard !attemptedAutomaticBegin, let automaticMethod else { return }
+        attemptedAutomaticBegin = true
+        if let currentOperationID {
+            activeOperationID = currentOperationID
+            return
+        }
+        begin(automaticMethod)
     }
 
     private func begin(_ method: String) {

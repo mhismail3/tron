@@ -18,6 +18,19 @@ struct ProviderConfigurationPresentationTests {
         #expect(ProviderConfigurationPresentation.actionTitle(method: "oauth", configured: true) == "Log In with a Different Account")
     }
 
+    @Test("one unconfigured connection method starts directly from the provider sheet")
+    func automaticSingleMethod() {
+        let single = provider(configured: false, authSource: nil, authMethods: ["oauth"])
+        let multiple = provider(configured: false, authSource: nil, authMethods: ["api-key", "oauth"])
+        let configured = provider(configured: true, authSource: "oauth", authMethods: ["oauth"])
+        let unknown = provider(configured: false, authSource: nil, authMethods: ["future-auth"])
+
+        #expect(ProviderConfigurationPresentation.automaticallyBegunMethod(for: single) == "oauth")
+        #expect(ProviderConfigurationPresentation.automaticallyBegunMethod(for: multiple) == nil)
+        #expect(ProviderConfigurationPresentation.automaticallyBegunMethod(for: configured) == nil)
+        #expect(ProviderConfigurationPresentation.automaticallyBegunMethod(for: unknown) == nil)
+    }
+
     @Test("clear actions and connection summaries match credential authority")
     func statusLabels() {
         let login = provider(configured: true, authSource: "oauth")
@@ -39,7 +52,8 @@ struct ProviderConfigurationPresentationTests {
     private func provider(
         configured: Bool,
         authSource: String?,
-        credentialType: String? = nil
+        credentialType: String? = nil,
+        authMethods: [String] = ["api-key", "oauth"]
     ) -> ProviderSummary {
         ProviderSummary(
             id: "provider",
@@ -47,7 +61,7 @@ struct ProviderConfigurationPresentationTests {
             configured: configured,
             authSource: authSource,
             credentialType: credentialType,
-            authMethods: ["api-key", "oauth"],
+            authMethods: authMethods,
             modelCount: 1
         )
     }

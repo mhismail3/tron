@@ -5,21 +5,37 @@ import UIKit
 /// content so selecting a credential method never opens an unrelated presenter.
 struct ProviderAuthFlowContent: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var contentKey: String {
+        "\(model.authEvent?.kind.rawValue ?? ""):\(model.authEvent?.operationId ?? ""):\(model.authPrompt?.id ?? "")"
+    }
+
+    private var revealTransition: AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: TronSpacing.section) {
             if let event = model.authEvent,
                event.kind == .authURL || model.authPrompt == nil {
                 AuthEventContent(event: event)
+                    .transition(revealTransition)
             }
             if let prompt = model.authPrompt {
                 AuthPromptContent(prompt: prompt)
+                    .transition(revealTransition)
             }
             if model.authPrompt == nil && model.authEvent == nil {
                 TronLoadingState(label: "Finishing provider login…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(revealTransition)
             }
         }
+        .animation(
+            reduceMotion ? .linear(duration: 0.12) : .snappy(duration: 0.24),
+            value: contentKey
+        )
     }
 }
 
@@ -103,6 +119,7 @@ private struct AuthPromptContent: View {
 private struct AuthEventContent: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let event: AppModel.AuthEventState
     @State private var browserSession = ProviderOAuthBrowserSession()
     @State private var openingBrowser = false
@@ -140,34 +157,41 @@ private struct AuthEventContent: View {
     }
 
     @ViewBuilder private var authURLContent: some View {
-        if let instructions = event.instructions {
-            OnboardingCard {
-                Text(instructions)
-                    .font(TronTypography.body)
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        if let url = event.url {
-            Button { openProviderLogin(url) } label: {
-                if openingBrowser {
-                    Label("Opening Provider Login…", systemImage: "safari")
-                } else {
-                    Label(browserActive ? "Open Provider Login Again" : "Open Provider Login", systemImage: "safari")
+        Group {
+            if let instructions = event.instructions {
+                OnboardingCard {
+                    Text(instructions)
+                        .font(TronTypography.body)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .buttonStyle(TronActionButtonStyle(role: .primary))
-            .disabled(openingBrowser)
-            if let browserError {
-                TronCaption(browserError)
-                    .foregroundStyle(Color.tronError)
+            if let url = event.url {
+                Button { openProviderLogin(url) } label: {
+                    if openingBrowser {
+                        Label("Opening Provider Login…", systemImage: "safari")
+                    } else {
+                        Label(browserActive ? "Open Provider Login Again" : "Open Provider Login", systemImage: "safari")
+                    }
+                }
+                .buttonStyle(TronActionButtonStyle(role: .primary))
+                .disabled(openingBrowser)
+                if let browserError {
+                    TronCaption(browserError)
+                        .foregroundStyle(Color.tronError)
+                        .transition(
+                            reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top))
+                        )
+                }
+                if let host = url.host() {
+                    TronCaption("Secure login at \(host). Tron returns here after authorization.")
+                }
             }
-            Text(url.absoluteString)
-                .font(TronTypography.codeContent)
-                .foregroundStyle(Color.tronTextSecondary)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
         }
+        .animation(
+            reduceMotion ? .linear(duration: 0.12) : .snappy(duration: 0.2),
+            value: browserError
+        )
     }
 
     @ViewBuilder private var deviceCodeContent: some View {
@@ -203,7 +227,11 @@ private struct AuthEventContent: View {
     private func openProviderLogin(_ url: URL) {
         browserError = nil
         guard let capture = event.callbackCapture else {
-            openURL(url)
+            if model.authPrompt?.kind == .manualCode {
+                openURL(url)
+            } else {
+                browserError = "This Gateway did not provide a secure iPhone callback. Update the selected Mac and try again."
+            }
             return
         }
         openingBrowser = true

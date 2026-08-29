@@ -358,7 +358,7 @@ export class AuthBroker {
     const errorValues = callback.searchParams.getAll("error");
     const stateValues = callback.searchParams.getAll("state");
     if (codeValues.length > 1 || errorValues.length > 1 || stateValues.length > 1
-      || (codeValues.length === 0 && errorValues.length === 0)) {
+      || codeValues.length + errorValues.length !== 1) {
       throw new GatewayError("invalid_request", "Authentication callback has an ambiguous authorization result");
     }
     if (capture.expectedState !== undefined && callback.searchParams.get("state") !== capture.expectedState) {

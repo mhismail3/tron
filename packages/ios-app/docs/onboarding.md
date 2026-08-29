@@ -29,8 +29,12 @@ hidden while the native upward sheet gesture remains available.
 8. **Other providers** presents the remaining dynamic provider catalog. Connect
    and Configure open the same standardized provider configuration sheet used by
    Settings, with every runtime-advertised API-key and account-login method in
-   one place. API-key entry stays inline in that sheet with a value-gated Save
-   action. Browser OAuth opens in `ASWebAuthenticationSession` on iPhone. For Pi
+   one place. An unconfigured provider with one advertised connection method starts
+   that method when its sheet opens, so any Pi-owned account choices appear directly;
+   multiple methods and configured-provider replacement controls remain explicit. Newly
+   delivered prompt/event content fades and slides down in place (opacity-only under
+   Reduce Motion). API-key entry stays inline with a value-gated Save action. Browser
+   OAuth opens in `ASWebAuthenticationSession` on iPhone. For Pi
    loopback redirects, a one-shot operation-owned iOS listener binds only the exact
    advertised localhost port/path, captures the bounded authorization response, and
    closes the system browser through the dedicated `com.tron.mobile.oauth` handoff. The complete

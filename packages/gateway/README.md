@@ -530,8 +530,9 @@ For phone browser OAuth, the Gateway derives an optional callback descriptor onl
 provider-authored `auth_url` (`redirect_uri` or `callback_url`) and only for explicit HTTP loopback
 hosts. iOS may answer Pi's existing `manual_code` prompt with the complete captured redirect. For
 providers such as Radius without that prompt, `auth.callback` accepts only the operation/callback ID
-and bounded query: the host, port, and path remain Gateway-retained, state is checked before a fixed
-no-proxy loopback GET reaches Pi's already-listening callback server, and neither callback data nor
+and bounded query: the host, port, and path remain Gateway-retained, exactly one authorization code or
+provider error plus unambiguous state is required before a fixed no-proxy loopback GET reaches Pi's
+already-listening callback server, and neither callback data nor
 response bodies are logged, persisted, or returned. Pi remains the sole state/PKCE, token exchange,
 refresh, and credential-storage authority.
 `session.list` and `model.list` are cursor-paginated so Pi catalogs remain

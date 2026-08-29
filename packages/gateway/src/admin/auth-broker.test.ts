@@ -279,6 +279,8 @@ describe("AuthBroker", () => {
 
     await expect(broker.forwardCallback("device", operationId, capture.id as string, "code=one&code=two&state=expected"))
       .rejects.toMatchObject({ code: "invalid_request" });
+    await expect(broker.forwardCallback("device", operationId, capture.id as string, "code=one&error=denied&state=expected"))
+      .rejects.toMatchObject({ code: "invalid_request" });
     await expect(broker.forwardCallback("device", operationId, capture.id as string, "code=temporary&state=wrong"))
       .rejects.toMatchObject({ code: "invalid_request" });
     await expect(broker.forwardCallback("other-device", operationId, capture.id as string, "code=temporary&state=expected"))
