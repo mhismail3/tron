@@ -100,10 +100,12 @@ and mounted transcript snapshots cannot overwrite those global row fields. Dashb
 of those Gateway-canonical row fields: only final settled prompt responses advance it, Mark Read/Unread
 uses an absolute command-receipt mutation whose complete attention projection applies immediately even
 for cold rows, and a successful open acknowledges only its returned completion revision after the
-snapshot installs. That acknowledgement retries transient failures against
-one fixed presentation/connection owner and revision; cancellation retires it, while an older Gateway
-without the additive method remains rolling-upgrade compatible. The local snapshot cache is display-only and older peers
-missing additive attention fields decode as read during rolling upgrade. The dashboard groups user
+snapshot installs. That acknowledgement retries transient failures against one
+fixed presentation/connection owner and revision; cancellation retires it.
+Protocol-v4 clients require the complete attention mutation and projection
+contract and do not attach to earlier Gateways. The local snapshot cache remains
+display-only, and projections written before attention fields existed decode as
+read rather than inventing unread state. The dashboard groups user
 sessions by workspace and renders the newest ten per workspace by default; explicit Show more/Show less
 pagination is a disposable UI projection with generation-checked staged animations, so catalog refreshes
 cannot expose stale rows or leave controls stuck. Successful session creation starts a shared background

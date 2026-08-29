@@ -652,8 +652,10 @@ Gateway emits a list invalidation rather than fabricating a summary event.
 Mark-read carries the exact rendered completion revision so a racing newer
 completion stays unread. Successful `session.open` returns its current completion
 revision, and first-party clients acknowledge it only after installing the
-snapshot, retries transient acknowledgement failure against that same absolute
-revision, and treats an older Gateway without the additive method as compatible.
+snapshot and retries transient acknowledgement failure against that same
+absolute revision. Protocol-v4 clients require the complete attention contract;
+they do not attach to an earlier Gateway that lacks the method or revisioned
+response.
 Delete removes attention metadata, true identity replacement moves it without
 overwriting a target, switches preserve both identities, and new/imported/forked
 sessions begin read.
