@@ -65,6 +65,12 @@ function validText(value: unknown, bytes: number): value is string {
     && !/[\u0000-\u001f\u007f]/u.test(value);
 }
 
+function validArguments(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0
+    && Buffer.byteLength(value, "utf8") <= MAX_ARGUMENT_BYTES
+    && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value);
+}
+
 function utf8Prefix(value: string, bytes: number): string {
   if (Buffer.byteLength(value, "utf8") <= bytes) return value;
   return Buffer.from(value, "utf8").subarray(0, bytes).toString("utf8").replace(/\uFFFD$/u, "");
@@ -127,7 +133,7 @@ export function parseInvocationReceipt(value: unknown): InvocationReceiptData | 
       || !Object.keys(r).every(key => allowedKeys(r.receiptKind as ReceiptKind).has(key))) return undefined;
   const kind = r.receiptKind as ReceiptKind;
   if (r.name !== undefined && !validText(r.name, MAX_NAME_BYTES)) return undefined;
-  if (r.arguments !== undefined && !validText(r.arguments, MAX_ARGUMENT_BYTES)) return undefined;
+  if (r.arguments !== undefined && !validArguments(r.arguments)) return undefined;
   if (r.lifecycle !== undefined && (!validText(r.lifecycle, 64) || !LIFECYCLES.has(r.lifecycle as InvocationLifecycle))) return undefined;
   if (r.canonicalEntryId !== undefined && !validText(r.canonicalEntryId, MAX_ID_BYTES)) return undefined;
   if (r.parentEntryId !== undefined && !validText(r.parentEntryId, MAX_ID_BYTES)) return undefined;

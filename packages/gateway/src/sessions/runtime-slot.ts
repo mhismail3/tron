@@ -4460,7 +4460,7 @@ export class RuntimeSlot {
           ...(invocationName ? { name: invocationName } : {}),
           ...(queueDisplay?.resourceInvocation?.arguments
             ? { arguments: queueDisplay.resourceInvocation.arguments }
-            : queueDisplay?.text ? { arguments: queueDisplay.text } : {}),
+            : {}),
           lifecycle: "staged",
           origin: invocation.origin,
           sequence: this.revision + 1,

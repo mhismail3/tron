@@ -5,8 +5,11 @@
 The Gateway is the sole live owner of invocation, operation, and activity
 identity. Canonical Pi JSONL remains authoritative; Gateway-owned bounded
 `tron.chat-invocation.v1` records persist causal start/terminal/binding facts in
-the same session branch and never enter model context. A missing terminal record
-after an accepted start is `outcomeUnknown` and is never automatically replayed.
+the same session branch and never enter model context. Plain prompt bodies remain
+only in their canonical user entries rather than being duplicated into receipts;
+resource arguments are bounded but preserve tabs and multiline text. A missing
+terminal record after an accepted start is `outcomeUnknown` and is never
+automatically replayed.
 
 Transcript order is canonical branch order, never timestamp or activity recency.
 The v4 projection separates inbound context, agent output/invocations, ambient

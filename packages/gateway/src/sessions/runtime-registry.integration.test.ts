@@ -11,6 +11,7 @@ import type { NotificationService } from "../notifications/notification-service.
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../protocol/types.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
+import { INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { RunMarkerCompletionConflictError } from "./run-markers.js";
 
@@ -3742,6 +3743,43 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const duplicateFact = internal.canonicalExtensionRunFacts().get("duplicate-canonical-run");
     expect(duplicateFact?.toolCallId).toBeUndefined();
     expect(duplicateFact?.ambiguous).toBe(true);
+  });
+
+  it("admits multiline plain prompts without duplicating their body into invocation receipts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-multiline-prompt-receipt-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-multiline-prompt", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("complete")]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
+      modelRuntimeFactory: async () => runtime,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    const prompt = "first line\nsecond line";
+    await expect(slot.prompt(prompt)).resolves.toEqual({ operationId: expect.any(String) });
+    await waitUntil(() => !slot.isBusy);
+
+    const entries = (await readFile(slot.sessionFile!, "utf8"))
+      .trimEnd().split("\n").map(line => JSON.parse(line) as any);
+    const startReceipt = entries.find(entry => entry.type === "custom"
+      && entry.customType === INVOCATION_RECEIPT_TYPE
+      && entry.data?.receiptKind === "start");
+    expect(startReceipt?.data).toMatchObject({ source: "plain", lifecycle: "staged" });
+    expect(startReceipt?.data).not.toHaveProperty("arguments");
+    expect(entries.some(entry => entry.type === "message" && entry.message?.role === "user"
+      && entry.message.content?.some((part: any) => part.type === "text" && part.text === prompt))).toBe(true);
   });
 
   it("runs the unchanged official status and working-indicator examples with the baseline theme", async () => {

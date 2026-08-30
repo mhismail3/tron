@@ -33,6 +33,12 @@ describe("invocation receipts", () => {
     expect(parseInvocationReceipt({ ...start, arguments: "🙂".repeat(20_000) })).toBeUndefined();
   });
 
+  it("preserves bounded multiline resource arguments", () => {
+    const argumentsText = "first line\nsecond\tline\r\nthird line";
+    expect(makeInvocationReceipt({ ...start, arguments: argumentsText }).arguments).toBe(argumentsText);
+    expect(parseInvocationReceipt({ ...start, arguments: "unsafe\u0000value" })).toBeUndefined();
+  });
+
   it("deduplicates identical IDs and rejects contradictory IDs or terminal rewrites", () => {
     const duplicate = { ...start };
     expect(invocationReceipts([
