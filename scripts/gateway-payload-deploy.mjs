@@ -1503,15 +1503,39 @@ async function requireSelectedPayload(paths, expected) {
   }
 }
 
-async function requireBundledPayload(paths, expected) {
-  if (await currentSelection(paths)) {
-    throw new Error("restored Gateway still has an external payload selection");
+export async function requireBundledPayload(paths, expected, bundledCandidatesOverride) {
+  let externalSelectionIsAdmissible = false;
+  try {
+    const selected = await currentSelection(paths);
+    if (selected) {
+      await validatePayload(join(paths.versionsRoot, selected.version), {
+        channel: paths.channel, version: selected.version, payloadFingerprint: selected.payloadFingerprint,
+      }, true);
+      externalSelectionIsAdmissible = true;
+    }
+  } catch { /* The launcher rejects the same malformed or incompatible projection. */ }
+  if (externalSelectionIsAdmissible) {
+    throw new Error("restored Gateway still has an admissible external payload selection");
   }
-  const bundled = await bundledPayload();
+  const bundled = await bundledPayload(bundledCandidatesOverride);
   if (bundled.manifest.version !== expected.version
     || bundled.manifest.payloadFingerprint !== expected.payloadFingerprint) {
     throw new Error("restored bundled Gateway does not match the validated recovery payload");
   }
+}
+
+export async function resolveRecoveryPayload(paths, recoverySelectionValue, bundledCandidatesOverride) {
+  if (recoverySelectionValue) {
+    try {
+      const manifest = await validatePayload(join(paths.versionsRoot, recoverySelectionValue.version), {
+        channel: paths.channel, version: recoverySelectionValue.version,
+        payloadFingerprint: recoverySelectionValue.payloadFingerprint,
+      }, true);
+      return { manifest, usesBundledFallback: false };
+    } catch { /* A rejected external selection means the launcher is already using its bundle. */ }
+  }
+  const bundled = await bundledPayload(bundledCandidatesOverride);
+  return { manifest: bundled.manifest, usesBundledFallback: true };
 }
 
 export async function verifyIdempotentPromotion({ paths, channel, manifest, current, requestInfo }) {
@@ -1549,17 +1573,9 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
     const recoverySelectionValue = candidateAlreadyPublished
       ? (priorState.previous === undefined ? undefined : selection(JSON.parse(priorState.previous), channel))
       : prior;
-    let recoveryManifest;
-    let recoveryUsesBundledFallback = false;
-    if (recoverySelectionValue) {
-      recoveryManifest = await validatePayload(join(paths.versionsRoot, recoverySelectionValue.version), {
-        channel, version: recoverySelectionValue.version, payloadFingerprint: recoverySelectionValue.payloadFingerprint,
-      }, true);
-    } else {
-      const bundled = await bundledPayload();
-      recoveryManifest = bundled.manifest;
-      recoveryUsesBundledFallback = true;
-    }
+    const recovery = await resolveRecoveryPayload(paths, recoverySelectionValue);
+    const recoveryManifest = recovery.manifest;
+    const recoveryUsesBundledFallback = recovery.usesBundledFallback;
     const boundary = await captureAuthenticatedRestartBoundary({ host, port, token, timeoutMs, channel });
     const before = boundary.info;
     const oldProcess = boundary.process;

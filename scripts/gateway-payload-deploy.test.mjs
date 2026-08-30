@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { chmod, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -40,6 +40,8 @@ import {
   captureLocalListenerProcess,
   confirmAndClearPendingAttempt,
   verifyIdempotentPromotion,
+  requireBundledPayload,
+  resolveRecoveryPayload,
   restoreSelectionStateAndClearAttempt,
   stagePayload,
   stagedCandidate,
@@ -430,6 +432,43 @@ async function makePreflightFixture(root) {
   }));
   return payload;
 }
+
+test("promotion recovery admits a launcher-rejected external selection as bundled fallback", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-recovery-bundled-fallback-"));
+  try {
+    const store = await paths(root);
+    await mkdir(store.versionsRoot, { recursive: true });
+    const externalFixture = await makePreflightFixture(join(root, "external"));
+    const externalRoot = join(store.versionsRoot, "old-v3");
+    await rename(externalFixture, externalRoot);
+    const externalManifestPath = join(externalRoot, "manifest.json");
+    const externalManifest = JSON.parse(await readFile(externalManifestPath, "utf8"));
+    externalManifest.version = "old-v3";
+    delete externalManifest.protocolVersion;
+    delete externalManifest.minProtocolVersion;
+    await writeFile(externalManifestPath, JSON.stringify(externalManifest));
+    const staleSelection = selection("old-v3", externalManifest.payloadFingerprint);
+    await writeFile(store.current, `${JSON.stringify(staleSelection)}\n`);
+
+    const bundled = await makePreflightFixture(join(root, "bundled"));
+    const bundledManifest = JSON.parse(await readFile(join(bundled, "manifest.json"), "utf8"));
+    const recovery = await resolveRecoveryPayload(store, staleSelection, [bundled]);
+    assert.equal(recovery.usesBundledFallback, true);
+    assert.deepEqual(recovery.manifest, bundledManifest);
+    await requireBundledPayload(store, bundledManifest, [bundled]);
+
+    externalManifest.protocolVersion = "4";
+    externalManifest.minProtocolVersion = "4";
+    await writeFile(externalManifestPath, JSON.stringify(externalManifest));
+    const admissible = await resolveRecoveryPayload(store, staleSelection, [bundled]);
+    assert.equal(admissible.usesBundledFallback, false);
+    assert.equal(admissible.manifest.version, "old-v3");
+    await assert.rejects(
+      requireBundledPayload(store, bundledManifest, [bundled]),
+      /admissible external payload selection/,
+    );
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("source rebuild preserves signed native artifacts only with an unchanged dependency lock", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-source-native-signatures-"));

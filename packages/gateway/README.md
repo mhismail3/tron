@@ -27,10 +27,12 @@ install the Mac app containing the v4 Gateway payload while preserving
 client. The repository protocol manifest is projected into Gateway payload,
 Mac app, and iOS app metadata; launch/build/install validators require one exact
 range. A replacement launcher's bundled payload is the migration bootstrap when
-a previously selected external payload advertises an older range. Do not widen
-the advertised minimum or allow a mixed v3/v4 pair merely to bypass that
-handoff. Ordinary same-major updates continue through the owned Gateway update
-flow.
+a previously selected external payload advertises an older range. Same-major
+promotion and rollback treat that rejected external pointer as bounded history
+and use the validated signed bundle as their recovery authority; they never
+require the incompatible payload to become admissible again. Do not widen the
+advertised minimum or allow a mixed v3/v4 pair merely to bypass that handoff.
+Ordinary same-major updates continue through the owned Gateway update flow.
 
 Tron Gateway is the minimal always-running Mac service behind the Tron iPhone
 app. It embeds `@earendil-works/pi-coding-agent` 0.84.1 through supported SDK
