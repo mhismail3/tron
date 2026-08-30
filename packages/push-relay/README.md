@@ -187,10 +187,13 @@ migration state is a stop condition requiring deletion or Cloudflare review.
 
 The named `sandbox` environment is a distinct service,
 `tron-push-relay-sandbox`, with its own SQLite Durable Object namespace and
-secrets. A bare deploy never counts as sandbox validation. Configure the four
-secret names below independently for sandbox, then a maintainer may manually
-run `npx wrangler deploy --env sandbox`. No script in this package performs that
-mutation.
+secrets. It does not automatically replace the single client origin in
+`config/PushService.xcconfig`; isolated device validation must deliberately set
+that origin, rebuild and install matching Mac/iOS artifacts, then restore the
+production origin before release review. A bare deploy never counts as sandbox
+validation. Configure the four secret names below independently for sandbox,
+then a maintainer may manually run `npx wrangler deploy --env sandbox`. No script
+in this package performs that mutation.
 
 Configure these Cloudflare secrets manually:
 

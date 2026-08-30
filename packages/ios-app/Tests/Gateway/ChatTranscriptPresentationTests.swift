@@ -26,6 +26,20 @@ struct ChatTranscriptPresentationTests {
         ) == 0)
     }
 
+    @Test("unattributed context names its canonical message type without inventing a producer")
+    func unattributedContextTitle() {
+        #expect(InboundProducerPresentationPolicy.label(for: nil) == "Context")
+        #expect(InboundProducerPresentationPolicy.title(
+            for: nil,
+            customType: "subagent_supervisor_request"
+        ) == "Subagent Supervisor Request")
+        #expect(InboundProducerPresentationPolicy.title(
+            for: ChatOrigin(kind: .extension, title: "Trusted Adapter", confidence: .receipt),
+            customType: "ignored"
+        ) == "Trusted Adapter")
+        #expect(InboundProducerPresentationPolicy.title(for: nil, customType: nil) == "Unattributed")
+    }
+
     @Test("inbound delivery metadata remains truthful in technical details")
     func inboundDeliveryLabels() {
         #expect(InboundProducerPresentationPolicy.deliveryLabel(for: .stored) == "Stored for model context")

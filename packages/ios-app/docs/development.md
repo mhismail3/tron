@@ -787,10 +787,16 @@ compatibility; it has no real APNs entitlement or delivery lane.
 Development and production builds read the public `TRON_PUSH_SERVICE_ORIGIN`
 from the repository-canonical maintainer input `config/PushService.xcconfig`;
 `Info.plist` and the bundled Mac Gateway embed the same exact HTTPS origin. The
-repository currently carries that public origin; non-install development builds
-also tolerate an intentionally empty local override so the unavailable UI can be
-tested. Archive/install validation and Mac payload packaging reject an empty or
-invalid origin, and Mac installation verification rejects a selected stable payload whose embedded origin differs from the installed signed product. The Worker admits the signed application environment
+repository currently targets the production Worker; `LocalDevice` therefore
+exercises that service's `production-sandbox` route. The distinct named sandbox
+Worker is not selected automatically. Testing it requires deliberately changing
+the canonical origin to its public URL, rebuilding and installing the matching
+Mac app first, then rebuilding iOS; restore and re-verify the production origin
+before a release build. Non-install development builds also tolerate an
+intentionally empty local override so the unavailable UI can be tested.
+Archive/install validation and Mac payload packaging reject an empty or invalid
+origin, and Mac installation verification rejects a selected stable payload
+whose embedded origin differs from the installed signed product. The Worker admits the signed application environment
 through App Attest: `com.tron.mobile.beta` development and `com.tron.mobile`
 development (`Tron Device`/`LocalDevice`) use APNs sandbox, while
 `com.tron.mobile` production uses APNs production. iOS cannot select an

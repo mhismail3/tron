@@ -144,7 +144,7 @@ Outbound relay requests use one fixed `/v3/notifications` route, no redirects, a
 - `DELETE /v1/uploads/:id` — authenticated discard of unclaimed client staging; prompt-owned attachments fail closed
 - `GET /v1/uploads/:id` — authenticated stream for a prompt-owned canonical attachment
 - `GET /v1/blobs/:id` — authenticated transient projected blob
-- `GET /v1/socket` — authenticated protocol version 3 WebSocket
+- `GET /v1/socket` — authenticated protocol version 4 WebSocket
 
 The pairing limiter keeps the exact rolling per-address window while retaining at most 4,096
 least-recently-used address keys and periodically deleting expired windows; address churn cannot

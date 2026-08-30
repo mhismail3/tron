@@ -9,8 +9,16 @@ enum InboundProducerPresentationPolicy {
         case .user: return "User"
         case .gateway: return "Tron"
         case .assistant: return "Assistant"
-        case .unknown, nil: return "Producer"
+        case .unknown, nil: return "Context"
         }
+    }
+
+    static func title(for origin: ChatOrigin?, customType: String?) -> String {
+        if let title = origin?.title, !title.isEmpty { return title }
+        if let customType, !customType.isEmpty {
+            return ComposerResourceNameFormatter.friendly(customType)
+        }
+        return "Unattributed"
     }
 
     static func tone(for origin: ChatOriginKind?) -> ChatNotificationTone {
@@ -65,7 +73,10 @@ struct InboundProducerMessageView: View {
     @State private var showingDetails = false
 
     private var originTitle: String {
-        item.semantic?.origin.title ?? "Unknown producer"
+        InboundProducerPresentationPolicy.title(
+            for: item.semantic?.origin,
+            customType: item.customType
+        )
     }
 
     private var messageText: String {
@@ -132,6 +143,13 @@ private struct InboundContextDetailsSheet: View {
 
     private let accent = Color.tronCyan
 
+    private var originTitle: String {
+        InboundProducerPresentationPolicy.title(
+            for: item.semantic?.origin,
+            customType: item.customType
+        )
+    }
+
     private var messageText: String {
         let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? "No text content" : text
@@ -139,7 +157,7 @@ private struct InboundContextDetailsSheet: View {
 
     private var originMetadata: [TronTechnicalMetadataItem] {
         [
-            .init(title: "Producer", value: item.semantic?.origin.title ?? "Unknown producer", icon: "person.crop.circle"),
+            .init(title: "Source", value: originTitle, icon: "doc.badge.ellipsis"),
             .init(title: "Origin", value: item.semantic?.origin.kind.rawValue ?? "unknown", icon: "externaldrive"),
             .init(title: "Confidence", value: item.semantic?.origin.confidence.rawValue ?? "unknown", icon: "checkmark.shield"),
             .init(
@@ -178,9 +196,9 @@ private struct InboundContextDetailsSheet: View {
                     )
                     if let details = item.details {
                         payloadSection(
-                            "Producer details",
+                            "Context details",
                             value: details,
-                            sheetTitle: "Producer details"
+                            sheetTitle: "Context details"
                         )
                     }
                     payloadSection(
