@@ -234,7 +234,10 @@ scripts/tron mac verify
 
 It fails unless Stable's Release-owned launchd PID is the sole 9847 listener,
 executes the validated active payload, and returns matching authenticated
-`system.info` channel/revision/fingerprint/epoch. If Debug is present, it also
+`system.info` channel/revision/fingerprint/epoch. An incompatible or invalid
+external selection may remain as bounded rollback history after a protocol
+bump; verification accepts it only when both the launcher and live PID have
+rejected it in favor of the signed bundled payload. If Debug is present, it also
 requires one lifecycle snapshot whose live supervisor and child PID/start
 identities, sole 9848 listener, selected manifest, command, and authenticated
 identity all agree. Debug absence is informational; loaded legacy Debug or

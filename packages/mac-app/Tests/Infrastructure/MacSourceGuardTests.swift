@@ -198,6 +198,13 @@ struct MacSourceGuardTests {
         #expect(hashScript.contains("-type f -o -type l"))
         #expect(hashScript.contains("shasum -a 256"))
 
+        let repoRoot = macRoot
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let installVerifier = try Self.read(repoRoot, "scripts/verify-mac-install.sh")
+        #expect(installVerifier.contains("if [[ \"$payload\" == \"$bundled\" ]]; then"))
+        #expect(installVerifier.contains("incompatible or invalid external selection rejected; bundled payload selected"))
+
         let launcher = try Self.read(macRoot, "scripts/tron-gateway-launcher.c")
         for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_PROTOCOL_VERSION", "TRON_GATEWAY_MIN_PROTOCOL_VERSION", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_UPDATE_HELPER", "gateway-payload-deploy.mjs", "immutable_tree", "required_runtime_alias", "required_pi_alias", "../node-%s", "pi-coding-agent/dist/cli.js", "CC_SHA256", "S_IWUSR", "--verify-payload", "nodeVersion"] {
             #expect(launcher.contains(required), "launcher missing external payload safety marker: \(required)")

@@ -87,9 +87,13 @@ verify_payload() {
   if regular_file "$home/gateway/payloads/$channel/current.json"; then
     selected_version="$(plist_value version "$home/gateway/payloads/$channel/current.json")"
     if [[ -n "$selected_version" ]]; then
-      [[ "$(plist_value version "$manifest")" == "$selected_version" ]] \
-        && pass "$label selection version matches manifest" \
-        || fail "$label selection version does not match selected manifest"
+      if [[ "$payload" == "$bundled" ]]; then
+        pass "$label incompatible or invalid external selection rejected; bundled payload selected"
+      else
+        [[ "$(plist_value version "$manifest")" == "$selected_version" ]] \
+          && pass "$label selection version matches manifest" \
+          || fail "$label selection version does not match selected manifest"
+      fi
     fi
   fi
   expected="$(plist_value payloadFingerprint "$manifest")"
