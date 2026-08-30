@@ -15,7 +15,6 @@ import {
   type AgentSessionEvent,
   type CreateAgentSessionRuntimeFactory,
   type ExtensionCommandContextActions,
-  type Extension,
   type ModelRuntime,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
@@ -46,7 +45,7 @@ import type {
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { BLOB_MAX_ITEM_BYTES, type BlobStore } from "./blob-store.js";
-import { SemanticUIBroker } from "./semantic-ui-broker.js";
+import { SemanticUIBroker, type ExtensionNotificationInput } from "./semantic-ui-broker.js";
 import { ExtensionPresentationStore } from "../extensions/host/extension-presentation-store.js";
 import { ExtensionLifecycleCoordinator } from "./extension-lifecycle-coordinator.js";
 import { RemotePiExtensionHost } from "../extensions/host/remote-pi-extension-host.js";
@@ -69,11 +68,12 @@ import {
   type TranscriptPage,
 } from "./projection.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
-import { attributeExtensions, currentExtensionOwner, currentInvocationContext, extensionOwnerFor, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
+import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
-import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
+import { CONTEXT_DELIVERY_RECEIPT_TYPE, contextDeliveryMetadataByEntry, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
+import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
 import { admitPromptText, admitResourceInvocation, canonicalResourceName, parsePiLiteralCommand } from "./resource-invocation.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import { ProcessActivityRecency, type ProcessActivityExpiryFrame } from "./process-activity-recency.js";
@@ -121,6 +121,24 @@ type PendingManualCompaction = {
   resolve: () => void;
   reject: (error: unknown) => void;
 };
+
+type PendingExtensionCanonicalEffect =
+  | {
+      kind: "context";
+      branchStartIndex: number;
+      delivery: "stored" | "triggeredTurn";
+      origin?: ExtensionToolOrigin;
+    }
+  | {
+      kind: "notification";
+      receiptId: string;
+      message: string;
+      tone: ExtensionNotificationInput["tone"];
+      origin: ChatOrigin;
+      invocationId?: string;
+      operationId?: string;
+      createdAt: string;
+    };
 
 const MAXIMUM_QUEUED_MESSAGES = 32;
 const MAXIMUM_PROMPT_ATTACHMENTS = 10;
@@ -425,12 +443,13 @@ export class RuntimeSlot {
     operationId: string;
     invocationId: string;
   }>();
-  /** Exact custom messages observed at Pi's message boundary. Their producer
-   * and delivery receipt is appended only after Pi persists that same object. */
-  private readonly pendingContextMessages = new WeakMap<AgentMessage, {
-    delivery: "stored" | "triggeredTurn";
-    origin?: ExtensionToolOrigin;
-  }>();
+  /** Causal custom-message callbacks awaiting Pi's canonical branch identity.
+   * FIFO callback order and the captured branch boundary—not cloned payload
+   * identity—bind each delivery receipt after Pi persists its entry. */
+  private pendingExtensionNotificationWrites = 0;
+  private extensionCanonicalEffectFlushScheduled = false;
+  private readonly pendingExtensionCanonicalEffects: PendingExtensionCanonicalEffect[] = [];
+  private readonly pendingContextMessages: Array<Extract<PendingExtensionCanonicalEffect, { kind: "context" }>> = [];
   private pendingManualCompaction: PendingManualCompaction | undefined;
   private compactionBaselineEntryId: string | undefined;
   private manualCompactionClaim: symbol | undefined;
@@ -471,7 +490,111 @@ export class RuntimeSlot {
         { code: "theme.baseline-only", message: "Per-session process-global Pi theme synchronization is unavailable through the pinned public API." },
       ],
     });
-    return new SemanticUIBroker(presentation);
+    return new SemanticUIBroker(presentation, (notification) => this.enqueueExtensionNotification(notification));
+  }
+
+  private enqueueExtensionNotification(notification: ExtensionNotificationInput): void {
+    // notify is a void producer callback. Bound queued canonical writes so an
+    // extension timer cannot create unbounded mutation-lane memory pressure.
+    if (this.pendingExtensionNotificationWrites >= 128) {
+      this.ui.presentation.recordRejectedCallback(
+        "notify",
+        new GatewayError("busy", "Extension notifications reached their pending write capacity", true),
+      );
+      return;
+    }
+    this.pendingExtensionNotificationWrites += 1;
+    const invocation = notification.invocation
+      ? this.invocations.get(notification.invocation.invocationId)
+        ?? this.invocationForOperation(notification.invocation.operationId)
+      : this.invocationForOperation(this.pendingExtensionCommand?.id);
+    // The exact callback owner is the producer. The enclosing invocation adds
+    // causality but must not restyle an extension tool notification as user UI.
+    const origin: ChatOrigin = notification.owner
+      ? {
+          kind: trustedExtensionOriginKind(notification.owner),
+          ownerId: notification.owner.id,
+          title: notification.owner.title,
+          confidence: "receipt",
+        }
+      : invocation?.origin ?? { kind: "unknown", confidence: "unknown" };
+    this.enqueueExtensionCanonicalEffect({
+      kind: "notification",
+      receiptId: `notification:${randomUUID()}`,
+      message: notification.message,
+      tone: notification.tone,
+      origin,
+      ...(invocation ? { invocationId: invocation.invocationId, operationId: invocation.operationId } : {}),
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  private enqueueExtensionCanonicalEffect(effect: PendingExtensionCanonicalEffect): void {
+    this.pendingExtensionCanonicalEffects.push(effect);
+    this.scheduleExtensionCanonicalEffectFlush();
+  }
+
+  private scheduleExtensionCanonicalEffectFlush(): void {
+    if (this.extensionCanonicalEffectFlushScheduled) return;
+    this.extensionCanonicalEffectFlushScheduled = true;
+    void this.lane.run(() => this.flushPendingExtensionCanonicalEffects())
+      .catch((error) => this.emit("session.extensionError", safeJson({
+        message: error instanceof Error ? error.message : String(error),
+      })))
+      .finally(() => {
+        this.extensionCanonicalEffectFlushScheduled = false;
+        if (!this.disposed && this.pendingExtensionCanonicalEffects.length > 0) {
+          this.scheduleExtensionCanonicalEffectFlush();
+        }
+      });
+  }
+
+  private async flushPendingExtensionCanonicalEffects(): Promise<void> {
+    let changed = false;
+    while (this.pendingExtensionCanonicalEffects.length > 0) {
+      const effect = this.pendingExtensionCanonicalEffects.shift()!;
+      if (effect.kind === "notification") {
+        try {
+          const receipt = makeExtensionNotificationReceipt({
+            version: 1,
+            receiptId: effect.receiptId,
+            sessionId: this.id,
+            message: effect.message,
+            tone: effect.tone,
+            origin: effect.origin,
+            ...(effect.invocationId ? { invocationId: effect.invocationId } : {}),
+            ...(effect.operationId ? { operationId: effect.operationId } : {}),
+            sequence: this.revision + 1,
+            createdAt: effect.createdAt,
+          });
+          await this.persistCanonicalCustomEntry(
+            EXTENSION_NOTIFICATION_RECEIPT_TYPE,
+            extensionNotificationJSON(receipt),
+            effect.receiptId,
+          );
+        } finally {
+          this.pendingExtensionNotificationWrites -= 1;
+        }
+      } else {
+        const branch = this.sessionManager.getBranch();
+        const ownedTargets = contextDeliveryMetadataByEntry(branch);
+        const candidate = branch.slice(effect.branchStartIndex).find(entry =>
+          entry.type === "custom_message" && !ownedTargets.has(entry.id));
+        if (!candidate || candidate.type !== "custom_message") {
+          this.emit("session.extensionError", safeJson({
+            message: "Custom message did not acquire canonical context identity",
+          }));
+          continue;
+        }
+        await this.persistCanonicalCustomEntry(
+          CONTEXT_DELIVERY_RECEIPT_TYPE,
+          safeJson(makeContextDeliveryReceipt(candidate.id, effect.delivery, effect.origin)),
+          candidate.id,
+        );
+      }
+      changed = true;
+    }
+    if (changed) this.scheduleSnapshot();
   }
 
   static async create(
@@ -2328,9 +2451,27 @@ export class RuntimeSlot {
           // identity only at the Gateway callback boundary; customType, text,
           // details, and renderer registration are never attribution evidence.
           const callbackOwner = currentExtensionOwner();
-          this.pendingContextMessages.set(event.message, {
-            delivery: this.hasActiveAgentRun ? "triggeredTurn" : "stored",
-            ...(callbackOwner ? { origin: { source: callbackOwner.source, owner: callbackOwner } } : {}),
+          const callbackInvocation = currentInvocationContext();
+          const invocation = callbackInvocation
+            ? this.invocations.get(callbackInvocation.invocationId)
+              ?? this.invocationForOperation(callbackInvocation.operationId)
+            : this.invocationForOperation(this.pendingExtensionCommand?.id);
+          const invocationOrigin = invocation?.name
+            ? this.extensionCommandContextOrigin(invocation.name)
+            : undefined;
+          const branch = this.sessionManager.getBranch();
+          const delivery = this.hasActiveAgentRun ? "triggeredTurn" : "stored";
+          this.pendingContextMessages.push({
+            kind: "context",
+            // Idle, stored custom messages are persisted before Pi emits their
+            // callbacks. Turn-triggering/streamed messages are persisted after
+            // message_end, so their search must begin after the current branch.
+            branchStartIndex: delivery === "stored" && branch.length > 0
+              ? branch.length - 1 : branch.length,
+            delivery,
+            ...(invocationOrigin
+              ? { origin: invocationOrigin }
+              : callbackOwner ? { origin: { source: callbackOwner.source, owner: callbackOwner } } : {}),
           });
         }
         break;
@@ -2521,37 +2662,10 @@ export class RuntimeSlot {
           this.finalizeToolInvocationGroups(event.message);
           this.bindCanonicalPresentation(event.message);
         } else if (event.message.role === "custom") {
-          const input = this.pendingContextMessages.get(event.message);
-          if (input) {
-            this.pendingContextMessages.delete(event.message);
-            const parentBeforePersistence = this.sessionManager.getLeafId();
-            const message = event.message;
-            // Canonicalize the exact custom message on the session lane. This
-            // prevents a concurrent branch mutation from appending a receipt
-            // to the wrong leaf and makes failures owned/retryable rather than
-            // detached microtask exceptions.
-            void this.lane.run(async () => {
-              // Resolve against the complete canonical branch, not its current
-              // leaf: assistant/tool entries can be appended before this lane
-              // continuation runs. Object identity is the admission key; the
-              // content reference is only used for Pi's wrapped custom_message
-              // representation, with the captured parent as an additional guard.
-              const candidate = this.sessionManager.getBranch().find((entry) =>
-                entry.parentId === parentBeforePersistence
-                && ((entry.type === "message" && entry.message === message)
-                  || (entry.type === "custom_message"
-                    && entry.content === message.content)));
-              const canonicalID = candidate?.id;
-              if (!canonicalID) return;
-              await this.persistCanonicalCustomEntry(
-                CONTEXT_DELIVERY_RECEIPT_TYPE,
-                safeJson(makeContextDeliveryReceipt(canonicalID, input.delivery, input.origin)),
-                canonicalID,
-              );
-              this.scheduleSnapshot();
-            }).catch((error) => this.emit("session.extensionError", safeJson({ message: error instanceof Error ? error.message : String(error) })));
-
-          }
+          // Pi emits custom message start/end callbacks serially. FIFO is the
+          // causal owner; object identity is not stable across its wrapper.
+          const pending = this.pendingContextMessages.shift();
+          if (pending) this.enqueueExtensionCanonicalEffect(pending);
         } else if (event.message.role === "user") {
           const queuedBinding = this.pendingInvocationUserMessages.get(event.message);
           if (queuedBinding) this.pendingInvocationUserMessages.delete(event.message);
@@ -2681,8 +2795,8 @@ export class RuntimeSlot {
       return paths.some((value) => /(?:^|[\\/])pi-subagents(?:[\\/]|$)/u.test(value));
     });
     if (extension) {
-      const owner = extensionOwnerFor(extension);
-      return { source: owner.source, owner };
+      const owner = attributedToolOwner(extension.tools.get("subagent"));
+      if (owner) return { source: owner.source, owner };
     }
     return { source: "pi-subagents" };
   }
@@ -3785,16 +3899,20 @@ export class RuntimeSlot {
     return this.toolLabels();
   }
 
+  private extensionCommandContextOrigin(commandName: string): ExtensionToolOrigin | undefined {
+    const owners = this.runtime?.session.resourceLoader.getExtensions().extensions
+      .map(extension => attributedCommandOwner(extension.commands.get(commandName)))
+      .filter((owner): owner is NonNullable<typeof owner> => owner !== undefined) ?? [];
+    return owners.length === 1 ? { source: owners[0]!.source, owner: owners[0]! } : undefined;
+  }
+
   private extensionCommandOrigin(commandName: string): ChatOrigin {
-    const extensions = this.runtime?.session.resourceLoader.getExtensions().extensions.filter(
-      extension => extension.commands.has(commandName),
-    ) ?? [];
-    if (extensions.length !== 1) return { kind: "unknown", confidence: "unknown" };
-    const owner = extensionOwnerFor(extensions[0]!);
+    const contextOrigin = this.extensionCommandContextOrigin(commandName);
+    if (!contextOrigin?.owner) return { kind: "unknown", confidence: "unknown" };
     return {
-      kind: trustedExtensionOriginKind(owner),
-      ownerId: owner.id,
-      title: owner.title,
+      kind: trustedExtensionOriginKind(contextOrigin.owner),
+      ownerId: contextOrigin.owner.id,
+      title: contextOrigin.owner.title,
       confidence: "adapter",
     };
   }
@@ -3804,15 +3922,12 @@ export class RuntimeSlot {
     if (!session) return undefined;
     const tool = session.getAllTools().find(candidate => candidate.name === toolName);
     if (!tool) return undefined;
-    const extensions = session.resourceLoader.getExtensions().extensions.filter(extension => extension.tools.has(toolName));
+    const extensions = session.resourceLoader.getExtensions().extensions
+      .map(extension => ({ extension, owner: attributedToolOwner(extension.tools.get(toolName)) }))
+      .filter(candidate => candidate.owner !== undefined);
     if (extensions.length !== 1) return undefined;
-    const extension = extensions[0]!;
-    if (tool.sourceInfo.path !== extension.path && tool.sourceInfo.path !== extension.resolvedPath) return undefined;
-    return this.projectExtensionOrigin(extension);
-  }
-
-  private projectExtensionOrigin(extension: Extension): ExtensionToolOrigin | undefined {
-    const owner = extensionOwnerFor(extension);
+    const { extension, owner } = extensions[0]!;
+    if (!owner || tool.sourceInfo.path !== extension.path && tool.sourceInfo.path !== extension.resolvedPath) return undefined;
     const source = owner.source.trim().slice(0, 256);
     return source ? { source, owner } : undefined;
   }
@@ -5762,8 +5877,16 @@ export class RuntimeSlot {
     this.extensionRunOwnership.clear();
     this.unsubscribe?.();
     this.ui.cancelAll();
-    this.extensionHost.retire("Session runtime disposed");
+    // Pi owns session_shutdown before its extension context is invalidated.
+    // Keep semantic presentation live through that bounded callback; the
+    // disposal grace still force-retires a blocking third-party cleanup.
     await this.disposeAgentRuntime();
+    // session_shutdown can synchronously enqueue canonical notification/context
+    // effects while this lane is held. Flush them here rather than leaving a
+    // nested lane task behind the disposal that produced them.
+    await this.flushPendingExtensionCanonicalEffects();
+    await this.waitForReceiptWrites();
+    this.extensionHost.retire("Session runtime disposed");
     for (const operationId of [...this.operationWork.keys()]) this.settleOperationWork(operationId);
     this.lifecycle.retire();
     this.ui.retire();

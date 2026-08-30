@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attributeExtensions, currentExtensionOwner } from "./owner-attribution.js";
+import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner } from "./owner-attribution.js";
 
 describe("extension owner attribution", () => {
   it("rejects extension tools that collide with the canonical assistant bash tool", () => {
@@ -33,21 +33,27 @@ describe("extension owner attribution", () => {
       seen.push(currentExtensionOwner());
       return { content: [], details: {} };
     };
+    const command = async () => { seen.push(currentExtensionOwner()); };
     const extension = {
       path: "/extensions/subagents.ts", resolvedPath: "/extensions/subagents.ts",
       sourceInfo: { path: "/extensions/subagents.ts", source: "project", scope: "project", origin: "top-level" },
       handlers: new Map([["session_start", [handler]]]), tools: new Map([["subagent", { definition: { execute } }]]),
-      commands: new Map(), shortcuts: new Map(), messageRenderers: new Map(), entryRenderers: new Map(),
+      commands: new Map([["review", { handler: command }]]), shortcuts: new Map(), messageRenderers: new Map(), entryRenderers: new Map(),
     };
     const result = attributeExtensions({ extensions: [extension as any], errors: [], runtime: {} as any });
     await result.extensions[0]!.handlers.get("session_start")![0]!();
-    await result.extensions[0]!.tools.get("subagent")!.definition.execute("id", {}, undefined, undefined, {} as any);
-    expect(seen).toHaveLength(3);
+    const attributedTool = result.extensions[0]!.tools.get("subagent")!;
+    const attributedCommand = result.extensions[0]!.commands.get("review")!;
+    await attributedTool.definition.execute("id", {}, undefined, undefined, {} as any);
+    await attributedCommand.handler("", {} as any);
+    expect(seen).toHaveLength(4);
     expect(seen.every((owner) => (owner as { id: string }).id === (seen[0] as { id: string }).id)).toBe(true);
     expect(seen.every((owner) => (owner as { id: string }).id.startsWith("extension:"))).toBe(true);
     expect(JSON.stringify(seen)).not.toContain("/extensions/subagents.ts");
     expect(seen.every((owner) => (owner as { title: string; source: string }).title === "Subagents"
       && (owner as { source: string }).source === "project")).toBe(true);
+    expect(attributedToolOwner(attributedTool)).toEqual(seen[0]);
+    expect(attributedCommandOwner(attributedCommand)).toEqual(seen[0]);
     expect(currentExtensionOwner()).toBeUndefined();
   });
 });

@@ -2,14 +2,19 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import type { SessionSnapshot } from "./types.js";
 
-describe("shared protocol-v3 fixtures", () => {
+describe("shared protocol-v4 fixtures", () => {
   it("covers every projected transcript kind and reconnect state", async () => {
-    const path = new URL("../../../protocol-fixtures/session-snapshot-v3.json", import.meta.url);
+    const path = new URL("../../../protocol-fixtures/session-snapshot-v4.json", import.meta.url);
     const snapshot = JSON.parse(await readFile(path, "utf8")) as SessionSnapshot;
     expect(snapshot.runtimeGeneration).toBe("fixture-generation");
     expect(snapshot.transcriptStart).toBe(0);
     expect(snapshot.transcriptTotal).toBe(snapshot.transcript.length);
     expect(snapshot.transcriptTotal).toBe(11);
+    expect(snapshot.queueRevision).toBe(3);
+    expect(snapshot.queuedItems.map((item) => item.behavior)).toEqual(["steer", "followUp"]);
+    expect(snapshot.automaticCompactionEnabled).toBe(true);
+    expect(snapshot.liveActivityRevision).toBe(5);
+    expect(snapshot.extensionActivityAsOf).toBe("2026-01-01T00:00:11Z");
     expect(snapshot.extensionPresentation).toBeDefined();
     expect(snapshot.toolExecutions).toBeDefined();
     expect(snapshot.processOverview).toMatchObject({ revision: 5, visibility: "recent", activeCount: 0, recentCount: 1 });

@@ -6,11 +6,11 @@ private final class FixtureBundleMarker {}
 
 @Suite("Shared TypeScript and Swift protocol fixtures")
 struct SharedProtocolFixtureTests {
-    @Test("protocol-v3 exhaustive session fixture decodes and round trips")
+    @Test("protocol-v4 exhaustive session fixture decodes and round trips")
     func exhaustiveSessionFixture() throws {
         let bundle = Bundle(for: FixtureBundleMarker.self)
-        let direct = bundle.url(forResource: "session-snapshot-v3", withExtension: "json")
-        let nested = bundle.url(forResource: "session-snapshot-v3", withExtension: "json", subdirectory: "protocol-fixtures")
+        let direct = bundle.url(forResource: "session-snapshot-v4", withExtension: "json")
+        let nested = bundle.url(forResource: "session-snapshot-v4", withExtension: "json", subdirectory: "protocol-fixtures")
         let url = try #require(direct ?? nested)
         let data = try Data(contentsOf: url)
         let snapshot = try JSONDecoder.gateway.decode(SessionSnapshot.self, from: data)

@@ -6455,6 +6455,90 @@ export default function (pi) {
     expect(drainSettled).toBe(true);
   });
 
+  it("persists extension notifications as centered non-context rows with exact command provenance", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-extension-command-notification-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+    await writeFile(join(extensionDir, "notify-command.ts"), `export default function (pi) {
+      pi.registerCommand("notify-command", {
+        handler: async (_args, ctx) => {
+          ctx.ui.notify("Goal created.", "info");
+          pi.sendMessage({
+            customType: "goal-event",
+            content: "Goal created.",
+            display: true,
+            details: { goal: { objective: "count to 20", status: "active" } },
+          });
+          pi.sendMessage({
+            customType: "goal-audit",
+            content: "Goal receipt stored.",
+            display: true,
+          });
+        },
+      });
+    }\n`);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust,
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+
+    await expect(slot.prompt("/notify-command count to 20")).resolves.toEqual({ operationId: expect.any(String) });
+    await waitUntil(() => slot.snapshot().transcript.some(item =>
+      item.kind === "customEntry" && item.semantic?.kind === "status"));
+    await waitUntil(() => slot.snapshot().transcript.filter(item =>
+      item.kind === "customMessage" && item.semantic?.origin.kind === "extension").length === 2);
+    const snapshot = slot.snapshot();
+    const command = snapshot.transcript.find(item => item.semantic?.kind === "command");
+    const commandOwnerID = command?.semantic?.origin.ownerId;
+    expect(command).toMatchObject({
+      semantic: {
+        direction: "ambientStatus",
+        contextEffect: "none",
+        lifecycle: "completed",
+        origin: { kind: "extension", ownerId: expect.any(String) },
+      },
+    });
+    expect(snapshot.transcript.find(item =>
+      item.kind === "customEntry" && item.semantic?.kind === "status")).toMatchObject({
+      kind: "customEntry",
+      data: expect.objectContaining({ message: "Goal created.", tone: "info" }),
+      semantic: {
+        direction: "ambientStatus",
+        contextEffect: "none",
+        origin: expect.objectContaining({ kind: "extension", ownerId: commandOwnerID }),
+      },
+    });
+    const customMessages = snapshot.transcript.filter(item => item.kind === "customMessage");
+    expect(customMessages).toHaveLength(2);
+    expect(customMessages[0]).toMatchObject({
+      details: { goal: { objective: "count to 20", status: "active" } },
+      semantic: {
+        direction: "inboundContext",
+        contextEffect: "modelInput",
+        origin: expect.objectContaining({ kind: "extension", ownerId: commandOwnerID }),
+      },
+    });
+    expect(customMessages[1]).toMatchObject({
+      semantic: {
+        direction: "inboundContext",
+        contextEffect: "modelInput",
+        origin: expect.objectContaining({ kind: "extension", ownerId: commandOwnerID }),
+      },
+    });
+  });
+
   it("records a caught extension-command handler error as a failed canonical invocation", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-extension-command-failure-"));
     const agentDir = join(root, "agent");
@@ -6524,6 +6608,7 @@ export default function (pi) {
       pi.on("session_shutdown", async (_event, ctx) => {
         await new Promise((resolve) => setTimeout(resolve, 50));
         ctx.ui.setStatus("shutdown", "complete");
+        ctx.ui.notify("Shutdown complete.", "info");
       });
       pi.registerCommand("close-owning-session", { handler: async (_args, ctx) => ctx.shutdown() });
     }\n`);
@@ -6579,6 +6664,15 @@ export default function (pi) {
       sessionId: persistedID,
       phase: "idle",
       summaryRevision: ownership.summaryRevisions.get(persistedID),
+    });
+    const reopened = await registry.acquire(persistedID);
+    expect(reopened.snapshot().transcript.find(item =>
+      item.kind === "customEntry" && item.semantic?.kind === "status"
+        && item.data !== undefined && !Array.isArray(item.data)
+        && typeof item.data === "object" && item.data !== null
+        && item.data.message === "Shutdown complete.")).toMatchObject({
+      data: expect.objectContaining({ message: "Shutdown complete." }),
+      semantic: { direction: "ambientStatus", contextEffect: "none" },
     });
   });
 

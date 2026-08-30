@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { SemanticUIBroker } from "./semantic-ui-broker.js";
+import { SemanticUIBroker, type ExtensionNotificationInput } from "./semantic-ui-broker.js";
 import { ExtensionPresentationStore } from "../extensions/host/extension-presentation-store.js";
 import type { JsonValue } from "../protocol/types.js";
 import { withInvocationContext } from "../extensions/owner-attribution.js";
 
-function brokerWith(broadcast: (topic: string, payload: JsonValue) => void = () => {}): SemanticUIBroker {
-  return new SemanticUIBroker(new ExtensionPresentationStore((topic, payload) => broadcast(topic, payload)));
+function brokerWith(
+  broadcast: (topic: string, payload: JsonValue) => void = () => {},
+  notificationSink?: (notification: ExtensionNotificationInput) => void,
+): SemanticUIBroker {
+  return new SemanticUIBroker(
+    new ExtensionPresentationStore((topic, payload) => broadcast(topic, payload)),
+    notificationSink,
+  );
 }
 
 describe("SemanticUIBroker", () => {
@@ -367,6 +373,33 @@ describe("SemanticUIBroker", () => {
     expect(JSON.stringify(events)).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/u);
     broker.cancelAll();
     await expect(pending).rejects.toMatchObject({ code: "cancelled" });
+  });
+
+  it("rejects notifications that are empty after terminal sanitization", () => {
+    const notifications: ExtensionNotificationInput[] = [];
+    const broker = brokerWith(() => {}, (value) => notifications.push(value));
+
+    expect(() => broker.context().notify("\u001b]52;c;clip\u0007", "info")).not.toThrow();
+
+    expect(notifications).toEqual([]);
+    expect(broker.state().diagnostics.at(-1)?.code).toBe("semantic.notify");
+  });
+
+  it("routes extension notifications to the canonical sink rather than presentation events", () => {
+    const events: unknown[] = [];
+    const notifications: ExtensionNotificationInput[] = [];
+    const broker = brokerWith((_topic, payload) => events.push(payload), (value) => notifications.push(value));
+
+    withInvocationContext({ invocationId: "invocation", operationId: "operation" }, () => {
+      broker.context().notify("Goal created.", "info");
+    });
+
+    expect(notifications).toEqual([{
+      message: "Goal created.",
+      tone: "info",
+      invocation: { invocationId: "invocation", operationId: "operation" },
+    }]);
+    expect(events).toEqual([]);
   });
 
   it("bounds widget identities and scalar event fields", () => {

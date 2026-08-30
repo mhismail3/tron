@@ -436,12 +436,6 @@ struct ExtensionSemanticPatch: Codable, Hashable, Sendable {
     }
 }
 
-struct ExtensionPresentationNotification: Codable, Hashable, Sendable {
-    enum Kind: String, Codable, Sendable { case info, warning, error }
-    var message: String
-    var type: Kind
-}
-
 struct ExtensionPresentationMutation: Codable, Hashable, Sendable {
     var version: Int
     var hostEpoch: String
@@ -454,11 +448,10 @@ struct ExtensionPresentationMutation: Codable, Hashable, Sendable {
     var inputLeasePresent: Bool
     var capabilities: [String]?
     var diagnostics: [ExtensionPresentationDiagnostic]?
-    var notification: ExtensionPresentationNotification?
 
     private enum CodingKeys: String, CodingKey {
         case version, hostEpoch, revision, semantic, interactionList, surfaceUpserts
-        case surfaceRemovals, inputLease, capabilities, diagnostics, notification
+        case surfaceRemovals, inputLease, capabilities, diagnostics
     }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -473,7 +466,6 @@ struct ExtensionPresentationMutation: Codable, Hashable, Sendable {
         inputLease = inputLeasePresent ? try container.decode(JSONValue.self, forKey: .inputLease) : nil
         capabilities = try container.decodeBoundedArrayIfPresent(String.self, forKey: .capabilities, maximum: 128)
         diagnostics = try container.decodeBoundedArrayIfPresent(ExtensionPresentationDiagnostic.self, forKey: .diagnostics, maximum: 64)
-        notification = try container.decodeIfPresent(ExtensionPresentationNotification.self, forKey: .notification)
     }
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -487,7 +479,6 @@ struct ExtensionPresentationMutation: Codable, Hashable, Sendable {
         if inputLeasePresent { try container.encode(inputLease ?? .null, forKey: .inputLease) }
         try container.encodeIfPresent(capabilities, forKey: .capabilities)
         try container.encodeIfPresent(diagnostics, forKey: .diagnostics)
-        try container.encodeIfPresent(notification, forKey: .notification)
     }
 }
 

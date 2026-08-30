@@ -1350,7 +1350,32 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
                 title: item.label.map { "Bookmark: \($0)" } ?? "Bookmark removed",
                 detail: nil, body: nil, tone: .neutral, material: .flat
             )
-        case .message, .bash, .customMessage, .customEntry:
+        case .customEntry:
+            guard item.semantic?.kind == .status,
+                  let data = item.customData?.objectValue,
+                  let message = data["message"]?.stringValue,
+                  !message.isEmpty else { return nil }
+            let tone: ChatNotificationTone = switch data["tone"]?.stringValue {
+            case "error": .error
+            case "warning": .warning
+            default:
+                switch item.semantic?.origin.kind {
+                case .extension: .purple
+                case .subagent, .process: .information
+                case .user: .accent
+                case .gateway, .assistant, .unknown, nil: .neutral
+                }
+            }
+            return ChatNotificationPresentation(
+                id: "notification-\(item.id)", semanticID: item.id,
+                icon: tone == .error ? "exclamationmark.triangle.fill" : "info.circle.fill",
+                title: message,
+                detail: item.semantic?.origin.title,
+                body: nil,
+                tone: tone,
+                material: .flat
+            )
+        case .message, .bash, .customMessage:
             return nil
         }
     }

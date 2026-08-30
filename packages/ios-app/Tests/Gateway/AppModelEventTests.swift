@@ -455,7 +455,7 @@ struct AppModelEventTests {
         #expect(model.selectedSnapshot?.sessionId != "other-session")
     }
 
-    @Test("v3 session.open requires explicit subscription ownership")
+    @Test("session.open requires explicit subscription ownership")
     func missingSessionOpenTokenIsRejected() throws {
         let snapshot = try loadSnapshot()
         #expect(throws: (any Error).self) {
@@ -711,7 +711,7 @@ struct AppModelEventTests {
         #expect(!model.terminalHasExited("terminal"))
     }
 
-    @Test("unrendered sequenced events still advance the authoritative cursor")
+    @Test("unrendered sequenced events still advance the authoritative cursor without creating app notices")
     func unrenderedEventsAdvanceCursor() async throws {
         let snapshot = try loadSnapshot()
         let model = AppModel()
@@ -724,7 +724,7 @@ struct AppModelEventTests {
         ])))
 
         #expect(model.selectedSnapshot?.eventSequence == 89)
-        #expect(model.visibleNotices.last?.title == "Caught up")
+        #expect(model.visibleNotices.allSatisfy { $0.title != "Caught up" })
     }
 
     @Test("configured default model is preferred over catalog order")
@@ -924,8 +924,8 @@ struct AppModelEventTests {
 
     private func loadSnapshot() throws -> SessionSnapshot {
         let bundle = Bundle(for: EventFixtureBundleMarker.self)
-        let url = bundle.url(forResource: "session-snapshot-v3", withExtension: "json")
-            ?? bundle.url(forResource: "session-snapshot-v3", withExtension: "json", subdirectory: "protocol-fixtures")
+        let url = bundle.url(forResource: "session-snapshot-v4", withExtension: "json")
+            ?? bundle.url(forResource: "session-snapshot-v4", withExtension: "json", subdirectory: "protocol-fixtures")
         return try JSONDecoder.gateway.decode(SessionSnapshot.self, from: Data(contentsOf: #require(url)))
     }
 }

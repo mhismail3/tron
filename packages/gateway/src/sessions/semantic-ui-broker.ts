@@ -9,6 +9,7 @@ import { GatewayError } from "../errors.js";
 import type {
   ExtensionInteraction,
   ExtensionInteractionInput,
+  ExtensionOwner,
   ExtensionQuestionnaireAnswer,
   ExtensionQuestionnaireDescriptor,
   ExtensionSemanticState,
@@ -26,6 +27,13 @@ import {
 } from "../extensions/host/extension-presentation-store.js";
 import { stripTerminalControls } from "../extensions/host/terminal-sanitizer.js";
 import { currentExtensionOwner, currentInvocationContext } from "../extensions/owner-attribution.js";
+
+export interface ExtensionNotificationInput {
+  message: string;
+  tone: "info" | "warning" | "error";
+  owner?: ExtensionOwner;
+  invocation?: { invocationId: string; operationId: string };
+}
 
 interface PendingInteraction {
   wire: ExtensionInteraction;
@@ -102,7 +110,10 @@ export class SemanticUIBroker {
   private readonly pending = new Map<string, PendingInteraction>();
   private readonly editorOperationReceipts = new Map<string, number>();
 
-  constructor(readonly presentation: ExtensionPresentationStore) {}
+  constructor(
+    readonly presentation: ExtensionPresentationStore,
+    private readonly notificationSink?: (notification: ExtensionNotificationInput) => void,
+  ) {}
 
   get hostEpoch(): string { return this.presentation.hostEpoch; }
   interactions(): ExtensionInteraction[] { return this.presentation.state().pendingInteractions; }
@@ -362,8 +373,17 @@ export class SemanticUIBroker {
       notify(message, type = "info") {
         broker.safeCallback("notify", () => {
           broker.assertActive(); requireBoundedString(message, MAX_NOTIFICATION_BYTES, "notification"); message = stripTerminalPresentation(message);
+          if (message.length === 0) throw new GatewayError("conflict", "Extension UI notification is empty after sanitization");
           if (type !== "info" && type !== "warning" && type !== "error") throw new GatewayError("conflict", "Extension UI notification type is invalid");
-          broker.presentation.notify(message, type);
+          const owner = currentExtensionOwner();
+          const invocation = currentInvocationContext();
+          const notification = {
+            message,
+            tone: type,
+            ...(owner ? { owner } : {}),
+            ...(invocation ? { invocation } : {}),
+          };
+          broker.notificationSink?.(notification);
         });
       },
       onTerminalInput() { return () => {}; },

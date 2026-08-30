@@ -2216,7 +2216,6 @@ final class SessionPresentationStore {
             chatTimelineChanged = true
         }
         snapshot.extensionPresentation = next
-        if let notification = mutation.notification { effects.append(.notice(notification.message, type: notification.type.rawValue)) }
         return .applied
     }
 

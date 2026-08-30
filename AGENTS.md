@@ -20,6 +20,9 @@
    only; speculative runtime surfaces should be deleted.
 7. **Never run or add automated production deployment.** Production release and
    deployment are manual maintainer actions.
+8. **Never rebuild, replace, promote, or restart the running Stable Gateway.**
+   Agents may prepare and validate source or build artifacts, but every Stable
+   Gateway transition must be explicitly initiated by the user or maintainer.
 
 ## Architecture invariants
 

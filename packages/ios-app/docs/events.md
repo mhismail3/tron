@@ -8,14 +8,16 @@ metadata separates direction, context effect, provenance, visibility, delivery,
 semantic kind, and causal invocation/operation IDs. Inbound model context is
 right aligned; assistant output and agent-requested tools remain left aligned;
 non-context status is centered; hidden internal state has no chat row. User input
-is green, trusted subagent/process input blue, extension or unknown input gray,
-and Gateway status muted, with labels/icons for accessibility.
+is green, trusted subagent/process input blue, attributed extension input pastel
+purple, unknown input gray, and Gateway status muted, with labels/icons for accessibility.
 
 `custom_message` is model context regardless of whether it triggers a turn or is
 producer-visible. Producer-hidden messages remain hidden in ordinary chat.
 `custom`/`appendEntry` is context-free extension state and is hidden unless a
-trusted typed adapter promotes it to a centered status. No generic extension
-message/state is rendered as a ToolCard. Invocation receipts are bounded
+trusted typed adapter promotes it to a centered status. Extension `ui.notify`
+callbacks are canonical bounded centered status receipts, never app toasts; app
+notices remain reserved for product/system events. No generic extension message/state
+is rendered as a ToolCard. Invocation receipts are bounded
 canonical records used to reconcile accepted commands and resource prompts after
 restart; uncertain side effects are never replayed automatically.
 
@@ -134,7 +136,8 @@ unknown values stay neutral, and each newly admitted prompt uses its role-aware 
 Resource invocation is one typed contract across composer, pending, queue, and canonical rows: the
 source/name identity is captured once, arguments are the exact visible composer text (bounded to
 5,000 UTF-8 bytes), and empty
-arguments are valid for no-argument resources. Leading manually typed extension and skill resources
+arguments are valid for no-argument resources. Extension arguments are opaque and passed exactly;
+Tron never lowercases or otherwise rewrites case-sensitive command syntax. Leading manually typed extension and skill resources
 use Pi's literal ASCII-space delimiter; prompt templates use Pi's whitespace delimiter after extension
 precedence. Embedded slash text remains ordinary prose. The
 Gateway owns UTF-8 byte/control validation and rejects mismatched display/execution text. Canonical
@@ -301,8 +304,8 @@ Session subscription ownership is token-scoped end to end. The open response rem
 provisional until sync acknowledgement and exact route-intent revalidation; both sync and subscription
 credentials must be nonempty, printable UTF-8 tokens no larger than 200 bytes. Baseline plus its
 already-drained contiguous event suffix then publish in one MainActor turn. The fitted tail mounts immediately regardless of its display-bearing count; earlier-page reads begin only from the mounted presentation and cannot make the conversation unavailable. A stale or failed
-attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. Active
-protocol-v3 peers always provide explicit subscription ownership. If a reconnect installs a new runtime generation for the same canonical session,
+attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. Protocol-v4
+peers always provide explicit subscription ownership. If a reconnect installs a new runtime generation for the same canonical session,
 iOS clears context/tree/resource/command projections, invalidates their in-flight request generations,
 and advances all three public reload revisions before publishing the replacement. Secondary read successes
 and failures both require the exact captured subscription token and latest request generation, so a retired

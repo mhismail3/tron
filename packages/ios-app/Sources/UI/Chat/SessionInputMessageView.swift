@@ -25,8 +25,8 @@ enum InboundProducerPresentationPolicy {
         switch origin {
         case .subagent, .process: return .information
         case .user: return .accent
-        case .gateway: return .neutral
-        case .extension, .assistant, .unknown, nil: return .neutral
+        case .extension: return .purple
+        case .gateway, .assistant, .unknown, nil: return .neutral
         }
     }
 
@@ -42,6 +42,51 @@ enum InboundProducerPresentationPolicy {
         case .toolResult: return "Delivered as a tool result"
         case .unknown, nil: return "Unknown"
         }
+    }
+}
+
+struct InboundContextGoalPresentation: Equatable {
+    let objective: String
+    let status: String
+    let tokensUsed: Int?
+    let tokenBudget: Int?
+    let timeUsedSeconds: Int?
+
+    static func project(_ details: JSONValue?) -> Self? {
+        guard let goal = details?.objectValue?["goal"]?.objectValue,
+              let objective = goal["objective"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !objective.isEmpty else { return nil }
+        return Self(
+            objective: objective,
+            status: ComposerResourceNameFormatter.friendly(goal["status"]?.stringValue ?? "unknown"),
+            tokensUsed: goal["tokensUsed"]?.intValue,
+            tokenBudget: goal["tokenBudget"]?.intValue,
+            timeUsedSeconds: goal["timeUsedSeconds"]?.intValue
+        )
+    }
+
+    var compactStatus: String { "\(status) · \(objective)" }
+
+    var metadata: [TronTechnicalMetadataItem] {
+        var values = [
+            TronTechnicalMetadataItem(title: "Objective", value: objective, icon: "scope"),
+            TronTechnicalMetadataItem(title: "Status", value: status, icon: "checkmark.circle"),
+        ]
+        if let tokensUsed {
+            values.append(.init(title: "Tokens used", value: tokensUsed.formatted(), icon: "number"))
+        }
+        if let tokenBudget {
+            values.append(.init(title: "Token budget", value: tokenBudget.formatted(), icon: "gauge.with.dots.needle.33percent"))
+        }
+        if let timeUsedSeconds {
+            let boundedSeconds = max(0, min(timeUsedSeconds, Int.max / 1_000))
+            values.append(.init(
+                title: "Time used",
+                value: ToolTiming.format(milliseconds: boundedSeconds * 1_000),
+                icon: "clock"
+            ))
+        }
+        return values
     }
 }
 
@@ -85,7 +130,10 @@ struct InboundProducerMessageView: View {
     }
 
     private var status: String {
-        InboundContextCompactPresentationPolicy.status(
+        if let goal = InboundContextGoalPresentation.project(item.details) {
+            return goal.compactStatus
+        }
+        return InboundContextCompactPresentationPolicy.status(
             details: item.details,
             message: messageText
         )
@@ -168,6 +216,10 @@ private struct InboundContextDetailsSheet: View {
         ]
     }
 
+    private var goalMetadata: [TronTechnicalMetadataItem]? {
+        InboundContextGoalPresentation.project(item.details)?.metadata
+    }
+
     private var canonicalMetadata: [TronTechnicalMetadataItem] {
         [
             .init(title: "Entry", value: item.id, icon: "number"),
@@ -184,6 +236,13 @@ private struct InboundContextDetailsSheet: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
                     messageSection
+                    if let goalMetadata {
+                        TronTechnicalMetadataSection(
+                            title: "Goal",
+                            items: goalMetadata,
+                            accent: .tronPurple
+                        )
+                    }
                     TronTechnicalMetadataSection(
                         title: "Origin",
                         items: originMetadata,

@@ -329,7 +329,7 @@ token are returned first. The snapshot and subscription token remain provisional
 unobservable until `session.sync` succeeds and the exact session/presentation intent is
 revalidated. iOS admits both tokens as nonempty, printable UTF-8 values of at most 200 bytes before installation; stale or failed opens close only the already bounded provisional subscription token. The same opaque token
 then becomes subscription ownership, and `session.close` only releases a subscription whose
-current token matches. Active protocol-v3 peers always provide explicit ownership.
+current token matches. Protocol-v4 peers always provide explicit ownership.
 One intent-keyed synchronization coordinator owns the shared outcome and event quarantine.
 Compatible reconnect callers await that outcome directly instead of polling tokens; a fresh
 presentation never inherits reconnect installation semantics and waits to retry after incompatible

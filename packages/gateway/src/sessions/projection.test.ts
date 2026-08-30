@@ -6,6 +6,7 @@ import { BlobStore } from "./blob-store.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { makeInvocationReceipt, INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
+import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
 import type { SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import {
   admitCommandCatalog,
@@ -354,11 +355,47 @@ describe("transcript projection", () => {
     const transcript = projectTranscript(manager, new BlobStore());
     expect(transcript.map(item => item.id)).toEqual([user, manager.getEntries()[1]!.id, assistant]);
     expect(transcript[0]).toMatchObject({ semantic: { kind: "prompt", origin: { kind: "user" } } });
-    expect(transcript[1]).toMatchObject({ kind: "customEntry", semantic: { invocationId: "inv", lifecycle: "completed", kind: "command" } });
+    expect(transcript[1]).toMatchObject({
+      kind: "customEntry",
+      semantic: { invocationId: "inv", lifecycle: "completed", kind: "command", direction: "ambientStatus", contextEffect: "none" },
+    });
     expect(transcript.filter(item => item.customType === INVOCATION_RECEIPT_TYPE)).toHaveLength(1);
     const tree = projectTree(manager, new BlobStore());
     expect(tree.filter(item => item.kind === "customEntry")).toHaveLength(1);
     expect(tree.filter(item => item.kind === "customEntry")[0]).toMatchObject({ preview: INVOCATION_RECEIPT_TYPE });
+  });
+
+  it("projects Gateway-authored extension notifications as ambient non-context status", () => {
+    const manager = SessionManager.inMemory("/tmp/project");
+    manager.appendCustomEntry(EXTENSION_NOTIFICATION_RECEIPT_TYPE, makeExtensionNotificationReceipt({
+      version: 1,
+      receiptId: "notification:goal",
+      sessionId: manager.getSessionId(),
+      message: "Goal created.",
+      tone: "info",
+      origin: { kind: "extension", ownerId: "extension:goal", title: "Pi Goal", confidence: "receipt" },
+      invocationId: "invocation",
+      operationId: "operation",
+      sequence: 2,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }));
+
+    expect(projectTranscript(manager, new BlobStore())).toEqual([
+      expect.objectContaining({
+        kind: "customEntry",
+        customType: EXTENSION_NOTIFICATION_RECEIPT_TYPE,
+        data: expect.objectContaining({ message: "Goal created.", tone: "info" }),
+        semantic: expect.objectContaining({
+          kind: "status",
+          direction: "ambientStatus",
+          contextEffect: "none",
+          origin: expect.objectContaining({ title: "Pi Goal" }),
+        }),
+      }),
+    ]);
+    // Session tree remains structural; ambient chat notices do not become
+    // navigation nodes.
+    expect(projectTree(manager, new BlobStore())).toEqual([]);
   });
 
   it("folds a skill invocation into its canonical user row without a receipt row", () => {

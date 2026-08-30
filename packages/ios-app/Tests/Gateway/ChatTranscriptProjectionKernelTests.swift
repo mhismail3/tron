@@ -947,7 +947,7 @@ struct ChatTranscriptProjectionKernelTests {
     @Test("canonical command receipts remain ordered transcript rows rather than user or tool rows")
     func commandReceiptIsDedicatedTranscriptRow() throws {
         var snapshot = try fixture(transcript: """
-        [{"id":"command","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"inboundContext","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"adapter"},"invocationId":"invocation","operationId":"operation","sequence":1,"lifecycle":"running","resourceInvocation":{"source":"extension","name":"goal","arguments":"count to 20"}}}]
+        [{"id":"command","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.chat-invocation.v1","semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"adapter"},"invocationId":"invocation","operationId":"operation","sequence":1,"lifecycle":"running","resourceInvocation":{"source":"extension","name":"goal","arguments":"count to 20"}}}]
         """)
         snapshot.transcriptTotal = 1
 
@@ -959,9 +959,29 @@ struct ChatTranscriptProjectionKernelTests {
         }
         #expect(item.id == "command")
         #expect(item.semantic?.kind == .command)
+        #expect(item.semantic?.direction == .ambientStatus)
         #expect(item.semantic?.resourceInvocation == ComposerResourceInvocation(
             source: .extension, name: "goal", arguments: "count to 20"
         ))
+        #expect(candidate.toolPayloads.callIDs.isEmpty)
+    }
+
+    @Test("canonical extension notifications are centered status rows rather than app notices")
+    func extensionNotificationIsCanonicalStatus() throws {
+        var snapshot = try fixture(transcript: """
+        [{"id":"notice","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"customEntry","customType":"tron.extension-notification.v1","data":{"writer":"gateway","version":1,"receiptId":"notification:goal","sessionId":"session","message":"Goal created.","tone":"info","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"receipt"},"sequence":1,"createdAt":"2026-01-01T00:00:00.000Z"},"semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"status","origin":{"kind":"extension","ownerId":"extension:goal","title":"Pi Goal","confidence":"receipt"},"sequence":1}}]
+        """)
+        snapshot.transcriptTotal = 1
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(candidate.timeline.items.count == 1)
+        guard case .notification(let notice) = candidate.timeline.items.first else {
+            Issue.record("Expected a centered extension notification")
+            return
+        }
+        #expect(notice.title == "Goal created.")
+        #expect(notice.detail == "Pi Goal")
+        #expect(notice.tone == .purple)
         #expect(candidate.toolPayloads.callIDs.isEmpty)
     }
 

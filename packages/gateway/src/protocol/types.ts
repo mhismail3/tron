@@ -680,7 +680,6 @@ export interface ExtensionPresentationMutation {
   inputLease?: ExtensionInputLease | null;
   capabilities?: string[];
   diagnostics?: ExtensionPresentationDiagnostic[];
-  notification?: { message: string; type: "info" | "warning" | "error" };
 }
 
 export interface SessionStats {

@@ -30,9 +30,11 @@ struct TranscriptRow: View, Equatable {
             case .customEntry:
                 if item.semantic?.kind == .command {
                     CommandLifecycleView(item: item)
+                } else if let notification = ChatNotificationPresentation.canonical(item, globalOrdinal: nil) {
+                    ChatNotificationView(presentation: notification)
                 } else {
                     // appendEntry/custom entries are extension state, not chat
-                    // content. Only typed command receipts have a transcript
+                    // content. Only typed Gateway receipts have a transcript
                     // presentation; unadapted state remains absent.
                     EmptyView()
                 }

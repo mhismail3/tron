@@ -46,7 +46,6 @@ const MAX_INDICATOR_FRAMES = 32;
 const MAX_INDICATOR_FRAME_BYTES = 256;
 const MAX_INTERACTION_BYTES = 192 * 1_024;
 const MAX_EDITOR_DIRECTIVE_BYTES = 192 * 1_024;
-const MAX_NOTIFICATION_BYTES = 32 * 1_024;
 const MAX_OWNER_ID_BYTES = 512;
 const MAX_OWNER_TITLE_BYTES = 256;
 const MAX_OWNER_SOURCE_BYTES = 512;
@@ -163,7 +162,6 @@ export interface ExtensionPresentationDraft {
   inputLease?: ExtensionInputLease;
   capabilities: string[];
   diagnostics: ExtensionPresentationDiagnostic[];
-  notification?: { message: string; type: "info" | "warning" | "error" };
   editorDirective?: { action: "set" | "paste" | "native"; delta: string; operationId?: string };
 }
 
@@ -280,10 +278,6 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
     return mutation;
   }
 
-  notify(message: string, type: "info" | "warning" | "error"): void {
-    this.transact((draft) => { draft.notification = { message: stripTerminalControls(message), type }; });
-  }
-
   /**
    * Record a rejected extension-owned void callback without allowing its
    * presentation failure to escape into an unawaited timer/event callback.
@@ -365,7 +359,6 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
     if (!equal(before.inputLease, after.inputLease)) result.inputLease = after.inputLease ? clone(after.inputLease) : null;
     if (!equal(before.capabilities, after.capabilities)) result.capabilities = [...after.capabilities];
     if (!equal(before.diagnostics, after.diagnostics)) result.diagnostics = clone(after.diagnostics);
-    if (after.notification) result.notification = clone(after.notification);
     return result;
   }
 
@@ -405,10 +398,6 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
           || (item.method === "select" && item.options?.length !== item.questionnaire.options.length + (item.questionnaire.allowFreeform ? 1 : 0))))
         || bytes(item) > MAX_INTERACTION_BYTES)) {
       throw new GatewayError("conflict", "Extension interactions are invalid");
-    }
-    if (draft.notification && (!boundedSafe(draft.notification.message, MAX_NOTIFICATION_BYTES, true)
-      || !["info", "warning", "error"].includes(draft.notification.type))) {
-      throw new GatewayError("conflict", "Extension presentation notification is invalid");
     }
     if (draft.editorDirective && (bytes(draft.editorDirective.delta) > MAX_EDITOR_DIRECTIVE_BYTES
       || (draft.editorDirective.operationId !== undefined && bytes(draft.editorDirective.operationId) > MAX_ID_BYTES))) {

@@ -20,11 +20,19 @@ export interface InvocationExecutionContext {
   operationId: string;
 }
 const invocationStorage = new AsyncLocalStorage<InvocationExecutionContext>();
+const attributedCommandOwners = new WeakMap<RegisteredCommand["handler"], ExtensionOwner>();
+const attributedToolOwners = new WeakMap<ToolDefinition["execute"], ExtensionOwner>();
 
 export function currentExtensionOwner(): ExtensionOwner | undefined { return ownerStorage.getStore(); }
 export function currentInvocationContext(): InvocationExecutionContext | undefined { return invocationStorage.getStore(); }
 export function withInvocationContext<T>(context: InvocationExecutionContext, operation: () => T): T {
   return invocationStorage.run(context, operation);
+}
+export function attributedCommandOwner(command: RegisteredCommand | undefined): ExtensionOwner | undefined {
+  return command ? attributedCommandOwners.get(command.handler) : undefined;
+}
+export function attributedToolOwner(tool: RegisteredTool | undefined): ExtensionOwner | undefined {
+  return tool ? attributedToolOwners.get(tool.definition.execute) : undefined;
 }
 
 function humanizedDisplayName(extension: Extension): string {
@@ -73,11 +81,13 @@ export function attributeExtensions(base: LoadExtensionsResult, hooks: Extension
     }
     for (const [name, registered] of extension.tools) {
       const definition = registered.definition;
+      const execute = owned(adaptedToolDefinition(extension, name, definition, hooks).execute, owner);
+      attributedToolOwners.set(execute, owner);
       extension.tools.set(name, {
         ...registered,
         definition: {
           ...definition,
-          execute: owned(adaptedToolDefinition(extension, name, definition, hooks).execute, owner),
+          execute,
           ...(definition.prepareArguments ? { prepareArguments: owned(definition.prepareArguments, owner) } : {}),
           ...(definition.renderCall ? { renderCall: owned(definition.renderCall, owner) } : {}),
           ...(definition.renderResult ? { renderResult: owned(definition.renderResult, owner) } : {}),
@@ -85,7 +95,9 @@ export function attributeExtensions(base: LoadExtensionsResult, hooks: Extension
       } as RegisteredTool);
     }
     for (const [name, command] of extension.commands) {
-      extension.commands.set(name, { ...command, handler: owned(command.handler, owner) } as RegisteredCommand);
+      const handler = owned(command.handler, owner);
+      attributedCommandOwners.set(handler, owner);
+      extension.commands.set(name, { ...command, handler } as RegisteredCommand);
     }
     for (const [name, shortcut] of extension.shortcuts) {
       extension.shortcuts.set(name, { ...shortcut, handler: owned(shortcut.handler, owner) });

@@ -27,6 +27,7 @@ import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js
 import type { ChatOrigin, ChatSemanticMetadata, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
 import { contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, parseInvocationReceipt, type InvocationProjection } from "./invocation-receipts.js";
+import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, parseExtensionNotificationReceipt } from "./extension-notification-receipts.js";
 import { RESOURCE_NAME_MAX_BYTES } from "./resource-invocation.js";
 
 const MAX_TEXT = 64_000;
@@ -97,7 +98,7 @@ function semanticForMessage(role: "user" | "assistant" | "toolResult", invocatio
 function semanticForCommand(receipt: ReturnType<typeof parseInvocationReceipt>): ChatSemanticMetadata {
   return {
     version: 1,
-    direction: "inboundContext",
+    direction: "ambientStatus",
     contextEffect: "none",
     delivery: "stored",
     visibility: "visible",
@@ -115,6 +116,23 @@ function semanticForCommand(receipt: ReturnType<typeof parseInvocationReceipt>):
       },
     } : {}),
     sequence: receipt?.sequence ?? 0,
+  };
+}
+
+function semanticForExtensionNotification(
+  receipt: NonNullable<ReturnType<typeof parseExtensionNotificationReceipt>>,
+): ChatSemanticMetadata {
+  return {
+    version: 1,
+    direction: "ambientStatus",
+    contextEffect: "none",
+    delivery: "stored",
+    visibility: "visible",
+    kind: "status",
+    origin: receipt.origin,
+    ...(receipt.invocationId ? { invocationId: receipt.invocationId } : {}),
+    ...(receipt.operationId ? { operationId: receipt.operationId } : {}),
+    sequence: receipt.sequence,
   };
 }
 
@@ -1134,10 +1152,22 @@ export function projectEntry(
         semantic: semanticForCustom(entry.display === true, contextDelivery),
       };
     case "custom": {
-      // Arbitrary extension state and receipt records stay canonical in Pi
-      // JSONL, but never consume a chat transcript/tree row. Only one
-      // validated invocation start is the typed command row; later records
-      // fold into that row by invocation identity.
+      // Arbitrary extension state stays canonical in Pi JSONL but never
+      // consumes a chat row. Only Gateway-authored, strictly validated command
+      // and notification receipts receive typed transcript presentation.
+      if (entry.customType === EXTENSION_NOTIFICATION_RECEIPT_TYPE) {
+        const notification = parseExtensionNotificationReceipt(entry.data);
+        if (!notification) return undefined;
+        return {
+          id: entry.id,
+          parentId: entry.parentId,
+          timestamp: entry.timestamp,
+          kind: "customEntry",
+          customType: entry.customType,
+          data: projectJson(notification),
+          semantic: semanticForExtensionNotification(notification),
+        };
+      }
       if (entry.customType !== INVOCATION_RECEIPT_TYPE) return undefined;
       const invocation = parseInvocationReceipt(entry.data);
       if (!invocation || invocation.receiptKind !== "start" || invocation.source !== "extension") return undefined;
@@ -1545,13 +1575,21 @@ function projectableTranscriptEntries(
         && parseInvocationReceipt(entry.data) === undefined) {
       throw new GatewayError("conflict", "Session contains a malformed Gateway invocation receipt");
     }
+    if (entry.type === "custom" && entry.customType === EXTENSION_NOTIFICATION_RECEIPT_TYPE
+        && parseExtensionNotificationReceipt(entry.data) === undefined) {
+      throw new GatewayError("conflict", "Session contains a malformed Gateway extension notification receipt");
+    }
     const invocation = entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE
       ? parseInvocationReceipt(entry.data)
       : undefined;
+    const notification = entry.type === "custom" && entry.customType === EXTENSION_NOTIFICATION_RECEIPT_TYPE
+      ? parseExtensionNotificationReceipt(entry.data)
+      : undefined;
+    const projectableCustom = entry.type !== "custom"
+      || invocation?.receiptKind === "start" && invocation.source === "extension"
+      || notification !== undefined;
     const projectable = entry.type !== "session_info"
-      && !(entry.type === "custom" && (
-        invocation?.receiptKind !== "start" || invocation.source !== "extension"
-      ))
+      && projectableCustom
       && !(entry.type === "custom_message" && !entry.display)
       && !(entry.type === "message" && entry.message.role === "custom"
         && !entry.message.display);
@@ -1767,7 +1805,17 @@ function compactTranscriptPageItem(item: TranscriptItem, byteBudget: number): Tr
   } else if (item.kind === "customMessage") {
     compacted = { ...item, content: [], details: { truncated: true, preview: "Oversized custom message omitted from mobile page." } };
   } else if (item.kind === "customEntry") {
-    compacted = { ...item, data: { truncated: true, preview: "Oversized custom entry omitted from mobile page." } };
+    const notification = item.semantic?.kind === "status" ? item.data as Record<string, JsonValue> | undefined : undefined;
+    compacted = notification && typeof notification.message === "string"
+      ? {
+          ...item,
+          data: {
+            message: utf8Prefix(notification.message, Math.max(64, byteBudget - 2_048)),
+            tone: typeof notification.tone === "string" ? notification.tone : "info",
+            truncated: true,
+          },
+        }
+      : { ...item, data: { truncated: true, preview: "Oversized custom entry omitted from mobile page." } };
   } else if (item.kind === "compaction" || item.kind === "branchSummary") {
     const { details: _details, usage: _usage, ...base } = item;
     compacted = { ...base, summary: utf8Prefix(item.summary, Math.max(64, byteBudget - 1_024)) };

@@ -38,14 +38,6 @@
     "latestCacheHitRate": 62.5,
     "cost": 0.0125
   },
-  "queued": {
-    "steering": [
-      "correct course"
-    ],
-    "followUp": [
-      "then verify"
-    ]
-  },
   "queueRevision": 3,
   "queuedItems": [
     {
@@ -61,6 +53,7 @@
       "attachmentCount": 0
     }
   ],
+  "automaticCompactionEnabled": true,
   "transcript": [
     {
       "id": "user-entry",
@@ -328,6 +321,8 @@
       "groupFinalized": true
     }
   ],
+  "liveActivityRevision": 5,
+  "extensionActivityAsOf": "2026-01-01T00:00:11Z",
   "processActivities": [
     {
       "version": 1,
