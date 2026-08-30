@@ -61,11 +61,23 @@ describe("two-phase session synchronization protocol", () => {
         if (method === "session.close") {
           return { closed: context.unsubscribe(sessionId, params.subscriptionToken as string | undefined) };
         }
+        if (method === "session.presentation.set") {
+          return context.setPresentationVisibility(
+            sessionId,
+            params.subscriptionToken,
+            params.revision,
+            params.visible,
+          );
+        }
         throw new Error(`unexpected method ${method}`);
       },
     };
     const sessions = {
       subscribe: vi.fn(),
+      setPresentationVisibility: vi.fn((input: { revision: number; visible: boolean }) => ({
+        revision: input.revision,
+        visible: input.visible,
+      })),
       unsubscribe: vi.fn(),
       unsubscribeClient: vi.fn(),
     };
@@ -186,7 +198,30 @@ describe("two-phase session synchronization protocol", () => {
     };
     await mobileOpenSync("mobile-a", "a");
     await mobileOpenSync("mobile-b", "b");
-    await mobileOpenSync("mobile-c", "c");
+    const mobileCToken = await mobileOpenSync("mobile-c", "c");
+    mobile.send(JSON.stringify({
+      type: "request",
+      id: "mobile-c-visible",
+      method: "session.presentation.set",
+      params: { sessionId: "c", subscriptionToken: mobileCToken, revision: 1, visible: true },
+    }));
+    while (!mobileFrames.some((frame) => frame.id === "mobile-c-visible")) await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(mobileFrames.find((frame) => frame.id === "mobile-c-visible").result).toEqual({ revision: 1, visible: true });
+    expect(sessions.setPresentationVisibility).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "c",
+      subscriptionToken: mobileCToken,
+      revision: 1,
+      visible: true,
+    }));
+
+    request("technical-visible", "session.presentation.set", "a", {
+      subscriptionToken: openA.result.subscriptionToken,
+      revision: 1,
+      visible: true,
+    });
+    while (!frames.some((frame) => frame.id === "technical-visible")) await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(frames.find((frame) => frame.id === "technical-visible").error.code).toBe("invalid_request");
+
     const mobileEventStart = mobileFrames.length;
     gateway.broadcastSession("a", "session.progress", { runtimeGeneration: "generation-a", eventSequence: 200, revision: 200, data: { message: "a" } } as any);
     gateway.broadcastSession("b", "session.progress", { runtimeGeneration: "generation-b", eventSequence: 200, revision: 200, data: { message: "b" } } as any);

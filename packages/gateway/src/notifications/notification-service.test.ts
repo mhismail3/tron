@@ -97,6 +97,50 @@ describe("NotificationGrantStore and NotificationService", () => {
     })).resolves.toBe("suppressed");
   });
 
+  it("durably suppresses an observed completion without relay or inbox work", async () => {
+    const { service, relay, store } = await fixture();
+    await service.upsertGrant(grant);
+    const completion = {
+      sessionId: "session-observed",
+      sourceId: "assistant-observed",
+    };
+
+    await expect(service.suppressAutomaticCompletion(completion)).resolves.toBe("suppressed");
+    expect(relay.sent).toEqual([]);
+    expect((await service.inbox()).notifications).toEqual([]);
+    expect((await store.snapshot()).receipts).toEqual([
+      expect.objectContaining({ result: "suppressed", grantIds: [] }),
+    ]);
+
+    await expect(service.enqueue({
+      ...completion,
+      kind: "agent_finished",
+      message: "The agent finished responding.",
+    })).resolves.toBe("suppressed");
+    expect(relay.sent).toEqual([]);
+  });
+
+  it("does not charge a presentation-suppressed completion against delivery quota", async () => {
+    const { service, relay } = await fixture(undefined, Date.now, {
+      dailyIntents: 1,
+      sessionHourlyIntents: 1,
+      targetDailyIntents: 1,
+    });
+    await service.upsertGrant(grant);
+    await service.suppressAutomaticCompletion({
+      sessionId: "session-observed",
+      sourceId: "assistant-observed",
+    });
+
+    await expect(service.enqueue({
+      sessionId: "session-observed",
+      sourceId: "explicit-after-observed",
+      kind: "explicit",
+      message: "Explicit update",
+    })).resolves.toBe("queued");
+    await vi.waitFor(() => expect(relay.sent).toHaveLength(1));
+  });
+
   it("keeps inbox invalidation callbacks outside canonical notification admission", async () => {
     const { service } = await fixture(undefined, Date.now, undefined, () => { throw new Error("presentation failed"); });
     await service.upsertGrant(grant);

@@ -80,8 +80,14 @@ export class SessionAttentionStore {
     return projection(record);
   }
 
-  /** Admit an exact canonical successful assistant completion once. */
-  async complete(sessionId: string, completionId: string): Promise<SessionAttentionMutation> {
+  /** Admit an exact canonical successful assistant completion once. A
+   * foreground-observed completion advances read-through in the same durable
+   * replacement, so no intermediate unread projection can escape. */
+  async complete(
+    sessionId: string,
+    completionId: string,
+    observed = false,
+  ): Promise<SessionAttentionMutation> {
     return this.mutex.run(async () => {
       const document = this.requireDocument();
       const existing = ownRecord(document.sessions, sessionId);
@@ -89,9 +95,12 @@ export class SessionAttentionStore {
       if (current.recentCompletionIds.includes(completionId)) {
         return { changed: false, projection: projection(current) };
       }
+      const completionRevision = current.completionRevision + 1;
       const next: SessionAttentionRecord = {
         ...current,
-        completionRevision: current.completionRevision + 1,
+        completionRevision,
+        readThroughRevision: observed ? completionRevision : current.readThroughRevision,
+        manualUnread: observed ? false : current.manualUnread,
         attentionRevision: current.attentionRevision + 1,
         recentCompletionIds: [...current.recentCompletionIds, completionId].slice(-MAXIMUM_RECENT_COMPLETIONS),
       };

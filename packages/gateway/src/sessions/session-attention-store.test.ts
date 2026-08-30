@@ -78,6 +78,24 @@ describe("SessionAttentionStore", () => {
     expect(restarted.projection("next").isUnread).toBe(false);
   });
 
+  it("commits an observed completion as read without exposing an unread intermediate", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-attention-observed-"));
+    const store = new SessionAttentionStore(home);
+    await store.initialize();
+    await store.set("s", true);
+
+    const result = await store.complete("s", "observed-entry", true);
+    expect(result).toMatchObject({
+      changed: true,
+      projection: { completionRevision: 1, attentionRevision: 2, isUnread: false },
+    });
+    expect((await store.complete("s", "observed-entry", false)).changed).toBe(false);
+
+    const restarted = new SessionAttentionStore(home);
+    await restarted.initialize();
+    expect(restarted.projection("s")).toEqual(result.projection);
+  });
+
   it("does not write, create records, or advance revisions for no-op reads", async () => {
     const home = await mkdtemp(join(tmpdir(), "tron-attention-noop-"));
     const write = vi.fn(atomicWriteJson);

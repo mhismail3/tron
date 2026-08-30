@@ -100,10 +100,18 @@ and mounted transcript snapshots cannot overwrite those global row fields. Dashb
 of those Gateway-canonical row fields: only final settled prompt responses advance it, Mark Read/Unread
 uses an absolute command-receipt mutation whose complete attention projection applies immediately even
 for cold rows, and a successful open acknowledges only its returned completion revision after the
-snapshot installs. That acknowledgement retries transient failures against one
-fixed presentation/connection owner and revision; cancellation retires it.
-Protocol-v4 clients require the complete attention mutation and projection
-contract and do not attach to earlier Gateways. The local snapshot cache remains
+snapshot installs. After the exact transcript reaches its first ready frame in an active scene,
+`SessionPresentationStore` owns a 15-second renewal loop for the current subscription's 45-second
+Gateway presentation lease. Visibility requests carry a monotonically increasing revision so a delayed
+inactive request or renewal cannot overwrite newer intent; inactivity, route close, subscription
+replacement, and connection retirement cancel the local owner, while Gateway close/disconnect and lease
+expiry bound missed cleanup. Revisioned unread summaries for the mounted session feed the same exact
+read-through path as a convergence fallback. Gateway latches the lease observation once per canonical
+completion and uses that single disposition to commit completion/read-through atomically and suppress
+the automatic completion notification without creating an inbox row. Opening and mounted acknowledgements
+retry transient failures against one fixed presentation/connection owner and absolute revision;
+cancellation retires them. Protocol-v4 clients require the complete attention and presentation contract
+and do not attach to earlier Gateways. The local snapshot cache remains
 display-only, and projections written before attention fields existed decode as
 read rather than inventing unread state. The dashboard groups user
 sessions by workspace and renders the newest ten per workspace by default; explicit Show more/Show less
@@ -875,7 +883,7 @@ never origins, identifiers, tokens, proofs, grants, response bodies, certificate
 Registration reconciles on connection, foreground, profile, permission, and APNs-token changes;
 Worker failure leaves push pending.
 The app accepts no relay URL or private push credential from settings. Remote alerts
-have no app-icon badge, background content fetch, or notification actions. They request the bundled `tron-notification.caf` custom sound; iOS falls back to its default alert behavior if that resource cannot be resolved. The Settings leading toolbar bell opens a profile-aggregated inbox backed by Gateway's bounded `notification-inbox.v1` resource; `NotificationInboxCoordinator` retains only a bounded local projection, while Gateway list revisions and command-receipt read mutations remain authoritative. The bell uses `bell.badge.fill` and an exact unread accessibility count. The primary sheet shows at most the newest 15 filtered rows, then one View More container opens the full bounded history. Primary rows retain their glass container, while history uses a lazy stack of plain tinted rows so large retained projections do not create one glass compositor per row. Unread rows use an emerald icon/container; read rows use muted gray, with no redundant dot or disclosure chevron. Opening marks one row read, Mark Read clears all Gateway buckets, and details use standard Tron sheet/glass/metadata presentation with Open Chat in the leading toolbar. The All/Unread control sits directly in each list sheet without a redundant outer card or section label; each empty filter uses explicit Tron icon, headline, and body typography rather than the system `ContentUnavailableView` style. Agent-completion
+have no app-icon badge, background content fetch, or notification actions. They request the bundled `tron-notification.caf` custom sound; iOS falls back to its default alert behavior if that resource cannot be resolved. A foreground-ready chat's exact Gateway presentation lease suppresses its product-authored agent-completion alert globally before relay or inbox admission; explicit model `notify` and Ask alerts are unaffected. The Settings leading toolbar bell opens a profile-aggregated inbox backed by Gateway's bounded `notification-inbox.v1` resource; `NotificationInboxCoordinator` retains only a bounded local projection, while Gateway list revisions and command-receipt read mutations remain authoritative. The bell uses `bell.badge.fill` and an exact unread accessibility count. The primary sheet shows at most the newest 15 filtered rows, then one View More container opens the full bounded history. Primary rows retain their glass container, while history uses a lazy stack of plain tinted rows so large retained projections do not create one glass compositor per row. Unread rows use an emerald icon/container; read rows use muted gray, with no redundant dot or disclosure chevron. Opening marks one row read, Mark Read clears all Gateway buckets, and details use standard Tron sheet/glass/metadata presentation with Open Chat in the leading toolbar. The All/Unread control sits directly in each list sheet without a redundant outer card or section label; each empty filter uses explicit Tron icon, headline, and body typography rather than the system `ContentUnavailableView` style. Agent-completion
 alerts carry a bounded APNs request ID and machine/session identity pair in addition to fixed product
 copy and the session title. Tap admission rejects partial, oversized, or non-opaque
 routes and request IDs, resolves the machine only against an already-paired profile, marks the matching canonical inbox item read without delaying navigation, returns to the

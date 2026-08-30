@@ -332,7 +332,8 @@ final class AppModel {
         )
         let sessionPresentation = SessionPresentationStore(
             client: client,
-            performanceSignposts: performanceSignposts
+            performanceSignposts: performanceSignposts,
+            clock: clock
         )
         let terminal = TerminalCoordinator(
             client: client,
@@ -614,6 +615,10 @@ final class AppModel {
                 return true
             }
         }
+    }
+
+    func setSessionPresentationVisible(_ target: SessionPresentationTarget, visible: Bool) {
+        sessionPresentation.setPresentationVisible(target, visible: visible)
     }
 
     func revokePresentationIntake(_ target: SessionPresentationTarget) {
@@ -2850,6 +2855,7 @@ final class AppModel {
     }
 
     private func apply(_ update: SessionSummaryUpdate) {
+        sessionPresentation.observeAttentionSummary(update)
         switch sessionCatalog.apply(update) {
         case .stale:
             return

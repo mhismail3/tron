@@ -5,16 +5,20 @@ function fixture() {
   let tool: any;
   const handlers = new Map<string, (event: any, ctx: any) => any>();
   const admitted: any[] = [];
+  const suppressed: any[] = [];
   const factory = createTronNotifyExtension({
     sessionId: () => "canonical-session",
     sessionTitle: () => "Canonical title",
     machineId: "machine-abcdefgh",
+    isAutomaticCompletionSuppressed: (completionId) => completionId === "assistant-entry",
+    suppressAutomaticCompletion: async (input) => { suppressed.push(input); return "suppressed"; },
     enqueue: async (input) => { admitted.push(input); return "queued"; },
   });
   return {
     tool: () => tool,
     handlers,
     admitted,
+    suppressed,
     load: () => factory({
       registerTool(value: unknown) { tool = value; },
       on(name: string, handler: (event: any, ctx: any) => any) { handlers.set(name, handler); },
@@ -53,14 +57,11 @@ describe("first-party Tron notify extension", () => {
       isIdle: () => true,
       sessionManager: { getBranch: () => [assistant("assistant-entry", "stop")] },
     });
-    expect(value.admitted[1]).toEqual({
+    expect(value.admitted).toHaveLength(1);
+    expect(value.suppressed).toEqual([{
       sessionId: "canonical-session",
       sourceId: "assistant-entry",
-      kind: "agent_finished",
-      title: "Canonical title",
-      message: "The agent finished responding.",
-      route: { sessionId: "canonical-session", machineId: "machine-abcdefgh" },
-    });
+    }]);
   });
 
   it("waits through an overlapping continuation and notifies only its final response", async () => {
@@ -83,6 +84,7 @@ describe("first-party Tron notify extension", () => {
     });
     expect(value.admitted).toHaveLength(1);
     expect(value.admitted[0]).toMatchObject({ sourceId: "assistant-b", kind: "agent_finished" });
+    expect(value.suppressed).toEqual([]);
   });
 
   it("does not reuse an earlier success when the final continuation fails", async () => {

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { GatewayError } from "../errors.js";
 import {
   MAXIMUM_NOTIFICATION_INBOX_ENTRIES,
+  MAXIMUM_NOTIFICATION_RECEIPTS,
   MAXIMUM_PENDING_INTENTS,
   MAXIMUM_PUSH_GRANTS,
   MAXIMUM_REVOCATIONS,
@@ -379,6 +380,33 @@ export class NotificationService {
     return { changed };
   }
 
+  async suppressAutomaticCompletion(input: {
+    sessionId: string;
+    sourceId: string;
+  }): Promise<"suppressed"> {
+    if (!input.sessionId || !input.sourceId) {
+      throw new GatewayError("invalid_request", "Notification identity is missing");
+    }
+    const now = this.now();
+    const dedupeKey = notificationHash(`agent_finished\0${input.sessionId}\0${input.sourceId}`);
+    const sessionKey = notificationHash(`session\0${input.sessionId}`);
+    await this.store.update((document) => {
+      prune(document, now);
+      if (document.receipts.some((receipt) => receipt.dedupeKey === dedupeKey)
+        || document.pending.some((intent) => intent.dedupeKey === dedupeKey)) return document;
+      document.receipts.push(receiptFor({
+        dedupeKey,
+        sessionKey,
+        grantIds: [],
+        now,
+        result: "suppressed",
+      }));
+      document.receipts = document.receipts.slice(-MAXIMUM_NOTIFICATION_RECEIPTS);
+      return document;
+    });
+    return "suppressed";
+  }
+
   async enqueue(input: {
     sessionId: string;
     sourceId: string;
@@ -409,9 +437,9 @@ export class NotificationService {
       const day = now - 24 * 60 * 60_000;
       const hour = now - 60 * 60_000;
       const recent = document.receipts.filter((receipt) => Date.parse(receipt.createdAt) > day);
-      // Legacy rejected receipts remain readable until normal expiry, but they
-      // never consume quota or extend their own lockout window.
-      const admitted = recent.filter((receipt) => receipt.result !== "rate_limited");
+      // Rejected and presentation-suppressed receipts never consume delivery
+      // quota or extend a lockout window.
+      const admitted = recent.filter((receipt) => receipt.result !== "rate_limited" && receipt.result !== "suppressed");
       const targetLimited = grants.some((grant) => admitted
         .filter((receipt) => receipt.grantIds.includes(grant.grantId)).length >= this.rateLimits.targetDailyIntents);
       if (admitted.length >= this.rateLimits.dailyIntents

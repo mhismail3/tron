@@ -78,8 +78,6 @@ async function acknowledgeTerminalAttention(
       }, 8_000);
       return;
     } catch (error) {
-      if (error instanceof GatewayClientError
-        && ["unsupported", "not_found", "method_not_found"].includes(error.code)) return;
       if (!(error instanceof GatewayClientError) || !error.retryable || attempt === 2) return;
     }
   }

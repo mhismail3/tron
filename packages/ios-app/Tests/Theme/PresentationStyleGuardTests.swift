@@ -466,7 +466,8 @@ struct PresentationStyleGuardTests {
         #expect(presentation.contains("connectionGeneration == expectedConnectionGeneration"))
         #expect(presentation.contains("subscriptionTarget == target"))
         #expect(presentation.contains("throw CancellationError()"))
-        #expect(presentation.contains(#"["unsupported", "not_found", "method_not_found"]"#))
+        #expect(presentation.contains(#""session.presentation.set""#))
+        #expect(presentation.contains("presentationLeaseRenewalInterval"))
         #expect(presentation.components(separatedBy: "timeout: .seconds(5)").count >= 3)
         #expect(scroll.contains("static let defaultOpeningTailTimeout: Duration = .milliseconds(750)"))
     }

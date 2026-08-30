@@ -138,8 +138,11 @@ extension SessionPresentationStoreDelegate {
 @MainActor
 @Observable
 final class SessionPresentationStore {
+    private static let presentationLeaseRenewalInterval: Duration = .seconds(15)
+
     private let client: GatewayClient
     private let performanceSignposts: any PerformanceSignposting
+    private let clock: MonotonicClock
     weak var delegate: (any SessionPresentationStoreDelegate)?
 
     private func noticeScope(for target: SessionPresentationIdentity?) -> InAppNoticeScope? {
@@ -202,6 +205,20 @@ final class SessionPresentationStore {
     }
     private var pendingAttentionRead: PendingAttentionRead?
     @ObservationIgnored private var attentionReadTask: Task<Void, Never>?
+    private var attentionReadHighWaterRevision = 0
+    private var attentionReadAcknowledgedRevision = 0
+    private var attentionReadRequiresVisibility = false
+    private struct ObservedAttentionSummary {
+        let sessionID: String
+        let completionRevision: Int
+        let attentionRevision: Int
+        let isUnread: Bool
+    }
+    private var observedAttentionSummary: ObservedAttentionSummary?
+    private var visiblePresentationTarget: SessionPresentationIdentity?
+    private var presentationVisibilityRevision = 0
+    private var presentationVisibilityTaskGeneration = 0
+    @ObservationIgnored private var presentationVisibilityTask: Task<Void, Never>?
     private var pendingSubscriptionTokens: [String: String] = [:]
     private var pendingRebaselines: [String: PreparedSessionRebaseline] = [:]
     private let synchronization = SessionSynchronizationCoordinator()
@@ -223,10 +240,12 @@ final class SessionPresentationStore {
 
     init(
         client: GatewayClient,
-        performanceSignposts: any PerformanceSignposting
+        performanceSignposts: any PerformanceSignposting,
+        clock: MonotonicClock = .continuous
     ) {
         self.client = client
         self.performanceSignposts = performanceSignposts
+        self.clock = clock
     }
 
     var mountedTarget: SessionPresentationIdentity? {
@@ -283,6 +302,67 @@ final class SessionPresentationStore {
 
     func owns(_ requested: SessionPresentationIdentity) -> Bool {
         target == requested && revokedTarget != requested
+    }
+
+    func setPresentationVisible(_ requested: SessionPresentationIdentity, visible: Bool) {
+        if visible {
+            guard owns(requested),
+                  isAuthoritative,
+                  subscribedSessionID == requested.sessionID,
+                  subscriptionTarget == requested,
+                  let token = subscriptionToken else { return }
+            visiblePresentationTarget = requested
+            startPresentationVisibilityLease(
+                target: requested,
+                subscriptionToken: token,
+                connectionGeneration: connectionGeneration
+            )
+            scheduleObservedAttentionReadIfNeeded()
+            return
+        }
+
+        guard visiblePresentationTarget == requested else { return }
+        visiblePresentationTarget = nil
+        if attentionReadRequiresVisibility {
+            attentionReadTask?.cancel()
+            attentionReadTask = nil
+            attentionReadRequiresVisibility = false
+            attentionReadHighWaterRevision = attentionReadAcknowledgedRevision
+        }
+        presentationVisibilityTaskGeneration &+= 1
+        presentationVisibilityTask?.cancel()
+        presentationVisibilityTask = nil
+        guard subscribedSessionID == requested.sessionID,
+              subscriptionTarget == requested,
+              let token = subscriptionToken else { return }
+        let revision = nextPresentationVisibilityRevision()
+        let expectedConnectionGeneration = connectionGeneration
+        presentationVisibilityTask = Task { [weak self] in
+            await self?.sendPresentationVisibility(
+                sessionID: requested.sessionID,
+                subscriptionToken: token,
+                revision: revision,
+                visible: false,
+                expectedConnectionGeneration: expectedConnectionGeneration
+            )
+        }
+    }
+
+    func observeAttentionSummary(_ update: SessionSummaryUpdate) {
+        guard update.sessionId == subscribedSessionID,
+              subscriptionTarget?.sessionID == update.sessionId else { return }
+        if let current = observedAttentionSummary {
+            guard update.attentionRevision > current.attentionRevision
+                || update.attentionRevision == current.attentionRevision
+                    && update.completionRevision > current.completionRevision else { return }
+        }
+        observedAttentionSummary = ObservedAttentionSummary(
+            sessionID: update.sessionId,
+            completionRevision: update.completionRevision,
+            attentionRevision: update.attentionRevision,
+            isUnread: update.isUnread
+        )
+        scheduleObservedAttentionReadIfNeeded()
     }
 
     func revokeIntake(_ requested: SessionPresentationIdentity) {
@@ -398,6 +478,7 @@ final class SessionPresentationStore {
         // untouched.
         let oldTarget = target
         let oldPendingTarget = pendingTarget
+        setPresentationVisible(requested, visible: false)
         if revokedTarget == requested { revokedTarget = nil }
         deferredEffectsByTarget[requested] = nil
         retireNoticeScopes([oldTarget, oldPendingTarget])
@@ -793,6 +874,11 @@ final class SessionPresentationStore {
         attentionReadTask?.cancel()
         attentionReadTask = nil
         pendingAttentionRead = nil
+        attentionReadHighWaterRevision = 0
+        attentionReadAcknowledgedRevision = 0
+        attentionReadRequiresVisibility = false
+        observedAttentionSummary = nil
+        retirePresentationVisibilityLocally()
         connectionGeneration &+= 1
         transcriptLoadTarget = nil
         loadingEarlierTranscript = false
@@ -817,6 +903,11 @@ final class SessionPresentationStore {
 
     func clearProfile() {
         nextPresentationGeneration &+= 1
+        attentionReadHighWaterRevision = 0
+        attentionReadAcknowledgedRevision = 0
+        attentionReadRequiresVisibility = false
+        observedAttentionSummary = nil
+        retirePresentationVisibilityLocally()
         let oldTarget = target
         let oldPendingTarget = pendingTarget
         retireNoticeScopes([oldTarget, oldPendingTarget])
@@ -1065,6 +1156,13 @@ final class SessionPresentationStore {
         return true
     }
 
+    private func retirePresentationVisibilityLocally() {
+        presentationVisibilityTaskGeneration &+= 1
+        presentationVisibilityTask?.cancel()
+        presentationVisibilityTask = nil
+        visiblePresentationTarget = nil
+    }
+
     private func clearSecondaryProjection() {
         contextLoadGeneration &+= 1
         treeLoadGeneration &+= 1
@@ -1089,6 +1187,11 @@ final class SessionPresentationStore {
         attentionReadTask?.cancel()
         attentionReadTask = nil
         pendingAttentionRead = nil
+        attentionReadHighWaterRevision = 0
+        attentionReadAcknowledgedRevision = 0
+        attentionReadRequiresVisibility = false
+        observedAttentionSummary = nil
+        retirePresentationVisibilityLocally()
         let expectedConnectionGeneration = connectionGeneration
         let expectedSubscriptionTarget = subscriptionTarget
         struct Params: Codable { let sessionId, subscriptionToken: String }
@@ -1520,6 +1623,10 @@ final class SessionPresentationStore {
             subscriptionToken = response.subscriptionToken
             pendingSubscriptionTokens[sessionID] = nil
             subscriptionTarget = installedTarget
+            attentionReadHighWaterRevision = 0
+            attentionReadAcknowledgedRevision = 0
+            attentionReadRequiresVisibility = false
+            observedAttentionSummary = nil
             snapshot = installed
             if commandCatalogTarget != installedTarget {
                 Task { [weak self] in await self?.loadCommands(sessionID: sessionID) }
@@ -1654,6 +1761,97 @@ final class SessionPresentationStore {
         }
     }
 
+    private func nextPresentationVisibilityRevision() -> Int {
+        presentationVisibilityRevision += 1
+        return presentationVisibilityRevision
+    }
+
+    private func startPresentationVisibilityLease(
+        target: SessionPresentationIdentity,
+        subscriptionToken: String,
+        connectionGeneration expectedConnectionGeneration: Int
+    ) {
+        presentationVisibilityTaskGeneration &+= 1
+        let taskGeneration = presentationVisibilityTaskGeneration
+        presentationVisibilityTask?.cancel()
+        presentationVisibilityTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                guard self.presentationVisibilityTaskGeneration == taskGeneration,
+                      self.visiblePresentationTarget == target,
+                      self.owns(target),
+                      self.connectionGeneration == expectedConnectionGeneration,
+                      self.subscribedSessionID == target.sessionID,
+                      self.subscriptionTarget == target,
+                      self.subscriptionToken == subscriptionToken else { return }
+                let revision = self.nextPresentationVisibilityRevision()
+                await self.sendPresentationVisibility(
+                    sessionID: target.sessionID,
+                    subscriptionToken: subscriptionToken,
+                    revision: revision,
+                    visible: true,
+                    expectedConnectionGeneration: expectedConnectionGeneration
+                )
+                self.scheduleObservedAttentionReadIfNeeded()
+                do {
+                    try await self.clock.sleep(Self.presentationLeaseRenewalInterval)
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func sendPresentationVisibility(
+        sessionID: String,
+        subscriptionToken: String,
+        revision: Int,
+        visible: Bool,
+        expectedConnectionGeneration: Int
+    ) async {
+        struct Params: Codable {
+            let sessionId: String
+            let subscriptionToken: String
+            let revision: Int
+            let visible: Bool
+        }
+        struct Response: Decodable {
+            let visible: Bool
+            let revision: Int
+        }
+        guard connectionGeneration == expectedConnectionGeneration else { return }
+        let _: Response? = try? await client.request(
+            "session.presentation.set",
+            Params(
+                sessionId: sessionID,
+                subscriptionToken: subscriptionToken,
+                revision: revision,
+                visible: visible
+            ),
+            timeout: .seconds(5)
+        )
+    }
+
+    private func scheduleObservedAttentionReadIfNeeded() {
+        guard let observedAttentionSummary,
+              observedAttentionSummary.isUnread,
+              observedAttentionSummary.completionRevision > 0,
+              let visiblePresentationTarget,
+              visiblePresentationTarget.sessionID == observedAttentionSummary.sessionID,
+              owns(visiblePresentationTarget),
+              subscribedSessionID == visiblePresentationTarget.sessionID,
+              subscriptionTarget == visiblePresentationTarget,
+              let subscriptionToken else { return }
+        scheduleAttentionRead(
+            sessionID: visiblePresentationTarget.sessionID,
+            throughCompletionRevision: observedAttentionSummary.completionRevision,
+            target: visiblePresentationTarget,
+            subscriptionToken: subscriptionToken,
+            connectionGeneration: connectionGeneration,
+            requiresVisibility: true
+        )
+    }
+
     private func schedulePendingAttentionRead(targetOverride: SessionPresentationIdentity? = nil) {
         guard let pending = pendingAttentionRead else { return }
         pendingAttentionRead = nil
@@ -1671,19 +1869,34 @@ final class SessionPresentationStore {
         throughCompletionRevision: Int,
         target: SessionPresentationIdentity,
         subscriptionToken: String,
-        connectionGeneration: Int
+        connectionGeneration: Int,
+        requiresVisibility: Bool = false
     ) {
+        guard throughCompletionRevision > attentionReadHighWaterRevision else { return }
+        attentionReadHighWaterRevision = throughCompletionRevision
+        attentionReadRequiresVisibility = requiresVisibility
         attentionReadTask?.cancel()
         attentionReadTask = Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.acknowledgeAttentionRead(
+                let acknowledged = try await self.acknowledgeAttentionRead(
                     sessionID: sessionID,
                     throughCompletionRevision: throughCompletionRevision,
                     target: target,
                     subscriptionToken: subscriptionToken,
                     connectionGeneration: connectionGeneration
                 )
+                if acknowledged {
+                    self.attentionReadAcknowledgedRevision = max(
+                        self.attentionReadAcknowledgedRevision,
+                        throughCompletionRevision
+                    )
+                } else if self.attentionReadHighWaterRevision == throughCompletionRevision {
+                    // Admission failed, so this revision is not a high-water
+                    // fact. A later visibility renewal or summary may retry it.
+                    self.attentionReadHighWaterRevision = self.attentionReadAcknowledgedRevision
+                    self.attentionReadRequiresVisibility = false
+                }
             } catch is CancellationError {
                 return
             } catch {
@@ -1698,7 +1911,7 @@ final class SessionPresentationStore {
         target: SessionPresentationIdentity,
         subscriptionToken expectedToken: String,
         connectionGeneration expectedConnectionGeneration: Int
-    ) async throws {
+    ) async throws -> Bool {
         struct Params: Codable {
             let sessionId: String
             let throughCompletionRevision: Int
@@ -1727,22 +1940,20 @@ final class SessionPresentationStore {
                       subscriptionToken == expectedToken else {
                     throw CancellationError()
                 }
-                return
+                return true
             } catch is CancellationError {
                 throw CancellationError()
             } catch let failure as GatewayFailure {
-                // Rolling upgrades can briefly pair a newer app with a Gateway
-                // that does not own the additive attention method yet.
-                if ["unsupported", "not_found", "method_not_found"].contains(failure.code) { return }
                 if failure.retryable && attempt < 2 { continue }
                 // Attention convergence is non-blocking for chat. A later
                 // reconnect/open retries the same canonical operation.
-                return
+                return false
             } catch {
                 if attempt < 2 { continue }
-                return
+                return false
             }
         }
+        return false
     }
 
     private func acknowledgeSync(sessionID: String, syncToken: String) async throws {

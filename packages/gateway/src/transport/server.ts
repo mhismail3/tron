@@ -961,6 +961,23 @@ export class GatewayServer {
             subscriptionToken: active.subscriptionToken,
           });
         },
+        setPresentationVisibility: (sessionId, subscriptionToken, revision, visible) => {
+          sessionId = resolveSessionId(sessionId);
+          if (!connection.presentationOnly) {
+            throw new GatewayError("invalid_request", "Only a mobile presentation connection may publish chat visibility");
+          }
+          if (connection.subscriptionTokens.get(sessionId) !== subscriptionToken
+            || connection.synchronizations.has(sessionId)) {
+            throw new GatewayError("conflict", "Session presentation subscription is not current", true);
+          }
+          return this.options.sessions.setPresentationVisibility({
+            clientId: connection.id,
+            sessionId,
+            subscriptionToken,
+            revision,
+            visible,
+          });
+        },
         unsubscribe: (sessionId, subscriptionToken) => {
           sessionId = resolveSessionId(sessionId);
           if (subscriptionToken !== undefined) return revokeSubscription(sessionId, subscriptionToken);

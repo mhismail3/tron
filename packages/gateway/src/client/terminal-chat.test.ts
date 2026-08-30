@@ -62,25 +62,6 @@ describe("terminal chat synchronization", () => {
     expect(request.mock.calls.filter(([method]) => method === "session.attention.read"))
       .toEqual(Array(2).fill(["session.attention.read", { sessionId: "session", throughCompletionRevision: 19 }, 8_000]));
   });
-
-  it.each(["unsupported", "not_found", "method_not_found"])(
-    "treats %s attention support as an older-Gateway fallback",
-    async (code) => {
-      const request = vi.fn(async (method: string) => {
-        if (method === "session.open") {
-          return { session: { sessionId: "session" }, syncToken: "sync", subscriptionToken: "subscription" };
-        }
-        if (method === "session.sync") return { synchronized: true };
-        throw new GatewayClientError(code, "older Gateway", false);
-      });
-      await expect(synchronizeTerminalSession(
-        { request } as unknown as Pick<GatewayProtocolClient, "request">,
-        "session",
-        () => {},
-      )).resolves.toBeDefined();
-      await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(3));
-    },
-  );
 });
 
 describe("terminal chat operation settlement", () => {

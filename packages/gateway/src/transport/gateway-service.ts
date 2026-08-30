@@ -74,7 +74,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 
 const restartDrainMethods = new Set([
   "system.info", "system.logs", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status",
-  "session.list", "session.open", "session.sync", "session.close", "session.transcript", "session.attention.read",
+  "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
 ]);
@@ -86,6 +86,12 @@ export interface ClientContext {
   beginSynchronization(sessionId: string): string;
   establishSynchronization(sessionId: string, snapshot: import("../protocol/types.js").SessionSnapshot): void;
   completeSynchronization(sessionId: string, syncToken: string): void;
+  setPresentationVisibility(
+    sessionId: string,
+    subscriptionToken: string,
+    revision: number,
+    visible: boolean,
+  ): { visible: boolean; revision: number };
   unsubscribe(sessionId: string, subscriptionToken?: string): boolean;
   attachTerminal(terminalId: string): void;
   detachTerminal(terminalId: string): void;
@@ -484,6 +490,18 @@ export class GatewayService {
           subscriptionToken: syncToken,
           completionRevision: this.dependencies.sessions.attentionProjection(sessionId).completionRevision,
         });
+      }
+      case "session.presentation.set": {
+        const sessionId = string(params.sessionId, "sessionId", { max: 200 });
+        const subscriptionToken = string(params.subscriptionToken, "subscriptionToken", { max: 200 });
+        const revision = integer(params.revision, "revision", 1, Number.MAX_SAFE_INTEGER);
+        const visible = boolean(params.visible, "visible");
+        return safeJson(client.setPresentationVisibility(
+          sessionId,
+          subscriptionToken,
+          revision,
+          visible,
+        ));
       }
       case "session.attention.read": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });

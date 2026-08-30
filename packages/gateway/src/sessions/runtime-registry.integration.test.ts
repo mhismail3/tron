@@ -206,6 +206,86 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }));
   });
 
+  it("latches foreground-open and foreground-close completion dispositions at canonical admission", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-agent-observed-completion-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    let releaseHiddenCompletion!: () => void;
+    const hiddenCompletionBarrier = new Promise<void>((resolve) => { releaseHiddenCompletion = resolve; });
+    const faux = fauxProvider({ provider: "tron-agent-observed-completion", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      fauxAssistantMessage("observed response"),
+      async () => {
+        await hiddenCompletionBarrier;
+        return fauxAssistantMessage("hidden response");
+      },
+    ]);
+    runtime.registerNativeProvider(faux.provider);
+    const enqueue = vi.fn(async () => "queued" as const);
+    const suppressAutomaticCompletion = vi.fn(async () => "suppressed" as const);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+      machineId: "machine-observed-test",
+      notifications: { enqueue, suppressAutomaticCompletion, askPresented: vi.fn() } as unknown as NotificationService,
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    registry.subscribe("visible-phone", slot.id);
+    registry.setPresentationVisibility({
+      clientId: "visible-phone",
+      sessionId: slot.id,
+      subscriptionToken: "visible-subscription",
+      revision: 1,
+      visible: true,
+    });
+
+    await slot.prompt("finish while visible");
+    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => registry.attentionProjection(slot.id).completionRevision === 1);
+    expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 1, isUnread: false });
+    await waitUntil(() => suppressAutomaticCompletion.mock.calls.length > 0);
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(suppressAutomaticCompletion).toHaveBeenCalledWith({
+      sessionId: slot.id,
+      sourceId: expect.any(String),
+    });
+
+    enqueue.mockClear();
+    suppressAutomaticCompletion.mockClear();
+    await slot.prompt("finish after presentation closes");
+    await waitUntil(() => slot.isBusy);
+    registry.setPresentationVisibility({
+      clientId: "visible-phone",
+      sessionId: slot.id,
+      subscriptionToken: "visible-subscription",
+      revision: 2,
+      visible: false,
+    });
+    releaseHiddenCompletion();
+    await waitUntil(() => !slot.isBusy);
+    await waitUntil(() => registry.attentionProjection(slot.id).completionRevision === 2);
+    expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 2, isUnread: true });
+    await waitUntil(() => enqueue.mock.calls.length > 0);
+    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: slot.id,
+      kind: "agent_finished",
+      sourceId: expect.any(String),
+    }));
+    expect(suppressAutomaticCompletion).not.toHaveBeenCalled();
+  });
+
   it("recovers a canonical successful completion missed before restart", async () => {
     const fixture = await coldFixture("attention-restart");
     expect(fixture.registry.attentionProjection(fixture.manager.getSessionId()).isUnread).toBe(false);

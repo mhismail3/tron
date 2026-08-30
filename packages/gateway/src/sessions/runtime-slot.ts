@@ -138,6 +138,7 @@ const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
 const STREAMING_PROGRESS_FLUSH_MS = 150;
 const DEFAULT_RUNTIME_DISPOSAL_GRACE_MS = 5_000;
 const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
+const MAX_COMPLETION_DISPOSITIONS = 16;
 const MAX_VALIDATED_CHILD_SESSION_PATHS = 2_048;
 const RECOVERY_SESSION_OWNER = Symbol("recovery-session-owner");
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
@@ -200,7 +201,12 @@ export interface RuntimeSlotHooks {
   summaryChanged: (summary: SessionSummaryUpdate) => void;
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
-  assistantResponseCompleted: (sessionId: string, completion: CanonicalAssistantCompletion, recovery: boolean) => Promise<void>;
+  assistantResponseCompleted: (
+    sessionId: string,
+    completion: CanonicalAssistantCompletion,
+    recovery: boolean,
+    observed: boolean,
+  ) => Promise<void>;
   rekey: (
     previousId: string,
     nextId: string,
@@ -220,6 +226,7 @@ export interface RuntimeSlotDependencies {
   extensionActivityRecency: ExtensionActivityRecency;
   processActivityRecency: ProcessActivityRecency;
   workRegistry: GatewayWorkRegistry;
+  isSessionPresented: (sessionId: string) => boolean;
   machineId?: string;
   notifications?: NotificationService;
   extensionArtifactWarning?: (warning: { reason: ExtensionArtifactRejectionReason; owner: string }) => void;
@@ -281,6 +288,9 @@ export class RuntimeSlot {
   private readonly canonicalizedStreamingMessages = new WeakSet<object>();
   /** Exact successful canonical assistant completion awaiting durable attention admission. */
   private pendingAssistantCompletion: CanonicalAssistantCompletion | undefined;
+  /** One foreground-observation decision is shared by durable attention and
+   * automatic completion notification policy for the same canonical entry. */
+  private readonly completionDispositions = new Map<string, boolean>();
   /** `message_end` precedes Pi's synchronous canonical append. Capture immutable
    * operation ownership in that callback turn so an immediate extension
    * continuation cannot inherit the completion's already-consumed owner. */
@@ -823,6 +833,8 @@ export class RuntimeSlot {
                 sessionId: () => this.id,
                 sessionTitle: () => this.notificationTitle(),
                 ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
+                isAutomaticCompletionSuppressed: (completionId) => this.completionObserved(completionId),
+                suppressAutomaticCompletion: (input) => notifications.suppressAutomaticCompletion(input),
                 enqueue: (input) => notifications.enqueue(input),
               }),
             }],
@@ -1597,6 +1609,19 @@ export class RuntimeSlot {
     });
   }
 
+  private completionObserved(completionId: string): boolean {
+    const existing = this.completionDispositions.get(completionId);
+    if (existing !== undefined) return existing;
+    const observed = this.dependencies.isSessionPresented(this.id);
+    this.completionDispositions.set(completionId, observed);
+    while (this.completionDispositions.size > MAX_COMPLETION_DISPOSITIONS) {
+      const oldest = this.completionDispositions.keys().next().value;
+      if (oldest === undefined) break;
+      this.completionDispositions.delete(oldest);
+    }
+    return observed;
+  }
+
   private notificationTitle(): string {
     // agent_settled extension handlers run before RuntimeSlot's deferred summary
     // projection necessarily catches up. Read the canonical active branch here
@@ -1845,6 +1870,10 @@ export class RuntimeSlot {
         item.completion = { ...item.completion, operationId: completion.operationId };
       }
     } else {
+      // Canonical append admission is the single observation boundary. Later
+      // attention settlement and agent_settled notification handling must read
+      // this same disposition rather than resampling a close/completion race.
+      this.completionObserved(completion.id);
       const operationId = completion.operationId ?? this.completionWorkOwners.get(completion.id);
       const exactOwner = operationId ? this.operationWork.get(operationId) : undefined;
       item = {
@@ -1896,7 +1925,12 @@ export class RuntimeSlot {
       let lastError: unknown;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          await this.hooks.assistantResponseCompleted(this.id, completion, false);
+          await this.hooks.assistantResponseCompleted(
+            this.id,
+            completion,
+            false,
+            this.completionObserved(completion.id),
+          );
           lastError = undefined;
           break;
         } catch (error) {
@@ -1977,7 +2011,7 @@ export class RuntimeSlot {
     for (const marker of markers) {
       const completion = completionOwnedByMarker(this.sessionManager, marker);
       if (!completion) continue;
-      await this.hooks.assistantResponseCompleted(this.id, completion, true);
+      await this.hooks.assistantResponseCompleted(this.id, completion, true, false);
       await this.clearMarkerOwnership(marker.operationId);
     }
   }

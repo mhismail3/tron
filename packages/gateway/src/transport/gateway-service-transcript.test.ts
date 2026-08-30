@@ -8,6 +8,7 @@ const client: ClientContext = {
   beginSynchronization: () => "sync",
   establishSynchronization: () => {},
   completeSynchronization: () => {},
+  setPresentationVisibility: (_sessionId, _token, revision, visible) => ({ revision, visible }),
   unsubscribe: () => true,
   attachTerminal: () => {},
   detachTerminal: () => {},
@@ -15,6 +16,24 @@ const client: ClientContext = {
 };
 
 describe("session transcript paging", () => {
+  it("routes exact mobile presentation visibility through connection ownership", async () => {
+    const setPresentationVisibility = vi.fn((_sessionId, _token, revision: number, visible: boolean) => ({
+      revision,
+      visible,
+    }));
+    const service = new GatewayService({
+      sessions: {},
+    } as unknown as GatewayServiceDependencies);
+
+    await expect(service.invoke({ ...client, setPresentationVisibility }, "session.presentation.set", {
+      sessionId: "session",
+      subscriptionToken: "subscription",
+      revision: 7,
+      visible: true,
+    })).resolves.toEqual({ revision: 7, visible: true });
+    expect(setPresentationVisibility).toHaveBeenCalledWith("session", "subscription", 7, true);
+  });
+
   it("advertises independent process and scalable upload-status capabilities", () => {
     const service = new GatewayService({
       config: {

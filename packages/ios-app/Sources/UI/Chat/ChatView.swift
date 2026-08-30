@@ -357,6 +357,9 @@ struct ChatView: View {
     }
 
     private func scenePhaseChanged(_ current: ScenePhase) {
+        if current != .active, let target = presentationTarget {
+            model.setSessionPresentationVisible(target, visible: false)
+        }
         if current == .background {
             abandonLayoutTransaction()
             // Background suspension retires disposable presentation work while
@@ -365,6 +368,10 @@ struct ChatView: View {
         } else if current == .active,
                   !sessionPresentation.needsOpeningResume,
                   transcriptPresentation.installed != nil {
+            if sessionPresentation.open.phase == .ready,
+               let target = presentationTarget {
+                model.setSessionPresentationVisible(target, visible: true)
+            }
             scrollCoordinator.foregroundViewportBecameActive()
         }
     }
@@ -380,7 +387,10 @@ struct ChatView: View {
     }
 
     private func retirePresentation() {
-        if let target = presentationTarget { model.revokePresentationIntake(target) }
+        if let target = presentationTarget {
+            model.setSessionPresentationVisible(target, visible: false)
+            model.revokePresentationIntake(target)
+        }
         sessionPresentation.suspendForBackground()
         scrollCoordinator.cancel()
         abandonLayoutTransaction()
@@ -1507,6 +1517,9 @@ struct ChatView: View {
                 return false
             }
             performanceSignposts.end(interval, result: .success, metrics: .none)
+            if scenePhase == .active, let target = presentationTarget {
+                model.setSessionPresentationVisible(target, visible: true)
+            }
             return true
         } catch {
             performanceSignposts.end(

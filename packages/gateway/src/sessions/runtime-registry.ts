@@ -24,6 +24,10 @@ import type {
   SessionSummaryUpdate,
 } from "../protocol/types.js";
 import { SessionAttentionStore, type SessionAttentionProjection } from "./session-attention-store.js";
+import {
+  SessionPresentationPresenceRegistry,
+  type SessionPresentationPresenceProjection,
+} from "./session-presentation-presence.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { BlobStore } from "./blob-store.js";
@@ -376,6 +380,7 @@ export class RuntimeRegistry {
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
   private readonly processActivityRecency = new ProcessActivityRecency();
   private readonly attention: SessionAttentionStore;
+  private readonly presentationPresence = new SessionPresentationPresenceRegistry();
   private readonly catalogMetadataIndex: CatalogMetadataIndex;
   private readonly configuredSessionDir: string | undefined;
   private interrupted = new Set<string>();
@@ -543,9 +548,10 @@ export class RuntimeRegistry {
       assistantResponseCompleted: async (
         sessionId: string,
         completion: CanonicalAssistantCompletion,
-        _recovery: boolean,
+        recovery: boolean,
+        observed: boolean,
       ) => this.attentionLane.run(async () => {
-        const result = await this.attention.complete(sessionId, completion.id);
+        const result = await this.attention.complete(sessionId, completion.id, !recovery && observed);
         if (result.changed) await this.publishAttentionSummary(sessionId, result.projection);
       }),
       closed: (sessionId: string, slot: RuntimeSlot) => {
@@ -558,6 +564,7 @@ export class RuntimeRegistry {
         if (removed) this.slots.delete(sessionId);
         this.cancelIdleEviction(sessionId, slot);
         this.subscribers.delete(sessionId);
+        this.presentationPresence.removeSession(sessionId);
         this.interrupted.delete(sessionId);
         if (removedLiveOnlySession) {
           // Empty runtime ownership is permanent only while the slot exists.
@@ -610,6 +617,7 @@ export class RuntimeRegistry {
             if (wasInterrupted) this.interrupted.add(nextId);
           }
         }
+        this.presentationPresence.rekey(previousId, nextId);
         const subscribers = this.subscribers.get(previousId);
         if (subscribers) {
           this.subscribers.delete(previousId);
@@ -767,6 +775,7 @@ export class RuntimeRegistry {
       extensionActivityRecency: this.extensionActivityRecency,
       processActivityRecency: this.processActivityRecency,
       workRegistry: this.workRegistry,
+      isSessionPresented: (sessionId: string) => this.isSessionPresented(sessionId),
       ...(this.options.machineId ? { machineId: this.options.machineId } : {}),
       ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
@@ -2600,6 +2609,7 @@ export class RuntimeRegistry {
         if (slot) await slot.dispose();
         this.slots.delete(sessionId);
         this.subscribers.delete(sessionId);
+        this.presentationPresence.removeSession(sessionId);
         this.summaryRevisions.delete(sessionId);
         this.latestSummaries.delete(sessionId);
         this.interrupted.delete(sessionId);
@@ -2721,10 +2731,28 @@ export class RuntimeRegistry {
     this.subscribers.set(sessionId, clients);
   }
 
+  setPresentationVisibility(input: {
+    clientId: string;
+    sessionId: string;
+    subscriptionToken: string;
+    revision: number;
+    visible: boolean;
+  }): SessionPresentationPresenceProjection {
+    if (!this.isSubscribed(input.clientId, input.sessionId)) {
+      throw new GatewayError("conflict", "Session presentation subscription is not current", true);
+    }
+    return this.presentationPresence.set(input);
+  }
+
+  isSessionPresented(sessionId: string): boolean {
+    return this.presentationPresence.isVisible(sessionId);
+  }
+
   unsubscribe(clientId: string, sessionId: string): void {
     const clients = this.subscribers.get(sessionId);
     clients?.delete(clientId);
     if (clients?.size === 0) this.subscribers.delete(sessionId);
+    this.presentationPresence.remove(clientId, sessionId);
   }
 
   unsubscribeClient(clientId: string): void {
@@ -2732,6 +2760,7 @@ export class RuntimeRegistry {
       clients.delete(clientId);
       if (clients.size === 0) this.subscribers.delete(sessionId);
     }
+    this.presentationPresence.remove(clientId);
   }
 
   isSubscribed(clientId: string, sessionId: string): boolean {
