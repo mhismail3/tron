@@ -388,6 +388,13 @@ final class PushNotificationCoordinator {
     private(set) var readiness: PushReadiness = .unavailable
     private(set) var diagnostic: PushRegistrationDiagnostic = .idle
 
+    var canRetryRejectedRegistration: Bool {
+        !credentialLoadFailed
+            && document.appAttestKeyID != nil
+            && document.appAttestKeyRejected == true
+            && diagnostic == .stoppedRejected
+    }
+
     convenience init() {
         self.init(
             credentials: KeychainPushCredentialStore(),
@@ -529,6 +536,19 @@ final class PushNotificationCoordinator {
         guard registrationAdmitted else { return }
         readiness = .pending
         diagnostic = .stoppedUnavailable
+    }
+
+    /// Explicit recovery after the operator corrects the relay's relying-party
+    /// configuration. Rotate only the rejected App Attest key; the APNs token,
+    /// endpoint grants, pairings, and every unrelated Keychain value survive.
+    func retryRejectedRegistration() throws {
+        guard canRetryRejectedRegistration else { return }
+        registrationGeneration &+= 1
+        registrationTask?.cancel()
+        registrationTask = nil
+        try persistAppAttestKeyID(nil, rejected: false)
+        diagnostic = .idle
+        scheduleRegistration()
     }
 
     private func scheduleRegistration() {

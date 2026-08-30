@@ -45,6 +45,7 @@ struct GatewayConnectionStatusBadge: View {
 
 struct ConnectionsSettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(PushNotificationCoordinator.self) private var pushNotifications
     @State private var selectedProfile: GatewayProfile?
     @State private var serverDetailDetent: PresentationDetent = .medium
     @State private var deviceToRevoke: GatewayAuthorizedDevice?
@@ -124,6 +125,23 @@ struct ConnectionsSettingsView: View {
                             detail: model.pushRegistrationDiagnostic.rawValue,
                             accent: .tronBlue
                         )
+                        if pushNotifications.canRetryRejectedRegistration {
+                            TronSettingsDivider(accent: .tronBlue)
+                            Button {
+                                do { try pushNotifications.retryRejectedRegistration() }
+                                catch { model.presentError(error) }
+                            } label: {
+                                TronValueRow(
+                                    icon: "arrow.clockwise",
+                                    title: "Retry Registration",
+                                    detail: "Generate one fresh App Attest key after correcting the relay.",
+                                    accent: .tronBlue
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint("Preserves the APNs token, pairings, grants, and other Keychain data")
+                        }
                     }
                 }
 

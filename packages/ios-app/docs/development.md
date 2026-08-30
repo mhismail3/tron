@@ -811,7 +811,11 @@ missing-version document whose key was already marked rejected clears that key
 and rejection marker, durably records the current version, and retries with a
 fresh Apple key. APNs tokens, grants, pairing, and all other app data remain
 unchanged. Current-version rejected keys remain rejected across relaunches so a
-real fresh-attestation rejection cannot churn keys. Challenge requests retain a short network deadline; the non-blocking App Attest
+real fresh-attestation rejection cannot churn keys. While that exact stopped state is visible,
+Settings offers one explicit **Retry Registration** action for use only after the relay's relying-party
+configuration is corrected. It clears only the rejected App Attest key reference and starts one fresh
+attestation; the APNs token, grants, profiles, pairings, and unrelated Keychain state remain intact.
+Challenge requests retain a short network deadline; the non-blocking App Attest
 installation uses a 60-second deadline so a cold mobile/Worker verification path
 does not become a false registration failure. A registration operation retries only
 ambiguous timeout or retryable 5xx twice, with bounded 250/750 ms backoff and a fresh

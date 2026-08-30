@@ -593,6 +593,37 @@ struct PushNotificationCoordinatorTests {
     }
 
     @MainActor
+    @Test("explicit rejected-key retry preserves APNs and grant state while creating one fresh key")
+    func explicitRejectedKeyRetry() async throws {
+        let retainedGrant = PushGrant(
+            profileID: "other", installationID: "install_other", grantID: "grant_other",
+            grantSecret: String(repeating: "s", count: 32), tokenHash: "hash"
+        )
+        let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
+            appAttestKeyID: appAttestKey("rejected-key"),
+            apnsToken: "01",
+            grants: [retainedGrant.profileID: retainedGrant],
+            appAttestKeyRejected: true,
+            appAttestCredentialWireVersion: PushCredentialDocument.currentAppAttestCredentialWireVersion
+        ))
+        let script = ScriptedPushTransport(installations: [.status(201)])
+        let attest = PushAttestRecorder(generatedKeys: [appAttestKey("replacement-key")])
+        let coordinator = makeCoordinator(store: store, script: script, attest: attest)
+
+        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        try await waitUntil { coordinator.canRetryRejectedRegistration }
+        try coordinator.retryRejectedRegistration()
+        try await waitForGrant(in: store)
+
+        #expect(await script.submittedModes == ["attestation"])
+        #expect(await attest.generatedCount == 1)
+        #expect(store.value?.appAttestKeyID == appAttestKey("replacement-key"))
+        #expect(store.value?.appAttestKeyRejected == false)
+        #expect(store.value?.apnsToken == "01")
+        #expect(store.value?.grants[retainedGrant.profileID] == retainedGrant)
+    }
+
+    @MainActor
     @Test("timeout retries with a fresh challenge and persisted-key assertion")
     func timeoutThenAssertionSuccess() async throws {
         let script = ScriptedPushTransport(installations: [.timeout, .status(201)])

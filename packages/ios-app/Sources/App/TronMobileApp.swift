@@ -22,6 +22,7 @@ struct TronMobileApp: App {
                     .allowsHitTesting(false)
                 }
                 .environment(model)
+                .environment(pushNotifications)
                 .tronPresentation()
                 .preferredColorScheme(appearance.mode.colorScheme)
                 .task {
