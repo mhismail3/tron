@@ -476,19 +476,24 @@ struct QueuedMessageRow: View {
 
     private var card: some View {
         let attachmentChips = QueuedMessageAttachmentPresentation.chips(for: message)
-        return ChatPromptCard(
-            behavior: behavior,
-            text: message.text,
-            detail: "\(deliveryDetail) · \(position) of \(total)",
-            isInteractive: isManageable,
-            onActivate: isManageable && !isMutating ? onEdit : nil,
-            attachmentContent: {
-                if !attachmentChips.isEmpty {
-                    QueuedMessageAttachmentChipRow(chips: attachmentChips, accent: accent)
-                }
-            },
-            statusContent: { trailingStatus }
-        )
+        return VStack(alignment: .trailing, spacing: 4) {
+            if let resource = message.resourceInvocation, !resource.isExtensionCommand {
+                CanonicalResourceChip(resource: resource)
+            }
+            ChatPromptCard(
+                behavior: behavior,
+                text: message.text,
+                detail: "\(deliveryDetail) · \(position) of \(total)",
+                isInteractive: isManageable,
+                onActivate: isManageable && !isMutating ? onEdit : nil,
+                attachmentContent: {
+                    if !attachmentChips.isEmpty {
+                        QueuedMessageAttachmentChipRow(chips: attachmentChips, accent: accent)
+                    }
+                },
+                statusContent: { trailingStatus }
+            )
+        }
     }
 
     @ViewBuilder

@@ -3,7 +3,32 @@ enum SessionSnapshotQueueAdmissionPolicy {
         let displayed = snapshot.displayedQueuedMessages
         guard displayed.count <= SessionSnapshot.maximumQueuedMessages else { return false }
         let ids = displayed.map(\.id)
-        return ids.allSatisfy { !$0.isEmpty } && Set(ids).count == ids.count
+        guard ids.allSatisfy({ !$0.isEmpty }), Set(ids).count == ids.count else { return false }
+        guard displayed.allSatisfy({ message in
+            admits(
+                message.resourceInvocation,
+                text: message.text,
+                attachmentCount: message.attachmentCount
+            )
+        }) else { return false }
+        guard let pending = snapshot.pendingPrompt else { return true }
+        return admits(
+            pending.resourceInvocation,
+            text: pending.text,
+            attachmentCount: pending.attachmentCount
+        )
+    }
+
+    private static func admits(
+        _ resource: ComposerResourceInvocation?,
+        text: String,
+        attachmentCount: Int
+    ) -> Bool {
+        guard attachmentCount >= 0 else { return false }
+        guard let resource else { return true }
+        guard resource.arguments == text, resource.isTransportValid else { return false }
+        // Extension commands execute immediately and never belong to prompt queue state.
+        return resource.source != .extension
     }
 }
 

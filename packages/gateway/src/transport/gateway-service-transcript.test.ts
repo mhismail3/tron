@@ -226,7 +226,7 @@ describe("session transcript paging", () => {
       text: "",
       resourceInvocation: { source: "skill", name: "review", arguments: "" },
       commandId: "00000000-0000-4000-8000-000000000005",
-    })).rejects.toMatchObject({ code: "invalid_request" });
+    })).resolves.toEqual({ operationId: "skill-operation" });
     commands.mockReturnValue([
       { name: "skill:review", source: "skill" },
       { name: "skill:review", source: "extension" },
@@ -237,7 +237,71 @@ describe("session transcript paging", () => {
       resourceInvocation: { source: "skill", name: "review", arguments: "Inspect this change" },
       commandId: "00000000-0000-4000-8000-000000000006",
     })).rejects.toMatchObject({ code: "conflict", retryable: false });
-    expect(prompt).toHaveBeenCalledTimes(1);
+    expect(prompt).toHaveBeenCalledTimes(2);
+  });
+
+  it("admits empty resources, rejects mismatched text, and rejects extension attachments", async () => {
+    const prompt = vi.fn(async () => ({ operationId: "resource-operation" }));
+    const execute = vi.fn(async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation());
+    const commands = vi.fn(() => [
+      { name: "skill:review", source: "skill" },
+      { name: "goal", source: "extension" },
+    ]);
+    const service = new GatewayService({
+      sessions: { isSubscribed: () => true, acquire: async () => ({ id: "session", prompt, commands }) },
+      uploads: { materialize: async () => ({ envelope: "", images: [], photoCount: 0, fileAttachmentCount: 1, attachments: [{ id: "upload", name: "a.txt", mimeType: "text/plain", size: 1 }] }) },
+      receipts: { execute },
+    } as unknown as GatewayServiceDependencies);
+
+    await expect(service.invoke(client, "session.prompt", {
+      sessionId: "session", text: "", uploadIds: [],
+      resourceInvocation: { source: "skill", name: "review", arguments: "" },
+      commandId: "00000000-0000-4000-8000-000000000007",
+    })).resolves.toEqual({ operationId: "resource-operation" });
+    await expect(service.invoke(client, "session.prompt", {
+      sessionId: "session", text: "shown", uploadIds: [],
+      resourceInvocation: { source: "skill", name: "review", arguments: "executed" },
+      commandId: "00000000-0000-4000-8000-000000000008",
+    })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(service.invoke(client, "session.prompt", {
+      sessionId: "session", text: "", uploadIds: ["upload"],
+      resourceInvocation: { source: "extension", name: "goal", arguments: "" },
+      commandId: "00000000-0000-4000-8000-000000000009",
+    })).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("preserves Pi literal-space command parsing", async () => {
+    const prompt = vi.fn(async () => ({ operationId: "plain-operation" }));
+    const execute = vi.fn(async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation());
+    const commands = vi.fn(() => [{ name: "goal", source: "extension" }]);
+    const service = new GatewayService({
+      sessions: { isSubscribed: () => true, acquire: async () => ({ id: "session", prompt, commands }) },
+      uploads: { materialize: async () => ({ envelope: "", images: [], photoCount: 0, fileAttachmentCount: 0, attachments: [] }) },
+      receipts: { execute },
+    } as unknown as GatewayServiceDependencies);
+    await expect(service.invoke(client, "session.prompt", {
+      sessionId: "session", text: "/goal\tvalue", uploadIds: [],
+      commandId: "00000000-0000-4000-8000-000000000010",
+    })).resolves.toEqual({ operationId: "plain-operation" });
+    expect(prompt).toHaveBeenCalledWith("/goal\tvalue", [], undefined, expect.anything(), expect.any(Function));
+  });
+
+  it("rejects invalid resource controls and oversized UTF-8 names", async () => {
+    const service = new GatewayService({
+      sessions: { isSubscribed: () => true, acquire: async () => ({ id: "session", prompt: vi.fn(), commands: vi.fn(() => []) }) },
+      uploads: { materialize: async () => ({ envelope: "", images: [], photoCount: 0, fileAttachmentCount: 0, attachments: [] }) },
+      receipts: { execute: vi.fn(async (_a: string, _b: string, _c: string, operation: () => Promise<unknown>) => operation()) },
+    } as unknown as GatewayServiceDependencies);
+    await expect(service.invoke(client, "session.prompt", {
+      sessionId: "session", text: "x", uploadIds: [],
+      resourceInvocation: { source: "prompt", name: "x", arguments: "bad\u0000" },
+      commandId: "00000000-0000-4000-8000-000000000011",
+    })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(service.invoke(client, "session.prompt", {
+      sessionId: "session", text: "x".repeat(200), uploadIds: [],
+      resourceInvocation: { source: "prompt", name: "🙂".repeat(300), arguments: "x".repeat(200) },
+      commandId: "00000000-0000-4000-8000-000000000012",
+    })).rejects.toMatchObject({ code: "invalid_request" });
   });
 
   it("rejects terminal control until this connection attaches", async () => {

@@ -366,6 +366,7 @@ struct ChatPendingPromptPresentation: Equatable, Hashable, Identifiable, Sendabl
     let attachmentCount: Int
     let photoCount: Int?
     let fileAttachmentCount: Int?
+    let resourceInvocation: ComposerResourceInvocation?
     var attachments: [SessionSnapshot.PromptAttachment]? = nil
     let isCompacting: Bool
 
@@ -377,6 +378,9 @@ struct ChatPendingPromptPresentation: Equatable, Hashable, Identifiable, Sendabl
         attachmentCount = snapshot.attachmentCount
         photoCount = snapshot.photoCount
         fileAttachmentCount = snapshot.fileAttachmentCount
+        resourceInvocation = snapshot.resourceInvocation.map {
+            ComposerResourceInvocation(source: $0.source, name: $0.name, arguments: $0.arguments)
+        }
         attachments = snapshot.attachments
         self.isCompacting = isCompacting
     }

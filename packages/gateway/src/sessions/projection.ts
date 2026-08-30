@@ -27,6 +27,7 @@ import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js
 import type { ChatOrigin, ChatSemanticMetadata, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
 import { contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, parseInvocationReceipt, type InvocationProjection } from "./invocation-receipts.js";
+import { RESOURCE_NAME_MAX_BYTES } from "./resource-invocation.js";
 
 const MAX_TEXT = 64_000;
 const MAX_SKILL_INVOCATION_BYTES = 4 * 1_048_576;
@@ -101,15 +102,16 @@ function semanticForCommand(receipt: ReturnType<typeof parseInvocationReceipt>):
     delivery: "stored",
     visibility: "visible",
     kind: "command",
-    origin: receipt?.origin ?? { kind: "extension", confidence: "receipt" },
+    origin: receipt && "origin" in receipt && receipt.origin
+      ? receipt.origin : { kind: "extension", confidence: "receipt" },
     ...(receipt?.invocationId ? { invocationId: receipt.invocationId } : {}),
     ...(receipt?.operationId ? { operationId: receipt.operationId } : {}),
-    ...(receipt?.lifecycle ? { lifecycle: receipt.lifecycle } : {}),
-    ...(receipt?.name ? {
+    ...(receipt && "lifecycle" in receipt ? { lifecycle: receipt.lifecycle } : {}),
+    ...(receipt && "name" in receipt && receipt.name ? {
       resourceInvocation: {
         source: "extension",
         name: receipt.name,
-        arguments: receipt.arguments ?? "",
+        arguments: "arguments" in receipt ? receipt.arguments ?? "" : "",
       },
     } : {}),
     sequence: receipt?.sequence ?? 0,
@@ -151,7 +153,7 @@ export interface ProjectedSkillInvocation {
  * Recognizes only Pi's exact persisted skill envelope. Malformed, oversized,
  * nested, or future shapes remain untouched rather than risking content loss.
  */
-export function projectSkillInvocation(value: string): ProjectedSkillInvocation | undefined {
+export function projectSkillInvocation(value: string, expectedArguments?: string): ProjectedSkillInvocation | undefined {
   if (!value.startsWith("<skill name=\"") || Buffer.byteLength(value) > MAX_SKILL_INVOCATION_BYTES) return undefined;
   const headerEnd = value.indexOf(">\n");
   if (headerEnd < 0 || headerEnd > MAX_SKILL_NAME_BYTES + MAX_SKILL_PATH_BYTES + 64) return undefined;
@@ -171,7 +173,28 @@ export function projectSkillInvocation(value: string): ProjectedSkillInvocation 
   const baseDir = reference.slice(referencePrefix.length, -1);
   if (!baseDir || /[\r\n]/u.test(baseDir) || Buffer.byteLength(baseDir) > MAX_SKILL_PATH_BYTES) return undefined;
   const closing = "\n</skill>";
-  const closingIndex = value.lastIndexOf(closing);
+  // Delimiter-like text can occur in skill Markdown or user arguments. Exact
+  // receipt arguments disambiguate it; without them, multiple candidates fail
+  // closed rather than dropping user text or exposing private skill content.
+  let closingIndex = value.lastIndexOf(closing);
+  if (expectedArguments !== undefined) {
+    let matched = false;
+    let candidate = value.indexOf(closing, referenceEnd + 2);
+    while (candidate >= 0) {
+      const candidateTail = value.slice(candidate + closing.length);
+      if ((candidateTail === "" && expectedArguments === "")
+        || (candidateTail.startsWith("\n\n") && candidateTail.slice(2) === expectedArguments)) {
+        closingIndex = candidate;
+        matched = true;
+        break;
+      }
+      candidate = value.indexOf(closing, candidate + closing.length);
+    }
+    if (!matched) return undefined;
+  } else {
+    const firstClosingIndex = value.indexOf(closing, referenceEnd + 2);
+    if (firstClosingIndex !== closingIndex) return undefined;
+  }
   if (closingIndex < referenceEnd + 2) return undefined;
   const tail = value.slice(closingIndex + closing.length);
   if (tail !== "" && !tail.startsWith("\n\n")) return undefined;
@@ -186,11 +209,15 @@ function projectedSkillText(value: string): string {
     : value;
 }
 
-function projectableUserContent(content: ProjectableContent): ProjectableContent {
-  if (typeof content === "string") return projectedSkillText(content);
+function projectableUserContent(content: ProjectableContent, expectedSkillArguments?: string): ProjectableContent {
+  if (typeof content === "string") return expectedSkillArguments === undefined
+    ? projectedSkillText(content)
+    : projectSkillInvocation(content, expectedSkillArguments)?.text ?? projectedSkillText(content);
   const first = content[0];
   if (first?.type !== "text") return content;
-  const text = projectedSkillText(first.text);
+  const text = expectedSkillArguments === undefined
+    ? projectedSkillText(first.text)
+    : projectSkillInvocation(first.text, expectedSkillArguments)?.text ?? projectedSkillText(first.text);
   if (text === first.text) return content;
   return [{ ...first, text }, ...content.slice(1)];
 }
@@ -943,12 +970,13 @@ export function projectMessage(
   toolLabels?: ReadonlyMap<string, string>,
   contextDelivery?: ContextDeliveryMetadata,
   segmentId?: string,
+  expectedSkillArguments?: string,
 ): TranscriptItem | undefined {
   switch (message.role) {
     case "user":
       return {
         id, parentId, timestamp, kind: "message", role: "user", presentationId,
-        content: projectContent(projectableUserContent(message.content), blobs, presentationId, true),
+        content: projectContent(projectableUserContent(message.content, expectedSkillArguments), blobs, presentationId, true),
         semantic: semanticForMessage("user"),
       };
     case "assistant":
@@ -1075,6 +1103,7 @@ export function projectEntry(
   toolLabels?: ReadonlyMap<string, string>,
   contextDelivery?: ContextDeliveryMetadata,
   segmentId?: string,
+  expectedSkillArguments?: string,
 ): TranscriptItem | undefined {
   switch (entry.type) {
     case "message":
@@ -1090,6 +1119,7 @@ export function projectEntry(
         toolLabels,
         contextDelivery,
         segmentId,
+        expectedSkillArguments,
       );
     case "custom_message":
       if (!entry.display) return undefined;
@@ -1235,6 +1265,7 @@ export function admitCommandCatalog(commands: CommandInfo[]): CommandInfo[] {
     ];
     const identity = `${command.source}:${command.name}`;
     if (typeof command.name !== "string" || command.name.length === 0
+      || Buffer.byteLength(command.name) > RESOURCE_NAME_MAX_BYTES || /\s/u.test(command.name)
       || !["extension", "skill", "prompt"].includes(command.source)
       || command.resourceScope !== undefined
         && !["user", "project", "temporary"].includes(command.resourceScope)
@@ -1584,6 +1615,9 @@ export function projectTranscript(
     .filter(value => value.canonicalEntryId !== undefined)
     .map(value => [value.canonicalEntryId!, value]));
   return entries.map((entry) => {
+    const boundInvocation = invocationByCanonicalEntry.get(entry.id);
+    const expectedSkillArguments = boundInvocation?.resourceInvocation?.source === "skill"
+      ? boundInvocation.resourceInvocation.arguments : undefined;
     const projected = projectEntry(
       entry,
       blobs,
@@ -1592,9 +1626,9 @@ export function projectTranscript(
       toolLabels,
       contextDelivery.get(entry.id),
       toolSegmentIDs.get(entry.id),
+      expectedSkillArguments,
     );
     if (!projected) throw new Error("projectable transcript entry produced no item");
-    const boundInvocation = invocationByCanonicalEntry.get(entry.id);
     if (boundInvocation && projected.semantic) {
       return { ...projected, semantic: {
         ...projected.semantic,
@@ -1661,6 +1695,9 @@ export function projectTranscriptPage(
   const selected: TranscriptItem[] = [];
   while (start > 0 && selected.length < TRANSCRIPT_PAGE_ITEMS) {
     const entry = entries[start - 1]!;
+    const boundInvocation = invocationByCanonicalEntry.get(entry.id);
+    const expectedSkillArguments = boundInvocation?.resourceInvocation?.source === "skill"
+      ? boundInvocation.resourceInvocation.arguments : undefined;
     const item = projectEntry(
       entry,
       blobs,
@@ -1669,9 +1706,9 @@ export function projectTranscriptPage(
       toolLabels,
       contextDelivery.get(entry.id),
       toolSegmentIDs.get(entry.id),
+      expectedSkillArguments,
     );
     if (!item) throw new Error("projectable transcript entry produced no item");
-    const boundInvocation = invocationByCanonicalEntry.get(entry.id);
     const enriched = boundInvocation && item.semantic
       ? { ...item, semantic: {
           ...item.semantic,

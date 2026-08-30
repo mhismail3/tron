@@ -1,5 +1,7 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { ChatOrigin, InvocationLifecycle, JsonValue, ResourceInvocation } from "../protocol/types.js";
+import { GatewayError } from "../errors.js";
+import { RESOURCE_ARGUMENTS_MAX_BYTES } from "./resource-invocation.js";
 
 /** Internal folded lifecycle derived from canonical invocation receipts. */
 export interface InvocationProjection {
@@ -10,7 +12,6 @@ export interface InvocationProjection {
   name?: string;
   arguments?: string;
   resourceInvocation?: ResourceInvocation;
-  disposition: "canonicalPrompt" | "queuedPrompt" | "extensionCommand";
   lifecycle: InvocationLifecycle;
   canonicalEntryId?: string;
   origin: ChatOrigin;
@@ -25,7 +26,6 @@ export const INVOCATION_RECEIPT_WRITER = "gateway";
 export const MAX_RECEIPT_BYTES = 8_192;
 const MAX_ID_BYTES = 256;
 const MAX_NAME_BYTES = 512;
-const MAX_ARGUMENT_BYTES = 64_000;
 const TERMINAL_LIFECYCLES = new Set<InvocationLifecycle>(["completed", "failed", "interrupted", "outcomeUnknown"]);
 const LIFECYCLES = new Set<InvocationLifecycle>([
   "staged", "accepted", "queued", "running", "waitingForInput", "retrying", "settling", "completed", "failed", "interrupted", "outcomeUnknown",
@@ -38,27 +38,60 @@ const ORIGIN_CONFIDENCE = new Set(["boundary", "receipt", "adapter", "unknown"] 
 type ReceiptKind = "start" | "transition" | "terminal" | "binding";
 type ReceiptSource = "plain" | "skill" | "prompt" | "extension";
 
-export interface InvocationReceiptData {
-  writer: typeof INVOCATION_RECEIPT_WRITER;
-  version: 1;
+interface InvocationReceiptCommon {
   receiptId: string;
+  version: 1;
   receiptKind: ReceiptKind;
   invocationId: string;
   operationId: string;
   sessionId: string;
   source: ReceiptSource;
-  name?: string;
-  arguments?: string;
-  lifecycle?: InvocationLifecycle;
-  canonicalEntryId?: string;
-  parentEntryId?: string;
-  origin?: ChatOrigin;
-  retryable?: boolean;
   sequence: number;
   createdAt: string;
+}
+
+export interface InvocationStartReceipt extends InvocationReceiptCommon {
+  receiptKind: "start";
+  name?: string;
+  arguments?: string;
+  lifecycle: "staged";
+  origin: ChatOrigin;
+}
+
+export interface InvocationTransitionReceipt extends InvocationReceiptCommon {
+  receiptKind: "transition";
+  lifecycle: Exclude<InvocationLifecycle, "staged" | "completed" | "failed" | "interrupted" | "outcomeUnknown">;
+}
+
+export interface InvocationTerminalReceipt extends InvocationReceiptCommon {
+  receiptKind: "terminal";
+  lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown";
+  name?: string;
+  origin?: ChatOrigin;
+  retryable?: boolean;
   /** Terminal errors are codes, never arbitrary extension payloads. */
   errorCode?: string;
 }
+
+export interface InvocationBindingReceipt extends InvocationReceiptCommon {
+  receiptKind: "binding";
+  canonicalEntryId: string;
+  parentEntryId?: string;
+}
+
+export type InvocationReceiptData =
+  | (InvocationStartReceipt & { writer: typeof INVOCATION_RECEIPT_WRITER })
+  | (InvocationTransitionReceipt & { writer: typeof INVOCATION_RECEIPT_WRITER })
+  | (InvocationTerminalReceipt & { writer: typeof INVOCATION_RECEIPT_WRITER })
+  | (InvocationBindingReceipt & { writer: typeof INVOCATION_RECEIPT_WRITER });
+
+type ReceiptInput<T> = Omit<T, "writer"> & { writer?: never };
+
+type InvocationReceiptInput =
+  | ReceiptInput<InvocationStartReceipt>
+  | ReceiptInput<InvocationTransitionReceipt>
+  | ReceiptInput<InvocationTerminalReceipt>
+  | ReceiptInput<InvocationBindingReceipt>;
 
 function validText(value: unknown, bytes: number): value is string {
   return typeof value === "string" && value.length > 0 && Buffer.byteLength(value, "utf8") <= bytes
@@ -67,13 +100,8 @@ function validText(value: unknown, bytes: number): value is string {
 
 function validArguments(value: unknown): value is string {
   return typeof value === "string" && value.length > 0
-    && Buffer.byteLength(value, "utf8") <= MAX_ARGUMENT_BYTES
+    && Buffer.byteLength(value, "utf8") <= RESOURCE_ARGUMENTS_MAX_BYTES
     && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value);
-}
-
-function utf8Prefix(value: string, bytes: number): string {
-  if (Buffer.byteLength(value, "utf8") <= bytes) return value;
-  return Buffer.from(value, "utf8").subarray(0, bytes).toString("utf8").replace(/\uFFFD$/u, "");
 }
 
 function validTimestamp(value: unknown): value is string {
@@ -110,15 +138,12 @@ function allowedKeys(kind: ReceiptKind): Set<string> {
 }
 
 /** Add the Gateway writer marker and reject an oversized encoded record. */
-export function makeInvocationReceipt(data: Omit<InvocationReceiptData, "writer">): InvocationReceiptData {
-  const receipt = {
-    ...data,
-    ...(data.arguments === undefined ? {} : { arguments: utf8Prefix(data.arguments, 5_000) }),
-    ...(data.name === undefined ? {} : { name: utf8Prefix(data.name, MAX_NAME_BYTES) }),
-    writer: INVOCATION_RECEIPT_WRITER,
-  } as InvocationReceiptData;
+export function makeInvocationReceipt(data: InvocationReceiptInput): InvocationReceiptData {
+  // Semantic identity must never be silently shortened. Request boundaries
+  // reject oversized values before this builder is reached.
+  const receipt = { ...data, writer: INVOCATION_RECEIPT_WRITER } as InvocationReceiptData;
   const parsed = parseInvocationReceipt(receipt);
-  if (!parsed) throw new Error("invalid invocation receipt");
+  if (!parsed) throw new GatewayError("invalid_request", "Gateway could not construct a valid invocation receipt");
   return parsed;
 }
 
@@ -138,13 +163,20 @@ export function parseInvocationReceipt(value: unknown): InvocationReceiptData | 
   if (r.canonicalEntryId !== undefined && !validText(r.canonicalEntryId, MAX_ID_BYTES)) return undefined;
   if (r.parentEntryId !== undefined && !validText(r.parentEntryId, MAX_ID_BYTES)) return undefined;
   if (r.origin !== undefined && !validOrigin(r.origin)) return undefined;
+  if (kind === "start" && !validOrigin(r.origin)) return undefined;
   if (r.retryable !== undefined && typeof r.retryable !== "boolean") return undefined;
   if (r.errorCode !== undefined && !validText(r.errorCode, 256)) return undefined;
   if (kind === "start" && (r.lifecycle !== "staged"
-      || r.canonicalEntryId !== undefined || r.errorCode !== undefined)) return undefined;
-  if (kind === "transition" && (!r.lifecycle || TERMINAL_LIFECYCLES.has(r.lifecycle as InvocationLifecycle))) return undefined;
+      || r.canonicalEntryId !== undefined || r.errorCode !== undefined
+      || r.retryable !== undefined || r.parentEntryId !== undefined
+      || (r.source === "plain" && (r.name !== undefined || r.arguments !== undefined))
+      || (r.source !== "plain" && r.name === undefined))) return undefined;
+  if (kind === "transition" && (!r.lifecycle || r.lifecycle === "staged"
+      || TERMINAL_LIFECYCLES.has(r.lifecycle as InvocationLifecycle))) return undefined;
   if (kind === "terminal" && (!TERMINAL_LIFECYCLES.has(r.lifecycle as InvocationLifecycle) || r.canonicalEntryId !== undefined)) return undefined;
-  if (kind === "binding" && (r.canonicalEntryId === undefined || r.lifecycle !== undefined || r.errorCode !== undefined)) return undefined;
+  if (kind === "binding" && (r.canonicalEntryId === undefined || r.lifecycle !== undefined
+      || r.errorCode !== undefined || r.name !== undefined || r.arguments !== undefined
+      || r.origin !== undefined || r.retryable !== undefined)) return undefined;
   if (Buffer.byteLength(JSON.stringify(r), "utf8") > MAX_RECEIPT_BYTES) return undefined;
   return r as unknown as InvocationReceiptData;
 }
@@ -156,14 +188,15 @@ export function parseInvocationReceipt(value: unknown): InvocationReceiptData | 
  */
 export function invocationReceipts(entries: readonly SessionEntry[], sessionId?: string): InvocationReceiptData[] {
   const records = new Map<string, InvocationReceiptData>();
+  const entriesById = new Map(entries.map(entry => [entry.id, entry]));
   for (const entry of entries) {
     if (entry.type !== "custom" || entry.customType !== INVOCATION_RECEIPT_TYPE) continue;
     const receipt = parseInvocationReceipt(entry.data);
     if (!receipt || (sessionId !== undefined && receipt.sessionId !== sessionId)) continue;
-    if (receipt.canonicalEntryId !== undefined) {
-      const target = entries.find(candidate => candidate.id === receipt.canonicalEntryId);
-      if (!target || (target.type === "custom" && target.customType === INVOCATION_RECEIPT_TYPE)) {
-        throw new Error("invocation receipt target is not canonical");
+    if (receipt.receiptKind === "binding") {
+      const target = entriesById.get(receipt.canonicalEntryId);
+      if (!target || target.type !== "message" || target.message.role !== "user") {
+        throw new Error("invocation receipt target is not a canonical user message");
       }
       if (receipt.parentEntryId !== undefined && entry.parentId !== receipt.parentEntryId) {
         throw new Error("invocation receipt parent does not match canonical entry");
@@ -173,16 +206,33 @@ export function invocationReceipts(entries: readonly SessionEntry[], sessionId?:
     if (previous && canonicalJSON(previous) !== canonicalJSON(receipt)) throw new Error("contradictory invocation receipt");
     records.set(receipt.receiptId, receipt);
   }
+  const values = [...records.values()];
+  const startsByInvocation = new Map(values
+    .filter((record): record is InvocationStartReceipt & { writer: typeof INVOCATION_RECEIPT_WRITER } => record.receiptKind === "start")
+    .map(record => [record.invocationId, record]));
+  const boundEntries = new Set<string>();
+  const boundInvocations = new Set<string>();
+  for (const record of values) {
+    if (record.receiptKind !== "start" && !startsByInvocation.has(record.invocationId)) {
+      throw new Error("invocation receipt has no start receipt");
+    }
+    if (record.receiptKind === "binding") {
+      if (boundEntries.has(record.canonicalEntryId)) throw new Error("canonical entry has more than one invocation binding");
+      if (boundInvocations.has(record.invocationId)) throw new Error("invocation has more than one canonical binding");
+      boundEntries.add(record.canonicalEntryId);
+      boundInvocations.add(record.invocationId);
+    }
+  }
   // Map insertion order is canonical branch order. Sequence is a bounded live
   // presentation fact only and can repeat across writes in one Gateway revision.
-  return [...records.values()];
+  return values;
 }
 
 function legalTransition(from: InvocationLifecycle, to: InvocationLifecycle, terminal: boolean): boolean {
   if (TERMINAL_LIFECYCLES.has(from)) return false;
-  if (terminal) return from === "staged"
-      ? to === "failed" || to === "outcomeUnknown"
-      : TERMINAL_LIFECYCLES.has(to);
+  // A terminal observation is authoritative even if the accepted transition
+  // could not be persisted after Pi admitted execution.
+  if (terminal) return TERMINAL_LIFECYCLES.has(to);
   const transitions: Record<string, InvocationLifecycle[]> = {
     staged: ["accepted", "queued", "running", "waitingForInput", "retrying", "settling"],
     accepted: ["queued", "running", "waitingForInput", "retrying", "settling"],
@@ -198,6 +248,8 @@ function legalTransition(from: InvocationLifecycle, to: InvocationLifecycle, ter
 export function invocationProjection(receipts: readonly InvocationReceiptData[]): InvocationProjection[] {
   const grouped = new Map<string, InvocationProjection>();
   const terminal = new Set<string>();
+  const boundEntries = new Set<string>();
+  const boundInvocations = new Set<string>();
   for (const receipt of receipts) {
     const previous = grouped.get(receipt.invocationId);
     if (receipt.receiptKind === "start" && previous) {
@@ -214,14 +266,25 @@ export function invocationProjection(receipts: readonly InvocationReceiptData[])
         ...(["skill", "prompt", "extension"].includes(receipt.source) && receipt.name !== undefined
           ? { resourceInvocation: { source: receipt.source as "skill" | "prompt" | "extension", name: receipt.name, arguments: receipt.arguments ?? "" } }
           : {}),
-        disposition: receipt.source === "extension" ? "extensionCommand" : "canonicalPrompt",
         lifecycle: receipt.lifecycle ?? "accepted",
         origin: receipt.origin ?? { kind: receipt.source === "extension" ? "extension" : "user", confidence: "receipt" },
         sequence: receipt.sequence, updatedAt: receipt.createdAt,
       });
       continue;
     }
-    if (!previous) continue;
+    if (!previous) throw new Error("invocation receipt has no start receipt");
+    if (receipt.receiptKind === "binding") {
+      if (boundEntries.has(receipt.canonicalEntryId)) throw new Error("canonical entry has more than one invocation binding");
+      if (boundInvocations.has(receipt.invocationId)) throw new Error("invocation has more than one canonical binding");
+      boundEntries.add(receipt.canonicalEntryId);
+      boundInvocations.add(receipt.invocationId);
+    }
+    if ("name" in receipt && receipt.name !== undefined && receipt.name !== previous.name) {
+      throw new Error("invocation receipt resource name changed");
+    }
+    if ("origin" in receipt && canonicalJSON(receipt.origin) !== canonicalJSON(previous.origin)) {
+      throw new Error("invocation receipt origin changed");
+    }
     if (receipt.receiptKind === "terminal") {
       if (terminal.has(receipt.invocationId)) {
         const current = previous.lifecycle;
@@ -235,15 +298,16 @@ export function invocationProjection(receipts: readonly InvocationReceiptData[])
         throw new Error("illegal invocation transition");
       }
     } else if (terminal.has(receipt.invocationId)) {
-      // Facts after terminal settlement cannot mutate the lifecycle, but a
-      // binding/turn may still fill canonical identity without reopening it.
-      if (receipt.lifecycle !== undefined) throw new Error("invocation lifecycle changed after terminal receipt");
+      // Only canonical binding may arrive after terminal settlement.
+      if (receipt.receiptKind !== "binding") {
+        throw new Error("invocation changed after terminal receipt");
+      }
     }
     const next: InvocationProjection = { ...previous, updatedAt: receipt.createdAt };
-    if (receipt.lifecycle && !terminal.has(receipt.invocationId)) next.lifecycle = receipt.lifecycle;
-    if (receipt.lifecycle && receipt.receiptKind === "terminal") next.lifecycle = receipt.lifecycle;
-    if (receipt.canonicalEntryId) next.canonicalEntryId = receipt.canonicalEntryId;
-    if (receipt.retryable !== undefined) next.retryable = receipt.retryable;
+    if ("lifecycle" in receipt && receipt.lifecycle && !terminal.has(receipt.invocationId)) next.lifecycle = receipt.lifecycle;
+    if (receipt.receiptKind === "terminal") next.lifecycle = receipt.lifecycle;
+    if ("canonicalEntryId" in receipt && receipt.canonicalEntryId) next.canonicalEntryId = receipt.canonicalEntryId;
+    if ("retryable" in receipt && receipt.retryable !== undefined) next.retryable = receipt.retryable;
     grouped.set(receipt.invocationId, next);
   }
   return [...grouped.values()].sort((a, b) => a.sequence - b.sequence);

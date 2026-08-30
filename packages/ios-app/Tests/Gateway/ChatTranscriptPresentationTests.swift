@@ -122,6 +122,25 @@ struct ChatTranscriptPresentationTests {
         ))
     }
 
+    @Test("pending resource presentation preserves exact invocation identity")
+    func pendingResourcePresentationPreservesInvocation() {
+        let resource = ComposerResourceInvocation(
+            source: .skill, name: "review", arguments: "Inspect this"
+        )
+        let pending = SessionSnapshot.PendingPrompt(
+            id: "operation-resource",
+            createdAt: "2026-01-01T00:00:01Z",
+            behavior: nil,
+            text: "Inspect this",
+            attachmentCount: 0,
+            resourceInvocation: resource
+        )
+        let presentation = ChatPendingPromptPresentation(
+            snapshot: pending, isCompacting: false
+        )
+        #expect(presentation.resourceInvocation == resource)
+    }
+
     @Test("pending canonical replacement prefers exact operation identity over repeated text")
     func pendingCanonicalReplacementPrefersOperationIdentity() throws {
         let pending = SessionSnapshot.PendingPrompt(

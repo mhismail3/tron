@@ -4749,6 +4749,102 @@ export default function (pi) {
     expect(snapshots.at(-1)?.operation).toBeUndefined();
   });
 
+  it("persists fast foreground skill and prompt bindings without operation failures", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-skill-binding-receipt-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([
+      mkdir(join(agentDir, "skills", "review"), { recursive: true }),
+      mkdir(join(agentDir, "prompts"), { recursive: true }),
+      mkdir(cwd),
+    ]);
+    await Promise.all([
+      writeFile(join(agentDir, "skills", "review", "SKILL.md"),
+        "---\nname: review\ndescription: Review carefully\n---\nReview the requested change.\n"),
+      writeFile(join(agentDir, "prompts", "summarize.md"),
+        "---\ndescription: Summarize carefully\n---\nSummarize $ARGUMENTS\n"),
+    ]);
+    const failures: unknown[] = [];
+    const snapshots: any[] = [];
+    const faux = fauxProvider({ provider: "tron-skill-binding", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("skill complete"), fauxAssistantMessage("prompt complete")]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
+      broadcast: (_sessionId, topic, payload) => {
+        if (topic === "session.operationFailed") failures.push(payload);
+        if (topic === "session.snapshot") snapshots.push(payload);
+      },
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await expect(slot.prompt("/skill:review configurations", [], undefined, {
+      text: "configurations",
+      resourceInvocation: { source: "skill", name: "review", arguments: "configurations" },
+      attachmentEnvelope: "", attachmentCount: 0,
+    })).resolves.toEqual({ operationId: expect.any(String) });
+    await waitUntil(() => !slot.isBusy);
+    const entries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line) as any);
+    let receipts = entries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE).map(entry => entry.data);
+    expect(receipts.map(receipt => receipt.receiptKind)).toEqual(["start", "transition", "binding", "terminal"]);
+    expect(receipts.find(receipt => receipt.receiptKind === "binding")).not.toHaveProperty("name");
+    expect(snapshots.some(snapshot => snapshot.pendingPrompt?.resourceInvocation?.name === "review")).toBe(true);
+    expect(slot.snapshot().transcript.some(item => item.semantic?.resourceInvocation?.name === "review")).toBe(true);
+
+    await expect(slot.prompt("/summarize configurations", [], undefined, {
+      text: "configurations",
+      resourceInvocation: { source: "prompt", name: "summarize", arguments: "configurations" },
+      attachmentEnvelope: "", attachmentCount: 0,
+    })).resolves.toEqual({ operationId: expect.any(String) });
+    await waitUntil(() => !slot.isBusy);
+    const allEntries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line) as any);
+    receipts = allEntries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE).map(entry => entry.data);
+    const promptReceipts = receipts.filter(receipt => receipt.source === "prompt");
+    expect(promptReceipts.map(receipt => receipt.receiptKind)).toEqual(["start", "transition", "binding", "terminal"]);
+    expect(promptReceipts.find(receipt => receipt.receiptKind === "binding")).not.toHaveProperty("name");
+    expect(slot.snapshot().transcript.some(item => item.semantic?.resourceInvocation?.name === "summarize")).toBe(true);
+    expect(failures).toEqual([]);
+  });
+
+  it("records interruption intent before fast SDK settlement", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-abort-invocation-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let release!: () => void;
+    const responseBarrier = new Promise<void>((resolve) => { release = resolve; });
+    const faux = fauxProvider({ provider: "tron-abort-invocation", tokensPerSecond: 10_000 });
+    faux.setResponses([async () => { await responseBarrier; return fauxAssistantMessage("should not complete"); }]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const prompt = slot.prompt("interrupt me");
+    await waitUntil(() => slot.isBusy);
+    const aborting = slot.abort("agent");
+    release();
+    await aborting;
+    await expect(prompt).resolves.toEqual({ operationId: expect.any(String) });
+    await waitUntil(() => !slot.isBusy);
+    const entries = (await readFile(slot.sessionFile!, "utf8")).trimEnd().split("\n").map(line => JSON.parse(line) as any);
+    const terminal = entries.find(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.receiptKind === "terminal");
+    expect(terminal?.data).toMatchObject({ lifecycle: "interrupted" });
+  });
+
   it("projects and atomically manages multiple queued messages by stable identity", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-queue-management-"));
     const agentDir = join(root, "agent");
@@ -4855,6 +4951,16 @@ export default function (pi) {
       { id: skill!.id, behavior: "followUp", text: "edited skill" },
     ]);
     expect(replaced.items[2]?.attachments).toEqual([attachment]);
+    expect(replaced.items[3]?.resourceInvocation).toEqual({
+      source: "skill", name: "review", arguments: "edited skill",
+    });
+    const afterEditEntries = (slot as any).runtime.session.sessionManager.getEntries() as any[];
+    const skillInvocationReceipts = afterEditEntries.filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE
+      && entry.data?.operationId === skill!.id).map(entry => entry.data);
+    expect(skillInvocationReceipts.filter(receipt => receipt.receiptKind === "start")
+      .map(receipt => receipt.arguments)).toEqual(["queued skill", "edited skill"]);
+    expect(skillInvocationReceipts.some(receipt => receipt.receiptKind === "terminal"
+      && receipt.lifecycle === "interrupted" && receipt.errorCode === "queue-edited")).toBe(true);
     const queuedRuntime = (slot as unknown as {
       runtime: { session: { getFollowUpMessages(): readonly string[] } };
     }).runtime.session.getFollowUpMessages();
@@ -4866,9 +4972,20 @@ export default function (pi) {
     const removed = await slot.replaceQueue(replaced.queueRevision, [replaced.items[1]!]);
     expect(removed.items).toHaveLength(1);
     expect(removed.items[0]?.id).toBe(followUp!.id);
+    const afterReplaceEntries = (slot as any).runtime.session.sessionManager.getEntries() as any[];
+    expect(afterReplaceEntries.some(entry => entry.customType === INVOCATION_RECEIPT_TYPE
+      && entry.data?.operationId === skill!.id
+      && entry.data?.receiptKind === "terminal"
+      && entry.data?.lifecycle === "interrupted")).toBe(true);
 
     await slot.clearQueue();
     expect(slot.snapshot().queuedItems).toEqual([]);
+    const afterClearEntries = (slot as any).runtime.session.sessionManager.getEntries() as any[];
+    expect(afterClearEntries.some(entry => entry.customType === INVOCATION_RECEIPT_TYPE
+      && entry.data?.operationId === followUp!.id
+      && entry.data?.receiptKind === "terminal"
+      && entry.data?.lifecycle === "interrupted"
+      && entry.data?.errorCode === "queue-cleared")).toBe(true);
     await expect(slot.replaceQueue(removed.queueRevision, removed.items))
       .rejects.toMatchObject({ code: "conflict" });
 

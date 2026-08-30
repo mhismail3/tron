@@ -31,6 +31,7 @@ import { SessionListPaginationStore } from "./session-list-pagination.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
+import { admitPromptText, admitResourceInvocation, canonicalResourceName } from "../sessions/resource-invocation.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
@@ -640,26 +641,29 @@ export class GatewayService {
       case "session.prompt":
         return this.mutation(client, method, params, async () => {
           const slot = await this.openedSlot(client, params);
-          const text = typeof params.text === "string" ? params.text.trim() : "";
+          if (params.text !== undefined && typeof params.text !== "string") {
+            throw new GatewayError("invalid_request", "text must be a string");
+          }
+          const text = params.text === undefined ? "" : admitPromptText(params.text);
           const uploadIds = params.uploadIds === undefined ? [] : arrayOfStrings(params.uploadIds, "uploadIds", 10);
           const resourceInvocation = params.resourceInvocation === undefined || params.resourceInvocation === null
-            ? undefined
-            : object(params.resourceInvocation, "resourceInvocation");
-          const resourceSource = resourceInvocation === undefined
-            ? undefined
-            : oneOf(resourceInvocation.source, "resourceInvocation.source", ["skill", "prompt", "extension"] as const);
-          const resourceName = resourceInvocation === undefined
-            ? undefined : string(resourceInvocation.name, "resourceInvocation.name", { max: 512 });
-          const resourceArguments = resourceInvocation === undefined
-            ? undefined : boundedText(resourceInvocation.arguments, "resourceInvocation.arguments", 64_000);
-          if (!text && !resourceArguments && uploadIds.length === 0) {
+            ? undefined : admitResourceInvocation(params.resourceInvocation);
+          const resourceSource = resourceInvocation?.source;
+          const resourceName = resourceInvocation?.name;
+          const resourceArguments = resourceInvocation?.arguments;
+          if (resourceInvocation === undefined && !text.trim() && uploadIds.length === 0) {
             throw new GatewayError("invalid_request", "Prompt text or attachments are required");
           }
-          const catalogResourceName = resourceSource === "skill"
-            ? `skill:${resourceName!.startsWith("skill:") ? resourceName!.slice("skill:".length) : resourceName!}`
-            : resourceName;
+          if (resourceInvocation !== undefined && resourceArguments !== text) {
+            throw new GatewayError("invalid_request", "Prompt text must exactly match resourceInvocation.arguments");
+          }
+          const catalogResourceName = resourceSource === undefined
+            ? undefined : canonicalResourceName(resourceSource, resourceName!);
           if (resourceSource !== undefined) {
             const commands = slot.commands();
+            if (resourceSource === "extension" && uploadIds.length > 0) {
+              throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
+            }
             const matches = commands.filter(
               (command) => command.source === resourceSource && command.name === catalogResourceName,
             );
@@ -687,10 +691,8 @@ export class GatewayService {
             ...(resourceSource === undefined ? {} : {
               resourceInvocation: {
                 source: resourceSource,
-                name: resourceSource === "skill" && resourceName!.startsWith("skill:")
-                  ? resourceName!.slice("skill:".length)
-                  : resourceName!,
-                arguments: resourceArguments ?? text,
+                name: resourceName!,
+                arguments: resourceArguments!,
               },
             }),
             attachmentEnvelope: attachments.envelope,

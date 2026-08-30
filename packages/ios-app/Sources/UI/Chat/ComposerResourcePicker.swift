@@ -731,3 +731,65 @@ struct ComposerResourceChip: View {
         }
     }
 }
+
+enum ComposerResourceInvocationPolicy {
+    /// Resolves only a leading, catalog-backed Pi resource command. Extension
+    /// and skill commands use Pi's literal ASCII-space delimiter; prompt
+    /// templates use Pi's whitespace delimiter after extension precedence.
+    static func leadingInvocation(
+        in text: String,
+        commands: [CommandInfo]
+    ) -> ComposerResourceInvocation? {
+        guard text.first == "/" else { return nil }
+        let remainder = text.dropFirst()
+        let literalParts = remainder.split(
+            separator: " ", maxSplits: 1, omittingEmptySubsequences: false
+        )
+        let literalName = String(literalParts.first ?? "")
+        guard !literalName.isEmpty else { return nil }
+        let literalArguments = literalParts.count > 1 ? String(literalParts[1]) : ""
+
+        if let command = commands.first(where: {
+            $0.source == .extension && $0.name == literalName
+        }) {
+            return invocation(command, arguments: literalArguments)
+        }
+        if literalName.hasPrefix("skill:"), let command = commands.first(where: {
+            $0.source == .skill && $0.name == literalName
+        }) {
+            return invocation(command, arguments: literalArguments)
+        }
+
+        let promptName: String
+        let promptArguments: String
+        if let boundary = remainder.firstIndex(where: \.isWhitespace) {
+            promptName = String(remainder[..<boundary])
+            promptArguments = String(remainder[boundary...])
+        } else {
+            promptName = String(remainder)
+            promptArguments = ""
+        }
+        guard !promptName.isEmpty, let command = commands.first(where: {
+            $0.source == .prompt && $0.name == promptName
+        }) else { return nil }
+        return invocation(command, arguments: promptArguments)
+    }
+
+    private static func invocation(
+        _ command: CommandInfo,
+        arguments: String
+    ) -> ComposerResourceInvocation {
+        let source: ComposerResourceInvocation.Source = switch command.source {
+        case .skill: .skill
+        case .prompt: .prompt
+        case .extension: .extension
+        }
+        return ComposerResourceInvocation(
+            source: source,
+            name: source == .skill && command.name.hasPrefix("skill:")
+                ? String(command.name.dropFirst("skill:".count))
+                : command.name,
+            arguments: arguments.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+}

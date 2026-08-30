@@ -229,11 +229,24 @@ enum ComposerAttachmentPolicy {
 
 struct ComposerResourceInvocation: Codable, Equatable, Hashable, Sendable {
     enum Source: String, Codable, Sendable { case skill, prompt, `extension` }
+    static let maximumNameBytes = 512
+    static let maximumArgumentBytes = 5_000
+
     let source: Source
     let name: String
     let arguments: String
 
     var isExtensionCommand: Bool { source == .extension }
+    var isTransportValid: Bool {
+        !name.isEmpty
+            && name.utf8.count <= Self.maximumNameBytes
+            && !name.contains(where: \.isWhitespace)
+            && arguments.utf8.count <= Self.maximumArgumentBytes
+            && !arguments.unicodeScalars.contains(where: { scalar in
+                (scalar.value < 0x20 && ![0x09, 0x0a, 0x0d].contains(scalar.value))
+                    || scalar.value == 0x7f
+            })
+    }
 }
 
 struct ComposerSubmissionSnapshot: Equatable, Sendable {
@@ -960,6 +973,7 @@ final class ComposerDraftCoordinator {
             return message.behavior.rawValue == behavior
                 && message.text == admission.snapshot.outgoingText
                 && message.attachmentCount == admission.submittedAttachments.count
+                && message.resourceInvocation == admission.snapshot.resourceInvocation
         }
         admission.provisionalQueuedCandidateID = if admission.operationID == nil,
                                                     queuedCandidates.count == 1 {
@@ -1780,7 +1794,7 @@ final class ComposerDraftCoordinator {
             )
         }
         let draft = drafts[scope] ?? Draft(text: "", revision: 0, lastAccess: sequence)
-        let outgoing = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawOutgoing = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachmentsByScope[scope] ?? []
         let submittedResource = selectedResourceByScope[scope]
         let selectedResource = resourceInvocation ?? submittedResource.map {
@@ -1794,7 +1808,18 @@ final class ComposerDraftCoordinator {
                 name: source == .skill && $0.name.hasPrefix("skill:")
                     ? String($0.name.dropFirst("skill:".count))
                     : $0.name,
-                arguments: outgoing
+                arguments: rawOutgoing
+            )
+        }
+        // A manually typed leading invocation is normalized at the ChatView
+        // boundary. Its arguments become the sole visible/executed prompt text.
+        let outgoing = resourceInvocation?.arguments ?? rawOutgoing
+        if let selectedResource, !selectedResource.isTransportValid {
+            throw GatewayFailure(
+                code: "invalid_request",
+                message: "Resource names and arguments must fit the bounded Gateway invocation contract.",
+                retryable: false,
+                details: nil
             )
         }
         guard submittedAttachments.allSatisfy({ $0.gatewayUploadID != nil }) else {
@@ -2085,6 +2110,11 @@ final class ComposerDraftCoordinator {
     ) -> Bool {
         guard item.kind == .message, item.role == .user,
               !baselineTranscriptIDs.contains(item.id) else { return false }
+        if let expectedResource = snapshot.resourceInvocation {
+            guard item.semantic?.resourceInvocation == expectedResource else { return false }
+        } else if item.semantic?.resourceInvocation != nil {
+            return false
+        }
         let text = (item.content ?? []).compactMap { part -> String? in
             guard part.type == .text, part.attachment == nil else { return nil }
             return part.text

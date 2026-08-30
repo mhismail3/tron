@@ -56,6 +56,14 @@ struct CommandAndSessionTreePolicyTests {
             _ = try CommandCatalogPolicy.admit([self.command("")])
         }
         #expect(throws: GatewayFailure.self) {
+            _ = try CommandCatalogPolicy.admit([self.command("two words")])
+        }
+        #expect(throws: GatewayFailure.self) {
+            _ = try CommandCatalogPolicy.admit([
+                self.command(String(repeating: "🙂", count: 129))
+            ])
+        }
+        #expect(throws: GatewayFailure.self) {
             _ = try CommandCatalogPolicy.admit([
                 self.command("valid", sourcePath: String(repeating: "x", count: CommandCatalogPolicy.maximumStringBytes + 1))
             ])

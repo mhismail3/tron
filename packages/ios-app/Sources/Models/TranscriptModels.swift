@@ -292,10 +292,7 @@ struct ChatSemanticMetadata: Codable, Hashable, Sendable {
         guard version == 1, sequence >= 0,
               invocationId.map({ admitsSemanticString($0, maximumBytes: 256) }) ?? true,
               operationId.map({ admitsSemanticString($0, maximumBytes: 256) }) ?? true,
-              resourceInvocation.map({
-                  admitsSemanticString($0.name, maximumBytes: 512)
-                      && $0.arguments.utf8.count <= 64_000
-              }) ?? true else {
+              resourceInvocation.map(\.isTransportValid) ?? true else {
             throw DecodingError.dataCorruptedError(
                 forKey: .version,
                 in: values,

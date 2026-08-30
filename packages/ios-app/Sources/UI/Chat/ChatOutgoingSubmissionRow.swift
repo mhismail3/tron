@@ -142,6 +142,9 @@ struct ChatPendingPromptRow: View, Equatable {
             HStack(alignment: .top, spacing: 10) {
                 Spacer(minLength: 24)
                 VStack(alignment: .trailing, spacing: 4) {
+                    if let resource = presentation.resourceInvocation, !resource.isExtensionCommand {
+                        CanonicalResourceChip(resource: resource)
+                    }
                     Label(presentation.statusTitle, systemImage: "clock.arrow.circlepath")
                         .font(TronTypography.caption)
                         .foregroundStyle(Color.tronTextSecondary)

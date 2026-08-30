@@ -51,6 +51,41 @@ struct ComposerResourcePickerTests {
         #expect(token("plain", caret: 5) == nil)
     }
 
+    @Test("manual leading resources use Pi delimiter and extension precedence")
+    func manualLeadingResourceParsing() {
+        let commands = [
+            command("skill:review", source: .skill),
+            command("review", source: .prompt),
+            command("review", source: .extension),
+        ]
+        #expect(ComposerResourceInvocationPolicy.leadingInvocation(in: "/skill:review inspect", commands: commands)
+            == ComposerResourceInvocation(source: .skill, name: "review", arguments: "inspect"))
+        #expect(ComposerResourceInvocationPolicy.leadingInvocation(in: "/review inspect", commands: commands)
+            == ComposerResourceInvocation(source: .extension, name: "review", arguments: "inspect"))
+        #expect(ComposerResourceInvocationPolicy.leadingInvocation(in: "/review\tinspect", commands: commands)
+            == ComposerResourceInvocation(source: .prompt, name: "review", arguments: "inspect"))
+        #expect(ComposerResourceInvocationPolicy.leadingInvocation(in: "/review\ninspect", commands: commands)
+            == ComposerResourceInvocation(source: .prompt, name: "review", arguments: "inspect"))
+        #expect(ComposerResourceInvocationPolicy.leadingInvocation(in: "say /review inspect", commands: commands) == nil)
+    }
+
+    @Test("resource invocation transport identity is bounded before optimistic admission")
+    func resourceInvocationTransportAdmission() {
+        #expect(ComposerResourceInvocation(
+            source: .skill, name: "review", arguments: "one\ntwo"
+        ).isTransportValid)
+        #expect(!ComposerResourceInvocation(
+            source: .prompt, name: "two words", arguments: "x"
+        ).isTransportValid)
+        #expect(!ComposerResourceInvocation(
+            source: .prompt, name: "review",
+            arguments: String(repeating: "x", count: ComposerResourceInvocation.maximumArgumentBytes + 1)
+        ).isTransportValid)
+        #expect(!ComposerResourceInvocation(
+            source: .extension, name: "goal", arguments: "bad\u{0}value"
+        ).isTransportValid)
+    }
+
     @Test("catalog strips skill transport prefixes, excludes skills from commands, and filters deterministically")
     func catalogFiltering() throws {
         let catalog = ComposerResourceCatalog(commands: [

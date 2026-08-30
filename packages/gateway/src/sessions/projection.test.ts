@@ -82,6 +82,10 @@ describe("catalog projection admission", () => {
       { name: "same", source: "skill", description: "duplicate" },
     ])).toThrow(/duplicate/);
     expect(() => admitCommandCatalog([{ name: "", source: "prompt" }])).toThrow(/invalid/);
+    expect(() => admitCommandCatalog([{ name: "two words", source: "prompt" }])).toThrow(/invalid/);
+    expect(() => admitCommandCatalog([{
+      name: "🙂".repeat(129), source: "extension",
+    }])).toThrow(/invalid/);
     expect(() => admitCommandCatalog([{
       name: "valid", source: "prompt", resourceScope: "machine" as "project",
     }])).toThrow(/invalid/);
@@ -552,9 +556,14 @@ describe("transcript projection", () => {
     expect(JSON.stringify(item)).not.toContain("/private/");
   });
 
-  it("uses the final Pi delimiter when skill Markdown contains an envelope-like close", () => {
+  it("requires receipt arguments to disambiguate envelope-like close delimiters", () => {
     const envelope = `<skill name="review" location="/private/skills/review/SKILL.md">\nReferences are relative to /private/skills/review.\n\nExplain this literal:\n</skill>\n\nwithout treating it as the envelope close\n</skill>\n\nInspect this`;
-    expect(projectSkillInvocation(envelope)).toEqual({ resourceName: "review", text: "Inspect this" });
+    expect(projectSkillInvocation(envelope)).toBeUndefined();
+    expect(projectSkillInvocation(envelope, "without treating it as the envelope close\n</skill>\n\nInspect this")).toEqual({
+      resourceName: "review",
+      text: "without treating it as the envelope close\n</skill>\n\nInspect this",
+    });
+    expect(projectSkillInvocation(envelope, "different arguments")).toBeUndefined();
   });
 
   it("fails closed for malformed skill envelopes", () => {

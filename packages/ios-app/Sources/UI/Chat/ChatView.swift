@@ -2207,30 +2207,23 @@ struct ChatView: View {
 
     private func composerResourceInvocation() -> ComposerResourceInvocation? {
         let value = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard value.first == "/" else {
-            if let scope = composerScope, let resource = model.composerDrafts.selectedResource(for: scope) {
-                let source: ComposerResourceInvocation.Source = switch resource.source {
-                case .skill: .skill
-                case .prompt: .prompt
-                case .extension: .extension
-                }
-                return ComposerResourceInvocation(
-                    source: source,
-                    name: source == .skill && resource.name.hasPrefix("skill:")
-                        ? String(resource.name.dropFirst("skill:".count))
-                        : resource.name,
-                    arguments: value
-                )
+        // The staged chip is the sole invocation authority. A slash typed into
+        // its argument text is data, not an opportunity to replace the chip.
+        if let scope = composerScope, let resource = model.composerDrafts.selectedResource(for: scope) {
+            let source: ComposerResourceInvocation.Source = switch resource.source {
+            case .skill: .skill
+            case .prompt: .prompt
+            case .extension: .extension
             }
-            return nil
+            return ComposerResourceInvocation(
+                source: source,
+                name: source == .skill && resource.name.hasPrefix("skill:")
+                    ? String(resource.name.dropFirst("skill:".count))
+                    : resource.name,
+                arguments: value
+            )
         }
-        // Pi 0.84.1 uses a literal ASCII space to delimit the command name.
-        // Keep this admission parser identical to Gateway and do not execute
-        // slash text embedded later in prose.
-        let token = String(value.dropFirst().split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
-        guard let command = model.commands.first(where: { $0.source == .extension && $0.name == token }) else { return nil }
-        let arguments = value.dropFirst().dropFirst(token.count)
-        return ComposerResourceInvocation(source: .extension, name: command.name, arguments: String(arguments).trimmingCharacters(in: .whitespacesAndNewlines))
+        return ComposerResourceInvocationPolicy.leadingInvocation(in: value, commands: model.commands)
     }
 
     @MainActor
@@ -2255,8 +2248,10 @@ struct ChatView: View {
             )
             return
         }
-        if let composerScope,
-           let selected = model.composerDrafts.selectedResource(for: composerScope) {
+        // Capture invocation intent exactly once before any presentation state
+        // changes. The same value is validated, staged, rendered, and sent.
+        let resourceInvocation = composerResourceInvocation()
+        if let resourceInvocation {
             guard model.commandCatalogTarget == target else {
                 model.presentComposerActionError(
                     "Resources are still loading for this session.",
@@ -2264,14 +2259,24 @@ struct ChatView: View {
                 )
                 return
             }
-            let matches = model.commands.filter {
-                $0.source == selected.source && $0.name == selected.name
+            let source: CommandInfo.Source = switch resourceInvocation.source {
+            case .skill: .skill
+            case .prompt: .prompt
+            case .extension: .extension
             }
-            let shadowed = selected.source != .extension && model.commands.contains {
-                $0.source == .extension && $0.name == selected.name
+            let catalogName = source == .skill
+                ? "skill:\(resourceInvocation.name)"
+                : resourceInvocation.name
+            let matches = model.commands.filter {
+                $0.source == source && $0.name == catalogName
+            }
+            let shadowed = source != .extension && model.commands.contains {
+                $0.source == .extension && $0.name == catalogName
             }
             guard matches.count == 1, !shadowed else {
-                model.composerDrafts.removeSelectedResource(for: composerScope)
+                if let composerScope {
+                    model.composerDrafts.removeSelectedResource(for: composerScope)
+                }
                 model.presentComposerActionError(
                     "That resource is no longer available for this session.",
                     target: target
@@ -2308,7 +2313,7 @@ struct ChatView: View {
                 let submission = try model.beginComposerSubmission(
                     target: target,
                     behavior: behavior,
-                    resourceInvocation: composerResourceInvocation(),
+                    resourceInvocation: resourceInvocation,
                     canonicalTranscript: model.transcriptSnapshot(for: sessionID)?.transcript ?? [],
                     queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? []
                 )

@@ -84,6 +84,7 @@ enum CommandResourceDetailPolicy {
 
 enum CommandCatalogPolicy {
     static let maximumCommands = 1_000
+    static let maximumNameBytes = 512
     static let maximumStringBytes = 8_192
     static let maximumEncodedBytes = 700_000
 
@@ -93,7 +94,8 @@ enum CommandCatalogPolicy {
         identities.reserveCapacity(commands.count)
         for command in commands {
             guard !command.name.isEmpty,
-                  command.name.utf8.count <= maximumStringBytes,
+                  command.name.utf8.count <= maximumNameBytes,
+                  !command.name.contains(where: \.isWhitespace),
                   command.description.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
                   command.argumentHint.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
                   command.sourcePath.map({ $0.utf8.count <= maximumStringBytes }) ?? true,

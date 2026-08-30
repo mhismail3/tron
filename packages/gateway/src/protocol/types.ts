@@ -704,7 +704,9 @@ export interface PromptAttachmentState {
 
 export interface ResourceInvocation {
   source: "skill" | "prompt" | "extension";
+  /** Canonical resource name; skills omit the `skill:` transport prefix. */
   name: string;
+  /** Exact visible arguments, bounded to 5,000 UTF-8 bytes for receipt safety. Empty is valid. */
   arguments: string;
 }
 

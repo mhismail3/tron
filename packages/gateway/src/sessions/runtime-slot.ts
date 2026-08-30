@@ -74,6 +74,7 @@ import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundE
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
+import { admitPromptText, admitResourceInvocation, canonicalResourceName, parsePiLiteralCommand } from "./resource-invocation.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import { ProcessActivityRecency, type ProcessActivityExpiryFrame } from "./process-activity-recency.js";
 import {
@@ -226,6 +227,8 @@ export interface RuntimeSlotDependencies {
    * never settles must not strand the canonical session behind idle eviction. */
   runtimeDisposalTimedOut?: (graceMs: number) => void;
 }
+
+class CanonicalCustomEntryConflictError extends Error {}
 
 type CompletionOwnershipItem = {
   completion: CanonicalAssistantCompletion;
@@ -425,6 +428,8 @@ export class RuntimeSlot {
   private shuttingDown = false;
   private shutdownPromise: Promise<void> | undefined;
   private suppressQueueEvents = false;
+  /** Abort intent is recorded before SDK cancellation can synchronously settle. */
+  private readonly abortedOperations = new Set<string>();
 
   private constructor(
     private sessionManager: SessionManager,
@@ -1694,10 +1699,14 @@ export class RuntimeSlot {
           // One operation can never own two canonical completions. Retrying
           // that conflict would hold session.open behind an impossible claim;
           // ordinary storage failures retain the existing durable retry.
-          if (error instanceof RunMarkerCompletionConflictError) throw error;
+          if (error instanceof RunMarkerCompletionConflictError
+            || error instanceof CanonicalCustomEntryConflictError) throw error;
           attempt += 1;
           if (attempt === 1 || attempt % 60 === 0) {
-            this.emit("session.operationFailed", safeJson({ message: "Canonical ownership persistence is retrying" }));
+            this.emit("session.diagnostic", safeJson({
+              code: "canonical-ownership-persistence-retrying",
+              message: "Canonical ownership persistence is retrying",
+            }));
           }
           await new Promise((resolve) => {
             const timer = setTimeout(resolve, Math.min(1_000, 25 * attempt));
@@ -1713,6 +1722,13 @@ export class RuntimeSlot {
     return write;
   }
 
+  // The pinned Pi SessionManager keeps a brand-new session in memory until its
+  // first assistant entry. appendCustomEntry therefore has no public pre-assistant
+  // flush/durability acknowledgement to await here. Do not poll the JSONL (the
+  // assistant cannot run while this owner is blocked), write Pi's file directly,
+  // or add a second receipt journal. Once Pi exposes an owner-safe eager flush,
+  // require it here before provider or extension execution and add a crash/reopen
+  // integration test for the first invocation in a new session.
   private persistCanonicalCustomEntry(
     customType: string,
     data: JsonValue,
@@ -1721,12 +1737,18 @@ export class RuntimeSlot {
   ): Promise<void> {
     return this.trackOwnershipWrite(
       () => this.retryDurableWrite(`canonical:${customType}:${identity}`, async () => {
-        const exists = this.sessionManager.getBranch().some((entry) => {
+        const existing = this.sessionManager.getBranch().find((entry) => {
           if (entry.type !== "custom" || entry.customType !== customType) return false;
           const value = entry.data as { receiptId?: unknown; targetEntryId?: unknown };
           return value?.receiptId === identity || value?.targetEntryId === identity;
         });
-        if (!exists) this.sessionManager.appendCustomEntry(customType, data);
+        if (existing) {
+          if (existing.type !== "custom" || JSON.stringify(existing.data) !== JSON.stringify(data)) {
+            throw new CanonicalCustomEntryConflictError("Canonical custom entry identity is contradictory");
+          }
+          return;
+        }
+        this.sessionManager.appendCustomEntry(customType, data);
       }),
       owner,
     );
@@ -1738,14 +1760,14 @@ export class RuntimeSlot {
 
   private invocationForOperation(operationId: string | undefined): InvocationProjection | undefined {
     if (!operationId) return undefined;
-    const live = [...this.invocations.values()].find(
-      invocation => invocation.operationId === operationId,
-    );
+    const live = [...this.invocations.values()]
+      .filter(invocation => invocation.operationId === operationId)
+      .at(-1);
     if (live) return live;
     const canonical = invocationProjection(invocationReceipts(
       this.sessionManager.getBranch(),
       this.id,
-    )).find(invocation => invocation.operationId === operationId);
+    )).filter(invocation => invocation.operationId === operationId).at(-1);
     if (canonical) this.invocations.set(canonical.invocationId, canonical);
     return canonical;
   }
@@ -1882,12 +1904,17 @@ export class RuntimeSlot {
         }
       }
       if (lastError !== undefined) throw lastError;
+      const completionLifecycle = completion.operationId !== undefined
+        && this.abortedOperations.has(completion.operationId)
+        ? "interrupted" as const
+        : "completed" as const;
       await this.terminalizeInvocation(
         completion.operationId,
-        "completed",
-        undefined,
+        completionLifecycle,
+        completionLifecycle === "interrupted" ? "user-abort" : undefined,
         item.fallbackWork,
       );
+      if (completion.operationId) this.abortedOperations.delete(completion.operationId);
       if (!this.pendingManualCompaction) {
         await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
@@ -2108,17 +2135,26 @@ export class RuntimeSlot {
           }
           if (settledOperationId) {
             this.operationWork.get(settledOperationId)?.transition("terminal-receipt-persistence");
-            const markerClear = this.terminalizeInvocation(settledOperationId, "completed")
+            const terminalLifecycle = this.abortedOperations.has(settledOperationId)
+              ? "interrupted" as const
+              : "completed" as const;
+            const markerClear = this.terminalizeInvocation(
+              settledOperationId,
+              terminalLifecycle,
+              terminalLifecycle === "interrupted" ? "user-abort" : undefined,
+            )
               .then(() => this.clearMarkerOwnership(settledOperationId));
             // The foreground token remains the exact owner; do not create a second
             // receipt token or report drain completion while marker I/O is active.
             void markerClear.then(
               () => undefined,
-              (error) => this.emit("session.operationFailed", safeJson({
+              (error) => this.emit("session.diagnostic", safeJson({
+                code: "terminal-receipt-persistence-failed",
                 operationId: settledOperationId,
                 message: error instanceof Error ? error.message : String(error),
               })),
             ).finally(() => {
+              this.abortedOperations.delete(settledOperationId);
               this.settleOperationWork(settledOperationId);
               this.hooks.settled(this.id);
               this.publishSnapshot();
@@ -2504,7 +2540,13 @@ export class RuntimeSlot {
               entry.type === "message" && entry.message.role === "user" && entry.message === message);
             if (!candidate || candidate.type !== "message") return;
             this.rememberPresentationID(candidate.id, operationID);
-            const invocation = this.invocations.get(invocationID);
+            // The live map is only an optimization. A fast run may already
+            // have terminalized and evicted it; recover immutable ownership
+            // from the canonical start receipt before binding.
+            const invocation = this.invocationForOperation(operationID);
+            if (!invocation || invocation.invocationId !== invocationID) {
+              throw new Error("canonical invocation start receipt is unavailable");
+            }
             await this.persistCanonicalCustomEntry(
               INVOCATION_RECEIPT_TYPE,
               receiptJSON(makeInvocationReceipt({
@@ -2514,8 +2556,7 @@ export class RuntimeSlot {
                 invocationId: invocationID,
                 operationId: operationID,
                 sessionId: this.id,
-                source: invocation?.source ?? "plain",
-                ...(invocation?.name ? { name: invocation.name } : {}),
+                source: invocation.source,
                 canonicalEntryId: candidate.id,
                 sequence: this.revision + 1,
                 createdAt: new Date().toISOString(),
@@ -2529,7 +2570,11 @@ export class RuntimeSlot {
               this.pendingPromptMessage = undefined;
             }
             this.scheduleSnapshot();
-          }).catch((error) => this.emit("session.operationFailed", safeJson({ operationId: operationID, message: error instanceof Error ? error.message : String(error) })));
+          }).catch((error) => this.emit("session.diagnostic", safeJson({
+            code: "canonical-binding-persistence-failed",
+            operationId: operationID,
+            message: error instanceof Error ? error.message : String(error),
+          })));
         }
         this.scheduleSnapshot();
         break;
@@ -2841,7 +2886,10 @@ export class RuntimeSlot {
   async reconcileOwnedExtensionArtifactsForDrain(): Promise<void> {
     if (this.completionOwnershipQueue.length > 0 && !this.attentionBarrier) {
       await this.drainCompletionOwnership().catch(() => {
-        this.emit("session.operationFailed", safeJson({ message: "Canonical completion persistence is retrying" }));
+        this.emit("session.diagnostic", safeJson({
+          code: "canonical-completion-persistence-retrying",
+          message: "Canonical completion persistence is retrying",
+        }));
       });
     }
     const canonicalFacts = this.canonicalExtensionRunFacts();
@@ -3998,12 +4046,19 @@ export class RuntimeSlot {
     return [text.trim(), attachmentEnvelope].filter(Boolean).join("\n\n");
   }
 
-  private static validateQueue(items: Array<Pick<QueuedMessageState, "text" | "attachmentCount"> & { resourceInvocation?: ResourceInvocation }>): void {
+  private static validateQueue(items: Array<Pick<QueuedMessageState, "text" | "attachmentCount"> & { resourceInvocation?: ResourceInvocation | undefined }>): void {
     if (items.length > MAXIMUM_QUEUED_MESSAGES) {
       throw new GatewayError("invalid_request", `At most ${MAXIMUM_QUEUED_MESSAGES} messages may be queued`);
     }
     let totalBytes = 0;
     for (const item of items) {
+      admitPromptText(item.text, MAXIMUM_QUEUED_MESSAGE_BYTES);
+      if (item.resourceInvocation !== undefined) {
+        const resource = admitResourceInvocation(item.resourceInvocation);
+        if (resource.arguments !== item.text) {
+          throw new GatewayError("invalid_request", "Queued resource arguments must match queued text");
+        }
+      }
       const bytes = Buffer.byteLength(item.text);
       if (bytes > MAXIMUM_QUEUED_MESSAGE_BYTES) {
         throw new GatewayError("invalid_request", "A queued message is too large to manage safely");
@@ -4345,10 +4400,14 @@ export class RuntimeSlot {
         throw new GatewayError("invalid_request", "Prompt attachment descriptors do not match the bounded attachment count");
       }
       if (queueDisplay?.resourceInvocation !== undefined) {
-        const resource = queueDisplay.resourceInvocation;
-        const catalogName = resource.source === "skill"
-          ? `skill:${resource.name.startsWith("skill:") ? resource.name.slice("skill:".length) : resource.name}`
-          : resource.name;
+        const resource = admitResourceInvocation(queueDisplay.resourceInvocation);
+        if (resource.arguments !== queueDisplay.text) {
+          throw new GatewayError("invalid_request", "Prompt text must exactly match resource invocation arguments");
+        }
+        if (resource.source === "extension" && (images.length > 0 || (queueDisplay.attachments?.length ?? 0) > 0)) {
+          throw new GatewayError("invalid_request", "Extension commands cannot include attachments");
+        }
+        const catalogName = canonicalResourceName(resource.source, resource.name);
         const commands = this.commands();
         const matches = commands.filter(
           command => command.source === resource.source && command.name === catalogName,
@@ -4362,9 +4421,8 @@ export class RuntimeSlot {
       // Pi 0.84.1 uses the first literal ASCII space as its command
       // delimiter. Keep admission byte-for-byte identical: tabs/newlines are
       // part of the command name and therefore remain ordinary prompt text.
-      const extensionCommandName = text.startsWith("/")
-        ? text.slice(1).split(" ", 1)[0]
-        : undefined;
+      const parsedCommand = parsePiLiteralCommand(text);
+      const extensionCommandName = parsedCommand?.name;
       const isExactExtensionCommand = extensionCommandName !== undefined
         && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
       const queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
@@ -4383,7 +4441,6 @@ export class RuntimeSlot {
         source: invocationSource,
         ...(invocationName ? { name: invocationName } : {}),
         ...(queueDisplay?.resourceInvocation?.arguments === undefined ? {} : { arguments: queueDisplay.resourceInvocation.arguments }),
-        disposition: isExactExtensionCommand ? "extensionCommand" : queuesIntoActiveRun ? "queuedPrompt" : "canonicalPrompt",
         lifecycle: "staged",
         origin: invocationSource === "extension" && invocationName
           ? this.extensionCommandOrigin(invocationName)
@@ -4491,6 +4548,9 @@ export class RuntimeSlot {
               MAXIMUM_PENDING_PROMPT_BYTES
             ),
             attachmentCount: queueDisplay?.attachmentCount ?? images.length,
+            ...(queueDisplay?.resourceInvocation === undefined
+              ? {}
+              : { resourceInvocation: queueDisplay.resourceInvocation }),
             ...(queueDisplay?.photoCount === undefined && images.length === 0
               ? {}
               : { photoCount: queueDisplay?.photoCount ?? images.length }),
@@ -4590,7 +4650,14 @@ export class RuntimeSlot {
       void run.then(
         () => admissionFinalized ? settleWithoutAgent() : undefined,
         async (error) => {
-          this.emit("session.operationFailed", safeJson({ operationId, message: error instanceof Error ? error.message : String(error) }));
+          // RPC rejection owns preflight failures. After admission, canonical
+          // transcript/error state owns execution outcome; neither case should
+          // falsely restore an already accepted composer submission.
+          this.emit("session.diagnostic", safeJson({
+            code: "runtime-prompt-failed",
+            operationId,
+            message: error instanceof Error ? error.message : String(error),
+          }));
           if (admissionFinalized) await settleWithoutAgent();
         },
       );
@@ -4633,18 +4700,28 @@ export class RuntimeSlot {
         throw new GatewayError("invalid_request", "The agent runtime rejected the prompt before admission");
       }
 
-      await this.persistInvocationReceipt(makeInvocationReceipt({
-        version: 1,
-        receiptId: `accepted:${invocationId}`,
-        receiptKind: "transition",
-        invocationId,
-        operationId,
-        sessionId: this.id,
-        source: invocationSource,
-        lifecycle: "accepted",
-        sequence: this.revision + 1,
-        createdAt: new Date().toISOString(),
-      }), operationWork);
+      try {
+        await this.persistInvocationReceipt(makeInvocationReceipt({
+          version: 1,
+          receiptId: `accepted:${invocationId}`,
+          receiptKind: "transition",
+          invocationId,
+          operationId,
+          sessionId: this.id,
+          source: invocationSource,
+          lifecycle: "accepted",
+          sequence: this.revision + 1,
+          createdAt: new Date().toISOString(),
+        }), operationWork);
+      } catch (error) {
+        // Admission has already been accepted by Pi. A receipt write failure is
+        // a durability diagnostic, never evidence that execution was rejected.
+        this.emit("session.diagnostic", safeJson({
+          code: "invocation-acceptance-receipt-failed",
+          operationId,
+          message: error instanceof Error ? error.message : String(error),
+        }));
+      }
       this.invocations.set(invocationId, {
         ...invocation,
         lifecycle: queuesIntoActiveRun ? "queued" : "accepted",
@@ -4743,8 +4820,15 @@ export class RuntimeSlot {
       case "branchSummary": session.abortBranchSummary(); break;
       case "bash": session.abortBash(); break;
       case "agent":
-        await session.abort();
-        await this.terminalizeInvocation(abortedOperationId, "interrupted", "user-abort");
+        if (abortedOperationId) this.abortedOperations.add(abortedOperationId);
+        let interruptionPersisted = false;
+        try {
+          await session.abort();
+          await this.terminalizeInvocation(abortedOperationId, "interrupted", "user-abort");
+          interruptionPersisted = true;
+        } finally {
+          if (abortedOperationId && interruptionPersisted) this.abortedOperations.delete(abortedOperationId);
+        }
         break;
     }
     this.revision += 1;
@@ -4752,15 +4836,19 @@ export class RuntimeSlot {
   }
 
   async clearQueue(): Promise<void> {
-    return this.lane.run(() => {
+    return this.lane.run(async () => {
       this.assertUsable();
+      const removed = this.queuedMessages;
       this.suppressQueueEvents = true;
       try {
         this.runtime.session.clearQueue();
       } finally {
         this.suppressQueueEvents = false;
       }
-      for (const item of this.queuedMessages) this.settleOperationWork(item.id);
+      for (const item of removed) {
+        await this.terminalizeInvocation(item.id, "interrupted", "queue-cleared");
+        this.settleOperationWork(item.id);
+      }
       this.queuedMessages = [];
       this.queueRevision += 1;
       this.revision += 1;
@@ -4796,6 +4884,9 @@ export class RuntimeSlot {
           ...previous,
           behavior: item.behavior,
           text,
+          ...(previous.resourceInvocation === undefined ? {} : {
+            resourceInvocation: { ...previous.resourceInvocation, arguments: text },
+          }),
           runtimeText: text === previous.text
             ? previous.runtimeText
             : previous.resourceInvocation === undefined
@@ -4821,10 +4912,23 @@ export class RuntimeSlot {
           }
         }
         if (!item.runtimeText.startsWith("/")) continue;
-        const command = item.runtimeText.slice(1).split(/\s/u, 1)[0] ?? "";
+        const command = parsePiLiteralCommand(item.runtimeText)?.name ?? "";
         if (extensionCommands.has(command)) {
           throw new GatewayError("invalid_request", `Extension command "/${command}" cannot be queued`);
         }
+      }
+
+      const replacementInvocations = new Map<string, InvocationProjection>();
+      for (const item of next) {
+        const previous = previousByID.get(item.id);
+        if (previous?.resourceInvocation === undefined
+          || previous.resourceInvocation.arguments === item.resourceInvocation?.arguments) continue;
+        const invocation = this.invocationForOperation(item.id);
+        if (!invocation || invocation.source === "plain" || invocation.name === undefined
+          || item.resourceInvocation === undefined) {
+          throw new GatewayError("conflict", "Queued resource invocation ownership changed", true);
+        }
+        replacementInvocations.set(item.id, invocation);
       }
 
       let rebuildError: unknown;
@@ -4837,11 +4941,20 @@ export class RuntimeSlot {
         await Promise.all(queued);
       } catch (error) {
         rebuildError = error;
+        // Queue replacement is one mutation. Do not retain a partially rebuilt
+        // queue whose items have no coherent invocation ownership.
+        session.clearQueue();
       } finally {
         this.suppressQueueEvents = false;
       }
       if (rebuildError !== undefined) {
-        this.reconcileQueuedMessages();
+        const removed = this.queuedMessages;
+        for (const item of removed) {
+          await this.terminalizeInvocation(item.id, "interrupted", "queue-rebuild-failed");
+          this.settleOperationWork(item.id);
+        }
+        this.queuedMessages = [];
+        this.queueRevision += 1;
         this.revision += 1;
         this.publishSnapshot();
         throw rebuildError;
@@ -4861,8 +4974,67 @@ export class RuntimeSlot {
           survivors.push({ ...aligned[index]!, runtimeText: texts[texts.length - aligned.length + index]! });
         }
       }
-      for (const item of this.queuedMessages) {
-        if (!survivors.some((candidate) => candidate.id === item.id)) this.settleOperationWork(item.id);
+      const removed = this.queuedMessages.filter(item => !survivors.some(candidate => candidate.id === item.id));
+      const revised = survivors.filter(item => {
+        const previous = previousByID.get(item.id);
+        return previous?.resourceInvocation !== undefined
+          && previous.resourceInvocation.arguments !== item.resourceInvocation?.arguments;
+      });
+      for (const item of revised) {
+        const previousInvocation = replacementInvocations.get(item.id)!;
+        const resourceInvocation = item.resourceInvocation;
+        const invocationName = previousInvocation.name;
+        if (!resourceInvocation || !invocationName) throw new Error("revised resource invocation is unavailable");
+        // Start receipts are immutable. Editing queued arguments terminalizes
+        // the prior intent and starts a replacement invocation while retaining
+        // the queue operation ID used by native row identity.
+        await this.terminalizeInvocation(item.id, "interrupted", "queue-edited");
+        const invocationId = randomUUID();
+        const createdAt = new Date().toISOString();
+        await this.persistInvocationReceipt(makeInvocationReceipt({
+          version: 1,
+          receiptId: `start:${invocationId}`,
+          receiptKind: "start",
+          invocationId,
+          operationId: item.id,
+          sessionId: this.id,
+          source: previousInvocation.source,
+          name: invocationName,
+          ...(resourceInvocation.arguments ? { arguments: resourceInvocation.arguments } : {}),
+          lifecycle: "staged",
+          origin: previousInvocation.origin,
+          sequence: this.revision + 1,
+          createdAt,
+        }), this.operationWork.get(item.id));
+        await this.persistInvocationReceipt(makeInvocationReceipt({
+          version: 1,
+          receiptId: `accepted:${invocationId}`,
+          receiptKind: "transition",
+          invocationId,
+          operationId: item.id,
+          sessionId: this.id,
+          source: previousInvocation.source,
+          lifecycle: "accepted",
+          sequence: this.revision + 1,
+          createdAt: new Date().toISOString(),
+        }), this.operationWork.get(item.id));
+        this.invocations.set(invocationId, {
+          version: 1,
+          invocationId,
+          operationId: item.id,
+          source: previousInvocation.source,
+          name: invocationName,
+          arguments: resourceInvocation.arguments,
+          resourceInvocation,
+          lifecycle: "queued",
+          origin: previousInvocation.origin,
+          sequence: this.revision + 1,
+          updatedAt: createdAt,
+        });
+      }
+      for (const item of removed) {
+        await this.terminalizeInvocation(item.id, "interrupted", "queue-replaced");
+        this.settleOperationWork(item.id);
       }
       this.queuedMessages = survivors.sort((left, right) => left.behavior === right.behavior
         ? left.ordinal - right.ordinal

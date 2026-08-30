@@ -80,6 +80,45 @@ struct SessionSnapshotEventAdmissionTests {
         #expect(!SessionSnapshotQueueAdmissionPolicy.admit(snapshot))
     }
 
+    @Test("queue and pending resources require the exact bounded invocation contract")
+    func resourceQueueAdmission() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 57).openingTail(targetEncodedBytes: 8_192)
+        let resource = ComposerResourceInvocation(
+            source: .skill, name: "review", arguments: "Inspect this"
+        )
+        snapshot.queuedItems = [
+            .init(
+                id: "resource", behavior: .steer, text: "Inspect this",
+                attachmentCount: 0, resourceInvocation: resource
+            ),
+        ]
+        snapshot.pendingPrompt = .init(
+            id: "pending", createdAt: nil, behavior: nil, text: "Inspect this",
+            attachmentCount: 0, resourceInvocation: resource
+        )
+        #expect(SessionSnapshotQueueAdmissionPolicy.admit(snapshot))
+
+        snapshot.queuedItems[0].text = "different"
+        #expect(!SessionSnapshotQueueAdmissionPolicy.admit(snapshot))
+        snapshot.queuedItems[0].text = "Inspect this"
+        snapshot.queuedItems[0].resourceInvocation = .init(
+            source: .prompt, name: "two words", arguments: "Inspect this"
+        )
+        #expect(!SessionSnapshotQueueAdmissionPolicy.admit(snapshot))
+        snapshot.queuedItems[0].resourceInvocation = .init(
+            source: .extension, name: "goal", arguments: "Inspect this"
+        )
+        #expect(!SessionSnapshotQueueAdmissionPolicy.admit(snapshot))
+        snapshot.queuedItems = []
+        let oversized = String(repeating: "x", count: 5_001)
+        snapshot.pendingPrompt = .init(
+            id: "pending", createdAt: nil, behavior: nil, text: oversized,
+            attachmentCount: 0,
+            resourceInvocation: .init(source: .skill, name: "review", arguments: oversized)
+        )
+        #expect(!SessionSnapshotQueueAdmissionPolicy.admit(snapshot))
+    }
+
     @Test("same-runtime rebaseline preserves activity monotonicity")
     func rebaselineActivityAdmission() throws {
         var current = try SessionScenarioBuilder(seed: 56).openingTail(targetEncodedBytes: 8_192)

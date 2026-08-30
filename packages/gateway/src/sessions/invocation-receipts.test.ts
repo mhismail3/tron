@@ -7,14 +7,21 @@ const start = makeInvocationReceipt({
   arguments: "count to 20", lifecycle: "staged", sequence: 1,
   origin: { kind: "extension", confidence: "boundary" }, createdAt: "2026-01-01T00:00:00.000Z",
 });
+const accepted = makeInvocationReceipt({
+  version: 1, receiptId: "accepted:inv-1", receiptKind: "transition", invocationId: "inv-1",
+  operationId: "op-1", sessionId: "session-1", source: "extension", lifecycle: "accepted",
+  sequence: 2, createdAt: "2026-01-01T00:00:00.500Z",
+});
+const completed = makeInvocationReceipt({
+  version: 1, receiptId: "terminal:inv-1", receiptKind: "terminal", invocationId: "inv-1",
+  operationId: "op-1", sessionId: "session-1", source: "extension", name: "goal",
+  lifecycle: "completed", origin: { kind: "extension", confidence: "boundary" },
+  sequence: 3, createdAt: "2026-01-01T00:00:01.000Z",
+});
 
 describe("invocation receipts", () => {
   it("folds terminal state into the immutable start identity", () => {
-    const values = invocationProjection([
-      start,
-      { ...start, receiptId: "accepted:inv-1", receiptKind: "transition", lifecycle: "accepted", sequence: 2, createdAt: "2026-01-01T00:00:00.500Z" },
-      { ...start, receiptId: "terminal:inv-1", receiptKind: "terminal", lifecycle: "completed", sequence: 3, createdAt: "2026-01-01T00:00:01.000Z" },
-    ]);
+    const values = invocationProjection([start, accepted, completed]);
     expect(values).toHaveLength(1);
     expect(values[0]).toMatchObject({ invocationId: "inv-1", operationId: "op-1", name: "goal", lifecycle: "completed" });
   });
@@ -33,10 +40,24 @@ describe("invocation receipts", () => {
     expect(parseInvocationReceipt({ ...start, arguments: "🙂".repeat(20_000) })).toBeUndefined();
   });
 
-  it("preserves bounded multiline resource arguments", () => {
+  it("preserves bounded multiline resource arguments without truncation", () => {
     const argumentsText = "first line\nsecond\tline\r\nthird line";
     expect(makeInvocationReceipt({ ...start, arguments: argumentsText }).arguments).toBe(argumentsText);
     expect(parseInvocationReceipt({ ...start, arguments: "unsafe\u0000value" })).toBeUndefined();
+    expect(parseInvocationReceipt({ ...start, arguments: "🙂".repeat(20_000) })).toBeUndefined();
+  });
+
+  it("keeps binding receipts limited to canonical identity", () => {
+    const binding = {
+      version: 1, receiptId: "binding:inv-1", receiptKind: "binding" as const,
+      invocationId: "inv-1", operationId: "op-1", sessionId: "session-1", source: "extension" as const,
+      canonicalEntryId: "entry-1", sequence: 2, createdAt: "2026-01-01T00:00:00.500Z",
+    };
+    expect(parseInvocationReceipt({ ...binding, name: "goal" })).toBeUndefined();
+    expect(makeInvocationReceipt(binding)).toEqual({ ...binding, writer: "gateway" });
+    expect(() => invocationProjection([binding as any])).toThrow("no start receipt");
+    const secondBinding = { ...binding, receiptId: "binding:inv-2", canonicalEntryId: "entry-2" };
+    expect(() => invocationProjection([start, binding as any, secondBinding as any])).toThrow("more than one canonical binding");
   });
 
   it("deduplicates identical IDs and rejects contradictory IDs or terminal rewrites", () => {
@@ -51,9 +72,13 @@ describe("invocation receipts", () => {
     ] as any[])).toThrow("contradictory");
     expect(() => invocationProjection([
       start,
-      { ...start, receiptId: "accepted:inv-1", receiptKind: "transition", lifecycle: "accepted", sequence: 2, createdAt: "2026-01-01T00:00:00.500Z" },
-      { ...start, receiptId: "terminal:inv-1", receiptKind: "terminal", lifecycle: "completed", sequence: 3, createdAt: "2026-01-01T00:00:01.000Z" },
-      { ...start, receiptId: "terminal-2:inv-1", receiptKind: "terminal", lifecycle: "failed", sequence: 4, createdAt: "2026-01-01T00:00:02.000Z" },
+      accepted,
+      completed,
+      makeInvocationReceipt({
+        version: 1, receiptId: "terminal-2:inv-1", receiptKind: "terminal", invocationId: "inv-1",
+        operationId: "op-1", sessionId: "session-1", source: "extension", lifecycle: "failed",
+        sequence: 4, createdAt: "2026-01-01T00:00:02.000Z",
+      }),
     ])).toThrow("terminal");
     expect(() => invocationProjection([
       start,
@@ -61,7 +86,11 @@ describe("invocation receipts", () => {
     ])).toThrow("more than one start");
     expect(() => invocationProjection([
       start,
-      { ...start, receiptId: "accepted:inv-1", receiptKind: "transition", lifecycle: "accepted", operationId: "other", sequence: 2, createdAt: "2026-01-01T00:00:00.500Z" },
+      makeInvocationReceipt({
+        version: 1, receiptId: "accepted:other", receiptKind: "transition", invocationId: "inv-1",
+        operationId: "other", sessionId: "session-1", source: "extension", lifecycle: "accepted",
+        sequence: 2, createdAt: "2026-01-01T00:00:00.500Z",
+      }),
     ])).toThrow("ownership changed");
   });
 

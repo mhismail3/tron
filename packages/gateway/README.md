@@ -480,8 +480,10 @@ text and requested delivery behavior. The Gateway claims the exact Pi user-messa
 retires the projection only for that same message at persistence, and exposes the prompt
 operation ID as the canonical user's bounded `presentationId`; repeated text therefore
 cannot settle the wrong mobile admission. A known operation ID never falls back to content matching on
-iOS. Sequenced `session.operationFailed` receipts retire only their exact accepted composer admission,
-restore its draft once, and release later send admission. Definitive rejection/no-agent settlement clears
+iOS. `session.operationFailed` is reserved for an exact operation proven unable to produce canonical
+input; only that sequenced fact may retire and restore its matching composer admission. Receipt,
+binding, and post-admission runtime failures emit non-settling `session.diagnostic` events instead of
+lying about accepted execution. Definitive transport rejection/no-agent settlement clears
 the same owner, so iOS can reconstruct an in-flight prompt across navigation without replay.
 
 Manual compaction has a separate Gateway-owned single-entry maintenance admission. Its
@@ -716,7 +718,7 @@ duplicate or malformed canonical entries and oversized retained strings; omitted
 are valid because the bounded outline is not a canonical mirror.
 `session.commands` preserves runtime sort order and rejects catalogs above 1,000 rows
 or 700 KiB, duplicate full `source:name` identities, empty names, invalid resource scope/origin,
-or command metadata strings above 8 KiB before generic JSON projection can truncate the response.
+names above 512 UTF-8 bytes, or other command metadata strings above 8 KiB before generic JSON projection can truncate the response.
 Each row includes the runtime loader's source, scope, origin, and path when available. The lazy
 `session.commandDetail` read requires one exact current `source:name` identity and returns
 that selected prompt, skill, or extension source document only; content is UTF-8 bounded
@@ -726,7 +728,33 @@ never reads or copies every resource body. Protocol-v4 `session.prompt` accepts 
 exact live `(source,name)` identity and extension-command precedence before constructing Pi's
 normalized leading invocation. Pending and queued projections retain the same typed resource;
 canonical binding receipts attach it to the resulting user entry so native chips survive restart
-without exposing expanded skill contents or private paths. Canonical mobile projection recognizes
+without exposing expanded skill contents or private paths. Resource names are bounded to 512
+UTF-8 bytes and arguments to 5,000 bytes (the receipt-safe semantic bound); newline, carriage return, and tab are allowed prompt content,
+while other controls and unknown fields are rejected. `text` and resource `arguments` are one exact
+contract, including valid empty arguments for no-argument resources; extension commands reject
+attachments at the Gateway boundary regardless of client behavior. Extension and skill commands
+use Pi's literal ASCII-space delimiter; prompt templates retain Pi's whitespace delimiter after
+extension precedence. The same source-specific rules govern typed admission and queue checks. Binding receipts
+contain canonical target identity only; start receipts own resource identity and are recovered from
+canonical JSONL if live runtime maps have already settled. Queue edits preserve immutable intent by
+terminalizing the prior invocation and appending a replacement start/accepted pair under the stable
+queue operation ID. Explicit removal appends an interrupted terminal receipt rather than leaving an
+accepted orphan, so later canonical binding and cold projection describe the text Pi actually receives. Receipt construction never silently truncates semantic data; persistence/binding diagnostics
+are not operation failures and cannot retire an accepted composer row.
+
+One upstream durability boundary remains for the first turn of a brand-new Pi session. The pinned
+`SessionManager` admits `appendCustomEntry` into its canonical in-memory branch but intentionally
+does not create/flush the JSONL until the first assistant entry. An abrupt Gateway-process or machine
+failure after first-prompt admission but before that entry can therefore lose the new session, user
+message, and invocation receipts together; iOS disconnect alone does not trigger this window, and
+sessions with any assistant history append receipts immediately. Gateway must not poll for the file
+(the first assistant cannot run while admission is blocked), write Pi's JSONL directly, fabricate an
+assistant entry, or create a second receipt journal. Closing this boundary requires a pinned upstream
+public eager-flush/durable-append API that preserves Pi ordering and internal state; acceptance requires
+a crash/reopen integration test proving the first start receipt is disk-visible before provider or
+extension execution.
+
+Canonical mobile projection recognizes
 only Pi's exact 4 MiB-bounded persisted skill envelope, strips the private skill body/path, and
 projects its user arguments through the existing attachment extractor. Malformed skill-looking
 envelopes become a generic omission rather than leaking or destructively guessing private data.
