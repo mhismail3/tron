@@ -112,6 +112,27 @@ struct ComposerResourcePickerTests {
         #expect(ComposerResourceNameFormatter.friendly("ios_sdk") == "iOS SDK")
     }
 
+    @Test("canonical resource chips lead with the friendly name and recover exact detail identity")
+    func canonicalChipPresentation() throws {
+        let skill = ComposerResourceInvocation(source: .skill, name: "tron-ios", arguments: "inspect")
+        #expect(CanonicalResourceChipPresentation.title(for: skill) == "Tron iOS")
+        #expect(CanonicalResourceChipPresentation.kindTitle(for: skill) == "Skill")
+        #expect(CanonicalResourceChipPresentation.invocationPrefix(for: skill) == "@")
+        let skillEntry = try #require(CanonicalResourceChipPresentation.detailEntry(for: skill))
+        #expect(skillEntry.commandInfo.source == .skill)
+        #expect(skillEntry.commandInfo.name == "skill:tron-ios")
+
+        let prompt = ComposerResourceInvocation(source: .prompt, name: "release_notes", arguments: "")
+        #expect(CanonicalResourceChipPresentation.title(for: prompt) == "Release Notes")
+        #expect(CanonicalResourceChipPresentation.kindTitle(for: prompt) == "Prompt")
+        #expect(CanonicalResourceChipPresentation.invocationPrefix(for: prompt) == "/")
+        #expect(CanonicalResourceChipPresentation.detailEntry(for: prompt)?.commandInfo.name == "release_notes")
+
+        let command = ComposerResourceInvocation(source: .extension, name: "goal", arguments: "set")
+        #expect(CanonicalResourceChipPresentation.kindTitle(for: command) == "Command")
+        #expect(CanonicalResourceChipPresentation.detailEntry(for: command)?.commandInfo.source == .extension)
+    }
+
     @Test("resource content hides duplicate Markdown front matter only")
     func resourceContentBody() {
         let skill = "---\nname: council-mode\ndescription: Council guidance\n---\n# Council Mode\n\nBody"

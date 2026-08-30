@@ -652,6 +652,7 @@ struct ReadOnlySubagentSessionSheet: View {
         } action: { _, nearTail in
             isNearTail = nearTail
         }
+        .environment(\.canonicalResourceSessionID, store.childSessionRef)
         .onChange(of: store.transcriptTotal) { previous, current in
             guard current > previous, isNearTail else { return }
             var transaction = Transaction()

@@ -137,6 +137,10 @@ invocation start receipts own immutable resource identity, binding receipts cont
 user target, and a binding persistence diagnostic never retires a successful operation. Queue edits
 terminalize the prior immutable invocation and append a replacement under the stable queue operation
 identity; explicit removal is an interrupted terminal outcome. Reconnect never replays an unresolved invocation.
+Every pending, queued, optimistic, and canonical resource chip uses one source-independent emerald
+surface, leads with the friendly resource name, and shows the smaller resource kind second. The
+entire chip is a tool-chip-style detail action; it reconstructs the exact catalog `source:name` and
+opens the same bounded `session.commandDetail` sheet as the selected chip above the composer.
 Queue admission and canonical handoff receipts suppress every later entrance; pending/queued-to-canonical replacement preserves canonical semantic IDs while one bounded one-to-one causal alias retains physical row identity. Repeated text, unrelated rows, and alias collisions fail closed. Replacement installs directly visible with only the focused container/header morph and no hidden mount state. Exact off-main-prepared file
 previews map through upload blob identity, and prepared image previews transfer by order only when complete count/MIME facts
 agree; settlement performs no decode, while ambiguity uses normal media loading. Attachment-only canonical settlement uses an exact attachment metadata multiset even when Pi

@@ -116,6 +116,7 @@ struct ChatView: View {
             toolbarContainerWidth = width
         }
         .background { Color.tronBackground.ignoresSafeArea(.all) }
+        .environment(\.canonicalResourceSessionID, sessionID)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)

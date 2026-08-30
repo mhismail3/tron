@@ -484,7 +484,7 @@ struct ComposerResourcePicker: View {
     }
 }
 
-private struct ComposerResourceDetailSheet: View {
+struct ComposerResourceDetailSheet: View {
     let sessionID: String?
     let entry: ComposerResourceEntry
     let accent: Color

@@ -194,21 +194,26 @@ struct ChatPendingPromptRow: View, Equatable {
             fileAttachmentCount: presentation.fileAttachmentCount,
             attachments: presentation.attachments
         )
-        ChatPromptCard(
-            behavior: presentation.cardBehavior,
-            title: presentation.cardTitle,
-            text: presentation.text,
-            detail: presentation.cardDetail,
-            attachmentContent: {
-                if !chips.isEmpty {
-                    QueuedMessageAttachmentChipRow(
-                        chips: chips,
-                        accent: presentation.cardBehavior == .followUp ? .tronPurple : .tronEmerald
-                    )
-                }
-            },
-            statusContent: { EmptyView() }
-        )
+        VStack(alignment: .trailing, spacing: 4) {
+            if let resource = presentation.resourceInvocation, !resource.isExtensionCommand {
+                CanonicalResourceChip(resource: resource)
+            }
+            ChatPromptCard(
+                behavior: presentation.cardBehavior,
+                title: presentation.cardTitle,
+                text: presentation.text,
+                detail: presentation.cardDetail,
+                attachmentContent: {
+                    if !chips.isEmpty {
+                        QueuedMessageAttachmentChipRow(
+                            chips: chips,
+                            accent: presentation.cardBehavior == .followUp ? .tronPurple : .tronEmerald
+                        )
+                    }
+                },
+                statusContent: { EmptyView() }
+            )
+        }
     }
 }
 
@@ -229,18 +234,21 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
         if presentation.usesQueuedCardVisual {
             HStack(alignment: .top, spacing: 10) {
                 Spacer(minLength: 24)
-                ChatPromptCard(
-                    behavior: presentation.cardBehavior,
-                    title: presentation.cardTitle,
-                    text: presentation.text,
-                    detail: presentation.cardDetail,
-                    attachmentContent: { queuedAttachmentChips },
-                    statusContent: { EmptyView() }
-                )
-                .chatMorphDestination(
-                    id: ChatMorphID(lifecycleID: presentation.id, element: .prompt),
-                    registry: morphRegistry
-                )
+                VStack(alignment: .trailing, spacing: 4) {
+                    resourceChip
+                    ChatPromptCard(
+                        behavior: presentation.cardBehavior,
+                        title: presentation.cardTitle,
+                        text: presentation.text,
+                        detail: presentation.cardDetail,
+                        attachmentContent: { queuedAttachmentChips },
+                        statusContent: { EmptyView() }
+                    )
+                    .chatMorphDestination(
+                        id: ChatMorphID(lifecycleID: presentation.id, element: .prompt),
+                        registry: morphRegistry
+                    )
+                }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .accessibilityElement(children: .contain)
@@ -288,17 +296,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
     @ViewBuilder
     private var resourceChip: some View {
         if let resource = presentation.resourceInvocation, !resource.isExtensionCommand {
-            ChatCompactPillSurface(tone: .accent, material: .glass, interactive: false) {
-                ChatCompactPillLabel(
-                    icon: resource.source == .skill ? "sparkles" : "command",
-                    title: resource.source == .skill ? "Skill" : "Prompt",
-                    detail: ComposerResourceNameFormatter.friendly(resource.name),
-                    tone: .accent,
-                    iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
-                    titleWeight: .bold
-                )
-            }
-            .accessibilityLabel("\(resource.source == .skill ? "Skill" : "Prompt") \(resource.name)")
+            CanonicalResourceChip(resource: resource)
         }
     }
 
