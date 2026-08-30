@@ -9,6 +9,7 @@ extension ChatNotificationTone {
         switch self {
         case .accent: .tronAccentText
         case .information: Color(lightHex: "#0369A1", darkHex: "#38BDF8")
+        case .purple: Color(lightHex: "#6D28D9", darkHex: "#C4B5FD")
         case .warning: Color(lightHex: "#92400E", darkHex: "#FBBF24")
         case .error: .tronError
         case .neutral: Color(lightHex: "#475569", darkHex: "#CBD5E1")
@@ -19,6 +20,7 @@ extension ChatNotificationTone {
         switch self {
         case .accent: Color(lightHex: "#047857", darkHex: "#A7F3D0")
         case .information: Color(lightHex: "#075985", darkHex: "#7DD3FC")
+        case .purple: Color(lightHex: "#5B21B6", darkHex: "#DDD6FE")
         case .warning: Color(lightHex: "#78350F", darkHex: "#FDE68A")
         case .error: Color(lightHex: "#991B1B", darkHex: "#FCA5A5")
         case .neutral: Color(lightHex: "#334155", darkHex: "#E2E8F0")
@@ -29,6 +31,7 @@ extension ChatNotificationTone {
         switch self {
         case .accent: .tronEmerald
         case .information: .tronInfo
+        case .purple: .tronPurple
         case .warning: .tronAmber
         case .error: .tronError
         case .neutral: .tronSlate

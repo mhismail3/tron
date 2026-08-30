@@ -117,6 +117,7 @@ struct ComposerResourcePickerTests {
         let skill = ComposerResourceInvocation(source: .skill, name: "tron-ios", arguments: "inspect")
         #expect(CanonicalResourceChipPresentation.title(for: skill) == "Tron iOS")
         #expect(CanonicalResourceChipPresentation.kindTitle(for: skill) == "Skill")
+        #expect(CanonicalResourceChipPresentation.tone(for: skill) == .information)
         #expect(CanonicalResourceChipPresentation.invocationPrefix(for: skill) == "@")
         let skillEntry = try #require(CanonicalResourceChipPresentation.detailEntry(for: skill))
         #expect(skillEntry.commandInfo.source == .skill)
@@ -125,11 +126,13 @@ struct ComposerResourcePickerTests {
         let prompt = ComposerResourceInvocation(source: .prompt, name: "release_notes", arguments: "")
         #expect(CanonicalResourceChipPresentation.title(for: prompt) == "Release Notes")
         #expect(CanonicalResourceChipPresentation.kindTitle(for: prompt) == "Prompt")
+        #expect(CanonicalResourceChipPresentation.tone(for: prompt) == .purple)
         #expect(CanonicalResourceChipPresentation.invocationPrefix(for: prompt) == "/")
         #expect(CanonicalResourceChipPresentation.detailEntry(for: prompt)?.commandInfo.name == "release_notes")
 
         let command = ComposerResourceInvocation(source: .extension, name: "goal", arguments: "set")
         #expect(CanonicalResourceChipPresentation.kindTitle(for: command) == "Command")
+        #expect(CanonicalResourceChipPresentation.tone(for: command) == .purple)
         #expect(CanonicalResourceChipPresentation.detailEntry(for: command)?.commandInfo.source == .extension)
     }
 

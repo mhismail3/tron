@@ -1269,6 +1269,7 @@ enum ChatTokenCountPresentation {
 enum ChatNotificationTone: Hashable, Sendable {
     case accent
     case information
+    case purple
     case warning
     case error
     case neutral

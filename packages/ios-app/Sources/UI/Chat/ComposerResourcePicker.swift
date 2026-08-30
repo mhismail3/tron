@@ -691,7 +691,7 @@ struct ComposerResourceChip: View {
 
     var body: some View {
         ChatCompactPillSurface(
-            tone: .information,
+            tone: tone,
             material: .glass,
             interactive: true,
             cornerRadiusOverride: ChatToolChipShapePolicy.cornerRadius
@@ -701,7 +701,7 @@ struct ComposerResourceChip: View {
                     ChatCompactPillLabel(
                         icon: resource.commandInfo.source == .skill ? "sparkles" : "command",
                         title: resource.friendlyName,
-                        tone: .information,
+                        tone: tone,
                         iconSize: TronTypography.sizeBody,
                         titleWeight: .bold
                     )
@@ -725,10 +725,18 @@ struct ComposerResourceChip: View {
             ComposerResourceDetailSheet(
                 sessionID: sessionID,
                 entry: resource,
-                accent: .tronCyan,
-                prefix: "@"
+                accent: accent,
+                prefix: resource.source == .skill ? "@" : "/"
             )
         }
+    }
+
+    private var tone: ChatNotificationTone {
+        resource.source == .skill ? .information : .purple
+    }
+
+    private var accent: Color {
+        resource.source == .skill ? .tronCyan : .tronPurple
     }
 }
 

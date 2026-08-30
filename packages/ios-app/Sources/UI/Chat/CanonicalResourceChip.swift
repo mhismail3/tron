@@ -28,6 +28,14 @@ enum CanonicalResourceChipPresentation {
         resource.source == .skill ? "sparkles" : "command"
     }
 
+    static func tone(for resource: ComposerResourceInvocation) -> ChatNotificationTone {
+        resource.source == .skill ? .information : .purple
+    }
+
+    static func accent(for resource: ComposerResourceInvocation) -> Color {
+        resource.source == .skill ? .tronCyan : .tronPurple
+    }
+
     static func detailEntry(for resource: ComposerResourceInvocation) -> ComposerResourceEntry? {
         let source: CommandInfo.Source = switch resource.source {
         case .skill: .skill
@@ -62,7 +70,7 @@ struct CanonicalResourceChip: View, Equatable {
 
     var body: some View {
         ChatCompactPillSurface(
-            tone: .accent,
+            tone: tone,
             material: .glass,
             interactive: detailEntry != nil,
             cornerRadiusOverride: ChatToolChipShapePolicy.cornerRadius
@@ -71,7 +79,7 @@ struct CanonicalResourceChip: View, Equatable {
                 icon: CanonicalResourceChipPresentation.icon(for: resource),
                 title: CanonicalResourceChipPresentation.title(for: resource),
                 detail: CanonicalResourceChipPresentation.kindTitle(for: resource),
-                tone: .accent,
+                tone: tone,
                 iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
                 titleWeight: .bold
             )
@@ -87,11 +95,15 @@ struct CanonicalResourceChip: View, Equatable {
                 ComposerResourceDetailSheet(
                     sessionID: sessionID,
                     entry: detailEntry,
-                    accent: .tronCyan,
+                    accent: CanonicalResourceChipPresentation.accent(for: resource),
                     prefix: CanonicalResourceChipPresentation.invocationPrefix(for: resource)
                 )
             }
         }
+    }
+
+    private var tone: ChatNotificationTone {
+        CanonicalResourceChipPresentation.tone(for: resource)
     }
 
     private var detailEntry: ComposerResourceEntry? {
