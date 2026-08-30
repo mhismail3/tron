@@ -15,6 +15,8 @@ DEVICE_NAME="${TRON_IOS_DEVICE_NAME:-}"
 LAUNCH_AFTER_INSTALL=1
 LAUNCH_TIMEOUT_SECONDS="${TRON_IOS_LAUNCH_TIMEOUT_SECONDS:-20}"
 REQUIRED_SDK_MAJOR="${TRON_IOS_REQUIRED_SDK_MAJOR:-}"
+GATEWAY_PROTOCOL_TARGET="${TRON_IOS_GATEWAY_PROTOCOL_TARGET:-stable}"
+GATEWAY_MAC_APP="${TRON_IOS_GATEWAY_MAC_APP:-/Applications/Tron.app}"
 
 usage() {
     cat <<'USAGE'
@@ -38,6 +40,11 @@ install targets.
                            Fail before building unless iphoneos uses this SDK major
   TRON_IOS_LAUNCH_TIMEOUT_SECONDS
                            devicectl process launch timeout, defaults to 20
+  TRON_IOS_GATEWAY_PROTOCOL_TARGET
+                           stable (default) verifies /Applications/Tron.app before install;
+                           source verifies an explicitly source-built Debug Gateway contract
+  TRON_IOS_GATEWAY_MAC_APP
+                           Alternate absolute Stable Tron.app path for protocol verification
 
 Without a device override, the script selects the only selectable physical iOS
 device. If multiple physical devices are selectable, set TRON_IOS_DEVICE_ID or
@@ -82,6 +89,44 @@ validate_install_pair() {
         die "refusing retired Tron + Prod install pair; use Tron Device + LocalDevice"
     fi
     die "unsupported device install pair '$SCHEME' + '$CONFIG'; use Tron Device + LocalDevice"
+}
+
+validate_gateway_protocol_target_prebuild() {
+    case "$GATEWAY_PROTOCOL_TARGET" in
+        stable)
+            [[ "$GATEWAY_MAC_APP" == /* ]] || die "TRON_IOS_GATEWAY_MAC_APP must be absolute"
+            [[ -d "$GATEWAY_MAC_APP" ]] || die "install the matching Mac Tron.app first; no app exists at $GATEWAY_MAC_APP"
+            python3 "$ROOT_DIR/scripts/verify-gateway-protocol-contract.py" --mac-app "$GATEWAY_MAC_APP" ||
+                die "Stable Mac app/Gateway protocol is not ready; replace and verify the Mac app before building iOS"
+            ;;
+        source)
+            python3 "$ROOT_DIR/scripts/verify-gateway-protocol-contract.py" ||
+                die "source-built Gateway protocol contract is inconsistent"
+            ;;
+        *)
+            die "TRON_IOS_GATEWAY_PROTOCOL_TARGET must be stable or source"
+            ;;
+    esac
+}
+
+validate_gateway_protocol_target() {
+    local app="$1"
+    case "$GATEWAY_PROTOCOL_TARGET" in
+        stable)
+            [[ "$GATEWAY_MAC_APP" == /* ]] || die "TRON_IOS_GATEWAY_MAC_APP must be absolute"
+            [[ -d "$GATEWAY_MAC_APP" ]] || die "install the matching Mac Tron.app first; no app exists at $GATEWAY_MAC_APP"
+            python3 "$ROOT_DIR/scripts/verify-gateway-protocol-contract.py" \
+                --ios-app "$app" --mac-app "$GATEWAY_MAC_APP" ||
+                die "iOS and Stable Mac Gateway protocols do not match; replace/verify the Mac app before installing iOS"
+            ;;
+        source)
+            python3 "$ROOT_DIR/scripts/verify-gateway-protocol-contract.py" --ios-app "$app" ||
+                die "iOS artifact does not match the source-built Gateway protocol"
+            ;;
+        *)
+            die "TRON_IOS_GATEWAY_PROTOCOL_TARGET must be stable or source"
+            ;;
+    esac
 }
 
 require_full_xcode() {
@@ -216,6 +261,7 @@ pretty_xcode_output() {
 
 build_install_launch() {
     require_full_xcode
+    validate_gateway_protocol_target_prebuild
 
     local device_id
     device_id="$(resolve_device_id)"
@@ -276,6 +322,7 @@ build_install_launch() {
     [ -d "$app" ] || die "expected app bundle not found at $app"
     python3 "$ROOT_DIR/scripts/validate-ios-artifact.py" "$app" \
         --configuration "$CONFIG" --require-profile
+    validate_gateway_protocol_target "$app"
 
     xcrun devicectl device install app --device "$device_id" "$app"
 

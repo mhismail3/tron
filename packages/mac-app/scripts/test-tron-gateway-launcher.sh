@@ -40,7 +40,7 @@ make_payload() {
   ln -s ../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js "$root/runtime/bin-arm64/pi"
   ln -s ../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js "$root/runtime/bin-x64/pi"
   fingerprint="$("$HASH" "$root")"
-  printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"fixture","nodeVersion":"fixture","sourceRevision":"0123456789abcdef0123456789abcdef01234567","runtimeEpoch":"01234567-89ab-cdef-0123-456789abcdef","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' "$version" "$fingerprint" > "$root/manifest.json"
+  printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"fixture","protocolVersion":"4","minProtocolVersion":"4","nodeVersion":"fixture","sourceRevision":"0123456789abcdef0123456789abcdef01234567","runtimeEpoch":"01234567-89ab-cdef-0123-456789abcdef","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' "$version" "$fingerprint" > "$root/manifest.json"
   chmod -R a-w "$root"
 }
 
@@ -111,6 +111,32 @@ valid="$(HOME="$TMP/home" "$HELPER" --version)"
 EXTERNAL_REAL="$(cd "$EXTERNAL" && pwd -P)"
 [[ "$valid" == "$EXTERNAL_REAL" ]] || { echo "valid fixture did not select external payload: $valid" >&2; exit 1; }
 BUNDLE_REAL="$(cd "$BUNDLE" && pwd -P)"
+# A previously selected, internally valid payload from another wire generation
+# must be ignored after a Mac app replacement so the bundled lockstep Gateway
+# becomes the migration bootstrap instead of relaunching the old protocol.
+chmod -R u+w "$TMP/home"
+INCOMPATIBLE="$TMP/home/.tron/gateway/payloads/stable/versions/v3-protocol"
+cp -R "$EXTERNAL" "$INCOMPATIBLE"
+chmod -R u+w "$INCOMPATIBLE"
+python3 - "$INCOMPATIBLE/manifest.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    manifest = json.load(handle)
+manifest["version"] = "v3-protocol"
+manifest["protocolVersion"] = "3"
+manifest["minProtocolVersion"] = "3"
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(manifest, handle, separators=(",", ":"))
+    handle.write("\n")
+PY
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3-protocol","payloadFingerprint":"%s"}\n' "$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$INCOMPATIBLE/manifest.json")" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
+chmod -R a-w "$TMP/home"
+incompatible_result="$(HOME="$TMP/home" "$HELPER" --version 2> "$TMP/incompatible-error")"
+[[ "$incompatible_result" == "$BUNDLE_REAL" ]] || { echo "incompatible selected protocol did not use bundled migration fallback: $incompatible_result" >&2; exit 1; }
+chmod -R u+w "$TMP/home"
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v2","payloadFingerprint":"%s"}\n' "$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$EXTERNAL/manifest.json")" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
+chmod -R a-w "$TMP/home"
 # Channel names are exact selectors, stable/dev, and the empty-value default.
 # Invalid values must be rejected before recovery can touch a sibling marker or lock.
 for supported_channel in stable dev; do

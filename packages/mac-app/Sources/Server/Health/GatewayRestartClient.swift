@@ -4,8 +4,8 @@ import Foundation
 /// Gateway restart is a drain request; launchd remains the process owner and
 /// is responsible for relaunching the Gateway after it exits.
 enum GatewayRestartClient {
-    static let protocolVersion = 4
-    static let minimumProtocolVersion = 4
+    static let protocolVersion = TronGatewayProtocolContract.protocolVersion
+    static let minimumProtocolVersion = TronGatewayProtocolContract.minimumProtocolVersion
     static let defaultTimeout: TimeInterval = 10
     static let minimumCommandIDLength = 8
     static let maximumCommandIDLength = 160

@@ -15,6 +15,18 @@ plist_value() { plutil -extract "$1" raw -o - "$2" 2>/dev/null || true; }
 plist_json() { plutil -extract "$1" json -o - "$2" 2>/dev/null || true; }
 
 [[ -d "$APP" ]] && pass "installed app exists: $APP" || fail "installed app missing: $APP"
+APP_PROTOCOL_VERSION="$(plist_value TRONGatewayProtocolVersion "$APP/Contents/Info.plist")"
+APP_MIN_PROTOCOL_VERSION="$(plist_value TRONGatewayMinProtocolVersion "$APP/Contents/Info.plist")"
+if [[ "$APP_PROTOCOL_VERSION" =~ ^[1-9][0-9]{0,4}$ && "$APP_MIN_PROTOCOL_VERSION" =~ ^[1-9][0-9]{0,4}$ ]]; then
+  pass "installed app carries bounded Gateway protocol metadata"
+else
+  fail "installed app Gateway protocol metadata missing or malformed"
+fi
+if python3 "$(dirname "$0")/verify-gateway-protocol-contract.py" --mac-app "$APP" >/dev/null 2>&1; then
+  pass "installed app and bundled Gateway match the canonical protocol"
+else
+  fail "installed app or bundled Gateway protocol does not match source"
+fi
 
 # Verify the installed signed helper before using its in-process canonical
 # hasher. This keeps verification fast even with a full production dependency
@@ -51,6 +63,8 @@ payload_for() {
           && [[ "$(plist_value schema "$manifest")" == 1 ]] && [[ "$(plist_value kind "$manifest")" == tron-gateway-payload ]] \
           && [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]] && [[ "$(plist_value channel "$current")" == "$channel" ]] \
           && [[ "$(plist_value channel "$manifest")" == "$channel" ]] \
+          && [[ "$(plist_value protocolVersion "$manifest")" == "$APP_PROTOCOL_VERSION" ]] \
+          && [[ "$(plist_value minProtocolVersion "$manifest")" == "$APP_MIN_PROTOCOL_VERSION" ]] \
           && [[ "$(plist_value payloadFingerprint "$current")" == "$fingerprint" ]]; then
           actual="$(hash_payload "$home/gateway/payloads/$channel/versions/$version" 2>/dev/null || true)"
           if [[ "$actual" == "$fingerprint" ]]; then
@@ -82,6 +96,10 @@ verify_payload() {
   if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then fail "$label payload manifest fingerprint invalid"; return; fi
   actual="$(hash_payload "$payload" 2>/dev/null || true)"
   [[ "$actual" == "$expected" ]] && pass "$label selected payload fingerprint matches" || fail "$label selected payload fingerprint mismatch"
+  [[ "$(plist_value protocolVersion "$manifest")" == "$APP_PROTOCOL_VERSION" \
+      && "$(plist_value minProtocolVersion "$manifest")" == "$APP_MIN_PROTOCOL_VERSION" ]] \
+    && pass "$label selected payload protocol matches installed app" \
+    || fail "$label selected payload protocol differs from installed app"
   local pi_cli="${payload}/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   [[ -f "$pi_cli" && ! -L "$pi_cli" && -x "$pi_cli" ]] && pass "$label bundled Pi CLI executable" || fail "$label bundled Pi CLI missing/substituted"
   for architecture in arm64 x64; do
@@ -172,12 +190,16 @@ authenticated_system_info() {
   node_runtime="$payload_root/runtime/node-arm64"
   [[ "$(uname -m)" == x86_64 ]] && node_runtime="$payload_root/runtime/node-x64"
   url_host="$host"; [[ "$url_host" == *:* ]] && url_host="[$url_host]"
-  NODE_PATH="$payload_root/app/node_modules" VERIFY_URL="ws://$url_host:$port/v1/socket" VERIFY_TOKEN="$token" "$node_runtime" <<'NODE' 2>/dev/null
+  NODE_PATH="$payload_root/app/node_modules" VERIFY_URL="ws://$url_host:$port/v1/socket" VERIFY_TOKEN="$token" \
+    VERIFY_PROTOCOL_VERSION="$APP_PROTOCOL_VERSION" VERIFY_MIN_PROTOCOL_VERSION="$APP_MIN_PROTOCOL_VERSION" \
+    "$node_runtime" <<'NODE' 2>/dev/null
 const WebSocket = require("ws");
 const ws = new WebSocket(process.env.VERIFY_URL, { headers: { authorization: `Bearer ${process.env.VERIFY_TOKEN}` }, perMessageDeflate: false });
 const timer = setTimeout(() => { ws.terminate(); process.exit(2); }, 3000);
 const requestId = "verify-mac-system-info";
-ws.on("open", () => ws.send(JSON.stringify({ type: "hello", protocolVersion: 4, minProtocolVersion: 4 })));
+const protocolVersion = Number(process.env.VERIFY_PROTOCOL_VERSION);
+const minProtocolVersion = Number(process.env.VERIFY_MIN_PROTOCOL_VERSION);
+ws.on("open", () => ws.send(JSON.stringify({ type: "hello", protocolVersion, minProtocolVersion })));
 ws.on("message", raw => {
   let frame; try { frame = JSON.parse(raw.toString()); } catch { return; }
   if (frame.type === "hello") ws.send(JSON.stringify({ type: "request", id: requestId, method: "system.info", params: {} }));

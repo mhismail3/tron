@@ -88,6 +88,8 @@ struct GatewayPayloadStoreTests {
                 channel: field == "channel" ? value : manifest.channel,
                 version: manifest.version,
                 gatewayVersion: field == "gatewayVersion" ? value : manifest.gatewayVersion,
+                protocolVersion: field == "protocolVersion" ? value : manifest.protocolVersion,
+                minProtocolVersion: field == "minProtocolVersion" ? value : manifest.minProtocolVersion,
                 nodeVersion: field == "nodeVersion" ? value : manifest.nodeVersion,
                 sourceRevision: field == "sourceRevision" ? value : manifest.sourceRevision,
                 runtimeEpoch: field == "runtimeEpoch" ? value : manifest.runtimeEpoch,
@@ -118,6 +120,8 @@ struct GatewayPayloadStoreTests {
             ("nodeVersion", String(repeating: "é", count: 64)),
             ("sourceRevision", String(repeating: "é", count: 128)),
             ("runtimeEpoch", String(repeating: "e", count: GatewayPayloadStore.runtimeEpochComponentLimit + 1)),
+            ("protocolVersion", "3"),
+            ("minProtocolVersion", "3"),
             ("channel", "preview"),
         ]
         for (field, value) in overLimitValues {

@@ -22,6 +22,8 @@ settings:
     DEVELOPMENT_TEAM: MYGKXH6TY4
     CODE_SIGN_STYLE: Automatic
     ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+    TRON_GATEWAY_PROTOCOL_VERSION: "4"
+    TRON_GATEWAY_MIN_PROTOCOL_VERSION: "4"
 
 targets:
   TronMac:
@@ -64,6 +66,7 @@ targets:
         basedOnDependencyAnalysis: false
         script: |
           set -euo pipefail
+          python3 "$SRCROOT/../../scripts/verify-gateway-protocol-contract.py" >/dev/null
           if [[ "${CONFIGURATION:-}" == "Release" ]]; then
             "$SRCROOT/../../scripts/validate-push-service-config.sh" "$SRCROOT/../../config/PushService.xcconfig" >/dev/null
           else
@@ -91,6 +94,8 @@ targets:
           # tree because they apply directory modes before populating children.
           # rsync defers final directory modes and preserves the internal links.
           /usr/bin/rsync -a "$GATEWAY_SRC/" "$GATEWAY_DST/"
+          python3 "$SRCROOT/../../scripts/verify-gateway-protocol-contract.py" \
+            --mac-app "$TARGET_BUILD_DIR/$WRAPPER_NAME" >/dev/null
           # Signing rewrites Mach-O files, so the copied payload must be
           # writable until signatures and its final fingerprint are complete.
           chmod -R u+w "$GATEWAY_DST"

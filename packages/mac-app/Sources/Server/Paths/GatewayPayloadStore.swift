@@ -83,6 +83,8 @@ struct GatewayPayloadManifest: Codable, Equatable, Sendable {
     let channel: String
     let version: String
     let gatewayVersion: String
+    let protocolVersion: String
+    let minProtocolVersion: String
     let nodeVersion: String
     let sourceRevision: String?
     let runtimeEpoch: String?
@@ -95,6 +97,8 @@ struct GatewayPayloadManifest: Codable, Equatable, Sendable {
         channel: String,
         version: String,
         gatewayVersion: String,
+        protocolVersion: String = String(TronGatewayProtocolContract.protocolVersion),
+        minProtocolVersion: String = String(TronGatewayProtocolContract.minimumProtocolVersion),
         nodeVersion: String,
         sourceRevision: String? = nil,
         runtimeEpoch: String? = nil,
@@ -106,6 +110,8 @@ struct GatewayPayloadManifest: Codable, Equatable, Sendable {
         self.channel = channel
         self.version = version
         self.gatewayVersion = gatewayVersion
+        self.protocolVersion = protocolVersion
+        self.minProtocolVersion = minProtocolVersion
         self.nodeVersion = nodeVersion
         self.sourceRevision = sourceRevision
         self.runtimeEpoch = runtimeEpoch
@@ -218,6 +224,8 @@ enum GatewayPayloadValidator {
               GatewayPayloadStore.validComponent(manifest.version, maximumLength: GatewayPayloadStore.versionComponentLimit),
               !manifest.gatewayVersion.isEmpty,
               manifest.gatewayVersion.utf8.count <= GatewayPayloadStore.gatewayVersionByteLimit,
+              manifest.protocolVersion == String(TronGatewayProtocolContract.protocolVersion),
+              manifest.minProtocolVersion == String(TronGatewayProtocolContract.minimumProtocolVersion),
               !manifest.nodeVersion.isEmpty,
               manifest.nodeVersion.utf8.count <= GatewayPayloadStore.nodeVersionByteLimit,
               manifest.sourceRevision.map({ !$0.isEmpty && $0.utf8.count <= GatewayPayloadStore.sourceRevisionByteLimit }) == true,

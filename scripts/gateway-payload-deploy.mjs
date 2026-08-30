@@ -53,6 +53,7 @@ const PAYLOAD_FINGERPRINT_COVERAGE = "app/** and runtime/** regular files";
 const PAYLOAD_PI_CLI = "app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js";
 const PAYLOAD_PI_ALIAS_TARGET = "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js";
 const PROTOCOL_VERSION = 4;
+const MIN_PROTOCOL_VERSION = 4;
 const LOCAL_CREDENTIAL_MAX_BYTES = 64 * 1024;
 const MAX_RETAINED_VERSIONS = 8;
 const REQUIREMENTS = [
@@ -342,7 +343,10 @@ function payloadManifest(value, expected = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)
     || value.schema !== SCHEMA || value.kind !== KIND
     || !validComponent(value.channel, 64) || !validComponent(value.version, 128)
-    || !safeIdentity(value.gatewayVersion) || !safeIdentity(value.nodeVersion)
+    || !safeIdentity(value.gatewayVersion)
+    || value.protocolVersion !== String(PROTOCOL_VERSION)
+    || value.minProtocolVersion !== String(MIN_PROTOCOL_VERSION)
+    || !safeIdentity(value.nodeVersion)
     || !safeIdentity(value.sourceRevision) || !validComponent(value.runtimeEpoch, 128) || !fingerprint(value.payloadFingerprint)
     || value.dependencyTreeCoverage !== PAYLOAD_FINGERPRINT_COVERAGE) {
     throw new Error("payload manifest identity is invalid");

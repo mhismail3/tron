@@ -20,8 +20,8 @@ enum MenuBarLogReadError: Error, Equatable {
 enum MenuBarLogReader {
     static let defaultLimit = 200
     static let requestID = "mac-system-logs"
-    static let supportedProtocolVersion = 4
-    static let minimumProtocolVersion = 4
+    static let supportedProtocolVersion = TronGatewayProtocolContract.protocolVersion
+    static let minimumProtocolVersion = TronGatewayProtocolContract.minimumProtocolVersion
 
     static func fetchRecentLogs(
         host: String,

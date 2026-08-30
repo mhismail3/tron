@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from gateway_protocol_contract import ProtocolContractError, verify_ios_app
+
 EXPECTED = {
     "Development": ("development", "beta", "com.tron.mobile.beta", "com.tron.mobile.beta.ShareExtension", "development", "development", "NO"),
     "Test": ("hosted-test", "beta", "com.tron.mobile.testhost", "com.tron.mobile.testhost.ShareExtension", "none", "none", "NO"),
@@ -168,6 +170,10 @@ def validate(app: Path, extension: Path, config: str, require_profile: bool) -> 
     if not app.is_dir() or app.suffix != ".app":
         fail(f"not an app bundle: {app}")
     info = load_plist(app / "Info.plist")
+    try:
+        verify_ios_app(app)
+    except ProtocolContractError as exc:
+        fail(str(exc))
     expected = {
         "CFBundleIdentifier": bundle,
         "TRONBuildRole": role,

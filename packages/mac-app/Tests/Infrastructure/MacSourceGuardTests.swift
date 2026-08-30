@@ -169,6 +169,9 @@ struct MacSourceGuardTests {
         #expect(bundleScript.contains("cmp -s \"$REPO_ROOT/scripts/gateway-payload-deploy.mjs\" \"$APP_DIR/scripts/gateway-payload-deploy.mjs\""))
         #expect(bundleScript.contains("staged Gateway deployment helper does not match canonical source"))
         #expect(bundleScript.contains("dependencyTreeCoverage"))
+        #expect(bundleScript.contains("protocolVersion"))
+        #expect(bundleScript.contains("minProtocolVersion"))
+        #expect(bundleScript.contains("verify-gateway-protocol-contract.py"))
         #expect(bundleScript.contains("runtimeEpoch"))
         #expect(bundleScript.contains("--verify-only"))
         #expect(bundleScript.contains("verify-gateway-payload.sh"))
@@ -196,13 +199,16 @@ struct MacSourceGuardTests {
         #expect(hashScript.contains("shasum -a 256"))
 
         let launcher = try Self.read(macRoot, "scripts/tron-gateway-launcher.c")
-        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_UPDATE_HELPER", "gateway-payload-deploy.mjs", "immutable_tree", "required_runtime_alias", "required_pi_alias", "../node-%s", "pi-coding-agent/dist/cli.js", "CC_SHA256", "S_IWUSR", "--verify-payload", "nodeVersion"] {
+        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_PROTOCOL_VERSION", "TRON_GATEWAY_MIN_PROTOCOL_VERSION", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_UPDATE_HELPER", "gateway-payload-deploy.mjs", "immutable_tree", "required_runtime_alias", "required_pi_alias", "../node-%s", "pi-coding-agent/dist/cli.js", "CC_SHA256", "S_IWUSR", "--verify-payload", "nodeVersion"] {
             #expect(launcher.contains(required), "launcher missing external payload safety marker: \(required)")
         }
 
         let project = try Self.read(macRoot, "project.yml")
         #expect(project.contains("name: Ensure Bundled Gateway Payload"))
         #expect(project.contains("ensure-gateway-bundle.sh"))
+        #expect(project.contains("TRON_GATEWAY_PROTOCOL_VERSION: \"4\""))
+        #expect(project.contains("TRON_GATEWAY_MIN_PROTOCOL_VERSION: \"4\""))
+        #expect(project.contains("verify-gateway-protocol-contract.py"))
         #expect(project.contains("- \"Gateway/**\""))
         #expect(project.contains("/usr/bin/rsync -a \"$GATEWAY_SRC/\" \"$GATEWAY_DST/\""))
         #expect(project.contains("find \"$GATEWAY_DST\" -type f"))

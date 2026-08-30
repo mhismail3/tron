@@ -191,6 +191,13 @@ never part of ordinary automated tests because it intentionally invokes `launchc
 ## Reinstall a local Release build
 
 This is a manual developer installation, not a production deployment command.
+It is also the bootstrap path for an intentional lockstep Gateway protocol bump:
+the new signed launcher rejects a previously selected payload whose manifest
+protocol differs and falls back to the matching bundled Gateway. The final Mac
+app binds its own protocol metadata to that bundled payload before signing.
+After `scripts/tron mac verify` passes, the physical iOS helper independently
+requires the same signed protocol before installation.
+
 Do not remove `~/.tron`; it contains canonical sessions and owned credentials.
 When replacing an already-installed app, first wait for active runs to finish,
 choose **Pause Tron** from the Mac menu bar, and quit the wrapper. Stop any
@@ -218,7 +225,8 @@ currently registered job. The new wrapper also detects a running same-bundle
 job without the supervision marker and repairs its registration before it
 settles into the healthy state.
 
-Verify the result with the read-only check:
+Do not install the new iOS app before this Mac verification succeeds. Verify
+the result with the read-only check:
 
 ```bash
 scripts/tron mac verify

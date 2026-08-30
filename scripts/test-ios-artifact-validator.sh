@@ -16,6 +16,8 @@ cat >"$app/Info.plist" <<'PLIST'
 <key>TRONAPNsEnvironment</key><string>development</string>
 <key>TRONAppAttestEnvironment</key><string>development</string>
 <key>TRONPrivateBlurEnabled</key><string>YES</string>
+<key>TRONGatewayProtocolVersion</key><string>4</string>
+<key>TRONGatewayMinProtocolVersion</key><string>4</string>
 </dict></plist>
 PLIST
 cat >"$ext/Info.plist" <<'PLIST'
@@ -69,6 +71,23 @@ chmod +x "$fakebin/security"
 PATH="$fakebin:$PATH" CODESIGN_LOG="$tmp/codesign.log" \
   python3 "$root/scripts/validate-ios-artifact.py" "$app" --configuration LocalDevice --require-profile
 grep -c -- '--verify' "$tmp/codesign.log" | grep -Fxq 2
+python3 - "$app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "rb") as handle: document = plistlib.load(handle)
+document["TRONGatewayProtocolVersion"] = "3"
+with open(sys.argv[1], "wb") as handle: plistlib.dump(document, handle)
+PY
+if PATH="$fakebin:$PATH" CODESIGN_LOG="$tmp/codesign.log" \
+  python3 "$root/scripts/validate-ios-artifact.py" "$app" --configuration LocalDevice >/dev/null 2>&1; then
+  echo "validator accepted an incompatible Gateway protocol" >&2
+  exit 1
+fi
+python3 - "$app/Info.plist" <<'PY'
+import plistlib, sys
+with open(sys.argv[1], "rb") as handle: document = plistlib.load(handle)
+document["TRONGatewayProtocolVersion"] = "4"
+with open(sys.argv[1], "wb") as handle: plistlib.dump(document, handle)
+PY
 if PATH="$fakebin:$PATH" CODESIGN_LOG="$tmp/codesign.log" CODESIGN_FAIL=1 \
   python3 "$root/scripts/validate-ios-artifact.py" "$app" --configuration LocalDevice >/dev/null 2>&1; then
   echo "validator accepted a cryptographically invalid signature" >&2

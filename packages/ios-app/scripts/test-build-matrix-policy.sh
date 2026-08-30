@@ -19,6 +19,9 @@ for scheme in schemes:
     assert source.count(f"  {scheme}:\n") == 1, scheme
 assert "  Tron:\n" not in source
 assert '"${CONFIGURATION:-}" == "Release"' in source
+assert 'TRON_GATEWAY_PROTOCOL_VERSION: "4"' in source
+assert 'TRON_GATEWAY_MIN_PROTOCOL_VERSION: "4"' in source
+assert 'verify-gateway-protocol-contract.py' in source
 # Release is the sole archive/analyze/profile scheme and has no run/test action.
 release = source[source.index("  Tron Release:"):]
 assert "    archive:" in release and "config: Release" in release
@@ -70,7 +73,9 @@ for name, (bundle, route, apns, attest, blur, flags) in expected.items():
         assert document.get("com.apple.developer.devicecheck.appattest-environment") == entitlements[2], name
     else:
         assert 'CODE_SIGN_ENTITLEMENTS: ""' in source[source.index("        Test:", source.index("  TronMobile:")):source.index("  TronShareExtension:")], name
-assert "TRON_PUSH_ROUTE" in (root / "Sources/Info.plist").read_text()
+info_plist = (root / "Sources/Info.plist").read_text()
+assert "TRON_PUSH_ROUTE" in info_plist
+assert "TRONGatewayProtocolVersion" in info_plist and "TRONGatewayMinProtocolVersion" in info_plist
 assert "#if BETA" not in (root / "Sources/Notifications/PushNotificationCoordinator.swift").read_text()
 assert (root / "TronMobileDevelopment.entitlements").exists()
 assert (root / "TronMobileLocalDevice.entitlements").exists()

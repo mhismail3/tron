@@ -24,6 +24,8 @@ NODE_VERSION_FILE="$REPO_ROOT/.node-version"
 [[ -f "$NODE_VERSION_FILE" ]] || { echo "missing canonical Node version file: $NODE_VERSION_FILE" >&2; exit 3; }
 NODE_VERSION="$(<"$NODE_VERSION_FILE")"
 NODE_VERSION_LINES="$(awk 'END { print NR }' "$NODE_VERSION_FILE")"
+PROTOCOL_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["protocolVersion"])' "$REPO_ROOT/config/GatewayProtocol.json")"
+MIN_PROTOCOL_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["minProtocolVersion"])' "$REPO_ROOT/config/GatewayProtocol.json")"
 [[ "$NODE_VERSION_LINES" == 1 && "$NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
     echo "invalid canonical Node version in $NODE_VERSION_FILE" >&2
     exit 3
@@ -110,7 +112,10 @@ required=(
     "$GATEWAY_DIR/package.json"
     "$GATEWAY_DIR/package-lock.json"
     "$REPO_ROOT/config/PushService.xcconfig"
+    "$REPO_ROOT/config/GatewayProtocol.json"
     "$REPO_ROOT/scripts/validate-push-service-config.sh"
+    "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py"
+    "$REPO_ROOT/scripts/gateway_protocol_contract.py"
     "$REPO_ROOT/scripts/gateway-payload-deploy.mjs"
     "$SCRIPT_DIR/tron-gateway-launcher.c"
     "$SCRIPT_DIR/verify-gateway-payload.sh"
@@ -129,8 +134,11 @@ else
     push_origin="$("$REPO_ROOT/scripts/validate-push-service-config.sh" "$REPO_ROOT/config/PushService.xcconfig")"
 fi
 
+python3 "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py" >/dev/null
+
 if ((verify_only)); then
     "$SCRIPT_DIR/verify-gateway-payload.sh" "$PAYLOAD_DIR" "$HELPER_DIR/MacOS/tron" "$payload_channel"
+    python3 "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py" --gateway-payload "$PAYLOAD_DIR" >/dev/null
     cmp -s "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/PushService.xcconfig" || {
         echo "staged Gateway PushService.xcconfig does not match canonical product configuration" >&2
         exit 3
@@ -306,7 +314,7 @@ done
 rm -rf "$(dirname "$launcher_temp")"
 
 for required_payload in \
-    "$APP_DIR/dist/index.js" "$APP_DIR/package.json" "$APP_DIR/package-lock.json" "$APP_DIR/PushService.xcconfig" \
+    "$APP_DIR/dist/index.js" "$APP_DIR/dist/version.js" "$APP_DIR/package.json" "$APP_DIR/package-lock.json" "$APP_DIR/PushService.xcconfig" \
     "$APP_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/gateway-payload-deploy.mjs" \
     "$APP_DIR/node_modules" "$RUNTIME_DIR/node-arm64" "$RUNTIME_DIR/node-x64"; do
     [[ -e "$required_payload" ]] || { echo "missing required staged payload: $required_payload" >&2; exit 3; }
@@ -338,9 +346,10 @@ RUNTIME_EPOCH="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 # remains the readable cross-implementation fixture but is intentionally not
 # process-per-file on this large build path.
 PAYLOAD_FINGERPRINT="$("${launchers[0]}" --fingerprint "$PAYLOAD_DIR")"
-printf '{"schema":1,"kind":"tron-gateway-payload","channel":"%s","version":"%s","gatewayVersion":"%s","nodeVersion":"%s","sourceRevision":"%s","runtimeEpoch":"%s","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' \
-    "$payload_channel" "$GATEWAY_VERSION" "$GATEWAY_VERSION" "$NODE_VERSION" "$SOURCE_REVISION" "$RUNTIME_EPOCH" "$PAYLOAD_FINGERPRINT" \
+printf '{"schema":1,"kind":"tron-gateway-payload","channel":"%s","version":"%s","gatewayVersion":"%s","protocolVersion":"%s","minProtocolVersion":"%s","nodeVersion":"%s","sourceRevision":"%s","runtimeEpoch":"%s","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' \
+    "$payload_channel" "$GATEWAY_VERSION" "$GATEWAY_VERSION" "$PROTOCOL_VERSION" "$MIN_PROTOCOL_VERSION" "$NODE_VERSION" "$SOURCE_REVISION" "$RUNTIME_EPOCH" "$PAYLOAD_FINGERPRINT" \
     > "$PAYLOAD_DIR/manifest.json"
+python3 "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py" --gateway-payload "$PAYLOAD_DIR" >/dev/null
 # Version payloads are immutable after publication; current.json remains the
 # only mutable deployment pointer. The launcher uses this as its bounded
 # anti-tampering check and does not claim to re-hash the tree.

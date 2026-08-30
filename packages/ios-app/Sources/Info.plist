@@ -24,6 +24,10 @@
 	<false/>
 	<key>TRONCanonicalVersion</key>
 	<string>$(TRON_CANONICAL_VERSION)</string>
+	<key>TRONGatewayProtocolVersion</key>
+	<string>$(TRON_GATEWAY_PROTOCOL_VERSION)</string>
+	<key>TRONGatewayMinProtocolVersion</key>
+	<string>$(TRON_GATEWAY_MIN_PROTOCOL_VERSION)</string>
 	<!-- Build metadata is intentionally emitted into every artifact so the
 	     signed product, rather than a scheme name, is the verification source. -->
 	<key>TRONBuildRole</key>

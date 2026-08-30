@@ -23,8 +23,8 @@ enum ServerPingResult: Sendable, Equatable {
 /// by the install step's "wait for Tron" loop and by the menu bar poller.
 enum ServerPing {
     static let requestID = "mac-system-info"
-    static let supportedProtocolVersion = 4
-    static let minimumProtocolVersion = 4
+    static let supportedProtocolVersion = TronGatewayProtocolContract.protocolVersion
+    static let minimumProtocolVersion = TronGatewayProtocolContract.minimumProtocolVersion
 
     /// Performs a single ping with a default 3 s timeout. Classifies
     /// failures so the caller can render the right state without

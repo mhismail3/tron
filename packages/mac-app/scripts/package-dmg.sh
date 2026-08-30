@@ -82,6 +82,8 @@ verify_app_bundle() {
     done
     "$REPO_ROOT/scripts/validate-push-service-config.sh" "$root/$gateway_root/app/PushService.xcconfig" >/dev/null \
         || die "app bundle Gateway PushService.xcconfig is invalid or empty"
+    python3 "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py" --mac-app "$root" >/dev/null \
+        || die "app bundle and Gateway protocol contracts differ"
     [ -x "$root/$helper" ] || die "app bundle helper is not executable: $root/$helper"
     codesign --verify --deep --strict "$root" >/dev/null 2>&1 \
         || die "app bundle deep strict signature is invalid: $root"

@@ -21,6 +21,13 @@ source "$root_dir/scripts/tron-ios-device"
     echo "device helper defaults are not the canonical install pair" >&2
     exit 1
 }
+[[ "$GATEWAY_PROTOCOL_TARGET" == "stable" && "$GATEWAY_MAC_APP" == "/Applications/Tron.app" ]] || {
+    echo "device helper does not default to Stable protocol verification" >&2
+    exit 1
+}
+GATEWAY_PROTOCOL_TARGET=source
+validate_gateway_protocol_target_prebuild >/dev/null
+GATEWAY_PROTOCOL_TARGET=stable
 [[ "$PHYSICAL_BUNDLE_ID" == "com.tron.mobile" ]] || {
     echo "device helper launch identity is not canonical" >&2
     exit 1

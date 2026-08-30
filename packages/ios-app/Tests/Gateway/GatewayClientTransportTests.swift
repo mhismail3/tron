@@ -131,7 +131,7 @@ struct GatewayClientTransportTests {
             let sentHello = try await decodedValue(in: socket, index: 0)
             #expect(sentHello == .object([
                 "type": .string("hello"),
-                "protocolVersion": .number(3),
+                "protocolVersion": .number(Double(TronGatewayProtocolContract.protocolVersion)),
                 "clientId": .string("00000000-0000-0000-0000-000000000001"),
                 "clientRole": .string("mobile"),
             ]))

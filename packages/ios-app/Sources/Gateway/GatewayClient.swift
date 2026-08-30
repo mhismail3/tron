@@ -349,7 +349,7 @@ actor GatewayClient {
         do {
             let hello: JSONValue = .object([
                 "type": .string("hello"),
-                "protocolVersion": .number(4),
+                "protocolVersion": .number(Double(TronGatewayProtocolContract.protocolVersion)),
                 "clientId": .string(uuidSource.next().uuidString),
                 "clientRole": .string("mobile"),
             ])
@@ -360,7 +360,9 @@ actor GatewayClient {
             try GatewayFramePolicy.validateInboundBytes(data)
             let decoded = try JSONDecoder.gateway.decode(GatewayHello.self, from: data)
             try requireEpoch(epochID)
-            guard decoded.type == "hello", decoded.protocolVersion == 4, decoded.minProtocolVersion == 4 else {
+            guard decoded.type == "hello",
+                  decoded.protocolVersion == TronGatewayProtocolContract.protocolVersion,
+                  decoded.minProtocolVersion == TronGatewayProtocolContract.minimumProtocolVersion else {
                 throw GatewayFailure(code: "protocol_mismatch", message: "The Mac gateway protocol is not compatible with this app.", retryable: false, details: nil)
             }
             let admittedChannel = try GatewayChannelPolicy.admit(decoded.gatewayChannel)

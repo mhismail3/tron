@@ -257,7 +257,7 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
     const sourceFingerprint = await payloadFingerprint(versionRoot);
     await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify({
       schema: 1, kind: "tron-gateway-payload", channel: "dev", version: "source",
-      gatewayVersion: "1", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "source-epoch",
+      gatewayVersion: "1", protocolVersion: "4", minProtocolVersion: "4", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "source-epoch",
       payloadFingerprint: sourceFingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files",
     })}\n`);
 
@@ -307,7 +307,7 @@ test("source build failure leaves active selection and deployment state unchange
     await chmod(join(versionRoot, "runtime", "node-x64"), 0o755);
     await addRuntimeNodeAliases(versionRoot);
     const fingerprint = await payloadFingerprint(versionRoot);
-    const manifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
+    const manifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", protocolVersion: "4", minProtocolVersion: "4", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
     await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify(manifest)}\n`);
     await mkdir(store.channelRoot, { recursive: true });
     await writeFile(store.current, `${JSON.stringify(selection("active", fingerprint))}\n`);
@@ -356,7 +356,7 @@ test("source builds compile privately and leave the trusted source tree unchange
     await chmod(join(versionRoot, "runtime", "node-x64"), 0o755);
     await addRuntimeNodeAliases(versionRoot);
     const fingerprint = await payloadFingerprint(versionRoot);
-    const activeManifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
+    const activeManifest = { schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "active", gatewayVersion: "1", protocolVersion: "4", minProtocolVersion: "4", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch", payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files" };
     await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify(activeManifest)}\n`);
     await mkdir(store.channelRoot, { recursive: true });
     await writeFile(store.current, `${JSON.stringify(selection("active", fingerprint))}\n`);
@@ -425,7 +425,7 @@ async function makePreflightFixture(root) {
   const fingerprint = await payloadFingerprint(payload);
   await writeFile(join(payload, "manifest.json"), JSON.stringify({
     schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "preflight",
-    gatewayVersion: "1", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch",
+    gatewayVersion: "1", protocolVersion: "4", minProtocolVersion: "4", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch",
     payloadFingerprint: fingerprint, dependencyTreeCoverage: "app/** and runtime/** regular files",
   }));
   return payload;
@@ -981,7 +981,7 @@ test("duplicate promotion of the exact selected live candidate is verified and i
     await mkdir(store.channelRoot, { recursive: true });
     const manifest = {
       schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "candidate",
-      gatewayVersion: "1.2.3", sourceRevision: "tested-revision", runtimeEpoch: "candidate-epoch",
+      gatewayVersion: "1.2.3", protocolVersion: "4", minProtocolVersion: "4", sourceRevision: "tested-revision", runtimeEpoch: "candidate-epoch",
       payloadFingerprint: "b".repeat(64),
     };
     const current = selection(manifest.version, manifest.payloadFingerprint);

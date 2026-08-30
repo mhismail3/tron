@@ -66,6 +66,8 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "7"
     TRON_CANONICAL_VERSION: "0.1.0-beta.7"
+    TRON_GATEWAY_PROTOCOL_VERSION: "4"
+    TRON_GATEWAY_MIN_PROTOCOL_VERSION: "4"
     ENABLE_USER_SCRIPT_SANDBOXING: false
     DEVELOPMENT_TEAM: MYGKXH6TY4
     CODE_SIGN_STYLE: Automatic
@@ -94,6 +96,8 @@ targets:
       - name: Validate product push configuration
         basedOnDependencyAnalysis: false
         script: |
+          set -euo pipefail
+          python3 "$SRCROOT/../../scripts/verify-gateway-protocol-contract.py" >/dev/null
           if [[ "${ACTION:-}" == "install" || "${CONFIGURATION:-}" == "Release" ]]; then
             "$SRCROOT/../../scripts/validate-push-service-config.sh" "$SRCROOT/../../config/PushService.xcconfig" >/dev/null
           else

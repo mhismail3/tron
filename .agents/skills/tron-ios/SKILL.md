@@ -19,9 +19,11 @@ distributed Beta product.
 | UI validation | Tron UI Validation | Development / Test action | Development app, Test UI host |
 
 The canonical physical install pair is `Tron Device` + `LocalDevice`.
-Build role and push route are emitted into `Info.plist`; signed artifacts are
-authoritative. Test's beta relay route is internal compatibility only and is
-not a real APNs lane.
+Build role, push route, and exact Gateway protocol range are emitted into
+`Info.plist`; signed artifacts are authoritative. Test's beta relay route is
+internal compatibility only and is not a real APNs lane. A Stable device install
+must follow a verified matching Mac app/Gateway install; the device helper fails
+before `devicectl` when their signed protocol metadata differs.
 
 ## Commands
 
@@ -32,8 +34,9 @@ scripts/tron-ios-simulator status
 scripts/ios-ci-test.sh
 ```
 
-For a physical development device, use the device helper without overriding its
-safe defaults:
+For a physical development device targeting Stable, first complete the Mac
+Release reinstall runbook and `scripts/tron mac verify`, then use the device
+helper without overriding its safe defaults:
 
 ```bash
 scripts/tron-ios-device install
@@ -41,6 +44,11 @@ scripts/tron-ios-device launch
 scripts/tron-ios-device status
 scripts/tron-ios-device stop
 ```
+
+For an explicitly source-built Debug Gateway on 9848, use
+`TRON_IOS_GATEWAY_PROTOCOL_TARGET=source scripts/tron-ios-device install`; this
+still verifies the source and iOS artifact contract but does not claim Stable is
+ready. Never use that target to bypass a mismatched Stable installation.
 
 Generate Xcode with `xcodegen generate`; if it is not on `PATH`, install the
 pinned repository-managed tool with `scripts/install-ci-tools.sh xcodegen`.
@@ -53,6 +61,8 @@ Do not archive, upload, deploy, or erase app/Keychain data.
 
 - Never infer push routing from `DEBUG`, bundle naming, or a scheme; inspect the
   emitted artifact metadata and entitlements.
+- Never install iOS before its target Gateway contract is verified. A protocol
+  bump is Mac-first; do not widen the advertised minimum as a migration shortcut.
 - Never use retired build names. A narrowly bounded compatibility adapter
   exists only for the untouched external-harness environment; agents must use
   the canonical `Tron Device` + `LocalDevice` pair.

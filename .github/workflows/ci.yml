@@ -19,6 +19,9 @@ jobs:
       - run: scripts/personal-info-guard.sh
       - run: scripts/tron version check
       - run: scripts/tron version test
+      - run: python3 scripts/test-gateway-protocol-contract.py
+      - name: Check Python syntax
+        run: python3 -m py_compile scripts/gateway_protocol_contract.py scripts/verify-gateway-protocol-contract.py scripts/test-gateway-protocol-contract.py scripts/validate-ios-artifact.py
       - name: Check shell syntax
         run: |
           bash -n \

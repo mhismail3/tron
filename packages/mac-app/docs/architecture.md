@@ -154,6 +154,11 @@ scripts/gateway-payload-deploy.mjs rollback --channel stable --command-id <uniqu
 
 `stage` copies into a new immutable version directory, verifies required files
 and the complete SHA-256 fingerprint, and never mutates the active version.
+Every payload manifest also carries the exact protocol and minimum protocol from
+`config/GatewayProtocol.json`. The signed launcher admits only its compiled
+lockstep range; after a Mac app replacement, an older selected payload is
+therefore rejected and the matching bundled Gateway becomes the one-time
+migration bootstrap without deleting `~/.tron` or weakening the wire contract.
 Every payload includes a regular fingerprinted `app/PushService.xcconfig`.
 Stable staging, promotion, rollback, launcher selection, Swift validation, and
 packaging require its one exact non-empty public HTTPS origin; dev may carry one
@@ -214,8 +219,12 @@ This keeps Stable independent of Homebrew/NVM while avoiding a Debug toolchain
 regression. Alias failure aborts startup before third-party code loads. No payload
 selection code writes canonical sessions or credentials.
 
-The Mac menu Restart action authenticates to the Gateway WebSocket, validates
-protocol identity, and calls `gateway.restart` with a bounded command ID. The
+The Mac app and iOS app emit the same canonical protocol range into their final
+Info plists. Build scripts validate source constants, final app metadata, and
+the bundled payload together; the physical-device helper additionally compares
+the target Mac app before installation. The Mac menu Restart action
+authenticates to the Gateway WebSocket, validates protocol identity, and calls
+`gateway.restart` with a bounded command ID. The
 Gateway drains accepted work; the wrapper then waits for the launchd-owned
 Gateway to become healthy again. It does not use `launchctl kickstart -k` as a
 restart shortcut; the fixed kickstart is reserved for payload deployment recovery after

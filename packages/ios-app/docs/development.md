@@ -656,10 +656,16 @@ name one exact element, have a retained rendered checkpoint, and have a separate
 real-size assertion; category-wide suppression is not allowed.
 
 Simulator screenshots are deterministic regression artifacts, not the final
-system-chrome authority. At broad presentation checkpoints, build the actual
-`Tron Device` `LocalDevice` app for the connected iOS 27 device, install it without
-removing its Keychain pairing, launch it against the isolated development
-gateway, and capture chat, dashboard/setup, Manage Session, tool detail, and
+system-chrome authority. A physical install is protocol-gated before
+`devicectl`: the default Stable target requires a matching verified installed
+Mac app, while an isolated source-built Debug Gateway requires the explicit
+`TRON_IOS_GATEWAY_PROTOCOL_TARGET=source` helper input. For a protocol bump,
+complete and verify the Mac Release reinstall first; never widen the wire range
+or install iOS into a deterministic reconnect loop. At broad presentation
+checkpoints, build the actual `Tron Device` `LocalDevice` app for the connected
+iOS 27 device, install it without removing its Keychain pairing, launch it
+against the selected verified gateway, and capture chat, dashboard/setup,
+Manage Session, tool detail, and
 settings screens with `devicectl`. Terminal lifecycle checkpoints additionally verify
 that the signed app installs and launches on the connected device after the focused suites
 pass; interactive PTY input remains a manual device check. Compare captures to the historical

@@ -15,6 +15,8 @@
 #define MAX_MANIFEST_BYTES (64 * 1024)
 #define MAX_PUSH_CONFIG_BYTES (4 * 1024)
 #define MAX_COMPONENT_BYTES 128
+#define TRON_GATEWAY_PROTOCOL_VERSION "4"
+#define TRON_GATEWAY_MIN_PROTOCOL_VERSION "4"
 
 typedef struct {
     char channel[MAX_COMPONENT_BYTES];
@@ -102,8 +104,8 @@ static int json_key_count(const char *json, const char *key) {
 }
 
 static int json_manifest_exact(const char *json) {
-    const char *keys[] = {"schema", "kind", "gatewayVersion", "nodeVersion", "sourceRevision", "runtimeEpoch", "channel", "version", "payloadFingerprint", "dependencyTreeCoverage"};
-    int seen[10] = {0};
+    const char *keys[] = {"schema", "kind", "gatewayVersion", "protocolVersion", "minProtocolVersion", "nodeVersion", "sourceRevision", "runtimeEpoch", "channel", "version", "payloadFingerprint", "dependencyTreeCoverage"};
+    int seen[12] = {0};
     const char *cursor = skip_space(json);
     if (*cursor++ != '{') return -1;
     for (;;) {
@@ -111,7 +113,7 @@ static int json_manifest_exact(const char *json) {
         if (*cursor == '}') {
             cursor = skip_space(cursor + 1);
             if (*cursor != '\0') return -1;
-            for (size_t index = 0; index < 10; ++index) if (!seen[index]) return -1;
+            for (size_t index = 0; index < 12; ++index) if (!seen[index]) return -1;
             return 0;
         }
         if (*cursor++ != '"') return -1;
@@ -123,7 +125,7 @@ static int json_manifest_exact(const char *json) {
         if (*cursor++ != '"') return -1;
         size_t length = (size_t)(cursor - start - 1);
         int found = -1;
-        for (size_t index = 0; index < 10; ++index) {
+        for (size_t index = 0; index < 12; ++index) {
             if (strlen(keys[index]) == length && strncmp(start, keys[index], length) == 0) { found = (int)index; break; }
         }
         if (found < 0 || seen[found]++) return -1;
@@ -429,9 +431,13 @@ static int read_payload_manifest(const char *root, PayloadIdentity *identity) {
     char json[MAX_MANIFEST_BYTES + 1];
     if (snprintf(path, sizeof(path), "%s/manifest.json", root) >= (int)sizeof(path) ||
         bounded_file(path, json, sizeof(json)) != 0 || json_manifest_exact(json) != 0) return -1;
-    char kind[64], gatewayVersion[128], nodeVersion[128], coverage[128];
+    char kind[64], gatewayVersion[128], protocolVersion[16], minProtocolVersion[16], nodeVersion[128], coverage[128];
     if (json_string(json, "kind", kind, sizeof(kind)) != 0 || strcmp(kind, "tron-gateway-payload") != 0 ||
         json_string(json, "gatewayVersion", gatewayVersion, sizeof(gatewayVersion)) != 0 ||
+        json_string(json, "protocolVersion", protocolVersion, sizeof(protocolVersion)) != 0 ||
+        strcmp(protocolVersion, TRON_GATEWAY_PROTOCOL_VERSION) != 0 ||
+        json_string(json, "minProtocolVersion", minProtocolVersion, sizeof(minProtocolVersion)) != 0 ||
+        strcmp(minProtocolVersion, TRON_GATEWAY_MIN_PROTOCOL_VERSION) != 0 ||
         !valid_component(gatewayVersion, MAX_COMPONENT_BYTES - 1) ||
         snprintf(identity->gatewayVersion, sizeof(identity->gatewayVersion), "%s", gatewayVersion) >= (int)sizeof(identity->gatewayVersion) ||
         json_string(json, "dependencyTreeCoverage", coverage, sizeof(coverage)) != 0 ||
