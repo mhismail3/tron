@@ -2251,32 +2251,73 @@ final class AppModel {
             throw GatewayFailure(code: "sync_failed", message: "Open the session before exporting it.", retryable: true, details: nil)
         }
         struct Params: Codable { let sessionId, format: String }
-        struct Response: Decodable { let blobId, name, mimeType: String }
-        let response: Response = try await client.request("session.export", Params(sessionId: sessionID, format: format), timeout: .seconds(120))
-        guard sessionPresentation.ownsInstalledSubscription(
-            sessionID: sessionID,
-            token: subscriptionToken
-        ) else { throw CancellationError() }
-        try Task.checkCancellation()
-        let stagedURL = try await client.blobFile(
-            id: response.blobId,
-            maximumBytes: SessionExportArtifactPolicy.maximumEncodedBytes
-        )
-        defer { BoundedHTTPFileStaging.shared.discard(stagedURL) }
-        guard sessionPresentation.ownsInstalledSubscription(
-            sessionID: sessionID,
-            token: subscriptionToken
-        ) else { throw CancellationError() }
-        try Task.checkCancellation()
-        let artifact = try await exportArtifacts.adopt(stagedURL, suggestedName: response.name)
-        guard !Task.isCancelled, sessionPresentation.ownsInstalledSubscription(
-            sessionID: sessionID,
-            token: subscriptionToken
-        ) else {
-            await exportArtifacts.discard(artifact)
-            throw CancellationError()
+        struct Response: Decodable {
+            let blobId, name, mimeType: String
+            let size: Int64?
         }
-        return artifact
+        let supportsLargeExports = gatewayInfo?.capabilities.contains("session-export.v2") == true
+        let response: Response = try await client.request(
+            "session.export",
+            Params(sessionId: sessionID, format: format),
+            timeout: .seconds(1_800)
+        )
+        guard sessionPresentation.ownsInstalledSubscription(
+            sessionID: sessionID,
+            token: subscriptionToken
+        ) else { throw CancellationError() }
+        try Task.checkCancellation()
+        let admission: SessionExportDownloadAdmission
+        do {
+            admission = try SessionExportDownloadAdmission.resolve(
+                supportsLargeExports: supportsLargeExports,
+                declaredBytes: response.size
+            )
+        } catch SessionExportDownloadAdmissionError.invalidVersionedSize {
+            throw GatewayFailure(
+                code: "invalid_response",
+                message: "The Gateway did not describe a supported export size.",
+                retryable: true,
+                details: nil
+            )
+        } catch {
+            throw GatewayFailure(
+                code: "export_too_large",
+                message: "This Gateway does not support large session exports.",
+                retryable: false,
+                details: nil
+            )
+        }
+        let reservation = try await exportArtifacts.prepareDownload(
+            expectedBytes: admission.reservedBytes
+        )
+        do {
+            let stagedURL = try await client.blobFile(
+                id: response.blobId,
+                maximumBytes: admission.maximumBytes,
+                expectedBytes: admission.expectedBytes
+            )
+            defer { BoundedHTTPFileStaging.shared.discard(stagedURL) }
+            guard sessionPresentation.ownsInstalledSubscription(
+                sessionID: sessionID,
+                token: subscriptionToken
+            ) else { throw CancellationError() }
+            try Task.checkCancellation()
+            let artifact = try await exportArtifacts.adopt(stagedURL,
+                suggestedName: response.name,
+                reservation: reservation
+            )
+            guard !Task.isCancelled, sessionPresentation.ownsInstalledSubscription(
+                sessionID: sessionID,
+                token: subscriptionToken
+            ) else {
+                await exportArtifacts.discard(artifact)
+                throw CancellationError()
+            }
+            return artifact
+        } catch {
+            await exportArtifacts.cancelDownload(reservation)
+            throw error
+        }
     }
 
     func discardExportArtifact(_ artifact: URL) async {

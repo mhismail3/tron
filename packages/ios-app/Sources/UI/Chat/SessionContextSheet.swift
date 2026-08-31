@@ -601,13 +601,13 @@ struct SessionContextSheet: View {
                 exportRow(
                     format: "html",
                     icon: "doc.richtext",
-                    subtitle: "Readable session archive"
+                    subtitle: "Readable snapshot of committed session activity"
                 )
                 divider()
                 exportRow(
                     format: "jsonl",
                     icon: "doc.text",
-                    subtitle: "Complete canonical audit"
+                    subtitle: "Complete canonical audit through the captured snapshot"
                 )
                 if let exportedURL {
                     divider()
@@ -781,6 +781,7 @@ struct SessionContextSheet: View {
             } catch is CancellationError {
                 return
             } catch {
+                guard !Task.isCancelled else { return }
                 model.presentError(error, scope: noticeScope)
             }
         }

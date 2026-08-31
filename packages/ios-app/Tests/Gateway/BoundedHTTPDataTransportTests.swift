@@ -320,8 +320,11 @@ struct BoundedHTTPDataTransportTests {
             let fileTransport = BoundedHTTPFileTransport { request, maximumBytes in
                 await recorder.record(request: request, maximumBytes: maximumBytes)
                 let response = HTTPURLResponse(
-                    url: request.url!, statusCode: 200, httpVersion: nil,
-                    headerFields: ["Content-Type": "text/html"]
+                    url: request.url!, statusCode: 206, httpVersion: nil,
+                    headerFields: [
+                        "Content-Type": "text/html",
+                        "Content-Range": "bytes 3-5/6",
+                    ]
                 )!
                 return BoundedHTTPDownloadedFile(url: staged, response: response, byteCount: 6)
             }
@@ -332,11 +335,15 @@ struct BoundedHTTPDataTransportTests {
             await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await client.connectForLifecycle(profile: profile, token: "secret")
 
-            #expect(try await client.blobFile(id: "export/id", maximumBytes: 25) == staged)
+            #expect(try await client.blobFile(id: "export/id", maximumBytes: 25, expectedBytes: 6) == staged)
             let recorded = try #require(await recorder.value)
             #expect(recorded.maximumBytes == 25)
             #expect(recorded.request.url?.path == "/v1/blobs/export/id")
             #expect(recorded.request.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
+            await #expect(throws: GatewayFailure.self) {
+                try await client.blobFile(id: "export/id", maximumBytes: 25, expectedBytes: 7)
+            }
+            #expect(!FileManager.default.fileExists(atPath: staged.path))
             await client.close()
         }
     }

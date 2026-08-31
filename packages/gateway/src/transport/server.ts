@@ -9,6 +9,7 @@ import type { DeviceStore } from "../security/device-store.js";
 import { RateLimiter } from "../security/rate-limiter.js";
 import type { UploadStore } from "../machine/upload-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import type { BlobByteRange } from "../sessions/blob-store.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
 import type { GatewayLogger } from "./logger.js";
 import { GatewayService, type ClientContext } from "./gateway-service.js";
@@ -18,6 +19,20 @@ import { SessionSyncBarrier, type BufferedSessionEvent } from "./session-sync.js
 // Retain only recent former IDs while an active subscription is rekeyed. Older
 // IDs are stale control paths and may safely require a fresh session.open.
 export const MAXIMUM_REKEYED_SESSION_IDS = 64;
+
+export function parseBlobByteRange(value: string | string[] | undefined): BlobByteRange | undefined {
+  if (value === undefined) return undefined;
+  if (Array.isArray(value)) throw new GatewayError("invalid_request", "Only one blob byte range may be requested");
+  const match = /^bytes=(\d+)-(\d*)$/.exec(value.trim());
+  if (!match) throw new GatewayError("invalid_request", "Blob byte range must use bytes=start-end syntax");
+  const start = Number(match[1]);
+  const end = match[2] ? Number(match[2]) : undefined;
+  if (!Number.isSafeInteger(start) || start < 0
+    || (end !== undefined && (!Number.isSafeInteger(end) || end < start))) {
+    throw new GatewayError("invalid_request", "Blob byte range is not satisfiable");
+  }
+  return end === undefined ? { start } : { start, end };
+}
 
 export interface ActiveSessionSynchronization {
   barrier: SessionSyncBarrier;
@@ -582,11 +597,16 @@ export class GatewayServer {
       }
       if (request.method === "GET" && url.pathname.startsWith("/v1/blobs/")) {
         const id = decodeURIComponent(url.pathname.slice("/v1/blobs/".length));
-        const lease = await this.options.sessions.acquireBlob(id);
+        const requestedRange = parseBlobByteRange(request.headers.range);
+        const lease = await this.options.sessions.acquireBlob(id, requestedRange);
         try {
-          response.writeHead(200, {
+          response.writeHead(requestedRange ? 206 : 200, {
             "content-type": lease.mimeType,
             "content-length": lease.size,
+            "accept-ranges": "bytes",
+            ...(requestedRange
+              ? { "content-range": `bytes ${lease.rangeStart}-${lease.rangeEnd}/${lease.totalSize}` }
+              : {}),
             "cache-control": "private, max-age=300",
             "x-content-type-options": "nosniff",
           });

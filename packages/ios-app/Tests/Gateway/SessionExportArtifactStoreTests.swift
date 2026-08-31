@@ -4,6 +4,61 @@ import Testing
 
 @Suite("Bounded session export artifacts")
 struct SessionExportArtifactStoreTests {
+    @Test("exports use an archive-specific limit rather than the media limit")
+    func exportCapacityPolicy() {
+        #expect(SessionExportArtifactPolicy.maximumEncodedBytes > 25 * 1_048_576)
+        #expect(SessionExportArtifactPolicy.maximumTotalBytes >= Int64(SessionExportArtifactPolicy.maximumEncodedBytes))
+        #expect(SessionExportArtifactPolicy.maximumArtifacts > 0)
+    }
+
+    @Test("versioned and legacy responses enforce their independent exact-size contracts")
+    func downloadAdmission() throws {
+        let versioned = try SessionExportDownloadAdmission.resolve(
+            supportsLargeExports: true,
+            declaredBytes: Int64(SessionExportArtifactPolicy.legacyMaximumEncodedBytes) + 1
+        )
+        #expect(versioned.maximumBytes == SessionExportArtifactPolicy.legacyMaximumEncodedBytes + 1)
+        #expect(versioned.expectedBytes == Int64(versioned.maximumBytes))
+        #expect(throws: SessionExportDownloadAdmissionError.self) {
+            _ = try SessionExportDownloadAdmission.resolve(
+                supportsLargeExports: true,
+                declaredBytes: nil
+            )
+        }
+        #expect(throws: SessionExportDownloadAdmissionError.self) {
+            _ = try SessionExportDownloadAdmission.resolve(
+                supportsLargeExports: true,
+                declaredBytes: 0
+            )
+        }
+        #expect(throws: SessionExportDownloadAdmissionError.self) {
+            _ = try SessionExportDownloadAdmission.resolve(
+                supportsLargeExports: true,
+                declaredBytes: Int64(SessionExportArtifactPolicy.maximumEncodedBytes) + 1
+            )
+        }
+
+        let legacy = try SessionExportDownloadAdmission.resolve(
+            supportsLargeExports: false,
+            declaredBytes: nil
+        )
+        #expect(legacy.maximumBytes == SessionExportArtifactPolicy.legacyMaximumEncodedBytes)
+        #expect(legacy.reservedBytes == Int64(SessionExportArtifactPolicy.legacyMaximumEncodedBytes))
+        #expect(legacy.expectedBytes == nil)
+        #expect(throws: SessionExportDownloadAdmissionError.self) {
+            _ = try SessionExportDownloadAdmission.resolve(
+                supportsLargeExports: false,
+                declaredBytes: 0
+            )
+        }
+        #expect(throws: SessionExportDownloadAdmissionError.self) {
+            _ = try SessionExportDownloadAdmission.resolve(
+                supportsLargeExports: false,
+                declaredBytes: Int64(SessionExportArtifactPolicy.legacyMaximumEncodedBytes) + 1
+            )
+        }
+    }
+
     @Test("gateway filenames cannot escape the owned export directory")
     func safeNames() {
         #expect(SessionExportArtifactStore.safeFilename("../../secret.jsonl") == "secret.jsonl")
@@ -83,6 +138,82 @@ struct SessionExportArtifactStoreTests {
             try await store.adopt(oversized, suggestedName: "large.jsonl")
         }
         #expect(FileManager.default.fileExists(atPath: oversized.path))
+    }
+
+    @Test("artifact ownership rejects a symbolic-link root")
+    func symbolicLinkRoot() async throws {
+        let parent = temporaryRoot()
+        let outside = temporaryRoot()
+        defer {
+            try? FileManager.default.removeItem(at: parent)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let root = parent.appending(path: "exports")
+        try FileManager.default.createSymbolicLink(at: root, withDestinationURL: outside)
+        let store = SessionExportArtifactStore(root: root, maximumBytes: 8)
+        await #expect(throws: URLError.self) {
+            try await store.write(Data([1]), suggestedName: "blocked.jsonl")
+        }
+        #expect((try FileManager.default.contentsOfDirectory(atPath: outside.path)).isEmpty)
+    }
+
+    @Test("download reservations hold aggregate and item capacity until adoption or cancellation")
+    func downloadReservations() async throws {
+        let root = temporaryRoot()
+        let staging = temporaryRoot()
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: staging)
+        }
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        let store = SessionExportArtifactStore(
+            root: root,
+            maximumBytes: 8,
+            maximumTotalBytes: 10,
+            maximumArtifacts: 1
+        )
+        let reservation = try await store.prepareDownload(expectedBytes: 6)
+        await #expect(throws: URLError.self) {
+            _ = try await store.prepareDownload(expectedBytes: 5)
+        }
+
+        let source = staging.appending(path: "download")
+        try Data(repeating: 7, count: 6).write(to: source)
+        let artifact = try await store.adopt(
+            source,
+            suggestedName: "reserved.jsonl",
+            reservation: reservation
+        )
+        #expect(try Data(contentsOf: artifact).count == 6)
+        await store.discard(artifact)
+
+        let cancelled = try await store.prepareDownload(expectedBytes: 8)
+        await store.cancelDownload(cancelled)
+        let replacement = try await store.write(Data([1]), suggestedName: "replacement.jsonl")
+        #expect(FileManager.default.fileExists(atPath: replacement.path))
+    }
+
+    @Test("active artifacts enforce aggregate and count capacity without unsafe eviction")
+    func activeCapacity() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = SessionExportArtifactStore(
+            root: root,
+            maximumBytes: 8,
+            maximumTotalBytes: 10,
+            maximumArtifacts: 1
+        )
+        let first = try await store.write(Data(repeating: 1, count: 6), suggestedName: "first.jsonl")
+        await #expect(throws: URLError.self) {
+            try await store.write(Data(repeating: 2, count: 5), suggestedName: "second.jsonl")
+        }
+        #expect(FileManager.default.fileExists(atPath: first.path))
+
+        await store.discard(first)
+        let replacement = try await store.write(Data(repeating: 3, count: 5), suggestedName: "replacement.jsonl")
+        #expect(try Data(contentsOf: replacement).count == 5)
     }
 
     @Test("pruning and discard remove only owned artifacts")

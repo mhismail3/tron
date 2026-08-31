@@ -759,7 +759,7 @@ actor GatewayClient {
         return value
     }
 
-    func blobFile(id: String, maximumBytes: Int) async throws -> URL {
+    func blobFile(id: String, maximumBytes: Int, expectedBytes: Int64? = nil) async throws -> URL {
         guard let profile, let token, let connectionID = connection?.id else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
@@ -770,6 +770,14 @@ actor GatewayClient {
             maximumBytes: maximumBytes
         )
         do {
+            if let expectedBytes, downloaded.byteCount != expectedBytes {
+                throw GatewayFailure(
+                    code: "blob_failed",
+                    message: "The export size changed while it was downloading. Try exporting again.",
+                    retryable: true,
+                    details: nil
+                )
+            }
             try requireEpoch(connectionID)
             guard self.profile?.id == profile.id else { throw CancellationError() }
             return downloaded.url
@@ -815,7 +823,7 @@ actor GatewayClient {
             for: request,
             maximumBytes: maximumBytes
         )
-        guard downloaded.response.statusCode == 200 else {
+        guard downloaded.response.statusCode == 200 || downloaded.response.statusCode == 206 else {
             BoundedHTTPFileStaging.shared.discard(downloaded.url)
             throw GatewayFailure(code: "blob_failed", message: "The export is no longer available. Try exporting again.", retryable: true, details: nil)
         }

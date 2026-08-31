@@ -51,6 +51,7 @@ describe("session transcript paging", () => {
       "process-history.v1",
       "process-transcript.v1",
       "uploads-status.v2",
+      "session-export.v2",
     ]));
     expect(capabilities).not.toContain("uploads-status.v1");
   });

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { lstat, mkdir, open, realpath, rename, rm, stat } from "node:fs/promises";
+import { lstat, mkdir, open, realpath, rename, rm, stat, statfs } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -29,9 +29,18 @@ type BlobValue = MemoryBlobValue | FileBlobValue;
 
 export interface BlobLease {
   mimeType: string;
+  /** Bytes exposed by this lease (the full item when rangeStart is zero). */
   size: number;
+  totalSize: number;
+  rangeStart: number;
+  rangeEnd: number;
   stream: Readable;
   release(): Promise<void>;
+}
+
+export interface BlobByteRange {
+  start: number;
+  end?: number;
 }
 
 export const BLOB_MAX_ITEM_BYTES = 25 * 1_048_576;
@@ -39,12 +48,13 @@ export const BLOB_MAX_ITEMS = 128;
 export const BLOB_MAX_TOTAL_BYTES = 200 * 1_048_576;
 export const BLOB_MAX_MIME_TYPE_BYTES = 1_024;
 
-interface BlobStoreLimits {
+export interface BlobStoreLimits {
   maximumItemBytes: number;
   maximumItems: number;
   maximumTotalBytes: number;
   maximumReaders?: number;
   maximumFileProductions?: number;
+  minimumFreeBytes?: number;
 }
 
 function isConfirmedMissingBlob(error: unknown): boolean {
@@ -87,7 +97,8 @@ export class BlobStore {
     if (limits.maximumItemBytes < 0 || limits.maximumItems < 1
       || limits.maximumTotalBytes < limits.maximumItemBytes
       || !Number.isSafeInteger(this.maximumReaders) || this.maximumReaders < 1
-      || !Number.isSafeInteger(this.maximumFileProductions) || this.maximumFileProductions < 1) {
+      || !Number.isSafeInteger(this.maximumFileProductions) || this.maximumFileProductions < 1
+      || !Number.isSafeInteger(limits.minimumFreeBytes ?? 0) || (limits.minimumFreeBytes ?? 0) < 0) {
       throw new Error("Invalid blob store limits");
     }
   }
@@ -196,12 +207,22 @@ export class BlobStore {
       reserved = true;
     });
 
-    this.assertFileStorageAvailable();
-    const directory = await this.ensureDirectory();
-    const staging = join(directory, `staging-${randomUUID()}`);
-    const hash = createHash("sha256").update(mimeType).update("\0");
-    let copiedSize = 0;
+    let staging: string | undefined;
     try {
+      this.assertFileStorageAvailable();
+      const directory = await this.ensureDirectory();
+      const minimumFreeBytes = this.limits.minimumFreeBytes ?? 0;
+      if (minimumFreeBytes > 0) {
+        const filesystem = await statfs(directory);
+        const available = filesystem.bavail * filesystem.bsize;
+        if (!Number.isSafeInteger(available) || available < before.size + minimumFreeBytes) {
+          throw new GatewayError("busy", "Blob file storage does not have enough free space", true);
+        }
+      }
+      const stagingPath = join(directory, `staging-${randomUUID()}`);
+      staging = stagingPath;
+      const hash = createHash("sha256").update(mimeType).update("\0");
+      let copiedSize = 0;
       const meter = new Transform({
         transform: (chunk: Buffer, _encoding, callback) => {
           copiedSize += chunk.length;
@@ -216,10 +237,10 @@ export class BlobStore {
       await pipeline(
         createReadStream(source),
         meter,
-        createWriteStream(staging, { flags: "wx", mode: 0o600 }),
+        createWriteStream(stagingPath, { flags: "wx", mode: 0o600 }),
       );
       const afterCopy = await stat(source);
-      const staged = await stat(staging);
+      const staged = await stat(stagingPath);
       if (!afterCopy.isFile() || afterCopy.size !== before.size || afterCopy.mtimeMs !== before.mtimeMs
         || copiedSize !== before.size || !staged.isFile() || staged.size !== copiedSize) {
         throw new GatewayError("conflict", "Blob source changed while it was being registered");
@@ -241,7 +262,7 @@ export class BlobStore {
         }
         const path = join(directory, `blob-${randomUUID()}`);
         try {
-          await rename(staging, path);
+          await rename(stagingPath, path);
           const actual = await realpath(path);
           const info = await stat(actual);
           if (!actual.startsWith(`${directory}/`) || !info.isFile() || info.size !== before.size) {
@@ -268,7 +289,7 @@ export class BlobStore {
         }
       });
     } finally {
-      await rm(staging, { force: true });
+      if (staging) await rm(staging, { force: true });
       if (reserved) {
         await this.serialize(async () => {
           this.releaseFileReservation(before.size);
@@ -286,9 +307,19 @@ export class BlobStore {
     return { data: value.data, mimeType: value.mimeType };
   }
 
-  async acquire(id: string): Promise<BlobLease> {
+  async acquire(id: string, requestedRange?: BlobByteRange): Promise<BlobLease> {
     if (this.disposed) throw new GatewayError("not_found", "Blob is not available; refresh the session snapshot");
     const value = this.available(id);
+    const rangeStart = requestedRange?.start ?? 0;
+    const rangeEnd = requestedRange?.end ?? value.size - 1;
+    if ((value.size === 0 && requestedRange)
+      || !Number.isSafeInteger(rangeStart) || !Number.isSafeInteger(rangeEnd)
+      || rangeStart < 0
+      || (value.size > 0 && (rangeEnd < rangeStart || rangeEnd >= value.size))
+      || (value.size === 0 && (rangeStart !== 0 || rangeEnd !== -1))) {
+      throw new GatewayError("invalid_request", "Requested blob byte range is not satisfiable");
+    }
+    const rangeSize = value.size === 0 ? 0 : rangeEnd - rangeStart + 1;
     if (this.activeReaders >= this.maximumReaders) {
       throw new GatewayError("busy", "Concurrent blob downloads reached their bounded capacity", true);
     }
@@ -298,14 +329,16 @@ export class BlobStore {
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     let stream: Readable;
     try {
-      if (value.kind === "memory") stream = Readable.from([value.data]);
+      if (value.kind === "memory") stream = Readable.from([value.data.subarray(rangeStart, rangeEnd + 1)]);
       else {
         handle = await open(value.path, "r");
         const info = await handle.stat();
         if (!info.isFile() || info.size !== value.size) {
           throw new GatewayError("not_found", "Blob is not available; refresh the session snapshot");
         }
-        stream = handle.createReadStream({ autoClose: false });
+        stream = value.size === 0
+          ? Readable.from([])
+          : handle.createReadStream({ start: rangeStart, end: rangeEnd, autoClose: false });
       }
     } catch (error) {
       value.activeReaders -= 1;
@@ -321,7 +354,10 @@ export class BlobStore {
     let released = false;
     return {
       mimeType: value.mimeType,
-      size: value.size,
+      size: rangeSize,
+      totalSize: value.size,
+      rangeStart,
+      rangeEnd,
       stream,
       release: async () => {
         if (released) return;

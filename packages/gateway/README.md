@@ -207,17 +207,25 @@ Successful imports remove
 their staging folder; deleting a canonical session removes its claimed attachment folders. Cleanup
 failure after canonical import/deletion success cannot turn that success into an ambiguous command receipt;
 failed session-folder cleanup remains pending in the live store and periodic canonical-catalog maintenance
-recovers it after process restart. Transient image/export blobs reject individual values above 25 MiB or MIME metadata above 1 KiB
-and retain at most 128 items/200 MiB; exact content deduplicates and access refreshes 30-minute idle
-expiry. Generated exports move into protected transient storage and stream to authenticated readers with backpressure,
-without retained export `Buffer` values. HTML renders the active branch; JSONL audit export copies the bounded canonical
-append-only session file verbatim so abandoned branches and parent identities remain present. Default admission allows at most 32 concurrent blob readers and four simultaneous
-export generations, derived from the existing item/aggregate limits; canonical session files above the item ceiling fail
-before SDK export work begins. Active downloads survive pruning; expired IDs admit no new readers, and physical capacity
-releases after the final reader. Startup scavenges transient files only after the Gateway binds successfully.
+recovers it after process restart. Transient image blobs retain their 25 MiB item, 128-item, and 200 MiB aggregate
+bounds; exact content deduplicates and access refreshes 30-minute idle expiry. Session archives use a separate protected,
+file-backed export store because their capacity is unrelated to media admission. It admits one disk-reserved generation,
+four readers, eight retained artifacts, 2 GiB per artifact, and 4 GiB aggregate, with a 64 MiB filesystem floor checked before copy/registration. Export registration and authenticated
+HTTP delivery remain streamed with backpressure, support a single `bytes=start-end` range for bounded resume, and never retain a complete archive `Buffer` in Gateway memory.
+
+An export captures one newline-terminated canonical descriptor/byte-length cut while briefly serialized with the live
+runtime, then copies exactly that immutable prefix outside the session lane. Later appends therefore continue normally
+and are excluded deterministically. A first-turn session whose Pi JSONL has not yet been created uses the runtime owner's
+public append-only header/entry projection for that cut. JSONL preserves the complete canonical tree verbatim, including
+abandoned branches and parent identities. HTML renders the captured active branch through Pi's documented standalone
+export command in a child process, isolating the pinned renderer's current whole-document memory work from the Gateway
+event loop. The response includes the exact generated size and advertises `session-export.v2`; older clients retain the
+legacy 25 MiB download path. Active downloads survive pruning; expired IDs admit no new readers, and physical capacity
+releases after the final reader. A requester disconnect does not alter the already captured cut: admitted generation remains
+single-flight, HTML rendering retains its 15-minute kill bound, and any unclaimed completed artifact expires normally. Startup scavenges both disposable stores only after the Gateway binds successfully.
 Capacity admission never evicts an ID already published to a client: excess projected images become bounded omission
-text, while later requests can retry after expiry. Blob storage rejects control-bearing MIME metadata. Downloads remain
-full-body responses without Range support.
+text, while later requests can retry after expiry. Blob storage rejects control-bearing MIME metadata. Blob downloads
+advertise byte ranges; malformed or unsatisfiable multi-range requests fail closed.
 The retired `/engine` protocol is not exposed.
 
 Gateway updates are an explicit, bounded control-plane contract. `gateway.update.status`

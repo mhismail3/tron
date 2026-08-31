@@ -189,6 +189,7 @@ export class GatewayService {
       capabilities: [
         ...(process.env.TRON_GATEWAY_SUPERVISED === "1" ? ["restart-supervised.v1"] : []),
         "sessions.v1",
+        "session-export.v2",
         "auth.v1",
         "settings.v1",
         "packages.v1",

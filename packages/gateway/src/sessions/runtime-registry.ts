@@ -31,6 +31,14 @@ import {
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { BlobStore } from "./blob-store.js";
+import {
+  SESSION_EXPORT_MAX_ITEM_BYTES,
+  SESSION_EXPORT_MAX_ITEMS,
+  SESSION_EXPORT_MAX_PRODUCTIONS,
+  SESSION_EXPORT_MAX_READERS,
+  SESSION_EXPORT_MINIMUM_FREE_BYTES,
+  SESSION_EXPORT_MAX_TOTAL_BYTES,
+} from "./session-export.js";
 import { RunMarkerStore, type RunMarkerEvidence } from "./run-markers.js";
 import {
   RuntimeSlot,
@@ -376,6 +384,7 @@ export class RuntimeRegistry {
   /** Serializes attention membership checks with set/delete/rekey. */
   private readonly attentionLane = new AsyncMutex();
   private readonly blobs: BlobStore;
+  private readonly exports: BlobStore;
   private readonly markers: RunMarkerStore;
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
   private readonly processActivityRecency = new ProcessActivityRecency();
@@ -445,6 +454,14 @@ export class RuntimeRegistry {
     },
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
+    this.exports = new BlobStore({
+      maximumItemBytes: SESSION_EXPORT_MAX_ITEM_BYTES,
+      maximumItems: SESSION_EXPORT_MAX_ITEMS,
+      maximumTotalBytes: SESSION_EXPORT_MAX_TOTAL_BYTES,
+      maximumReaders: SESSION_EXPORT_MAX_READERS,
+      maximumFileProductions: SESSION_EXPORT_MAX_PRODUCTIONS,
+      minimumFreeBytes: SESSION_EXPORT_MINIMUM_FREE_BYTES,
+    }, Date.now, join(options.tronHome, "gateway", "exports"));
     this.markers = new RunMarkerStore(options.tronHome);
     this.attention = new SessionAttentionStore(options.tronHome);
     this.catalogMetadataIndex = new CatalogMetadataIndex(
@@ -490,8 +507,8 @@ export class RuntimeRegistry {
     void this.discoverExtensionArtifacts();
   }
 
-  initializeBlobStorage(): Promise<void> {
-    return this.blobs.initialize();
+  async initializeBlobStorage(): Promise<void> {
+    await Promise.all([this.blobs.initialize(), this.exports.initialize()]);
   }
 
   private async reconcileCanonicalAttention(
@@ -771,6 +788,7 @@ export class RuntimeRegistry {
       })))()),
       trust: this.options.trust,
       blobs: this.blobs,
+      exports: this.exports,
       markers: this.markers,
       extensionActivityRecency: this.extensionActivityRecency,
       processActivityRecency: this.processActivityRecency,
@@ -3136,7 +3154,7 @@ export class RuntimeRegistry {
     if (failures.length > 0) {
       throw new AggregateError(failures, "One or more session runtimes failed to shut down");
     }
-    await this.blobs.dispose();
+    await Promise.all([this.blobs.dispose(), this.exports.dispose()]);
     this.shutdownState = "disposed";
   }
 
@@ -3165,7 +3183,12 @@ export class RuntimeRegistry {
     }
   }
 
-  acquireBlob(id: string) {
-    return this.blobs.acquire(id);
+  async acquireBlob(id: string, range?: import("./blob-store.js").BlobByteRange) {
+    try {
+      return await this.blobs.acquire(id, range);
+    } catch (error) {
+      if (!(error instanceof GatewayError) || error.code !== "not_found") throw error;
+      return this.exports.acquire(id, range);
+    }
   }
 }

@@ -40,15 +40,20 @@ struct BoundedHTTPFileTransportTests {
         await #expect(throws: CancellationError.self) { try await pending.value }
     }
 
-    @Test("staging is count bounded, active-safe, and explicitly retired")
+    @Test("staging is aggregate bounded, active-safe, and explicitly retired")
     func stagingLifecycle() throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let staging = BoundedHTTPFileStaging(root: root, maximumFiles: 1, maximumAge: 10)
-        let first = try staging.reserveDestination(now: Date(timeIntervalSince1970: 100))
+        let staging = BoundedHTTPFileStaging(
+            root: root,
+            maximumFiles: 2,
+            maximumTotalBytes: 1,
+            maximumAge: 10
+        )
+        let first = try staging.reserveDestination(incomingBytes: 1, now: Date(timeIntervalSince1970: 100))
         try Data([1]).write(to: first)
         #expect(throws: URLError.self) {
-            _ = try staging.reserveDestination(now: Date(timeIntervalSince1970: 100))
+            _ = try staging.reserveDestination(incomingBytes: 1, now: Date(timeIntervalSince1970: 100))
         }
         #expect(FileManager.default.fileExists(atPath: first.path))
         staging.discard(first)
@@ -60,7 +65,7 @@ struct BoundedHTTPFileTransportTests {
             [.modificationDate: Date(timeIntervalSince1970: 80)],
             ofItemAtPath: stale.path
         )
-        let replacement = try staging.reserveDestination(now: Date(timeIntervalSince1970: 100))
+        let replacement = try staging.reserveDestination(incomingBytes: 1, now: Date(timeIntervalSince1970: 100))
         #expect(!FileManager.default.fileExists(atPath: stale.path))
         staging.discard(replacement)
     }

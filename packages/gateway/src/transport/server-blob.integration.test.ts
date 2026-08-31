@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { GatewayError } from "../errors.js";
-import { BlobStore, type BlobLease } from "../sessions/blob-store.js";
+import { BlobStore, type BlobByteRange, type BlobLease } from "../sessions/blob-store.js";
 import { GatewayServer } from "./server.js";
 
 const roots: string[] = [];
@@ -17,7 +17,7 @@ afterEach(async () => {
 });
 
 function makeServer(
-  acquireBlob: (id: string) => Promise<BlobLease>,
+  acquireBlob: (id: string, range?: BlobByteRange) => Promise<BlobLease>,
   port = 0,
   acquireUpload: (id: string) => Promise<unknown> = async () => { throw new GatewayError("not_found", "missing"); },
 ): GatewayServer {
@@ -34,7 +34,7 @@ function makeServer(
   });
 }
 
-async function server(acquireBlob: (id: string) => Promise<BlobLease>): Promise<number> {
+async function server(acquireBlob: (id: string, range?: BlobByteRange) => Promise<BlobLease>): Promise<number> {
   const gateway = makeServer(acquireBlob);
   servers.push(gateway);
   await gateway.listen();
@@ -43,7 +43,12 @@ async function server(acquireBlob: (id: string) => Promise<BlobLease>): Promise<
   return address.port;
 }
 
-function download(port: number, id: string, route = "blobs"): Promise<{
+function download(
+  port: number,
+  id: string,
+  route = "blobs",
+  headers: Record<string, string> = {},
+): Promise<{
   status: number;
   headers: Record<string, string | string[] | undefined>;
   body: Buffer;
@@ -53,7 +58,7 @@ function download(port: number, id: string, route = "blobs"): Promise<{
       host: "127.0.0.1",
       port,
       path: `/v1/${route}/${encodeURIComponent(id)}`,
-      headers: { authorization: "Bearer paired" },
+      headers: { authorization: "Bearer paired", ...headers },
     }, (response) => {
       const chunks: Buffer[] = [];
       response.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -143,15 +148,22 @@ describe("Gateway blob HTTP leases", () => {
     const source = join(home, "source");
     await writeFile(source, "file-backed");
     const id = await store.registerFile(source, "text/plain");
-    const port = await server((requested) => store.acquire(requested));
+    const port = await server((requested, range) => store.acquire(requested, range));
 
     const response = await download(port, id);
     expect(response.status).toBe(200);
     expect(response.headers["content-type"]).toBe("text/plain");
     expect(response.headers["content-length"]).toBe("11");
+    expect(response.headers["accept-ranges"]).toBe("bytes");
     expect(response.headers["cache-control"]).toBe("private, max-age=300");
     expect(response.headers["x-content-type-options"]).toBe("nosniff");
     expect(response.body.toString()).toBe("file-backed");
+
+    const resumed = await download(port, id, "blobs", { range: "bytes=5-" });
+    expect(resumed.status).toBe(206);
+    expect(resumed.headers["content-length"]).toBe("6");
+    expect(resumed.headers["content-range"]).toBe("bytes 5-10/11");
+    expect(resumed.body.toString()).toBe("backed");
     await store.dispose();
   });
 

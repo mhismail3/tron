@@ -650,9 +650,11 @@ real-gateway test retains named screenshot checkpoints for the completed chat,
 Manage Session, root settings, and appearance in its result bundle. Manage Session
 acceptance additionally verifies the compact context bar, exactly two primary groups,
 textual Compact action, peer Project Resources details, the shared Technical JSON sheet,
-user-oriented Agent Context, and the History-owned runtime summary. Focused presentation
-policy tests separately pin stable export-row identity, single-row progress ownership, and
-presentation-local failures without requiring a large live export. The end-to-end path also
+user-oriented Agent Context, and the History-owned runtime summary. Focused presentation policy tests separately pin stable export-row identity and single-row progress ownership.
+`SessionExportArtifactStoreTests` owns archive-specific item/aggregate/count/reservation/age/protection policy, while
+`BoundedHTTPFileTransportTests` owns reservation-backed, resumable file transfer and exact byte ceilings. Gateway integration fixtures cross the legacy
+25 MiB boundary and exercise running-session JSONL/HTML cuts without placing those bytes in iOS test memory.
+The end-to-end path also
 relaunches at accessibility XXXL to verify standard SwiftUI controls that
 XCTest's simulated Dynamic Type audit misclassifies. Any audit suppression must
 name one exact element, have a retained rendered checkpoint, and have a separate

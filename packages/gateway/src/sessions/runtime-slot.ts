@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { closeSync, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
-import { copyFile, mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, open, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
@@ -44,7 +44,15 @@ import type {
 } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { TrustService } from "../admin/trust-service.js";
-import { BLOB_MAX_ITEM_BYTES, type BlobStore } from "./blob-store.js";
+import type { BlobStore } from "./blob-store.js";
+import {
+  SESSION_EXPORT_MAX_ITEM_BYTES,
+  copyCanonicalSessionCut,
+  renderSessionCutToHtml,
+  requireSessionExportDiskCapacity,
+  writeSessionProjectionCut,
+  type CanonicalSessionFileCut,
+} from "./session-export.js";
 import { SemanticUIBroker, type ExtensionNotificationInput } from "./semantic-ui-broker.js";
 import { ExtensionPresentationStore } from "../extensions/host/extension-presentation-store.js";
 import { ExtensionLifecycleCoordinator } from "./extension-lifecycle-coordinator.js";
@@ -240,6 +248,7 @@ export interface RuntimeSlotDependencies {
   createModelRuntime: () => Promise<ModelRuntime>;
   trust: TrustService;
   blobs: BlobStore;
+  exports: BlobStore;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
   processActivityRecency: ProcessActivityRecency;
@@ -623,7 +632,9 @@ export class RuntimeSlot {
 
   /** Actionable work only; decorative presentation must not block trust/delete. */
   get isBusy(): boolean {
-    return this.lifecycle.preventsOperationalQuiescence || this.pendingAssistantCompletion !== undefined;
+    return this.lifecycle.preventsOperationalQuiescence
+      || this.pendingAssistantCompletion !== undefined
+      || this.activeExports > 0;
   }
   /** Retained presentation protects only automatic idle eviction. */
   get isEvictionProtected(): boolean { return this.lifecycle.preventsEviction; }
@@ -5692,7 +5703,7 @@ export class RuntimeSlot {
     });
   }
 
-  async export(format: "html" | "jsonl"): Promise<{ blobId: string; name: string; mimeType: string }> {
+  async export(format: "html" | "jsonl"): Promise<{ blobId: string; name: string; mimeType: string; size: number }> {
     this.assertUsable();
     const work = this.dependencies.workRegistry.begin({
       kind: "compaction-export",
@@ -5701,45 +5712,100 @@ export class RuntimeSlot {
     });
     this.activeExports += 1;
     try {
-      return await this.lane.run(() => this.dependencies.blobs.withFileProductionAdmission(async () => {
-        this.assertUsable();
-        if (this.runtime.session.isStreaming
-          || this.effectivePhase === "running"
-          || this.effectivePhase === "compacting"
-          || this.effectivePhase === "retrying"
-          || this.runtime.session.isBashRunning) {
-          throw new GatewayError("busy", "Session must be idle for this operation");
-        }
-        const source = this.runtime.session.sessionFile;
-        if (!source) throw new GatewayError("conflict", "Session has no file to export");
-        const sourceMetadata = await stat(source);
-        if (!sourceMetadata.isFile() || sourceMetadata.size > BLOB_MAX_ITEM_BYTES) {
-          throw new GatewayError("conflict", "Session export exceeds the 25 MiB limit");
-        }
-        const directory = await mkdtemp(join(tmpdir(), "tron-session-export-"));
-        try {
-          const output = join(directory, `session.${format}`);
-          let path: string;
+      return await this.dependencies.exports.withFileProductionAdmission(async () => {
+        const capture = await this.lane.run(async (): Promise<{
+          file?: CanonicalSessionFileCut;
+          projection?: { header: unknown; entries: readonly unknown[] };
+          exportName: string;
+        }> => {
+          this.assertUsable();
+          const manager = this.sessionManager;
+          const exportName = basename(this.runtime.session.sessionName ?? this.id)
+            .replace(/[^A-Za-z0-9._-]+/g, "-");
           if (format === "html") {
-            path = await this.runtime.session.exportToHtml(output);
+            return {
+              projection: { header: manager.getHeader(), entries: manager.getBranch() },
+              exportName,
+            };
+          }
+          const source = this.runtime.session.sessionFile;
+          if (source && existsSync(source)) {
+            if (lstatSync(source).isSymbolicLink()) {
+              throw new GatewayError("conflict", "Canonical session export source cannot be a symbolic link");
+            }
+            let handle: CanonicalSessionFileCut["handle"];
+            try {
+              handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === "ELOOP") {
+                throw new GatewayError("conflict", "Canonical session export source cannot be a symbolic link");
+              }
+              throw error;
+            }
+            try {
+              const metadata = await handle.stat();
+              if (!metadata.isFile() || metadata.size > SESSION_EXPORT_MAX_ITEM_BYTES) {
+                throw new GatewayError("conflict", "Session export exceeds the 2 GiB export limit");
+              }
+              if (metadata.size === 0) {
+                throw new GatewayError("conflict", "Canonical session file is empty; repair or remove it before exporting");
+              }
+              const terminator = Buffer.allocUnsafe(1);
+              const { bytesRead } = await handle.read(terminator, 0, 1, metadata.size - 1);
+              if (bytesRead !== 1 || terminator[0] !== 0x0a) {
+                throw new GatewayError("busy", "Canonical session is between complete JSONL boundaries; retry export", true);
+              }
+              return { file: { handle, size: metadata.size }, exportName };
+            } catch (error) {
+              await handle.close().catch(() => {});
+              throw error;
+            }
+          }
+          return {
+            projection: { header: manager.getHeader(), entries: manager.getEntries() },
+            exportName,
+          };
+        });
+
+        let directory: string | undefined;
+        try {
+          if (capture.file) {
+            await requireSessionExportDiskCapacity(tmpdir(), capture.file.size * 2);
+          }
+          directory = await mkdtemp(join(tmpdir(), "tron-session-export-"));
+          const snapshot = join(directory, "session.jsonl");
+          if (capture.file) {
+            await copyCanonicalSessionCut(capture.file, snapshot);
+          } else if (capture.projection) {
+            await writeSessionProjectionCut(capture.projection, snapshot);
           } else {
-            // The SDK JSONL exporter linearizes only the active branch. A Tron
-            // audit export must retain the canonical append-only tree verbatim,
-            // including abandoned branches and their parent identities.
-            await copyFile(source, output);
-            path = output;
+            throw new GatewayError("internal", "Session export snapshot was not captured");
           }
-          const mimeType = format === "html" ? "text/html; charset=utf-8" : "application/x-ndjson";
-          const name = `${basename(this.runtime.session.sessionName ?? this.id).replace(/[^A-Za-z0-9._-]+/g, "-")}.${format}`;
+
+          const path = format === "html" ? join(directory, "session.html") : snapshot;
+          if (format === "html") {
+            // The child renderer is isolated; its parent-owned output stream
+            // admits disk in bounded increments and enforces the item ceiling.
+            await renderSessionCutToHtml(snapshot, path);
+          }
           const metadata = await stat(path);
-          if (!metadata.isFile() || metadata.size > BLOB_MAX_ITEM_BYTES) {
-            throw new GatewayError("conflict", "Session export exceeds the 25 MiB limit");
+          if (!metadata.isFile() || metadata.size > SESSION_EXPORT_MAX_ITEM_BYTES) {
+            throw new GatewayError("conflict", "Session export exceeds the 2 GiB export limit");
           }
-          return { blobId: await this.dependencies.blobs.registerFile(path, mimeType), name, mimeType };
+          await requireSessionExportDiskCapacity(directory, metadata.size);
+          const mimeType = format === "html" ? "text/html; charset=utf-8" : "application/x-ndjson";
+          const name = `${capture.exportName || "session"}.${format}`;
+          return {
+            blobId: await this.dependencies.exports.registerFile(path, mimeType),
+            name,
+            mimeType,
+            size: metadata.size,
+          };
         } finally {
-          await rm(directory, { recursive: true, force: true });
+          await capture.file?.handle.close().catch(() => {});
+          if (directory) await rm(directory, { recursive: true, force: true });
         }
-      }));
+      });
     } finally {
       this.activeExports = Math.max(0, this.activeExports - 1);
       work.settle();

@@ -315,12 +315,15 @@ session-keyed context/tree/resources/commands. `AppModel` routes cross-domain ef
 a weak delegate and retains no token, snapshot graph, presentation generation, or secondary
 projection mirror. Revocation synchronously rejects every sequenced topic, not only full snapshots.
 Paging, exports, and secondary reads capture an exact unrevoked target plus installed token and
-revalidate both after suspension. Export blobs use a file-backed URLSession download with declared
-and streamed 25 MiB admission rather than response `Data`; completed downloads move into a protected,
-32-file/24-hour bounded staging owner before the artifact store atomically adopts them. Gateway-provided
-names reduce to a 160-byte last path component and each artifact enters a unique, protected,
-backup-excluded temporary directory. Exact route revalidation removes stale staging and artifacts,
-and app launch plus every new export prune malformed or older-than-24-hour disposable artifacts. Paging is read-only
+revalidate both after suspension. Export archives use a file-backed URLSession download rather than response `Data`.
+A `session-export.v2` Gateway supplies the exact artifact size and iOS rejects declared, streamed, or final files above
+the export-specific 2 GiB item/4 GiB aggregate policy; older Gateways remain on the legacy 25 MiB path. Capacity is
+reserved against artifact count, aggregate bytes, and available filesystem space with a 64 MiB floor. HTTP staging
+reserves its count and byte budget before transfer, and URLSession may use the authenticated Gateway byte-range contract
+to resume a transiently interrupted download before atomic artifact adoption. The artifact owner retains at most eight protected,
+backup-excluded values, prunes malformed/expired/non-active values by age and aggregate size, and never evicts an active
+ShareLink artifact. Gateway-provided names reduce to a 160-byte last path component. Exact route revalidation removes
+stale staging and artifacts, and app launch plus every new export performs bounded cleanup. Paging is read-only
 at the Gateway and cannot revive event subscription ownership after close. Cold cache snapshots never
 enter the store's authoritative read gate.
 `session.open` uses
@@ -1325,8 +1328,9 @@ edge; event titles intentionally use the smaller regular body style while summar
 headline style. The row opens details while its uncontained ellipsis control opens the native actions
 menu. Forking is available from that menu and as the final action in Entry Details instead of occupying the
 history summary.
-Gateway produces that audit by copying the
-canonical append-only JSONL under the existing idle/file/concurrency bounds rather than linearizing only the active branch.
+Gateway produces that audit from a newline-terminated canonical byte cut captured briefly under the live runtime lane.
+The bounded file copy and HTML rendering continue outside that lane, so running, retrying, compacting, and Bash-active
+sessions remain exportable while later appends are deterministically excluded. JSONL does not linearize only the active branch.
 Agent Context summarizes assembled instructions, context accounting, and capability
 counts without duplicating the detailed Project Resources inventory; full instructions
 open from a separate matching row. Full instructions and raw technical JSON use

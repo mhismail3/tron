@@ -4744,6 +4744,98 @@ export default function (pi) {
     expect(exported).toContain("active branch response");
   });
 
+  it("exports a committed JSONL cut while the live session phase is running", async () => {
+    const fixture = await coldFixture("active-jsonl-export");
+    await fixture.registry.initializeBlobStorage();
+    fixture.manager.appendMessage({ role: "user", content: "committed before export", timestamp: Date.now() });
+    fixture.manager.appendMessage(fauxAssistantMessage("committed response"));
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as { phase: "running" | "idle" };
+    internal.phase = "running";
+    try {
+      const artifact = await slot.export("jsonl");
+      expect(artifact.size).toBeGreaterThan(0);
+      const lease = await fixture.registry.acquireBlob(artifact.blobId);
+      let exported = "";
+      try {
+        for await (const chunk of lease.stream) exported += Buffer.from(chunk).toString("utf8");
+      } finally {
+        await lease.release();
+      }
+      expect(exported).toContain("committed before export");
+      expect(exported).toContain("committed response");
+      expect(exported.endsWith("\n")).toBe(true);
+    } finally {
+      internal.phase = "idle";
+    }
+  });
+
+  it("fails closed instead of projecting over an existing empty canonical file", async () => {
+    const fixture = await coldFixture("empty-canonical-export");
+    await fixture.registry.initializeBlobStorage();
+    const source = fixture.manager.getSessionFile();
+    expect(source).toBeDefined();
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    await writeFile(source!, "");
+    await expect(slot.export("jsonl")).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("empty"),
+    });
+  });
+
+  it("renders HTML from an immutable cut without requiring the live session to become idle", async () => {
+    const fixture = await coldFixture("active-html-export");
+    await fixture.registry.initializeBlobStorage();
+    const branchRoot = fixture.manager.getEntries().at(-1)!;
+    fixture.manager.appendMessage(fauxAssistantMessage("abandoned html branch"));
+    fixture.manager.branch(branchRoot.id);
+    fixture.manager.appendMessage({ role: "user", content: "html snapshot marker", timestamp: Date.now() });
+    fixture.manager.appendMessage(fauxAssistantMessage("html snapshot response"));
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as { phase: "running" | "idle" };
+    internal.phase = "running";
+    try {
+      const artifact = await slot.export("html");
+      expect(artifact.mimeType).toContain("text/html");
+      const lease = await fixture.registry.acquireBlob(artifact.blobId);
+      let exported = "";
+      try {
+        for await (const chunk of lease.stream) exported += Buffer.from(chunk).toString("utf8");
+      } finally {
+        await lease.release();
+      }
+      expect(exported).toContain("<!DOCTYPE html>");
+      expect(Buffer.byteLength(exported)).toBe(artifact.size);
+      const encoded = exported.match(/<script id="session-data" type="application\/json">([^<]+)<\/script>/)?.[1];
+      expect(encoded).toBeDefined();
+      const sessionData = Buffer.from(encoded!, "base64").toString("utf8");
+      expect(sessionData).toContain("html snapshot marker");
+      expect(sessionData).toContain("html snapshot response");
+      expect(sessionData).not.toContain("abandoned html branch");
+    } finally {
+      internal.phase = "idle";
+    }
+  }, 30_000);
+
+  it("keeps session exports independent from the 25 MiB transient media item limit", async () => {
+    const fixture = await coldFixture("large-jsonl-export");
+    await fixture.registry.initializeBlobStorage();
+    fixture.manager.appendCustomEntry("large-export-fixture", {
+      payload: "x".repeat(26 * 1_024 * 1_024),
+    });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const artifact = await slot.export("jsonl");
+    expect(artifact.size).toBeGreaterThan(25 * 1_024 * 1_024);
+    const lease = await fixture.registry.acquireBlob(artifact.blobId);
+    let bytes = 0;
+    try {
+      for await (const chunk of lease.stream) bytes += Buffer.byteLength(chunk);
+    } finally {
+      await lease.release();
+    }
+    expect(bytes).toBe(artifact.size);
+  }, 30_000);
+
   it("drains branch summarization through exact SDK settlement", async () => {
     const { manager, registry } = await coldFixture("branch-summary-drain");
     const slot = await registry.acquire(manager.getSessionId());
