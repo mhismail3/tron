@@ -284,15 +284,17 @@ struct SessionContextSheet: View {
                     TerminalSheet(sessionID: sessionID)
                 }
             }
-            .alert("Rename Session", isPresented: $showRename) {
-                TextField("Name", text: $name)
-                Button("Save") {
-                    Task {
-                        do { try await model.renameSession(sessionID, name: name) }
-                        catch { surfaceActionError(error) }
-                    }
+            .tronTextEntryAlert(
+                "Rename Session",
+                isPresented: $showRename,
+                text: $name,
+                placeholder: "Name"
+            ) { value in
+                let trimmedName = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                Task {
+                    do { try await model.renameSession(sessionID, name: trimmedName) }
+                    catch { surfaceActionError(error) }
                 }
-                Button("Cancel", role: .cancel) {}
             }
             .tronManagedSystemPresentation(
                 isPresented: $showRename,

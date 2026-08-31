@@ -29,6 +29,7 @@ enum SessionCatalogFreshness: Equatable, Sendable {
 enum DashboardSessionActivity: Equatable, Sendable {
     case idle
     case active
+    case subagentsWorking
     case resuming
     case interrupted
 }
@@ -283,7 +284,9 @@ struct SessionCatalogCoordinator: Equatable {
         guard isLive else {
             return phase == .idle ? .idle : .resuming
         }
-        if phase.isActive { return .active }
+        if phase.isActive {
+            return sessions[index].hasOnlyActiveSubagents ? .subagentsWorking : .active
+        }
         return phase == .interrupted ? .interrupted : .idle
     }
 
@@ -345,6 +348,8 @@ struct SessionCatalogCoordinator: Equatable {
                 sessionId: update.sessionId,
                 summaryRevision: update.summaryRevision,
                 phase: update.phase,
+                foregroundPhase: update.foregroundPhase,
+                hasActiveSubagents: update.hasActiveSubagents,
                 name: update.name,
                 updatedAt: update.updatedAt,
                 activeSince: update.activeSince,
@@ -367,6 +372,8 @@ struct SessionCatalogCoordinator: Equatable {
             messageCount: current.messageCount,
             firstMessage: current.firstMessage,
             phase: current.phase,
+            foregroundPhase: current.foregroundPhase,
+            hasActiveSubagents: current.hasActiveSubagents,
             summaryRevision: current.summaryRevision,
             completionRevision: projection.completionRevision,
             attentionRevision: projection.attentionRevision,
@@ -440,6 +447,8 @@ struct SessionCatalogCoordinator: Equatable {
             sessionId: update.sessionId,
             summaryRevision: update.summaryRevision,
             phase: update.phase,
+            foregroundPhase: update.foregroundPhase,
+            hasActiveSubagents: update.hasActiveSubagents,
             name: update.name,
             updatedAt: update.updatedAt,
             activeSince: update.activeSince,
@@ -469,6 +478,8 @@ struct SessionCatalogCoordinator: Equatable {
             messageCount: update.messageCount,
             firstMessage: update.firstMessage,
             phase: update.phase,
+            foregroundPhase: update.foregroundPhase,
+            hasActiveSubagents: update.hasActiveSubagents,
             summaryRevision: update.summaryRevision,
             completionRevision: preserve ? summary.completionRevision : update.completionRevision,
             attentionRevision: preserve ? summary.attentionRevision : update.attentionRevision,

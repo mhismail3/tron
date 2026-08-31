@@ -924,6 +924,16 @@ export class RuntimeSlot {
     return this.dashboardPhase;
   }
 
+  /** Narrow foreground truth for dashboard clients that distinguish a settled
+   * parent agent from detached subagents that are still running. */
+  get catalogForegroundPhase(): SessionPhase {
+    return this.effectivePhase;
+  }
+
+  get catalogHasActiveSubagents(): boolean {
+    return this.hasDetachedDashboardWork();
+  }
+
   get touchedAt(): number {
     return this.lastTouchedAt;
   }
@@ -1833,6 +1843,8 @@ export class RuntimeSlot {
       sessionId: this.id,
       summaryRevision: 0,
       phase: this.dashboardPhase,
+      foregroundPhase: this.effectivePhase,
+      hasActiveSubagents: this.hasDetachedDashboardWork(),
       ...canonical,
       updatedAt,
       ...(activeSince ? { activeSince } : {}),
@@ -4552,6 +4564,8 @@ export class RuntimeSlot {
     if (!this.lastPublishedSummary
       || summary.sessionId !== this.lastPublishedSummary.sessionId
       || summary.phase !== this.lastPublishedSummary.phase
+      || summary.foregroundPhase !== this.lastPublishedSummary.foregroundPhase
+      || summary.hasActiveSubagents !== this.lastPublishedSummary.hasActiveSubagents
       || summary.name !== this.lastPublishedSummary.name
       || summary.updatedAt !== this.lastPublishedSummary.updatedAt
       || summary.activeSince !== this.lastPublishedSummary.activeSince

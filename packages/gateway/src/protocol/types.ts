@@ -62,6 +62,11 @@ export interface SessionSummary {
   messageCount: number;
   firstMessage: string;
   phase: SessionPhase;
+  /** Narrow foreground agent phase. When this is settled while `phase` remains
+   * active, detached subagents are the only remaining dashboard work. */
+  foregroundPhase?: SessionPhase;
+  /** True when at least one detached subagent activity remains active. */
+  hasActiveSubagents?: boolean;
   summaryRevision: number;
   /** Gateway-canonical cross-client attention projection. Missing only during a rolling upgrade. */
   completionRevision?: number;
@@ -75,6 +80,10 @@ export interface SessionSummaryUpdate {
   sessionId: string;
   summaryRevision: number;
   phase: SessionPhase;
+  /** Narrow foreground agent phase; omitted by older Gateway builds. */
+  foregroundPhase?: SessionPhase;
+  /** True when at least one detached subagent activity remains active. */
+  hasActiveSubagents?: boolean;
   name?: string;
   updatedAt: string;
   /** Stable Gateway-observed start of the current active dashboard period. */

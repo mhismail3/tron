@@ -399,13 +399,13 @@ private struct ToolStatusChip: View {
     }
 
     private func content(_ presentation: ToolStatusChipPresentation, showsSpinner: Bool) -> some View {
-        HStack(spacing: 6) {
-            if showsSpinner {
-                TronPulseLoadingIndicator(accent: accent, size: 18)
-            } else {
-                Image(systemName: presentation.icon)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-            }
+        HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
+            ChatCompactPillLeadingIcon(
+                icon: presentation.icon,
+                accent: accent,
+                showsProgress: showsSpinner,
+                iconSize: ChatCompactPillLayoutPolicy.standardIconSize
+            )
             Text(presentation.text)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .monospacedDigit()
@@ -414,7 +414,7 @@ private struct ToolStatusChip: View {
                 .layoutPriority(1)
         }
         .foregroundStyle(accent)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 9)
         .padding(.vertical, 6)
         .glassEffect(.regular.tint(accent.opacity(0.12)), in: Capsule())
         .accessibilityElement(children: .combine)
@@ -425,9 +425,12 @@ private struct ToolMetadataChip: View {
     let item: ToolDetailMetadata
 
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: item.icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+        HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
+            ChatCompactPillLeadingIcon(
+                icon: item.icon,
+                accent: .tronTextSecondary,
+                iconSize: ChatCompactPillLayoutPolicy.standardIconSize
+            )
             Text(item.chipPreview.text)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .lineLimit(2)
@@ -450,14 +453,21 @@ struct ToolStaticChip: View {
     let accent: Color
 
     var body: some View {
-        Label(text, systemImage: icon)
-            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-            .foregroundStyle(accent)
-            .lineLimit(2)
-            .multilineTextAlignment(.leading)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .glassEffect(.regular.tint(accent.opacity(0.10)), in: Capsule())
+        HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
+            ChatCompactPillLeadingIcon(
+                icon: icon,
+                accent: accent,
+                iconSize: ChatCompactPillLayoutPolicy.standardIconSize
+            )
+            Text(text)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+        }
+        .foregroundStyle(accent)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .glassEffect(.regular.tint(accent.opacity(0.10)), in: Capsule())
     }
 }
 

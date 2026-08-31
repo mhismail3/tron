@@ -465,9 +465,12 @@ private struct SessionProcessPill: View {
     let accent: Color
 
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(TronTypography.caption2)
+        HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
+            ChatCompactPillLeadingIcon(
+                icon: icon,
+                accent: accent,
+                iconSize: ChatCompactPillLayoutPolicy.standardIconSize
+            )
             Text(text)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                 .lineLimit(1)

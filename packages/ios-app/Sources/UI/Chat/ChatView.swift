@@ -1766,12 +1766,12 @@ struct ChatView: View {
                 )
             }
         } label: {
-            HStack(spacing: 7) {
-                if isLoadingEarlierMessages {
-                    TronPulseLoadingIndicator(accent: .tronEmerald, size: 18)
-                } else {
-                    Image(systemName: "arrow.up")
-                }
+            HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
+                ChatCompactPillLeadingIcon(
+                    icon: "arrow.up",
+                    accent: .tronAccentText,
+                    showsProgress: isLoadingEarlierMessages
+                )
                 Text(
                     isLoadingEarlierMessages
                         ? "Loading earlier…"

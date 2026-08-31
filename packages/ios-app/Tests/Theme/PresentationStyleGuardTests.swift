@@ -472,14 +472,45 @@ struct PresentationStyleGuardTests {
         #expect(source.contains(".tint(Color.tronError)"))
         #expect(source.contains(#".accessibilityIdentifier("session-delete-action-\(session.dashboardID)")"#))
         #expect(source.contains(#"session.isUnread ? "Mark Read" : "Mark Unread""#))
+        #expect(source.contains(".tint(Color.gray)"))
+        #expect(!source.contains(".tint(Color.tronCyan)"))
         #expect(source.contains(#".accessibilityIdentifier("session-attention-action-\(session.dashboardID)")"#))
         #expect(source.contains(#"session.isUnread ? "circle.fill" : "circle""#))
+        #expect(source.contains(#"Button("Rename", systemImage: "pencil") { beginRename(session) }"#))
+        #expect(source.contains(".tint(Color.tronEmerald)"))
         #expect(source.contains("let navigationIntent = navigationOwner.begin()"))
         #expect(source.contains("navigationOwner.admit(navigationIntent)"))
         #expect(source.contains("model.ownsNavigationRoute(route)"))
         #expect(source.contains("catch is CancellationError { return }"))
         #expect(!source.contains(#"Button("Delete", systemImage: "trash", role: .destructive)"#))
         #expect(presentation.contains(".tronToolbarAction(accent: .tronTextSecondary)\n                        .accessibilityIdentifier(\"confirmation-cancel\")"))
+    }
+
+    @Test("session rename alerts keep a fixed native clear affordance")
+    func sessionRenameClearAffordance() throws {
+        let shell = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionShellView.swift"),
+            encoding: .utf8
+        )
+        let context = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionContextSheet.swift"),
+            encoding: .utf8
+        )
+        let alert = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Components/TronTextEntryAlert.swift"),
+            encoding: .utf8
+        )
+
+        #expect(shell.contains(".tronTextEntryAlert("))
+        #expect(context.contains(".tronTextEntryAlert("))
+        #expect(!shell.contains(".alert(\"Rename Session\""))
+        #expect(!context.contains(".alert(\"Rename Session\""))
+        #expect(alert.contains("field.clearButtonMode = .whileEditing"))
+        #expect(alert.contains("field.returnKeyType = .done"))
+        #expect(alert.contains("func textFieldShouldClear"))
+        #expect(alert.contains("updateSaveAdmission(value)"))
+        #expect(alert.contains("configuration.onConfirm(value)"))
+        #expect(alert.contains("!value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty"))
     }
 
     @Test("dashboard retry and opening deadlines remain bounded without capped dirty attempts")
@@ -1959,6 +1990,9 @@ struct PresentationStyleGuardTests {
         #expect(sheet.contains("ToolChipFlowLayout"))
         #expect(sheet.contains("ToolStatusChip"))
         #expect(sheet.contains("ToolMetadataChip"))
+        #expect(sheet.occurrences(of: "ChatCompactPillLeadingIcon(") >= 3)
+        #expect(processSheets.contains("HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing)"))
+        #expect(processSheets.contains("ChatCompactPillLeadingIcon("))
         let chipLayout = try #require(
             sheet.components(separatedBy: "struct ToolChipFlowLayout: Layout {").dropFirst().first?
                 .components(separatedBy: "private struct ToolActivityChip: View {").first
@@ -2146,6 +2180,7 @@ struct PresentationStyleGuardTests {
             encoding: .utf8
         )
         #expect(chat.contains("Load earlier messages"))
+        #expect(chat.contains("ChatCompactPillLeadingIcon("))
         #expect(!chat.contains("New response"))
         #expect(chat.components(separatedBy: ".chatTranscriptPill()").count - 1 >= 2)
         let catchUpButton = (chat.components(separatedBy: "private var catchUpButton").dropFirst().first ?? "")
@@ -2625,9 +2660,11 @@ struct PresentationStyleGuardTests {
         #expect(!toolRuns.contains("value: run)"))
         #expect(compactPill.contains("struct ChatCompactPillVisualState: Hashable"))
         #expect(compactPill.contains("static let verticalPadding: CGFloat = 6"))
-        #expect(compactPill.contains("static let itemSpacing: CGFloat = 6"))
-        #expect(compactPill.contains("static let standardIconSize: CGFloat = 12"))
-        #expect(compactPill.contains("static let toolIconSize: CGFloat = 12"))
+        #expect(compactPill.contains("static let itemSpacing: CGFloat = 5"))
+        #expect(compactPill.contains("static let standardIconSize: CGFloat = 13"))
+        #expect(compactPill.contains("static let toolIconSize: CGFloat = 13"))
+        #expect(compactPill.contains("static let progressIconSize: CGFloat = 13"))
+        #expect(compactPill.contains("struct ChatCompactPillLeadingIcon: View"))
         #expect(compactPill.contains("HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing)"))
         #expect(toolRuns.occurrences(of: "iconSize: ChatCompactPillLayoutPolicy.toolIconSize") == 2)
         #expect(compactPill.contains("TronPulseLoadingIndicator("))

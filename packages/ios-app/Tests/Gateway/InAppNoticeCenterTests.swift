@@ -245,7 +245,8 @@ struct InAppNoticePresentationGuardTests {
         #expect(!terminal.contains(".alert(\"Terminal action failed\""))
         #expect(!context.contains(".alert(\"Export Failed\""))
         #expect(terminal.contains(".alert(\"Quit Terminal?\""))
-        #expect(context.contains(".alert(\"Rename Session\""))
+        #expect(context.contains(".tronTextEntryAlert("))
+        #expect(context.contains("\"Rename Session\""))
         #expect(!FileManager.default.fileExists(
             atPath: packageRoot.appending(path: "Sources/State/GlobalNoticeStore.swift").path
         ))

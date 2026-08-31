@@ -109,11 +109,14 @@ struct SessionShellView: View {
                     onConfirm: { delete(session) }
                 )
             }
-            .alert("Rename Session", isPresented: renameConfirmationPresented, presenting: sessionToRename) { session in
-                TextField("Session name", text: $renameName)
-                Button("Save") { rename(session) }
-                    .disabled(renameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button("Cancel", role: .cancel) { sessionToRename = nil }
+            .tronTextEntryAlert(
+                "Rename Session",
+                isPresented: renameConfirmationPresented,
+                text: $renameName,
+                placeholder: "Session name"
+            ) { value in
+                guard let session = sessionToRename else { return }
+                rename(session, name: value)
             }
             .tronManagedSystemPresentation(
                 isPresented: renameConfirmationPresented,
@@ -482,8 +485,8 @@ struct SessionShellView: View {
         sessionToRename = session
     }
 
-    private func rename(_ session: SessionSummary) {
-        let name = renameName.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func rename(_ session: SessionSummary, name value: String) {
+        let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         Task {
             do { try await model.performOnOwningGateway(session) { try await model.renameSession(session.id, name: name) } }
@@ -658,7 +661,7 @@ struct SessionShellView: View {
                     catch { model.presentError(error) }
                 }
             }
-            .tint(Color.tronCyan)
+            .tint(Color.gray)
             .accessibilityIdentifier("session-attention-action-\(session.dashboardID)")
         }
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -666,7 +669,7 @@ struct SessionShellView: View {
                 .tint(Color.tronError)
                 .accessibilityIdentifier("session-delete-action-\(session.dashboardID)")
             Button("Rename", systemImage: "pencil") { beginRename(session) }
-                .tint(Color.tronPurple)
+                .tint(Color.tronEmerald)
         }
     }
 
@@ -979,12 +982,37 @@ private struct SessionListExpansionControls: View {
     }
 }
 
+enum DashboardSessionIndicatorState: Hashable {
+    case idleRead
+    case idleUnread
+    case active
+    case subagentsWorking
+    case resuming
+    case interrupted
+
+    init(activity: DashboardSessionActivity, isUnread: Bool) {
+        self = switch activity {
+        case .idle: isUnread ? .idleUnread : .idleRead
+        case .active: .active
+        case .subagentsWorking: .subagentsWorking
+        case .resuming: .resuming
+        case .interrupted: .interrupted
+        }
+    }
+}
+
+@MainActor
+enum DashboardSessionIndicatorPresentation {
+    static let subagentOrbSize = TronTypography.sizeBody3
+}
+
 private struct HistoricalSessionRow: View {
     let session: SessionSummary
     let activity: DashboardSessionActivity
     let showsContext: Bool
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isVisible = false
 
     var body: some View {
@@ -1008,16 +1036,13 @@ private struct HistoricalSessionRow: View {
     private func row(relativeTo now: Date) -> some View {
         let relativeActivity = session.relativeActivityDescription(relativeTo: now)
         return HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
-            Group {
-                if activity == .active || activity == .resuming {
-                    TronPulseLoadingIndicator(accent: .tronEmerald, size: 18)
-                } else {
-                    Image(systemName: activity == .interrupted ? "exclamationmark.circle" : session.isUnread ? "circle.fill" : "circle")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                        .foregroundStyle(activity == .interrupted ? Color.tronAmber : Color.tronEmerald.opacity(0.82))
-                }
+            ZStack {
+                sessionIndicator
+                    .id(indicatorState)
+                    .transition(indicatorTransition)
             }
             .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
+            .animation(indicatorAnimation, value: indicatorState)
 
             VStack(alignment: .leading, spacing: showsContext ? 2 : 0) {
                 Text(session.title)
@@ -1055,6 +1080,50 @@ private struct HistoricalSessionRow: View {
         .accessibilityLabel("\(session.title), \(activity.accessibilityDescription)\(session.isUnread ? ", unread" : ""), \(relativeActivity)")
     }
 
+    private var indicatorState: DashboardSessionIndicatorState {
+        DashboardSessionIndicatorState(activity: activity, isUnread: session.isUnread)
+    }
+
+    @ViewBuilder
+    private var sessionIndicator: some View {
+        switch indicatorState {
+        case .subagentsWorking:
+            ProcessActivityOrb(
+                mode: .solving,
+                size: DashboardSessionIndicatorPresentation.subagentOrbSize,
+                isVisible: isVisible
+            )
+        case .active, .resuming:
+            TronPulseLoadingIndicator(accent: .tronEmerald, size: 18)
+        case .interrupted:
+            Image(systemName: "exclamationmark.circle")
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                .foregroundStyle(Color.tronAmber)
+        case .idleUnread:
+            Image(systemName: "circle.fill")
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald.opacity(0.82))
+        case .idleRead:
+            Image(systemName: "circle")
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald.opacity(0.82))
+        }
+    }
+
+    private var indicatorTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .scale(scale: 0.72).combined(with: .opacity),
+            removal: .scale(scale: 1.14).combined(with: .opacity)
+        )
+    }
+
+    private var indicatorAnimation: Animation {
+        reduceMotion
+            ? .easeOut(duration: 0.12)
+            : .spring(response: 0.3, dampingFraction: 0.8)
+    }
+
     private var projectServerContext: String {
         let project = URL(fileURLWithPath: session.cwd).lastPathComponent
         let projectName = project.isEmpty ? session.cwd : project
@@ -1070,6 +1139,7 @@ private extension DashboardSessionActivity {
         switch self {
         case .idle: "idle"
         case .active: "active"
+        case .subagentsWorking: "subagents working"
         case .resuming: "resuming"
         case .interrupted: "interrupted"
         }

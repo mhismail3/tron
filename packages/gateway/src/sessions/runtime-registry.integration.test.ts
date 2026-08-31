@@ -2203,8 +2203,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await waitUntil(() => first.isBusy && second.isBusy);
     expect(faux.state.callCount).toBe(2);
     expect(summaryUpdates).toEqual(expect.arrayContaining([
-      expect.objectContaining({ sessionId: first.id, phase: "running" }),
-      expect.objectContaining({ sessionId: second.id, phase: "running" }),
+      expect.objectContaining({
+        sessionId: first.id, phase: "running", foregroundPhase: "running", hasActiveSubagents: false,
+      }),
+      expect.objectContaining({
+        sessionId: second.id, phase: "running", foregroundPhase: "running", hasActiveSubagents: false,
+      }),
     ]));
     const beforeHeartbeat = summaryUpdates.findLast((update) => update.sessionId === first.id)!;
     expect(beforeHeartbeat.activeSince).toBeDefined();
@@ -2394,6 +2398,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const internal = slot as unknown as {
       extensionActivities: Map<string, ExtensionRunActivity>;
       upsertExtensionActivity: (activity: ExtensionRunActivity) => unknown;
+      phase: SessionSummaryUpdate["phase"];
+      publishSnapshot: () => void;
       publishExtensionActivity: (activity: ExtensionRunActivity) => void;
       publishActivityHeartbeat: () => void;
     };
@@ -2418,12 +2424,37 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
         observedAt: startedAt,
       },
     };
+    internal.phase = "running";
+    internal.publishSnapshot();
+    expect(fixture.summaries.at(-1)).toMatchObject({
+      sessionId: slot.id,
+      phase: "running",
+      foregroundPhase: "running",
+      hasActiveSubagents: false,
+    });
+
     internal.extensionActivities.set(running.toolCallId, running);
     internal.upsertExtensionActivity(running);
     internal.publishExtensionActivity(running);
+    expect(fixture.summaries.at(-1)).toMatchObject({
+      sessionId: slot.id,
+      phase: "running",
+      foregroundPhase: "running",
+      hasActiveSubagents: true,
+    });
 
+    // Parent settlement does not change aggregate phase while detached work is
+    // active. The shallow foreground fact must still publish the visual-state
+    // transition to every dashboard.
+    internal.phase = "idle";
+    internal.publishSnapshot();
     const active = fixture.summaries.at(-1)!;
-    expect(active).toMatchObject({ sessionId: slot.id, phase: "running" });
+    expect(active).toMatchObject({
+      sessionId: slot.id,
+      phase: "running",
+      foregroundPhase: "idle",
+      hasActiveSubagents: true,
+    });
     expect(active.activeSince).toBeDefined();
     expect(Date.parse(active.updatedAt)).toBeGreaterThan(Date.parse(startedAt));
     await new Promise((resolve) => setTimeout(resolve, 2));
@@ -2436,6 +2467,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(activeCatalog.sessions[0]).toMatchObject({
       id: slot.id,
       phase: "running",
+      foregroundPhase: "idle",
+      hasActiveSubagents: true,
       updatedAt: heartbeat.updatedAt,
       activeSince: active.activeSince,
     });
@@ -2459,7 +2492,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     internal.extensionActivities.set(completed.toolCallId, completed);
     internal.upsertExtensionActivity(completed);
     internal.publishExtensionActivity(completed);
-    expect(fixture.summaries.at(-1)).toMatchObject({ sessionId: slot.id, phase: "idle" });
+    expect(fixture.summaries.at(-1)).toMatchObject({
+      sessionId: slot.id,
+      phase: "idle",
+      foregroundPhase: "idle",
+      hasActiveSubagents: false,
+    });
     expect(fixture.summaries.at(-1)!.activeSince).toBeUndefined();
     expect(Date.parse(fixture.summaries.at(-1)!.updatedAt))
       .toBeGreaterThanOrEqual(Date.parse(heartbeat.updatedAt));

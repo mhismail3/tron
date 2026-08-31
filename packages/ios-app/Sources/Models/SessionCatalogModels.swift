@@ -21,6 +21,10 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     let messageCount: Int
     let firstMessage: String
     let phase: SessionPhase
+    /// Narrow foreground phase. A settled value while `phase` remains active
+    /// means detached subagents are the only remaining dashboard work.
+    let foregroundPhase: SessionPhase?
+    let hasActiveSubagents: Bool
     let summaryRevision: Int?
     let completionRevision: Int
     let attentionRevision: Int
@@ -32,8 +36,9 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     init(
         id: String, name: String?, cwd: String, kind: Kind = .user, parentSessionId: String?,
         createdAt: String, updatedAt: String, activeSince: String? = nil, messageCount: Int,
-        firstMessage: String, phase: SessionPhase, summaryRevision: Int? = nil,
-        completionRevision: Int = 0, attentionRevision: Int = 0, isUnread: Bool = false,
+        firstMessage: String, phase: SessionPhase, foregroundPhase: SessionPhase? = nil,
+        hasActiveSubagents: Bool = false, summaryRevision: Int? = nil, completionRevision: Int = 0,
+        attentionRevision: Int = 0, isUnread: Bool = false,
         gatewayProfileID: String? = nil, gatewayProfileLabel: String? = nil
     ) {
         self.id = id
@@ -47,6 +52,8 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         self.messageCount = messageCount
         self.firstMessage = firstMessage
         self.phase = phase
+        self.foregroundPhase = foregroundPhase
+        self.hasActiveSubagents = hasActiveSubagents
         self.summaryRevision = summaryRevision
         self.completionRevision = completionRevision
         self.attentionRevision = attentionRevision
@@ -56,7 +63,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, cwd, kind, parentSessionId, createdAt, updatedAt, activeSince, messageCount, firstMessage, phase, summaryRevision
+        case id, name, cwd, kind, parentSessionId, createdAt, updatedAt, activeSince, messageCount, firstMessage, phase, foregroundPhase, hasActiveSubagents, summaryRevision
         case completionRevision, attentionRevision, isUnread
     }
 
@@ -73,6 +80,8 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         messageCount = try container.decode(Int.self, forKey: .messageCount)
         firstMessage = try container.decode(String.self, forKey: .firstMessage)
         phase = try container.decode(SessionPhase.self, forKey: .phase)
+        foregroundPhase = try container.decodeIfPresent(SessionPhase.self, forKey: .foregroundPhase)
+        hasActiveSubagents = try container.decodeIfPresent(Bool.self, forKey: .hasActiveSubagents) ?? false
         summaryRevision = try container.decodeIfPresent(Int.self, forKey: .summaryRevision)
         let decodedCompletionRevision = try container.decodeIfPresent(Int.self, forKey: .completionRevision) ?? 0
         let decodedAttentionRevision = try container.decodeIfPresent(Int.self, forKey: .attentionRevision) ?? 0
@@ -102,6 +111,8 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
             messageCount: messageCount,
             firstMessage: firstMessage,
             phase: phase,
+            foregroundPhase: foregroundPhase,
+            hasActiveSubagents: hasActiveSubagents,
             summaryRevision: summaryRevision,
             completionRevision: completionRevision,
             attentionRevision: attentionRevision,
@@ -113,6 +124,10 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
 
     var dashboardID: String {
         gatewayProfileID.map { "\($0):\(id)" } ?? id
+    }
+
+    var hasOnlyActiveSubagents: Bool {
+        phase.isActive && hasActiveSubagents && foregroundPhase == .idle
     }
 
     var title: String {
@@ -199,6 +214,8 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
     let sessionId: String
     let summaryRevision: Int
     let phase: SessionPhase
+    let foregroundPhase: SessionPhase?
+    let hasActiveSubagents: Bool
     let name: String?
     let updatedAt: String
     let activeSince: String?
@@ -209,13 +226,17 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
     let isUnread: Bool
 
     init(
-        sessionId: String, summaryRevision: Int, phase: SessionPhase, name: String?,
-        updatedAt: String, activeSince: String? = nil, messageCount: Int, firstMessage: String,
+        sessionId: String, summaryRevision: Int, phase: SessionPhase,
+        foregroundPhase: SessionPhase? = nil, hasActiveSubagents: Bool = false,
+        name: String?, updatedAt: String, activeSince: String? = nil,
+        messageCount: Int, firstMessage: String,
         completionRevision: Int = 0, attentionRevision: Int = 0, isUnread: Bool = false
     ) {
         self.sessionId = sessionId
         self.summaryRevision = summaryRevision
         self.phase = phase
+        self.foregroundPhase = foregroundPhase
+        self.hasActiveSubagents = hasActiveSubagents
         self.name = name
         self.updatedAt = updatedAt
         self.activeSince = activeSince
@@ -227,7 +248,7 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case sessionId, summaryRevision, phase, name, updatedAt, activeSince, messageCount, firstMessage
+        case sessionId, summaryRevision, phase, foregroundPhase, hasActiveSubagents, name, updatedAt, activeSince, messageCount, firstMessage
         case completionRevision, attentionRevision, isUnread
     }
 
@@ -236,6 +257,8 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
         sessionId = try container.decode(String.self, forKey: .sessionId)
         summaryRevision = try container.decode(Int.self, forKey: .summaryRevision)
         phase = try container.decode(SessionPhase.self, forKey: .phase)
+        foregroundPhase = try container.decodeIfPresent(SessionPhase.self, forKey: .foregroundPhase)
+        hasActiveSubagents = try container.decodeIfPresent(Bool.self, forKey: .hasActiveSubagents) ?? false
         name = try container.decodeIfPresent(String.self, forKey: .name)
         updatedAt = try container.decode(String.self, forKey: .updatedAt)
         activeSince = try container.decodeIfPresent(String.self, forKey: .activeSince)

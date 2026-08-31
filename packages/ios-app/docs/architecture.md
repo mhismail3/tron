@@ -96,7 +96,7 @@ rejects more than 50 pages/25,000 identities, duplicate IDs, cursor cycles, and 
 publishes only a complete catalog. A mixed revision from an older Gateway or an expired continuation lease restarts silently once from a nil
 cursor; it is expected optimistic invalidation, not the former actionable “Sessions changed while loading
 the dashboard” alert. Known revisioned `session.summary` events apply synchronously without a list read,
-and mounted transcript snapshots cannot overwrite those global row fields. Dashboard ordering keeps active rows first and uses the Gateway-observed `activeSince` boundary to hold their relative positions while progress and heartbeats continue; settled history orders parsed `updatedAt` instants with profile-qualified identity as the deterministic tie-breaker, so equivalent whole/fractional ISO representations never become chronology. Older Gateways that omit the additive boundary use profile-qualified identity among active rows instead of their volatile live timestamp. Visible rows use a 30-second `TimelineView` cadence to age relative labels even when no catalog event occurs; live Gateway summary heartbeats independently advance active foreground and detached-extension freshness without moving those active rows. Completion attention is one
+and mounted transcript snapshots cannot overwrite those global row fields. The shallow summary carries aggregate `phase` plus optional `foregroundPhase` and `hasActiveSubagents` facts: a live row whose foreground has settled while subagents remain active uses a circle-sized native solving orb instead of the foreground pulse, while older summaries fall back to the pulse. Read, unread, foreground-active, delegated-active, resuming, and interrupted indicator replacements share one stable icon column and animate with an overlapping scale/fade transition; Reduce Motion keeps only the short fade. Dashboard ordering keeps active rows first and uses the Gateway-observed `activeSince` boundary to hold their relative positions while progress and heartbeats continue; settled history orders parsed `updatedAt` instants with profile-qualified identity as the deterministic tie-breaker, so equivalent whole/fractional ISO representations never become chronology. Older Gateways that omit the additive boundary use profile-qualified identity among active rows instead of their volatile live timestamp. Visible rows use a 30-second `TimelineView` cadence to age relative labels even when no catalog event occurs; live Gateway summary heartbeats independently advance active foreground and detached-extension freshness without moving those active rows. Completion attention is one
 of those Gateway-canonical row fields: only final settled prompt responses advance it, Mark Read/Unread
 uses an absolute command-receipt mutation whose complete attention projection applies immediately even
 for cold rows, and a successful open acknowledges only its returned completion revision after the
@@ -996,7 +996,7 @@ same 28-point status-icon anchor: 16 points of outer row inset plus 12 points of
 card content padding. Selectable app-owned cards have one full-card
 hit region and no decorative disclosure chevron. Dashboard session rows never
 retain a selected tint; their trailing swipe actions rename or request deletion of the exact
-swiped canonical session without changing navigation selection. The delete swipe
+swiped canonical session without changing navigation selection. Rename uses emerald, while both leading attention actions—Mark Read and Mark Unread—use neutral gray. Dashboard and Manage Session rename flows share one native text-entry alert whose fixed trailing circle-x clears the value; UIKit owns horizontal text scrolling beneath that control, so long names cannot displace it. The delete swipe
 uses a red tint but no destructive button role, so UIKit keeps the row mounted
 until the Tron confirmation sheet completes the canonical mutation. The view does
 not stage deletion beyond confirmation or suppress rows locally. The confirmed
@@ -1249,7 +1249,7 @@ the authoritative response is an object/list or the bounded readable result is v
 details. Non-JSON content-only results remain text, response data wins, and a fallback identical to Request is rejected. Running sheets consume the newest immutable tool presentation, update status, timing,
 partial output, and bounded-output disclosure in place, and never move
 the reader's scroll position. Tool chips retain six-point vertical capsule insets and
-intrinsic label/timing geometry without a layout-inflating minimum interaction frame.
+intrinsic label/timing geometry without a layout-inflating minimum interaction frame. Every compact chat pill and tool-detail status/metadata/activity chip uses the metadata-pill leading rhythm: a 13-point icon or pulse followed by a five-point gap, with no legacy 18-point icon reservation.
 Thinking traces remain one compact inline run while they fit, but their visible viewport
 is capped at four measured text lines rather than truncating canonical content. Once the run
 actually overflows, the compact viewport presents only the latest four measured lines without
@@ -1285,7 +1285,7 @@ alive. Canonical settings determine the default model; catalog order is never a
 default-selection policy. Dashboard Settings explicitly exposes only global configuration; project scope,
 trust, and project package actions appear only when Settings is opened from a
 project session. Manage Session has two primary groups: Configuration owns the
-model, thinking level, peer-presented Project Resources sheet, and final Rename action. Its model row uses the same
+model, thinking level, peer-presented Project Resources sheet, and final Rename action. Rename uses the same clearable native text-entry alert as the dashboard row action, including trimmed nonempty admission and a fixed trailing clear control. Its model row uses the same
 progressive searchable `ModelPicker` sheet as Models and Defaults, and its thinking row uses that settings surface's
 shared inline Change control while retaining the session's authoritative available-level list and immediate mutations;
 Session owns Agent Context, recent history/audit actions, terminal, Git evidence, and
@@ -1367,8 +1367,7 @@ preview alone owns rounded glass clipping, leaving the half-offset remove contro
 Sent prompt attachment strips add three points of vertical breathing room without
 changing the 64-point image/file chip geometry. Pending and sent photo chips share the historical medium-detent,
 concentrically rounded preview with native pinch and double-tap zoom. Earlier-history loading, context summaries, and unread-response navigation share one
-content-sized compact pill treatment while preserving 44-point semantic targets; tool-chip symbols use the
-next one-point type step for slightly stronger visual weight without changing pill geometry. A
+content-sized compact pill treatment while preserving 44-point semantic targets; every leading symbol and progress pulse uses the shared 13-point metadata scale and five-point icon-to-label gap without changing pill geometry. A
 history request captures the visually first measured semantic frame intersecting the
 viewport; threshold visibility cannot authorize loading. Canonical-to-rendered metadata
 maps every tool call to its single compact grouped transcript chip, so page-boundary

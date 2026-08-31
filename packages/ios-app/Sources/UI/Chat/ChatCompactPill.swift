@@ -77,9 +77,12 @@ enum ChatSemanticPillRole: Hashable, Sendable {
 enum ChatCompactPillLayoutPolicy {
     static let horizontalPadding: CGFloat = 10
     static let verticalPadding: CGFloat = 6
-    static let itemSpacing: CGFloat = 6
-    static let standardIconSize: CGFloat = 12
-    static let toolIconSize: CGFloat = 12
+    /// Matches the compact metadata-pill gap between the icon's visible edge
+    /// and its label. Every chat pill/chip uses this one leading rhythm.
+    static let itemSpacing: CGFloat = 5
+    static let standardIconSize: CGFloat = 13
+    static let toolIconSize: CGFloat = 13
+    static let progressIconSize: CGFloat = 13
     static let errorCornerRadius: CGFloat = 18
     static let capsuleCornerRadius: CGFloat = 999
 
@@ -247,6 +250,46 @@ struct ChatToolChipTransitionState: Equatable, Sendable {
     func admits(_ candidate: Int) -> Bool { candidate == token }
 }
 
+struct ChatCompactPillLeadingIcon: View {
+    let icon: String
+    let accent: Color
+    let showsProgress: Bool
+    let iconSize: CGFloat
+
+    init(
+        icon: String,
+        accent: Color,
+        showsProgress: Bool = false,
+        iconSize: CGFloat = ChatCompactPillLayoutPolicy.standardIconSize
+    ) {
+        self.icon = icon
+        self.accent = accent
+        self.showsProgress = showsProgress
+        self.iconSize = iconSize
+    }
+
+    var body: some View {
+        ZStack {
+            if showsProgress {
+                TronPulseLoadingIndicator(
+                    accent: accent,
+                    size: ChatCompactPillLayoutPolicy.progressIconSize
+                )
+                .transition(.opacity.combined(with: .scale(scale: 0.82)))
+            } else {
+                Image(systemName: icon)
+                    .font(TronTypography.sans(size: iconSize, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .transition(.opacity.combined(with: .scale(scale: 0.82)))
+            }
+        }
+        // Keep vertical pill geometry stable without reserving horizontal
+        // whitespace between the symbol's visible edge and its label.
+        .frame(minHeight: max(iconSize, ChatCompactPillLayoutPolicy.progressIconSize))
+        .accessibilityHidden(true)
+    }
+}
+
 struct ChatCompactPillLabel<Trailing: View>: View {
     let icon: String
     let title: String
@@ -282,18 +325,12 @@ struct ChatCompactPillLabel<Trailing: View>: View {
 
     var body: some View {
         HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
-            ZStack {
-                if showsProgress {
-                    TronPulseLoadingIndicator(accent: tone.primaryColor, size: 18)
-                        .transition(.opacity.combined(with: .scale(scale: 0.82)))
-                } else {
-                    Image(systemName: icon)
-                        .font(TronTypography.sans(size: iconSize, weight: .semibold))
-                        .foregroundStyle(tone.primaryColor)
-                        .transition(.opacity.combined(with: .scale(scale: 0.82)))
-                }
-            }
-            .frame(width: 18, height: 18)
+            ChatCompactPillLeadingIcon(
+                icon: icon,
+                accent: tone.primaryColor,
+                showsProgress: showsProgress,
+                iconSize: iconSize
+            )
             Text(title)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: titleWeight))
                 .foregroundStyle(tone.primaryColor)

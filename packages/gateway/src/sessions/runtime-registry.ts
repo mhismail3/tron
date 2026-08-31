@@ -336,6 +336,8 @@ interface CatalogPageSeed {
   readonly messageCount: number;
   readonly firstMessage: string;
   readonly phase: SessionSummary["phase"];
+  readonly foregroundPhase?: SessionSummary["foregroundPhase"];
+  readonly hasActiveSubagents?: boolean;
   readonly summaryRevision: number;
   readonly attention: SessionAttentionProjection;
 }
@@ -1977,6 +1979,7 @@ export class RuntimeRegistry {
       const headerParentSessionId = session.parentSessionPath ? pathToId.get(resolve(session.parentSessionPath)) : undefined;
       const parentSessionId = topology?.parentSessionId ?? headerParentSessionId;
       const latest = this.latestSummaries.get(session.id);
+      const slot = this.slots.get(session.id);
       const name = latest?.name ?? session.name;
       seeds.push({
         id: session.id,
@@ -1989,7 +1992,13 @@ export class RuntimeRegistry {
         ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
         messageCount: latest?.messageCount ?? session.messageCount,
         firstMessage: latest?.firstMessage ?? session.firstMessage,
-        phase: latest?.phase ?? (this.slots.get(session.id) ? this.slots.get(session.id)!.catalogPhase : this.interrupted.has(session.id) ? "interrupted" : "idle"),
+        phase: latest?.phase ?? (slot ? slot.catalogPhase : this.interrupted.has(session.id) ? "interrupted" : "idle"),
+        ...(latest?.foregroundPhase
+          ? { foregroundPhase: latest.foregroundPhase }
+          : slot ? { foregroundPhase: slot.catalogForegroundPhase } : {}),
+        ...(latest?.hasActiveSubagents !== undefined
+          ? { hasActiveSubagents: latest.hasActiveSubagents }
+          : slot ? { hasActiveSubagents: slot.catalogHasActiveSubagents } : {}),
         summaryRevision: latest?.summaryRevision ?? 0,
         attention: this.attention.projection(session.id),
       });
@@ -2009,6 +2018,8 @@ export class RuntimeRegistry {
           messageCount: latest?.messageCount ?? 0,
           firstMessage: latest?.firstMessage ?? "",
           phase: latest?.phase ?? slot.catalogPhase,
+          foregroundPhase: latest?.foregroundPhase ?? slot.catalogForegroundPhase,
+          hasActiveSubagents: latest?.hasActiveSubagents ?? slot.catalogHasActiveSubagents,
           summaryRevision: latest?.summaryRevision ?? 0,
           attention: this.attention.projection(id),
         });
@@ -2026,6 +2037,7 @@ export class RuntimeRegistry {
       + Buffer.byteLength(seed.id) + Buffer.byteLength(seed.cwd) + Buffer.byteLength(seed.kind)
       + Buffer.byteLength(seed.createdAt) + Buffer.byteLength(seed.updatedAt)
       + Buffer.byteLength(seed.firstMessage) + Buffer.byteLength(seed.phase)
+      + (seed.foregroundPhase ? Buffer.byteLength(seed.foregroundPhase) : 0)
       + (seed.activeSince ? Buffer.byteLength(seed.activeSince) : 0)
       + (seed.name ? Buffer.byteLength(seed.name) : 0)
       + (seed.parentSessionId ? Buffer.byteLength(seed.parentSessionId) : 0)
@@ -2046,6 +2058,10 @@ export class RuntimeRegistry {
         messageCount: seed.messageCount,
         firstMessage: seed.firstMessage,
         phase: seed.phase,
+        ...(seed.foregroundPhase ? { foregroundPhase: seed.foregroundPhase } : {}),
+        ...(seed.hasActiveSubagents !== undefined
+          ? { hasActiveSubagents: seed.hasActiveSubagents }
+          : {}),
         summaryRevision: seed.summaryRevision,
         ...seed.attention,
       })),

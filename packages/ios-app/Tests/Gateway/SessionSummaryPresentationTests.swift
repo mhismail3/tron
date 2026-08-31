@@ -113,7 +113,23 @@ struct SessionSummaryPresentationTests {
         """
         let decoded = try JSONDecoder().decode(SessionSummary.self, from: Data(json.utf8))
         #expect(decoded.kind == .user)
+        #expect(decoded.foregroundPhase == nil)
+        #expect(!decoded.hasActiveSubagents)
+        #expect(!decoded.hasOnlyActiveSubagents)
         #expect(SessionSummary.dashboardSessions([decoded]).map(\.id) == ["legacy"])
+    }
+
+    @Test("summary distinguishes settled foreground from active subagents")
+    func activeSubagentSummary() throws {
+        let json = """
+        {"id":"delegating","name":null,"cwd":"/tmp/project","kind":"user","parentSessionId":null,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:01Z","messageCount":2,"firstMessage":"delegate","phase":"running","foregroundPhase":"idle","hasActiveSubagents":true,"summaryRevision":4}
+        """
+        let decoded = try JSONDecoder().decode(SessionSummary.self, from: Data(json.utf8))
+
+        #expect(decoded.foregroundPhase == .idle)
+        #expect(decoded.hasActiveSubagents)
+        #expect(decoded.hasOnlyActiveSubagents)
+        #expect(decoded.withGatewaySource(id: "stable", label: "Mac").hasOnlyActiveSubagents)
     }
 
     @Test("equal session IDs from different gateways retain distinct dashboard identities")

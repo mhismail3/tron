@@ -241,13 +241,14 @@ struct ChatCompactPillTests {
         #expect(SessionHistoryPreview.plain("# **Hello**\n> [world](https://example.test)\n- ~~again~~\n```swift") == "Hello world again swift")
     }
 
-    @Test("compact transcript pills retain pre-shared vertical rhythm")
+    @Test("compact transcript pills share metadata-level leading icon rhythm")
     func compactPillGeometry() {
         #expect(ChatCompactPillLayoutPolicy.horizontalPadding == 10)
         #expect(ChatCompactPillLayoutPolicy.verticalPadding == 6)
-        #expect(ChatCompactPillLayoutPolicy.itemSpacing == 6)
-        #expect(ChatCompactPillLayoutPolicy.standardIconSize == 12)
-        #expect(ChatCompactPillLayoutPolicy.toolIconSize == 12)
+        #expect(ChatCompactPillLayoutPolicy.itemSpacing == 5)
+        #expect(ChatCompactPillLayoutPolicy.standardIconSize == 13)
+        #expect(ChatCompactPillLayoutPolicy.toolIconSize == 13)
+        #expect(ChatCompactPillLayoutPolicy.progressIconSize == 13)
     }
 
     @Test("tool chip visual state excludes timing and provenance payload churn")

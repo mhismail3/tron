@@ -64,7 +64,10 @@ admits and reduces mounted-session topics:
   known dashboard rows synchronously without subscribing every device to every transcript or
   issuing a list request. A summary makes only that row live before full catalog completion;
   unknown summaries request discovery without fabricating a row. The same row projection carries
-  Gateway-canonical completion/read-through attention. Its additive `activeSince` remains fixed for one
+  Gateway-canonical completion/read-through attention. Additive `foregroundPhase` and
+  `hasActiveSubagents` facts distinguish a settled parent response with delegated work still active;
+  the dashboard maps that live combination to its subagent orb and treats omitted legacy facts as
+  ordinary active foreground work. Its additive `activeSince` remains fixed for one
   continuous active period, so live `updatedAt` progress and heartbeat updates refresh row content
   without repeatedly reordering concurrent work; older Gateways fall back to stable profile-qualified
   identity for active-row ties. A final prompt response becomes unread only

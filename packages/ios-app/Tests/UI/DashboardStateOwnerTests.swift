@@ -677,6 +677,36 @@ struct DashboardStateOwnerTests {
         #expect(owner.sessions.count == 1)
     }
 
+    @Test("settled foreground with active subagents has distinct live activity")
+    func activeSubagentActivity() {
+        var owner = SessionCatalogCoordinator()
+        let load = owner.beginLoad()
+        let published = owner.publishAuthoritative([
+            summary(
+                revision: 1,
+                phase: .running,
+                foregroundPhase: .idle,
+                hasActiveSubagents: true
+            ),
+        ], admission: load)
+
+        #expect(published)
+        #expect(owner.activity(for: "session") == .subagentsWorking)
+
+        let foregroundResumed = owner.apply(update(
+            revision: 2,
+            phase: .running,
+            foregroundPhase: .running,
+            hasActiveSubagents: true
+        ))
+        #expect(foregroundResumed == .updated)
+        #expect(owner.activity(for: "session") == .active)
+
+        let legacy = owner.apply(update(revision: 3, phase: .running))
+        #expect(legacy == .updated)
+        #expect(owner.activity(for: "session") == .active)
+    }
+
     @Test("cached and disconnected phases retain provenance without fabricating interruption")
     func catalogFreshnessAndActivity() {
         var owner = SessionCatalogCoordinator()
@@ -792,6 +822,18 @@ struct DashboardStateOwnerTests {
         #expect(model.dashboardPresentationRevision > presentationRevision)
     }
 
+    @MainActor
+    @Test("dashboard indicator identities cover every icon transition")
+    func dashboardIndicatorStates() {
+        #expect(DashboardSessionIndicatorState(activity: .idle, isUnread: false) == .idleRead)
+        #expect(DashboardSessionIndicatorState(activity: .idle, isUnread: true) == .idleUnread)
+        #expect(DashboardSessionIndicatorState(activity: .active, isUnread: false) == .active)
+        #expect(DashboardSessionIndicatorState(activity: .subagentsWorking, isUnread: false) == .subagentsWorking)
+        #expect(DashboardSessionIndicatorState(activity: .resuming, isUnread: false) == .resuming)
+        #expect(DashboardSessionIndicatorState(activity: .interrupted, isUnread: true) == .interrupted)
+        #expect(DashboardSessionIndicatorPresentation.subagentOrbSize == TronTypography.sizeBody3)
+    }
+
     @Test("dashboard presentation freezes exact rows and activity together")
     func dashboardPresentationSnapshotIsAtomic() {
         let session = summary(revision: 3, phase: .running)
@@ -819,7 +861,9 @@ struct DashboardStateOwnerTests {
 
     private func summary(
         revision: Int,
-        phase: SessionPhase = .idle
+        phase: SessionPhase = .idle,
+        foregroundPhase: SessionPhase? = nil,
+        hasActiveSubagents: Bool = false
     ) -> SessionSummary {
         SessionSummary(
             id: "session",
@@ -831,6 +875,8 @@ struct DashboardStateOwnerTests {
             messageCount: 1,
             firstMessage: "Hello",
             phase: phase,
+            foregroundPhase: foregroundPhase,
+            hasActiveSubagents: hasActiveSubagents,
             summaryRevision: revision
         )
     }
@@ -838,6 +884,8 @@ struct DashboardStateOwnerTests {
     private func update(
         revision: Int,
         phase: SessionPhase,
+        foregroundPhase: SessionPhase? = nil,
+        hasActiveSubagents: Bool = false,
         activeSince: String? = nil,
         completionRevision: Int = 0,
         isUnread: Bool = false
@@ -846,6 +894,8 @@ struct DashboardStateOwnerTests {
             sessionId: "session",
             summaryRevision: revision,
             phase: phase,
+            foregroundPhase: foregroundPhase,
+            hasActiveSubagents: hasActiveSubagents,
             name: "Updated",
             updatedAt: "2026-01-01T00:00:01Z",
             activeSince: activeSince,

@@ -772,7 +772,9 @@ final class AppModel {
         }
         let live = dashboardStatesByProfile[profileID] == .connected
         guard live else { return session.phase == .idle ? .idle : .resuming }
-        if session.phase.isActive { return .active }
+        if session.phase.isActive {
+            return session.hasOnlyActiveSubagents ? .subagentsWorking : .active
+        }
         return session.phase == .interrupted ? .interrupted : .idle
     }
 
