@@ -16,6 +16,7 @@ import {
   type CreateAgentSessionRuntimeFactory,
   type ExtensionCommandContextActions,
   type ModelRuntime,
+  type ToolDefinition,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
@@ -96,6 +97,7 @@ import type { ExtensionActivityHistoryPage } from "./extension-activity-history.
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { GatewayWorkHandle, GatewayWorkKind, GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { createTronNotifyExtension } from "../notifications/tron-notify-extension.js";
+import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
 
@@ -475,6 +477,9 @@ export class RuntimeSlot {
   private suppressQueueEvents = false;
   /** Abort intent is recorded before SDK cancellation can synchronously settle. */
   private readonly abortedOperations = new Set<string>();
+  /** Exact process ownership for the built-in foreground bash tool only.
+   * Extension-managed detached subagents remain outside this stop boundary. */
+  private directBashProcesses: DirectBashProcessOwner | undefined;
 
   private constructor(
     private sessionManager: SessionManager,
@@ -1011,10 +1016,15 @@ export class RuntimeSlot {
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });
+      const directBashProcesses = new DirectBashProcessOwner(services.settingsManager);
+      this.directBashProcesses = directBashProcesses;
       const created = await createAgentSessionFromServices({
         services,
         sessionManager,
         ...(sessionStartEvent ? { sessionStartEvent } : {}),
+        // Pi's generic ToolDefinition render state is invariant; the concrete
+        // bash schema is nevertheless the exact SDK definition registered here.
+        customTools: [directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition],
       });
       return { ...created, services, diagnostics: services.diagnostics };
     };
@@ -5036,7 +5046,23 @@ export class RuntimeSlot {
         if (abortedOperationId) this.abortedOperations.add(abortedOperationId);
         let interruptionPersisted = false;
         try {
-          await session.abort();
+          // Pi normally propagates its run signal into the built-in bash tool.
+          // The independent owner is the fail-safe for a lost/stale run signal
+          // and for descendants that create a separate process group.
+          try {
+            await Promise.all([
+              session.abort(),
+              this.directBashProcesses?.abortAll() ?? Promise.resolve(),
+            ]);
+          } catch (error) {
+            if (this.directBashProcesses?.hasActiveProcesses) {
+              throw new GatewayError("conflict", "The direct command process did not stop", true);
+            }
+            throw error;
+          }
+          if (this.directBashProcesses?.hasActiveProcesses) {
+            throw new GatewayError("conflict", "The direct command process did not stop", true);
+          }
           await this.terminalizeInvocation(abortedOperationId, "interrupted", "user-abort");
           interruptionPersisted = true;
         } finally {
@@ -5934,7 +5960,10 @@ export class RuntimeSlot {
     this.runtime.session.abortRetry();
     this.runtime.session.abortBranchSummary();
     this.runtime.session.abortBash();
-    await this.runtime.session.abort();
+    await Promise.all([
+      this.runtime.session.abort(),
+      this.directBashProcesses?.abortAll() ?? Promise.resolve(),
+    ]);
     await this.waitForReceiptWrites();
     // A command may hold the mutation lane while awaiting native UI. Cancel the
     // epoch's imperative interactions before joining that lane so shutdown cannot

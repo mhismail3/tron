@@ -118,6 +118,34 @@ struct MultilineComposerTextViewTests {
         #expect(ChatComposerPolicy.abortKind(operation: nil) == "agent")
     }
 
+    @Test("stop admission depends on exact mounted authority, not ordinary command readiness")
+    func stopAdmissionIsPreemptive() {
+        #expect(SessionAbortAdmissionPolicy.admits(
+            ownsPresentation: true,
+            hasInstalledSubscription: true,
+            snapshotSessionID: "session",
+            targetSessionID: "session"
+        ))
+        #expect(!SessionAbortAdmissionPolicy.admits(
+            ownsPresentation: false,
+            hasInstalledSubscription: true,
+            snapshotSessionID: "session",
+            targetSessionID: "session"
+        ))
+        #expect(!SessionAbortAdmissionPolicy.admits(
+            ownsPresentation: true,
+            hasInstalledSubscription: false,
+            snapshotSessionID: "session",
+            targetSessionID: "session"
+        ))
+        #expect(!SessionAbortAdmissionPolicy.admits(
+            ownsPresentation: true,
+            hasInstalledSubscription: true,
+            snapshotSessionID: "other",
+            targetSessionID: "session"
+        ))
+    }
+
     @Test("failed steering restores the outgoing message without overwriting new input")
     func failedSteeringRestoresDraft() {
         #expect(ChatComposerPolicy.restoredDraft(

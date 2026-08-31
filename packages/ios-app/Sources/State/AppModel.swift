@@ -63,6 +63,19 @@ private struct GatewayUpdateAcknowledgement: Codable {
     }
 }
 
+enum SessionAbortAdmissionPolicy {
+    static func admits(
+        ownsPresentation: Bool,
+        hasInstalledSubscription: Bool,
+        snapshotSessionID: String?,
+        targetSessionID: String
+    ) -> Bool {
+        ownsPresentation
+            && hasInstalledSubscription
+            && snapshotSessionID == targetSessionID
+    }
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -599,15 +612,25 @@ final class AppModel {
         sessionPresentation.owns(target)
     }
 
+    /// Stop is a preemptive control, not an ordinary serialized mutation. Its
+    /// confirmed executor may wait through a short transport handoff, but it
+    /// still requires the exact mounted subscription and authoritative session.
+    func admitsSessionAbort(_ target: SessionPresentationTarget) -> Bool {
+        SessionAbortAdmissionPolicy.admits(
+            ownsPresentation: ownsPresentation(target),
+            hasInstalledSubscription: sessionPresentation.hasInstalledSubscription(for: target.sessionID),
+            snapshotSessionID: authoritativeSnapshot(for: target.sessionID)?.sessionId,
+            targetSessionID: target.sessionID
+        )
+    }
+
     /// Live commands require the exact mounted subscription and authoritative
     /// snapshot, not merely a retained transcript or presentation lease.
     func admitsLiveSessionCommands(_ target: SessionPresentationTarget) -> Bool {
         guard connectionState == .connected,
               !isReconcilingForeground,
-              ownsPresentation(target),
-              sessionPresentation.hasInstalledSubscription(for: target.sessionID),
-              let snapshot = authoritativeSnapshot(for: target.sessionID),
-              snapshot.sessionId == target.sessionID else { return false }
+              admitsSessionAbort(target),
+              let snapshot = authoritativeSnapshot(for: target.sessionID) else { return false }
         // Extension interactions remain independently answerable, but another
         // composer mutation must not queue invisibly behind a command handler
         // that is running or waiting for input on the serialized session lane.
@@ -2217,7 +2240,7 @@ final class AppModel {
         operationID: String? = nil
     ) async {
         guard let target = presentationTarget(for: sessionID),
-              admitsLiveSessionCommands(target) else { return }
+              admitsSessionAbort(target) else { return }
         do {
             try await sessionMutations.abort(
                 sessionID: sessionID,

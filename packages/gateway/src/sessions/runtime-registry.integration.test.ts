@@ -6079,6 +6079,65 @@ export default function (pi) {
     streaming.mockRestore();
   });
 
+  it("aborts the exact foreground bash tree without relying only on Pi's run signal", async () => {
+    if (process.platform === "win32") return;
+    const root = await mkdtemp(join(tmpdir(), "tron-foreground-bash-abort-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(cwd)]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir }));
+
+    const detachedPidPath = join(cwd, "detached.pid");
+    const childProgram = "setInterval(() => {}, 1000)";
+    const parentProgram = [
+      "const { spawn } = require('node:child_process');",
+      "const { writeFileSync } = require('node:fs');",
+      `const child = spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(childProgram)}], { detached: true, stdio: 'ignore' });`,
+      `writeFileSync(${JSON.stringify(detachedPidPath)}, String(child.pid));`,
+      "setInterval(() => {}, 1000);",
+    ].join(" ");
+    const command = `${JSON.stringify(process.execPath)} -e ${JSON.stringify(parentProgram)}`;
+    const faux = fauxProvider({ provider: "tron-foreground-bash-abort", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("bash", { command }, { id: "call-owned-bash" })], { stopReason: "toolUse" }),
+    ]);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => {
+        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+        runtime.registerNativeProvider(faux.provider);
+        return runtime;
+      },
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    const prompting = slot.prompt("run the owned command");
+    await waitUntil(() => existsSync(detachedPidPath));
+    const detachedPid = Number(await readFile(detachedPidPath, "utf8"));
+    expect(() => process.kill(detachedPid, 0)).not.toThrow();
+    const operationId = slot.snapshot().operation?.id;
+    expect(operationId).toBeDefined();
+
+    await slot.abort("agent", operationId);
+    await expect(prompting).resolves.toMatchObject({ operationId });
+    await waitUntil(() => {
+      try { process.kill(detachedPid, 0); return false; }
+      catch { return true; }
+    });
+    expect(slot.snapshot().toolExecutions).toEqual([]);
+  });
+
   it("projects stable ordinals for parallel tools from start through completion", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-tool-order-integration-"));
     const agentDir = join(root, "agent");

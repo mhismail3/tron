@@ -343,8 +343,13 @@ canonical result. This keeps long turns and paged-out history free of duplicate 
 terminal tool rows while preserving running calls and canonical enrichment.
 The embedded runtime's active-run flag outranks an older settlement callback when
 an extension completion immediately triggers a continuation, so phase, operation,
-and Stop controls cannot become idle while a newer turn is executing. Extension
-commands are resolved before ordinary streaming rejection and still execute through
+and Stop controls cannot become idle while a newer turn is executing. Agent Stop
+also has an exact per-session owner for the built-in foreground `bash` process. It
+freezes that process group, captures its direct descendant tree, terminates descendants
+that created their own process groups, and does not acknowledge abort until the owned
+processes settle. This is a fail-safe behind Pi's normal run signal; extension-managed
+detached subagents never enter that owner and are not cancelled by foreground Stop.
+Extension commands are resolved before ordinary streaming rejection and still execute through
 Pi's prompt path. The explicit extension adapter registry identifies the installed
 `@pi9/ask` package only by package source metadata and its public parameter shape.
 Its original execute function, result formatting/events, timeout signal, and replay

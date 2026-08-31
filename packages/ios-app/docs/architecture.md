@@ -777,7 +777,11 @@ canonical completion; shutdown cancels only work that has not started. Older Gat
 automatic-compaction evidence.
 A non-empty active draft replaces the trailing Stop
 action with Send and is admitted as a steering message, while an empty active
-composer retains Stop. The keyboard remains focused after steering so multiple messages can
+composer retains Stop. Stop is a preemptive control rather than an ordinary serialized
+composer mutation: exact mounted subscription and snapshot authority admit it even while
+an extension command owns the mutation lane or a short transport handoff is reconciling.
+The confirmed abort either reaches that exact session after reconnect or surfaces failure;
+it is never silently discarded by ordinary send-readiness gating. The keyboard remains focused after steering so multiple messages can
 be queued without waiting for the current turn to settle. The send control's native context
 menu can explicitly choose steering after the current turn or follow-up after current work. A press
 has immediate scale/opacity feedback, admitted sends replace the arrow with a compact progress
