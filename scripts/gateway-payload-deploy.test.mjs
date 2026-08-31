@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { chmod, mkdir, mkdtemp, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -25,6 +25,8 @@ import {
   validatePayload,
   payloadFingerprint,
   buildSourcePayload,
+  resolveSourcePayloadBase,
+  copyValidatedPayloadBase,
   preserveSignedNativeArtifacts,
   preflightPayload,
   proveDebugHandoffIdentity,
@@ -340,6 +342,68 @@ test("source build failure leaves active selection and deployment state unchange
     await assert.rejects(buildSourcePayload({ paths: store, config: { sourceRoot: root }, runCommand: async () => { throw new Error("build failed"); } }), /build failed/);
     assert.equal(await readFile(store.state, "utf8"), before);
     assert.deepEqual(JSON.parse(await readFile(store.current, "utf8")), selection("active", fingerprint));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("source runtime base falls back only to fully validated migration payloads", async (context) => {
+  for (const kind of ["configured artifact", "launcher bundle", "prepared source bundle"]) {
+    await context.test(kind, async () => {
+      const root = await mkdtemp(join(tmpdir(), "tron-source-runtime-base-"));
+      try {
+        const store = await paths(root);
+        await mkdir(store.channelRoot, { recursive: true });
+        await writeFile(store.current, `${JSON.stringify(selection("missing"))}\n`);
+        const sourceRoot = join(root, "source");
+        await mkdir(sourceRoot, { recursive: true });
+        let payload = await makePreflightFixture(join(root, "fixture"));
+        const config = { sourceRoot };
+        const environment = {};
+        if (kind === "configured artifact") config.artifactRoot = payload;
+        if (kind === "launcher bundle") environment.TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT = payload;
+        if (kind === "prepared source bundle") {
+          const prepared = join(sourceRoot, "packages", "mac-app", "Sources", "Resources", "Gateway");
+          await mkdir(dirname(prepared), { recursive: true });
+          await rename(payload, prepared);
+          payload = prepared;
+        }
+        const base = await resolveSourcePayloadBase(store, config, environment);
+        assert.equal(base.root, payload);
+        assert.equal(base.manifest.payloadFingerprint, await payloadFingerprint(payload));
+      } finally { await rm(root, { recursive: true, force: true }); }
+    });
+  }
+});
+
+test("source runtime base fails closed when every migration payload is invalid", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-source-runtime-base-invalid-"));
+  try {
+    const store = await paths(root);
+    await mkdir(store.channelRoot, { recursive: true });
+    await writeFile(store.current, `${JSON.stringify(selection("missing"))}\n`);
+    const invalid = join(root, "invalid");
+    await mkdir(invalid, { recursive: true });
+    await assert.rejects(
+      resolveSourcePayloadBase(store, { sourceRoot: join(root, "source"), artifactRoot: invalid }, {
+        TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT: "relative",
+      }),
+      /prepare the bundled payload or reinstall Tron/,
+    );
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("source runtime base copy rejects a projection changed after admission", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-source-runtime-base-race-"));
+  try {
+    const payload = await makePreflightFixture(join(root, "fixture"));
+    const manifest = await validatePayload(payload, {}, true);
+    const destination = join(root, "copied");
+    await assert.rejects(
+      copyValidatedPayloadBase({ root: payload, manifest }, destination, async (source, target, options) => {
+        await cp(source, target, options);
+        await writeFile(join(target, "app", "dist", "index.js"), `${"z".repeat(1_024)}\n`);
+      }),
+      /fingerprint does not match/,
+    );
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

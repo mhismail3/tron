@@ -19,16 +19,22 @@ packages/mac-app/scripts/bundle-gateway.sh --allow-unconfigured-push
 
 Staging resolves the exact Node version in the repository's `.node-version`
 before installing anything, then derives `npm` from that Node's sibling `bin`
-directory. A wrong ambient `PATH` Node is skipped; resolution checks the exact
-`$NVM_DIR/versions/node/v<version>/bin/node` directory and Homebrew candidates
-only after proving their version. `TRON_NODE_BIN` may explicitly name an
-absolute executable, but it must print the pinned version; there is no ambient
-npm override. Failure happens before build or payload mutation. These variables
+directory. Candidate admission proves the complete pair: a wrong-version Node
+or a pinned-version payload alias without sibling npm is skipped before the
+exact `$NVM_DIR/versions/node/v<version>/bin/node` directory and Homebrew
+candidates are considered. `TRON_NODE_BIN` may explicitly name an absolute
+executable, but it must provide both the pinned Node and sibling npm; there is
+no ambient npm override. Failure happens before build or payload mutation. These variables
 affect staging only. Release preparation also downloads and verifies the
 repository-pinned XcodeGen archive, executable, and preset tree, then
-fingerprints them under `Gateway/runtime/xcodegen`. The completed app uses only
-those embedded runtimes for supervised work and does not consult Homebrew, NVM,
-or the destination checkout's `.ci-tools` cache.
+fingerprints them under `Gateway/runtime/xcodegen`. Bundle writers serialize
+before touching the shared dependency tree, assemble and verify generated
+resources under a private source-local staging root, and publish the payload,
+launcher, and icon through bounded backup renames. Failure or interruption
+restores the prior generated projection; `ensure-gateway-bundle.sh` never erases
+that projection before a replacement is ready. The completed app uses only those
+embedded runtimes for supervised work and does not consult Homebrew, NVM, or the
+destination checkout's `.ci-tools` cache.
 
 `config/PushService.xcconfig` is the one maintainer-owned public Push service
 origin consumed by both iOS and this bundled Gateway. Development may stage an
@@ -37,9 +43,16 @@ remains unavailable. Every payload carries a regular, fingerprinted
 `app/PushService.xcconfig`. Stable staging, selection, source update, rollback,
 launcher admission, and packaging require exactly one non-empty public HTTPS
 origin and reject missing, empty, malformed, or symlinked projections. A Stable
-source update preserves the validated active payload's product configuration;
-it never reads an environment override or substitutes the source checkout's
-configuration. `scripts/tron mac verify` additionally compares the selected stable origin with the installed signed app, so an old external selection cannot masquerade as the current product configuration; repairing that mismatch requires selecting/installing a payload from the current signed product before another source-only update. Direct official staging and Mac Release builds fail closed while
+source update preserves its validated runtime base's product configuration; it
+never reads an environment override or substitutes the source checkout's
+configuration. The selected payload remains the preferred base. When a newer
+payload contract invalidates it, source repair may use only the fully validated
+configured artifact, the signed launcher's exported bundled root, or the prepared
+Gateway bundle inside the admitted source checkout, in that order. The updater
+revalidates the copied snapshot against the admitted manifest before changing it;
+it never scans historical versions for a convenient fallback. This lets a prepared
+local Release build break a toolchain bootstrap deadlock while malformed or stale
+payloads still fail closed. `scripts/tron mac verify` additionally compares the selected stable origin with the installed signed app, so an old external selection cannot masquerade as the current product configuration; repairing that mismatch requires selecting/installing a payload from the current signed product before another source-only update. Direct official staging and Mac Release builds fail closed while
 the origin is empty. This is release configuration, never end-user setup, and
 contains no credential. Notification grants and pending delivery state remain
 under the Tron home outside immutable payload directories and survive updates.
@@ -241,10 +254,13 @@ scripts/tron mac verify
 
 It fails unless Stable's Release-owned launchd PID is the sole 9847 listener,
 executes the validated active payload, and returns matching authenticated
-`system.info` channel/revision/fingerprint/epoch. An incompatible or invalid
-external selection may remain as bounded rollback history after a protocol
-bump; verification accepts it only when both the launcher and live PID have
-rejected it in favor of the signed bundled payload. If Debug is present, it also
+`system.info` channel/revision/fingerprint/epoch. Pointer admission mirrors the
+current required runtime contract, including the signed universal pinned
+XcodeGen tree, rather than accepting an older self-consistent fingerprint alone.
+An incompatible or invalid external selection may remain as bounded rollback
+history after a protocol or runtime-contract bump; verification accepts it only
+when both the launcher and live PID have rejected it in favor of the signed
+bundled payload. If Debug is present, it also
 requires one lifecycle snapshot whose live supervisor and child PID/start
 identities, sole 9848 listener, selected manifest, command, and authenticated
 identity all agree. Debug absence is informational; loaded legacy Debug or
@@ -286,8 +302,9 @@ Status, restart, handoff, and stop without a host flag inherit a live
 supervisor's recorded host. A conflicting explicit flag is rejected; stop the
 supervisor before changing exposure. `scripts/tron dev` resolves the pinned
 repository Node once and uses its absolute Node and sibling npm for every
-helper, build, and deployment command; it fails before touching `~/.tron-dev`
-when that toolchain is unavailable. Mutating commands use a short-lived atomic
+helper, build, and deployment command. Node-only payload aliases are skipped
+rather than shadowing a complete pinned NVM or Homebrew toolchain; it fails
+before touching `~/.tron-dev` when no complete pair is available. Mutating commands use a short-lived atomic
 command lock, released before the supervisor continues running, so concurrent
 start/restart/stop/handoff commands fail closed. If the supervisor is stale but
 the exact recorded child PID/start identity is still live, start first terminates

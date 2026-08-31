@@ -343,12 +343,16 @@ canonical result. This keeps long turns and paged-out history free of duplicate 
 terminal tool rows while preserving running calls and canonical enrichment.
 The embedded runtime's active-run flag outranks an older settlement callback when
 an extension completion immediately triggers a continuation, so phase, operation,
-and Stop controls cannot become idle while a newer turn is executing. Agent Stop
-also has an exact per-session owner for the built-in foreground `bash` process. It
-freezes that process group, captures its direct descendant tree, terminates descendants
-that created their own process groups, and does not acknowledge abort until the owned
-processes settle. This is a fail-safe behind Pi's normal run signal; extension-managed
-detached subagents never enter that owner and are not cancelled by foreground Stop.
+and Stop controls cannot become idle while a newer turn is executing. Stop's client-supplied
+operation kind is advisory presentation metadata, never cancellation authority: after
+fencing the exact operation ID, the Gateway fans cancellation out across agent, compaction,
+retry, branch-summary, direct-bash, and built-in foreground `bash` ownership. The latter
+freezes its process group, captures its direct descendant tree, and terminates descendants
+that created their own process groups. Gateway does not acknowledge Stop until the exact
+foreground operation and every owned process settle; an unsuccessful postcondition returns
+an error rather than `{ aborted: true }`. Runtime replacement also drains the outgoing
+process owner before installing its successor. Extension-managed detached subagents never
+enter that owner and are not cancelled by foreground Stop.
 Extension commands are resolved before ordinary streaming rejection and still execute through
 Pi's prompt path. The explicit extension adapter registry identifies only the pinned
 `@zhushanwen/pi-ask-user@7.0.15` package through exact package source/path metadata,
@@ -865,13 +869,19 @@ verification rather than RPC to the failed process. Status keeps observed live i
 selected pointer so publication cannot report readiness early. Each immutable payload fingerprints a regular `app/PushService.xcconfig`.
 Stable staging, promotion, source updates, rollback, launcher/Swift admission,
 and packaging require its one exact non-empty public HTTPS origin; dev alone
-may carry one explicit empty assignment. Stable source updates preserve the
-validated active projection rather than consulting source files or environment,
-including its team-signed Darwin native modules. Source rebuilds require a
-byte-identical dependency lock; dependency changes require a newly signed app or
-artifact. Preflight loads every host-architecture native module before pointer
-publication, and a failed first external candidate restores the validated bundled
-fallback rather than requiring a `previous.json` pointer. Notification state stays
+may carry one explicit empty assignment. Stable source updates normally inherit the selected validated payload. If a new
+payload requirement makes that predecessor inadmissible, bootstrap is limited to
+three explicit, fully fingerprint-validated runtime bases: the configured artifact,
+the bundled payload root exported by the signed launcher, then the prepared Gateway
+bundle under the already-admitted source checkout. The copied base is revalidated
+against the exact admitted manifest before any candidate file changes, closing the
+mutable-projection race. No historical version scan or unvalidated runtime fallback
+is allowed. Source updates preserve that base's product configuration and team-signed
+Darwin native modules rather than consulting environment configuration. Source
+rebuilds require a byte-identical dependency lock; dependency changes require a newly
+signed app or artifact. Preflight loads every host-architecture native module before
+pointer publication, and a failed first external candidate restores the validated
+bundled fallback rather than requiring a `previous.json` pointer. Notification state stays
 outside payload version directories. Payload staging,
 promotion, and rollback use `scripts/gateway-payload-deploy.mjs`. Restart requests use the authenticated drain-aware Gateway protocol; direct self-stop
 is rejected. Clients receive `system.stopping`, reconnect with bounded backoff, and replace

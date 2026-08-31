@@ -63,7 +63,7 @@ private struct GatewayUpdateAcknowledgement: Codable {
     }
 }
 
-enum SessionAbortAdmissionPolicy {
+enum SessionMountedAuthorityPolicy {
     static func admits(
         ownsPresentation: Bool,
         hasInstalledSubscription: Bool,
@@ -616,11 +616,12 @@ final class AppModel {
         sessionPresentation.owns(target)
     }
 
-    /// Stop is a preemptive control, not an ordinary serialized mutation. Its
-    /// confirmed executor may wait through a short transport handoff, but it
-    /// still requires the exact mounted subscription and authoritative session.
-    func admitsSessionAbort(_ target: SessionPresentationTarget) -> Bool {
-        SessionAbortAdmissionPolicy.admits(
+    /// Ordinary live commands require exact mounted authority. Stop deliberately
+    /// bypasses this presentation gate: its route session ID and optional
+    /// operation ID are fenced again by the Gateway, and the confirmed executor
+    /// can carry that escape hatch through a short transport handoff.
+    func hasMountedSessionAuthority(_ target: SessionPresentationTarget) -> Bool {
+        SessionMountedAuthorityPolicy.admits(
             ownsPresentation: ownsPresentation(target),
             hasInstalledSubscription: sessionPresentation.hasInstalledSubscription(for: target.sessionID),
             snapshotSessionID: authoritativeSnapshot(for: target.sessionID)?.sessionId,
@@ -633,7 +634,7 @@ final class AppModel {
     func admitsLiveSessionCommands(_ target: SessionPresentationTarget) -> Bool {
         guard connectionState == .connected,
               !isReconcilingForeground,
-              admitsSessionAbort(target),
+              hasMountedSessionAuthority(target),
               let snapshot = authoritativeSnapshot(for: target.sessionID) else { return false }
         // Extension interactions remain independently answerable, but another
         // composer mutation must not queue invisibly behind a command handler
@@ -2244,14 +2245,15 @@ final class AppModel {
         kind: String = "agent",
         operationID: String? = nil
     ) async {
-        guard let target = presentationTarget(for: sessionID),
-              admitsSessionAbort(target) else { return }
         do {
             try await sessionMutations.abort(
                 sessionID: sessionID,
                 kind: kind,
                 operationID: operationID
             )
+        } catch is CancellationError {
+            guard !Task.isCancelled else { return }
+            presentError("Stop could not be delivered to the Mac. Reopen the session and try again.")
         } catch { surface(error) }
     }
 

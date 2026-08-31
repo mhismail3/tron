@@ -28,7 +28,7 @@ make_payload() {
   mkdir -p "$root/app/node_modules/@earendil-works/pi-coding-agent/dist"
   printf '%s\n' '#!/usr/bin/env node' > "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   chmod 755 "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
-  printf '%s\n' '#!/bin/sh' 'printf "%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"' 'exit 0' > "$root/runtime/node-arm64"
+  printf '%s\n' '#!/bin/sh' '[ -n "$TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT" ] || exit 9' 'printf "%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"' 'exit 0' > "$root/runtime/node-arm64"
   # Keep each fake runtime over the canonical minimum size without embedding
   # NUL bytes that would make the shell fixture itself invalid.
   dd if=/dev/zero bs=1024 count=1025 2>/dev/null | tr '\\0' '#' >> "$root/runtime/node-arm64"
@@ -276,4 +276,4 @@ set -e
 [[ "$MALFORMED_STATUS" -eq 75 ]] || { echo "malformed attempt marker did not return retry status: $MALFORMED_STATUS" >&2; exit 1; }
 [[ ! -s "$TMP/malformed-result" ]] || { echo "malformed attempt marker executed a payload" >&2; exit 1; }
 
-printf 'launcher fixture: valid external fingerprint passes; tampered payload uses trusted bundled fallback; pending candidate crash-rolls back; committed candidate persists; held locks fail closed; stale locks recover; malformed markers fail closed\n'
+printf 'launcher fixture: valid external fingerprint and bundled migration root pass; tampered payload uses trusted bundled fallback; pending candidate crash-rolls back; committed candidate persists; held locks fail closed; stale locks recover; malformed markers fail closed\n'

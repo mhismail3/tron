@@ -844,6 +844,7 @@ int main(int argc, char **argv) {
         setenv("TRON_GATEWAY_BUILD_FINGERPRINT", selectedIdentity.fingerprint, 1) != 0 ||
         setenv("TRON_GATEWAY_RUNTIME_EPOCH", selectedIdentity.runtimeEpoch, 1) != 0 ||
         setenv("TRON_GATEWAY_PAYLOAD_ROOT", selectedPayloadRoot, 1) != 0 ||
+        setenv("TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT", bundledRoot, 1) != 0 ||
         setenv("TRON_GATEWAY_SUPERVISED", "1", 1) != 0 ||
         setenv("TRON_GATEWAY_UPDATE_HELPER", helper, 1) != 0) {
         fputs("Tron could not export Gateway payload identity.\n", stderr);

@@ -34,21 +34,25 @@ node_matches_pin() {
   actual="$("$candidate" --version 2>/dev/null || true)"
   [[ "$actual" == "v${NODE_VERSION}" ]]
 }
+node_toolchain_matches_pin() {
+  local candidate="$1"
+  node_matches_pin "$candidate" && [[ -x "$(dirname "$candidate")/npm" ]]
+}
 resolve_pinned_node() {
   local candidate nvm_node
   if [[ -n "${TRON_NODE_BIN:-}" ]]; then
     candidate="$TRON_NODE_BIN"
-    [[ "$candidate" == /* ]] && node_matches_pin "$candidate" || { echo "TRON_NODE_BIN is not exact Node v${NODE_VERSION}" >&2; exit 127; }
+    [[ "$candidate" == /* ]] && node_toolchain_matches_pin "$candidate" || { echo "TRON_NODE_BIN does not provide exact Node v${NODE_VERSION} with sibling npm" >&2; exit 127; }
     printf '%s\n' "$candidate"; return
   fi
   candidate="$(command -v node 2>/dev/null || true)"
-  if [[ "$candidate" == /* ]] && node_matches_pin "$candidate"; then printf '%s\n' "$candidate"; return; fi
+  if [[ "$candidate" == /* ]] && node_toolchain_matches_pin "$candidate"; then printf '%s\n' "$candidate"; return; fi
   nvm_node="${NVM_DIR:-${HOME:-}/.nvm}/versions/node/v${NODE_VERSION}/bin/node"
-  if [[ "$nvm_node" == /* ]] && node_matches_pin "$nvm_node"; then printf '%s\n' "$nvm_node"; return; fi
+  if [[ "$nvm_node" == /* ]] && node_toolchain_matches_pin "$nvm_node"; then printf '%s\n' "$nvm_node"; return; fi
   for candidate in "/opt/homebrew/bin/node" "/usr/local/bin/node"; do
-    if node_matches_pin "$candidate"; then printf '%s\n' "$candidate"; return; fi
+    if node_toolchain_matches_pin "$candidate"; then printf '%s\n' "$candidate"; return; fi
   done
-  echo "unable to find exact Node v${NODE_VERSION}; refusing to mutate Debug state" >&2
+  echo "unable to find exact Node v${NODE_VERSION} with sibling npm; refusing to mutate Debug state" >&2
   exit 127
 }
 NODE_BIN="$(resolve_pinned_node)"

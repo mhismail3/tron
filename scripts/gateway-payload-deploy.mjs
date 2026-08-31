@@ -1804,8 +1804,47 @@ async function currentPayload(paths, bundledCandidatesOverride) {
       }, true);
       return { root, manifest };
     }
-  } catch { /* fall through to the validated bundled payload */ }
+  } catch { /* fall through to another fully validated runtime base */ }
   return bundledPayload(bundledCandidatesOverride);
+}
+
+function sourceRuntimeBaseCandidates(config, environment) {
+  const candidates = [];
+  const append = (value) => {
+    if (typeof value !== "string" || !isAbsolute(value) || /[\u0000-\u001f\u007f]/u.test(value)) return;
+    const candidate = resolve(value);
+    if (!candidates.includes(candidate)) candidates.push(candidate);
+  };
+  // artifactRoot is the operator's explicit immutable payload projection. The
+  // launcher-owned bundled root survives external selection, and a prepared
+  // source bundle lets a local Release build bootstrap a newly required runtime
+  // without weakening payload validation.
+  append(config.artifactRoot);
+  append(environment.TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT);
+  append(join(config.sourceRoot, "packages", "mac-app", "Sources", "Resources", "Gateway"));
+  return candidates;
+}
+
+export async function resolveSourcePayloadBase(paths, config, environment = process.env) {
+  try {
+    return await currentPayload(paths, sourceRuntimeBaseCandidates(config, environment));
+  } catch {
+    throw new Error("source update requires a validated Gateway runtime base; prepare the bundled payload or reinstall Tron");
+  }
+}
+
+export async function copyValidatedPayloadBase(base, destination, copyPayload = cp) {
+  await copyPayload(base.root, destination, {
+    recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true,
+  });
+  // Fallback roots may be operator-prepared mutable projections. Verify the
+  // copied snapshot against the exact manifest observed during admission before
+  // making or replacing any candidate files.
+  await validatePayload(destination, {
+    channel: base.manifest.channel,
+    version: base.manifest.version,
+    payloadFingerprint: base.manifest.payloadFingerprint,
+  }, true);
 }
 
 async function stageConfiguredArtifact(paths, config, requestedVersion) {
@@ -1819,8 +1858,8 @@ async function stageConfiguredArtifact(paths, config, requestedVersion) {
   return result.manifest.version;
 }
 
-export async function buildSourcePayload({ paths, config, candidateVersion, timeoutMs = 120_000, runCommand = runBounded, npmCommand = resolveNpmCommand() }) {
-  const active = await currentPayload(paths);
+export async function buildSourcePayload({ paths, config, candidateVersion, timeoutMs = 120_000, runCommand = runBounded, npmCommand = resolveNpmCommand(), environment = process.env }) {
+  const active = await resolveSourcePayloadBase(paths, config, environment);
   const gatewayRoot = join(config.sourceRoot, "packages", "gateway");
   // Compile into a private temporary directory. In particular, never invoke
   // the package build script here: its configured outDir is the trusted source
@@ -1846,9 +1885,7 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
     const temporaryParent = await mkdtemp(join(tmpdir(), "tron-gateway-source-staging-"));
     const temporary = join(temporaryParent, "payload");
     try {
-      await cp(active.root, temporary, {
-        recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true,
-      });
+      await copyValidatedPayloadBase(active, temporary);
       await makeMutable(temporary);
       await rm(join(temporary, "app", "dist"), { recursive: true, force: true });
       await verifiedSourceCompilerOutput(compilerOutput);

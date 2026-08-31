@@ -127,9 +127,11 @@ admits and reduces mounted-session topics:
   and truthful restored prompt/automatic-idle operation state; manual marker cleanup remains compacting
   until durable settlement. The typed `session.compaction` delta must identify one exact
   canonical compaction item; an inexact delta requests rebaseline.
-  Stop derives its typed abort kind from the same authoritative operation and includes that
-  operation ID. Gateway rejects a delayed tap if a newer operation has replaced it, preventing
-  a stale compaction/agent control from aborting its successor.
+  Stop includes the projected abort kind as advisory metadata and the authoritative operation
+  ID as its safety fence. Gateway rejects a delayed tap if a newer operation has replaced it,
+  preventing a stale control from aborting its successor, but never lets a stale kind narrow
+  the escape hatch: every foreground cancellation controller and exact built-in bash process
+  owner is invoked, and success is returned only after the fenced foreground work settles.
   `pendingPrompt` is the companion transient admission for a prompt
   whose canonical user entry is still being prepared, including automatic compaction
   during prompt preflight. An ordinary prompt compacting in its own preflight remains

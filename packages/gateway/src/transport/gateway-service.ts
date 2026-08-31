@@ -784,11 +784,25 @@ export class GatewayService {
         });
       case "session.abort":
         return this.mutation(client, method, params, async () => {
-          await (await this.openedSlot(client, params)).abort(
-            params.kind === undefined
-              ? "agent"
-              : oneOf(params.kind, "kind", ["agent", "compaction", "retry", "branchSummary", "bash"] as const),
-            optionalString(params.operationId, "operationId", 200),
+          const sessionId = string(params.sessionId, "sessionId", { max: 200 });
+          const kind = params.kind === undefined
+            ? "agent"
+            : oneOf(params.kind, "kind", ["agent", "compaction", "retry", "branchSummary", "bash"] as const);
+          const operationId = optionalString(params.operationId, "operationId", 200);
+          try {
+            await (await this.openedSlot(client, params)).abort(kind, operationId);
+          } catch (error) {
+            this.dependencies.logger.log(
+              "warning",
+              `Session abort did not settle (session ${sessionId}, kind ${kind}, operation ${operationId ?? "unspecified"}): ${error instanceof Error ? error.message : String(error)}`,
+              { event: "session.abort.unsettled", source: "sessions" },
+            );
+            throw error;
+          }
+          this.dependencies.logger.log(
+            "info",
+            `Session abort settled (session ${sessionId}, kind ${kind}, operation ${operationId ?? "unspecified"})`,
+            { event: "session.abort.settled", source: "sessions" },
           );
           return { aborted: true };
         }, true);

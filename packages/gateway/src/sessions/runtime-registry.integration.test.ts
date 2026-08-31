@@ -6084,7 +6084,7 @@ export default function (pi) {
     streaming.mockRestore();
   });
 
-  it("aborts the exact foreground bash tree without relying only on Pi's run signal", async () => {
+  it("aborts the exact foreground bash tree even when the client reports a stale bash kind", async () => {
     if (process.platform === "win32") return;
     const root = await mkdtemp(join(tmpdir(), "tron-foreground-bash-abort-"));
     const agentDir = join(root, "agent");
@@ -6134,7 +6134,9 @@ export default function (pi) {
     const operationId = slot.snapshot().operation?.id;
     expect(operationId).toBeDefined();
 
-    await slot.abort("agent", operationId);
+    // Mobile derives this advisory kind from a snapshot. A stale `.bash`
+    // classification must not bypass the agent run or exact process owner.
+    await slot.abort("bash", operationId);
     await expect(prompting).resolves.toMatchObject({ operationId });
     await waitUntil(() => {
       try { process.kill(detachedPid, 0); return false; }

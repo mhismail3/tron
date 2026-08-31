@@ -152,6 +152,55 @@ if ((verify_only)); then
     exit 0
 fi
 
+# npm installation mutates the shared source dependency tree, and publication
+# updates one generated projection. Serialize builders before either boundary.
+# A dead owner's directory is recoverable; a live or PID-reused owner fails
+# closed rather than allowing overlapping writers.
+BUNDLE_LOCK="$RESOURCES_DIR/.tron-gateway-bundle.lock"
+BUNDLE_LOCK_OWNED=0
+acquire_bundle_lock() {
+    local owner="" modified=0 now=0
+    if ! mkdir "$BUNDLE_LOCK" 2>/dev/null; then
+        if [[ -f "$BUNDLE_LOCK/pid" && ! -L "$BUNDLE_LOCK/pid" ]]; then
+            owner="$(<"$BUNDLE_LOCK/pid")"
+        fi
+        if [[ "$owner" =~ ^[1-9][0-9]{0,9}$ ]] && kill -0 "$owner" 2>/dev/null; then
+            echo "another Gateway bundle build is active (pid $owner)" >&2
+            exit 75
+        fi
+        # mkdir and pid publication are two commands. A contender that lands in
+        # that tiny window must not erase the new owner's lock; only malformed
+        # owner metadata older than the bounded startup grace is recoverable.
+        if [[ ! "$owner" =~ ^[1-9][0-9]{0,9}$ ]]; then
+            modified="$(stat -f '%m' "$BUNDLE_LOCK" 2>/dev/null || printf '0')"
+            now="$(date +%s)"
+            if [[ "$modified" =~ ^[0-9]+$ ]] && ((now - modified < 30)); then
+                echo "Gateway bundle build lock owner is not settled; retry shortly" >&2
+                exit 75
+            fi
+        fi
+        safe_remove_tree "$BUNDLE_LOCK"
+        mkdir "$BUNDLE_LOCK" || { echo "cannot acquire Gateway bundle build lock" >&2; exit 75; }
+    fi
+    printf '%s\n' "$$" > "$BUNDLE_LOCK/pid"
+    BUNDLE_LOCK_OWNED=1
+}
+release_bundle_lock() {
+    if ((BUNDLE_LOCK_OWNED)); then
+        safe_remove_tree "$BUNDLE_LOCK"
+        BUNDLE_LOCK_OWNED=0
+    fi
+}
+cleanup_bundle_lock() {
+    local status=$?
+    trap - EXIT INT TERM HUP
+    release_bundle_lock
+    exit "$status"
+}
+acquire_bundle_lock
+trap cleanup_bundle_lock EXIT
+trap 'exit 130' INT TERM HUP
+
 # Xcode and LaunchAgents may provide a sanitized PATH. Resolve the exact
 # canonical Node once, before any install/build work, and derive npm from that
 # same directory. A wrong ambient Node is skipped in favor of the exact nvm
@@ -162,32 +211,36 @@ node_matches_pin() {
     actual="$("$candidate" --version 2>/dev/null || true)"
     [[ "$actual" == "v${NODE_VERSION}" ]]
 }
+node_toolchain_matches_pin() {
+    local candidate="$1"
+    node_matches_pin "$candidate" && [[ -x "$(dirname "$candidate")/npm" ]]
+}
 resolve_pinned_node() {
     local candidate nvm_node
     if [[ -n "${TRON_NODE_BIN:-}" ]]; then
         candidate="$TRON_NODE_BIN"
         [[ "$candidate" == /* ]] || { echo "TRON_NODE_BIN must be absolute" >&2; exit 127; }
-        node_matches_pin "$candidate" || { echo "TRON_NODE_BIN is not Node v${NODE_VERSION}" >&2; exit 127; }
+        node_toolchain_matches_pin "$candidate" || { echo "TRON_NODE_BIN does not provide Node v${NODE_VERSION} with sibling npm" >&2; exit 127; }
         printf '%s\n' "$candidate"
         return
     fi
     candidate="$(command -v node 2>/dev/null || true)"
-    if [[ "$candidate" == /* ]] && node_matches_pin "$candidate"; then
+    if [[ "$candidate" == /* ]] && node_toolchain_matches_pin "$candidate"; then
         printf '%s\n' "$candidate"
         return
     fi
     nvm_node="${NVM_DIR:-${HOME:-}/.nvm}/versions/node/v${NODE_VERSION}/bin/node"
-    if node_matches_pin "$nvm_node"; then
+    if node_toolchain_matches_pin "$nvm_node"; then
         printf '%s\n' "$nvm_node"
         return
     fi
     for candidate in "/opt/homebrew/bin/node" "/usr/local/bin/node"; do
-        if node_matches_pin "$candidate"; then
+        if node_toolchain_matches_pin "$candidate"; then
             printf '%s\n' "$candidate"
             return
         fi
     done
-    echo "unable to find exact Node v${NODE_VERSION}; checked PATH, the pinned nvm directory, and Homebrew" >&2
+    echo "unable to find exact Node v${NODE_VERSION} with sibling npm; checked PATH, the pinned nvm directory, and Homebrew" >&2
     exit 127
 }
 
@@ -207,6 +260,59 @@ else
         exit 2
     }
 fi
+
+# Build generated resources privately. The previously published projection is
+# not touched until the complete replacement passes the same payload verifier
+# used by Xcode and packaging. The EXIT trap restores all prior generated roots
+# if publication is interrupted between its bounded renames.
+PUBLISHED_PAYLOAD_DIR="$PAYLOAD_DIR"
+PUBLISHED_HELPER_DIR="$HELPER_DIR"
+STAGING_ROOT="$(mktemp -d "$RESOURCES_DIR/.tron-gateway-staging.XXXXXX")"
+BACKUP_ROOT=""
+PUBLICATION_COMPLETE=0
+HAD_PUBLISHED_PAYLOAD=0
+HAD_PUBLISHED_LAUNCHER=0
+HAD_PUBLISHED_ICON=0
+PUBLISHED_PAYLOAD_MODE=555
+cleanup_private_bundle() {
+    local status=$?
+    trap - EXIT INT TERM HUP
+    if [[ -n "$BACKUP_ROOT" && "$PUBLICATION_COMPLETE" != 1 ]]; then
+        if [[ -e "$BACKUP_ROOT/Gateway" || -L "$BACKUP_ROOT/Gateway" ]]; then
+            safe_remove_tree "$PUBLISHED_PAYLOAD_DIR"
+            chmod u+w "$BACKUP_ROOT/Gateway"
+            mv "$BACKUP_ROOT/Gateway" "$PUBLISHED_PAYLOAD_DIR"
+            chmod "$PUBLISHED_PAYLOAD_MODE" "$PUBLISHED_PAYLOAD_DIR"
+        elif ((!HAD_PUBLISHED_PAYLOAD)); then
+            safe_remove_tree "$PUBLISHED_PAYLOAD_DIR"
+        fi
+        if [[ -e "$BACKUP_ROOT/tron" || -L "$BACKUP_ROOT/tron" ]]; then
+            safe_remove_tree "$PUBLISHED_HELPER_DIR/MacOS/tron"
+            mv "$BACKUP_ROOT/tron" "$PUBLISHED_HELPER_DIR/MacOS/tron"
+        elif ((!HAD_PUBLISHED_LAUNCHER)); then
+            safe_remove_tree "$PUBLISHED_HELPER_DIR/MacOS/tron"
+        fi
+        if [[ -e "$BACKUP_ROOT/AppIcon.icns" || -L "$BACKUP_ROOT/AppIcon.icns" ]]; then
+            safe_remove_tree "$PUBLISHED_HELPER_DIR/Resources/AppIcon.icns"
+            mv "$BACKUP_ROOT/AppIcon.icns" "$PUBLISHED_HELPER_DIR/Resources/AppIcon.icns"
+        elif ((!HAD_PUBLISHED_ICON)); then
+            safe_remove_tree "$PUBLISHED_HELPER_DIR/Resources/AppIcon.icns"
+        fi
+    fi
+    safe_remove_tree "$STAGING_ROOT"
+    [[ -z "$BACKUP_ROOT" ]] || safe_remove_tree "$BACKUP_ROOT"
+    release_bundle_lock
+    exit "$status"
+}
+trap cleanup_private_bundle EXIT
+trap 'exit 130' INT TERM HUP
+PAYLOAD_DIR="$STAGING_ROOT/Gateway"
+APP_DIR="$PAYLOAD_DIR/app"
+RUNTIME_DIR="$PAYLOAD_DIR/runtime"
+HELPER_DIR="$STAGING_ROOT/Library/LoginItems/Tron Agent.app/Contents"
+launchers=("$HELPER_DIR/MacOS/tron")
+mkdir -p "$HELPER_DIR/MacOS" "$HELPER_DIR/Resources"
+cp "$PUBLISHED_HELPER_DIR/Info.plist" "$HELPER_DIR/Info.plist"
 
 validate_node_runtime() {
     local arch="$1" expected="$2" destination="$RUNTIME_DIR/node-$1"
@@ -405,6 +511,43 @@ python3 "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py" --gateway-paylo
 # only mutable deployment pointer. The launcher uses this as its bounded
 # anti-tampering check and does not claim to re-hash the tree.
 chmod -R a-w "$PAYLOAD_DIR"
+"$SCRIPT_DIR/verify-gateway-payload.sh" "$PAYLOAD_DIR" "$HELPER_DIR/MacOS/tron" "$payload_channel"
+
+BACKUP_ROOT="$(mktemp -d "$RESOURCES_DIR/.tron-gateway-backup.XXXXXX")"
+mkdir -p "$PUBLISHED_HELPER_DIR/MacOS" "$PUBLISHED_HELPER_DIR/Resources"
+if [[ -e "$PUBLISHED_PAYLOAD_DIR" || -L "$PUBLISHED_PAYLOAD_DIR" ]]; then
+    HAD_PUBLISHED_PAYLOAD=1
+    if [[ -d "$PUBLISHED_PAYLOAD_DIR" && ! -L "$PUBLISHED_PAYLOAD_DIR" ]]; then
+        PUBLISHED_PAYLOAD_MODE="$(stat -f '%Lp' "$PUBLISHED_PAYLOAD_DIR")"
+        chmod u+w "$PUBLISHED_PAYLOAD_DIR"
+    fi
+    mv "$PUBLISHED_PAYLOAD_DIR" "$BACKUP_ROOT/Gateway"
+    if [[ -d "$BACKUP_ROOT/Gateway" && ! -L "$BACKUP_ROOT/Gateway" ]]; then
+        chmod "$PUBLISHED_PAYLOAD_MODE" "$BACKUP_ROOT/Gateway"
+    fi
+fi
+if [[ -e "$PUBLISHED_HELPER_DIR/MacOS/tron" || -L "$PUBLISHED_HELPER_DIR/MacOS/tron" ]]; then
+    HAD_PUBLISHED_LAUNCHER=1
+    mv "$PUBLISHED_HELPER_DIR/MacOS/tron" "$BACKUP_ROOT/tron"
+fi
+if [[ -e "$PUBLISHED_HELPER_DIR/Resources/AppIcon.icns" || -L "$PUBLISHED_HELPER_DIR/Resources/AppIcon.icns" ]]; then
+    HAD_PUBLISHED_ICON=1
+    mv "$PUBLISHED_HELPER_DIR/Resources/AppIcon.icns" "$BACKUP_ROOT/AppIcon.icns"
+fi
+# Darwin rename refuses a non-writable source directory even when both parent
+# directories are writable. Open only the staged root for the rename, then
+# immediately restore the immutable publication mode at its final path.
+chmod u+w "$PAYLOAD_DIR"
+mv "$PAYLOAD_DIR" "$PUBLISHED_PAYLOAD_DIR"
+chmod a-w "$PUBLISHED_PAYLOAD_DIR"
+mv "$HELPER_DIR/MacOS/tron" "$PUBLISHED_HELPER_DIR/MacOS/tron"
+mv "$HELPER_DIR/Resources/AppIcon.icns" "$PUBLISHED_HELPER_DIR/Resources/AppIcon.icns"
+PUBLICATION_COMPLETE=1
+safe_remove_tree "$BACKUP_ROOT"
+BACKUP_ROOT=""
+PAYLOAD_DIR="$PUBLISHED_PAYLOAD_DIR"
+HELPER_DIR="$PUBLISHED_HELPER_DIR"
+launchers=("$HELPER_DIR/MacOS/tron")
 
 printf 'staged Tron Gateway %s with Node %s (fingerprint %s)\n' \
     "$GATEWAY_VERSION" "$NODE_VERSION" "$PAYLOAD_FINGERPRINT"

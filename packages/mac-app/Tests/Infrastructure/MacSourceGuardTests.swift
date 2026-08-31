@@ -128,6 +128,8 @@ struct MacSourceGuardTests {
         #expect(ensureScript.contains("bundle-gateway.sh"))
         #expect(ensureScript.contains("--verify-only"))
         #expect(ensureScript.contains("failed verification; explicitly rebuilding"))
+        #expect(ensureScript.contains("Do not erase the prior projection"))
+        #expect(!ensureScript.contains("safe_remove_tree \"$PAYLOAD_DIR\""))
         #expect(!ensureScript.contains("exec \"$SCRIPT_DIR/bundle-gateway.sh\""))
 
         let bundleScript = try Self.read(macRoot, "scripts/bundle-gateway.sh")
@@ -178,6 +180,12 @@ struct MacSourceGuardTests {
         #expect(bundleScript.contains("runtimeEpoch"))
         #expect(bundleScript.contains("--verify-only"))
         #expect(bundleScript.contains("verify-gateway-payload.sh"))
+        #expect(bundleScript.contains(".tron-gateway-bundle.lock"))
+        #expect(bundleScript.contains(".tron-gateway-staging.XXXXXX"))
+        #expect(bundleScript.contains(".tron-gateway-backup.XXXXXX"))
+        #expect(bundleScript.contains("PUBLICATION_COMPLETE"))
+        #expect(bundleScript.contains("cleanup_private_bundle"))
+        #expect(bundleScript.contains("another Gateway bundle build is active"))
         #expect(bundleScript.contains("-arch arm64 -arch x86_64"))
         #expect(bundleScript.contains("-arch arm64 -arch x86_64"))
         #expect(!bundleScript.contains("cargo build"))
@@ -204,10 +212,12 @@ struct MacSourceGuardTests {
 
         let installVerifier = try Self.read(repoRoot, "scripts/verify-mac-install.sh")
         #expect(installVerifier.contains("if [[ \"$payload\" == \"$bundled\" ]]; then"))
+        #expect(installVerifier.contains("payload_meets_current_runtime_contract"))
+        #expect(installVerifier.contains("runtime/xcodegen/bin/xcodegen"))
         #expect(installVerifier.contains("incompatible or invalid external selection rejected; bundled payload selected"))
 
         let launcher = try Self.read(macRoot, "scripts/tron-gateway-launcher.c")
-        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_PROTOCOL_VERSION", "TRON_GATEWAY_MIN_PROTOCOL_VERSION", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_UPDATE_HELPER", "gateway-payload-deploy.mjs", "runtime/xcodegen/bin/xcodegen", "immutable_tree", "required_runtime_alias", "required_pi_alias", "../node-%s", "pi-coding-agent/dist/cli.js", "CC_SHA256", "S_IWUSR", "--verify-payload", "nodeVersion"] {
+        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_PROTOCOL_VERSION", "TRON_GATEWAY_MIN_PROTOCOL_VERSION", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT", "TRON_GATEWAY_UPDATE_HELPER", "gateway-payload-deploy.mjs", "runtime/xcodegen/bin/xcodegen", "immutable_tree", "required_runtime_alias", "required_pi_alias", "../node-%s", "pi-coding-agent/dist/cli.js", "CC_SHA256", "S_IWUSR", "--verify-payload", "nodeVersion"] {
             #expect(launcher.contains(required), "launcher missing external payload safety marker: \(required)")
         }
 
@@ -217,11 +227,19 @@ struct MacSourceGuardTests {
         #expect(project.contains("TRON_GATEWAY_PROTOCOL_VERSION: \"4\""))
         #expect(project.contains("TRON_GATEWAY_MIN_PROTOCOL_VERSION: \"4\""))
         #expect(project.contains("verify-gateway-protocol-contract.py"))
+        #expect(project.contains("- \"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)\""))
         #expect(project.contains("- \"Gateway/**\""))
         #expect(project.contains("/usr/bin/rsync -a \"$GATEWAY_SRC/\" \"$GATEWAY_DST/\""))
         #expect(project.contains("find \"$GATEWAY_DST\" -type f"))
         #expect(project.contains("NODE_ENTITLEMENTS=\"$SRCROOT/TronNode.entitlements\""))
         #expect(project.contains("--entitlements \"$NODE_ENTITLEMENTS\""))
+
+        #expect(bundleScript.contains("node_toolchain_matches_pin"))
+        #expect(bundleScript.contains("$(dirname \"$candidate\")/npm"))
+
+        let devScript = try Self.read(repoRoot, "scripts/tron-dev")
+        #expect(devScript.contains("node_toolchain_matches_pin"))
+        #expect(devScript.contains("$(dirname \"$candidate\")/npm"))
 
         let nodeEntitlements = try Self.read(macRoot, "TronNode.entitlements")
         #expect(nodeEntitlements.contains("com.apple.security.cs.allow-jit"))

@@ -76,6 +76,11 @@ targets:
     postBuildScripts:
       - name: Copy Bundled Login Item
         basedOnDependencyAnalysis: false
+        # The protocol verifier reads the processed artifact plist. Declare the
+        # producer dependency so clean builds cannot schedule this script before
+        # ProcessInfoPlistFile.
+        inputFiles:
+          - "$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)"
         script: |
           set -euo pipefail
           SRC="$SRCROOT/Sources/Resources/Library"

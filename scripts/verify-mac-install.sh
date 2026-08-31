@@ -50,8 +50,33 @@ hash_payload() {
   "$HASHER" --fingerprint "$1"
 }
 
-# Resolve each identity independently. A malformed current pointer never
-# supplies identity; the bundled payload is only the bounded fallback.
+# The selected pointer can remain self-consistent under an older payload
+# contract after a Mac app replacement. Mirror every newly required runtime
+# boundary here before treating that pointer as launchable; otherwise the
+# signed launcher correctly falls back to bundled while verification projects
+# the rejected external path and reports false identity failures.
+payload_meets_current_runtime_contract() {
+  local payload="$1"
+  local xcodegen="$payload/runtime/xcodegen/bin/xcodegen"
+  local presets="$payload/runtime/xcodegen/share/xcodegen"
+  local base_preset="$presets/SettingPresets/base.yml"
+  local arches
+  regular_dir "$payload/runtime/xcodegen" \
+    && regular_dir "$payload/runtime/xcodegen/bin" \
+    && regular_dir "$presets" \
+    && regular_file "$xcodegen" \
+    && [[ -x "$xcodegen" ]] \
+    && regular_file "$base_preset" \
+    && ! find "$payload/runtime/xcodegen" -type l -print -quit | grep -q . \
+    && codesign --verify --strict "$xcodegen" >/dev/null 2>&1 \
+    || return 1
+  arches="$(lipo -archs "$xcodegen" 2>/dev/null || true)"
+  [[ " $arches " == *" arm64 "* && " $arches " == *" x86_64 "* ]] \
+    && [[ "$("$xcodegen" --version 2>/dev/null || true)" == "Version: $TRON_CI_XCODEGEN_VERSION" ]]
+}
+
+# Resolve each identity independently. A malformed or legacy-contract current
+# pointer never supplies identity; the bundled payload is the bounded fallback.
 payload_for() {
   local home="$1" channel="$2" bundled="$3" current version manifest fingerprint actual
   current="$home/gateway/payloads/$channel/current.json"
@@ -69,7 +94,8 @@ payload_for() {
           && [[ "$(plist_value minProtocolVersion "$manifest")" == "$APP_MIN_PROTOCOL_VERSION" ]] \
           && [[ "$(plist_value payloadFingerprint "$current")" == "$fingerprint" ]]; then
           actual="$(hash_payload "$home/gateway/payloads/$channel/versions/$version" 2>/dev/null || true)"
-          if [[ "$actual" == "$fingerprint" ]]; then
+          if [[ "$actual" == "$fingerprint" ]] \
+            && payload_meets_current_runtime_contract "$home/gateway/payloads/$channel/versions/$version"; then
             printf '%s\n' "$home/gateway/payloads/$channel/versions/$version"
             return 0
           fi

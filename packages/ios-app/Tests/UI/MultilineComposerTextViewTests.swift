@@ -104,7 +104,7 @@ struct MultilineComposerTextViewTests {
         }
     }
 
-    @Test("stop routes to the authoritative active operation kind")
+    @Test("stop includes the projected operation kind as advisory metadata")
     func activeOperationAbortPolicy() {
         func operation(_ kind: SessionOperationState.Kind) -> SessionOperationState {
             SessionOperationState(id: "operation", kind: kind, startedAt: "2026-01-01T00:00:00Z", reason: nil)
@@ -118,27 +118,27 @@ struct MultilineComposerTextViewTests {
         #expect(ChatComposerPolicy.abortKind(operation: nil) == "agent")
     }
 
-    @Test("stop admission depends on exact mounted authority, not ordinary command readiness")
-    func stopAdmissionIsPreemptive() {
-        #expect(SessionAbortAdmissionPolicy.admits(
+    @Test("ordinary command authority depends on the exact mounted session")
+    func mountedSessionAuthorityIsExact() {
+        #expect(SessionMountedAuthorityPolicy.admits(
             ownsPresentation: true,
             hasInstalledSubscription: true,
             snapshotSessionID: "session",
             targetSessionID: "session"
         ))
-        #expect(!SessionAbortAdmissionPolicy.admits(
+        #expect(!SessionMountedAuthorityPolicy.admits(
             ownsPresentation: false,
             hasInstalledSubscription: true,
             snapshotSessionID: "session",
             targetSessionID: "session"
         ))
-        #expect(!SessionAbortAdmissionPolicy.admits(
+        #expect(!SessionMountedAuthorityPolicy.admits(
             ownsPresentation: true,
             hasInstalledSubscription: false,
             snapshotSessionID: "session",
             targetSessionID: "session"
         ))
-        #expect(!SessionAbortAdmissionPolicy.admits(
+        #expect(!SessionMountedAuthorityPolicy.admits(
             ownsPresentation: true,
             hasInstalledSubscription: true,
             snapshotSessionID: "other",

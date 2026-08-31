@@ -172,6 +172,7 @@ const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
  */
 const STREAMING_PROGRESS_FLUSH_MS = 150;
 const DEFAULT_RUNTIME_DISPOSAL_GRACE_MS = 5_000;
+const FOREGROUND_ABORT_SETTLEMENT_GRACE_MS = 5_000;
 const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
 const MAX_COMPLETION_DISPOSITIONS = 16;
 const MAX_VALIDATED_CHILD_SESSION_PATHS = 2_048;
@@ -869,6 +870,31 @@ export class RuntimeSlot {
     return new Promise((resolve) => { this.stateChangeWaiters.add(resolve); });
   }
 
+  private operationMatches(target: SessionOperationState): boolean {
+    const current = this.operation;
+    return current?.id === target.id
+      && current?.kind === target.kind
+      && current?.startedAt === target.startedAt;
+  }
+
+  private async waitForForegroundAbortSettlement(
+    target: SessionOperationState | undefined,
+    agentOperationId: string | undefined,
+  ): Promise<boolean> {
+    const deadline = performance.now() + FOREGROUND_ABORT_SETTLEMENT_GRACE_MS;
+    const stillActive = () => this.directBashProcesses?.hasActiveProcesses === true
+      || (target !== undefined && this.operationMatches(target))
+      || (agentOperationId !== undefined
+        && this.activeOperationId === agentOperationId
+        && (this.hasActiveAgentRun
+          || this.pendingPrompt?.id === agentOperationId
+          || this.operation?.id === agentOperationId));
+    while (stillActive() && performance.now() < deadline) {
+      await new Promise<void>((resolveDelay) => { setTimeout(resolveDelay, 20); });
+    }
+    return !stillActive();
+  }
+
   private publishStateChange(): void {
     const waiters = [...this.stateChangeWaiters];
     this.stateChangeWaiters.clear();
@@ -1024,6 +1050,12 @@ export class RuntimeSlot {
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });
+      // A runtime replacement must never strand a process owned by the outgoing
+      // tool registry. Session replacement normally aborts Pi first; this exact
+      // owner handoff is the independent fail-safe when that signal was stale.
+      if (this.directBashProcesses?.hasActiveProcesses) {
+        await this.directBashProcesses.abortAll();
+      }
       const directBashProcesses = new DirectBashProcessOwner(services.settingsManager);
       this.directBashProcesses = directBashProcesses;
       const created = await createAgentSessionFromServices({
@@ -5045,41 +5077,49 @@ export class RuntimeSlot {
     if (expectedOperationId !== undefined && this.operation?.id !== expectedOperationId) {
       throw new GatewayError("conflict", "The active operation changed before it could be stopped", true);
     }
+
+    // `kind` is presentation metadata, not cancellation authority. A stale
+    // retry/compaction/bash projection must never route Stop around another
+    // foreground controller or the independently owned built-in bash process.
+    // Keep the exact operation fence above, then fan cancellation out across
+    // every foreground primitive and verify settlement before acknowledging.
+    void kind;
+    const target = this.operation ? { ...this.operation } : undefined;
+    const agentOperationId = this.activeOperationId;
+    const invocationOperationId = agentOperationId
+      ?? (target?.kind === "prompt" || target?.kind === "command" ? target.id : undefined);
+    if (invocationOperationId) this.abortedOperations.add(invocationOperationId);
+
     const session = this.runtime.session;
-    const abortedOperationId = this.operation?.id;
-    switch (kind) {
-      case "compaction": session.abortCompaction(); break;
-      case "retry": session.abortRetry(); break;
-      case "branchSummary": session.abortBranchSummary(); break;
-      case "bash": session.abortBash(); break;
-      case "agent":
-        if (abortedOperationId) this.abortedOperations.add(abortedOperationId);
-        let interruptionPersisted = false;
-        try {
-          // Pi normally propagates its run signal into the built-in bash tool.
-          // The independent owner is the fail-safe for a lost/stale run signal
-          // and for descendants that create a separate process group.
-          try {
-            await Promise.all([
-              session.abort(),
-              this.directBashProcesses?.abortAll() ?? Promise.resolve(),
-            ]);
-          } catch (error) {
-            if (this.directBashProcesses?.hasActiveProcesses) {
-              throw new GatewayError("conflict", "The direct command process did not stop", true);
-            }
-            throw error;
-          }
-          if (this.directBashProcesses?.hasActiveProcesses) {
-            throw new GatewayError("conflict", "The direct command process did not stop", true);
-          }
-          await this.terminalizeInvocation(abortedOperationId, "interrupted", "user-abort");
-          interruptionPersisted = true;
-        } finally {
-          if (abortedOperationId && interruptionPersisted) this.abortedOperations.delete(abortedOperationId);
-        }
-        break;
+    for (const cancel of [
+      () => session.abortCompaction(),
+      () => session.abortRetry(),
+      () => session.abortBranchSummary(),
+      () => session.abortBash(),
+    ]) {
+      try { cancel(); } catch { /* Continue through every independent escape hatch. */ }
     }
+    await Promise.allSettled([
+      session.abort(),
+      this.directBashProcesses?.abortAll() ?? Promise.resolve(),
+    ]);
+
+    let interruptionPersisted = false;
+    try {
+      const settled = await this.waitForForegroundAbortSettlement(target, agentOperationId);
+      if (!settled || this.directBashProcesses?.hasActiveProcesses) {
+        throw new GatewayError("conflict", "Foreground work did not stop", true);
+      }
+      if (invocationOperationId) {
+        await this.terminalizeInvocation(invocationOperationId, "interrupted", "user-abort");
+        interruptionPersisted = true;
+      }
+    } finally {
+      if (invocationOperationId && interruptionPersisted) {
+        this.abortedOperations.delete(invocationOperationId);
+      }
+    }
+
     this.revision += 1;
     this.publishSnapshot();
   }

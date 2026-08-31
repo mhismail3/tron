@@ -221,15 +221,26 @@ This keeps Stable independent of Homebrew/NVM while avoiding a Debug toolchain
 regression. Alias failure aborts startup before third-party code loads. No payload
 selection code writes canonical sessions or credentials.
 
+Source-resource generation is also a one-writer publication boundary. A bounded
+owner lock serializes dependency installation and bundle publication. The bundle
+is assembled and fully verified under a private source-local root; only then are
+the prior payload, launcher, and icon moved to a rollback root and the replacement
+renamed into place. Signal/error cleanup restores the prior projection, so a
+cancelled Xcode build cannot leave the source-checkout migration payload half
+written. The verification-only path remains lock-free and read-only.
+
 The same immutable runtime boundary contains the pinned universal XcodeGen
 executable and its complete preset tree. Release staging verifies the pinned
 archive, executable bytes, preset-tree digest, version, and both Mac
 architectures before publication; Xcode signs the executable before the outer
-app seals the payload. The launcher and update preflight require the toolchain,
-and source-built Gateway candidates inherit it byte-for-byte from the active
-signed payload. The detached iOS installer receives its absolute path through
-`TRON_XCODEGEN`, so launchd's sanitized `PATH` and machine-local package managers
-cannot alter project generation.
+app seals the payload. The launcher and update preflight require the toolchain.
+Source-built Gateway candidates inherit it byte-for-byte from the selected
+validated payload or, when a newer contract invalidates that predecessor, one
+explicit fully validated migration base: configured artifact, launcher-exported
+bundle, or prepared source-checkout bundle. The copied snapshot must still match
+its admitted manifest before mutation. The detached iOS installer receives its
+absolute path through `TRON_XCODEGEN`, so launchd's sanitized `PATH` and
+machine-local package managers cannot alter project generation.
 
 The Mac app and iOS app emit the same canonical protocol range into their final
 Info plists. Build scripts validate source constants, final app metadata, and
