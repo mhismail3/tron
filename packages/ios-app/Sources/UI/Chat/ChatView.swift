@@ -146,9 +146,7 @@ struct ChatView: View {
             onCameraImage: { image in Task { await importCameraImage(image) } },
             processesPresented: processPresentationBinding,
             interaction: interactionBinding,
-            onInteractionClosed: { interaction in
-                sessionPresentation.suppressedInteractionScope = ExtensionInteractionScope(interaction)
-            },
+            onInteractionClosed: closeInteractionPresentation,
             filesPresented: attachmentPresentationBinding(for: .files),
             onFileImport: { result in Task { await importFiles(result) } },
             editorRequest: editorRequestBinding,
@@ -235,6 +233,11 @@ struct ChatView: View {
         .onChange(of: composerFocused) { _, _ in
             keyboardObserver.setOwnerWindow(composerResponder.window)
         }
+        .environment(\.pendingExtensionInteractionPresenter) { interaction in
+            guard selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions
+                .contains(where: { ExtensionInteractionScope($0) == ExtensionInteractionScope(interaction) }) == true else { return }
+            sessionPresentation.requestInteractionPresentation(interaction)
+        }
     }
 
     var body: some View {
@@ -297,7 +300,7 @@ struct ChatView: View {
                 needsOpeningResume: sessionPresentation.needsOpeningResume
             ) {
             case .none:
-                return
+                await recoverExtensionPresentationPublicationIfNeeded()
             case .begin:
                 await beginOpeningPresentation()
             case .waitForCurrentThenBeginIfNeeded:
@@ -754,12 +757,9 @@ struct ChatView: View {
             Color.clear
                 .onChange(of: pendingInteractionScopes, initial: true) { _, _ in
                     reconcileInteractionDraftsIfAuthoritative()
-                    guard let suppressedInteractionScope = sessionPresentation.suppressedInteractionScope,
-                          ChatExtensionInteractionPolicy.shouldClearSuppression(
-                              suppressedInteractionScope,
-                              from: selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? []
-                          ) else { return }
-                    sessionPresentation.suppressedInteractionScope = nil
+                    sessionPresentation.reconcileInteractionPresentation(
+                        with: selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? []
+                    )
                 }
                 .onChange(of: initialModelSettled) { _, _ in
                     reconcileInteractionDraftsIfAuthoritative()
@@ -968,6 +968,7 @@ struct ChatView: View {
     private var candidatePresentedInteraction: ExtensionInteraction? {
         ChatExtensionInteractionPolicy.presentedInteraction(
             selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? [],
+            requested: sessionPresentation.requestedInteractionScope,
             suppressing: sessionPresentation.suppressedInteractionScope
         )
     }
@@ -980,6 +981,7 @@ struct ChatView: View {
     private var extensionForegroundPresentation: ChatExtensionForegroundPresentation {
         ChatExtensionPresentationArbiter.presentation(
             modelSettled: initialModelSettled,
+            presentationReady: sessionPresentation.permitsExtensionInteractionPresentation,
             hasInteraction: candidatePresentedInteraction != nil,
             hasEditorRequest: candidateEditorRequest != nil
         )
@@ -1150,6 +1152,23 @@ struct ChatView: View {
     }
 
     @MainActor
+    private func recoverExtensionPresentationPublicationIfNeeded() async {
+        guard presentationActivity.allowsPresentationPublication,
+              !sessionPresentation.permitsExtensionInteractionPresentation,
+              sessionPresentation.open.phase == .ready,
+              transcriptPresentation.installed != nil,
+              sessionPresentation.modelPresentationGeneration != nil else { return }
+        do { try await displayFrameScheduler.nextFrame() }
+        catch { return }
+        guard !Task.isCancelled,
+              presentationActivity.allowsPresentationPublication,
+              sessionPresentation.open.phase == .ready,
+              transcriptPresentation.installed != nil,
+              sessionPresentation.modelPresentationGeneration != nil else { return }
+        sessionPresentation.permitsExtensionInteractionPresentation = true
+    }
+
+    @MainActor
     private func beginOpeningAfterForegroundWhenConnected() {
         guard scenePhase == .active,
               presentationActivity.allowsPresentationPublication,
@@ -1179,6 +1198,7 @@ struct ChatView: View {
 
     @MainActor
     private func performOpeningPresentation() async {
+        sessionPresentation.permitsExtensionInteractionPresentation = false
         // Retiring/restarting presentation authority cancels any local page
         // admission; late model/scroll completions are token-gated.
         sessionPresentation.earlierMessagesOperation.cancel()
@@ -1584,6 +1604,10 @@ struct ChatView: View {
             if scenePhase == .active, let target = presentationTarget {
                 model.setSessionPresentationVisible(target, visible: true)
             }
+            // Publish leased interaction/editor routes only after chat opening
+            // has crossed a real ready frame. Otherwise their sheet can cover
+            // the parent, cancel opening, and create a present/dismiss loop.
+            sessionPresentation.permitsExtensionInteractionPresentation = true
             return true
         } catch {
             performanceSignposts.end(
@@ -1951,8 +1975,15 @@ struct ChatView: View {
     private var interactionBinding: Binding<ExtensionInteraction?> {
         Binding(
             get: { pendingPresentedInteraction },
-            set: { _ in }
+            set: { presented in
+                guard presented == nil, let interaction = pendingPresentedInteraction else { return }
+                closeInteractionPresentation(interaction)
+            }
         )
+    }
+
+    private func closeInteractionPresentation(_ interaction: ExtensionInteraction) {
+        sessionPresentation.closeInteractionPresentation(interaction)
     }
 
     private var editorRequestBinding: Binding<ComposerEditorRequest?> {

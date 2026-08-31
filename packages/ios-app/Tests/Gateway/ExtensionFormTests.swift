@@ -203,6 +203,53 @@ struct ExtensionFormTests {
         ]))
     }
 
+    @Test func pendingToolMatchingUsesOperationAndAuditedOwnerInsteadOfToolCallID() throws {
+        let owner = ExtensionOwner(
+            id: "ask-user",
+            title: "Pi Ask User",
+            source: AskUserToolPresentation.auditedSource
+        )
+        let origin = ExtensionToolOrigin(
+            source: AskUserToolPresentation.auditedSource,
+            owner: owner
+        )
+        let exact = ChatToolPresentation(
+            id: "tool-call-is-not-the-invocation", title: "Ask User", toolName: "ask_user",
+            subtitle: "Running", request: nil, response: nil, content: "", fallbackContent: nil,
+            error: false, startedAt: nil, completedAt: nil, durationMs: nil,
+            lastProgressAt: nil, progressSequence: nil, extensionOrigin: origin,
+            toolSegmentId: "tool-segment:\"operation-1\""
+        ).descriptor
+        let pending = ExtensionInteraction(
+            id: "interaction", hostEpoch: "epoch", presentationRevision: 1,
+            method: .form, title: "Questions", form: descriptor(), owner: owner,
+            invocationId: "prompt-invocation", operationId: "operation-1"
+        )
+        #expect(PendingExtensionInteractionToolPresentation.interaction(
+            tools: [exact], pendingInteractions: [pending]
+        ) == pending)
+
+        let coldCanonical = ChatToolPresentation(
+            id: "different-call", title: "Ask User", toolName: "ask_user",
+            subtitle: "Running", request: nil, response: nil, content: "", fallbackContent: nil,
+            error: false, startedAt: nil, completedAt: nil, durationMs: nil,
+            lastProgressAt: nil, progressSequence: nil, extensionOrigin: origin,
+            toolSegmentId: "tool-segment:\"canonical-entry\""
+        ).descriptor
+        #expect(PendingExtensionInteractionToolPresentation.interaction(
+            tools: [coldCanonical], pendingInteractions: [pending]
+        ) == pending)
+
+        let unrelated = ExtensionInteraction(
+            id: "other", hostEpoch: "epoch", presentationRevision: 2,
+            method: .form, title: "Other", form: descriptor(), owner: owner,
+            operationId: "operation-2"
+        )
+        #expect(PendingExtensionInteractionToolPresentation.interaction(
+            tools: [coldCanonical], pendingInteractions: [pending, unrelated]
+        ) == nil)
+    }
+
     @Test func sheetRestoresIndependentSwipePagesWithFixedProgressAndDirectRows() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -242,6 +289,10 @@ struct ExtensionFormTests {
             contentsOf: root.appending(path: "Sources/UI/Chat/ChatToolRunViews.swift"),
             encoding: .utf8
         )
+        let chatView = try String(
+            contentsOf: root.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
         let toolDetails = try String(
             contentsOf: root.appending(path: "Sources/UI/Chat/ToolDetailSheet.swift"),
             encoding: .utf8
@@ -251,7 +302,11 @@ struct ExtensionFormTests {
             encoding: .utf8
         )
         #expect(toolRuns.contains("PendingExtensionInteractionToolPresentation.interaction("))
-        #expect(toolRuns.contains("pendingInteractionSheet("))
+        #expect(toolRuns.contains("presentPendingInteraction(interaction)"))
+        #expect(!toolRuns.contains("pendingInteractionSheet("))
+        #expect(!toolRuns.contains("@State private var pendingInteraction"))
+        #expect(chatView.contains(".environment(\\.pendingExtensionInteractionPresenter)"))
+        #expect(chatView.contains("permitsExtensionInteractionPresentation = true"))
         #expect(toolDetails.contains("AskUserToolPresentation.completed(tool: tool)"))
         #expect(toolDetails.contains("AskUserCompletedFormView"))
         #expect(!primitiveSheet.contains("cancelled: true"))

@@ -1,18 +1,85 @@
 import SwiftUI
 
+typealias PendingExtensionInteractionPresenter = @MainActor @Sendable (ExtensionInteraction) -> Void
+
+private struct PendingExtensionInteractionPresenterKey: EnvironmentKey {
+    static let defaultValue: PendingExtensionInteractionPresenter? = nil
+}
+
+extension EnvironmentValues {
+    var pendingExtensionInteractionPresenter: PendingExtensionInteractionPresenter? {
+        get { self[PendingExtensionInteractionPresenterKey.self] }
+        set { self[PendingExtensionInteractionPresenterKey.self] = newValue }
+    }
+}
+
 enum PendingExtensionInteractionToolPresentation {
     @MainActor
     static func interaction(
-        toolCallIDs: [String],
+        tools: [ChatToolDescriptor],
         sessionID: String,
         model: AppModel
     ) -> ExtensionInteraction? {
-        let callIDs = Set(toolCallIDs)
-        guard !callIDs.isEmpty else { return nil }
-        return model.authoritativeSnapshot(for: sessionID)?
-            .extensionPresentation.pendingInteractions.first { interaction in
-                interaction.invocationId.map(callIDs.contains) == true
+        interaction(
+            tools: tools,
+            pendingInteractions: model.authoritativeSnapshot(for: sessionID)?
+                .extensionPresentation.pendingInteractions ?? []
+        )
+    }
+
+    /// Matches the pending interaction to the tool's operation/extension owner,
+    /// not to the tool-call ID. Pi's semantic interaction carries the enclosing
+    /// prompt invocation ID, which is deliberately distinct from its tool-call ID.
+    static func interaction(
+        tools: [ChatToolDescriptor],
+        pendingInteractions: [ExtensionInteraction]
+    ) -> ExtensionInteraction? {
+        guard !tools.isEmpty, !pendingInteractions.isEmpty else { return nil }
+
+        let operationMatches = pendingInteractions.filter { interaction in
+            guard let operationID = interaction.operationId else { return false }
+            return tools.contains { tool in
+                tool.isRunning
+                    && toolOperationID(tool) == operationID
+                    && ownersMatch(interaction: interaction, tool: tool)
+                    && (interaction.method != .form || isAuditedAskUser(tool))
             }
+        }
+        if operationMatches.count == 1 { return operationMatches[0] }
+        guard operationMatches.isEmpty else { return nil }
+
+        // A running ask_user blocks its serialized session lane, so one exact
+        // audited owner and one pending form are an unambiguous fallback when a
+        // cold canonical tool segment no longer exposes the live operation ID.
+        let askUserTools = tools.filter { tool in
+            tool.isRunning && isAuditedAskUser(tool)
+        }
+        guard askUserTools.count == 1, let tool = askUserTools.first else { return nil }
+        let formMatches = pendingInteractions.filter { interaction in
+            interaction.method == .form && ownersMatch(interaction: interaction, tool: tool)
+        }
+        return formMatches.count == 1 ? formMatches[0] : nil
+    }
+
+    private static func isAuditedAskUser(_ tool: ChatToolDescriptor) -> Bool {
+        tool.toolName == "ask_user"
+            && tool.extensionOrigin?.owner?.source == AskUserToolPresentation.auditedSource
+    }
+
+    private static func toolOperationID(_ tool: ChatToolDescriptor) -> String? {
+        guard let segment = tool.toolSegmentId,
+              segment.hasPrefix("tool-segment:") else { return nil }
+        let encoded = segment.dropFirst("tool-segment:".count)
+        return try? JSONDecoder().decode(String.self, from: Data(encoded.utf8))
+    }
+
+    private static func ownersMatch(
+        interaction: ExtensionInteraction,
+        tool: ChatToolDescriptor
+    ) -> Bool {
+        guard let interactionOwner = interaction.owner,
+              let toolOwner = tool.extensionOrigin?.owner else { return false }
+        return interactionOwner == toolOwner
     }
 }
 

@@ -25,6 +25,33 @@ struct ChatSessionPresentationTests {
         #expect(!reopened.showContext)
         #expect(!reopened.showSettings)
         #expect(!reopened.showProcesses)
+        #expect(!reopened.permitsExtensionInteractionPresentation)
+        #expect(reopened.requestedInteractionScope == nil)
+        #expect(reopened.suppressedInteractionScope == nil)
+    }
+
+    @Test("pending interaction has one stable presentation owner and explicit reopen intent")
+    func interactionPresentationOwnership() {
+        let owner = ChatSessionPresentation(sessionID: "session-a")
+        let interaction = ExtensionInteraction(
+            id: "question", hostEpoch: "epoch", presentationRevision: 3,
+            method: .select, title: "Choose", options: ["A"]
+        )
+        let scope = ExtensionInteractionScope(interaction)
+
+        owner.requestInteractionPresentation(interaction)
+        #expect(owner.requestedInteractionScope == scope)
+        owner.closeInteractionPresentation(interaction)
+        #expect(owner.requestedInteractionScope == nil)
+        #expect(owner.suppressedInteractionScope == scope)
+
+        owner.reconcileInteractionPresentation(with: [interaction])
+        #expect(owner.suppressedInteractionScope == scope)
+        owner.requestInteractionPresentation(interaction)
+        #expect(owner.requestedInteractionScope == scope)
+        owner.reconcileInteractionPresentation(with: [])
+        #expect(owner.requestedInteractionScope == nil)
+        #expect(owner.suppressedInteractionScope == nil)
     }
 
     @Test("suspension abandons picker and import targets without changing presentation authority")

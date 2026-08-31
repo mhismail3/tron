@@ -39,6 +39,10 @@ final class ChatSessionPresentation {
     var showSettings = false
     var queuedMessageEditor: QueuedMessageEditorRoute?
     var suppressedInteractionScope: ExtensionInteractionScope?
+    var requestedInteractionScope: ExtensionInteractionScope?
+    /// Turns true only after the mounted transcript has crossed its first ready
+    /// frame. A pending interaction must never cover and cancel session opening.
+    var permitsExtensionInteractionPresentation = false
 
     var mutatingQueuedMessageIDs: Set<String> = []
     var locallyMutatedQueueOperationIDs: Set<String> = []
@@ -104,6 +108,32 @@ final class ChatSessionPresentation {
         openingTaskGeneration &+= 1
         openingTask?.cancel()
         openingTask = nil
+    }
+
+    func requestInteractionPresentation(_ interaction: ExtensionInteraction) {
+        requestedInteractionScope = ExtensionInteractionScope(interaction)
+    }
+
+    func closeInteractionPresentation(_ interaction: ExtensionInteraction) {
+        let scope = ExtensionInteractionScope(interaction)
+        suppressedInteractionScope = scope
+        if requestedInteractionScope == scope { requestedInteractionScope = nil }
+    }
+
+    func reconcileInteractionPresentation(with interactions: [ExtensionInteraction]) {
+        if let suppressedInteractionScope,
+           ChatExtensionInteractionPolicy.shouldClearSuppression(
+               suppressedInteractionScope,
+               from: interactions
+           ) {
+            self.suppressedInteractionScope = nil
+        }
+        if let requestedInteractionScope,
+           !interactions.contains(where: {
+               ExtensionInteractionScope($0) == requestedInteractionScope
+           }) {
+            self.requestedInteractionScope = nil
+        }
     }
 
     func startUnanchoredPrepend(

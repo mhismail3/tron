@@ -86,10 +86,11 @@ enum ChatExtensionPresentationArbiter {
     /// store and is presented after the interaction settles.
     static func presentation(
         modelSettled: Bool,
+        presentationReady: Bool,
         hasInteraction: Bool,
         hasEditorRequest: Bool
     ) -> ChatExtensionForegroundPresentation {
-        guard modelSettled else { return .none }
+        guard modelSettled, presentationReady else { return .none }
         if hasInteraction { return .interaction }
         if hasEditorRequest { return .editorRequest }
         return .none
@@ -99,11 +100,18 @@ enum ChatExtensionPresentationArbiter {
 enum ChatExtensionInteractionPolicy {
     static func presentedInteraction(
         _ interactions: [ExtensionInteraction],
-        suppressing scope: ExtensionInteractionScope?
+        requested requestedScope: ExtensionInteractionScope?,
+        suppressing suppressedScope: ExtensionInteractionScope?
     ) -> ExtensionInteraction? {
-        interactions.first { interaction in
-            guard let scope else { return true }
-            return ExtensionInteractionScope(interaction) != scope
+        if let requestedScope,
+           let requested = interactions.first(where: {
+               ExtensionInteractionScope($0) == requestedScope
+           }) {
+            return requested
+        }
+        return interactions.first { interaction in
+            guard let suppressedScope else { return true }
+            return ExtensionInteractionScope(interaction) != suppressedScope
         }
     }
 

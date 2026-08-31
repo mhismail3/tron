@@ -648,16 +648,24 @@ struct ChatTranscriptPresentationTests {
     @Test("interaction and editor presentation use deterministic priority")
     func extensionPresentationArbiterPriority() {
         #expect(ChatExtensionPresentationArbiter.presentation(
-            modelSettled: false, hasInteraction: true, hasEditorRequest: true
+            modelSettled: false, presentationReady: true,
+            hasInteraction: true, hasEditorRequest: true
         ) == .none)
         #expect(ChatExtensionPresentationArbiter.presentation(
-            modelSettled: true, hasInteraction: true, hasEditorRequest: true
+            modelSettled: true, presentationReady: false,
+            hasInteraction: true, hasEditorRequest: true
+        ) == .none)
+        #expect(ChatExtensionPresentationArbiter.presentation(
+            modelSettled: true, presentationReady: true,
+            hasInteraction: true, hasEditorRequest: true
         ) == .interaction)
         #expect(ChatExtensionPresentationArbiter.presentation(
-            modelSettled: true, hasInteraction: false, hasEditorRequest: true
+            modelSettled: true, presentationReady: true,
+            hasInteraction: false, hasEditorRequest: true
         ) == .editorRequest)
         #expect(ChatExtensionPresentationArbiter.presentation(
-            modelSettled: true, hasInteraction: false, hasEditorRequest: false
+            modelSettled: true, presentationReady: true,
+            hasInteraction: false, hasEditorRequest: false
         ) == .none)
     }
 
@@ -702,10 +710,13 @@ struct ChatTranscriptPresentationTests {
         let nextEpoch = ExtensionInteraction(id: "first", hostEpoch: "next", presentationRevision: 1, method: .select, title: "Next", options: ["C"])
         let scope = ExtensionInteractionScope(first)
 
-        #expect(ChatExtensionInteractionPolicy.presentedInteraction([first], suppressing: scope) == nil)
-        #expect(ChatExtensionInteractionPolicy.presentedInteraction([first, newer], suppressing: scope) == newer)
-        #expect(ChatExtensionInteractionPolicy.presentedInteraction([replacement], suppressing: scope) == replacement)
-        #expect(ChatExtensionInteractionPolicy.presentedInteraction([nextEpoch], suppressing: scope) == nextEpoch)
+        #expect(ChatExtensionInteractionPolicy.presentedInteraction([first], requested: nil, suppressing: scope) == nil)
+        #expect(ChatExtensionInteractionPolicy.presentedInteraction([first, newer], requested: nil, suppressing: scope) == newer)
+        #expect(ChatExtensionInteractionPolicy.presentedInteraction([replacement], requested: nil, suppressing: scope) == replacement)
+        #expect(ChatExtensionInteractionPolicy.presentedInteraction([nextEpoch], requested: nil, suppressing: scope) == nextEpoch)
+        #expect(ChatExtensionInteractionPolicy.presentedInteraction(
+            [first, newer], requested: scope, suppressing: scope
+        ) == first)
         #expect(!ChatExtensionInteractionPolicy.shouldClearSuppression(scope, from: [first, newer]))
         #expect(ChatExtensionInteractionPolicy.shouldClearSuppression(scope, from: [replacement]))
         #expect(ChatExtensionInteractionPolicy.shouldClearSuppression(scope, from: []))
@@ -714,7 +725,9 @@ struct ChatTranscriptPresentationTests {
     @Test("failed interaction responses do not create suppression scope")
     func failedInteractionResponseLeavesScopeAvailable() {
         let interaction = ExtensionInteraction(id: "failed", hostEpoch: "epoch", presentationRevision: 2, method: .confirm, title: "Continue?")
-        #expect(ChatExtensionInteractionPolicy.presentedInteraction([interaction], suppressing: nil) == interaction)
+        #expect(ChatExtensionInteractionPolicy.presentedInteraction(
+            [interaction], requested: nil, suppressing: nil
+        ) == interaction)
     }
 
     @Test("queued compaction is explicit until canonical compaction starts")
