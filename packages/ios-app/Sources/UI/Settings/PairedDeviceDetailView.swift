@@ -279,18 +279,35 @@ struct PairedDeviceDetailView: View {
             return
         }
         loading = true
+        var installerUnsupported = false
         do {
-            async let loadedConfig = model.loadIosDeviceInstallConfig(for: authorized)
-            async let loadedStatus = model.loadIosDeviceInstallStatus(for: authorized)
-            let values = try await (loadedConfig, loadedStatus)
+            let loadedConfig = try await model.loadIosDeviceInstallConfig(for: authorized)
             guard generation == loadGeneration else { return }
-            config = values.0
-            status = values.1
+            config = loadedConfig
         } catch is CancellationError {
             return
         } catch let failure as GatewayFailure where failure.code == "unsupported" {
             guard generation == loadGeneration else { return }
             config = nil
+            installerUnsupported = true
+        } catch {
+            guard generation == loadGeneration else { return }
+            model.presentError(error)
+        }
+        guard generation == loadGeneration else { return }
+        if installerUnsupported {
+            status = nil
+            loading = false
+            return
+        }
+        do {
+            let loadedStatus = try await model.loadIosDeviceInstallStatus(for: authorized)
+            guard generation == loadGeneration else { return }
+            status = loadedStatus
+        } catch is CancellationError {
+            return
+        } catch let failure as GatewayFailure where failure.code == "unsupported" {
+            guard generation == loadGeneration else { return }
             status = nil
         } catch {
             guard generation == loadGeneration else { return }

@@ -182,6 +182,8 @@ enum GatewayPayloadResolver {
 enum GatewayPayloadValidator {
     static let minimumEntrypointBytes: Int64 = 1_024
     static let minimumRuntimeBytes: Int64 = 1_048_576
+    static let xcodegenRelativePath = "runtime/xcodegen/bin/xcodegen"
+    static let xcodegenBasePresetRelativePath = "runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"
 
     static func validate(
         payloadRoot: URL,
@@ -265,6 +267,15 @@ enum GatewayPayloadValidator {
         guard let dependencies = containedRegularURL("app/node_modules", under: root, directory: true),
               isDirectory(dependencies, fileManager: fileManager) else {
             return .failure(.incomplete("app/node_modules"))
+        }
+        guard let xcodegen = containedRegularURL(xcodegenRelativePath, under: root, directory: false),
+              usableFile(xcodegen, minimumBytes: minimumRuntimeBytes, fileManager: fileManager),
+              fileManager.isExecutableFile(atPath: xcodegen.path) else {
+            return .failure(.incomplete(xcodegenRelativePath))
+        }
+        guard let basePreset = containedRegularURL(xcodegenBasePresetRelativePath, under: root, directory: false),
+              usableFile(basePreset, minimumBytes: 1, fileManager: fileManager) else {
+            return .failure(.incomplete(xcodegenBasePresetRelativePath))
         }
 
         for architecture in ["arm64", "x64"] {

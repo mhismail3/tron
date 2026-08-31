@@ -83,6 +83,13 @@ paired profiles, admitting at most one enabled profile per verified physical-mac
 byte-transport epoch. `AppModel` supplies narrow projection hooks for cache installation, refresh,
 session/terminal reconciliation, and synchronous retirement; it no longer stores a parallel lifecycle
 phase, reconnect task, pairing attempt, connection identity, or transition waiters. A dedicated
+
+Authorized-device repository configuration and terminal install status use
+independent presentation failure boundaries: an invalid status cannot hide a
+valid saved source checkout. The supervised installer receives the signed
+Gateway payload's pinned XcodeGen path and never depends on a Homebrew or
+checkout-local tool installation.
+
 `SessionCatalogCoordinator` owns the focused profile's summaries, while the dashboard pool owns
 profile-qualified shallow catalogs for non-focused profiles. `SessionSummary` carries dashboard-only
 profile ownership and the dashboard aggregates by `(profileID, sessionID)`; equal bare session IDs from

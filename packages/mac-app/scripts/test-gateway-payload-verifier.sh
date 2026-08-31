@@ -84,6 +84,18 @@ chmod a-w "$PAYLOAD/runtime/node-arm64"
 expect_rejected wrong-runtime-hash
 
 reset_fixture
+chmod u+w "$PAYLOAD/runtime/xcodegen/bin/xcodegen"
+printf 'forged-byte' >> "$PAYLOAD/runtime/xcodegen/bin/xcodegen"
+chmod a-w "$PAYLOAD/runtime/xcodegen/bin/xcodegen"
+expect_rejected wrong-xcodegen-hash
+
+reset_fixture
+chmod u+w "$PAYLOAD/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"
+printf '\n# forged preset\n' >> "$PAYLOAD/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"
+chmod a-w "$PAYLOAD/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"
+expect_rejected wrong-xcodegen-presets
+
+reset_fixture
 chmod u+w "$PAYLOAD/runtime/node-x64"
 cp "$PAYLOAD/runtime/node-arm64" "$PAYLOAD/runtime/node-x64"
 chmod a-w "$PAYLOAD/runtime/node-x64"

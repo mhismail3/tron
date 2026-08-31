@@ -9,6 +9,8 @@ PAYLOAD_DIR="${1:-}"
 HELPER="${2:-}"
 EXPECTED_CHANNEL="${3:-stable}"
 NODE_VERSION_FILE="$REPO_ROOT/.node-version"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/config/ci-toolchain.env"
 NODE_ARM64_SHA256="913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4"
 NODE_X64_SHA256="bf0e0ff20d4e5a16436d1ec372e47161e52be8e487db8070ae3f06b01efbba0c"
 
@@ -56,7 +58,8 @@ fi
 
 for required_directory in \
     "$PAYLOAD_DIR/app/dist" "$PAYLOAD_DIR/app/scripts" "$PAYLOAD_DIR/app/node_modules" \
-    "$PAYLOAD_DIR/runtime" "$PAYLOAD_DIR/runtime/bin-arm64" "$PAYLOAD_DIR/runtime/bin-x64"; do
+    "$PAYLOAD_DIR/runtime" "$PAYLOAD_DIR/runtime/bin-arm64" "$PAYLOAD_DIR/runtime/bin-x64" \
+    "$PAYLOAD_DIR/runtime/xcodegen/bin" "$PAYLOAD_DIR/runtime/xcodegen/share/xcodegen/SettingPresets"; do
     [[ -d "$required_directory" && ! -L "$required_directory" ]] || fail "required directory missing: $required_directory"
 done
 if [[ "$EXPECTED_CHANNEL" == dev ]]; then
@@ -73,7 +76,9 @@ for required_file in \
     "$PAYLOAD_DIR/app/PushService.xcconfig" \
     "$PAYLOAD_DIR/app/scripts/ensure-node-pty-helper.mjs" \
     "$PAYLOAD_DIR/app/scripts/gateway-payload-deploy.mjs" \
-    "$PAYLOAD_DIR/runtime/node-arm64" "$PAYLOAD_DIR/runtime/node-x64"; do
+    "$PAYLOAD_DIR/runtime/node-arm64" "$PAYLOAD_DIR/runtime/node-x64" \
+    "$PAYLOAD_DIR/runtime/xcodegen/bin/xcodegen" \
+    "$PAYLOAD_DIR/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"; do
     [[ -f "$required_file" && ! -L "$required_file" ]] || fail "required file missing or symlinked: $required_file"
 done
 
@@ -90,6 +95,30 @@ validate_runtime() {
 }
 validate_runtime arm64 "$NODE_ARM64_SHA256"
 validate_runtime x64 "$NODE_X64_SHA256"
+xcodegen_presets_hash() {
+    local root="$1"
+    (
+        cd "$root"
+        find . -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d '' file; do
+            printf '%s\0' "$file"
+            shasum -a 256 "$file" | awk '{print $1}'
+        done
+    ) | shasum -a 256 | awk '{print $1}'
+}
+XCODEGEN="$PAYLOAD_DIR/runtime/xcodegen/bin/xcodegen"
+XCODEGEN_PRESETS="$PAYLOAD_DIR/runtime/xcodegen/share/xcodegen"
+[[ "$(shasum -a 256 "$XCODEGEN" | awk '{print $1}')" == "$TRON_CI_XCODEGEN_BINARY_SHA256" ]] \
+    || fail "XcodeGen executable checksum mismatch"
+[[ "$(xcodegen_presets_hash "$XCODEGEN_PRESETS")" == "$TRON_CI_XCODEGEN_PRESETS_SHA256" ]] \
+    || fail "XcodeGen presets checksum mismatch"
+[[ "$("$XCODEGEN" --version 2>/dev/null)" == "Version: $TRON_CI_XCODEGEN_VERSION" ]] \
+    || fail "XcodeGen version is not canonical"
+XCODEGEN_ARCHES="$(lipo -archs "$XCODEGEN" 2>/dev/null || true)"
+[[ " $XCODEGEN_ARCHES " == *" arm64 "* && " $XCODEGEN_ARCHES " == *" x86_64 "* ]] \
+    || fail "XcodeGen executable is not universal arm64/x86_64"
+if find "$PAYLOAD_DIR/runtime/xcodegen" -type l -print -quit | grep -q .; then
+    fail "XcodeGen toolchain contains a symlink"
+fi
 validate_runtime_alias() {
     local architecture="$1" directory="$PAYLOAD_DIR/runtime/bin-$1" alias expected runtime
     alias="$directory/node"

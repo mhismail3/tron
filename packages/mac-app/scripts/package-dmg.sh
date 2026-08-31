@@ -4,6 +4,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd -P)"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/config/ci-toolchain.env"
 NODE_ARM64_SHA256="913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4"
 NODE_X64_SHA256="bf0e0ff20d4e5a16436d1ec372e47161e52be8e487db8070ae3f06b01efbba0c"
 
@@ -67,11 +69,14 @@ verify_app_bundle() {
         "$gateway_root/app/PushService.xcconfig"
         "$gateway_root/runtime/node-arm64"
         "$gateway_root/runtime/node-x64"
+        "$gateway_root/runtime/xcodegen/bin/xcodegen"
+        "$gateway_root/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"
     )
     local required_directories=(
         "$gateway_root/app/node_modules"
         "$gateway_root/runtime/bin-arm64"
         "$gateway_root/runtime/bin-x64"
+        "$gateway_root/runtime/xcodegen/share/xcodegen/SettingPresets"
     )
 
     for required_file in "${required_files[@]}"; do
@@ -109,6 +114,15 @@ verify_app_bundle() {
 
     pi_cli="$root/$gateway_root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
     [[ -f "$pi_cli" && ! -L "$pi_cli" && -x "$pi_cli" ]] || die "Gateway payload Pi CLI is invalid"
+    local xcodegen="$root/$gateway_root/runtime/xcodegen/bin/xcodegen"
+    local xcodegen_arches
+    [[ -f "$xcodegen" && ! -L "$xcodegen" && -x "$xcodegen" ]] || die "Gateway payload XcodeGen is invalid"
+    codesign --verify --strict "$xcodegen" >/dev/null 2>&1 || die "Gateway payload XcodeGen signature is invalid"
+    xcodegen_arches="$(lipo -archs "$xcodegen" 2>/dev/null || true)"
+    [[ " $xcodegen_arches " == *" arm64 "* && " $xcodegen_arches " == *" x86_64 "* ]] \
+        || die "Gateway payload XcodeGen is not universal arm64/x86_64"
+    [[ "$("$xcodegen" --version 2>/dev/null || true)" == "Version: $TRON_CI_XCODEGEN_VERSION" ]] \
+        || die "Gateway payload XcodeGen version is not canonical"
     for expected_arch in arm64 x86_64; do
         local runtime_arch
         if [[ "$expected_arch" == arm64 ]]; then

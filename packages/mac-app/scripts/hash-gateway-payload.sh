@@ -16,11 +16,16 @@ ROOT="$(cd "$ROOT" && pwd -P)"
 for required in \
     app/dist/index.js app/package.json app/package-lock.json app/PushService.xcconfig \
     app/scripts/ensure-node-pty-helper.mjs app/scripts/gateway-payload-deploy.mjs \
-    app/node_modules runtime/node-arm64 runtime/node-x64; do
+    app/node_modules runtime/node-arm64 runtime/node-x64 \
+    runtime/xcodegen/bin/xcodegen \
+    runtime/xcodegen/share/xcodegen/SettingPresets/base.yml; do
     [[ -e "$ROOT/$required" && ! -L "$ROOT/$required" ]] || {
         echo "required payload entry is missing or symlinked: $required" >&2; exit 2;
     }
 done
+[[ -x "$ROOT/runtime/xcodegen/bin/xcodegen" ]] || {
+    echo "required payload XcodeGen is not executable" >&2; exit 2;
+}
 PI_CLI="$ROOT/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
 [[ -f "$PI_CLI" && ! -L "$PI_CLI" && -x "$PI_CLI" ]] || { echo "required payload Pi CLI is invalid" >&2; exit 2; }
 for architecture in arm64 x64; do

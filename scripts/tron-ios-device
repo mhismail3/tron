@@ -4,6 +4,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck disable=SC1091
+source "$ROOT_DIR/config/ci-toolchain.env"
 IOS_DIR="$ROOT_DIR/packages/ios-app"
 PROJECT="TronMobile.xcodeproj"
 DERIVED_DATA="build/DerivedData"
@@ -58,15 +60,23 @@ die() {
 }
 
 xcodegen_command() {
-    if [[ -n "${TRON_XCODEGEN:-}" && -x "$TRON_XCODEGEN" ]]; then
-        printf '%s\n' "$TRON_XCODEGEN"
+    local candidate resolved actual
+    if [[ -n "${TRON_XCODEGEN:-}" ]]; then
+        candidate="$TRON_XCODEGEN"
+        [[ "$candidate" == /* ]] || die "TRON_XCODEGEN must be an absolute path"
     elif [[ -x "$ROOT_DIR/.ci-tools/bin/xcodegen" ]]; then
-        printf '%s\n' "$ROOT_DIR/.ci-tools/bin/xcodegen"
-    elif command -v xcodegen >/dev/null 2>&1; then
-        command -v xcodegen
+        candidate="$ROOT_DIR/.ci-tools/bin/xcodegen"
     else
-        die "xcodegen is unavailable; run scripts/install-ci-tools.sh xcodegen (repository-managed fallback: $ROOT_DIR/.ci-tools/bin/xcodegen)"
+        candidate="$(command -v xcodegen 2>/dev/null || true)"
     fi
+    [[ -n "$candidate" ]] || die "xcodegen is unavailable; install a current Tron Mac app or run scripts/install-ci-tools.sh xcodegen"
+    resolved="$(realpath "$candidate" 2>/dev/null || true)"
+    [[ "$resolved" == /* && -f "$resolved" && ! -L "$resolved" && -x "$resolved" ]] \
+        || die "resolved xcodegen is missing, linked, or non-executable"
+    actual="$("$resolved" --version 2>/dev/null || true)"
+    [[ "$actual" == "Version: $TRON_CI_XCODEGEN_VERSION" ]] \
+        || die "xcodegen version mismatch; expected $TRON_CI_XCODEGEN_VERSION"
+    printf '%s\n' "$resolved"
 }
 
 validate_install_pair() {
@@ -270,7 +280,12 @@ build_install_launch() {
     xcodebuild -version
     printf 'iPhoneOS SDK %s\n' "$(xcrun --sdk iphoneos --show-sdk-version)"
     cd "$IOS_DIR"
-    "$(xcodegen_command)" generate
+    local xcodegen
+    if ! xcodegen="$(xcodegen_command)"; then
+        return 1
+    fi
+    [[ -n "$xcodegen" ]] || die "xcodegen resolution returned an empty command"
+    "$xcodegen" generate
 
     local bundle_id="$PHYSICAL_BUNDLE_ID"
 
