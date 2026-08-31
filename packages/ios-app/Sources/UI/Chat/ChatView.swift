@@ -245,6 +245,7 @@ struct ChatView: View {
         .onAppear {
             keyboardObserver.setOwnerWindow(composerResponder.window)
             keyboardObserver.start()
+            reconcileSessionPresentationVisibility()
             layoutTransaction.configure(
                 keyboard: keyboardObserver.transition,
                 reduceMotion: reduceMotion
@@ -277,6 +278,7 @@ struct ChatView: View {
             scenePhaseChanged(current)
         }
         .onChange(of: model.connectionState) { _, state in
+            reconcileSessionPresentationVisibility()
             guard scenePhase == .active,
                   presentationActivity.allowsPresentationPublication,
                   state == .connected,
@@ -288,6 +290,9 @@ struct ChatView: View {
             foregroundReconciliationCompleted()
         }
         .onChange(of: presentationActivity) { previous, current in
+            reconcileSessionPresentationVisibility(
+                surfaceActive: current.allowsPresentationPublication
+            )
             if previous.allowsPresentationPublication,
                !current.allowsPresentationPublication {
                 transcriptPresentation.suspendPendingWork()
@@ -368,10 +373,26 @@ struct ChatView: View {
         .onDisappear(perform: retirePresentation)
     }
 
+    private func reconcileSessionPresentationVisibility(
+        sceneActive: Bool? = nil,
+        surfaceActive: Bool? = nil
+    ) {
+        guard let target = presentationTarget else { return }
+        let hasMountedAuthority = model.connectionState == .connected
+            && model.hasMountedSessionAuthority(target)
+        model.setSessionPresentationVisible(
+            target,
+            visible: ChatSessionVisibilityPolicy.isVisible(
+                sceneActive: sceneActive ?? (scenePhase == .active),
+                surfaceActive: surfaceActive
+                    ?? presentationActivity.allowsPresentationPublication,
+                hasMountedAuthority: hasMountedAuthority
+            )
+        )
+    }
+
     private func scenePhaseChanged(_ current: ScenePhase) {
-        if current != .active, let target = presentationTarget {
-            model.setSessionPresentationVisible(target, visible: false)
-        }
+        reconcileSessionPresentationVisibility(sceneActive: current == .active)
         if current == .background {
             abandonLayoutTransaction()
             // Background suspension retires disposable presentation work while
@@ -381,15 +402,12 @@ struct ChatView: View {
                   presentationActivity.allowsPresentationPublication,
                   !sessionPresentation.needsOpeningResume,
                   transcriptPresentation.installed != nil {
-            if sessionPresentation.open.phase == .ready,
-               let target = presentationTarget {
-                model.setSessionPresentationVisible(target, visible: true)
-            }
             scrollCoordinator.foregroundViewportBecameActive()
         }
     }
 
     private func foregroundReconciliationCompleted() {
+        reconcileSessionPresentationVisibility()
         guard scenePhase == .active,
               presentationActivity.allowsPresentationPublication else { return }
         if sessionPresentation.needsOpeningResume
@@ -1265,6 +1283,10 @@ struct ChatView: View {
                 return
             }
             sessionPresentation.modelPresentationGeneration = generation
+            // Presence follows exact synchronized route authority, not scroll
+            // positioning. The composer can admit work before a large retained
+            // transcript reaches its first ready frame.
+            reconcileSessionPresentationVisibility()
             let installed = try await installCurrentTranscriptProjection(
                 presentationGeneration: generation
             )
@@ -1601,9 +1623,7 @@ struct ChatView: View {
                 return false
             }
             performanceSignposts.end(interval, result: .success, metrics: .none)
-            if scenePhase == .active, let target = presentationTarget {
-                model.setSessionPresentationVisible(target, visible: true)
-            }
+            reconcileSessionPresentationVisibility()
             // Publish leased interaction/editor routes only after chat opening
             // has crossed a real ready frame. Otherwise their sheet can cover
             // the parent, cancel opening, and create a present/dismiss loop.

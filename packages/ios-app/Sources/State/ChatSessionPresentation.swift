@@ -21,6 +21,16 @@ enum ChatOpeningSurfacePolicy {
     }
 }
 
+enum ChatSessionVisibilityPolicy {
+    static func isVisible(
+        sceneActive: Bool,
+        surfaceActive: Bool,
+        hasMountedAuthority: Bool
+    ) -> Bool {
+        sceneActive && surfaceActive && hasMountedAuthority
+    }
+}
+
 /// Disposable, session-scoped presentation state. Canonical session facts stay
 /// in AppModel and the transcript store; this owner is abandoned on route
 /// retirement and rebuilt from canonical snapshot plus bounded draft facts.

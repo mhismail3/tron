@@ -136,6 +136,30 @@ struct ChatSessionPresentationTests {
         ) == .none)
     }
 
+    @Test("session visibility follows synchronized topmost foreground authority, not ready-frame timing")
+    func sessionVisibilityPolicy() {
+        #expect(ChatSessionVisibilityPolicy.isVisible(
+            sceneActive: true,
+            surfaceActive: true,
+            hasMountedAuthority: true
+        ))
+        #expect(!ChatSessionVisibilityPolicy.isVisible(
+            sceneActive: false,
+            surfaceActive: true,
+            hasMountedAuthority: true
+        ))
+        #expect(!ChatSessionVisibilityPolicy.isVisible(
+            sceneActive: true,
+            surfaceActive: false,
+            hasMountedAuthority: true
+        ))
+        #expect(!ChatSessionVisibilityPolicy.isVisible(
+            sceneActive: true,
+            surfaceActive: true,
+            hasMountedAuthority: false
+        ))
+    }
+
     @Test("background suspension cancels an unanchored page task")
     func unanchoredPageCancellation() async throws {
         let clock = ManualClock()

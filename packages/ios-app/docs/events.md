@@ -71,9 +71,10 @@ admits and reduces mounted-session topics:
   continuous active period, so live `updatedAt` progress and heartbeat updates refresh row content
   without repeatedly reordering concurrent work; older Gateways fall back to stable profile-qualified
   identity for active-row ties. A final prompt response becomes unread only
-  at truthful settlement. Once an exact synchronized chat reaches its first ready frame in an active
-  scene, `SessionPresentationStore` publishes and renews a token-bound, revision-ordered
-  `session.presentation.set` lease; inactivity, route retirement, subscription replacement, and
+  at truthful settlement. Once an exact synchronized chat is mounted as the topmost surface in an
+  active scene, `SessionPresentationStore` publishes and renews a token-bound, revision-ordered
+  `session.presentation.set` lease without waiting for scroll positioning or a first-ready-frame delay;
+  covering sheets, inactivity, route retirement, subscription replacement, and
   connection retirement revoke it. Gateway uses the completion entry's one latched lease disposition
   for both canonical read-through and automatic completion-alert suppression. Opening still
   acknowledges only the completion revision installed by that exact presentation/connection owner,
