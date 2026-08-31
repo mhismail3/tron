@@ -5,8 +5,9 @@
 A fresh clone has neither Gateway dependencies/build output nor generated Mac
 payloads. The Mac Xcode target automatically runs
 `ensure-gateway-bundle.sh` before compiling when the payload is missing. This
-stages the Gateway's locked production dependencies and embedded Node runtimes;
-it does not require Pi to be installed globally.
+stages the Gateway's locked production dependencies, embedded Node runtimes,
+and checksum-pinned universal XcodeGen toolchain; it does not require Pi or
+XcodeGen to be installed globally on the destination Mac.
 
 For an explicit preflight or to refresh an existing payload:
 
@@ -23,8 +24,11 @@ directory. A wrong ambient `PATH` Node is skipped; resolution checks the exact
 only after proving their version. `TRON_NODE_BIN` may explicitly name an
 absolute executable, but it must print the pinned version; there is no ambient
 npm override. Failure happens before build or payload mutation. These variables
-affect staging only; the completed app uses its embedded Node runtimes and does
-not consult this toolchain.
+affect staging only. Release preparation also downloads and verifies the
+repository-pinned XcodeGen archive, executable, and preset tree, then
+fingerprints them under `Gateway/runtime/xcodegen`. The completed app uses only
+those embedded runtimes for supervised work and does not consult Homebrew, NVM,
+or the destination checkout's `.ci-tools` cache.
 
 `config/PushService.xcconfig` is the one maintainer-owned public Push service
 origin consumed by both iOS and this bundled Gateway. Development may stage an

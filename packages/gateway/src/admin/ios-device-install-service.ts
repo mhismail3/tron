@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
+import { lstatSync } from "node:fs";
 import { lstat, mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, parse } from "node:path";
+import { dirname, isAbsolute, join, parse } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
@@ -159,6 +160,7 @@ async function validateSourceRoot(value: unknown): Promise<string> {
   }
   for (const marker of [
     "packages/ios-app/project.yml",
+    "config/ci-toolchain.env",
     "scripts/tron-ios-device",
     "scripts/validate-ios-artifact.py",
     "scripts/verify-gateway-protocol-contract.py",
@@ -221,7 +223,7 @@ function statusDocument(value: unknown): IosDeviceInstallStatus {
     || !["requested", "running", "succeeded", "failed"].includes(String(raw.state))) {
     throw new GatewayError("conflict", "iOS device install status is malformed");
   }
-  const error = raw.error === undefined ? undefined : boundedText(raw.error, "failure", MAX_ERROR_BYTES);
+  const error = raw.error === undefined ? undefined : admittedFailure(raw.error);
   return {
     schema: 1,
     kind: STATUS_KIND,
@@ -335,9 +337,16 @@ async function defaultDiscoverTargets(): Promise<IosPhysicalDeviceTarget[]> {
 
 function failureText(error: unknown, maximum = MAX_ERROR_BYTES): string {
   const raw = error instanceof Error ? error.message : String(error);
-  const cleaned = raw.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, " ").trim();
+  const cleaned = raw.replace(/[\u0000-\u001f\u007f]+/gu, " ").replace(/\s+/gu, " ").trim();
   if (Buffer.byteLength(cleaned) <= maximum) return cleaned || "The iOS install helper failed.";
   return Buffer.from(cleaned).subarray(0, maximum).toString("utf8").replace(/�+$/u, "");
+}
+
+function admittedFailure(value: unknown): string {
+  if (typeof value !== "string" || Buffer.byteLength(value) === 0) {
+    throw new GatewayError("conflict", "iOS device install failure is malformed");
+  }
+  return failureText(value);
 }
 
 function defaultLauncher(environment: NodeJS.ProcessEnv): IosDeviceInstallLauncher | undefined {
@@ -581,8 +590,20 @@ export function iosDeviceInstallInvocation(
   };
 }
 
-function helperEnvironment(config: IosDeviceInstallConfig): NodeJS.ProcessEnv {
-  const inherited = process.env;
+function bundledXcodegen(runtimeExecutable: string): string | undefined {
+  const candidate = join(dirname(runtimeExecutable), "xcodegen", "bin", "xcodegen");
+  try {
+    const info = lstatSync(candidate);
+    return info.isFile() && !info.isSymbolicLink() && (info.mode & 0o111) !== 0 ? candidate : undefined;
+  } catch { return undefined; }
+}
+
+export function iosDeviceInstallHelperEnvironment(
+  config: IosDeviceInstallConfig,
+  inherited: NodeJS.ProcessEnv = process.env,
+  runtimeExecutable = process.execPath,
+): NodeJS.ProcessEnv {
+  const immutableXcodegen = bundledXcodegen(runtimeExecutable);
   const result: NodeJS.ProcessEnv = {
     PATH: inherited.PATH ?? "/usr/bin:/bin:/usr/sbin:/sbin",
     HOME: inherited.HOME,
@@ -592,6 +613,7 @@ function helperEnvironment(config: IosDeviceInstallConfig): NodeJS.ProcessEnv {
     LANG: inherited.LANG,
     LC_ALL: inherited.LC_ALL,
     DEVELOPER_DIR: inherited.DEVELOPER_DIR,
+    TRON_XCODEGEN: immutableXcodegen ?? inherited.TRON_XCODEGEN,
     TRON_IOS_GATEWAY_PROTOCOL_TARGET: config.gatewayChannel === "dev" ? "source" : "stable",
   };
   return Object.fromEntries(Object.entries(result).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
@@ -625,7 +647,7 @@ export async function runIosDeviceInstallHelper(input: {
   const invocation = iosDeviceInstallInvocation(sourceRoot, config.target.identifier);
   const child = spawn(invocation.executable, invocation.args, {
     cwd: invocation.cwd,
-    env: helperEnvironment(config),
+    env: iosDeviceInstallHelperEnvironment(config),
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });

@@ -1,12 +1,14 @@
-import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   IosDeviceInstallService,
   admitDevicectlTargets,
+  iosDeviceInstallHelperEnvironment,
   iosDeviceInstallInvocation,
   projectIosDeviceInstallConfig,
+  recordIosDeviceInstallHelperFailure,
   type IosPhysicalDeviceTarget,
 } from "./ios-device-install-service.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
@@ -28,6 +30,7 @@ async function fixture() {
   roots.push(tronHome, source);
   for (const path of [
     "packages/ios-app/project.yml",
+    "config/ci-toolchain.env",
     "scripts/tron-ios-device",
     "scripts/validate-ios-artifact.py",
     "scripts/verify-gateway-protocol-contract.py",
@@ -128,6 +131,70 @@ describe("IosDeviceInstallService", () => {
       .rejects.toMatchObject({ code: "busy", retryable: true });
   });
 
+  it("recovers a generated multiline install failure as a bounded projection", async () => {
+    const { tronHome, service } = await fixture();
+    const statusDirectory = join(tronHome, "gateway", "ios-device-installs", "status");
+    await mkdir(statusDirectory, { recursive: true });
+    const statusFile = join(statusDirectory, "device-alpha.json");
+    await writeFile(statusFile, JSON.stringify({
+      schema: 1,
+      kind: "tron-ios-device-install-status",
+      deviceId: "device-alpha",
+      state: "failed",
+      commandId: "command-install-1",
+      targetName: target.name,
+      startedAt: "2026-08-31T00:00:00.000Z",
+      updatedAt: "2026-08-31T00:00:01.000Z",
+      error: "first build failure\nsecond build failure\twith detail",
+    }), { mode: 0o600 });
+    await chmod(statusFile, 0o600);
+
+    await expect(service.status("device-alpha")).resolves.toEqual(expect.objectContaining({
+      state: "failed",
+      error: "first build failure second build failure with detail",
+    }));
+  });
+
+  it("persists detached helper failures in the status projection's own admission language", async () => {
+    const { source, tronHome, service } = await fixture();
+    await service.configure({ deviceId: "device-alpha", sourceRoot: source });
+    await service.install("device-alpha", "command-install-1");
+
+    await recordIosDeviceInstallHelperFailure(
+      tronHome,
+      "device-alpha",
+      "command-install-1",
+      new Error("first helper line\nsecond helper line\twith detail"),
+    );
+
+    await expect(service.status("device-alpha")).resolves.toEqual(expect.objectContaining({
+      state: "failed",
+      error: "first helper line second helper line with detail",
+    }));
+  });
+
+  it("passes the immutable payload XcodeGen to the detached install helper", async () => {
+    const { source, service } = await fixture();
+    const config = await service.configure({ deviceId: "device-alpha", sourceRoot: source });
+    const toolRoot = await mkdtemp(join(tmpdir(), "tron-ios-install-toolchain-"));
+    roots.push(toolRoot);
+    const runtime = join(toolRoot, "runtime", "node-arm64");
+    const xcodegen = join(toolRoot, "runtime", "xcodegen", "bin", "xcodegen");
+    await mkdir(join(toolRoot, "runtime", "xcodegen", "bin"), { recursive: true });
+    await writeFile(runtime, "runtime\n");
+    await writeFile(xcodegen, "tool\n");
+    await chmod(xcodegen, 0o755);
+
+    const environment = iosDeviceInstallHelperEnvironment(
+      config,
+      { PATH: "/usr/bin:/bin", HOME: "/Users/example", TRON_XCODEGEN: "/untrusted/ambient" },
+      runtime,
+    );
+    expect(environment.TRON_XCODEGEN).toBe(xcodegen);
+    expect(environment.PATH).toBe("/usr/bin:/bin");
+    expect(environment.TRON_IOS_GATEWAY_PROTOCOL_TARGET).toBe("stable");
+  });
+
   it("projects only opaque targets through paired-device receipt-backed RPC", async () => {
     const { source, service, tronHome } = await fixture();
     const update = vi.fn(async () => ({ accepted: true }));
@@ -171,6 +238,10 @@ describe("IosDeviceInstallService", () => {
     roots.push(linked);
     await symlink(source, linked);
     await expect(service.configure({ deviceId: "device-alpha", sourceRoot: linked }))
+      .rejects.toMatchObject({ code: "conflict" });
+
+    await rm(join(source, "config", "ci-toolchain.env"));
+    await expect(service.configure({ deviceId: "device-beta", sourceRoot: source }))
       .rejects.toMatchObject({ code: "conflict" });
 
     const unsupported = new IosDeviceInstallService({ tronHome, launcher: false, discoverer: vi.fn() });

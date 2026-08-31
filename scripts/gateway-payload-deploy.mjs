@@ -64,8 +64,10 @@ const REQUIREMENTS = [
   ["app/scripts/ensure-node-pty-helper.mjs", 1, false],
   ["app/scripts/gateway-payload-deploy.mjs", 1, false],
   ["app/node_modules", 0, true],
-  ["runtime/node-arm64", 1_048_576, false],
-  ["runtime/node-x64", 1_048_576, false],
+  ["runtime/node-arm64", 1_048_576, false, true],
+  ["runtime/node-x64", 1_048_576, false, true],
+  ["runtime/xcodegen/bin/xcodegen", 1_048_576, false, true],
+  ["runtime/xcodegen/share/xcodegen/SettingPresets/base.yml", 1, false, false],
 ];
 
 function ipv6Bytes(address) {
@@ -205,7 +207,7 @@ async function completePayload(root) {
     const directoryInfo = await lstat(join(resolved, directory));
     if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()) throw new Error(`payload root is not a regular directory: ${directory}`);
   }
-  for (const [path, minimum, directory] of REQUIREMENTS) {
+  for (const [path, minimum, directory, executable = false] of REQUIREMENTS) {
     const candidate = join(resolved, path);
     if (!under(resolved, candidate)) throw new Error(`payload path escapes root: ${path}`);
     const linkInfo = await lstat(candidate);
@@ -214,7 +216,7 @@ async function completePayload(root) {
     if (directory ? !info.isDirectory() : !info.isFile() || info.size < minimum) {
       throw new Error(`payload is incomplete: ${path}`);
     }
-    if (!directory && path.startsWith("runtime/") && (info.mode & 0o111) === 0) {
+    if (executable && (info.mode & 0o111) === 0) {
       throw new Error(`runtime is not executable: ${path}`);
     }
   }
@@ -1168,6 +1170,11 @@ export async function preflightPayload(root, runCommand = runBounded, timeoutMs 
   const runtime = join(root, process.arch === "arm64" ? "runtime/node-arm64" : "runtime/node-x64");
   const entrypoint = join(root, "app", "dist", "index.js");
   await runCommand(runtime, ["--check", entrypoint], { timeoutMs, maxOutputBytes: 64 * 1024 });
+  const xcodegen = join(root, "runtime", "xcodegen", "bin", "xcodegen");
+  const xcodegenResult = await runCommand(xcodegen, ["--version"], { timeoutMs, maxOutputBytes: 8 * 1024 });
+  if (!/^Version: \d+\.\d+\.\d+\s*$/u.test(xcodegenResult?.output ?? "")) {
+    throw new Error("candidate Gateway bundled XcodeGen is unavailable or malformed");
+  }
   const nativeModules = (await regularFiles(root, "app/node_modules"))
     .filter((entry) => entry.target === undefined && entry.path.endsWith(".node"))
     .map((entry) => entry.path)

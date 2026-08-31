@@ -221,6 +221,16 @@ This keeps Stable independent of Homebrew/NVM while avoiding a Debug toolchain
 regression. Alias failure aborts startup before third-party code loads. No payload
 selection code writes canonical sessions or credentials.
 
+The same immutable runtime boundary contains the pinned universal XcodeGen
+executable and its complete preset tree. Release staging verifies the pinned
+archive, executable bytes, preset-tree digest, version, and both Mac
+architectures before publication; Xcode signs the executable before the outer
+app seals the payload. The launcher and update preflight require the toolchain,
+and source-built Gateway candidates inherit it byte-for-byte from the active
+signed payload. The detached iOS installer receives its absolute path through
+`TRON_XCODEGEN`, so launchd's sanitized `PATH` and machine-local package managers
+cannot alter project generation.
+
 The Mac app and iOS app emit the same canonical protocol range into their final
 Info plists. Build scripts validate source constants, final app metadata, and
 the bundled payload together; the physical-device helper additionally compares

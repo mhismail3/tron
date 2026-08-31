@@ -71,6 +71,13 @@ async function addRuntimeNodeAliases(root) {
   await mkdir(dirname(piCli), { recursive: true });
   await writeFile(piCli, "#!/usr/bin/env node\n");
   await chmod(piCli, 0o755);
+  const xcodegen = join(root, "runtime", "xcodegen", "bin", "xcodegen");
+  await mkdir(dirname(xcodegen), { recursive: true });
+  await writeFile(xcodegen, `#!/bin/sh\nprintf 'Version: 2.45.3\\n'\n#${"x".repeat(1_048_576)}\n`);
+  await chmod(xcodegen, 0o755);
+  const basePreset = join(root, "runtime", "xcodegen", "share", "xcodegen", "SettingPresets", "base.yml");
+  await mkdir(dirname(basePreset), { recursive: true });
+  await writeFile(basePreset, "PRODUCT_NAME: $TARGET_NAME\n");
   for (const architecture of ["arm64", "x64"]) {
     const directory = join(root, "runtime", `bin-${architecture}`);
     await mkdir(directory, { recursive: true });
@@ -283,7 +290,13 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
       join(staged.root, "app", "node_modules", "@earendil-works"), join(staged.root, "app", "node_modules"),
       join(staged.root, "app", "dist"), join(staged.root, "app", "scripts"),
       join(staged.root, "app"), join(staged.root, "runtime", "bin-arm64"),
-      join(staged.root, "runtime", "bin-x64"), join(staged.root, "runtime"), staged.root,
+      join(staged.root, "runtime", "bin-x64"),
+      join(staged.root, "runtime", "xcodegen", "bin"),
+      join(staged.root, "runtime", "xcodegen", "share", "xcodegen", "SettingPresets"),
+      join(staged.root, "runtime", "xcodegen", "share", "xcodegen"),
+      join(staged.root, "runtime", "xcodegen", "share"),
+      join(staged.root, "runtime", "xcodegen"),
+      join(staged.root, "runtime"), staged.root,
     ]) await chmod(directory, 0o755);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -399,6 +412,11 @@ test("source builds compile privately and leave the trusted source tree unchange
       join(store.versionsRoot, "candidate", "app", "node_modules"),
       join(store.versionsRoot, "candidate", "runtime", "bin-arm64"),
       join(store.versionsRoot, "candidate", "runtime", "bin-x64"),
+      join(store.versionsRoot, "candidate", "runtime", "xcodegen", "bin"),
+      join(store.versionsRoot, "candidate", "runtime", "xcodegen", "share", "xcodegen", "SettingPresets"),
+      join(store.versionsRoot, "candidate", "runtime", "xcodegen", "share", "xcodegen"),
+      join(store.versionsRoot, "candidate", "runtime", "xcodegen", "share"),
+      join(store.versionsRoot, "candidate", "runtime", "xcodegen"),
       join(store.versionsRoot, "candidate", "runtime"),
     ]) await chmod(directory, 0o755);
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -584,12 +602,16 @@ test("preflight imports candidate protocol values and rejects incompatible range
     const payload = await makePreflightFixture(root);
     const run = async (_tool, args) => args[0] === "-e"
       ? { code: 0, output: JSON.stringify({ protocolVersion: 4, minProtocolVersion: 4 }) }
-      : { code: 0, output: "" };
+      : args[0] === "--version"
+        ? { code: 0, output: "Version: 2.45.3\n" }
+        : { code: 0, output: "" };
     await preflightPayload(payload, run);
     await assert.rejects(
       preflightPayload(payload, async (_tool, args) => args[0] === "-e"
         ? { code: 0, output: JSON.stringify({ protocolVersion: 3, minProtocolVersion: 3 }) }
-        : { code: 0, output: "" }),
+        : args[0] === "--version"
+          ? { code: 0, output: "Version: 2.45.3\n" }
+          : { code: 0, output: "" }),
       /protocol range is incompatible/
     );
   } finally { await rm(root, { recursive: true, force: true }); }

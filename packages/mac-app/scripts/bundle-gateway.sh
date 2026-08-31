@@ -21,6 +21,8 @@ RUNTIME_DIR="$PAYLOAD_DIR/runtime"
 LIBRARY_DIR="$RESOURCES_DIR/Library"
 HELPER_DIR="$LIBRARY_DIR/LoginItems/Tron Agent.app/Contents"
 NODE_VERSION_FILE="$REPO_ROOT/.node-version"
+# shellcheck disable=SC1091
+source "$REPO_ROOT/config/ci-toolchain.env"
 [[ -f "$NODE_VERSION_FILE" ]] || { echo "missing canonical Node version file: $NODE_VERSION_FILE" >&2; exit 3; }
 NODE_VERSION="$(<"$NODE_VERSION_FILE")"
 NODE_VERSION_LINES="$(awk 'END { print NR }' "$NODE_VERSION_FILE")"
@@ -253,6 +255,53 @@ validate_node_runtime() {
     fi
 }
 
+xcodegen_presets_hash() {
+    local root="$1"
+    (
+        cd "$root"
+        find . -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d '' file; do
+            printf '%s\0' "$file"
+            shasum -a 256 "$file" | awk '{print $1}'
+        done
+    ) | shasum -a 256 | awk '{print $1}'
+}
+
+stage_xcodegen() {
+    local cache_root="${TRON_CI_TOOLS_DIR:-$REPO_ROOT/.ci-tools}"
+    local executable presets destination="$RUNTIME_DIR/xcodegen"
+    TRON_CI_TOOLS_DIR="$cache_root" "$REPO_ROOT/scripts/install-ci-tools.sh" xcodegen
+    executable="$(realpath "$cache_root/bin/xcodegen")"
+    presets="$(realpath "$cache_root/share/xcodegen")"
+    [[ -f "$executable" && ! -L "$executable" && -x "$executable" ]] || {
+        echo "pinned XcodeGen executable is unavailable after installation" >&2
+        exit 3
+    }
+    [[ -d "$presets" && ! -L "$presets" ]] || {
+        echo "pinned XcodeGen presets are unavailable after installation" >&2
+        exit 3
+    }
+    [[ "$("$executable" --version 2>/dev/null)" == "Version: $TRON_CI_XCODEGEN_VERSION" ]] || {
+        echo "pinned XcodeGen version mismatch" >&2
+        exit 3
+    }
+    [[ "$(shasum -a 256 "$executable" | awk '{print $1}')" == "$TRON_CI_XCODEGEN_BINARY_SHA256" ]] || {
+        echo "pinned XcodeGen executable checksum mismatch" >&2
+        exit 3
+    }
+    [[ "$(xcodegen_presets_hash "$presets")" == "$TRON_CI_XCODEGEN_PRESETS_SHA256" ]] || {
+        echo "pinned XcodeGen presets checksum mismatch" >&2
+        exit 3
+    }
+    safe_remove_tree "$destination"
+    mkdir -p "$destination/bin" "$destination/share"
+    install -m 0755 "$executable" "$destination/bin/xcodegen"
+    /usr/bin/ditto "$presets" "$destination/share/xcodegen"
+    if find "$destination" -type l -print -quit | grep -q .; then
+        echo "staged XcodeGen toolchain contains a symlink" >&2
+        exit 3
+    fi
+}
+
 stage_node() {
     local arch="$1" expected="$2" destination="$RUNTIME_DIR/node-$1"
     if ((skip_download)); then
@@ -288,6 +337,7 @@ cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
 
 stage_node arm64 "$NODE_ARM64_SHA256"
 stage_node x64 "$NODE_X64_SHA256"
+stage_xcodegen
 
 # Provide an immutable architecture-specific command named `node` for hosted
 # extensions whose detached helpers fall back to PATH when the embedded runtime
@@ -316,7 +366,8 @@ rm -rf "$(dirname "$launcher_temp")"
 for required_payload in \
     "$APP_DIR/dist/index.js" "$APP_DIR/dist/version.js" "$APP_DIR/package.json" "$APP_DIR/package-lock.json" "$APP_DIR/PushService.xcconfig" \
     "$APP_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/gateway-payload-deploy.mjs" \
-    "$APP_DIR/node_modules" "$RUNTIME_DIR/node-arm64" "$RUNTIME_DIR/node-x64"; do
+    "$APP_DIR/node_modules" "$RUNTIME_DIR/node-arm64" "$RUNTIME_DIR/node-x64" \
+    "$RUNTIME_DIR/xcodegen/bin/xcodegen" "$RUNTIME_DIR/xcodegen/share/xcodegen/SettingPresets/base.yml"; do
     [[ -e "$required_payload" ]] || { echo "missing required staged payload: $required_payload" >&2; exit 3; }
 done
 PI_CLI="$APP_DIR/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"

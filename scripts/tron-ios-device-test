@@ -28,6 +28,26 @@ source "$root_dir/scripts/tron-ios-device"
 GATEWAY_PROTOCOL_TARGET=source
 validate_gateway_protocol_target_prebuild >/dev/null
 GATEWAY_PROTOCOL_TARGET=stable
+tool_fixture="$(mktemp -d "${TMPDIR:-/tmp}/tron-ios-device-tool.XXXXXX")"
+trap 'rm -rf "$tool_fixture"' EXIT
+cat > "$tool_fixture/xcodegen" <<EOF
+#!/usr/bin/env bash
+printf 'Version: %s\\n' '$TRON_CI_XCODEGEN_VERSION'
+EOF
+chmod 0755 "$tool_fixture/xcodegen"
+[[ "$(TRON_XCODEGEN="$tool_fixture/xcodegen" xcodegen_command)" == "$(realpath "$tool_fixture/xcodegen")" ]] || {
+    echo "explicit pinned XcodeGen was not resolved exactly" >&2
+    exit 1
+}
+cat > "$tool_fixture/wrong-xcodegen" <<'EOF'
+#!/usr/bin/env bash
+printf 'Version: 0.0.0\n'
+EOF
+chmod 0755 "$tool_fixture/wrong-xcodegen"
+if (TRON_XCODEGEN="$tool_fixture/wrong-xcodegen" xcodegen_command) >/dev/null 2>&1; then
+    echo "wrong XcodeGen version was accepted" >&2
+    exit 1
+fi
 [[ "$PHYSICAL_BUNDLE_ID" == "com.tron.mobile" ]] || {
     echo "device helper launch identity is not canonical" >&2
     exit 1

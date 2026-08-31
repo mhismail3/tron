@@ -135,6 +135,9 @@ struct MacSourceGuardTests {
         #expect(bundleScript.contains("tron-gateway-payload"))
         #expect(bundleScript.contains("node-arm64"))
         #expect(bundleScript.contains("node-x64"))
+        #expect(bundleScript.contains("stage_xcodegen"))
+        #expect(bundleScript.contains("TRON_CI_XCODEGEN_BINARY_SHA256"))
+        #expect(bundleScript.contains("TRON_CI_XCODEGEN_PRESETS_SHA256"))
         #expect(bundleScript.contains("bin-$arch"))
         #expect(bundleScript.contains("$alias_dir/node"))
         #expect(bundleScript.contains("safe_remove_tree \"$alias_dir\"\n    mkdir -p \"$alias_dir\""))
@@ -189,7 +192,7 @@ struct MacSourceGuardTests {
         #expect(!launchdFixture.contains("~/.tron"))
 
         let verifierScript = try Self.read(macRoot, "scripts/verify-gateway-payload.sh")
-        for required in ["--verify-payload", "NODE_ARM64_SHA256", "NODE_X64_SHA256", "payload tree is writable", "Mach-O", "lipo -archs", "realpath", "runtime/bin-", "alias target is not exact", "-arch arm64 -arch x86_64", "cmp -s", "GATEWAY_VERSION", "SOURCE_REVISION"] {
+        for required in ["--verify-payload", "NODE_ARM64_SHA256", "NODE_X64_SHA256", "payload tree is writable", "Mach-O", "lipo -archs", "realpath", "runtime/bin-", "runtime/xcodegen/bin/xcodegen", "TRON_CI_XCODEGEN_VERSION", "TRON_CI_XCODEGEN_PRESETS_SHA256", "alias target is not exact", "-arch arm64 -arch x86_64", "cmp -s", "GATEWAY_VERSION", "SOURCE_REVISION"] {
             #expect(verifierScript.contains(required), "payload verifier missing marker: \(required)")
         }
 
@@ -197,16 +200,14 @@ struct MacSourceGuardTests {
         #expect(hashScript.contains("find \"$ROOT/app\" \"$ROOT/runtime\""))
         #expect(hashScript.contains("-type f -o -type l"))
         #expect(hashScript.contains("shasum -a 256"))
+        #expect(hashScript.contains("runtime/xcodegen/bin/xcodegen"))
 
-        let repoRoot = macRoot
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
         let installVerifier = try Self.read(repoRoot, "scripts/verify-mac-install.sh")
         #expect(installVerifier.contains("if [[ \"$payload\" == \"$bundled\" ]]; then"))
         #expect(installVerifier.contains("incompatible or invalid external selection rejected; bundled payload selected"))
 
         let launcher = try Self.read(macRoot, "scripts/tron-gateway-launcher.c")
-        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_PROTOCOL_VERSION", "TRON_GATEWAY_MIN_PROTOCOL_VERSION", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_UPDATE_HELPER", "gateway-payload-deploy.mjs", "immutable_tree", "required_runtime_alias", "required_pi_alias", "../node-%s", "pi-coding-agent/dist/cli.js", "CC_SHA256", "S_IWUSR", "--verify-payload", "nodeVersion"] {
+        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_PROTOCOL_VERSION", "TRON_GATEWAY_MIN_PROTOCOL_VERSION", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_UPDATE_HELPER", "gateway-payload-deploy.mjs", "runtime/xcodegen/bin/xcodegen", "immutable_tree", "required_runtime_alias", "required_pi_alias", "../node-%s", "pi-coding-agent/dist/cli.js", "CC_SHA256", "S_IWUSR", "--verify-payload", "nodeVersion"] {
             #expect(launcher.contains(required), "launcher missing external payload safety marker: \(required)")
         }
 

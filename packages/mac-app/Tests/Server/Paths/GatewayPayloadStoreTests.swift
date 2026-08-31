@@ -254,6 +254,46 @@ struct GatewayPayloadStoreTests {
         }
     }
 
+    @Test("payload admission requires the complete bundled XcodeGen toolchain")
+    func bundledXcodegenAdmission() throws {
+        let temporary = try TemporaryPayloadDirectory()
+        defer { temporary.cleanup() }
+        for relativePath in [
+            GatewayPayloadValidator.xcodegenRelativePath,
+            GatewayPayloadValidator.xcodegenBasePresetRelativePath,
+        ] {
+            let root = temporary.root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try makePayload(
+                root: root,
+                channel: "stable",
+                version: "missing-toolchain",
+                fingerprint: String(repeating: "a", count: 64)
+            )
+            let target = root.appendingPathComponent(relativePath, isDirectory: false)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+            var parent = target.deletingLastPathComponent()
+            while parent.path.hasPrefix(root.path), parent != root {
+                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: parent.path)
+                parent.deleteLastPathComponent()
+            }
+            try FileManager.default.removeItem(at: target)
+            parent = target.deletingLastPathComponent()
+            while parent.path.hasPrefix(root.path), parent != root {
+                try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: parent.path)
+                parent.deleteLastPathComponent()
+            }
+            try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+
+            guard case .failure(.incomplete(relativePath)) = GatewayPayloadValidator.validate(
+                payloadRoot: root,
+                expectedChannel: "stable"
+            ) else {
+                Issue.record("missing bundled toolchain entry was admitted: \(relativePath)")
+                continue
+            }
+        }
+    }
+
     @Test("writable payload entries are ordinary incomplete external payloads")
     func writablePayloadFallsBack() throws {
         let temporary = try TemporaryPayloadDirectory()
@@ -354,6 +394,13 @@ struct GatewayPayloadStoreTests {
         try fm.createDirectory(at: piCLI.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("#!/usr/bin/env node\n".utf8).write(to: piCLI)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: piCLI.path)
+        let xcodegen = root.appendingPathComponent(GatewayPayloadValidator.xcodegenRelativePath, isDirectory: false)
+        try fm.createDirectory(at: xcodegen.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(repeating: 0x7f, count: 1_048_576).write(to: xcodegen)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: xcodegen.path)
+        let basePreset = root.appendingPathComponent(GatewayPayloadValidator.xcodegenBasePresetRelativePath, isDirectory: false)
+        try fm.createDirectory(at: basePreset.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("settings: {}\n".utf8).write(to: basePreset)
         for architecture in ["arm64", "x64"] {
             let runtime = runtimeDirectory.appendingPathComponent("node-\(architecture)", isDirectory: false)
             try Data(repeating: 0x7f, count: 1_048_576).write(to: runtime)

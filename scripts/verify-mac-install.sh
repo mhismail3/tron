@@ -4,6 +4,8 @@
 set -u
 
 APP="${TRON_APP_PATH:-/Applications/Tron.app}"
+# shellcheck disable=SC1091
+source "$(dirname "$0")/../config/ci-toolchain.env"
 UID_VALUE="$(id -u)"
 HOST_ARCH="$(uname -m)"
 failures=0
@@ -106,6 +108,24 @@ verify_payload() {
     || fail "$label selected payload protocol differs from installed app"
   local pi_cli="${payload}/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   [[ -f "$pi_cli" && ! -L "$pi_cli" && -x "$pi_cli" ]] && pass "$label bundled Pi CLI executable" || fail "$label bundled Pi CLI missing/substituted"
+  local xcodegen="${payload}/runtime/xcodegen/bin/xcodegen"
+  local xcodegen_presets="${payload}/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"
+  local xcodegen_arches
+  if regular_file "$xcodegen" && [[ -x "$xcodegen" ]] && regular_file "$xcodegen_presets"; then
+    pass "$label bundled XcodeGen toolchain is complete"
+  else
+    fail "$label bundled XcodeGen toolchain is missing/substituted"
+  fi
+  codesign --verify --strict "$xcodegen" >/dev/null 2>&1 \
+    && pass "$label bundled XcodeGen signature valid" \
+    || fail "$label bundled XcodeGen signature invalid"
+  xcodegen_arches="$(lipo -archs "$xcodegen" 2>/dev/null || true)"
+  [[ " $xcodegen_arches " == *" arm64 "* && " $xcodegen_arches " == *" x86_64 "* ]] \
+    && pass "$label bundled XcodeGen is universal arm64/x86_64" \
+    || fail "$label bundled XcodeGen architecture is invalid"
+  [[ "$("$xcodegen" --version 2>/dev/null || true)" == "Version: $TRON_CI_XCODEGEN_VERSION" ]] \
+    && pass "$label bundled XcodeGen version is canonical" \
+    || fail "$label bundled XcodeGen version mismatch"
   for architecture in arm64 x64; do
     local runtime="${payload}/runtime/node-${architecture}" alias="${payload}/runtime/bin-${architecture}/node" pi_alias="${payload}/runtime/bin-${architecture}/pi" expected_arch archs version_output entitlements native_arch
     [[ -x "$runtime" ]] && pass "$label Node $architecture runtime executable" || fail "$label Node $architecture runtime missing/non-executable"
