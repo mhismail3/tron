@@ -64,4 +64,6 @@ temp/
 
 # Agent runtime state
 .claude/scheduled_tasks.lock
-.pi/
+.pi/*
+!.pi/prompts/
+!.pi/prompts/*.md

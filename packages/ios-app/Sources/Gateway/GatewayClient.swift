@@ -16,9 +16,10 @@ enum GatewayUploadPolicy {
 enum GatewayLivenessPolicy {
     /// Must remain comfortably below the Gateway's 25-second heartbeat. A
     /// request frame refreshes old Gateway versions even when their WebSocket
-    /// stack does not surface an automatic pong from URLSession.
+    /// stack does not surface an automatic pong from URLSession. Server-to-client
+    /// traffic must not suppress this client-activity proof.
     static let probeInterval: Duration = .seconds(10)
-    static let probeAfterSilence: Duration = .seconds(10)
+    static let probeAfterClientSilence: Duration = .seconds(10)
     static let probeTimeout: Duration = .seconds(8)
 }
 
@@ -232,6 +233,7 @@ actor GatewayClient {
         var eventsActivated = false
         var pending: [String: PendingRequest] = [:]
         var lastInboundAt: ContinuousClock.Instant?
+        var lastClientFrameAt: ContinuousClock.Instant?
         var overflowResyncSignaled = false
         var info: GatewayInfo?
     }
@@ -355,6 +357,9 @@ actor GatewayClient {
             ])
             try await socket.send(JSONEncoder.gateway.encode(hello))
             try requireEpoch(epochID)
+            guard var sentEpoch = connection, sentEpoch.id == epochID else { throw CancellationError() }
+            sentEpoch.lastClientFrameAt = clock.now()
+            connection = sentEpoch
             let data = try await withTimeout(duration: handshakeTimeout) { try await socket.receive() }
             try requireEpoch(epochID)
             try GatewayFramePolicy.validateInboundBytes(data)
@@ -575,6 +580,7 @@ actor GatewayClient {
         case .success:
             request.transmission = .sent
             epoch.pending[id] = request
+            epoch.lastClientFrameAt = clock.now()
             connection = epoch
         case .failure(let error):
             fail(
@@ -894,8 +900,8 @@ actor GatewayClient {
         completedEpoch.livenessTask = nil
         connection = completedEpoch
         do {
-            guard let lastInboundAt = connection?.lastInboundAt else { return }
-            if clock.now() - lastInboundAt >= GatewayLivenessPolicy.probeAfterSilence {
+            guard let lastClientFrameAt = connection?.lastClientFrameAt else { return }
+            if clock.now() - lastClientFrameAt >= GatewayLivenessPolicy.probeAfterClientSilence {
                 struct Response: Decodable { let protocolVersion: Int }
                 let _: Response = try await request(
                     "system.info",

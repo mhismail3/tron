@@ -640,6 +640,35 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("server traffic cannot suppress the client heartbeat proof")
+    func inboundTrafficDoesNotSuppressLivenessProbe() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                clock: clock.clock,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000031")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000032")!,
+                ]).source
+            )
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+            try await clock.waitUntilSleeping(count: 1)
+
+            clock.advance(by: .seconds(5))
+            var eventIterator = client.events.makeAsyncIterator()
+            await socket.enqueue(eventFrame(topic: "session.summary", payload: .object([:])))
+            #expect(await eventIterator.next()?.event.topic == "session.summary")
+
+            clock.advance(by: .seconds(5))
+            try await socket.waitUntilSent(count: 2)
+            #expect(try await decodedValue(in: socket, index: 1).objectValue?["method"] == .string("system.info"))
+            await client.close()
+        }
+    }
+
     @Test("a current receiver cancellation is a transport disconnect")
     func currentReceiverCancellationDisconnects() async throws {
         try await withTestWatchdog {
