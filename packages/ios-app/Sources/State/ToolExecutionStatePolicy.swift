@@ -32,11 +32,14 @@ enum ToolExecutionStatePolicy {
             output: output,
             outputTruncated: outputTruncated,
             isError: candidate.isError,
-            startedAt: candidate.startedAt,
+            // One exact call ID has one execution interval. Sparse or late
+            // frames may enrich it, but must not restart it or reduce an already
+            // accepted monotonic duration sample.
+            startedAt: current.startedAt,
             updatedAt: candidate.updatedAt,
-            lastProgressAt: candidate.lastProgressAt,
-            completedAt: candidate.completedAt,
-            durationMs: candidate.durationMs,
+            lastProgressAt: candidate.lastProgressAt ?? current.lastProgressAt,
+            completedAt: candidate.completedAt ?? current.completedAt,
+            durationMs: maximumDuration(current.durationMs, candidate.durationMs),
             progressSequence: candidate.progressSequence,
             extensionOrigin: candidate.extensionOrigin ?? current.extensionOrigin,
             extensionActivity: candidate.extensionActivity ?? (candidate.status == .running ? current.extensionActivity : nil),
@@ -81,6 +84,15 @@ enum ToolExecutionStatePolicy {
     }
 
     private static let maximumLiveOutputBytes = 96 * 1_024
+
+    private static func maximumDuration(_ current: Int?, _ candidate: Int?) -> Int? {
+        switch (current, candidate) {
+        case let (current?, candidate?): Swift.max(0, Swift.max(current, candidate))
+        case let (current?, nil): max(0, current)
+        case let (nil, candidate?): max(0, candidate)
+        case (nil, nil): nil
+        }
+    }
 
     private static func nonempty(_ value: String?) -> String? {
         guard let value, !value.isEmpty else { return nil }

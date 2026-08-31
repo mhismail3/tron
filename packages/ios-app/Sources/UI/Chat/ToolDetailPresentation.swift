@@ -75,7 +75,14 @@ struct ToolStatusChipPresentation: Hashable, Sendable {
     let icon: String
 
     static func make(tool: ChatToolPresentation, at date: Date = .now) -> ToolStatusChipPresentation {
-        let duration = tool.elapsedMilliseconds(at: date).map(ToolTiming.format(milliseconds:))
+        make(tool: tool, elapsedMilliseconds: tool.elapsedMilliseconds(at: date))
+    }
+
+    static func make(
+        tool: ChatToolPresentation,
+        elapsedMilliseconds: Int?
+    ) -> ToolStatusChipPresentation {
+        let duration = elapsedMilliseconds.map(ToolTiming.format(milliseconds:))
         let text = [tool.subtitle, duration].compactMap { $0 }.joined(separator: " · ")
         let icon: String
         if tool.error { icon = "exclamationmark.triangle.fill" }

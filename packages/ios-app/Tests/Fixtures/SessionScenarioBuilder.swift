@@ -326,7 +326,10 @@ struct SessionScenarioBuilder: Sendable {
                 cancelled: false,
                 truncated: false,
                 fullOutputPath: nil,
-                excludeFromContext: nil
+                excludeFromContext: nil,
+                startedAt: nil,
+                completedAt: nil,
+                durationMs: nil
             ))
         default:
             return .summary(SummaryTranscriptItem(

@@ -204,8 +204,12 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   at agent settlement and deterministically reconstructs canonical segment boundaries on cold reopen,
   so continuous delivery and catch-up assemble the same bounded physical rows without cross-turn merges.
   The Gateway supplies monotonic duration samples while a call is running and the
-  authoritative final call-to-return duration when it completes; chips display those
-  samples without deriving normal timing from the device wall clock. The runtime-only
+  authoritative final call-to-return duration when it completes. Visible running chips
+  rebase each sample onto device uptime and advance locally between progress events;
+  producer output cadence never acts as the clock. Declared invocations do not accrue
+  execution time before the Gateway starts them. Terminal reduction and canonical handoff
+  preserve the greatest accepted monotonic sample, so settlement cannot replace a longer
+  execution with a near-zero late callback. The runtime-only
   tail overlay admits every authoritative execution without canonical or streaming placement. iOS
   preserves this ownership through projection: runtime-only and streaming rows stay in
   `ChatLiveRegion` and never become `ChatCommittedLedger` rows; canonical terminal results dominate
@@ -215,8 +219,10 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   liveness: the chip spinner is driven only by an actually running descriptor. Structure-change notifications with
   `branchChanged: false` preserve an installed earlier-message prefix until an authoritative snapshot proves its overlap;
   only branch replacement retires that prefix.
-  Older Gateways
-  without live duration samples use a bounded local monotonic fallback. The open detail
+  Older Gateways without live duration samples use the same bounded local monotonic clock
+  from the execution start timestamp. Direct `session.bash` canonical rows from the current
+  Gateway also carry optional exact start, completion, and duration metadata and render the
+  same terminal elapsed treatment; older Bash history remains valid without timing. The open detail
   sheet continues to consume the newest immutable call presentation, showing status and all bounded readable
   latest bounded live-output frame. Each newer nonempty frame replaces the displayed frame in place rather than
   accumulating repeated status snapshots; an empty advisory frame preserves the last readable output so an open
@@ -228,7 +234,7 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   extension provenance never substitutes **Extension activity**. Structural chip targets
   exclude duration and payload churn, coalesce for one display frame, and use a monotonic
   latest-target token for local interruptible animation while transcript and scroll
-  projection transactions remain stable while the transcript boundary scopes suppression to installed-projection identity changes, preserving both the discrete Liquid Glass touch-down and its continuous drag transactions. The physical row host installs no second content transition around the chip; only the chip's shallow value owner animates, preventing overlapping snapshots of rapid parallel-group updates. Measured row entrance clips retain a layout-neutral effect gutter only during admission, then remove the clipping node entirely so the stable transcript chip retains its unconstrained native press-and-drag region. The one stable chip surface retains semantic tint as its value changes: running is amber, failure is red, and successful completion uses the emerald tool role. Legacy and consolidated transcript tool chips use native interactive Liquid Glass as their sole press-and-drag owner. Aggregate Used Tools sheets instead use lazy full-width static summary rows, each with one accessible tap target. Transcript chip surfaces handle taps directly and expose explicit button accessibility semantics; they are not wrapped in a second native `Button` press phase, preserving the system drag morph without an immediate stacked zoom or custom scale/opacity effect. Multi-tool run chips show accumulated time as the sum of their
+  projection transactions remain stable while the transcript boundary scopes suppression to installed-projection identity changes, preserving both the discrete Liquid Glass touch-down and its continuous drag transactions. The physical row host installs no second content transition around the chip; only the chip's shallow value owner animates, preventing overlapping snapshots of rapid parallel-group updates. Measured row entrance clips retain a layout-neutral effect gutter only during admission, then remove the clipping node entirely so the stable transcript chip retains its unconstrained native press-and-drag region. The one stable chip surface retains semantic tint as its value changes: running is amber, failure is red, and successful completion uses the emerald tool role. Legacy and consolidated transcript tool chips use native interactive Liquid Glass as their sole press-and-drag owner. Aggregate tool detail sheets instead use lazy full-width static summary rows, each with one accessible tap target. Transcript chip surfaces handle taps directly and expose explicit button accessibility semantics; they are not wrapped in a second native `Button` press phase, preserving the system drag morph without an immediate stacked zoom or custom scale/opacity effect. Multi-tool run chips show accumulated time as the sum of their
   invocation durations. Aggregate row summaries and individual detail routes install atomically for one projection tag,
   and rows remain in reverse canonical invocation order rather than switching when optional
   timing metadata arrives. Aggregate rows center status with the title, place command/path

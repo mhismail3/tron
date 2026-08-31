@@ -8,8 +8,8 @@ Make transcript tool activity deterministic, identity-stable, and locally animat
 
 The completed behavior must satisfy all of the following:
 
-1. A finalized same-message group of five tool calls first appears as one **Using 5 tools** chip, not as a sequence such as a single tool, **Using 2 tools**, and **Using 5 tools**.
-2. When all calls settle, the chip smoothly becomes **Used 5 tools**.
+1. A finalized same-message group of five tool calls first appears as one **5 tools** chip, not as a sequence such as a single tool, **2 tools**, and **5 tools**.
+2. Its separate status smoothly changes from **In progress** to **Completed** when all calls settle.
 3. A single tool always displays its actual tool name, including extension-owned tools.
 4. Transcript tool chips never use **Extension activity** as a replacement for a tool name.
 5. A tool run keeps one stable presentation identity through live progress, canonical persistence, result arrival, reconnect, and idle settlement.
@@ -18,6 +18,7 @@ The completed behavior must satisfy all of the following:
 8. Detail-sheet title, membership, and tool rows update atomically.
 9. Reduce Motion receives an opacity-only or immediate transition.
 10. Canonical Pi messages, tool-call IDs, results, ordinals, and ordering remain authoritative.
+11. Running elapsed time advances independently of progress output, pending declarations do not accrue execution time, and canonical settlement never reduces accepted duration evidence.
 
 This plan does not change canonical JSONL semantics or infer parallel execution from timing.
 
@@ -155,7 +156,7 @@ The visible single-tool label must instead derive from the invocation's tool nam
 
 ### 7. Current tests validate settlement more strongly than transition history
 
-Existing tests cover deterministic tool order, grouping, sparse status patches, canonical settlement, timing, detail ordering, frame-coalesced projection installation, and final end-to-end presence of one **Used 3 tools** chip.
+Existing tests cover deterministic tool order, grouping, sparse status patches, canonical settlement, timing, detail ordering, frame-coalesced projection installation, and final end-to-end presence of one **3 tools** chip with **Completed** status.
 
 They do not currently sample each presented intermediate state across:
 
@@ -328,8 +329,8 @@ Do not weaken current sparse patch guards. Membership changes should become topo
 Apply the following title contract:
 
 - Single tool: actual normalized tool name.
-- Live multi-tool run: **Using N tools**.
-- Terminal multi-tool run: **Used N tools**.
+- Multi-tool run title: **N tools**.
+- Separate status: **In progress** while live, then **Completed** when terminal.
 - Transcript tool chips never display **Extension activity**.
 
 Remove extension-origin title overrides from `ToolCard` and `ChatToolRunPresentation`.
@@ -466,7 +467,7 @@ Add focused tests asserting:
 2. No finalized-group replay exposes one-to-four-member intermediate variants.
 3. One stable run ID survives live-to-canonical-to-result-to-idle settlement.
 4. Extension provenance appearing and disappearing never changes the single-tool title.
-5. Multi-tool extension-owned runs use **Using N tools** and **Used N tools**, never **Extension activity**.
+5. Multi-tool extension-owned runs use **N tools** with separate lifecycle status, never **Extension activity**.
 6. A newly earlier `order` cannot remount a group whose canonical group order is already finalized.
 7. Thinking and text barriers still split presentation runs.
 8. Same-segment adjacent tool-only consolidation preserves its first stable group-based run ID, while missing or different segments remain separate.
@@ -476,6 +477,7 @@ Add focused tests asserting:
 12. Detail title and detail row IDs install in the same generation.
 13. No extra entrance, semantic remount, or failsafe counter is recorded during membership/status updates.
 14. Stale projection work remains rejected by exact tags.
+15. Silent running tools advance from a Gateway sample, terminal duration never regresses, and canonical fallback timing cannot replace stronger live metadata.
 
 ### Hosted presentation tests
 
@@ -528,8 +530,8 @@ Use the physical iPhone for final UX validation. Exercise a scripted provider or
 Verify:
 
 1. A single extension-owned chip always reads `subagent` or its actual tool name.
-2. A finalized five-call declaration first appears as **Using 5 tools**.
-3. The chip changes once to **Used 5 tools** after terminal settlement.
+2. A finalized five-call declaration first appears as **5 tools** with **In progress** status.
+3. The same chip changes once to **Completed** status after terminal settlement.
 4. No tool chip ever reads **Extension activity**.
 5. No row disappears, duplicates, remounts, or replays entrance.
 6. Rapid transitions retarget smoothly rather than queueing old states.
@@ -557,7 +559,8 @@ The change is complete only when all of these are demonstrated by focused automa
 - [x] Reduce Motion is honored.
 - [x] Canonical tool IDs, results, ordering, and JSONL remain unchanged.
 - [x] Focused Gateway tests pass.
-- [ ] Focused iOS projection/store/hosted tests pass (test bundle compiles; execution intentionally deferred to avoid simulator hangs).
+- [x] Focused iOS projection, state-policy, tool-timing, and protocol-fixture tests pass.
+- [ ] Hosted frame-probe validation passes.
 - [x] Generic iOS build-for-testing succeeds.
 - [x] `git diff --check` passes.
 - [x] `scripts/personal-info-guard.sh` passes.

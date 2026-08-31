@@ -56,6 +56,26 @@ struct ToolExecutionStatePolicyTests {
         #expect(terminal.output == "final result")
     }
 
+    @Test("duration and start evidence never regress across newer frames")
+    func timingEvidenceIsMonotonic() {
+        let running = tool(
+            id: "call", updatedAt: "1", sequence: 1,
+            durationMs: 2_400
+        )
+        let terminal = ToolExecutionStatePolicy.newest(
+            running,
+            tool(
+                id: "call", status: .completed,
+                startedAt: "2026-01-01T00:00:02Z",
+                updatedAt: "2", sequence: 2,
+                durationMs: 50
+            )
+        )
+
+        #expect(terminal.startedAt == "2026-01-01T00:00:00Z")
+        #expect(terminal.durationMs == 2_400)
+    }
+
     @Test("terminal result wins while the selected latest frame stays bounded")
     func terminalResultAndBoundedOutput() {
         let latest = String(repeating: "b", count: 100 * 1_024)
@@ -112,6 +132,7 @@ struct ToolExecutionStatePolicyTests {
         sequence: Int? = nil,
         output: String? = nil,
         outputTruncated: Bool? = nil,
+        durationMs: Int? = nil,
         toolSegmentId: String? = nil,
         groupIndex: Int? = nil
     ) -> ToolExecutionState {
@@ -128,6 +149,7 @@ struct ToolExecutionStatePolicyTests {
             isError: status == .failed,
             startedAt: startedAt,
             updatedAt: updatedAt,
+            durationMs: durationMs,
             progressSequence: sequence,
             toolSegmentId: toolSegmentId,
             groupId: groupIndex == nil ? nil : "group",

@@ -1070,6 +1070,11 @@ export function projectMessage(
         truncated: message.truncated,
         ...(message.fullOutputPath ? { fullOutputPath: message.fullOutputPath } : {}),
         ...(message.excludeFromContext === undefined ? {} : { excludeFromContext: message.excludeFromContext }),
+        ...(toolMetadata ? {
+          startedAt: toolMetadata.startedAt,
+          ...(toolMetadata.completedAt ? { completedAt: toolMetadata.completedAt } : {}),
+          ...(toolMetadata.durationMs === undefined ? {} : { durationMs: toolMetadata.durationMs }),
+        } : {}),
         semantic: {
           version: 1,
           direction: "agentInvocation",
@@ -1122,6 +1127,7 @@ export function projectEntry(
   contextDelivery?: ContextDeliveryMetadata,
   segmentId?: string,
   expectedSkillArguments?: string,
+  bashMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
 ): TranscriptItem | undefined {
   switch (entry.type) {
     case "message":
@@ -1131,7 +1137,11 @@ export function projectEntry(
         entry.timestamp,
         entry.message,
         blobs,
-        entry.message.role === "toolResult" ? toolMetadata?.get(entry.message.toolCallId) : undefined,
+        entry.message.role === "toolResult"
+          ? toolMetadata?.get(entry.message.toolCallId)
+          : entry.message.role === "bashExecution"
+            ? bashMetadata?.get(entry.id)
+            : undefined,
         presentationIDs?.get(entry.id) ?? entry.id,
         entry.message.role === "assistant",
         toolLabels,
@@ -1642,6 +1652,7 @@ export function projectTranscript(
   blobs: BlobStore,
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
   toolLabels?: ReadonlyMap<string, string>,
+  bashMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
 ): TranscriptItem[] {
   const { entries, contextDelivery, toolSegmentIDs } = projectableTranscriptEntries(manager);
   const invocationValues = invocationProjection(invocationReceipts(
@@ -1665,6 +1676,7 @@ export function projectTranscript(
       contextDelivery.get(entry.id),
       toolSegmentIDs.get(entry.id),
       expectedSkillArguments,
+      bashMetadata,
     );
     if (!projected) throw new Error("projectable transcript entry produced no item");
     if (boundInvocation && projected.semantic) {
@@ -1711,6 +1723,7 @@ export function projectTranscriptPage(
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
   presentationIDs?: ReadonlyMap<string, string>,
   toolLabels?: ReadonlyMap<string, string>,
+  bashMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
 ): TranscriptPage {
   const { entries, contextDelivery, toolSegmentIDs } = projectableTranscriptEntries(
     manager,
@@ -1745,6 +1758,7 @@ export function projectTranscriptPage(
       contextDelivery.get(entry.id),
       toolSegmentIDs.get(entry.id),
       expectedSkillArguments,
+      bashMetadata,
     );
     if (!item) throw new Error("projectable transcript entry produced no item");
     const enriched = boundInvocation && item.semantic

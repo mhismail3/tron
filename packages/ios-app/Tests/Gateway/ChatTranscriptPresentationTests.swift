@@ -529,7 +529,7 @@ struct ChatTranscriptPresentationTests {
         #expect(!bottom.isPastBottomEdge)
         #expect(overshoot.isPastBottomEdge)
         #expect(!undersized.isPastBottomEdge)
-        #expect(!undersizedOvershoot.isPastBottomEdge)
+        #expect(undersizedOvershoot.isPastBottomEdge)
     }
 
     @Test("opening plausibility distinguishes a physical tail from overflow overshoot")
@@ -631,7 +631,7 @@ struct ChatTranscriptPresentationTests {
         }
         #expect(running.id == "tool-run-stream:turn:tool-group:0")
         #expect(running.tools.map(\.id) == ["a", "b", "c"])
-        #expect(running.title == "Using 3 tools")
+        #expect(running.title == "3 tools")
 
         snapshot.toolExecutions = snapshot.toolExecutions.map {
             tool($0.toolCallId, $0.toolName, status: .completed, startedAt: $0.startedAt,
@@ -642,7 +642,7 @@ struct ChatTranscriptPresentationTests {
             return
         }
         #expect(completed.id == running.id)
-        #expect(completed.title == "Used 3 tools")
+        #expect(completed.title == "3 tools")
     }
 
     @Test("interaction and editor presentation use deterministic priority")
@@ -1372,12 +1372,12 @@ struct ChatTranscriptPresentationTests {
             Issue.record("Expected one thinking run")
             return
         }
-        #expect(run.id == "thinking-1")
+        #expect(run.id == "thinking-run-0")
         #expect(run.segments.map(\.id) == [
+            "thinking-0:line:0",
+            "thinking-0:line:1",
             "thinking-1:line:0",
             "thinking-1:line:1",
-            "thinking-2:line:0",
-            "thinking-2:line:1",
         ])
         #expect(run.segments.map(\.text) == [
             "Inspecting the transcript",
@@ -1407,12 +1407,12 @@ struct ChatTranscriptPresentationTests {
         let item = try #require(snapshot.transcript.first)
         let parts = ChatTranscriptPresentation.messageParts(in: item)
 
-        #expect(parts.map(\.id) == ["thinking-thinking-1", "content-call", "thinking-thinking-2"])
+        #expect(parts.map(\.id) == ["thinking-thinking-run-0", "content-1", "thinking-thinking-run-2"])
         guard case .thinking(let trailingRun) = parts[2] else {
             Issue.record("Expected trailing thinking run")
             return
         }
-        #expect(trailingRun.segments.map(\.id) == ["thinking-2:line:0"])
+        #expect(trailingRun.segments.map(\.id) == ["thinking-3:line:0"])
         #expect(trailingRun.segments.map(\.text) == ["Second"])
     }
 
@@ -1433,7 +1433,7 @@ struct ChatTranscriptPresentationTests {
         #expect(timeline.ids == [
             "assistant",
             "tool-run-call-1",
-            "assistant-slice-thinking-thinking-2",
+            "assistant-slice-thinking-thinking-run-2",
         ])
         guard case .message(let first) = timeline.items[0],
               case .thinking(let firstRun) = first.parts.first,
@@ -1470,9 +1470,9 @@ struct ChatTranscriptPresentationTests {
         #expect(timeline.ids == [
             "assistant",
             "tool-run-call-1",
-            "assistant-slice-thinking-thinking-2",
+            "assistant-slice-thinking-thinking-run-3",
             "tool-run-call-3",
-            "assistant-slice-thinking-thinking-3",
+            "assistant-slice-thinking-thinking-run-5",
         ])
         guard case .toolRun(let firstRun) = timeline.items[1],
               case .message(let between) = timeline.items[2],
@@ -1510,7 +1510,7 @@ struct ChatTranscriptPresentationTests {
         #expect(details[0].request == .object(["path": .string("one")]))
         #expect(details[0].response == nil)
         #expect(details[1].request == .object(["command": .string("pwd")]))
-        #expect(run.title == "Used 2 tools")
+        #expect(run.title == "2 tools")
         #expect(timeline.preferredSemanticIDByRenderedID[run.id] == "call-2")
         #expect(timeline.renderedIDBySemanticID["call-1"] == run.id)
         #expect(timeline.renderedIDBySemanticID["call-2"] == run.id)
@@ -1540,7 +1540,7 @@ struct ChatTranscriptPresentationTests {
         #expect(runs.count == 1)
         #expect(runs.first?.tools.map(\.id) == ["a", "b", "c"])
         #expect(runs.first?.anchorID == "group-1")
-        #expect(runs.first?.title == "Used 3 tools")
+        #expect(runs.first?.title == "3 tools")
     }
 
     @Test("visible thinking is a hard barrier between finalized tool groups")
@@ -1632,7 +1632,7 @@ struct ChatTranscriptPresentationTests {
             return
         }
         #expect(liveRun.tools.map(\.id) == [callOne, callTwo, callThree])
-        #expect(liveRun.title == "Using 3 tools")
+        #expect(liveRun.title == "3 tools")
 
         snapshot.streaming = try message("""
         {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[
@@ -1693,7 +1693,7 @@ struct ChatTranscriptPresentationTests {
             Issue.record("Expected the settled tool run before the response")
             return
         }
-        #expect(completedRun.title == "Used 3 tools")
+        #expect(completedRun.title == "3 tools")
 
         snapshot.transcript.append(try message("""
         {"id":"assistant-final","parentId":"result-3","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"assistant","content":[{"id":"answer","type":"text","text":"All done"}]}
@@ -1951,8 +1951,31 @@ struct ChatTranscriptPresentationTests {
             Issue.record("Expected canonical tool run")
             return
         }
-        #expect(tool.durationMs == 2_000)
+        #expect(tool.durationMs == nil)
         #expect(tool.elapsedMilliseconds() == 2_000)
+    }
+
+    @Test("canonical settlement cannot reduce accepted live duration")
+    func canonicalSettlementPreservesDuration() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"call","type":"toolCall","toolCallId":"read","name":"read","arguments":{}}]},
+          {"id":"result","parentId":"assistant","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"toolResult","content":[{"id":"text","type":"text","text":"done"}],"toolCallId":"read","toolName":"read","isError":false,"startedAt":"2026-01-01T00:00:01Z","completedAt":"2026-01-01T00:00:03Z","durationMs":50}
+        ]
+        """)
+        snapshot.toolExecutions = [tool(
+            "read", "read", status: .completed,
+            startedAt: "2026-01-01T00:00:01Z",
+            durationMs: 2_400
+        )]
+
+        guard case .toolRun(let run) = ChatTranscriptPresentation.timeline(in: snapshot).items.first,
+              let descriptor = run.tools.first else {
+            Issue.record("Expected settled tool run")
+            return
+        }
+        #expect(descriptor.durationMs == 2_400)
+        #expect(descriptor.elapsedMilliseconds() == 2_400)
     }
 
     @Test("Gateway duration is authoritative and tool runs accumulate durations")
@@ -1976,17 +1999,28 @@ struct ChatTranscriptPresentationTests {
         #expect(run.elapsedMilliseconds() == 65)
     }
 
-    @Test("running Gateway duration does not use the device wall clock")
-    func runningGatewayDurationIsAuthoritative() throws {
+    @Test("running Gateway samples advance only from a local monotonic anchor")
+    func runningGatewayDurationAdvances() throws {
         let tool = ChatToolPresentation(
             id: "running", title: "bash", subtitle: "Running", request: nil, response: nil,
             content: "", fallbackContent: nil, error: false,
             startedAt: "2026-01-01T00:00:01Z", completedAt: nil,
             durationMs: 237, lastProgressAt: "2026-01-01T00:00:02Z", progressSequence: 2
         )
+        let invocation = ChatToolPresentation(
+            id: "pending", title: "edit", subtitle: "Invocation", request: nil, response: nil,
+            content: "", fallbackContent: nil, error: false,
+            startedAt: "2026-01-01T00:00:01Z", completedAt: nil,
+            durationMs: nil, lastProgressAt: nil, progressSequence: nil
+        )
 
-        let farFuture = try #require(ToolTiming.date("2036-01-01T00:00:01Z"))
+        let sampleTime = try #require(ToolTiming.date("2026-01-01T00:00:02Z"))
+        let farFuture = try #require(ToolTiming.date("2036-01-01T00:00:02Z"))
+        let localClock = ToolElapsedClock(baselineMilliseconds: 237, baselineUptime: 10)
+        #expect(tool.elapsedMilliseconds(at: sampleTime) == 237)
         #expect(tool.elapsedMilliseconds(at: farFuture) == 237)
+        #expect(localClock.milliseconds(at: 10.763) == 1_000)
+        #expect(invocation.elapsedMilliseconds(at: farFuture) == nil)
     }
 
     @Test("conversation content interrupts tool grouping")
@@ -2231,6 +2265,7 @@ struct ChatTranscriptPresentationTests {
         startedAt: String,
         order: Int? = nil,
         output: String? = nil,
+        durationMs: Int? = nil,
         toolSegmentId: String? = nil,
         groupId: String? = nil,
         groupIndex: Int? = nil,
@@ -2250,7 +2285,7 @@ struct ChatTranscriptPresentationTests {
             updatedAt: startedAt,
             lastProgressAt: startedAt,
             completedAt: status == .running ? nil : startedAt,
-            durationMs: status == .running ? nil : 0,
+            durationMs: durationMs ?? (status == .running ? nil : 0),
             progressSequence: 1,
             toolSegmentId: toolSegmentId,
             groupId: groupId,

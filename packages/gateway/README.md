@@ -472,9 +472,19 @@ Extension callbacks are wrapped through the public `DefaultResourceLoaderOptions
 Parallel tool events carry a monotonic per-run ordinal; each call additionally has
 a monotonic progress sequence, bounded display-safe live-output tail, runtime start,
 last-progress/completion timestamps, and a duration measured from the tool callback
-with a monotonic clock. Running progress carries the latest monotonic duration sample;
-the completion carries the final call-to-return duration. The Gateway coalesces high-rate
-updates without losing the newest state. Running readable output is a bounded current-frame
+with a monotonic clock. Every running progress delivery and reconnect snapshot refreshes the monotonic duration sample,
+even when the tool emits no output; the completion carries the final call-to-return duration. Accepted samples never decrease.
+Canonical result handoff refreshes the current running sample before retiring only the
+disposable runtime row, then preserves the original monotonic start and bounded timing metadata
+until terminal delivery or agent settlement. A snapshot between handoff and a late compatible
+terminal callback therefore cannot expose the stale near-zero start sample, and the callback
+cannot reset the call to a near-zero duration. A fresh lifecycle replaces noncanonical stale
+metadata; an exact tool-call ID that already owns a canonical result fails closed instead of
+inheriting timing or lineage across invocations. The Gateway
+coalesces high-rate updates without losing the newest state. Direct `session.bash` execution
+uses the same runtime-only metadata projection keyed by its canonical Bash entry, so current-
+Gateway rows carry exact start, completion, and monotonic duration while older history remains
+valid without those optional fields. Running readable output is a bounded current-frame
 channel: each newer nonempty frame replaces the previous display in place, while an empty advisory
 frame preserves the last readable output so detail views never flash blank. A nonempty terminal result
 is authoritative. Clients join

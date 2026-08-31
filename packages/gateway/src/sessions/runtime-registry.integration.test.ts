@@ -6023,17 +6023,31 @@ export default function (pi) {
     const internal = slot as unknown as {
       toolExecutions: Map<string, unknown>;
       toolMetadata: Map<string, unknown>;
+      toolStartedAtMonotonicMs: Map<string, number>;
+      activeOperationId?: string;
       onEvent: (event: unknown) => void;
       runtime: { session: { readonly isStreaming: boolean } };
     };
     internal.toolExecutions.set("canonical-old", {
-      toolCallId: "canonical-old", toolName: "read", order: 0, status: "failed",
-      arguments: null, isError: true, startedAt: new Date(0).toISOString(),
+      toolCallId: "canonical-old", toolName: "read", order: 0, status: "running",
+      arguments: null, isError: false, startedAt: new Date(0).toISOString(),
       updatedAt: new Date(0).toISOString(), lastProgressAt: new Date(0).toISOString(),
       progressSequence: 1,
     });
-    const metadata = { startedAt: new Date(0).toISOString(), lastProgressAt: new Date(0).toISOString(), progressSequence: 3 };
+    const startedAt = new Date(Date.now() - 1_500).toISOString();
+    const metadata = {
+      startedAt,
+      durationMs: 1_500,
+      lastProgressAt: startedAt,
+      progressSequence: 3,
+      toolSegmentId: "tool-segment:retained",
+      groupId: "tool-group:retained",
+      groupIndex: 0,
+      groupCount: 1,
+      groupFinalized: true,
+    };
     internal.toolMetadata.set("canonical-old", metadata);
+    internal.toolStartedAtMonotonicMs.set("canonical-old", performance.now() - 1_500);
     // The full-branch backstop removes the live row even before the lifecycle
     // handoff reaches this slot; ownership does not depend on the bounded
     // transcript page containing the result.
@@ -6052,16 +6066,53 @@ export default function (pi) {
     });
     await Promise.resolve();
     expect(internal.toolExecutions.has("canonical-old")).toBe(false);
-    expect(internal.toolMetadata.get("canonical-old")).toEqual(metadata);
+    expect(internal.toolMetadata.get("canonical-old")).toMatchObject({
+      startedAt,
+      durationMs: expect.any(Number),
+      progressSequence: 3,
+      toolSegmentId: "tool-segment:retained",
+      groupId: "tool-group:retained",
+    });
+    const handoffDurationMs = (internal.toolMetadata.get("canonical-old") as { durationMs: number }).durationMs;
+    expect(handoffDurationMs).toBeGreaterThanOrEqual(1_500);
+    expect(internal.toolStartedAtMonotonicMs.has("canonical-old")).toBe(true);
+    // A continuation clears old-run monotonic starts before a compatibility
+    // terminal callback can arrive. The retained handoff sample must not grow
+    // to callback-arrival wall time in that ordering.
+    internal.toolStartedAtMonotonicMs.delete("canonical-old");
     internal.onEvent({
       type: "tool_execution_end", toolCallId: "canonical-old", toolName: "read",
       result: { content: [{ type: "text", text: "late terminal" }] }, isError: true,
     });
     expect(internal.toolExecutions.has("canonical-old")).toBe(false);
     expect(internal.toolMetadata.get("canonical-old")).toMatchObject({
-      startedAt: expect.any(String), completedAt: expect.any(String), progressSequence: expect.any(Number),
+      startedAt,
+      completedAt: expect.any(String),
+      durationMs: expect.any(Number),
+      progressSequence: 4,
+      toolSegmentId: "tool-segment:retained",
+      groupId: "tool-group:retained",
+      groupIndex: 0,
+      groupCount: 1,
+      groupFinalized: true,
     });
+    expect((internal.toolMetadata.get("canonical-old") as { durationMs: number }).durationMs)
+      .toBe(handoffDurationMs);
+    expect(internal.toolStartedAtMonotonicMs.has("canonical-old")).toBe(false);
     expect(slot.snapshot().toolExecutions).toEqual([]);
+
+    const silentStartedAt = new Date().toISOString();
+    internal.toolExecutions.set("silent-running", {
+      toolCallId: "silent-running", toolName: "bash", order: 1, status: "running",
+      arguments: null, isError: false, startedAt: silentStartedAt,
+      updatedAt: silentStartedAt, lastProgressAt: silentStartedAt,
+      durationMs: 0, progressSequence: 1,
+    });
+    internal.toolStartedAtMonotonicMs.set("silent-running", performance.now() - 500);
+    expect(slot.snapshot().toolExecutions.find((tool) => tool.toolCallId === "silent-running")?.durationMs)
+      .toBeGreaterThanOrEqual(450);
+    internal.toolExecutions.delete("silent-running");
+    internal.toolStartedAtMonotonicMs.delete("silent-running");
 
     const notPersisted = {
       toolCallId: "not-persisted", toolName: "read", order: 1, status: "completed",
@@ -6081,6 +6132,31 @@ export default function (pi) {
     await Promise.resolve();
     expect(internal.toolExecutions.get("not-persisted")).toEqual(notPersisted);
     internal.toolExecutions.delete("not-persisted");
+
+    internal.toolMetadata.set("reused-after-interruption", {
+      startedAt: new Date(0).toISOString(), completedAt: new Date(1_000).toISOString(),
+      durationMs: 1_000, lastProgressAt: new Date(1_000).toISOString(), progressSequence: 9,
+      toolSegmentId: "tool-segment:stale", groupId: "tool-group:stale",
+      groupIndex: 0, groupCount: 1, groupFinalized: true,
+    });
+    internal.activeOperationId = "fresh-operation";
+    internal.onEvent({
+      type: "tool_execution_start", toolCallId: "reused-after-interruption",
+      toolName: "read", args: { path: "fresh" },
+    });
+    expect(internal.toolMetadata.get("reused-after-interruption")).toMatchObject({
+      startedAt: expect.not.stringContaining("1970-01-01"),
+      durationMs: expect.any(Number),
+      progressSequence: 1,
+      toolSegmentId: "tool-segment:\"fresh-operation\"",
+    });
+    expect(internal.toolMetadata.get("reused-after-interruption")).not.toMatchObject({
+      completedAt: expect.anything(), groupId: "tool-group:stale",
+    });
+    internal.toolExecutions.delete("reused-after-interruption");
+    internal.toolMetadata.delete("reused-after-interruption");
+    internal.toolStartedAtMonotonicMs.delete("reused-after-interruption");
+    internal.activeOperationId = undefined;
     streaming.mockRestore();
   });
 
@@ -7254,6 +7330,25 @@ export default function (pi) {
     expect(internal.activityHeartbeat).toBeUndefined();
     expect(slot.snapshot()).toMatchObject({ phase: "idle" });
     expect(slot.snapshot().processActivities ?? []).toEqual([]);
+  });
+
+  it("retains exact direct Bash timing for canonical projection", async () => {
+    const { manager, registry } = await coldFixture("bash-canonical-timing");
+    const slot = await registry.acquire(manager.getSessionId());
+
+    await slot.executeBash("printf ok", true);
+
+    const bash = slot.snapshot().transcript.find((item) => item.kind === "bash");
+    expect(bash).toMatchObject({
+      kind: "bash",
+      command: "printf ok",
+      output: "ok",
+      startedAt: expect.any(String),
+      completedAt: expect.any(String),
+      durationMs: expect.any(Number),
+    });
+    if (!bash || bash.kind !== "bash") throw new Error("expected canonical Bash projection");
+    expect(bash.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it("does not commit idle eviction while canonical receipt persistence is unsettled", async () => {

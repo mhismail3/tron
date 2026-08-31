@@ -702,14 +702,14 @@ streaming. The sheet uses the shared Tron title/top-blur/toolbar
 chrome with no drag handle. The same rendered tool/group row stays after non-tool streaming
 across running-to-completed updates, retains at most one installed-identity-owned tail settlement while
 pinned, uses one coordinated smooth viewport follow for a newly admitted transcript tool chip, and aggregate
-Used/Using sheets render each invocation as a lazy full-width summary row with centered header status,
+**N tools** sheets render each invocation as a lazy full-width summary row with centered lifecycle status,
 full-width request context below its label, and at most the newest two nonempty readable output lines. The
 primary value fades at its bottom edge when more follows, while bounded result tails fade at the top instead
 of adding an amber warning line. The row preserves a surviving semantic anchor while detached and emits no unowned automatic write for ordinary
 shrink. If settlement shortens content beneath a released pinned offset, verify exactly one physical-tail
 clamp; a detached or directly owned reader receives none. Verify a tool entrance has one correlated chip
 reveal and viewport command rather than competing writes. The stable transcript boundary suppresses ambient animation only when the installed projection identity changes; it does not rewrite either the discrete Liquid Glass touch-down transaction or subsequent continuous direct-manipulation updates. Legacy and consolidated tool chips, plus detail-bearing compact notification pills, use native interactive Liquid Glass as their only touch-response owner and handle taps on that visible surface with explicit button accessibility semantics rather than a second `Button` press phase; verify initial contact, lateral drag, release, and morph remain fluid without an immediate stacked zoom or custom scale effect.
-Tool-detail checkpoints open read, edit, bash, and one unknown/extension call at the medium detent: verify the compact status/metadata chips for individual details, and verify aggregate Used/Using sheets show lazy full-width rows,
+Tool-detail checkpoints open read, edit, bash, and one unknown/extension call at the medium detent: verify the compact status/metadata chips for individual details, and verify aggregate **N tools** sheets show lazy full-width rows and separate **In progress**/**Completed** status,
 secondary-plus-accent path, faithful single-change diff glance, word-preserving wrapped bash commands in
 the smaller code size, and centered title icons for command/file sheets with no duplicate icon in their
 primary value container. Edit results must precede any View Changes action. Verify the

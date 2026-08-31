@@ -817,7 +817,7 @@ private struct ToolRunSummaryRow: View {
     }
 }
 
-private struct ToolElapsedClock: Equatable {
+struct ToolElapsedClock: Equatable {
     let baselineMilliseconds: Int
     let baselineUptime: TimeInterval
 
@@ -838,7 +838,7 @@ private struct ToolElapsedClockKey: Hashable {
     init(_ tool: ChatToolDescriptor) {
         id = tool.id
         startedAt = tool.startedAt
-        lifecycle = "\(tool.isRunning)-\(tool.completedAt ?? "")-\(tool.durationMs.map(String.init) ?? "")"
+        lifecycle = "\(tool.isRunning)-\(tool.completedAt ?? "")-\(tool.lastProgressAt ?? "")-\(tool.durationMs.map(String.init) ?? "")"
     }
 }
 
@@ -851,7 +851,7 @@ private struct ToolElapsedText: View {
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.scenePhase) private var scenePhase
 
-    private var needsLocalClock: Bool { tool.isRunning && tool.durationMs == nil }
+    private var needsLocalClock: Bool { tool.isActivelyExecuting }
 
     var body: some View {
         Group {
@@ -878,6 +878,7 @@ private struct ToolElapsedText: View {
         .onChange(of: tool.isRunning) { _, _ in synchronizeLocalClock() }
         .onChange(of: tool.completedAt) { _, _ in synchronizeLocalClock() }
         .onChange(of: tool.durationMs) { _, _ in synchronizeLocalClock() }
+        .onChange(of: tool.lastProgressAt) { _, _ in synchronizeLocalClock() }
     }
 
     @ViewBuilder private func elapsed(at date: Date) -> some View {
@@ -923,7 +924,7 @@ private struct ToolRunElapsedText: View {
     @Environment(\.scenePhase) private var scenePhase
 
     private var needsLocalClocks: Bool {
-        run.tools.contains { $0.isRunning && $0.durationMs == nil }
+        run.tools.contains { $0.isActivelyExecuting }
     }
 
     var body: some View {
@@ -963,7 +964,7 @@ private struct ToolRunElapsedText: View {
     private func milliseconds(at date: Date) -> Int? {
         let uptime = ProcessInfo.processInfo.systemUptime
         let values = run.tools.compactMap { tool -> Int? in
-            guard tool.isRunning, tool.durationMs == nil,
+            guard tool.isActivelyExecuting,
                   let localClock = localClocks[ToolElapsedClockKey(tool)] else {
                 return tool.elapsedMilliseconds(at: date)
             }
@@ -983,7 +984,7 @@ private struct ToolRunElapsedText: View {
         updated = updated.filter { liveKeys.contains($0.key) }
         for tool in run.tools {
             let key = ToolElapsedClockKey(tool)
-            guard tool.isRunning && tool.durationMs == nil else {
+            guard tool.isActivelyExecuting else {
                 updated.removeValue(forKey: key)
                 continue
             }

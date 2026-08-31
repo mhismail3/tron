@@ -177,7 +177,10 @@
       "cancelled": false,
       "truncated": true,
       "fullOutputPath": "/tmp/full-output",
-      "excludeFromContext": false
+      "excludeFromContext": false,
+      "startedAt": "2026-01-01T00:00:02.250Z",
+      "completedAt": "2026-01-01T00:00:03Z",
+      "durationMs": 750
     },
     {
       "id": "custom-message",

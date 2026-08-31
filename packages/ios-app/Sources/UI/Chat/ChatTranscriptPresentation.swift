@@ -1026,17 +1026,19 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     }
 
     var isRunning: Bool { subtitle == "Running" || subtitle == "Invocation" }
+    /// A declared invocation is pending execution. It may keep the run live,
+    /// but must not accrue execution time before the Gateway starts the call.
+    var isActivelyExecuting: Bool { subtitle == "Running" }
 
     func elapsedMilliseconds(at date: Date = .now) -> Int? {
-        if isRunning, let durationMs {
-            return max(0, durationMs)
+        if isActivelyExecuting {
+            return ToolTiming.runningDuration(
+                sampledDuration: durationMs,
+                startedAt: startedAt,
+                at: date
+            )
         }
-        guard let start = ToolTiming.date(startedAt) else {
-            return durationMs.map { max(0, $0) }
-        }
-        if isRunning {
-            return ToolTiming.milliseconds(from: start, to: date)
-        }
+        if isRunning { return durationMs.map { max(0, $0) } }
         return ToolTiming.resolvedDuration(
             startedAt: startedAt,
             completedAt: completedAt,
@@ -1174,17 +1176,17 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     }
 
     var isRunning: Bool { subtitle == "Running" || subtitle == "Invocation" }
+    var isActivelyExecuting: Bool { subtitle == "Running" }
 
     func elapsedMilliseconds(at date: Date = .now) -> Int? {
-        if isRunning, let durationMs {
-            return max(0, durationMs)
+        if isActivelyExecuting {
+            return ToolTiming.runningDuration(
+                sampledDuration: durationMs,
+                startedAt: startedAt,
+                at: date
+            )
         }
-        guard let start = ToolTiming.date(startedAt) else {
-            return durationMs.map { max(0, $0) }
-        }
-        if isRunning {
-            return ToolTiming.milliseconds(from: start, to: date)
-        }
+        if isRunning { return durationMs.map { max(0, $0) } }
         return ToolTiming.resolvedDuration(
             startedAt: startedAt,
             completedAt: completedAt,
@@ -1226,6 +1228,28 @@ enum ToolTiming {
         return max(0, Int(rounded))
     }
 
+    /// Running Gateway durations are monotonic samples. Pure presentation
+    /// callers preserve the sample exactly; mounted views advance it from the
+    /// local receive-time uptime anchor without comparing device/Gateway clocks.
+    static func runningDuration(
+        sampledDuration: Int?,
+        startedAt: String?,
+        at date: Date
+    ) -> Int? {
+        if let sampledDuration { return max(0, sampledDuration) }
+        guard let start = self.date(startedAt) else { return nil }
+        return milliseconds(from: start, to: date)
+    }
+
+    static func maximum(_ first: Int?, _ second: Int?) -> Int? {
+        switch (first, second) {
+        case let (first?, second?): Swift.max(0, Swift.max(first, second))
+        case let (first?, nil): max(0, first)
+        case let (nil, second?): max(0, second)
+        case (nil, nil): nil
+        }
+    }
+
     /// Runtime duration is authoritative when supplied by the Gateway because
     /// it is measured from the tool callback with a monotonic clock. Timestamp
     /// subtraction is only the compatibility fallback for older canonical
@@ -1246,14 +1270,6 @@ enum ToolTiming {
         let totalSeconds = milliseconds / 1_000
         if totalSeconds < 3_600 { return "\(totalSeconds / 60)m \(totalSeconds % 60)s" }
         return "\(totalSeconds / 3_600)h \((totalSeconds % 3_600) / 60)m"
-    }
-
-    static func observedDuration(callTimestamp: String, result: TranscriptItem) -> Int? {
-        resolvedDuration(
-            startedAt: result.startedAt ?? callTimestamp,
-            completedAt: result.completedAt ?? result.timestamp,
-            fallback: result.durationMs
-        )
     }
 }
 

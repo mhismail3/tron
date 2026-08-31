@@ -313,12 +313,12 @@ struct ChatCompactPillTests {
     func toolChipLatestTarget() {
         var transition = ChatToolChipTransitionState()
         let first = ChatCompactPillVisualState(
-            id: "run", title: "Using 2 tools", detail: "in progress",
+            id: "run", title: "2 tools", detail: "In progress",
             icon: "square.stack.3d.up", tone: .warning, material: .glass,
             showsProgress: true, count: 2
         )
         let final = ChatCompactPillVisualState(
-            id: "run", title: "Used 2 tools", detail: nil,
+            id: "run", title: "2 tools", detail: "Completed",
             icon: "square.stack.3d.up", tone: .accent, material: .glass,
             showsProgress: false, count: 2
         )

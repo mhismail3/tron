@@ -103,16 +103,16 @@ final class TronGatewayEndToEndUITests: XCTestCase {
             XCTAssertTrue(allow.waitForExistence(timeout: 4))
             allow.tap()
         }
-        let liveGroup = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Using 3 tools")).firstMatch
+        let liveGroup = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "3 tools, In progress")).firstMatch
         XCTAssertTrue(liveGroup.waitForExistence(timeout: 4))
         XCTAssertTrue(app.staticTexts["Tool response complete after all three tools."].waitForExistence(timeout: 20))
-        let settledGroup = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Used 3 tools")).firstMatch
+        let settledGroup = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "3 tools, Completed")).firstMatch
         XCTAssertTrue(settledGroup.waitForExistence(timeout: 5))
-        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Used 3 tools")).count, 1)
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "3 tools, Completed")).count, 1)
         XCTAssertLessThan(settledGroup.frame.maxY, app.textViews["Message input"].frame.minY)
 
         settledGroup.tap()
-        XCTAssertTrue(app.staticTexts["Used 3 tools"].waitForExistence(timeout: 4))
+        XCTAssertTrue(app.staticTexts["3 tools"].waitForExistence(timeout: 4))
         let completedCommand = app.buttons["tool-run-summary-e2e-tool-3"]
         XCTAssertTrue(completedCommand.waitForExistence(timeout: 4))
         XCTAssertTrue(app.buttons["tool-run-summary-e2e-tool-2"].exists)

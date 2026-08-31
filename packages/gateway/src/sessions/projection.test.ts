@@ -268,6 +268,41 @@ describe("transcript projection", () => {
     expect(segmentByCall.get("call-c")).not.toBe(segmentByCall.get("call-b"));
   });
 
+  it("projects retained direct Bash timing without changing canonical history", () => {
+    const manager = SessionManager.inMemory("/tmp/project");
+    const entryId = manager.appendMessage({
+      role: "bashExecution",
+      command: "printf ok",
+      output: "ok",
+      exitCode: 0,
+      cancelled: false,
+      truncated: false,
+      timestamp: 2_000,
+    });
+    const timing = new Map([[entryId, {
+      startedAt: "1970-01-01T00:00:01.500Z",
+      completedAt: "1970-01-01T00:00:02.000Z",
+      durationMs: 500,
+      lastProgressAt: "1970-01-01T00:00:02.000Z",
+      progressSequence: 1,
+    }]]);
+    const collidingToolTiming = new Map([[entryId, {
+      startedAt: "1970-01-01T00:00:00.000Z",
+      durationMs: 9_999,
+      lastProgressAt: "1970-01-01T00:00:00.000Z",
+      progressSequence: 9,
+    }]]);
+
+    expect(projectTranscript(manager, new BlobStore(), collidingToolTiming, undefined, timing)).toMatchObject([{
+      id: entryId,
+      kind: "bash",
+      command: "printf ok",
+      startedAt: "1970-01-01T00:00:01.500Z",
+      completedAt: "1970-01-01T00:00:02.000Z",
+      durationMs: 500,
+    }]);
+  });
+
   it("keeps presentation and ordinal identity across live and canonical owners", () => {
     const message: AgentMessage = {
       role: "assistant",

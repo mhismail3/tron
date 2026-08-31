@@ -15,13 +15,23 @@ struct TranscriptRow: View, Equatable {
             case .message:
                 message
             case .bash:
-                ToolCard(
+                ToolCard(data: ChatToolPresentation(
+                    id: item.id,
                     title: "bash",
+                    toolName: "bash",
                     subtitle: item.cancelled == true ? "Cancelled" : "Exit \(item.exitCode.map(String.init) ?? "—")",
-                    content: item.output ?? "",
                     request: .object(["command": .string(item.command ?? "")]),
+                    response: nil,
+                    content: item.output ?? "",
+                    fallbackContent: nil,
+                    error: false,
+                    startedAt: item.startedAt,
+                    completedAt: item.completedAt,
+                    durationMs: item.durationMs,
+                    lastProgressAt: item.completedAt,
+                    progressSequence: nil,
                     outputTruncated: item.truncated == true
-                )
+                ))
             case .customMessage:
                 // Every projected custom_message is model input under Pi's
                 // session semantics. It is not a tool result and is rendered

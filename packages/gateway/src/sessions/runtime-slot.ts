@@ -423,8 +423,10 @@ export class RuntimeSlot {
   private processRevision = 0;
   private processAsOf = new Date().toISOString();
   /** Bounded runtime timing enriches the mobile projection without changing Pi
-   * JSONL. Historical entries without retained metadata use timestamp fallback. */
+   * JSONL. Identity domains remain separate so provider tool-call IDs cannot
+   * collide with canonical direct-Bash entry IDs. */
   private readonly toolMetadata = new Map<string, ToolProjectionMetadata>();
+  private readonly bashMetadata = new Map<string, ToolProjectionMetadata>();
   private nextToolOrder = 0;
   private lastPublishedSummary: SessionSummaryUpdate | undefined;
   /** Disposable live activity overlays the canonical tail timestamp in catalog
@@ -2576,6 +2578,16 @@ export class RuntimeSlot {
         this.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
+        if (!existing) {
+          // A fresh lifecycle owns fresh metadata. If this exact ID already has
+          // a canonical result, fail closed as an invalid provider reuse;
+          // otherwise discard interrupted/stale enrichment instead of merging
+          // timing or lineage from an earlier invocation.
+          if (this.toolMetadata.has(event.toolCallId)
+            && this.isCanonicalToolResultOwned(event.toolCallId)) break;
+          this.toolMetadata.delete(event.toolCallId);
+          this.toolStartedAtMonotonicMs.delete(event.toolCallId);
+        }
         const startedAt = existing?.startedAt ?? now;
         if (!this.toolStartedAtMonotonicMs.has(event.toolCallId)) {
           this.toolStartedAtMonotonicMs.set(event.toolCallId, performance.now());
@@ -2670,16 +2682,34 @@ export class RuntimeSlot {
         this.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
-        const startedAt = existing?.startedAt ?? now;
-        const durationMs = this.measureToolDuration(
-          event.toolCallId,
-          startedAt,
-          now,
-          performance.now()
+        // Canonical handoff can precede a compatibility terminal callback.
+        // Retained metadata and the monotonic start remain valid execution
+        // evidence after the disposable runtime row is retired.
+        const retained = this.toolMetadata.get(event.toolCallId);
+        const startedAt = existing?.startedAt ?? retained?.startedAt ?? now;
+        const canonicalOwned = this.isCanonicalToolResultOwned(event.toolCallId);
+        const hasMonotonicStart = this.toolStartedAtMonotonicMs.has(event.toolCallId);
+        // A continuation clears monotonic starts for the preceding run. If its
+        // already-canonical terminal callback arrives afterward, retain the
+        // handoff sample rather than extending it to callback-arrival wall time.
+        const measuredDurationMs = !existing && retained && canonicalOwned && !hasMonotonicStart
+          ? retained.durationMs ?? 0
+          : this.measureToolDuration(
+              event.toolCallId,
+              startedAt,
+              now,
+              performance.now()
+            );
+        const durationMs = Math.max(
+          measuredDurationMs,
+          existing?.durationMs ?? 0,
+          retained?.durationMs ?? 0
         );
         const output = projectToolOutput(event.result);
-        const extensionOrigin = this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin;
-        const toolLabel = existing?.toolLabel ?? this.toolLabel(event.toolName);
+        const extensionOrigin = this.extensionToolOrigin(event.toolName)
+          ?? existing?.extensionOrigin
+          ?? retained?.extensionOrigin;
+        const toolLabel = existing?.toolLabel ?? retained?.toolLabel ?? this.toolLabel(event.toolName);
         const extensionActivity = this.updateExtensionActivity(
           event.toolCallId, event.toolName, extensionOrigin, event.isError ? "failed" : "completed", startedAt, now, event.result, now, durationMs
         );
@@ -2704,8 +2734,12 @@ export class RuntimeSlot {
           lastProgressAt: now,
           completedAt: now,
           durationMs,
-          progressSequence: (existing?.progressSequence ?? 0) + 1,
-          toolSegmentId: existing?.toolSegmentId ?? toolSegmentId(this.activeOperationId!),
+          progressSequence: Math.max(existing?.progressSequence ?? 0, retained?.progressSequence ?? 0) + 1,
+          toolSegmentId: existing?.toolSegmentId ?? retained?.toolSegmentId ?? toolSegmentId(this.activeOperationId!),
+          ...(retained?.groupId ? { groupId: retained.groupId } : {}),
+          ...(retained?.groupIndex === undefined ? {} : { groupIndex: retained.groupIndex }),
+          ...(retained?.groupCount === undefined ? {} : { groupCount: retained.groupCount }),
+          ...(retained?.groupFinalized === undefined ? {} : { groupFinalized: retained.groupFinalized }),
           ...(this.toolInvocationGroups.get(event.toolCallId) ?? {}),
           ...(extensionOrigin ? { extensionOrigin } : {}),
           ...(extensionActivity ? { extensionActivity } : {}),
@@ -2715,7 +2749,7 @@ export class RuntimeSlot {
         // A tool-result message_end can precede this terminal callback in Pi.
         // Keep its timing/lineage metadata for canonical enrichment, but never
         // re-admit the exact call to the disposable runtime overlay.
-        if (this.isCanonicalToolResultOwned(event.toolCallId)) {
+        if (canonicalOwned) {
           this.toolExecutions.delete(event.toolCallId);
           this.scheduleSnapshot();
           break;
@@ -3929,9 +3963,26 @@ export class RuntimeSlot {
   }
 
   private toolProgressWire(state: ToolExecutionState): ToolExecutionState {
-    return state.extensionActivity
-      ? { ...state, liveActivityRevision: this.liveActivityRevision, extensionActivityAsOf: this.extensionActivityAsOf }
+    // Running duration is sampled at delivery time. This keeps reconnect and
+    // delayed/coalesced frames current even when the tool emits no output;
+    // clients then advance the sample locally with a monotonic clock.
+    const sampled = state.status === "running"
+      ? {
+          ...state,
+          durationMs: Math.max(
+            state.durationMs ?? 0,
+            this.measureToolDuration(
+              state.toolCallId,
+              state.startedAt,
+              new Date().toISOString(),
+              performance.now()
+            )
+          ),
+        }
       : state;
+    return sampled.extensionActivity
+      ? { ...sampled, liveActivityRevision: this.liveActivityRevision, extensionActivityAsOf: this.extensionActivityAsOf }
+      : sampled;
   }
 
   /** Lifecycle updates are compact presentation deltas, not transcript
@@ -4081,31 +4132,67 @@ export class RuntimeSlot {
     }
     // Metadata deliberately survives this transition: Pi does not persist
     // timing, grouping, or extension provenance in JSONL, so canonical
-    // projection still needs the bounded enrichment map.
+    // projection still needs the bounded enrichment map. Refresh a running
+    // sample before retiring its row so even a snapshot that lands between
+    // canonical handoff and a compatible late terminal callback cannot show
+    // the stale near-zero start sample as the completed duration.
+    const live = this.toolExecutions.get(toolCallId);
+    if (live?.status === "running") {
+      const now = new Date().toISOString();
+      this.rememberToolMetadata(toolCallId, {
+        ...live,
+        durationMs: Math.max(
+          live.durationMs ?? 0,
+          this.measureToolDuration(toolCallId, live.startedAt, now, performance.now())
+        ),
+      });
+    }
     this.toolExecutions.delete(toolCallId);
-    this.toolStartedAtMonotonicMs.delete(toolCallId);
+    // Do not clear the monotonic start here. A late terminal callback still
+    // owns this exact call and must measure from its original start. Ordinary
+    // terminal delivery and agent settlement both clear the bounded map.
   }
 
   private rememberToolMetadata(toolCallId: string, state: ToolExecutionState): void {
-    this.toolMetadata.delete(toolCallId);
-    this.toolMetadata.set(toolCallId, {
-      startedAt: state.startedAt,
-      ...(state.completedAt ? { completedAt: state.completedAt } : {}),
-      ...(state.durationMs === undefined ? {} : { durationMs: state.durationMs }),
-      lastProgressAt: state.lastProgressAt,
-      progressSequence: state.progressSequence,
-      ...(state.toolSegmentId ? { toolSegmentId: state.toolSegmentId } : {}),
-      ...(state.groupId ? { groupId: state.groupId } : {}),
-      ...(state.groupIndex === undefined ? {} : { groupIndex: state.groupIndex }),
-      ...(state.groupCount === undefined ? {} : { groupCount: state.groupCount }),
-      ...(state.groupFinalized ? { groupFinalized: true } : {}),
-      ...(state.extensionOrigin ? { extensionOrigin: state.extensionOrigin } : {}),
-      ...(state.toolLabel ? { toolLabel: state.toolLabel } : {}),
+    const retained = this.toolMetadata.get(toolCallId);
+    const completedAt = state.completedAt ?? retained?.completedAt;
+    const durationMs = state.durationMs === undefined
+      ? retained?.durationMs
+      : Math.max(0, state.durationMs, retained?.durationMs ?? 0);
+    const toolSegmentId = state.toolSegmentId ?? retained?.toolSegmentId;
+    const groupId = state.groupId ?? retained?.groupId;
+    const groupIndex = state.groupIndex ?? retained?.groupIndex;
+    const groupCount = state.groupCount ?? retained?.groupCount;
+    const groupFinalized = state.groupFinalized ?? retained?.groupFinalized;
+    const extensionOrigin = state.extensionOrigin ?? retained?.extensionOrigin;
+    const toolLabel = state.toolLabel ?? retained?.toolLabel;
+    this.rememberProjectionMetadata(this.toolMetadata, toolCallId, {
+      startedAt: retained?.startedAt ?? state.startedAt,
+      ...(completedAt ? { completedAt } : {}),
+      ...(durationMs === undefined ? {} : { durationMs }),
+      lastProgressAt: state.lastProgressAt ?? retained?.lastProgressAt ?? state.updatedAt,
+      progressSequence: Math.max(state.progressSequence ?? 0, retained?.progressSequence ?? 0),
+      ...(toolSegmentId ? { toolSegmentId } : {}),
+      ...(groupId ? { groupId } : {}),
+      ...(groupIndex === undefined ? {} : { groupIndex }),
+      ...(groupCount === undefined ? {} : { groupCount }),
+      ...(groupFinalized === undefined ? {} : { groupFinalized }),
+      ...(extensionOrigin ? { extensionOrigin } : {}),
+      ...(toolLabel ? { toolLabel } : {}),
     });
-    while (this.toolMetadata.size > 2_048) {
-      const oldest = this.toolMetadata.keys().next().value as string | undefined;
+  }
+
+  private rememberProjectionMetadata(
+    store: Map<string, ToolProjectionMetadata>,
+    id: string,
+    metadata: ToolProjectionMetadata
+  ): void {
+    store.delete(id);
+    store.set(id, metadata);
+    while (store.size > 2_048) {
+      const oldest = store.keys().next().value as string | undefined;
       if (!oldest) break;
-      this.toolMetadata.delete(oldest);
+      store.delete(oldest);
     }
   }
 
@@ -4443,7 +4530,8 @@ export class RuntimeSlot {
       toolExecutions: [...this.toolExecutions.values()]
         .filter((tool) => !canonicalToolResultIDs.has(tool.toolCallId))
         .filter((tool) => this.effectivePhase === "running" || tool.status !== "running")
-        .sort((left, right) => left.order - right.order),
+        .sort((left, right) => left.order - right.order)
+        .map((tool) => this.toolProgressWire(tool)),
       ...(() => {
         const visible = [...this.extensionActivities.values()]
           .map((activity) => ({ activity, visibility: this.extensionActivityVisibility(activity) }))
@@ -4502,6 +4590,7 @@ export class RuntimeSlot {
           this.toolMetadata,
           this.presentationIDs,
           this.toolLabels(),
+          this.bashMetadata,
         ),
         runtimeGeneration: this.runtimeGeneration,
         ...(leafEntryId ? { leafEntryId } : {}),
@@ -5523,7 +5612,27 @@ export class RuntimeSlot {
         this.revision += 1;
         this.publishSnapshot();
         try {
-          return safeJson(await this.runtime.session.executeBash(command, undefined, { excludeFromContext, id: operationId }));
+          const previousEntryIDs = new Set(this.sessionManager.getBranch().map((entry) => entry.id));
+          const startedMonotonicMs = performance.now();
+          const result = await this.runtime.session.executeBash(command, undefined, { excludeFromContext, id: operationId });
+          const completedAt = new Date().toISOString();
+          const bashEntries = this.sessionManager.getBranch().filter((entry) =>
+            !previousEntryIDs.has(entry.id)
+              && entry.type === "message"
+              && entry.message.role === "bashExecution");
+          // Pi currently appends exactly one Bash entry. Match by branch delta
+          // rather than leaf position so a future post-execution hook cannot
+          // silently detach timing by appending another canonical entry.
+          if (bashEntries.length === 1) {
+            this.rememberProjectionMetadata(this.bashMetadata, bashEntries[0]!.id, {
+              startedAt,
+              completedAt,
+              durationMs: Math.max(0, Math.round(performance.now() - startedMonotonicMs)),
+              lastProgressAt: completedAt,
+              progressSequence: 1,
+            });
+          }
+          return safeJson(result);
         } finally {
           await this.clearMarkerOwnership(operationId, work);
           this.phase = "idle";

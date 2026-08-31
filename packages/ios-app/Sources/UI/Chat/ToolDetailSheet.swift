@@ -382,28 +382,51 @@ private struct ToolStatusChip: View {
     let accent: Color
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.scenePhase) private var scenePhase
+    @State private var localClock: ToolElapsedClock?
     @State private var isVisible = false
 
     var body: some View {
         Group {
             if tool.isRunning {
-                if PresentationClockPolicy.runs(
+                if tool.isActivelyExecuting, PresentationClockPolicy.runs(
                     surfaceActive: presentationActivity.allowsContinuousAnimation,
                     sceneActive: scenePhase == .active,
                     viewportVisible: isVisible
                 ) {
-                    TimelineView(.periodic(from: ToolTiming.date(tool.startedAt) ?? .now, by: 0.5)) { context in
-                        content(ToolStatusChipPresentation.make(tool: tool, at: context.date), showsSpinner: true)
+                    TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                        content(runningPresentation(), showsSpinner: true)
                     }
                 } else {
-                    content(ToolStatusChipPresentation.make(tool: tool, at: .now), showsSpinner: true)
+                    content(runningPresentation(), showsSpinner: true)
                 }
             } else {
                 content(ToolStatusChipPresentation.make(tool: tool, at: .now), showsSpinner: false)
             }
         }
-        .onAppear { isVisible = true }
+        .onAppear {
+            isVisible = true
+            synchronizeLocalClock()
+        }
         .onDisappear { isVisible = false }
+        .onChange(of: tool) { _, _ in synchronizeLocalClock() }
+    }
+
+    private func runningPresentation() -> ToolStatusChipPresentation {
+        let elapsed = localClock?.milliseconds(at: ProcessInfo.processInfo.systemUptime)
+            ?? tool.elapsedMilliseconds(at: .now)
+        return ToolStatusChipPresentation.make(tool: tool, elapsedMilliseconds: elapsed)
+    }
+
+    private func synchronizeLocalClock() {
+        guard tool.isActivelyExecuting,
+              let baseline = tool.elapsedMilliseconds(at: .now) else {
+            localClock = nil
+            return
+        }
+        localClock = ToolElapsedClock(
+            baselineMilliseconds: baseline,
+            baselineUptime: ProcessInfo.processInfo.systemUptime
+        )
     }
 
     private func content(_ presentation: ToolStatusChipPresentation, showsSpinner: Bool) -> some View {

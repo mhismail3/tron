@@ -420,6 +420,9 @@ struct BashTranscriptItem: TranscriptPayload {
     let truncated: Bool
     let fullOutputPath: String?
     let excludeFromContext: Bool?
+    let startedAt: String?
+    let completedAt: String?
+    let durationMs: Int?
 }
 
 struct CustomMessageTranscriptItem: TranscriptPayload {
@@ -638,9 +641,27 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
         default: nil
         }
     }
-    var startedAt: String? { if case .message(let value) = self { value.startedAt } else { nil } }
-    var completedAt: String? { if case .message(let value) = self { value.completedAt } else { nil } }
-    var durationMs: Int? { if case .message(let value) = self { value.durationMs } else { nil } }
+    var startedAt: String? {
+        switch self {
+        case .message(let value): value.startedAt
+        case .bash(let value): value.startedAt
+        default: nil
+        }
+    }
+    var completedAt: String? {
+        switch self {
+        case .message(let value): value.completedAt
+        case .bash(let value): value.completedAt
+        default: nil
+        }
+    }
+    var durationMs: Int? {
+        switch self {
+        case .message(let value): value.durationMs
+        case .bash(let value): value.durationMs
+        default: nil
+        }
+    }
     var lastProgressAt: String? { if case .message(let value) = self { value.lastProgressAt } else { nil } }
     var progressSequence: Int? { if case .message(let value) = self { value.progressSequence } else { nil } }
     var command: String? { if case .bash(let value) = self { value.command } else { nil } }

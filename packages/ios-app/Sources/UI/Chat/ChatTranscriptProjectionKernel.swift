@@ -1519,7 +1519,9 @@ enum ChatTranscriptProjectionKernel {
             fallbackContent: fallbackContent,
             error: error, startedAt: canonical.startedAt ?? live.startedAt,
             completedAt: canonical.completedAt ?? live.completedAt,
-            durationMs: canonical.durationMs ?? live.durationMs,
+            // Canonical and live values are both monotonic Gateway samples when
+            // present. Never let source handoff replace a larger accepted sample.
+            durationMs: ToolTiming.maximum(canonical.durationMs, live.durationMs),
             lastProgressAt: canonical.lastProgressAt ?? live.lastProgressAt ?? live.updatedAt,
             progressSequence: canonical.progressSequence ?? live.progressSequence,
             outputTruncated: live.outputTruncated == true || canonical.outputTruncated,
@@ -1602,7 +1604,10 @@ enum ChatTranscriptProjectionKernel {
                         fallbackContent: result.text.isEmpty ? result.details : nil,
                         error: result.isError == true, startedAt: result.startedAt ?? item.timestamp,
                         completedAt: result.completedAt ?? result.timestamp,
-                        durationMs: ToolTiming.observedDuration(callTimestamp: item.timestamp, result: result),
+                        // Keep missing runtime metadata distinguishable from an
+                        // exact Gateway duration. elapsedMilliseconds derives the
+                        // canonical call-to-result interval only as a fallback.
+                        durationMs: result.durationMs,
                         lastProgressAt: result.lastProgressAt, progressSequence: result.progressSequence,
                         extensionOrigin: result.extensionOrigin,
                         toolSegmentId: part.toolSegmentId ?? result.toolSegmentId,

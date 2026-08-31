@@ -172,6 +172,11 @@ export type TranscriptItem =
       truncated: boolean;
       fullOutputPath?: string;
       excludeFromContext?: boolean;
+      /** Exact runtime timing is available for direct Bash executed by the
+       * current Gateway; older canonical history omits these fields. */
+      startedAt?: string;
+      completedAt?: string;
+      durationMs?: number;
     }
   | TranscriptBase & {
       kind: "customMessage";
