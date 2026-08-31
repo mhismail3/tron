@@ -148,8 +148,9 @@ can bind its port.
 
 The installed Release wrapper owns only the Stable LaunchAgent. Debug lifecycle
 belongs only to `scripts/tron dev`; the Release menu is a read-only authenticated
-observer. Without building, bundling, installing, or restarting during preparation, an operator
-can stage and then explicitly promote a complete payload:
+observer. Gateway transitions are user-initiated: repository agents may prepare and
+validate a complete payload but must not run the following mutating operations. A user
+or maintainer can stage and then explicitly promote that payload:
 
 ```bash
 scripts/gateway-payload-deploy.mjs stage --channel stable --source <payload>
@@ -191,7 +192,9 @@ never part of ordinary automated tests because it intentionally invokes `launchc
 ## Reinstall a local Release build
 
 This is a manual developer installation, not a production deployment command.
-It is also the bootstrap path for an intentional lockstep Gateway protocol bump:
+The user or maintainer performs Pause, replacement, launch, Resume, and every
+Gateway transition. Repository agents may prepare and validate the `.app` artifact and
+report its path, but must not initiate those operations. It is also the bootstrap path for an intentional lockstep Gateway protocol bump:
 the new signed launcher rejects a previously selected payload whose manifest
 protocol differs and falls back to the matching bundled Gateway. The final Mac
 app binds its own protocol metadata to that bundled payload before signing.
@@ -261,7 +264,10 @@ by `com.tron.server`/`com.tron.mac` on 9847. `scripts/tron dev` uses
 
 ### Gateway payload operations
 
-The installed wrapper owns Stable only. Developer tooling owns Debug:
+The installed wrapper owns Stable only. Developer tooling owns Debug. `status` and
+`preflight` are read-only; the user or maintainer must initiate every listed mutating
+lifecycle or handoff command. Repository agents report the needed command but do not
+execute it:
 
 ```bash
 scripts/tron dev start       # build, immutable-stage, and start 9848

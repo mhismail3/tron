@@ -1571,6 +1571,129 @@ final class AppModel {
         return authorized
     }
 
+    nonisolated static func supportsIosDeviceInstall(capabilities: [String]) -> Bool {
+        capabilities.contains("ios-device-install.v2")
+    }
+
+    func loadIosDeviceInstallConfig(for authorized: GatewayAuthorizedDevice) async throws -> IosDeviceInstallConfig? {
+        let admission = try selectedAdministrativeAdmission(for: authorized.profileID)
+        struct Params: Codable { let deviceId: String }
+        let config: IosDeviceInstallConfig? = try await client.request(
+            "device.install.config.status",
+            Params(deviceId: authorized.device.id),
+            as: IosDeviceInstallConfig?.self,
+            timeout: .seconds(10)
+        )
+        try requireLifecycle(admission)
+        guard config?.deviceId == authorized.device.id else {
+            if config == nil { return nil }
+            throw GatewayFailure(code: "invalid_response", message: "The iOS install configuration belongs to another device.", retryable: true, details: nil)
+        }
+        return config
+    }
+
+    func configureIosDeviceInstall(
+        for authorized: GatewayAuthorizedDevice,
+        sourceRoot: String
+    ) async throws -> IosDeviceInstallConfig {
+        let admission = try selectedAdministrativeAdmission(for: authorized.profileID)
+        let admittedSourceRoot = try GatewayUpdateConfigPolicy.admitPath(
+            sourceRoot,
+            name: "iOS source repository"
+        )
+        struct Params: Encodable {
+            let commandId: String
+            let deviceId: String
+            let sourceRoot: String
+        }
+        let commandID = uuidSource.next().uuidString
+        let params = Params(
+            commandId: commandID,
+            deviceId: authorized.device.id,
+            sourceRoot: admittedSourceRoot
+        )
+        let config: IosDeviceInstallConfig = try await mutationExecutor.perform(
+            method: "device.install.config",
+            commandID: commandID
+        ) {
+            try await self.client.request("device.install.config", params, timeout: .seconds(30))
+        }
+        try requireLifecycle(admission)
+        guard config.deviceId == authorized.device.id else {
+            throw GatewayFailure(code: "invalid_response", message: "The saved iOS install configuration belongs to another device.", retryable: true, details: nil)
+        }
+        return config
+    }
+
+    func loadIosDeviceInstallStatus(for authorized: GatewayAuthorizedDevice) async throws -> IosDeviceInstallStatus? {
+        let admission = try selectedAdministrativeAdmission(for: authorized.profileID)
+        struct Params: Codable { let deviceId: String }
+        let status: IosDeviceInstallStatus? = try await client.request(
+            "device.install.status",
+            Params(deviceId: authorized.device.id),
+            as: IosDeviceInstallStatus?.self,
+            timeout: .seconds(10)
+        )
+        try requireLifecycle(admission)
+        guard status?.deviceId == authorized.device.id else {
+            if status == nil { return nil }
+            throw GatewayFailure(code: "invalid_response", message: "The iOS install status belongs to another device.", retryable: true, details: nil)
+        }
+        return status
+    }
+
+    @discardableResult
+    func requestIosDeviceInstall(for authorized: GatewayAuthorizedDevice) async throws -> String {
+        let admission = try selectedAdministrativeAdmission(for: authorized.profileID)
+        struct Params: Codable { let commandId: String; let deviceId: String }
+        let commandID = uuidSource.next().uuidString
+        let acknowledgement: IosDeviceInstallAcknowledgement = try await mutationExecutor.perform(
+            method: "device.install",
+            commandID: commandID
+        ) {
+            try await self.client.request(
+                "device.install",
+                Params(commandId: commandID, deviceId: authorized.device.id),
+                timeout: .seconds(30)
+            )
+        }
+        try acknowledgement.require(commandID: commandID)
+        try requireLifecycle(admission)
+        postNotice(
+            "iOS rebuild and install accepted. This app will relaunch after installation.",
+            role: .progress,
+            lifetime: .standard,
+            priority: .low
+        )
+        return commandID
+    }
+
+    private func requireSelectedAdministrativeProfile(_ profileID: String) throws {
+        guard profiles.selected?.id == profileID, connectionState == .connected else {
+            throw GatewayFailure(
+                code: "disconnected",
+                message: "Use this server before changing its device installation settings.",
+                retryable: true,
+                details: nil
+            )
+        }
+    }
+
+    private func selectedAdministrativeAdmission(for profileID: String) throws -> GatewayLifecycleCoordinator.Admission {
+        try requireSelectedAdministrativeProfile(profileID)
+        guard Self.supportsIosDeviceInstall(capabilities: gatewayInfo?.capabilities ?? []) else {
+            throw GatewayFailure(
+                code: "unsupported",
+                message: "This Mac does not expose supervised iOS device installation.",
+                retryable: false,
+                details: nil
+            )
+        }
+        guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
+        try requireLifecycle(admission)
+        return admission
+    }
+
     func revokeDevice(_ id: String, for profileID: String) async throws {
         if profiles.selected?.id != profileID,
            let profile = profiles.profiles.first(where: { $0.id == profileID }) {

@@ -353,6 +353,127 @@ struct GatewayAuthorizedDevice: Hashable, Identifiable, Sendable {
     var id: String { "\(profileID):\(device.id)" }
 }
 
+struct IosDeviceInstallConfiguredTarget: Codable, Hashable, Sendable {
+    let name: String
+    let deviceType: String
+    let connectionState: String
+    let developerModeEnabled: Bool
+}
+
+struct IosDeviceInstallConfig: Codable, Hashable, Sendable {
+    let schema: Int
+    let kind: String
+    let deviceId: String
+    let gatewayChannel: String
+    let sourceRoot: String?
+    let target: IosDeviceInstallConfiguredTarget?
+    let updatedAt: String
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schema = try values.decode(Int.self, forKey: .schema)
+        kind = try values.decode(String.self, forKey: .kind)
+        deviceId = try values.decode(String.self, forKey: .deviceId)
+        gatewayChannel = try values.decode(String.self, forKey: .gatewayChannel)
+        sourceRoot = try values.decodeIfPresent(String.self, forKey: .sourceRoot)
+        target = try values.decodeIfPresent(IosDeviceInstallConfiguredTarget.self, forKey: .target)
+        updatedAt = try values.decode(String.self, forKey: .updatedAt)
+        try IosDeviceInstallProjectionPolicy.validate(config: self)
+    }
+}
+
+struct IosDeviceInstallStatus: Codable, Hashable, Sendable {
+    enum State: String, Codable, Hashable, Sendable {
+        case requested, running, succeeded, failed
+        var isActive: Bool { self == .requested || self == .running }
+    }
+
+    let schema: Int
+    let kind: String
+    let deviceId: String
+    let state: State
+    let commandId: String
+    let targetName: String
+    let startedAt: String
+    let updatedAt: String
+    let error: String?
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schema = try values.decode(Int.self, forKey: .schema)
+        kind = try values.decode(String.self, forKey: .kind)
+        deviceId = try values.decode(String.self, forKey: .deviceId)
+        state = try values.decode(State.self, forKey: .state)
+        commandId = try values.decode(String.self, forKey: .commandId)
+        targetName = try values.decode(String.self, forKey: .targetName)
+        startedAt = try values.decode(String.self, forKey: .startedAt)
+        updatedAt = try values.decode(String.self, forKey: .updatedAt)
+        error = try values.decodeIfPresent(String.self, forKey: .error)
+        try IosDeviceInstallProjectionPolicy.validate(status: self)
+    }
+}
+
+struct IosDeviceInstallAcknowledgement: Codable, Hashable, Sendable {
+    let accepted: Bool
+    let commandId: String
+    let state: String
+
+    func require(commandID: String) throws {
+        guard accepted, commandId == commandID, state == "install-requested" else {
+            throw GatewayFailure(
+                code: "invalid_response",
+                message: "The iOS install acknowledgement did not match the requested command.",
+                retryable: true,
+                details: nil
+            )
+        }
+    }
+}
+
+enum IosDeviceInstallProjectionPolicy {
+    static func validate(config: IosDeviceInstallConfig) throws {
+        guard config.schema == 1,
+              config.kind == "tron-ios-device-install-config",
+              bounded(config.deviceId, maximum: 100),
+              ["stable", "dev"].contains(config.gatewayChannel),
+              config.sourceRoot.map({ (try? GatewayUpdateConfigPolicy.admitPath($0, name: "iOS source repository")) != nil }) ?? true,
+              bounded(config.updatedAt, maximum: 64),
+              GatewayTimestamp.parse(config.updatedAt) != nil else { throw invalid() }
+        if let target = config.target {
+            guard bounded(target.name, maximum: 320),
+                  ["iPhone", "iPad"].contains(target.deviceType),
+                  bounded(target.connectionState, maximum: 80) else { throw invalid() }
+        }
+    }
+
+    static func validate(status: IosDeviceInstallStatus) throws {
+        guard status.schema == 1,
+              status.kind == "tron-ios-device-install-status",
+              bounded(status.deviceId, maximum: 100),
+              bounded(status.commandId, maximum: 160),
+              bounded(status.targetName, maximum: 320),
+              bounded(status.startedAt, maximum: 64),
+              bounded(status.updatedAt, maximum: 64),
+              GatewayTimestamp.parse(status.startedAt) != nil,
+              GatewayTimestamp.parse(status.updatedAt) != nil,
+              status.error.map({ bounded($0, maximum: 2_048) }) ?? true else { throw invalid() }
+    }
+
+    private static func bounded(_ value: String, maximum: Int) -> Bool {
+        !value.isEmpty && value.utf8.count <= maximum
+            && value.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
+    }
+
+    private static func invalid() -> GatewayFailure {
+        GatewayFailure(
+            code: "invalid_response",
+            message: "The iOS device install projection is malformed.",
+            retryable: true,
+            details: nil
+        )
+    }
+}
+
 
 enum PairedDeviceCatalogPolicy {
     static let maximumDevices = 256

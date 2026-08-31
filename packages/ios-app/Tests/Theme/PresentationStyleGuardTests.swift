@@ -1240,6 +1240,44 @@ struct PresentationStyleGuardTests {
         #expect(structuredJSON.contains("TronTypography.codeJSON"))
     }
 
+    @Test("authorized devices disclose supervised source build and fixed LocalDevice installation")
+    func authorizedDeviceInstallPresentation() throws {
+        let connections = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ConnectionSettingsView.swift"),
+            encoding: .utf8
+        )
+        let detail = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/PairedDeviceDetailView.swift"),
+            encoding: .utf8
+        )
+        let model = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/AppModel.swift"),
+            encoding: .utf8
+        )
+
+        #expect(connections.contains("Button { selectedAuthorizedDevice = authorized }"))
+        #expect(connections.contains("PairedDeviceDetailView(authorized: authorized)"))
+        #expect(!connections.contains("deviceToRevoke"))
+        #expect(detail.contains("title: \"Source Repository\""))
+        #expect(!detail.contains("Physical Install Target"))
+        #expect(!detail.contains("IosInstallTargetPicker"))
+        #expect(detail.contains("sole eligible physical iOS device"))
+        #expect(detail.contains("WorkspaceBrowser(initialPath: config?.sourceRoot)"))
+        #expect(detail.contains("Text(installActive ? \"Build and Install Running\" : \"Rebuild and Install Tron\")"))
+        #expect(detail.contains("fixed Tron Device + LocalDevice configuration"))
+        #expect(detail.contains("without erasing app or Keychain data"))
+        #expect(detail.contains("title: \"Use This Server\""))
+        #expect(detail.contains("model.requestIosDeviceInstall(for: authorized)"))
+        #expect(detail.contains(".foregroundStyle(Color.tronEmerald)"))
+        #expect(detail.contains(".task(id: \"\\(authorized.id):\\(usesServer)\")"))
+        #expect(!detail.contains("usesServer):\\(presentationActivity.allowsPresentationPublication)"))
+        #expect(connections.contains("GatewayConnectionStatusBadge("))
+        #expect(model.contains("capabilities.contains(\"ios-device-install.v2\")"))
+        #expect(model.contains("method: \"device.install\""))
+        #expect(!detail.contains("CoreDevice"))
+        #expect(!detail.contains("TRON_IOS_DEVICE_ID"))
+    }
+
     @Test("project resources and diagnostics use readable bounded presentations")
     func gatewayDetailPresentations() throws {
         let context = try String(

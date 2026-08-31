@@ -20,9 +20,13 @@
    only; speculative runtime surfaces should be deleted.
 7. **Never run or add automated production deployment.** Production release and
    deployment are manual maintainer actions.
-8. **Never rebuild, replace, promote, or restart the running Stable Gateway.**
-   Agents may prepare and validate source or build artifacts, but every Stable
-   Gateway transition must be explicitly initiated by the user or maintainer.
+8. **Gateway rebuilds are user-initiated only.** Agents must never invoke a
+   Gateway rebuild, update, rollback, promotion, restart, any mutating
+   `scripts/tron dev` lifecycle command, or the corresponding control-plane RPC.
+   This applies even when the requested change needs a newer Gateway. Agents may
+   prepare and validate source or build artifacts and report the exact user
+   action, but the user or maintainer must perform the action that transitions a
+   running Gateway.
 
 ## Architecture invariants
 

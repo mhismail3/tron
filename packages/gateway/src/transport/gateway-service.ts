@@ -23,6 +23,11 @@ import type { PackageService } from "../admin/package-service.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
 import type { LegacyImportService } from "../admin/legacy-import-service.js";
 import { GatewayUpdateService, validateGatewayUpdateRequest } from "../admin/gateway-update-service.js";
+import {
+  IOS_DEVICE_INSTALL_CAPABILITY,
+  IosDeviceInstallService,
+  projectIosDeviceInstallConfig,
+} from "../admin/ios-device-install-service.js";
 import type { GatewayLogger } from "./logger.js";
 import type { CommandReceiptStore } from "./command-receipts.js";
 import { fitSessionSnapshot, safeJson } from "../sessions/projection.js";
@@ -74,6 +79,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 
 const restartDrainMethods = new Set([
   "system.info", "system.logs", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status",
+  "device.install.config.status", "device.install.status",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
@@ -117,6 +123,8 @@ export interface GatewayServiceDependencies {
   legacyImport: LegacyImportService;
   /** Configured only by the LaunchAgent-owned update helper; never from RPC params. */
   updateService?: GatewayUpdateService;
+  /** Fixed LocalDevice installer; source and CoreDevice identity never come from install RPC params. */
+  iosDeviceInstallService?: IosDeviceInstallService;
   logger: GatewayLogger;
   receipts: CommandReceiptStore;
   requestRestart: () => void;
@@ -134,6 +142,7 @@ export class GatewayService {
   private readonly sessionListPages = new SessionListPaginationStore();
   private readonly modelCatalogPages = new ModelCatalogPager();
   private readonly updateService: GatewayUpdateService;
+  private readonly iosDeviceInstallService: IosDeviceInstallService;
   private readonly workRegistry: GatewayWorkRegistry | undefined;
   private readonly mobileIdentityLanes = new Map<string, MobileIdentityLane>();
   private readonly processTranscriptLeases: ProcessTranscriptLeaseStore;
@@ -142,6 +151,10 @@ export class GatewayService {
     this.updateService = dependencies.updateService ?? new GatewayUpdateService({
       tronHome: dependencies.config?.tronHome ?? process.cwd(),
       runtimeIdentity: runtimeIdentity(),
+    });
+    this.iosDeviceInstallService = dependencies.iosDeviceInstallService ?? new IosDeviceInstallService({
+      tronHome: dependencies.config?.tronHome ?? process.cwd(),
+      gatewayChannel: this.updateService.channel,
     });
     this.gitWorktrees = dependencies.gitWorktrees ?? new GitWorktreeService(
       dependencies.config?.tronHome ?? process.env.TRON_HOME ?? process.cwd(),
@@ -209,6 +222,7 @@ export class GatewayService {
         "restart-drain.v1",
         "drain-status.v1",
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
+        ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
       ],
     };
@@ -259,6 +273,7 @@ export class GatewayService {
       }
       case "gateway.update":
         return this.mutation(client, method, params, async () => {
+          await this.requireNoActiveIosDeviceInstall();
           const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
           return safeJson(await this.updateService.update({
             ...validateGatewayUpdateRequest(params),
@@ -267,6 +282,7 @@ export class GatewayService {
         });
       case "gateway.rollback":
         return this.mutation(client, method, params, async () => {
+          await this.requireNoActiveIosDeviceInstall();
           if (Object.keys(params).some((key) => !["commandId", "channel"].includes(key))) {
             throw new GatewayError("invalid_request", "Gateway rollback accepts only channel and commandId");
           }
@@ -276,12 +292,54 @@ export class GatewayService {
         });
       case "device.list":
         return safeJson({ devices: await this.dependencies.devices.listDevices() });
+      case "device.install.config.status": {
+        if (Object.keys(params).some((key) => key !== "deviceId")) {
+          throw new GatewayError("invalid_request", "iOS install configuration status accepts only deviceId");
+        }
+        const deviceId = string(params.deviceId, "deviceId", { max: 100 });
+        await this.requirePairedDevice(deviceId);
+        const config = await this.iosDeviceInstallService.configStatus(deviceId);
+        return safeJson(config === null ? null : projectIosDeviceInstallConfig(config));
+      }
+      case "device.install.config":
+        return this.mutation(client, method, params, async () => {
+          if (Object.keys(params).some((key) => !["commandId", "deviceId", "sourceRoot"].includes(key))) {
+            throw new GatewayError("invalid_request", "iOS install configuration contains unknown fields");
+          }
+          const deviceId = string(params.deviceId, "deviceId", { max: 100 });
+          await this.requirePairedDevice(deviceId);
+          const sourceRoot = string(params.sourceRoot, "sourceRoot", { max: 4_096 });
+          const config = await this.iosDeviceInstallService.configure({ deviceId, sourceRoot });
+          return safeJson(projectIosDeviceInstallConfig(config));
+        });
+      case "device.install.status": {
+        if (Object.keys(params).some((key) => key !== "deviceId")) {
+          throw new GatewayError("invalid_request", "iOS install status accepts only deviceId");
+        }
+        const deviceId = string(params.deviceId, "deviceId", { max: 100 });
+        await this.requirePairedDevice(deviceId);
+        return safeJson(await this.iosDeviceInstallService.status(deviceId));
+      }
+      case "device.install":
+        return this.mutation(client, method, params, async () => {
+          if (Object.keys(params).some((key) => !["commandId", "deviceId"].includes(key))) {
+            throw new GatewayError("invalid_request", "iOS device installation accepts only deviceId");
+          }
+          const deviceId = string(params.deviceId, "deviceId", { max: 100 });
+          const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
+          await this.requirePairedDevice(deviceId);
+          await this.requireNoActiveGatewayUpdate();
+          return safeJson(await this.iosDeviceInstallService.install(deviceId, commandId));
+        });
       case "device.revoke": {
         const deviceId = string(params.deviceId, "deviceId", { max: 100 });
         return this.mutation(client, method, params, () => this.withMobileIdentityLane(deviceId, async () => {
           await this.dependencies.notifications?.removeDevice(deviceId);
           const revoked = await this.dependencies.devices.revoke(deviceId);
-          if (revoked) this.dependencies.deviceRevoked(deviceId);
+          if (revoked) {
+            await this.iosDeviceInstallService.removeDevice(deviceId);
+            this.dependencies.deviceRevoked(deviceId);
+          }
           return { revoked };
         }));
       }
@@ -357,6 +415,7 @@ export class GatewayService {
         let ownsSchedule = false;
         try {
           return await this.mutation(client, method, params, async () => {
+            await this.requireNoActiveIosDeviceInstall();
             if (!this.dependencies.terminals.beginRestartDrain()) {
               throw new GatewayError("busy", "Close active terminal sessions before restarting the Gateway", true);
             }
@@ -1096,6 +1155,27 @@ export class GatewayService {
 
   private async slot(params: Record<string, unknown>) {
     return this.dependencies.sessions.acquire(string(params.sessionId, "sessionId", { max: 200 }));
+  }
+
+  private async requirePairedDevice(deviceId: string): Promise<void> {
+    if (!await this.dependencies.devices.hasDevice(deviceId)) {
+      throw new GatewayError("not_found", "The paired mobile device is no longer authorized");
+    }
+  }
+
+  private async requireNoActiveIosDeviceInstall(): Promise<void> {
+    const status = await this.iosDeviceInstallService.activeStatus();
+    if (status?.state === "requested" || status?.state === "running") {
+      throw new GatewayError("busy", "Wait for the active iOS build/install to finish before changing the Gateway", true);
+    }
+  }
+
+  private async requireNoActiveGatewayUpdate(): Promise<void> {
+    if (!this.updateService.isUsable) return;
+    const status = await this.updateService.status(this.updateService.channel);
+    if (["starting", "building", "staging", "draining", "promoting", "restart", "rollback", "rollback-requested", "restart-requested"].includes(status.state)) {
+      throw new GatewayError("busy", "Wait for the active Gateway update or rollback to finish before installing iOS", true);
+    }
   }
 
   private requireNotifications(): NotificationService {

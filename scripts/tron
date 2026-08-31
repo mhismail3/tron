@@ -12,7 +12,8 @@ Usage: scripts/tron <command> [options]
 Commands:
   dev [start|restart|status|preflight|stop|handoff]
                                     Own the immutable Debug Gateway on port 9848
-                                    Lifecycle transitions are explicit and fail closed
+                                    status/preflight are read-only; users initiate
+                                    every mutating Gateway lifecycle transition
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
   ci [check|test|all]               Validate the gateway and repository policy

@@ -59,6 +59,10 @@ Do not archive, upload, deploy, or erase app/Keychain data.
 
 ## Stop rules
 
+- Never initiate a Gateway rebuild, update, rollback, promotion, restart, or
+  mutating `scripts/tron dev` lifecycle command. Prepare and validate source or
+  artifacts, report the required action, and wait for the user or maintainer to
+  perform the Gateway transition.
 - Never infer push routing from `DEBUG`, bundle naming, or a scheme; inspect the
   emitted artifact metadata and entitlements.
 - Never install iOS before its target Gateway contract is verified. A protocol

@@ -144,7 +144,9 @@ uses that absolute runtime and its sibling npm for helper/build/deploy commands,
 builds and stages an immutable dev payload, starts or authentically drain-restarts
 the developer-owned supervisor on 9848, and preserves all Debug state. `scripts/tron dev handoff` copies only the exact selected payload
 whose pre/post authenticated identity remains unchanged into the Stable store as
-an inactive candidate. The agent-manageable command remains explicit:
+an inactive candidate. Every mutating Gateway lifecycle/deployment command is
+user- or maintainer-initiated; repository agents may prepare and validate a payload
+but must not execute these operator-owned commands:
 
 ```text
 scripts/gateway-payload-deploy.mjs stage --channel stable --source <payload>

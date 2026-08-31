@@ -49,7 +49,7 @@ struct ConnectionsSettingsView: View {
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var selectedProfile: GatewayProfile?
     @State private var serverDetailDetent: PresentationDetent = .medium
-    @State private var deviceToRevoke: GatewayAuthorizedDevice?
+    @State private var selectedAuthorizedDevice: GatewayAuthorizedDevice?
     @State private var authorizedDevices: [GatewayAuthorizedDevice] = []
     @State private var dataLoadGeneration = 0
     @State private var showAddServer = false
@@ -162,22 +162,22 @@ struct ConnectionsSettingsView: View {
                         } else {
                             ForEach(Array(authorizedDevices.enumerated()), id: \.element.id) { index, authorized in
                                 if index > 0 { TronSettingsDivider(accent: .tronPurple) }
-                                TronValueRow(
-                                    icon: "iphone",
-                                    title: authorized.device.name,
-                                    detail: deviceDetail(authorized),
-                                    accent: .tronPurple
-                                ) {
-                                    Button(role: .destructive) {
-                                        deviceToRevoke = authorized
-                                    } label: {
-                                        Image(systemName: "trash")
-                                            .frame(width: 44, height: 44)
+                                Button { selectedAuthorizedDevice = authorized } label: {
+                                    TronValueRow(
+                                        icon: "iphone",
+                                        title: authorized.device.name,
+                                        detail: deviceDetail(authorized),
+                                        accent: .tronPurple
+                                    ) {
+                                        GatewayConnectionStatusBadge(
+                                            state: model.dashboardServerState(for: authorized.profileID)
+                                        )
                                     }
-                                    .buttonStyle(.plain)
-                                    .foregroundStyle(Color.tronError)
-                                    .accessibilityLabel("Revoke \(authorized.device.name) from \(authorized.profileLabel)")
+                                    .contentShape(Rectangle())
                                 }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Details for \(authorized.device.name) on \(authorized.profileLabel)")
+                                .accessibilityHint("Shows source build, installation, and device authorization actions")
                             }
                         }
                     }
@@ -214,6 +214,19 @@ struct ConnectionsSettingsView: View {
             .presentationContentInteraction(.resizes)
         }
         .tronManagedSheet(
+            item: $selectedAuthorizedDevice,
+            identity: { "settings.device.\($0.profileID).\($0.device.id)" },
+            onDismiss: { Task { await reload() } }
+        ) { authorized in
+            NavigationStack {
+                PairedDeviceDetailView(authorized: authorized)
+            }
+            .tronTopBlur(.sheet)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.hidden)
+            .presentationContentInteraction(.resizes)
+        }
+        .tronManagedSheet(
             isPresented: $showAddServer,
             identity: "settings.connection.add-server",
             onDismiss: { model.isAddingServer = false }
@@ -225,36 +238,10 @@ struct ConnectionsSettingsView: View {
             .presentationDragIndicator(.hidden)
             .presentationContentInteraction(.resizes)
         }
-        .alert(
-            "Revoke \(deviceToRevoke?.device.name ?? "device")?",
-            isPresented: deviceRevocationPresented,
-            presenting: deviceToRevoke
-        ) { authorized in
-            Button("Cancel", role: .cancel) { deviceToRevoke = nil }
-            Button("Revoke Device", role: .destructive) {
-                Task {
-                    await revoke(authorized)
-                    deviceToRevoke = nil
-                }
-            }
-        } message: { authorized in
-            Text("This removes \(authorized.device.name)'s access to \(authorized.profileLabel).")
-        }
-        .tronManagedSystemPresentation(
-            isPresented: deviceRevocationPresented,
-            identity: "settings.device-revocation"
-        )
         .task(id: "\(model.profileRevision):\(presentationActivity.allowsPresentationPublication)") {
             guard presentationActivity.allowsPresentationPublication else { return }
             await reload()
         }
-    }
-
-    private var deviceRevocationPresented: Binding<Bool> {
-        Binding(
-            get: { deviceToRevoke != nil },
-            set: { if !$0 { deviceToRevoke = nil } }
-        )
     }
 
     private func deviceDetail(_ authorized: GatewayAuthorizedDevice) -> String {
@@ -269,16 +256,6 @@ struct ConnectionsSettingsView: View {
         authorizedDevices = loadedDevices
     }
 
-    private func revoke(_ authorized: GatewayAuthorizedDevice) async {
-        do {
-            try await model.revokeDevice(authorized.device.id, for: authorized.profileID)
-            await reload()
-        } catch is CancellationError {
-            return
-        } catch {
-            model.presentError(error)
-        }
-    }
 }
 
 struct GatewayTechnicalDetail: Identifiable, Equatable {

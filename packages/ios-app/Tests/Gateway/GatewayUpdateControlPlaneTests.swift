@@ -480,6 +480,87 @@ struct GatewayUpdateControlPlaneTests {
         await client.close()
     }
 
+    @Test("paired-device install control binds the authorized device server-side and uses receipt-backed commands")
+    func pairedDeviceInstallControlPlane() async throws {
+        let suiteName = "IosDeviceInstallControlPlaneTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: suiteName, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: cacheRoot) }
+        let profile = GatewayProfile(
+            id: "stable", label: "Stable", host: "gateway.test", port: 9_847,
+            machineId: "stable-machine", deviceId: "stable-device"
+        )
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let commandIDs = [
+            UUID(uuidString: "00000000-0000-0000-0000-000000000301")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000302")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000303")!,
+        ]
+        let model = AppModel(
+            client: client,
+            profiles: GatewayProfileStore(defaults: defaults),
+            cache: SnapshotCache(root: cacheRoot),
+            uuidSource: SequenceUUIDSource(commandIDs).source
+        )
+        let connecting = Task { try await model.connectHostedGateway(profile: profile, token: "stable-token") }
+        try await socket.waitUntilSent(count: 1)
+        await socket.enqueue(helloFrame(
+            machineID: "stable-machine",
+            capabilities: ["gateway-update.v1", "ios-device-install.v2"]
+        ))
+        try await connecting.value
+
+        let authorized = GatewayAuthorizedDevice(
+            profileID: profile.id,
+            profileLabel: profile.label,
+            device: PairedDevice(id: "stable-device", name: "iPhone", createdAt: "2026-08-31T00:00:00Z")
+        )
+        let configuring = Task {
+            try await model.configureIosDeviceInstall(
+                for: authorized,
+                sourceRoot: "/Users/example/tron"
+            )
+        }
+        try await socket.waitUntilSent(count: 2)
+        let configRequest = try requestFrame(await socket.sentFrames()[1])
+        #expect(configRequest.method == "device.install.config")
+        #expect(configRequest.params?["deviceId"] == .string("stable-device"))
+        #expect(configRequest.params?["sourceRoot"] == .string("/Users/example/tron"))
+        #expect(configRequest.params?["targetHandle"] == nil)
+        let configCommandID = try #require(configRequest.params?["commandId"]?.stringValue)
+        #expect(configCommandID == commandIDs[0].uuidString)
+        await socket.enqueue(successResponse(id: configRequest.id, result: .object([
+            "schema": .number(1),
+            "kind": .string("tron-ios-device-install-config"),
+            "deviceId": .string("stable-device"),
+            "gatewayChannel": .string("stable"),
+            "sourceRoot": .string("/Users/example/tron"),
+            "updatedAt": .string("2026-08-31T00:00:01Z"),
+        ])))
+        #expect(try await configuring.value.target == nil)
+
+        let installing = Task { try await model.requestIosDeviceInstall(for: authorized) }
+        try await socket.waitUntilSent(count: 3)
+        let installRequest = try requestFrame(await socket.sentFrames()[2])
+        #expect(installRequest.method == "device.install")
+        #expect(installRequest.params?["deviceId"] == .string("stable-device"))
+        let installCommandID = try #require(installRequest.params?["commandId"]?.stringValue)
+        #expect(installCommandID == commandIDs[1].uuidString)
+        await socket.enqueue(successResponse(id: installRequest.id, result: .object([
+            "accepted": .bool(true),
+            "commandId": .string(installCommandID),
+            "state": .string("install-requested"),
+        ])))
+        #expect(try await installing.value == installCommandID)
+
+        await model.teardown()
+        await client.close()
+    }
+
     private func debugCandidate(fingerprint: String) throws -> GatewayDebugPromotionCandidate {
         let data = Data(#"{"state":"prepared","channel":"stable","currentIdentity":null,"candidateIdentity":{"version":"debug-tested","sourceRevision":"revision-1","runtimeEpoch":"candidate-epoch","payloadFingerprint":"\#(fingerprint)"},"candidateAvailable":true,"candidateOrigin":"debug","candidateProvenance":{"origin":"debug","version":"debug-tested","payloadFingerprint":"\#(fingerprint)","sourceRevision":"revision-1","testedRuntimeEpoch":"tested-epoch","candidateRuntimeEpoch":"candidate-epoch"},"error":null,"updatedAt":null}"#.utf8)
         return try #require(JSONDecoder.gateway.decode(GatewayUpdateStatus.self, from: data).debugPromotionCandidate)

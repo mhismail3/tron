@@ -228,7 +228,11 @@ text, while later requests can retry after expiry. Blob storage rejects control-
 advertise byte ranges; malformed or unsatisfiable multi-range requests fail closed.
 The retired `/engine` protocol is not exposed.
 
-Gateway updates are an explicit, bounded control-plane contract. `gateway.update.status`
+Gateway updates are an explicit, bounded control-plane contract. Rebuild, update,
+rollback, promotion, and restart mutations are user-initiated operations: repository
+agents and automation may prepare and validate source or artifacts, but must not submit
+those RPCs or run a mutating Gateway lifecycle helper. The user or maintainer performs
+the confirmed action that transitions the running Gateway. `gateway.update.status`
 projects only the selected channel's `deployment-state.json`, `current.json`,
 `previous.json`, and version manifests (each document is capped at 64 KiB); malformed
 or oversized state fails closed. `gateway.update` accepts only `channel` (`stable` or `dev`), `mode` (`source`,
@@ -266,6 +270,10 @@ state; promotion must pin its exact candidate version and fingerprint.
 `gateway.update.config.status` and `gateway.update.status` are bounded projections; the latter
 includes build/staging/draining/promotion/rollback/failure progress. The mutation is usable only when the helper is
 configured, in which case `gateway-update.v1` appears in capabilities. Candidate transition health uses a 60-second default deadline; an owned decimal-millisecond override is admitted only from 2,000 through 300,000 milliseconds.
+
+A separate supervised macOS control plane advertises `ios-device-install.v2`. Receipt-backed `device.install.config` binds one authorized Gateway device to a validated Tron source checkout; it never accepts a physical target from the client. At install admission the Mac runs bounded `xcrun devicectl` discovery and reuses an owner-only exact CoreDevice binding when available. Otherwise it binds only when exactly one Developer Mode physical iOS device is eligible, failing closed and asking the user to disconnect other devices rather than guessing by Gateway device ID or display name. CoreDevice identifiers, serials, UDIDs, and complete discovery documents remain owner-only Mac state. The per-device configuration is stored under `gateway/ios-device-installs/` with mode `0600`; source roots must be absolute, symlink-free directories containing the canonical iOS project, fixed install helper, artifact validator, and protocol validator. Config/status reads revalidate paired-device authority and never accept an executable, scheme, build configuration, bundle ID, CoreDevice identifier, or arbitrary command from RPC.
+
+`device.install` admits only the paired-device ID plus command ID, serializes one Mac-wide install, and launches an immutable Gateway-bundled helper detached from the initiating socket. That helper re-reads owner-only configuration, revalidates the source and physical target, and invokes only `scripts/tron-ios-device install --device-id <owner-bound target>`. The script itself fixes `Tron Device` + `LocalDevice`, rejects Release/DevicePerformance, validates development signing and the exact Gateway protocol contract, overwrite-installs without uninstalling, and relaunches the app. Stable-channel installs remain Mac-first and verify `/Applications/Tron.app`; Debug-channel installs use the explicit source protocol target. `device.install.status` is the bounded reconnect-safe authority for requested/running/succeeded/failed state. Dispatch acknowledgement does not claim completion. A two-hour helper deadline and owner-only active record prevent overlapping Xcode builds; Gateway update, rollback, and restart admission are mutually exclusive with an active iOS install, and revocation removes the device's source/target mapping. No Stable Gateway transition, production archive, App Store upload, or automated production deployment is part of this path.
 
 Every WebSocket starts with:
 
