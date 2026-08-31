@@ -1,18 +1,11 @@
-import type { ExtensionQuestionnaireDescriptor } from "../protocol/types.js";
+import type { ExtensionFormAnswer, ExtensionFormDescriptor } from "../protocol/types.js";
 
-/** Non-public host seam used only by explicit Gateway extension adapters. */
-export const TRON_QUESTIONNAIRE_REQUEST = Symbol.for("tron.extension.questionnaire.request");
+/** Non-public host seam used only by exact, provenance-checked extension adapters. */
+export const TRON_FORM_REQUEST = Symbol("tron.extension.form.request");
 
-export type QuestionnaireRequest = (input: {
-  title: string;
-  method?: "select" | "input";
-  primitiveOptions?: string[];
-  placeholder?: string;
-  question: string;
-  context?: string;
-  options: ExtensionQuestionnaireDescriptor["options"];
-  allowMultiple: boolean;
-  allowFreeform: boolean;
+export type FormRequest = (input: {
+  form: ExtensionFormDescriptor;
   signal?: AbortSignal;
   timeout?: number;
-}) => Promise<unknown>;
+  presented?: () => void | Promise<void>;
+}) => Promise<ExtensionFormAnswer | undefined>;

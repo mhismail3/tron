@@ -484,29 +484,38 @@ export interface SessionOperationState {
   lifecycle?: InvocationLifecycle;
 }
 
-export interface ExtensionQuestionnaireOption {
+export interface ExtensionFormOption {
+  id: string;
   label: string;
   description?: string;
-  preview?: string;
 }
 
-export interface ExtensionQuestionnaireDescriptor {
-  version: 1;
+export interface ExtensionFormQuestion {
+  id: string;
+  header?: string;
   question: string;
   context?: string;
-  options: ExtensionQuestionnaireOption[];
-  allowMultiple: boolean;
-  allowFreeform: boolean;
+  options: ExtensionFormOption[];
+  multiSelect: boolean;
+  allowOther: boolean;
 }
 
-export interface ExtensionQuestionnaireSelection {
-  option: number;
-  comment?: string;
+export interface ExtensionFormDescriptor {
+  version: 1;
+  title: string;
+  questions: ExtensionFormQuestion[];
+  allowCancel: boolean;
 }
 
-export interface ExtensionQuestionnaireAnswer {
-  selections: ExtensionQuestionnaireSelection[];
-  freeform?: string;
+export interface ExtensionFormQuestionAnswer {
+  questionId: string;
+  optionIds: string[];
+  other?: string;
+}
+
+export interface ExtensionFormAnswer {
+  version: 1;
+  answers: ExtensionFormQuestionAnswer[];
 }
 
 interface ExtensionInteractionBase {
@@ -521,37 +530,43 @@ interface ExtensionInteractionBase {
   operationId?: string;
 }
 
-/** Method-discriminated in Gateway code while retaining the existing flat JSON shape. */
+/** Closed method discriminant. Cross-method fields are rejected at the Gateway boundary. */
 export type ExtensionInteraction =
   | (ExtensionInteractionBase & {
       method: "select";
       options: string[];
       placeholder?: never;
       prefill?: never;
-      /** Additive descriptor; old clients ignore it and answer the primitive dialog. */
-      questionnaire?: ExtensionQuestionnaireDescriptor;
+      form?: never;
     })
   | (ExtensionInteractionBase & {
       method: "confirm";
       options?: never;
       placeholder?: never;
       prefill?: never;
-      questionnaire?: never;
+      form?: never;
     })
   | (ExtensionInteractionBase & {
       method: "input";
       options?: never;
       placeholder?: string;
       prefill?: string;
-      /** Additive descriptor; old clients ignore it and answer the primitive dialog. */
-      questionnaire?: ExtensionQuestionnaireDescriptor;
+      form?: never;
     })
   | (ExtensionInteractionBase & {
       method: "editor";
       options?: never;
       placeholder?: string;
       prefill?: string;
-      questionnaire?: never;
+      form?: never;
+    })
+  | (ExtensionInteractionBase & {
+      method: "form";
+      form: ExtensionFormDescriptor;
+      options?: never;
+      placeholder?: never;
+      prefill?: never;
+      message?: never;
     });
 
 type ExtensionInteractionOwnedFields = "id" | "hostEpoch" | "presentationRevision"
@@ -560,7 +575,8 @@ export type ExtensionInteractionInput =
   | Omit<Extract<ExtensionInteraction, { method: "select" }>, ExtensionInteractionOwnedFields>
   | Omit<Extract<ExtensionInteraction, { method: "confirm" }>, ExtensionInteractionOwnedFields>
   | Omit<Extract<ExtensionInteraction, { method: "input" }>, ExtensionInteractionOwnedFields>
-  | Omit<Extract<ExtensionInteraction, { method: "editor" }>, ExtensionInteractionOwnedFields>;
+  | Omit<Extract<ExtensionInteraction, { method: "editor" }>, ExtensionInteractionOwnedFields>
+  | Omit<Extract<ExtensionInteraction, { method: "form" }>, ExtensionInteractionOwnedFields>;
 
 export interface ExtensionOwner {
   id: string;
@@ -647,7 +663,7 @@ export interface ExtensionSemanticState {
 
 /** Versioned, bounded, disposable projection of one live Pi extension-host epoch. */
 export interface ExtensionPresentationState {
-  version: 2;
+  version: 3;
   hostEpoch: string;
   revision: number;
   capabilities: string[];
@@ -679,7 +695,7 @@ export interface ExtensionSemanticPatch {
 }
 
 export interface ExtensionPresentationMutation {
-  version: 2;
+  version: 3;
   hostEpoch: string;
   revision: number;
   semantic?: ExtensionSemanticPatch;

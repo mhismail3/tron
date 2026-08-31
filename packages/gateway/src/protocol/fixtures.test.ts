@@ -54,10 +54,10 @@ describe("shared protocol-v4 fixtures", () => {
     });
     expect(snapshot.transcript.find((item) => item.kind === "message" && item.role === "toolResult"))
       .toMatchObject({ durationMs: 1_000, progressSequence: 3, extensionOrigin: { source: "fixture-extension", owner: { source: "fixture-extension" } } });
-    expect(snapshot.extensionPresentation).toMatchObject({ version: 2, hostEpoch: "fixture-host-epoch", revision: 9, semanticState: { toolsExpanded: true } });
+    expect(snapshot.extensionPresentation).toMatchObject({ version: 3, hostEpoch: "fixture-host-epoch", revision: 9, semanticState: { toolsExpanded: true } });
     expect(snapshot.extensionPresentation.surfaces[0]).toMatchObject({ id: "fixture-surface", kind: "unknown", frame: { plainText: "Readable fallback" } });
     expect(snapshot.extensionPresentation.inputLease).toMatchObject({ id: "fixture-lease", surfaceRevision: 1 });
-    expect(snapshot.extensionPresentation.pendingInteractions[0]).toMatchObject({ method: "select", hostEpoch: "fixture-host-epoch", presentationRevision: 9 });
+    expect(snapshot.extensionPresentation.pendingInteractions[0]).toMatchObject({ method: "form", hostEpoch: "fixture-host-epoch", presentationRevision: 9, form: { version: 1 } });
     expect(snapshot.queueRevision).toBe(3);
     expect(snapshot.queuedItems).toEqual([
       { id: "queued-steer", behavior: "steer", text: "correct course", attachmentCount: 0 },

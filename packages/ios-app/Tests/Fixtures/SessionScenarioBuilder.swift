@@ -293,7 +293,7 @@ struct SessionScenarioBuilder: Sendable {
             retry: nil,
             toolExecutions: [],
             extensionPresentation: ExtensionPresentationState(
-                version: 2,
+                version: 3,
                 hostEpoch: "test-host",
                 revision: 0,
                 capabilities: [],

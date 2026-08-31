@@ -22,7 +22,7 @@ struct GatewayProtocolContractTests {
             {"id":"entry-2","parentId":"entry-1","timestamp":"2026-01-01T00:00:01Z","kind":"modelChange","modelRef":{"provider":"openai","id":"next"}}
           ],"transcriptStart":10,"transcriptTotal":12,
           "leafEntryId":"entry-2","toolExecutions":[],
-          "extensionPresentation":{"version":2,"hostEpoch":"host","revision":0,"capabilities":[],"diagnostics":[],"semanticState":{"statuses":{},"working":{"visible":true},"widgets":[],"toolsExpanded":false,"editorRevision":0,"editorText":""},"surfaces":[],"pendingInteractions":[]},
+          "extensionPresentation":{"version":3,"hostEpoch":"host","revision":0,"capabilities":[],"diagnostics":[],"semanticState":{"statuses":{},"working":{"visible":true},"widgets":[],"toolsExpanded":false,"editorRevision":0,"editorText":""},"surfaces":[],"pendingInteractions":[]},
           "diagnostics":[]
         }
         """#.utf8)
@@ -260,7 +260,7 @@ struct GatewayProtocolContractTests {
             let suffix = lease.map { ",\"inputLease\":\($0)" } ?? ""
             return try JSONDecoder.gateway.decode(
                 ExtensionPresentationMutation.self,
-                from: Data("{\"version\":2,\"hostEpoch\":\"host\",\"revision\":1\(suffix)}".utf8)
+                from: Data("{\"version\":3,\"hostEpoch\":\"host\",\"revision\":1\(suffix)}".utf8)
             )
         }
         let absent = try decode(nil)
@@ -275,7 +275,7 @@ struct GatewayProtocolContractTests {
         #expect(throws: DecodingError.self) { try decode("[") }
 
         func policy(_ lease: String) throws -> ExtensionPresentationMutation {
-            let data = Data("{\"version\":2,\"hostEpoch\":\"host\",\"revision\":1,\"inputLease\":\(lease)}".utf8)
+            let data = Data("{\"version\":3,\"hostEpoch\":\"host\",\"revision\":1,\"inputLease\":\(lease)}".utf8)
             return try JSONDecoder.gateway.decode(ExtensionPresentationMutation.self, from: data)
         }
         #expect(ExtensionPresentationPolicy.admit(try policy("null")))
@@ -430,7 +430,7 @@ struct GatewayProtocolContractTests {
             "toolsExpanded": false, "editorRevision": 0, "editorText": "",
         ]
         let base: [String: Any] = [
-            "version": 2, "hostEpoch": "host", "revision": 0,
+            "version": 3, "hostEpoch": "host", "revision": 0,
             "capabilities": [], "diagnostics": [], "semanticState": semantic,
             "surfaces": [], "pendingInteractions": [],
         ]
@@ -556,7 +556,7 @@ struct GatewayProtocolContractTests {
         func decodeMutation(_ object: [String: Any]) throws -> ExtensionPresentationMutation {
             try JSONDecoder.gateway.decode(ExtensionPresentationMutation.self, from: JSONSerialization.data(withJSONObject: object))
         }
-        let mutationBase: [String: Any] = ["version": 2, "hostEpoch": "host", "revision": 1]
+        let mutationBase: [String: Any] = ["version": 3, "hostEpoch": "host", "revision": 1]
         var mutationExact = mutationBase
         mutationExact["interactionList"] = Array(repeating: interaction, count: 8)
         mutationExact["surfaceUpserts"] = Array(repeating: surface, count: 64)

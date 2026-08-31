@@ -3,7 +3,7 @@ import { join } from "node:path";
 import * as pi from "@earendil-works/pi-coding-agent";
 import * as tui from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import { EXTENSION_PRESENTATION_VERSION, officialExampleInventory, PINNED_PI_VERSION, remoteTuiFeasibilityCompatibility } from "./compatibility-manifest.js";
+import { EXTENSION_PRESENTATION_VERSION, extensionToolAdapterCompatibility, officialExampleInventory, PINNED_PI_VERSION, remoteTuiFeasibilityCompatibility } from "./compatibility-manifest.js";
 
 describe("pinned public Pi extension-host contract", () => {
   it("keeps exact direct dependency pins and public runtime versions", async () => {
@@ -20,7 +20,13 @@ describe("pinned public Pi extension-host contract", () => {
       expect(lock.packages[`node_modules/${packageName}`]?.version, packageName).toBe(PINNED_PI_VERSION);
     }
     expect(pi.VERSION).toBe(PINNED_PI_VERSION);
-    expect(EXTENSION_PRESENTATION_VERSION).toBe(2);
+    expect(EXTENSION_PRESENTATION_VERSION).toBe(3);
+    expect(extensionToolAdapterCompatibility).toEqual({
+      zhushanwenAskUserForm: expect.objectContaining({
+        classification: "native-semantic",
+        capability: "form.v1",
+      }),
+    });
     expect(remoteTuiFeasibilityCompatibility.presentationStore.capability).toBe("presentation.aggregate-revision");
   });
 

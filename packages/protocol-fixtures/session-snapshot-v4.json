@@ -359,11 +359,12 @@
     "nearestExpiry": "2026-01-01T00:05:10Z"
   },
   "extensionPresentation": {
-    "version": 2,
+    "version": 3,
     "hostEpoch": "fixture-host-epoch",
     "revision": 9,
     "capabilities": [
       "semantic.dialogs",
+      "semantic.form.v1",
       "semantic.status",
       "semantic.revisioned-editor"
     ],
@@ -378,13 +379,27 @@
         "id": "interaction",
         "hostEpoch": "fixture-host-epoch",
         "presentationRevision": 9,
-        "method": "select",
-        "title": "Choose",
-        "message": "Pick one",
-        "options": [
-          "one",
-          "two"
-        ],
+        "method": "form",
+        "title": "Questions",
+        "form": {
+          "version": 1,
+          "title": "Questions",
+          "allowCancel": true,
+          "questions": [
+            {
+              "id": "fixture-question",
+              "header": "Choice",
+              "question": "Choose one",
+              "context": "Fixture context",
+              "options": [
+                { "id": "one", "label": "One", "description": "First" },
+                { "id": "two", "label": "Two", "description": "Second" }
+              ],
+              "multiSelect": false,
+              "allowOther": true
+            }
+          ]
+        },
         "expiresAt": "2026-01-01T00:05:00Z"
       }
     ],

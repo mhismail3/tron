@@ -53,81 +53,138 @@ private extension KeyedDecodingContainer {
     }
 }
 
-struct ExtensionQuestionnaireOption: Codable, Hashable, Sendable {
+struct ExtensionFormOption: Codable, Hashable, Sendable, Identifiable {
+    let id: String
     let label: String
     let description: String?
-    let preview: String?
 
-    private enum CodingKeys: String, CodingKey { case label, description, preview }
-    init(label: String, description: String?, preview: String?) {
-        self.label = label; self.description = description; self.preview = preview
+    private enum CodingKeys: String, CodingKey { case id, label, description }
+    init(id: String, label: String, description: String? = nil) {
+        self.id = id; self.label = label; self.description = description
     }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeBoundedString(forKey: .id, maximumBytes: 256)
         label = try container.decodeBoundedString(forKey: .label, maximumBytes: 2 * 1_024)
         description = try container.decodeBoundedStringIfPresent(forKey: .description, maximumBytes: 2 * 1_024)
-        preview = try container.decodeBoundedStringIfPresent(forKey: .preview, maximumBytes: 32 * 1_024)
     }
 }
 
-struct ExtensionQuestionnaireDescriptor: Codable, Hashable, Sendable {
-    let version: Int
+struct ExtensionFormQuestion: Codable, Hashable, Sendable, Identifiable {
+    let id: String
+    let header: String?
     let question: String
     let context: String?
-    let options: [ExtensionQuestionnaireOption]
-    let allowMultiple: Bool
-    let allowFreeform: Bool
+    let options: [ExtensionFormOption]
+    let multiSelect: Bool
+    let allowOther: Bool
 
-    private enum CodingKeys: String, CodingKey { case version, question, context, options, allowMultiple, allowFreeform }
-    init(version: Int, question: String, context: String?, options: [ExtensionQuestionnaireOption], allowMultiple: Bool, allowFreeform: Bool) {
-        self.version = version; self.question = question; self.context = context; self.options = options
-        self.allowMultiple = allowMultiple; self.allowFreeform = allowFreeform
+    private enum CodingKeys: String, CodingKey { case id, header, question, context, options, multiSelect, allowOther }
+    init(id: String, header: String? = nil, question: String, context: String? = nil, options: [ExtensionFormOption], multiSelect: Bool, allowOther: Bool) {
+        self.id = id; self.header = header; self.question = question; self.context = context
+        self.options = options; self.multiSelect = multiSelect; self.allowOther = allowOther
+    }
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeBoundedString(forKey: .id, maximumBytes: 256)
+        header = try container.decodeBoundedStringIfPresent(forKey: .header, maximumBytes: 256)
+        question = try container.decodeBoundedString(forKey: .question, maximumBytes: 4 * 1_024)
+        context = try container.decodeBoundedStringIfPresent(forKey: .context, maximumBytes: 32 * 1_024)
+        options = try container.decodeBoundedArray(ExtensionFormOption.self, forKey: .options, maximum: 4)
+        multiSelect = try container.decode(Bool.self, forKey: .multiSelect)
+        allowOther = try container.decode(Bool.self, forKey: .allowOther)
+    }
+}
+
+struct ExtensionFormDescriptor: Codable, Hashable, Sendable {
+    let version: Int
+    let title: String
+    let questions: [ExtensionFormQuestion]
+    let allowCancel: Bool
+
+    private enum CodingKeys: String, CodingKey { case version, title, questions, allowCancel }
+    init(version: Int, title: String, questions: [ExtensionFormQuestion], allowCancel: Bool) {
+        self.version = version; self.title = title; self.questions = questions; self.allowCancel = allowCancel
     }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         version = try container.decode(Int.self, forKey: .version)
-        question = try container.decodeBoundedString(forKey: .question, maximumBytes: 32 * 1_024)
-        context = try container.decodeBoundedStringIfPresent(forKey: .context, maximumBytes: 32 * 1_024)
-        options = try container.decodeBoundedArray(ExtensionQuestionnaireOption.self, forKey: .options, maximum: 64)
-        allowMultiple = try container.decode(Bool.self, forKey: .allowMultiple)
-        allowFreeform = try container.decode(Bool.self, forKey: .allowFreeform)
+        title = try container.decodeBoundedString(forKey: .title, maximumBytes: 4 * 1_024)
+        questions = try container.decodeBoundedArray(ExtensionFormQuestion.self, forKey: .questions, maximum: 4)
+        allowCancel = try container.decode(Bool.self, forKey: .allowCancel)
     }
 }
 
-struct ExtensionQuestionnaireSelection: Codable, Hashable, Sendable {
-    let option: Int
-    let comment: String?
+struct ExtensionFormQuestionAnswer: Codable, Hashable, Sendable {
+    let questionId: String
+    let optionIds: [String]
+    let other: String?
 }
 
-struct ExtensionQuestionnaireAnswer: Codable, Hashable, Sendable {
-    let selections: [ExtensionQuestionnaireSelection]
-    let freeform: String?
+struct ExtensionFormAnswer: Codable, Hashable, Sendable {
+    let version: Int
+    let answers: [ExtensionFormQuestionAnswer]
 }
 
 enum ExtensionInteractionResponsePolicy {
     static let maximumResponseBytes = 192 * 1_024
-    static let maximumCommentBytes = 4 * 1_024
+    static let maximumOtherBytes = 32 * 1_024
 
     static func primitiveTextError(_ text: String) -> String? {
         text.utf8.count <= maximumResponseBytes ? nil : "Response is too large (maximum 192 KiB)."
     }
 
-    static func questionnaireError(_ answer: ExtensionQuestionnaireAnswer) -> String? {
-        if answer.selections.contains(where: { $0.comment?.utf8.count ?? 0 > maximumCommentBytes }) {
-            return "A comment is too large (maximum 4 KiB)."
+    static func formError(_ answer: ExtensionFormAnswer, descriptor: ExtensionFormDescriptor) -> String? {
+        guard answer.version == 1, answer.answers.count == descriptor.questions.count else {
+            return "Every question needs an answer."
         }
-        if answer.freeform?.utf8.count ?? 0 > maximumResponseBytes {
-            return "The custom response is too large (maximum 192 KiB)."
+        let byQuestion = Dictionary(grouping: answer.answers, by: \.questionId)
+        guard byQuestion.count == descriptor.questions.count,
+              descriptor.questions.allSatisfy({ byQuestion[$0.id]?.count == 1 }) else {
+            return "The answer does not match this form."
+        }
+        for question in descriptor.questions {
+            guard let value = byQuestion[question.id]?.first else { return "Every question needs an answer." }
+            let allowed = Set(question.options.map(\.id))
+            guard Set(value.optionIds).count == value.optionIds.count,
+                  value.optionIds.allSatisfy(allowed.contains),
+                  question.multiSelect || value.optionIds.count <= 1,
+                  question.multiSelect || value.optionIds.isEmpty || value.other == nil else {
+                return "Choose an answer for every question."
+            }
+            if let other = value.other {
+                guard question.allowOther,
+                      !other.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    return "Choose an answer for every question."
+                }
+                if other.utf8.count > maximumOtherBytes {
+                    return "An Other response is too large (maximum 32 KiB)."
+                }
+                if containsUnsafeControl(other, preservingNewlines: true) {
+                    return "An Other response contains unsupported control characters."
+                }
+            }
+            if value.optionIds.isEmpty && value.other == nil {
+                return "Choose an answer for every question."
+            }
         }
         guard let encoded = try? JSONEncoder.gateway.encode(answer), encoded.count <= maximumResponseBytes else {
             return "The answer is too large (maximum 192 KiB)."
         }
         return nil
     }
+
+    private static func containsUnsafeControl(_ value: String, preservingNewlines: Bool) -> Bool {
+        value.unicodeScalars.contains { scalar in
+            let code = scalar.value
+            if code == 0x0a || code == 0x0d { return !preservingNewlines }
+            return code < 0x20 || (0x7f...0x9f).contains(code)
+        }
+    }
 }
 
 struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
-    enum Method: String, Codable, Sendable { case select, confirm, input, editor }
+    enum Method: String, Codable, Sendable { case select, confirm, input, editor, form }
     let id: String
     let hostEpoch: String
     let presentationRevision: Int
@@ -138,17 +195,17 @@ struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
     let placeholder: String?
     let prefill: String?
     let expiresAt: String?
-    let questionnaire: ExtensionQuestionnaireDescriptor?
+    let form: ExtensionFormDescriptor?
     let owner: ExtensionOwner?
     let invocationId: String?
     let operationId: String?
 
-    init(id: String, hostEpoch: String, presentationRevision: Int, method: Method, title: String, message: String? = nil, options: [String]? = nil, placeholder: String? = nil, prefill: String? = nil, expiresAt: String? = nil, questionnaire: ExtensionQuestionnaireDescriptor? = nil, owner: ExtensionOwner? = nil, invocationId: String? = nil, operationId: String? = nil) {
+    init(id: String, hostEpoch: String, presentationRevision: Int, method: Method, title: String, message: String? = nil, options: [String]? = nil, placeholder: String? = nil, prefill: String? = nil, expiresAt: String? = nil, form: ExtensionFormDescriptor? = nil, owner: ExtensionOwner? = nil, invocationId: String? = nil, operationId: String? = nil) {
         self.id = id; self.hostEpoch = hostEpoch; self.presentationRevision = presentationRevision; self.method = method
-        self.title = title; self.message = message; self.options = options; self.placeholder = placeholder; self.prefill = prefill; self.expiresAt = expiresAt; self.questionnaire = questionnaire
+        self.title = title; self.message = message; self.options = options; self.placeholder = placeholder; self.prefill = prefill; self.expiresAt = expiresAt; self.form = form
         self.owner = owner; self.invocationId = invocationId; self.operationId = operationId
     }
-    private enum CodingKeys: String, CodingKey { case id, hostEpoch, presentationRevision, method, title, message, options, placeholder, prefill, expiresAt, questionnaire, owner, invocationId, operationId }
+    private enum CodingKeys: String, CodingKey { case id, hostEpoch, presentationRevision, method, title, message, options, placeholder, prefill, expiresAt, form, owner, invocationId, operationId }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -161,7 +218,7 @@ struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
         placeholder = try container.decodeIfPresent(String.self, forKey: .placeholder)
         prefill = try container.decodeIfPresent(String.self, forKey: .prefill)
         expiresAt = try container.decodeIfPresent(String.self, forKey: .expiresAt)
-        questionnaire = try container.decodeIfPresent(ExtensionQuestionnaireDescriptor.self, forKey: .questionnaire)
+        form = try container.decodeIfPresent(ExtensionFormDescriptor.self, forKey: .form)
         owner = try container.decodeIfPresent(ExtensionOwner.self, forKey: .owner)
         invocationId = try container.decodeIfPresent(String.self, forKey: .invocationId)
         operationId = try container.decodeIfPresent(String.self, forKey: .operationId)
@@ -494,7 +551,7 @@ enum ExtensionPresentationPolicy {
     static let maximumPresentationBytes = 700 * 1_024
 
     static func admit(_ state: ExtensionPresentationState) -> Bool {
-        guard state.version == 2,
+        guard state.version == 3,
               !state.hostEpoch.isEmpty,
               state.revision >= 0, state.revision <= maximumSafeRevision,
               state.surfaces.count <= maximumSurfaces,
@@ -522,7 +579,7 @@ enum ExtensionPresentationPolicy {
     }
 
     static func admit(_ mutation: ExtensionPresentationMutation) -> Bool {
-        guard mutation.version == 2, !mutation.hostEpoch.isEmpty,
+        guard mutation.version == 3, !mutation.hostEpoch.isEmpty,
               mutation.revision > 0, mutation.revision <= maximumSafeRevision,
               (mutation.surfaceUpserts ?? []).count <= maximumSurfaces,
               (mutation.surfaceUpserts ?? []).allSatisfy(admit),
@@ -582,38 +639,43 @@ enum ExtensionPresentationPolicy {
               interaction.placeholder.map({ boundedSafe($0, 4 * 1_024) }) ?? true,
               interaction.prefill.map({ boundedSafe($0, 192 * 1_024, newlines: true) }) ?? true,
               interaction.expiresAt.map({ GatewayTimestamp.parse($0) != nil }) ?? true,
-              (interaction.method != .select || (interaction.options?.isEmpty == false && interaction.placeholder == nil && interaction.prefill == nil)),
-              (interaction.method != .confirm || (interaction.options == nil && interaction.placeholder == nil && interaction.prefill == nil && interaction.questionnaire == nil)),
-              (interaction.method != .input || interaction.options == nil),
-              (interaction.method != .editor || (interaction.options == nil && interaction.questionnaire == nil)),
+              (interaction.method != .select || (interaction.options?.isEmpty == false && interaction.placeholder == nil && interaction.prefill == nil && interaction.form == nil)),
+              (interaction.method != .confirm || (interaction.options == nil && interaction.placeholder == nil && interaction.prefill == nil && interaction.form == nil)),
+              (interaction.method != .input || (interaction.options == nil && interaction.form == nil)),
+              (interaction.method != .editor || (interaction.options == nil && interaction.form == nil)),
+              (interaction.method != .form || (interaction.options == nil && interaction.placeholder == nil && interaction.prefill == nil && interaction.message == nil && interaction.form.map({ admitForm($0) && $0.title == interaction.title }) == true)),
+              (interaction.method == .form || interaction.form == nil),
               interaction.options.map({ options in
                   interaction.method == .select && options.count <= 64 && Set(options).count == options.count
                     && options.allSatisfy({ boundedSafe($0, 2 * 1_024) })
-              }) ?? true,
-              interaction.questionnaire.map(admitQuestionnaire) ?? true,
-              interaction.questionnaire.map({ questionnaire in
-                  switch interaction.method {
-                  case .select:
-                      return questionnaire.options.count <= (questionnaire.allowFreeform ? 63 : 64)
-                          && interaction.options?.count == questionnaire.options.count + (questionnaire.allowFreeform ? 1 : 0)
-                  case .input:
-                      return interaction.options == nil
-                  case .confirm, .editor:
-                      return false
-                  }
               }) ?? true else { return false }
         return (try? JSONEncoder.gateway.encode(interaction).count).map { $0 <= 192 * 1_024 } ?? false
     }
 
-    private static func admitQuestionnaire(_ descriptor: ExtensionQuestionnaireDescriptor) -> Bool {
-        guard descriptor.version == 1, !descriptor.question.isEmpty, boundedSafe(descriptor.question, 32 * 1_024, newlines: true),
-              descriptor.context.map({ boundedSafe($0, 32 * 1_024, newlines: true) }) ?? true,
-              !descriptor.options.isEmpty, descriptor.options.count <= 64,
-              descriptor.options.map(\.label).count == Set(descriptor.options.map(\.label)).count else { return false }
-        return descriptor.options.allSatisfy { option in
-            !option.label.isEmpty && boundedSafe(option.label, 2 * 1_024)
-                && (option.description.map({ boundedSafe($0, 2 * 1_024, newlines: true) }) ?? true)
-                && (option.preview.map({ boundedSafe($0, 32 * 1_024, newlines: true) }) ?? true)
+    private static func admitForm(_ descriptor: ExtensionFormDescriptor) -> Bool {
+        guard descriptor.version == 1,
+              !descriptor.title.isEmpty, boundedSafe(descriptor.title, 4 * 1_024, newlines: true),
+              (1...4).contains(descriptor.questions.count),
+              Set(descriptor.questions.map(\.id)).count == descriptor.questions.count,
+              Set(descriptor.questions.map(\.question)).count == descriptor.questions.count else { return false }
+        let multiQuestion = descriptor.questions.count > 1
+        let headers = descriptor.questions.compactMap { $0.header?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        if multiQuestion && (headers.count != descriptor.questions.count || Set(headers).count != headers.count) { return false }
+        return descriptor.questions.allSatisfy { question in
+            guard !question.id.isEmpty, boundedSafe(question.id, 256),
+                  !question.question.isEmpty, question.question.utf16.count <= 1_000,
+                  boundedSafe(question.question, 4 * 1_024),
+                  question.context.map({ boundedSafe($0, 32 * 1_024, newlines: true) }) ?? true,
+                  question.header.map({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.utf16.count <= 12 && boundedSafe($0, 256) }) ?? !multiQuestion,
+                  (2...4).contains(question.options.count),
+                  Set(question.options.map(\.id)).count == question.options.count,
+                  Set(question.options.map(\.label)).count == question.options.count else { return false }
+            return question.options.allSatisfy { option in
+                !option.id.isEmpty && boundedSafe(option.id, 256)
+                    && !option.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && boundedSafe(option.label, 2 * 1_024)
+                    && (option.description.map({ boundedSafe($0, 2 * 1_024, newlines: true) }) ?? true)
+            }
         }
     }
 

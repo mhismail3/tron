@@ -14,66 +14,126 @@ function brokerWith(
   );
 }
 
-describe("SemanticUIBroker", () => {
-  it("admits structured questionnaire answers and keeps primitive fallback valid", async () => {
-    const broker = brokerWith(() => {});
-    const pending = broker.requestQuestionnaire({
-      title: "Pick", question: "Pick one", options: [{ label: "One", preview: "**one**" }, { label: "Two" }],
-      allowMultiple: false, allowFreeform: true,
-    });
-    const interaction = broker.interactions()[0]!;
-    expect(interaction.questionnaire?.version).toBe(1);
-    broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision,
-      { selections: [{ option: 1, comment: "reason" }] }, false);
-    await expect(pending).resolves.toEqual({ selections: [{ option: 1, comment: "reason" }] });
+const form = (overrides: Record<string, unknown> = {}) => ({
+  version: 1 as const,
+  title: "Questions",
+  allowCancel: true,
+  questions: [
+    {
+      id: "q-db", header: "DB", question: "Which database?", context: "Need transactions.",
+      options: [{ id: "postgres", label: "Postgres" }, { id: "sqlite", label: "SQLite" }],
+      multiSelect: false, allowOther: true,
+    },
+    {
+      id: "q-region", header: "Region", question: "Which regions?",
+      options: [{ id: "us", label: "US" }, { id: "eu", label: "EU" }, { id: "apac", label: "APAC" }],
+      multiSelect: true, allowOther: true,
+    },
+  ],
+  ...overrides,
+});
 
-    const legacy = broker.requestQuestionnaire({
-      title: "Pick", question: "Pick one", options: [{ label: "One" }], allowMultiple: false, allowFreeform: false,
+describe("SemanticUIBroker", () => {
+  it("admits one atomic form and canonicalizes answer order", async () => {
+    const broker = brokerWith(() => {});
+    const pending = broker.requestForm({ form: form() });
+    const interaction = broker.interactions()[0]!;
+    expect(interaction).toMatchObject({ method: "form", form: { version: 1, questions: expect.any(Array) } });
+    broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision, {
+      version: 1,
+      answers: [
+        { questionId: "q-region", optionIds: ["apac", "us"], other: "LATAM" },
+        { questionId: "q-db", optionIds: ["sqlite"] },
+      ],
+    }, false);
+    await expect(pending).resolves.toEqual({
+      version: 1,
+      answers: [
+        { questionId: "q-db", optionIds: ["sqlite"] },
+        { questionId: "q-region", optionIds: ["us", "apac"], other: "LATAM" },
+      ],
     });
-    const fallback = broker.interactions()[0]!;
-    broker.respond(fallback.id, fallback.hostEpoch, fallback.presentationRevision, "1. One", false);
-    await expect(legacy).resolves.toBe("1. One");
   });
 
-  it("rejects invalid questionnaire answers without removing the pending request", async () => {
-    const broker = brokerWith(() => {});
-    const pending = broker.requestQuestionnaire({
-      title: "Pick", question: "Pick", options: [{ label: "One" }], allowMultiple: false, allowFreeform: false,
+  it("installs settlement authority before synchronously broadcasting presentation", async () => {
+    let broker!: SemanticUIBroker;
+    let answered = false;
+    broker = brokerWith((_topic, payload) => {
+      const interaction = (payload as { interactionList?: Array<{ id: string; hostEpoch: string; presentationRevision: number }> }).interactionList?.[0];
+      if (!interaction || answered) return;
+      answered = true;
+      broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision, {
+        version: 1,
+        answers: [
+          { questionId: "q-db", optionIds: ["postgres"] },
+          { questionId: "q-region", optionIds: ["eu"] },
+        ],
+      }, false);
     });
+    await expect(broker.requestForm({ form: form() })).resolves.toEqual({
+      version: 1,
+      answers: [
+        { questionId: "q-db", optionIds: ["postgres"] },
+        { questionId: "q-region", optionIds: ["eu"] },
+      ],
+    });
+    expect(broker.interactions()).toEqual([]);
+  });
+
+  it("rejects malformed, incomplete, conflicting, and unknown form answers without removing the request", async () => {
+    const broker = brokerWith(() => {});
+    const pending = broker.requestForm({ form: form() });
     const interaction = broker.interactions()[0]!;
-    expect(() => broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision,
-      { selections: [{ option: 4 }] }, false)).toThrow(expect.objectContaining({ code: "invalid_request" }));
-    expect(() => broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision,
-      { selections: [{ option: 0 }], freeform: "conflicting" }, false)).toThrow(expect.objectContaining({ code: "invalid_request" }));
+    const invalid = [
+      { version: 1, answers: [{ questionId: "q-db", optionIds: ["missing"] }] },
+      { version: 1, answers: [{ questionId: "q-db", optionIds: ["sqlite"], other: "both" }, { questionId: "q-region", optionIds: ["us"] }] },
+      { version: 1, answers: [{ questionId: "q-db", optionIds: [] }, { questionId: "q-region", optionIds: ["us"] }] },
+      { version: 1, answers: [{ questionId: "q-db", optionIds: ["sqlite"] }, { questionId: "q-db", optionIds: ["postgres"] }] },
+    ];
+    invalid.forEach((answer) => expect(() => broker.respond(
+      interaction.id, interaction.hostEpoch, interaction.presentationRevision, answer, false,
+    )).toThrow(expect.objectContaining({ code: "invalid_request" })));
     expect(broker.interactions()).toHaveLength(1);
     broker.cancelAll();
     await expect(pending).rejects.toMatchObject({ code: "cancelled" });
   });
 
-  it("preserves the first primitive input shape for multi-select fallback", async () => {
+  it("permits only one pending form while retaining ordinary bounded dialogs", async () => {
     const broker = brokerWith(() => {});
-    const pending = broker.requestQuestionnaire({ method: "input", title: "Choose", primitiveOptions: undefined, placeholder: "placeholder", question: "Choose", options: [{ label: "One" }], allowMultiple: true, allowFreeform: false });
-    const interaction = broker.interactions()[0]!;
-    expect(interaction.method).toBe("input");
-    expect(interaction.options).toBeUndefined();
-    broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision, "1", false);
-    await expect(pending).resolves.toBe("1");
+    const pending = broker.requestForm({ form: form() });
+    await expect(broker.requestForm({ form: form() })).rejects.toMatchObject({ code: "busy", retryable: true });
+    const confirm = broker.context().confirm("Confirm", "Proceed?");
+    expect(broker.interactions().map((interaction) => interaction.method)).toEqual(["form", "confirm"]);
+    broker.cancelAll();
+    await Promise.allSettled([pending, confirm]);
   });
 
-  it("enforces the conditional 63/64 structured option boundary", async () => {
+  it("enforces form cancellation policy", async () => {
     const broker = brokerWith(() => {});
-    const options = (count: number) => Array.from({ length: count }, (_, index) => ({ label: `Option ${index}` }));
-    const sixtyThree = broker.requestQuestionnaire({ title: "Pick", question: "Pick", options: options(63), allowMultiple: false, allowFreeform: true });
-    expect(broker.interactions()[0]?.options).toHaveLength(64);
+    const pending = broker.requestForm({ form: form({ allowCancel: false }) });
+    const interaction = broker.interactions()[0]!;
+    expect(() => broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision, undefined, true))
+      .toThrow(expect.objectContaining({ code: "invalid_request" }));
+    expect(broker.interactions()).toHaveLength(1);
     broker.cancelAll();
-    await expect(sixtyThree).rejects.toMatchObject({ code: "cancelled" });
-    await expect(broker.requestQuestionnaire({ title: "Pick", question: "Pick", options: options(64), allowMultiple: false, allowFreeform: true }))
-      .rejects.toMatchObject({ code: "conflict" });
-    broker.cancelAll();
-    const sixtyFour = broker.requestQuestionnaire({ title: "Pick", question: "Pick", options: options(64), allowMultiple: false, allowFreeform: false });
-    expect(broker.interactions()[0]?.options).toHaveLength(64);
-    broker.cancelAll();
-    await expect(sixtyFour).rejects.toMatchObject({ code: "cancelled" });
+    await expect(pending).rejects.toMatchObject({ code: "cancelled" });
+  });
+
+  it("admits before notifying and settles an abort exactly once", async () => {
+    const broker = brokerWith(() => {});
+    const controller = new AbortController();
+    const observed: number[] = [];
+    const pending = broker.requestForm({
+      form: form(), signal: controller.signal,
+      presented: () => { observed.push(broker.interactions().length); throw new Error("notification unavailable"); },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(observed).toEqual([1]);
+    controller.abort();
+    await expect(pending).resolves.toBeUndefined();
+    expect(broker.interactions()).toEqual([]);
+    controller.abort();
+    expect(broker.interactions()).toEqual([]);
   });
 
   it("binds interaction requests to the exact invocation context", async () => {
@@ -140,7 +200,7 @@ describe("SemanticUIBroker", () => {
     context.setToolsExpanded(true);
     expect(context.getToolsExpanded()).toBe(true);
     expect(broker.state()).toMatchObject({
-      version: 2,
+      version: 3,
       hostEpoch: broker.hostEpoch,
       semanticState: { working: { indicator: { kind: "animated", frames: [".", ".."], intervalMs: 120 } },
       toolsExpanded: true },

@@ -501,7 +501,7 @@ export class RuntimeSlot {
       this.emit(topic, payload);
     }, {
       capabilities: [
-        "semantic.dialogs", "semantic.questionnaire.v1", "semantic.notifications", "semantic.status", "semantic.working",
+        "semantic.dialogs", "semantic.form.v1", "semantic.notifications", "semantic.status", "semantic.working",
         "semantic.hidden-thinking-label", "semantic.string-widgets", "semantic.title",
         "semantic.revisioned-editor", "semantic.tools-expanded", "surfaces.full-frame",
       ],

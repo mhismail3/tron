@@ -2874,6 +2874,21 @@ final class AppModel {
         value: JSONValue?,
         cancelled: Bool
     ) async throws {
+        if interaction.method == .form,
+           let snapshot = authoritativeSnapshot(for: sessionID),
+           !snapshot.extensionPresentation.pendingInteractions.contains(where: {
+               $0.id == interaction.id
+                   && $0.hostEpoch == interaction.hostEpoch
+                   && $0.presentationRevision == interaction.presentationRevision
+                   && $0.method == .form
+           }) {
+            throw GatewayFailure(
+                code: "conflict",
+                message: "This form is no longer pending. Refresh the session.",
+                retryable: true,
+                details: nil
+            )
+        }
         try await sessionMutations.answerInteraction(
             interactionID: interaction.id,
             hostEpoch: interaction.hostEpoch,

@@ -22,7 +22,7 @@ describe("ExtensionPresentationStore", () => {
     expect(store.state()).toMatchObject({ revision: 1, semanticState: { statuses: { a: "one" } } });
     expect(store.state().pendingInteractions[0]).toMatchObject({ hostEpoch: store.hostEpoch, presentationRevision: 1 });
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ topic: "session.extensionPresentation", payload: { version: 2, revision: 1 } });
+    expect(events[0]).toMatchObject({ topic: "session.extensionPresentation", payload: { version: 3, revision: 1 } });
   });
 
   it("rejects an invalid transaction without changing state or emitting", () => {
@@ -95,12 +95,19 @@ describe("ExtensionPresentationStore", () => {
 
   it("rejects cross-method interaction fields at the Gateway boundary", () => {
     const store = new ExtensionPresentationStore(() => {});
+    const form = {
+      version: 1, title: "Question", allowCancel: true,
+      questions: [{ id: "q", question: "Choose", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }], multiSelect: false, allowOther: true }],
+    };
     const invalid = [
       { method: "confirm", options: ["yes"] },
-      { method: "confirm", questionnaire: { version: 1, question: "q", options: [{ label: "yes" }], allowMultiple: false, allowFreeform: false } },
+      { method: "confirm", form },
       { method: "select", options: ["yes"], placeholder: "bad" },
       { method: "input", options: ["bad"] },
-      { method: "editor", questionnaire: { version: 1, question: "q", options: [{ label: "yes" }], allowMultiple: false, allowFreeform: false } },
+      { method: "editor", form },
+      { method: "form", form, options: ["bad"] },
+      { method: "form", title: "Different", form },
+      { method: "form", form: { ...form, questions: [] } },
     ];
     invalid.forEach((fields, index) => {
       expect(() => store.transact((draft) => {

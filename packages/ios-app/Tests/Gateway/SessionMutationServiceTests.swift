@@ -206,7 +206,13 @@ struct SessionMutationServiceTests {
                     hostEpoch: "host-e",
                     presentationRevision: 7,
                     sessionID: "session-e",
-                    value: .string("answer"),
+                    value: .object([
+                        "version": .number(1),
+                        "answers": .array([.object([
+                            "questionId": .string("db"),
+                            "optionIds": .array([.string("postgres")]),
+                        ])]),
+                    ]),
                     cancelled: false
                 )
             }
@@ -216,7 +222,13 @@ struct SessionMutationServiceTests {
             #expect(answer.params?["interactionId"] == .string("interaction"))
             #expect(answer.params?["hostEpoch"] == .string("host-e"))
             #expect(answer.params?["presentationRevision"] == .number(7))
-            #expect(answer.params?["value"] == .string("answer"))
+            #expect(answer.params?["value"] == .object([
+                "version": .number(1),
+                "answers": .array([.object([
+                    "questionId": .string("db"),
+                    "optionIds": .array([.string("postgres")]),
+                ])]),
+            ]))
             #expect(answer.params?["cancelled"] == .bool(false))
             try expectCommandID(answer)
             await harness.socket.enqueue(successResponse(

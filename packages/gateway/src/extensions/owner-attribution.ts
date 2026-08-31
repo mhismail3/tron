@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { basename, extname } from "node:path";
 import type { Extension, LoadExtensionsResult, RegisteredCommand, RegisteredTool, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { adaptedToolDefinition, type ExtensionAdapterHooks } from "./extension-adapters.js";
+import { adaptedExtensionEventHandler, adaptedToolDefinition, type ExtensionAdapterHooks } from "./extension-adapters.js";
 import type { ExtensionOwner } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 
@@ -77,11 +77,11 @@ export function attributeExtensions(base: LoadExtensionsResult, hooks: Extension
   for (const extension of base.extensions) {
     const owner = extensionOwnerFor(extension);
     for (const [event, handlers] of extension.handlers) {
-      extension.handlers.set(event, handlers.map((handler) => owned(handler, owner)));
+      extension.handlers.set(event, handlers.map((handler) => owned(adaptedExtensionEventHandler(extension, handler), owner)));
     }
     for (const [name, registered] of extension.tools) {
-      const definition = registered.definition;
-      const execute = owned(adaptedToolDefinition(extension, name, definition, hooks).execute, owner);
+      const definition = adaptedToolDefinition(extension, name, registered.definition, hooks);
+      const execute = owned(definition.execute, owner);
       attributedToolOwners.set(execute, owner);
       extension.tools.set(name, {
         ...registered,

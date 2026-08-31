@@ -12,7 +12,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 export const PINNED_PI_VERSION = "0.84.1" as const;
-export const EXTENSION_PRESENTATION_VERSION = 2 as const;
+export const EXTENSION_PRESENTATION_VERSION = 3 as const;
 
 export type HostClassification = "native-semantic" | "remote-component" | "renderer" | "pi-runtime" | "explicit-fallback";
 export interface CompatibilityEntry {
@@ -25,7 +25,7 @@ const entry = (classification: HostClassification, capability: string, limitatio
 });
 
 export const extensionToolAdapterCompatibility = {
-  pi9AskQuestionnaire: entry("native-semantic", "questionnaire.v1", "Explicitly identified npm:@pi9/ask contract; older clients use the primitive RPC fallback."),
+  zhushanwenAskUserForm: entry("native-semantic", "form.v1", "Exact npm:@zhushanwen/pi-ask-user@7.0.15 marker contract; one bounded atomic form with no primitive fallback."),
 } as const;
 
 export const extensionPresentationCompatibility = {

@@ -99,8 +99,8 @@ struct ChatRoutes: ViewModifier {
                 item: $interaction,
                 identity: { "chat.\(sessionID).interaction.\($0.id)" }
             ) { value in
-                if value.questionnaire != nil {
-                    ExtensionQuestionnaireSheet(
+                if value.method == .form {
+                    ExtensionFormSheet(
                         sessionID: sessionID,
                         interaction: value,
                         onResolved: { onInteractionClosed(value) },

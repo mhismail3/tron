@@ -7,15 +7,20 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import type {
+  ExtensionFormAnswer,
+  ExtensionFormDescriptor,
   ExtensionInteraction,
   ExtensionInteractionInput,
   ExtensionOwner,
-  ExtensionQuestionnaireAnswer,
-  ExtensionQuestionnaireDescriptor,
   ExtensionSemanticState,
   ExtensionWidget,
 } from "../protocol/types.js";
-import { TRON_QUESTIONNAIRE_REQUEST } from "./extension-adapter-contract.js";
+import { TRON_FORM_REQUEST } from "./extension-adapter-contract.js";
+import {
+  canonicalExtensionFormAnswer,
+  EXTENSION_FORM_MAX_ANSWER_BYTES,
+  normalizeExtensionForm,
+} from "../extensions/semantic-form.js";
 import {
   EXTENSION_MAX_INTERACTIONS as MAX_PENDING_INTERACTIONS,
   EXTENSION_MAX_SELECT_OPTIONS as MAX_SELECT_OPTIONS,
@@ -41,6 +46,12 @@ interface PendingInteraction {
   reject: (error: Error) => void;
   timer?: NodeJS.Timeout;
   cleanupAbort?: () => void;
+}
+
+interface InteractionRequestOptions {
+  signal?: AbortSignal;
+  timeout?: number;
+  presented?: () => void | Promise<void>;
 }
 
 // Pi exposes Theme and initTheme at its package root, but not its mutable global
@@ -74,7 +85,6 @@ const MAX_TITLE_BYTES = 4 * 1_024;
 const MAX_MESSAGE_BYTES = 32 * 1_024;
 const MAX_OPTION_BYTES = 2 * 1_024;
 const MAX_RESPONSE_BYTES = 192 * 1_024;
-const MAX_COMMENT_BYTES = 4 * 1_024;
 const MAX_STATUS_BYTES = 4 * 1_024;
 const MAX_WORKING_BYTES = 8 * 1_024;
 const MAX_NOTIFICATION_BYTES = 32 * 1_024;
@@ -141,75 +151,50 @@ export class SemanticUIBroker {
     if (hostEpoch !== this.hostEpoch || presentationRevision !== pending.wire.presentationRevision) {
       throw new GatewayError("conflict", "Extension interaction scope is stale; refresh the session", true);
     }
-    if (!cancelled) {
-      const valid = pending.wire.questionnaire
-        ? isQuestionnaireAnswer(value, pending.wire.questionnaire)
-          || (pending.wire.method === "input"
-            ? typeof value === "string"
-            : typeof value === "string" && pending.wire.options?.includes(value) === true)
-        : pending.wire.method === "confirm"
-          ? typeof value === "boolean"
-          : pending.wire.method === "select"
-            ? typeof value === "string" && pending.wire.options?.includes(value) === true
-            : typeof value === "string";
-      if (!valid) throw new GatewayError("invalid_request", "Extension interaction response is invalid");
-      if (typeof value === "string" && Buffer.byteLength(value) > MAX_RESPONSE_BYTES) {
-        throw new GatewayError("invalid_request", "Extension interaction response exceeds its bounded capacity");
+    if (cancelled) {
+      if (pending.wire.method === "form" && !pending.wire.form.allowCancel) {
+        throw new GatewayError("invalid_request", "Extension form does not allow user cancellation");
       }
+      this.finish(pending);
+      pending.resolve(undefined);
+      return;
+    }
+    let resolved = value;
+    const valid = pending.wire.method === "form"
+      ? (() => {
+          resolved = canonicalExtensionFormAnswer(value, pending.wire.form);
+          return true;
+        })()
+      : pending.wire.method === "confirm"
+        ? typeof value === "boolean"
+        : pending.wire.method === "select"
+          ? typeof value === "string" && pending.wire.options.includes(value)
+          : typeof value === "string";
+    if (!valid) throw new GatewayError("invalid_request", "Extension interaction response is invalid");
+    if (typeof value === "string" && Buffer.byteLength(value) > MAX_RESPONSE_BYTES) {
+      throw new GatewayError("invalid_request", "Extension interaction response exceeds its bounded capacity");
+    }
+    if (pending.wire.method === "form" && encodedBytes(resolved) > EXTENSION_FORM_MAX_ANSWER_BYTES) {
+      throw new GatewayError("invalid_request", "Extension form response exceeds its bounded capacity");
     }
     this.finish(pending);
-    if (cancelled) pending.resolve(undefined); else pending.resolve(value);
+    pending.resolve(resolved);
   }
 
-  requestQuestionnaire(input: {
-    title: string;
-    method?: "select" | "input";
-    primitiveOptions?: string[];
-    placeholder?: string;
-    question: string;
-    context?: string;
-    options: ExtensionQuestionnaireDescriptor["options"];
-    allowMultiple: boolean;
-    allowFreeform: boolean;
+  requestForm(input: {
+    form: ExtensionFormDescriptor;
     signal?: AbortSignal;
     timeout?: number;
-  }): Promise<unknown> {
-    const descriptor: ExtensionQuestionnaireDescriptor = {
-      version: 1,
-      question: stripTerminalPresentation(input.question),
-      ...(input.context === undefined ? {} : { context: stripTerminalPresentation(input.context) }),
-      options: input.options.map((option) => ({
-        label: stripTerminalPresentation(option.label),
-        ...(option.description === undefined ? {} : { description: stripTerminalPresentation(option.description) }),
-        ...(option.preview === undefined ? {} : { preview: stripTerminalPresentation(option.preview) }),
-      })),
-      allowMultiple: input.allowMultiple,
-      allowFreeform: input.allowFreeform,
-    };
-    const method = input.method ?? "select";
-    const primitiveOptions = input.primitiveOptions ?? (method === "select"
-      ? input.options.map((option, index) => `${index + 1}. ${option.label}${option.description ? ` — ${option.description}` : ""}`)
-        .concat(input.allowFreeform ? [`${input.options.length + 1}. Type a response…`] : [])
-      : undefined);
-    if (method === "select" && (!primitiveOptions || primitiveOptions.length === 0)) {
-      return Promise.reject(new GatewayError("conflict", "Extension questionnaire select options are invalid"));
-    }
-    if (method === "select") {
-      // Keep the select/input discriminant visible to TypeScript. The wire
-      // contract intentionally forbids options on input interactions.
-      return this.request({
-        method: "select",
-        title: input.title,
-        options: primitiveOptions!,
-        questionnaire: descriptor,
-      }, input);
-    }
-    return this.request({
-      method: "input",
-      title: input.title,
-      ...(input.placeholder === undefined ? {} : { placeholder: input.placeholder }),
-      questionnaire: descriptor,
-    }, input);
+    presented?: () => void | Promise<void>;
+  }): Promise<ExtensionFormAnswer | undefined> {
+    let form: ExtensionFormDescriptor;
+    try {
+      form = normalizeExtensionForm(input.form);
+      if (this.interactions().some((interaction) => interaction.method === "form")) {
+        throw new GatewayError("busy", "Another extension form is already pending", true);
+      }
+    } catch (error) { return Promise.reject(error); }
+    return this.request({ method: "form", title: form.title, form }, input) as Promise<ExtensionFormAnswer | undefined>;
   }
 
   updateEditor(hostEpoch: string, baseRevision: number, operationId: string, text: string): { revision: number; text: string; applied: boolean } {
@@ -267,7 +252,7 @@ export class SemanticUIBroker {
 
   private request(
     input: ExtensionInteractionInput,
-    options?: { signal?: AbortSignal; timeout?: number },
+    options?: InteractionRequestOptions,
   ): Promise<unknown> {
     try {
       this.assertActive();
@@ -308,6 +293,9 @@ export class SemanticUIBroker {
             ...(input.prefill === undefined ? {} : { prefill: stripTerminalPresentation(input.prefill) }),
           };
           break;
+        case "form":
+          input = { ...input, title, form: normalizeExtensionForm(input.form) };
+          break;
       }
       if (options?.signal?.aborted) return Promise.resolve(input.method === "confirm" ? false : undefined);
       requireBoundedString(input.title, MAX_TITLE_BYTES, "interaction title");
@@ -329,7 +317,9 @@ export class SemanticUIBroker {
       const owner = currentExtensionOwner();
       const invocation = currentInvocationContext();
       const wire: ExtensionInteraction = {
-        id: crypto.randomUUID(), hostEpoch: this.hostEpoch, presentationRevision: 0, ...input,
+        id: crypto.randomUUID(), hostEpoch: this.hostEpoch,
+        presentationRevision: this.presentation.state().revision + 1,
+        ...input,
         ...(timeout ? { expiresAt: new Date(Date.now() + timeout).toISOString() } : {}),
         ...(owner ? { owner } : {}),
         ...(invocation ? {
@@ -340,17 +330,25 @@ export class SemanticUIBroker {
       const interactions = [...this.interactions(), wire];
       if (encodedBytes(interactions) > MAX_INTERACTION_BYTES) return reject(new GatewayError("busy", "Extension UI interactions reached their bounded capacity", true));
       const pending: PendingInteraction = { wire, resolve, reject };
-      try {
-        this.presentation.transact((draft) => { draft.pendingInteractions.push(wire); });
-      } catch (error) { reject(error); return; }
-      wire.presentationRevision = this.interactions().find((interaction) => interaction.id === wire.id)?.presentationRevision ?? 0;
+      // Install settlement authority before publishing. Broadcast callbacks are
+      // allowed to respond re-entrantly, and abort must not be lost between the
+      // preflight check and committed presentation.
+      this.pending.set(wire.id, pending);
       if (timeout) pending.timer = setTimeout(() => { if (this.pending.has(wire.id)) { this.finish(pending); resolve(undefined); } }, timeout);
       if (options?.signal) {
         const abort = () => { if (this.pending.has(wire.id)) { this.finish(pending); resolve(input.method === "confirm" ? false : undefined); } };
         options.signal.addEventListener("abort", abort, { once: true });
         pending.cleanupAbort = () => options.signal?.removeEventListener("abort", abort);
+        if (options.signal.aborted) { this.cleanup(pending); resolve(input.method === "confirm" ? false : undefined); return; }
       }
-      this.pending.set(wire.id, pending);
+      try {
+        this.presentation.transact((draft) => { draft.pendingInteractions.push(wire); });
+      } catch (error) { this.cleanup(pending); reject(error); return; }
+      const presented = options?.presented;
+      if (presented) queueMicrotask(() => {
+        try { void Promise.resolve(presented()).catch(() => undefined); }
+        catch { /* Notification admission must never fail the form. */ }
+      });
     });
   }
 
@@ -496,28 +494,7 @@ export class SemanticUIBroker {
         });
       },
     };
-    (context as ExtensionUIContext & { [TRON_QUESTIONNAIRE_REQUEST]: typeof broker.requestQuestionnaire })[TRON_QUESTIONNAIRE_REQUEST] = broker.requestQuestionnaire.bind(broker);
+    (context as ExtensionUIContext & { [TRON_FORM_REQUEST]: typeof broker.requestForm })[TRON_FORM_REQUEST] = broker.requestForm.bind(broker);
     return context;
   }
-}
-
-function isQuestionnaireAnswer(value: unknown, descriptor: ExtensionQuestionnaireDescriptor): value is ExtensionQuestionnaireAnswer {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const answer = value as ExtensionQuestionnaireAnswer;
-  if (Object.keys(answer).some((key) => key !== "selections" && key !== "freeform")) return false;
-  if (!Array.isArray(answer.selections) || answer.selections.length > descriptor.options.length
-    || (!descriptor.allowMultiple && answer.selections.length > 1)
-    || (!descriptor.allowMultiple && answer.selections.length > 0 && answer.freeform !== undefined)
-    || (answer.freeform !== undefined && (!descriptor.allowFreeform || typeof answer.freeform !== "string"))) return false;
-  if (answer.freeform !== undefined && Buffer.byteLength(answer.freeform) > MAX_RESPONSE_BYTES) return false;
-  if (Buffer.byteLength(JSON.stringify(answer), "utf8") > MAX_RESPONSE_BYTES) return false;
-  const seen = new Set<number>();
-  return answer.selections.every((selection) => {
-    if (!selection || typeof selection !== "object"
-      || Object.keys(selection).some((key) => key !== "option" && key !== "comment")
-      || !Number.isSafeInteger(selection.option) || selection.option < 0
-      || selection.option >= descriptor.options.length || seen.has(selection.option)) return false;
-    seen.add(selection.option);
-    return selection.comment === undefined || (typeof selection.comment === "string" && Buffer.byteLength(selection.comment) <= MAX_COMMENT_BYTES);
-  });
 }

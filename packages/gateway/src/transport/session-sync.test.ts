@@ -19,7 +19,7 @@ function snapshot(sequence: number): SessionSnapshot {
     queued: { steering: [], followUp: [] },
     transcript: [], transcriptStart: 0, transcriptTotal: 0,
     toolExecutions: [],
-    extensionPresentation: { version: 2, hostEpoch: "test-host", revision: 0, capabilities: [], diagnostics: [], semanticState: { statuses: {}, working: { visible: false, indicator: { kind: "default", frames: [] } }, widgets: [], toolsExpanded: false, editorRevision: 0, editorText: "" }, surfaces: [], pendingInteractions: [] },
+    extensionPresentation: { version: 3, hostEpoch: "test-host", revision: 0, capabilities: [], diagnostics: [], semanticState: { statuses: {}, working: { visible: false, indicator: { kind: "default", frames: [] } }, widgets: [], toolsExpanded: false, editorRevision: 0, editorText: "" }, surfaces: [], pendingInteractions: [] },
     diagnostics: [],
   };
 }

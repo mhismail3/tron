@@ -834,7 +834,7 @@ describe("transcript projection", () => {
         progressSequence: index + 1,
       })),
       extensionPresentation: {
-        version: 2, hostEpoch: "test-host", revision: 0, capabilities: [], diagnostics: [],
+        version: 3, hostEpoch: "test-host", revision: 0, capabilities: [], diagnostics: [],
         semanticState: { statuses: {}, working: { visible: true, indicator: { kind: "default", frames: [] } }, widgets: [], toolsExpanded: false, editorRevision: 0, editorText: "" },
         surfaces: [], pendingInteractions: [],
       },
@@ -934,7 +934,7 @@ describe("transcript projection", () => {
         content: [{ id: `idle-${index}:0`, type: "text" as const, text: "x".repeat(64_000) }],
       })),
       transcriptStart: 0, transcriptTotal: 10, toolExecutions: [],
-      extensionPresentation: { version: 2, hostEpoch: "test-host", revision: 0, capabilities: [], diagnostics: [], semanticState: { statuses: {}, working: { visible: false, indicator: { kind: "default", frames: [] } }, widgets: [], toolsExpanded: false, editorRevision: 0, editorText: "" }, surfaces: [], pendingInteractions: [] },
+      extensionPresentation: { version: 3, hostEpoch: "test-host", revision: 0, capabilities: [], diagnostics: [], semanticState: { statuses: {}, working: { visible: false, indicator: { kind: "default", frames: [] } }, widgets: [], toolsExpanded: false, editorRevision: 0, editorText: "" }, surfaces: [], pendingInteractions: [] },
       diagnostics: [],
     };
 
@@ -954,7 +954,7 @@ describe("transcript projection", () => {
       queued: { steering: [], followUp: [] }, transcript: [], transcriptStart: 0, transcriptTotal: 0,
       toolExecutions: [], diagnostics: [],
       extensionPresentation: {
-        version: 2, hostEpoch: "host", revision: 4, capabilities: [], diagnostics: [],
+        version: 3, hostEpoch: "host", revision: 4, capabilities: [], diagnostics: [],
         semanticState: { statuses: { decorative: "x".repeat(40_000) }, working: { visible: true, indicator: { kind: "default", frames: [] } }, widgets: [], toolsExpanded: false, editorRevision: 0, editorText: "" },
         surfaces: [{
           id: "decorative", kind: "widget", placement: "aboveEditor", lifecycle: "retained", revision: 5,
@@ -990,7 +990,7 @@ describe("transcript projection", () => {
       queued: { steering: [], followUp: [] }, transcript: [], transcriptStart: 0, transcriptTotal: 0,
       toolExecutions: [], diagnostics: [],
       extensionPresentation: {
-        version: 2, hostEpoch: "host", revision: 9, capabilities: [], diagnostics: [],
+        version: 3, hostEpoch: "host", revision: 9, capabilities: [], diagnostics: [],
         semanticState: {
           statuses: { decorative: "x".repeat(40_000) },
           statusOwners: {

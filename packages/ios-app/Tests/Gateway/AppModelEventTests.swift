@@ -46,6 +46,7 @@ struct AppModelEventTests {
             for: snapshot.sessionId,
             presentationGeneration: 1
         ))
+        let activityRevision = (snapshot.liveActivityRevision ?? 0) + 1
         let activity: JSONValue = .object([
             "id": .string("tool:subagent"),
             "activityId": .string("extension-activity:test"),
@@ -81,7 +82,7 @@ struct AppModelEventTests {
             sequence: snapshot.eventSequence + 1,
             data: .object([
                 "activity": activity,
-                "liveActivityRevision": .number(1),
+                "liveActivityRevision": .number(Double(activityRevision)),
                 "extensionActivityAsOf": .string("2026-01-01T00:00:01.000Z"),
             ])
         ))
@@ -101,7 +102,7 @@ struct AppModelEventTests {
         staleFullFrame.extensionActivities = nil
         await model.handle(snapshotEvent(staleFullFrame, sessionID: snapshot.sessionId))
         #expect(model.selectedSnapshot?.extensionActivities?.first?.stableID == "extension-activity:test")
-        #expect(model.selectedSnapshot?.liveActivityRevision == 1)
+        #expect(model.selectedSnapshot?.liveActivityRevision == activityRevision)
     }
 
     @Test("process deltas atomically update overview without rebuilding chat")
@@ -285,7 +286,7 @@ struct AppModelEventTests {
         )?.timeline == completedProjection.timeline)
 
         let interactions: JSONValue = .object([
-            "version": .number(2), "hostEpoch": .string("fixture-host-epoch"),
+            "version": .number(3), "hostEpoch": .string("fixture-host-epoch"),
             "revision": .number(10),
             "interactionList": .array([
                 .object([
@@ -305,7 +306,7 @@ struct AppModelEventTests {
         )?.timeline == completedProjection.timeline)
 
         let editor: JSONValue = .object([
-            "version": .number(2), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(11),
+            "version": .number(3), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(11),
             "semantic": .object([
                 "editorAction": .string("set"), "editorDelta": .string("replacement"),
                 "editorText": .string("replacement"), "editorRevision": .number(4),
@@ -334,7 +335,7 @@ struct AppModelEventTests {
         model.composerDrafts.setText("local", for: firstScope)
 
         await model.handle(event(topic: "session.extensionPresentation", snapshot: snapshot, sequence: snapshot.eventSequence + 1, data: .object([
-            "version": .number(2), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(10),
+            "version": .number(3), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(10),
             "semantic": .object([
                 "editorAction": .string("native"), "editorOperationId": .string("local-operation"),
                 "editorDelta": .string("local"), "editorText": .string("local"), "editorRevision": .number(4),
@@ -372,7 +373,7 @@ struct AppModelEventTests {
             snapshot: snapshot,
             sequence: snapshot.eventSequence + 1,
             data: .object([
-                "version": .number(2), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(10),
+                "version": .number(3), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(10),
                 "interactionList": .array([.object([
                     "id": .string("unscoped"), "method": .string("confirm"), "title": .string("Invalid"),
                 ])]),
@@ -386,7 +387,7 @@ struct AppModelEventTests {
             snapshot: snapshot,
             sequence: snapshot.eventSequence + 1,
             data: .object([
-                "version": .number(2), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(10),
+                "version": .number(3), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(10),
                 "surfaceUpserts": .array([.object([
                     "id": .string("existing"), "kind": .string("widget"),
                     "lifecycle": .string("retained"), "revision": .number(1),
@@ -719,7 +720,7 @@ struct AppModelEventTests {
 
         await model.handle(event(topic: "session.futureEvent", snapshot: snapshot, sequence: 88, data: .object([:])))
         await model.handle(event(topic: "session.extensionPresentation", snapshot: snapshot, sequence: 89, data: .object([
-            "version": .number(2), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(10),
+            "version": .number(3), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(10),
             "notification": .object(["type": .string("info"), "message": .string("Caught up")]),
         ])))
 

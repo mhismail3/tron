@@ -130,7 +130,7 @@ The first-party inline Pi extension reserves `notify({message})` and subscribes 
 
 The Gateway also owns a bounded 512-entry user-facing notification inbox in the same owner-only state transaction as delivery admission. A visible `queued` inbox row proves durable admission, not relay or APNs acceptance. New notification content, exact session route, per-target APNs request identities, delivery outcome, and global read state are canonical there; the iOS cache is only a bounded disposable projection. Pre-inbox version-1 documents are admitted without migration loss and gain the optional inbox on their next owned write. `notification.inbox.list` pages newest-first under an exact branch-independent revision/cursor, while `notification.inbox.read` accepts exactly one public inbox ID or APNs request ID and `notification.inbox.readAll` clears all unread entries through ordinary command receipts. Every admission, terminal delivery transition, and read mutation broadcasts `notification.inbox.changed`. Unknown, unavailable, suppressed, and rate-limited attempts create no inbox row. Preview-disabled explicit model text remains generic in both APNs and inbox storage.
 
-The exact `@pi9/ask` package adapter emits a detached callback only when its first structured questionnaire is admitted. The typed global `notifyWhenAskPresented` boolean defaults on, is persisted with notification state, and produces one fixed generic intent per Ask tool-call ID. Relay failure never delays or fails Ask. This is intentionally not a generic policy engine.
+The exact `@zhushanwen/pi-ask-user@7.0.15` adapter emits a detached callback only after one bounded semantic form is admitted. The typed global `notifyWhenAskPresented` boolean defaults on, is persisted with notification state, and produces one fixed generic intent per direct `ask_user` tool-call ID. Relay failure never delays or fails the form. This is intentionally not a generic policy engine.
 
 Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list`, `notification.inbox.read`, and `notification.inbox.readAll`. Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
 
@@ -350,17 +350,28 @@ that created their own process groups, and does not acknowledge abort until the 
 processes settle. This is a fail-safe behind Pi's normal run signal; extension-managed
 detached subagents never enter that owner and are not cancelled by foreground Stop.
 Extension commands are resolved before ordinary streaming rejection and still execute through
-Pi's prompt path. The explicit extension adapter registry identifies the installed
-`@pi9/ask` package only by package source metadata and its public parameter shape.
-Its original execute function, result formatting/events, timeout signal, and replay
-behavior remain authoritative; a scoped UI proxy admits one additive questionnaire
-v1 descriptor on a primitive select/input interaction. Capable clients submit
-bounded structured selections, comments, and freeform text through the existing
-response mutation (single-select allows 64 options without freeform or 63 with the
-legacy Type-a-response choice; multi-select/input allows 64; 2 KiB labels/descriptions;
-32 KiB previews/context; 192 KiB interaction/response envelope), while older clients continue the original
-sequential primitive RPC fallback. Arbitrary custom/overlay TUI is not inferred or
-remotely executed.
+Pi's prompt path. The explicit extension adapter registry identifies only the pinned
+`@zhushanwen/pi-ask-user@7.0.15` package through exact package source/path metadata,
+the installed manifest and npm-lock integrity
+`sha512-FqsIq4cOXVVX12Jotdj4o9BkZBa5DC/8Hg9w5yhxl+AmsA8UGX3a5kpThCzmFdf0lxaVaWN5/plAsJBSdWjZ3g==`,
+the exact `@xyz-agent/extension-protocol@0.7.0` dependency and its locked
+`sha512-08cGiK4NEwdqBRJRemyphlLLWKxG+8uaM+Fk3r95qi9eNVmP7l5hRfWGcJIYYkaseSv3S+GGfFAeBXth8x6rAw==`
+integrity, the `ask_user` tool name, and its complete bounded public parameter
+shape. Pi invokes the extension override before attaching canonical package metadata,
+so the adapter also admits only Pi's exact provisional `local`/`temporary`/`top-level`
+source shape when the owning user/project settings pin, package manifest, and both npm
+lock integrities prove the audited installation. Its original execute function,
+validation, result formatting, renderer callbacks, events, abort signal, and
+channel behavior remain authoritative. A scoped UI adapter translates the package's
+exact `\0XYZ_ASK_USER` select marker into one first-class semantic form interaction;
+the same adapter is installed on the extension event context captured by its subagent
+channel handler. Form v1 admits one to four questions, two to four options per question,
+stable question/option IDs, single or multiple selection, optional Other text, explicit
+cancel policy, and one atomic structured response. The Gateway permits one pending form
+per session, preserves canonical option order, caps each Other response at 32 KiB and the
+interaction/answer envelope at 192 KiB, and never falls back to primitive dialog scripting.
+Malformed or unaudited marker contracts fail closed. Arbitrary custom/overlay TUI is not
+inferred or remotely executed.
 A per-bind host epoch and monotonic presentation revision scope
 all retained semantic state and actionable responses; reload/replacement retires
 captured callbacks instead of letting them mutate the replacement host. The lifecycle coordinator counts prompt preflights, command handlers, interactions,
@@ -387,7 +398,7 @@ runs and 256 KiB per full frame, and a 700 KiB aggregate presentation ceiling. T
 lower aggregate ceiling leaves room inside the 1 MiB WebSocket frame for lifecycle
 identity and a bounded canonical transcript tail.
 
-Every committed change emits exactly one `session.extensionPresentation` v2 envelope
+Every committed change emits exactly one `session.extensionPresentation` v3 envelope
 with the current host epoch and exact next aggregate revision. Semantic patches,
 authoritative interaction lists, full-frame surface upserts, explicit removals,
 lease replacement/clear, capabilities, and diagnostics share this stream. Extension
@@ -410,10 +421,10 @@ String-widget updates are also admitted atomically: unsupported or
 oversized content leaves the prior widget unchanged and never throws through an
 extension-owned timer or event callback into the Gateway process.
 Pending interactions remain live across ordinary client disconnect and all imperative
-presentation is excluded from offline mobile cache. Wire interactions retain one flat JSON
-shape but are method-discriminated by Gateway and native admission: select requires options;
-confirm forbids select/input fields; input permits text defaults and questionnaires; editor
-permits text defaults without select options or questionnaires. Native editor updates admit an
+presentation is excluded from offline mobile cache. Wire interactions are method-discriminated
+by Gateway and native admission: select requires options; confirm forbids select/input/form
+fields; input and editor permit text defaults but no form; form requires the bounded form v1
+descriptor and forbids every primitive-dialog field. Native editor updates admit an
 empty or whitespace-only text payload without trimming; per-session clients coalesce
 possibly-sent updates and treat revision conflicts as ordinary convergence rather than
 user-visible failures. Exact extension commands persist a provisional run marker

@@ -977,7 +977,7 @@ struct SessionPresentationStoreTests {
                     "eventSequence": .number(Double(sequence)),
                     "revision": .number(Double(snapshot.revision)),
                     "data": .object([
-                        "version": .number(2), "hostEpoch": .string("presentation-host"),
+                        "version": .number(3), "hostEpoch": .string("presentation-host"),
                         "revision": .number(Double(sequence - 10)), "semantic": semantic,
                     ]),
                 ])
@@ -1035,7 +1035,7 @@ struct SessionPresentationStoreTests {
                 "eventSequence": .number(Double(sequence)),
                 "revision": .number(Double(snapshot.revision)),
                 "data": .object([
-                    "version": .number(2), "hostEpoch": .string(host),
+                    "version": .number(3), "hostEpoch": .string(host),
                     "revision": .number(Double(presentationRevision)),
                     "semantic": .object(["statuses": .object(["scope": .string(text)])]),
                 ]),
@@ -1065,7 +1065,7 @@ struct SessionPresentationStoreTests {
 
         func event(sequence: Int, revision: Int, fields: [String: JSONValue]) -> GatewayEvent {
             var data = fields
-            data["version"] = .number(2)
+            data["version"] = .number(3)
             data["hostEpoch"] = .string("surface-host")
             data["revision"] = .number(Double(revision))
             return GatewayEvent(type: "event", topic: "session.extensionPresentation", sessionId: snapshot.sessionId, payload: .object([
@@ -1133,7 +1133,7 @@ struct SessionPresentationStoreTests {
             payload: .object([
                 "runtimeGeneration": .string(snapshot.runtimeGeneration), "eventSequence": .number(36), "revision": .number(Double(snapshot.revision)),
                 "data": .object([
-                    "version": .number(2), "hostEpoch": .string("editor-host"), "revision": .number(3),
+                    "version": .number(3), "hostEpoch": .string("editor-host"), "revision": .number(3),
                     "semantic": .object([
                         "editorAction": .string("paste"), "editorDelta": .string("B"),
                         "editorText": .string("AX"), "editorRevision": .number(4),
@@ -1178,7 +1178,7 @@ struct SessionPresentationStoreTests {
             type: "event", topic: "session.extensionPresentation", sessionId: snapshot.sessionId,
             payload: .object([
                 "runtimeGeneration": .string(snapshot.runtimeGeneration), "eventSequence": .number(41), "revision": .number(Double(snapshot.revision)),
-                "data": .object(["version": .number(2), "hostEpoch": .string("fitted-host"), "revision": .number(11),
+                "data": .object(["version": .number(3), "hostEpoch": .string("fitted-host"), "revision": .number(11),
                     "surfaceUpserts": .array([surface]), "inputLease": lease]),
             ])
         ))
@@ -2122,7 +2122,7 @@ struct SessionPresentationStoreTests {
                 type: "event", topic: "session.extensionPresentation", sessionId: baseline.sessionId,
                 payload: .object([
                     "runtimeGeneration": .string(baseline.runtimeGeneration), "eventSequence": .number(11), "revision": .number(Double(baseline.revision)),
-                    "data": .object(["version": .number(2), "hostEpoch": .string("replay-host"), "revision": .number(2), "capabilities": .array([.string("gap")])]),
+                    "data": .object(["version": .number(3), "hostEpoch": .string("replay-host"), "revision": .number(2), "capabilities": .array([.string("gap")])]),
                 ])
             ))
             frames = await socket.sentFrames()
@@ -2210,7 +2210,7 @@ struct SessionPresentationStoreTests {
                     "eventSequence": .number(Double(snapshot.eventSequence + 1)),
                     "revision": .number(Double(snapshot.revision + 1)),
                     "data": .object([
-                        "version": .number(2), "hostEpoch": .string("editor-host"), "revision": .number(1),
+                        "version": .number(3), "hostEpoch": .string("editor-host"), "revision": .number(1),
                         "semantic": .object([
                             "editorAction": .string("set"), "editorDelta": .string("draft"),
                             "editorText": .string("draft"), "editorRevision": .number(1),
@@ -2293,7 +2293,7 @@ struct SessionPresentationStoreTests {
                 type: "event", topic: "session.extensionPresentation", sessionId: snapshot.sessionId,
                 payload: .object([
                     "runtimeGeneration": .string(snapshot.runtimeGeneration), "eventSequence": .number(Double(snapshot.eventSequence + 1)), "revision": .number(Double(snapshot.revision)),
-                    "data": .object(["version": .number(2), "hostEpoch": .string("debounce-host"), "revision": .number(1),
+                    "data": .object(["version": .number(3), "hostEpoch": .string("debounce-host"), "revision": .number(1),
                         "semantic": .object(["editorAction": .string("set"), "editorDelta": .string("remote"), "editorText": .string("remote"), "editorRevision": .number(4)])]),
                 ])
             ))

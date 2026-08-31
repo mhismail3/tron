@@ -29,6 +29,7 @@ struct ExtensionInteractionSheet: View {
         case .select: selectedOption != nil
         case .confirm: confirmValue != nil
         case .input, .editor: true
+        case .form: false
         }
     }
 
@@ -170,6 +171,8 @@ struct ExtensionInteractionSheet: View {
                     .disabled(submitting)
                     .accessibilityLabel(interaction.placeholder ?? "Response")
             }
+        case .form:
+            EmptyView()
         }
     }
 
@@ -219,6 +222,7 @@ struct ExtensionInteractionSheet: View {
         case .select: value = selectedOption.map(JSONValue.string)
         case .confirm: value = confirmValue.map(JSONValue.bool)
         case .input, .editor: value = .string(text)
+        case .form: return
         }
         respond(value: value, cancelled: false)
     }
