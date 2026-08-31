@@ -786,6 +786,63 @@ struct ToolDetailPresentationTests {
         #expect(presentation.structuredResult == response)
     }
 
+    @Test("generic extension tools promote JSON text into the structured result table")
+    func genericJSONTextResult() {
+        let result = """
+        {"goal":{"objective":"Count to 20","status":"complete","tokensUsed":26804}}
+        """
+        let presentation = ToolDetailPresentation(tool: tool(
+            "Update Goal",
+            content: result
+        ))
+
+        #expect(presentation.kind == .generic)
+        #expect(presentation.prefersStructuredResult)
+        #expect(presentation.structuredResult?.objectValue?["goal"]?.objectValue?["status"]?.stringValue
+            == "complete")
+
+        let response: JSONValue = .object(["authoritative": .bool(true)])
+        let responseWins = ToolDetailPresentation(tool: tool(
+            "Extension Result",
+            response: response,
+            content: result
+        ))
+        #expect(responseWins.structuredResult == response)
+
+        let fallback: JSONValue = .object([
+            "result": .string("{\"ok\":true}"),
+            "metadata": .string("preserved"),
+        ])
+        let fallbackEnvelope = ToolDetailPresentation(tool: tool(
+            "Fallback Result",
+            content: "{\"ok\":true}",
+            fallbackContent: fallback
+        ))
+        #expect(fallbackEnvelope.structuredResult == fallback)
+
+        let arrayResult = ToolDetailPresentation(tool: tool(
+            "Array Result",
+            response: .string("[1,2,3]")
+        ))
+        #expect(arrayResult.structuredResult == .array([.number(1), .number(2), .number(3)]))
+
+        let malformed = ToolDetailPresentation(tool: tool(
+            "Malformed Result",
+            content: "{not-json}",
+            outputTruncated: true
+        ))
+        #expect(!malformed.prefersStructuredResult)
+        #expect(malformed.structuredResult == nil)
+
+        let request: JSONValue = .object(["same": .string("value")])
+        let duplicateFallback = ToolDetailPresentation(tool: tool(
+            "Duplicate Fallback",
+            request: request,
+            fallbackContent: request
+        ))
+        #expect(duplicateFallback.structuredResult == nil)
+    }
+
     private func tool(
         _ title: String,
         toolName: String? = nil,

@@ -347,7 +347,7 @@ struct ComposerResourcePicker: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var detail: ComposerResourceEntry?
 
-    private var accent: Color { kind == .skill ? Color.tronCyan : Color.tronPurple }
+    private var accent: Color { kind == .skill ? Color.tronCyan : ChatSemanticPillRole.command.accent }
     private var icon: String { kind == .skill ? "sparkles" : "command" }
     private var title: String { kind == .skill ? "Skills" : "Commands" }
     private var prefix: String { kind == .skill ? "@" : "/" }
@@ -738,11 +738,19 @@ struct ComposerResourceChip: View {
     }
 
     private var tone: ChatNotificationTone {
-        resource.source == .skill ? .information : .purple
+        switch resource.source {
+        case .skill: .information
+        case .prompt: .purple
+        case .extension: ChatSemanticPillRole.command.tone
+        }
     }
 
     private var accent: Color {
-        resource.source == .skill ? .tronCyan : .tronPurple
+        switch resource.source {
+        case .skill: .tronCyan
+        case .prompt: .tronPurple
+        case .extension: ChatSemanticPillRole.command.accent
+        }
     }
 }
 

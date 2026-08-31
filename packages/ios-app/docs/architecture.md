@@ -1179,7 +1179,7 @@ Reduce Motion removes spatial effects. Agent tool buttons retain the capsule pri
 while aggregate run sheets use bounded static summary rows with immutable call-ID routes and
 individual detail sheets.
 
-Visible `custom_message` entries are conversation input rather than tool activity. They use a distinct right-aligned interactive glass container whose complete rounded geometry is one hit target. Its medium/large technical sheet shares the standard technical-detail title, close control, blur, metadata-card, and drill-in JSON presentation used by tool details while exposing canonical identity, delivery semantics, context payload, and exact extension attribution when available. When canonical producer evidence is absent, the compact row says **Context** and presents a friendly form of the custom type as a message-type label; technical origin remains `unknown`. iOS never promotes that custom type, title, text, or timestamp into invented producer attribution.
+Visible `custom_message` entries are conversation input rather than tool activity. They use a distinct right-aligned interactive glass container whose complete rounded geometry is one hit target. The compact row is deliberately schema-stable—**Producer · Context** plus one admitted finite lifecycle status, or **Received** when no single standard status exists—and never includes message text, custom type, objectives, or arbitrary detail values. Its medium/large technical sheet shares the standard technical-detail title, close control, role-matched color, blur, metadata-card, and drill-in JSON presentation used by tool details while exposing the full message, canonical identity, delivery semantics, message type, context payload, and exact extension attribution when available. When canonical producer evidence is absent, the compact row omits the producer instead of exposing an internal “Unattributed” label; the detail sheet reports **Unknown source** and technical origin remains `unknown`. iOS never promotes custom type, title, text, or timestamp into invented producer attribution.
 
 Every tool chip owns a tappable, top-anchored detail sheet, including
 read/write/edit and filesystem search tools. Inline chips use the same native
@@ -1244,8 +1244,9 @@ are authoritative for live timers; cached Sendable ISO 8601 parse strategies rem
 for older Gateways and canonical history, handling both fractional and whole-second Gateway timestamps without
 repeated formatter allocation. Technical execution rows use compact selectable label/value geometry; a bounded bash
 preview records its completeness fact there, followed by on-demand Request JSON and Result JSON summary rows
-with explicit `null` for a truly missing side. Content-only results remain JSON strings, response data wins, and a fallback
-identical to Request is rejected. Running sheets consume the newest immutable tool presentation, update status, timing,
+with explicit `null` for a truly missing side. Generic extension tools prefer the user-friendly structured field table whenever
+the authoritative response is an object/list or the bounded readable result is valid JSON; raw JSON stays behind Technical
+details. Non-JSON content-only results remain text, response data wins, and a fallback identical to Request is rejected. Running sheets consume the newest immutable tool presentation, update status, timing,
 partial output, and bounded-output disclosure in place, and never move
 the reader's scroll position. Tool chips retain six-point vertical capsule insets and
 intrinsic label/timing geometry without a layout-inflating minimum interaction frame.
@@ -1263,7 +1264,11 @@ Compaction and branch-summary events use content-sized transcript pills whose sh
 contain the complete canonical summary. Detail-bearing pills attach their action and button accessibility semantics directly to the interactive glass surface rather than wrapping it in a second native button press phase;
 compaction token counts use compact `K` shorthand.
 Transcript configuration changes, errors,
-bookmarks, and extension statuses share one readable notification-pill language,
+bookmarks, and extension statuses share one readable notification-pill language. Compact semantic chrome uses a fixed
+cross-extension role palette—indigo commands, emerald tools, violet extension context, blue informational notifications,
+slate unknown/system state—with amber warning and red failure overrides. Command pills show producer, exact command name,
+and lifecycle but never arguments; extension notification pills show producer, **Notification**, and severity while the exact
+message remains in the detail sheet,
 and thinking text and workspace shortcuts stay above the compact-caption scale.
 The hidden custom back button is paired with a UIKit navigation bridge so the
 native left-edge interactive-pop gesture remains available. Transcript rows enter with the historical soft

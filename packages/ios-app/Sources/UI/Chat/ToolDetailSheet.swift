@@ -6,7 +6,7 @@ struct ToolDetailSheet: View {
     @State private var showingTechnicalDetails = false
     @State private var showingChanges = false
 
-    private var accent: Color { tool.error ? .tronError : .tronEmerald }
+    private var accent: Color { tool.error ? .tronError : ChatSemanticPillRole.tool.accent }
 
     var body: some View {
         let presentation = ToolDetailPresentation(tool: tool)
@@ -181,7 +181,11 @@ struct ToolDetailSheet: View {
     }
 
     @ViewBuilder private func resultSection(_ presentation: ToolDetailPresentation) -> some View {
-        if let preview = presentation.readableResultPreview, !preview.text.isEmpty {
+        if presentation.prefersStructuredResult,
+           let structured = presentation.structuredResult,
+           presentation.diff == nil {
+            structuredResultSection(structured)
+        } else if let preview = presentation.readableResultPreview, !preview.text.isEmpty {
             VStack(alignment: .leading, spacing: 7) {
                 sectionLabel(tool.isRunning ? "Live output" : "Result")
                 if presentation.usesCodeResult {
@@ -201,19 +205,23 @@ struct ToolDetailSheet: View {
                 }
             }
         } else if let structured = presentation.structuredResult, presentation.diff == nil {
-            VStack(alignment: .leading, spacing: 7) {
-                sectionLabel(tool.isRunning ? "Current result" : "Result")
-                TronStructuredJSONView(
-                    value: structured,
-                    title: "Result",
-                    accent: accent,
-                    showsRawDisclosure: false
-                )
-            }
+            structuredResultSection(structured)
         } else if presentation.diff == nil {
             Text(tool.isRunning ? "Waiting for the first runtime result." : "Completed without output.")
                 .font(TronTypography.bodySM)
                 .foregroundStyle(Color.tronTextSecondary)
+        }
+    }
+
+    private func structuredResultSection(_ structured: JSONValue) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            sectionLabel(tool.isRunning ? "Current result" : "Result")
+            TronStructuredJSONView(
+                value: structured,
+                title: "Result",
+                accent: accent,
+                showsRawDisclosure: false
+            )
         }
     }
 

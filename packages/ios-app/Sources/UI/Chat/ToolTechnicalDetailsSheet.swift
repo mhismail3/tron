@@ -5,7 +5,7 @@ struct ToolTechnicalDetailsSheet: View {
     let presentation: ToolDetailPresentation
     @Environment(\.dismiss) private var dismiss
 
-    private var accent: Color { tool.error ? .tronError : .tronSlate }
+    private var accent: Color { tool.error ? .tronError : ChatSemanticPillRole.tool.accent }
 
     var body: some View {
         NavigationStack {

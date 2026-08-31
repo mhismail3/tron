@@ -4,20 +4,18 @@ import Testing
 
 @Suite("Chat transcript presentation")
 struct ChatTranscriptPresentationTests {
-    @Test("producer session messages derive one compact status and optional duration")
+    @Test("producer session messages derive one typed compact status and optional duration")
     func compactSessionInputPresentation() {
         #expect(InboundContextCompactPresentationPolicy.status(
-            details: .object(["status": .string("in_progress")]),
-            message: "ignored"
+            details: .object(["status": .string("in_progress")])
         ) == "In Progress")
         #expect(InboundContextCompactPresentationPolicy.status(
-            details: nil,
-            message: "Background task failed"
-        ) == "Failed")
-        #expect(InboundContextCompactPresentationPolicy.status(
-            details: nil,
-            message: "Worker finished"
+            details: .object(["goal": .object(["status": .string("complete")])])
         ) == "Completed")
+        #expect(InboundContextCompactPresentationPolicy.status(details: .object([
+            "status": .string("count to 20"),
+        ])) == "Received")
+        #expect(InboundContextCompactPresentationPolicy.status(details: nil) == "Received")
         #expect(InboundContextCompactPresentationPolicy.durationMilliseconds(
             details: .object(["durationMs": .number(42)])
         ) == 42)
@@ -26,18 +24,15 @@ struct ChatTranscriptPresentationTests {
         ) == 0)
     }
 
-    @Test("unattributed context names its canonical message type without inventing a producer")
-    func unattributedContextTitle() {
-        #expect(InboundProducerPresentationPolicy.label(for: nil) == "Context")
+    @Test("unknown context omits a producer without inventing one")
+    func unknownContextTitle() {
+        #expect(InboundProducerPresentationPolicy.title(for: nil) == "Unknown source")
+        #expect(InboundProducerPresentationPolicy.compactTitle(for: nil) == "Context")
+        #expect(InboundProducerPresentationPolicy.messageType("subagent_supervisor_request")
+            == "Subagent Supervisor Request")
         #expect(InboundProducerPresentationPolicy.title(
-            for: nil,
-            customType: "subagent_supervisor_request"
-        ) == "Subagent Supervisor Request")
-        #expect(InboundProducerPresentationPolicy.title(
-            for: ChatOrigin(kind: .extension, title: "Trusted Adapter", confidence: .receipt),
-            customType: "ignored"
+            for: ChatOrigin(kind: .extension, title: "Trusted Adapter", confidence: .receipt)
         ) == "Trusted Adapter")
-        #expect(InboundProducerPresentationPolicy.title(for: nil, customType: nil) == "Unattributed")
     }
 
     @Test("inbound delivery metadata remains truthful in technical details")

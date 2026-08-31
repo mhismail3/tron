@@ -7,16 +7,24 @@ canonical Pi JSONL determine transcript order and lifecycle truth. Typed chat
 metadata separates direction, context effect, provenance, visibility, delivery,
 semantic kind, and causal invocation/operation IDs. Inbound model context is
 right aligned; assistant output and agent-requested tools remain left aligned;
-non-context status is centered; hidden internal state has no chat row. User input
-is green, trusted subagent/process input blue, attributed extension input pastel
-purple, unknown input gray, and Gateway status muted, with labels/icons for accessibility.
+non-context status is centered; hidden internal state has no chat row. Compact semantic
+chrome has one cross-extension palette: user input stays emerald, commands are indigo,
+tools are emerald, attributed extension context is violet, informational notifications are
+blue, unknown context is slate, warnings are amber, and failures are red. Producer and
+category remain explicit text so color is never the only signal.
+
+Every compact command/context/tool/notification pill is payload-free: it shows the trusted
+producer when available, the command or semantic category, and lifecycle/status only.
+Arguments, notification bodies, context text, objectives, and arbitrary values live in the
+tappable detail sheet and may wrap there without expanding transcript rows.
 
 `custom_message` is model context regardless of whether it triggers a turn or is
 producer-visible. Producer-hidden messages remain hidden in ordinary chat.
 `custom`/`appendEntry` is context-free extension state and is hidden unless a
 trusted typed adapter promotes it to a centered status. Extension `ui.notify`
-callbacks are canonical bounded centered status receipts, never app toasts; app
-notices remain reserved for product/system events. No generic extension message/state
+callbacks are canonical bounded centered status receipts, never app toasts; their compact
+row shows producer, **Notification**, and severity while the exact message stays in its
+detail sheet. App notices remain reserved for product/system events. No generic extension message/state
 is rendered as a ToolCard. Invocation receipts are bounded
 canonical records used to reconcile accepted commands and resource prompts after
 restart; uncertain side effects are never replayed automatically.
@@ -146,7 +154,7 @@ user target, and a binding persistence diagnostic never retires a successful ope
 terminalize the prior immutable invocation and append a replacement under the stable queue operation
 identity; explicit removal is an interrupted terminal outcome. Reconnect never replays an unresolved invocation.
 Every pending, queued, optimistic, and canonical resource chip uses its composer resource theme
-(cyan/blue for skills and purple for prompts or extension commands), leads with the friendly resource
+(cyan/blue for skills, violet for prompts, and indigo for extension commands), leads with the friendly resource
 name, and shows the smaller resource kind second. The
 entire chip is a tool-chip-style detail action; it reconstructs the exact catalog `source:name` and
 opens the same bounded `session.commandDetail` sheet as the selected chip above the composer.
@@ -165,7 +173,7 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
 - `session.extensionPresentation` remains the leased transport for semantic updates and native select/confirm/input/editor/questionnaire sheets. Read-only statuses, widgets, and service activity no longer create an ambient composer or Manage Session surface; interactive prompts and editor ownership are unchanged. In particular, there is no Pi Subagents composer pill or generic extension summary route. Normal canonical `subagent` calls remain ordinary transcript tool chips, while the process orb/native **Subagents** sheet is the sole above-composer progress surface;
 - the snapshot `processOverview` authority with its optional nonempty `processActivities` rows and compact `session.processActivity` events drive the current/recent projection only for admitted synchronous/asynchronous subagents; assistant commands remain ordinary transcript/tool activity. A delta carries an optional exact process upsert, bounded explicit removals, and one same-revision shallow overview. `SessionPresentationStore` applies that replacement atomically and resynchronizes instead of installing an overview around a stale or rejected row; it never rebuilds transcript projection or moves chat scroll state. Terminal lifecycle is latched; delayed full frames cannot resurrect or erase newer process evidence. The Gateway emits a replacement at the exact five-minute expiry even without another chat event. A mounted read-only sheet follows a replaced aggregate only when exactly one admitted row retains the same tool-call and root-run correlation; ambiguous replacements fail closed. The composer sheet reads mounted rows only, while `SessionProcessHistoryStore` loads canonical pages from `session.processHistory.list/get` for the exact presentation/history generation;
 - `session.processTranscript.changed` is a lease-scoped invalidation, not a parent session-cursor event. `GatewayProtocol` dispatches it before the generic `session.*` envelope path. A mounted `ReadOnlySubagentSessionStore` accepts only its exact lease and newer revision, refreshes the newest page through that same lease, and retains already loaded earlier pages when canonical overlap proves append-only continuity. Branch replacement or an unbridgeable gap falls back to the new canonical tail rather than fabricating adjacency. `open/page/close` responses preserve page range, canonical boundary, unique ID, and generation checks; transient current tool/output remains outside canonical transcript rows;
-- producer-visible `custom_message` entries enter the ordered timeline as right-aligned inbound context, whether stored for a later model turn or triggering work immediately. Gateway-authored context-delivery receipts preserve exact producer attribution and delivery mode after reconnect; unknown provenance stays neutral and is never guessed from custom type, text, or details. Producer-hidden custom messages remain absent from ordinary chat, while `custom`/`appendEntry` state never becomes a tool or message row;
+- producer-visible `custom_message` entries enter the ordered timeline as right-aligned inbound context, whether stored for a later model turn or triggering work immediately. Their compact row is **Producer · Context** when producer evidence exists, or simply **Context** when it does not, plus one status from Tron's finite lifecycle vocabulary (or **Received**); unknown/ad-hoc status strings are not promoted. It never includes custom type, message text, objective, or another payload value. Those values remain in the detail sheet. Gateway-authored context-delivery receipts preserve exact producer attribution and delivery mode after reconnect; unknown provenance stays neutral and is never guessed from custom type, text, or details. Producer-hidden custom messages remain absent from ordinary chat, while `custom`/`appendEntry` state never becomes a tool or message row;
 - chat rendering joins canonical calls, live progress, and canonical results by
   `toolCallId` into one ordered timeline. At finalized assistant `message_end`, the
   Gateway publishes complete contiguous declaration groups before their tool starts.
@@ -211,11 +219,11 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   replacement rule so reconnect or projection replacement cannot resurrect discarded frames or erase readable output. Explicit output-truncation state appears only when the runtime flag or
   structured truncation contract says `truncated: true`, and the age of the most recent
   runtime update without automatic scrolling. One mounted tool chip hierarchy presents the
-  actual tool name for a single invocation and **Using/Used N tools** for an aggregate;
+  trusted producer plus tool name for a single invocation and **N tools** for an aggregate;
   extension provenance never substitutes **Extension activity**. Structural chip targets
   exclude duration and payload churn, coalesce for one display frame, and use a monotonic
   latest-target token for local interruptible animation while transcript and scroll
-  projection transactions remain stable while the transcript boundary scopes suppression to installed-projection identity changes, preserving both the discrete Liquid Glass touch-down and its continuous drag transactions. The physical row host installs no second content transition around the chip; only the chip's shallow value owner animates, preventing overlapping snapshots of rapid parallel-group updates. Measured row entrance clips retain a layout-neutral effect gutter only during admission, then remove the clipping node entirely so the stable transcript chip retains its unconstrained native press-and-drag region. The one stable chip surface retains semantic tint as its value changes: running is amber, failure is red, and successful completion is emerald. Legacy and consolidated transcript tool chips use native interactive Liquid Glass as their sole press-and-drag owner. Aggregate Used Tools sheets instead use lazy full-width static summary rows, each with one accessible tap target. Transcript chip surfaces handle taps directly and expose explicit button accessibility semantics; they are not wrapped in a second native `Button` press phase, preserving the system drag morph without an immediate stacked zoom or custom scale/opacity effect. Multi-tool run chips show accumulated time as the sum of their
+  projection transactions remain stable while the transcript boundary scopes suppression to installed-projection identity changes, preserving both the discrete Liquid Glass touch-down and its continuous drag transactions. The physical row host installs no second content transition around the chip; only the chip's shallow value owner animates, preventing overlapping snapshots of rapid parallel-group updates. Measured row entrance clips retain a layout-neutral effect gutter only during admission, then remove the clipping node entirely so the stable transcript chip retains its unconstrained native press-and-drag region. The one stable chip surface retains semantic tint as its value changes: running is amber, failure is red, and successful completion uses the emerald tool role. Legacy and consolidated transcript tool chips use native interactive Liquid Glass as their sole press-and-drag owner. Aggregate Used Tools sheets instead use lazy full-width static summary rows, each with one accessible tap target. Transcript chip surfaces handle taps directly and expose explicit button accessibility semantics; they are not wrapped in a second native `Button` press phase, preserving the system drag morph without an immediate stacked zoom or custom scale/opacity effect. Multi-tool run chips show accumulated time as the sum of their
   invocation durations. Aggregate row summaries and individual detail routes install atomically for one projection tag,
   and rows remain in reverse canonical invocation order rather than switching when optional
   timing metadata arrives. Aggregate rows center status with the title, place command/path

@@ -1,24 +1,29 @@
 import SwiftUI
 
 enum InboundProducerPresentationPolicy {
-    static func label(for origin: ChatOriginKind?) -> String {
-        switch origin {
+    static func title(for origin: ChatOrigin?) -> String {
+        if let title = origin?.title, !title.isEmpty { return title }
+        switch origin?.kind {
+        case .user: return "User"
         case .subagent: return "Subagent"
         case .process: return "Process"
         case .extension: return "Extension"
-        case .user: return "User"
         case .gateway: return "Tron"
         case .assistant: return "Assistant"
-        case .unknown, nil: return "Context"
+        case .unknown, nil: return "Unknown source"
         }
     }
 
-    static func title(for origin: ChatOrigin?, customType: String?) -> String {
-        if let title = origin?.title, !title.isEmpty { return title }
-        if let customType, !customType.isEmpty {
-            return ComposerResourceNameFormatter.friendly(customType)
+    static func messageType(_ customType: String?) -> String {
+        guard let customType, !customType.isEmpty else { return "Custom message" }
+        return ComposerResourceNameFormatter.friendly(customType)
+    }
+
+    static func compactTitle(for origin: ChatOrigin?) -> String {
+        guard let origin, origin.kind != .unknown else {
+            return ChatSemanticPillRole.context.label
         }
-        return "Unattributed"
+        return "\(title(for: origin)) · \(ChatSemanticPillRole.context.label)"
     }
 
     static func tone(for origin: ChatOriginKind?) -> ChatNotificationTone {
@@ -65,8 +70,6 @@ struct InboundContextGoalPresentation: Equatable {
         )
     }
 
-    var compactStatus: String { "\(status) · \(objective)" }
-
     var metadata: [TronTechnicalMetadataItem] {
         var values = [
             TronTechnicalMetadataItem(title: "Objective", value: objective, icon: "scope"),
@@ -91,16 +94,42 @@ struct InboundContextGoalPresentation: Equatable {
 }
 
 enum InboundContextCompactPresentationPolicy {
-    static func status(details: JSONValue?, message: String) -> String {
-        let supplied = details?.objectValue?["status"]?.stringValue
-            ?? details?.objectValue?["state"]?.stringValue
-        if let supplied, !supplied.isEmpty {
-            return ComposerResourceNameFormatter.friendly(supplied)
+    static func status(details: JSONValue?) -> String {
+        guard let object = details?.objectValue else { return "Received" }
+        var values: [String] = []
+        for candidate in [object["status"]?.stringValue, object["state"]?.stringValue] {
+            if let candidate, !candidate.isEmpty { values.append(candidate) }
         }
-        let normalized = message.lowercased()
-        if normalized.contains("failed") || normalized.contains("error") { return "Failed" }
-        if normalized.contains("completed") || normalized.contains("finished") { return "Completed" }
-        return "Message"
+        for key in object.keys.sorted() {
+            guard let nested = object[key]?.objectValue else { continue }
+            for candidate in [nested["status"]?.stringValue, nested["state"]?.stringValue] {
+                if let candidate, !candidate.isEmpty { values.append(candidate) }
+            }
+        }
+        let admitted = Set(values.compactMap(standardStatus))
+        guard admitted.count == 1, let status = admitted.first else { return "Received" }
+        return status
+    }
+
+    private static func standardStatus(_ value: String) -> String? {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+        switch normalized {
+        case "active": return "Active"
+        case "running", "in_progress", "working": return "In Progress"
+        case "pending": return "Pending"
+        case "queued": return "Queued"
+        case "complete", "completed", "finished", "success", "succeeded": return "Completed"
+        case "failed", "error": return "Failed"
+        case "blocked": return "Blocked"
+        case "paused": return "Paused"
+        case "cancelled", "canceled", "interrupted": return "Cancelled"
+        case "warning": return "Warning"
+        case "received": return "Received"
+        default: return nil
+        }
     }
 
     static func durationMilliseconds(details: JSONValue?) -> Int? {
@@ -118,25 +147,11 @@ struct InboundProducerMessageView: View {
     @State private var showingDetails = false
 
     private var originTitle: String {
-        InboundProducerPresentationPolicy.title(
-            for: item.semantic?.origin,
-            customType: item.customType
-        )
-    }
-
-    private var messageText: String {
-        let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? "No text content" : text
+        InboundProducerPresentationPolicy.title(for: item.semantic?.origin)
     }
 
     private var status: String {
-        if let goal = InboundContextGoalPresentation.project(item.details) {
-            return goal.compactStatus
-        }
-        return InboundContextCompactPresentationPolicy.status(
-            details: item.details,
-            message: messageText
-        )
+        InboundContextCompactPresentationPolicy.status(details: item.details)
     }
 
     private var durationMilliseconds: Int? {
@@ -145,10 +160,6 @@ struct InboundProducerMessageView: View {
 
     private var tone: ChatNotificationTone {
         InboundProducerPresentationPolicy.tone(for: item.semantic?.origin.kind)
-    }
-
-    private var originLabel: String {
-        InboundProducerPresentationPolicy.label(for: item.semantic?.origin.kind)
     }
 
     var body: some View {
@@ -161,7 +172,7 @@ struct InboundProducerMessageView: View {
             ) {
                 ChatCompactPillLabel(
                     icon: "arrow.down.message.fill",
-                    title: "\(originLabel) · \(originTitle)",
+                    title: InboundProducerPresentationPolicy.compactTitle(for: item.semantic?.origin),
                     detail: status,
                     tone: tone,
                     iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
@@ -176,7 +187,7 @@ struct InboundProducerMessageView: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Inbound context from \(originLabel), \(originTitle), \(status). \(messageText)")
+        .accessibilityLabel("\(originTitle) context, \(status)")
         .accessibilityHint("Shows the full message and technical details")
         .tronManagedSheet(
             isPresented: $showingDetails,
@@ -192,13 +203,12 @@ private struct InboundContextDetailsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var detent: PresentationDetent = .medium
 
-    private let accent = Color.tronCyan
+    private var accent: Color {
+        InboundProducerPresentationPolicy.tone(for: item.semantic?.origin.kind).surfaceColor
+    }
 
     private var originTitle: String {
-        InboundProducerPresentationPolicy.title(
-            for: item.semantic?.origin,
-            customType: item.customType
-        )
+        InboundProducerPresentationPolicy.title(for: item.semantic?.origin)
     }
 
     private var messageText: String {
@@ -208,7 +218,8 @@ private struct InboundContextDetailsSheet: View {
 
     private var originMetadata: [TronTechnicalMetadataItem] {
         [
-            .init(title: "Source", value: originTitle, icon: "doc.badge.ellipsis"),
+            .init(title: "Producer", value: originTitle, icon: "puzzlepiece.extension"),
+            .init(title: "Message type", value: InboundProducerPresentationPolicy.messageType(item.customType), icon: "doc.badge.ellipsis"),
             .init(title: "Origin", value: item.semantic?.origin.kind.rawValue ?? "unknown", icon: "externaldrive"),
             .init(title: "Confidence", value: item.semantic?.origin.confidence.rawValue ?? "unknown", icon: "checkmark.shield"),
             .init(
@@ -243,7 +254,7 @@ private struct InboundContextDetailsSheet: View {
                         TronTechnicalMetadataSection(
                             title: "Goal",
                             items: goalMetadata,
-                            accent: .tronPurple
+                            accent: accent
                         )
                     }
                     TronTechnicalMetadataSection(
@@ -279,7 +290,7 @@ private struct InboundContextDetailsSheet: View {
             .tronToolDetailNavigationChrome()
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Session message", accent: accent)
+                    TronSheetTitle(title: "Context details", accent: accent)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {

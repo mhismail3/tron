@@ -8,6 +8,8 @@ extension ChatNotificationTone {
     var primaryColor: Color {
         switch self {
         case .accent: .tronAccentText
+        case .command: Color(lightHex: "#4338CA", darkHex: "#C7D2FE")
+        case .tool: .tronAccentText
         case .information: Color(lightHex: "#0369A1", darkHex: "#38BDF8")
         case .purple: Color(lightHex: "#6D28D9", darkHex: "#C4B5FD")
         case .warning: Color(lightHex: "#92400E", darkHex: "#FBBF24")
@@ -19,6 +21,8 @@ extension ChatNotificationTone {
     var secondaryColor: Color {
         switch self {
         case .accent: Color(lightHex: "#047857", darkHex: "#A7F3D0")
+        case .command: Color(lightHex: "#3730A3", darkHex: "#E0E7FF")
+        case .tool: Color(lightHex: "#047857", darkHex: "#A7F3D0")
         case .information: Color(lightHex: "#075985", darkHex: "#7DD3FC")
         case .purple: Color(lightHex: "#5B21B6", darkHex: "#DDD6FE")
         case .warning: Color(lightHex: "#78350F", darkHex: "#FDE68A")
@@ -30,11 +34,42 @@ extension ChatNotificationTone {
     var surfaceColor: Color {
         switch self {
         case .accent: .tronEmerald
-        case .information: .tronInfo
+        case .command: .tronIndigo
+        case .tool: .tronEmerald
+        case .information: .tronBlue
         case .purple: .tronPurple
         case .warning: .tronAmber
         case .error: .tronError
         case .neutral: .tronSlate
+        }
+    }
+}
+
+/// Stable semantic palette for compact transcript chrome. Producer identity is
+/// text; category owns color, and warning/error may override that category.
+enum ChatSemanticPillRole: Hashable, Sendable {
+    case command
+    case context
+    case tool
+    case notification
+
+    var tone: ChatNotificationTone {
+        switch self {
+        case .command: .command
+        case .context: .purple
+        case .tool: .tool
+        case .notification: .information
+        }
+    }
+
+    @MainActor var accent: Color { tone.surfaceColor }
+
+    var label: String {
+        switch self {
+        case .command: "Command"
+        case .context: "Context"
+        case .tool: "Tool"
+        case .notification: "Notification"
         }
     }
 }
@@ -181,12 +216,12 @@ struct ChatCompactPillVisualState: Hashable, Sendable {
 
     static func toolRun(_ run: ChatToolRunPresentation) -> Self {
         let tone: ChatNotificationTone = run.failureCount > 0
-            ? .error : run.isRunning ? .warning : .accent
+            ? .error : run.isRunning ? .warning : ChatSemanticPillRole.tool.tone
         let single = run.displayCount == 1 ? run.tools.first : nil
         return Self(
             id: run.id,
             title: run.title,
-            detail: single?.subtitle.lowercased() ?? run.status,
+            detail: single.map { ComposerResourceNameFormatter.friendly($0.subtitle) } ?? run.status,
             icon: run.failureCount > 0
                 ? "exclamationmark.triangle.fill"
                 : single.map { ToolDetailPresentation.icon(for: $0.toolName ?? $0.title) }

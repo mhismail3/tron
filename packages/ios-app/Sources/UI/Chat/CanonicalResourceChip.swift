@@ -29,11 +29,19 @@ enum CanonicalResourceChipPresentation {
     }
 
     static func tone(for resource: ComposerResourceInvocation) -> ChatNotificationTone {
-        resource.source == .skill ? .information : .purple
+        switch resource.source {
+        case .skill: .information
+        case .prompt: .purple
+        case .extension: ChatSemanticPillRole.command.tone
+        }
     }
 
-    static func accent(for resource: ComposerResourceInvocation) -> Color {
-        resource.source == .skill ? .tronCyan : .tronPurple
+    @MainActor static func accent(for resource: ComposerResourceInvocation) -> Color {
+        switch resource.source {
+        case .skill: .tronCyan
+        case .prompt: .tronPurple
+        case .extension: ChatSemanticPillRole.command.accent
+        }
     }
 
     static func detailEntry(for resource: ComposerResourceInvocation) -> ComposerResourceEntry? {

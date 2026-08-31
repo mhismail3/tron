@@ -1268,6 +1268,8 @@ enum ChatTokenCountPresentation {
 
 enum ChatNotificationTone: Hashable, Sendable {
     case accent
+    case command
+    case tool
     case information
     case purple
     case warning
@@ -1355,25 +1357,32 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
                   let data = item.customData?.objectValue,
                   let message = data["message"]?.stringValue,
                   !message.isEmpty else { return nil }
-            let tone: ChatNotificationTone = switch data["tone"]?.stringValue {
-            case "error": .error
-            case "warning": .warning
+            let severity: String
+            let tone: ChatNotificationTone
+            switch data["tone"]?.stringValue {
+            case "error":
+                severity = "Error"
+                tone = .error
+            case "warning":
+                severity = "Warning"
+                tone = .warning
             default:
-                switch item.semantic?.origin.kind {
-                case .extension: .purple
-                case .subagent, .process: .information
-                case .user: .accent
-                case .gateway, .assistant, .unknown, nil: .neutral
-                }
+                severity = "Info"
+                tone = ChatSemanticPillRole.notification.tone
+            }
+            let producer = if let title = item.semantic?.origin.title, !title.isEmpty {
+                title
+            } else {
+                InboundProducerPresentationPolicy.title(for: item.semantic?.origin)
             }
             return ChatNotificationPresentation(
                 id: "notification-\(item.id)", semanticID: item.id,
-                icon: tone == .error ? "exclamationmark.triangle.fill" : "info.circle.fill",
-                title: message,
-                detail: item.semantic?.origin.title,
-                body: nil,
+                icon: tone == .error ? "exclamationmark.triangle.fill" : "bell.badge.fill",
+                title: "\(producer) · \(ChatSemanticPillRole.notification.label)",
+                detail: severity,
+                body: message,
                 tone: tone,
-                material: .flat
+                material: .glass
             )
         case .message, .bash, .customMessage:
             return nil
@@ -1517,15 +1526,25 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     /// historical evidence when every visible descriptor is terminal.
     var isRunning: Bool { tools.contains(where: \.isRunning) }
     var failureCount: Int { tools.filter(\.error).count }
+    var producerTitle: String? {
+        let owners = tools.compactMap { $0.extensionOrigin?.owner }
+        guard let first = owners.first,
+              owners.count == tools.count,
+              owners.allSatisfy({ $0.id == first.id }) else { return nil }
+        return first.title
+    }
     var title: String {
+        let value: String
         if displayCount == 1, let tool = tools.first {
-            return ToolDetailPresentation.displayTitle(for: tool.title)
+            value = ToolDetailPresentation.displayTitle(for: tool.title)
+        } else {
+            value = "\(displayCount) tools"
         }
-        return "\(isRunning ? "Using" : "Used") \(displayCount) tools"
+        return producerTitle.map { "\($0) · \(value)" } ?? value
     }
     var status: String? {
         if failureCount > 0 { return "\(failureCount) failed" }
-        return isRunning ? "in progress" : nil
+        return isRunning ? "In progress" : "Completed"
     }
     /// Accumulated tool time is the sum of each invocation, rather than the
     /// wall-clock span of the run. This remains correct when tools overlap and

@@ -24,10 +24,22 @@ struct InboundContextPresentationTests {
 
         #expect(presentation.objective == "count to 20")
         #expect(presentation.status == "Active")
-        #expect(presentation.compactStatus == "Active · count to 20")
+        #expect(InboundContextCompactPresentationPolicy.status(details: .object([
+            "goal": .object(["status": .string("active")]),
+        ])) == "Active")
         #expect(presentation.metadata.map(\.title) == [
             "Objective", "Status", "Tokens used", "Token budget", "Time used",
         ])
+    }
+
+    @Test("compact labels never expose payload text or technical message types")
+    func compactLabels() {
+        let origin = ChatOrigin(kind: .extension, title: "Pi Goal", confidence: .receipt)
+        #expect(InboundProducerPresentationPolicy.compactTitle(for: origin) == "Pi Goal · Context")
+        #expect(InboundProducerPresentationPolicy.title(for: nil) == "Unknown source")
+        #expect(InboundProducerPresentationPolicy.compactTitle(for: nil) == "Context")
+        #expect(InboundProducerPresentationPolicy.messageType("pi-goal-event") == "Pi Goal Event")
+        #expect(InboundContextCompactPresentationPolicy.status(details: nil) == "Received")
     }
 
     @Test("unrelated dynamic details do not manufacture a goal")

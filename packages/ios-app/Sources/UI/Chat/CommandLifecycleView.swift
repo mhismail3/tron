@@ -1,5 +1,23 @@
 import SwiftUI
 
+enum CommandLifecyclePresentationPolicy {
+    static func title(origin: String, command: String) -> String {
+        "\(origin) · /\(command)"
+    }
+
+    static func status(_ lifecycle: String) -> String {
+        ComposerResourceNameFormatter.friendly(lifecycle)
+    }
+
+    static func tone(_ lifecycle: String) -> ChatNotificationTone {
+        switch lifecycle {
+        case "failed", "interrupted": .error
+        case "outcomeUnknown": .warning
+        default: ChatSemanticPillRole.command.tone
+        }
+    }
+}
+
 /// Canonical invocation receipt presentation. This is an ambient command
 /// record, not a user prompt bubble; its physical identity is the receipt ID.
 struct CommandLifecycleView: View {
@@ -8,12 +26,6 @@ struct CommandLifecycleView: View {
 
     private var resource: ComposerResourceInvocation? { item.semantic?.resourceInvocation }
     private var name: String { resource?.name ?? "Extension command" }
-    private var commandLabel: String {
-        let arguments = resource?.arguments ?? ""
-        guard !arguments.isEmpty else { return "/\(name)" }
-        let bounded = String(arguments.prefix(72))
-        return "/\(name) \(bounded)\(arguments.count > bounded.count ? "…" : "")"
-    }
     private var state: String { item.semantic?.lifecycle?.rawValue ?? "accepted" }
     private var origin: String {
         item.semantic?.origin.title
@@ -21,12 +33,10 @@ struct CommandLifecycleView: View {
             ?? "Extension"
     }
     private var tone: ChatNotificationTone {
-        switch state {
-        case "failed", "interrupted": return .error
-        case "completed": return .accent
-        case "outcomeUnknown": return .warning
-        default: return .neutral
-        }
+        CommandLifecyclePresentationPolicy.tone(state)
+    }
+    private var title: String {
+        CommandLifecyclePresentationPolicy.title(origin: origin, command: name)
     }
 
     var body: some View {
@@ -34,8 +44,8 @@ struct CommandLifecycleView: View {
             ChatCompactPillSurface(tone: tone, material: .glass, interactive: true) {
                 ChatCompactPillLabel(
                     icon: "command",
-                    title: "\(origin) · \(commandLabel)",
-                    detail: ComposerResourceNameFormatter.friendly(state),
+                    title: title,
+                    detail: CommandLifecyclePresentationPolicy.status(state),
                     tone: tone,
                     iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
                     titleWeight: .bold
@@ -44,7 +54,7 @@ struct CommandLifecycleView: View {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: .center)
-        .accessibilityLabel("\(origin) command \(commandLabel), \(state)")
+        .accessibilityLabel("\(title), \(CommandLifecyclePresentationPolicy.status(state))")
         .accessibilityHint("Shows command details")
         .tronManagedSheet(
             isPresented: $showingDetails,
@@ -60,6 +70,7 @@ private struct CommandLifecycleDetailsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var detent: PresentationDetent = .medium
 
+    private let accent = ChatSemanticPillRole.command.accent
     private var resource: ComposerResourceInvocation? { item.semantic?.resourceInvocation }
     private var name: String { resource?.name ?? "Extension command" }
     private var origin: String {
@@ -101,12 +112,12 @@ private struct CommandLifecycleDetailsSheet: View {
                         TronMarkdownView(text: arguments, streaming: false)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(TronSpacing.lg)
-                            .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.08)
+                            .tronGlassSurface(accent: accent, tintOpacity: 0.08)
                         Text("Arguments are passed exactly to the extension and may be case-sensitive.")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
                             .foregroundStyle(Color.tronTextSecondary)
                     }
-                    TronTechnicalMetadataSection(title: "Command", items: metadata, accent: .tronEmerald)
+                    TronTechnicalMetadataSection(title: "Command", items: metadata, accent: accent)
                     TronTechnicalMetadataSection(title: "Canonical identity", items: identity, accent: .tronSlate)
                 }
                 .padding(18)
@@ -119,7 +130,7 @@ private struct CommandLifecycleDetailsSheet: View {
             .tronToolDetailNavigationChrome()
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Command details", accent: .tronEmerald)
+                    TronSheetTitle(title: "Command details", accent: accent)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {

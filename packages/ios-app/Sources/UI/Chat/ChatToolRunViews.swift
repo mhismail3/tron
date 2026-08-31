@@ -75,7 +75,7 @@ struct ToolCard: View {
             ChatCompactPillLabel(
                 icon: icon,
                 title: displayTitle,
-                detail: subtitle.lowercased(),
+                detail: ComposerResourceNameFormatter.friendly(subtitle),
                 tone: tone,
                 showsProgress: isRunning,
                 iconSize: ChatCompactPillLayoutPolicy.toolIconSize
@@ -143,10 +143,10 @@ struct ToolCard: View {
 
     private var tone: ChatNotificationTone {
         if error { return .error }
-        return isRunning ? .warning : .accent
+        return isRunning ? .warning : ChatSemanticPillRole.tool.tone
     }
     private var displayTitle: String {
-        ToolDetailPresentation.displayTitle(for: detailTool)
+        ToolDetailPresentation.contextualDisplayTitle(for: detailTool)
     }
     private var icon: String {
         error ? "exclamationmark.triangle.fill" : ToolDetailPresentation.icon(for: timing?.toolName ?? title)
@@ -195,7 +195,7 @@ struct ToolRunView: View {
             ) {
                 if let resolvedState {
                     if resolvedState.run.displayCount == 1, let tool = resolvedState.tools.first {
-                        let accent: Color = tool.error ? .tronError : .tronEmerald
+                        let accent: Color = tool.error ? .tronError : ChatSemanticPillRole.tool.accent
                         NavigationStack {
                             ToolDetailSheet(
                                 tool: tool,
@@ -205,7 +205,7 @@ struct ToolRunView: View {
                             .toolbar {
                                 ToolbarItem(placement: .principal) {
                                     TronSheetTitle(
-                                        title: ToolDetailPresentation.displayTitle(for: tool),
+                                        title: ToolDetailPresentation.contextualDisplayTitle(for: tool),
                                         accent: accent,
                                         icon: ToolDetailPresentation.sheetTitleIcon(for: tool)
                                     )
@@ -278,7 +278,7 @@ struct ReadOnlyToolRunView: View {
             identity: "chat.read-only-tool-run.\(run.id)"
         ) {
             if run.displayCount == 1, let tool = resolvedTools.first {
-                let accent: Color = tool.error ? .tronError : .tronEmerald
+                let accent: Color = tool.error ? .tronError : ChatSemanticPillRole.tool.accent
                 NavigationStack {
                     ToolDetailSheet(
                         tool: tool,
@@ -288,7 +288,7 @@ struct ReadOnlyToolRunView: View {
                     .toolbar {
                         ToolbarItem(placement: .principal) {
                             TronSheetTitle(
-                                title: ToolDetailPresentation.displayTitle(for: tool),
+                                title: ToolDetailPresentation.contextualDisplayTitle(for: tool),
                                 accent: accent,
                                 icon: ToolDetailPresentation.sheetTitleIcon(for: tool)
                             )
@@ -420,7 +420,7 @@ private struct ToolRunDetailSheet: View {
 
     private var tone: ChatNotificationTone {
         if run.failureCount > 0 { return .error }
-        return run.isRunning ? .warning : .accent
+        return run.isRunning ? .warning : ChatSemanticPillRole.tool.tone
     }
 
     private var orderedTools: [ChatToolPresentation] {
@@ -509,8 +509,8 @@ private struct ToolRunSelectedDetailSheet: View {
                 .toolbar {
                     ToolbarItem(placement: .principal) {
                         TronSheetTitle(
-                            title: ToolDetailPresentation.displayTitle(for: tool),
-                            accent: tool.error ? .tronError : .tronEmerald,
+                            title: ToolDetailPresentation.contextualDisplayTitle(for: tool),
+                            accent: tool.error ? .tronError : ChatSemanticPillRole.tool.accent,
                             icon: ToolDetailPresentation.sheetTitleIcon(for: tool)
                         )
                     }
@@ -731,7 +731,7 @@ private struct ToolRunSummaryRow: View {
 
     private var accent: Color {
         if tool.error { return .tronError }
-        return tool.isRunning ? .tronAmber : .tronEmerald
+        return tool.isRunning ? .tronAmber : ChatSemanticPillRole.tool.accent
     }
 
     private func statusText(_ presentation: ToolRunRowPresentation) -> String {
@@ -994,7 +994,7 @@ private struct ToolDetailSheetHost: ViewModifier {
             identity: { "chat.tool-detail.\($0.id)" }
         ) { _ in
             if let tool {
-                let accent: Color = tool.error ? .tronError : .tronEmerald
+                let accent: Color = tool.error ? .tronError : ChatSemanticPillRole.tool.accent
                 NavigationStack {
                     ToolDetailSheet(
                         tool: tool,
@@ -1004,7 +1004,7 @@ private struct ToolDetailSheetHost: ViewModifier {
                     .toolbar {
                         ToolbarItem(placement: .principal) {
                             TronSheetTitle(
-                                title: ToolDetailPresentation.displayTitle(for: tool),
+                                title: ToolDetailPresentation.contextualDisplayTitle(for: tool),
                                 accent: accent,
                                 icon: ToolDetailPresentation.sheetTitleIcon(for: tool)
                             )

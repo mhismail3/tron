@@ -377,7 +377,7 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(run.groupIDs == (0..<15).map { "group-\($0)" })
         #expect(run.tools.map(\.id) == (0..<15).map { "call-\($0)" })
         #expect(run.displayCount == 15)
-        #expect(run.title == "Using 15 tools")
+        #expect(run.title == "15 tools")
         #expect(candidate.toolPayloads.callIDs == Set((0..<15).map { "call-\($0)" }))
         #expect(candidate.isValid)
     }
@@ -555,7 +555,7 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(run.tools.map(\.id) == (0..<15).map { "runtime-\($0)" })
         #expect(run.groupIDs == (0..<15).map { "runtime-group-\($0)" })
         #expect(run.displayCount == 15)
-        #expect(run.title == "Using 15 tools")
+        #expect(run.title == "15 tools")
         #expect(candidate.isValid)
     }
 
@@ -979,9 +979,11 @@ struct ChatTranscriptProjectionKernelTests {
             Issue.record("Expected a centered extension notification")
             return
         }
-        #expect(notice.title == "Goal created.")
-        #expect(notice.detail == "Pi Goal")
-        #expect(notice.tone == .purple)
+        #expect(notice.title == "Pi Goal · Notification")
+        #expect(notice.detail == "Info")
+        #expect(notice.body == "Goal created.")
+        #expect(notice.tone == .information)
+        #expect(notice.material == .glass)
         #expect(candidate.toolPayloads.callIDs.isEmpty)
     }
 
@@ -1553,8 +1555,8 @@ struct ChatTranscriptProjectionKernelTests {
         }
         #expect(run.displayCount == 3)
         #expect(!run.isRunning)
-        #expect(run.title == "Used 3 tools")
-        #expect(run.status == nil)
+        #expect(run.title == "3 tools")
+        #expect(run.status == "Completed")
     }
 
     @Test("malformed maximum transcript bounds fall back without overflow")

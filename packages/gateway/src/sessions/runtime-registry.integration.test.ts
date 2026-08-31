@@ -6619,6 +6619,7 @@ export default function (pi) {
       semantic: {
         direction: "inboundContext",
         contextEffect: "modelInput",
+        delivery: "stored",
         origin: expect.objectContaining({ kind: "extension", ownerId: commandOwnerID }),
       },
     });
@@ -6626,6 +6627,7 @@ export default function (pi) {
       semantic: {
         direction: "inboundContext",
         contextEffect: "modelInput",
+        delivery: "stored",
         origin: expect.objectContaining({ kind: "extension", ownerId: commandOwnerID }),
       },
     });

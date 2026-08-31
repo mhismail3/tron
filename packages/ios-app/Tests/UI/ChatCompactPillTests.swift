@@ -286,6 +286,28 @@ struct ChatCompactPillTests {
         #expect(!first.title.contains("Extension activity"))
     }
 
+    @Test("extension tool pills expose producer tool and status only")
+    func extensionToolPillSummary() {
+        let tool = ChatToolPresentation(
+            id: "call", title: "Update Goal", toolName: "update_goal", subtitle: "Completed",
+            request: .object(["status": .string("complete")]),
+            response: .object(["goal": .object(["objective": .string("Count to 20")])]),
+            content: "", fallbackContent: nil, error: false,
+            startedAt: nil, completedAt: nil, durationMs: 6,
+            lastProgressAt: nil, progressSequence: nil,
+            extensionOrigin: ExtensionToolOrigin(
+                source: "project",
+                owner: ExtensionOwner(id: "extension:goal", title: "Pi Goal", source: "project")
+            )
+        )
+        let visual = ChatCompactPillVisualState.toolRun(ChatToolRunPresentation(tools: [tool]))
+
+        #expect(visual.title == "Pi Goal · Update Goal")
+        #expect(visual.detail == "Completed")
+        #expect(visual.tone == .tool)
+        #expect(!visual.title.contains("Count to 20"))
+    }
+
     @Test("tool chip transitions admit only the latest target token")
     func toolChipLatestTarget() {
         var transition = ChatToolChipTransitionState()
@@ -306,14 +328,39 @@ struct ChatCompactPillTests {
         #expect(transition.target == final)
     }
 
-    @Test("small warning and neutral text keeps accessible contrast")
+    @Test("command pills expose producer command and status but never arguments")
+    func commandPillSummary() {
+        let title = CommandLifecyclePresentationPolicy.title(origin: "Pi Goal", command: "goal")
+        #expect(title == "Pi Goal · /goal")
+        #expect(!title.contains("count to 20"))
+        #expect(CommandLifecyclePresentationPolicy.status("outcomeUnknown") == "Outcome Unknown")
+        #expect(CommandLifecyclePresentationPolicy.tone("completed") == .command)
+        #expect(CommandLifecyclePresentationPolicy.tone("failed") == .error)
+    }
+
+    @Test("semantic pill roles own a stable cross-extension palette")
+    func semanticPillPalette() {
+        #expect(ChatSemanticPillRole.command.tone == .command)
+        #expect(ChatSemanticPillRole.context.tone == .purple)
+        #expect(ChatSemanticPillRole.tool.tone == .tool)
+        #expect(ChatSemanticPillRole.notification.tone == .information)
+        #expect(Set([
+            ChatSemanticPillRole.command.tone,
+            ChatSemanticPillRole.context.tone,
+            ChatSemanticPillRole.tool.tone,
+            ChatSemanticPillRole.notification.tone,
+        ]).count == 4)
+    }
+
+    @Test("small semantic text keeps accessible contrast")
     @MainActor func compactToneContrast() {
+        #expect(ChatSemanticPillRole.tool.accent == .tronEmerald)
         let lightTraits = UITraitCollection(userInterfaceStyle: .light)
         let darkTraits = UITraitCollection(userInterfaceStyle: .dark)
         let lightBackground = UIColor(hex: "#F7F8FA")
         let darkBackground = UIColor(hex: "#090A0C")
 
-        for tone in [ChatNotificationTone.warning, .neutral] {
+        for tone in [ChatNotificationTone.command, .tool, .information, .purple, .warning, .neutral] {
             for color in [tone.primaryColor, tone.secondaryColor] {
                 #expect(contrastRatio(
                     UIColor(color).resolvedColor(with: lightTraits),

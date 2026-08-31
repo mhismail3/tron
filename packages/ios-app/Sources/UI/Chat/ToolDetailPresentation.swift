@@ -574,6 +574,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
     let readableResult: String?
     let readableResultPreview: ToolTextPreview?
     let structuredResult: JSONValue?
+    let prefersStructuredResult: Bool
     let diff: ToolDiffPresentation?
     let usesCodeResult: Bool
 
@@ -599,6 +600,7 @@ struct ToolDetailPresentation: Hashable, Sendable {
         readableResult = Self.readableResult(tool: tool)
         readableResultPreview = readableResult.map(ToolTextPreview.make)
         structuredResult = Self.structuredResult(tool: tool, readableResult: readableResult)
+        prefersStructuredResult = kind == .generic && structuredResult != nil
         usesCodeResult = [.read, .write, .edit, .bash, .grep, .find, .list].contains(kind)
     }
 
@@ -635,6 +637,12 @@ struct ToolDetailPresentation: Hashable, Sendable {
 
     static func displayTitle(for tool: ChatToolPresentation) -> String {
         displayTitle(for: tool.title)
+    }
+
+    static func contextualDisplayTitle(for tool: ChatToolPresentation) -> String {
+        let title = displayTitle(for: tool)
+        guard let owner = tool.extensionOrigin?.owner else { return title }
+        return "\(owner.title) · \(title)"
     }
 
     static func sheetTitleIcon(for tool: ChatToolPresentation) -> String? {
@@ -786,12 +794,29 @@ struct ToolDetailPresentation: Hashable, Sendable {
 
     static func structuredResult(tool: ChatToolPresentation, readableResult: String?) -> JSONValue? {
         if let response = tool.response {
+            if isCollection(response) { return response }
+            if let text = response.stringValue, let parsed = parsedJSON(text) { return parsed }
             if let text = response.stringValue, text == readableResult { return nil }
             return response
         }
-        guard let fallback = tool.fallbackContent, fallback != tool.request else { return nil }
-        if let text = fallback.stringValue, text == readableResult { return nil }
-        return fallback
+        if let fallback = tool.fallbackContent, fallback != tool.request {
+            if isCollection(fallback) { return fallback }
+            if let text = fallback.stringValue, let parsed = parsedJSON(text) { return parsed }
+            if let text = fallback.stringValue, text != readableResult { return fallback }
+        }
+        if let readableResult, let parsed = parsedJSON(readableResult) { return parsed }
+        return nil
+    }
+
+    private static func isCollection(_ value: JSONValue) -> Bool {
+        value.objectValue != nil || value.arrayValue != nil
+    }
+
+    private static func parsedJSON(_ text: String) -> JSONValue? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first, first == "{" || first == "[",
+              let data = trimmed.data(using: .utf8) else { return nil }
+        return try? JSONDecoder.gateway.decode(JSONValue.self, from: data)
     }
 }
 
@@ -896,7 +921,7 @@ struct ToolRunRowPresentation: Hashable, Sendable {
         let primary = ToolDetailPresentation.primary(kind: kind, request: request)
         let readableResult = ToolDetailPresentation.readableResult(tool: tool)
         id = tool.id
-        title = ToolDetailPresentation.displayTitle(for: tool)
+        title = ToolDetailPresentation.contextualDisplayTitle(for: tool)
         icon = ToolDetailPresentation.icon(for: rawToolName)
         status = tool.subtitle
         isRunning = tool.isRunning

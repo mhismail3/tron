@@ -132,7 +132,7 @@ struct ComposerResourcePickerTests {
 
         let command = ComposerResourceInvocation(source: .extension, name: "goal", arguments: "set")
         #expect(CanonicalResourceChipPresentation.kindTitle(for: command) == "Command")
-        #expect(CanonicalResourceChipPresentation.tone(for: command) == .purple)
+        #expect(CanonicalResourceChipPresentation.tone(for: command) == .command)
         #expect(CanonicalResourceChipPresentation.detailEntry(for: command)?.commandInfo.source == .extension)
     }
 
