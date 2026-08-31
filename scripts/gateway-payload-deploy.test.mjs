@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, readlink, rename, rm, symlink, writeFi
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   deploymentTransition,
   deploymentTimeoutMs,
@@ -46,13 +47,21 @@ import {
   stagePayload,
   stagedCandidate,
   runBounded,
+  PINNED_XCODEGEN_VERSION,
 } from "./gateway-payload-deploy.mjs";
+
+const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
 test("deployment timeout defaults to a valid bounded millisecond value", () => {
   assert.equal(deploymentTimeoutMs({}), 60_000);
   assert.equal(deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "120000" }), 120_000);
   assert.throws(() => deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "60_000" }), /invalid update timeout/);
   assert.throws(() => deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "1999" }), /invalid update timeout/);
+});
+
+test("candidate preflight XcodeGen version matches the repository pin", async () => {
+  const toolchain = await readFile(join(repositoryRoot, "config", "ci-toolchain.env"), "utf8");
+  assert.match(toolchain, new RegExp(`^TRON_CI_XCODEGEN_VERSION=${PINNED_XCODEGEN_VERSION}$`, "mu"));
 });
 
 test("command timeout defaults to a valid bounded millisecond value", () => {
@@ -603,16 +612,24 @@ test("preflight imports candidate protocol values and rejects incompatible range
     const run = async (_tool, args) => args[0] === "-e"
       ? { code: 0, output: JSON.stringify({ protocolVersion: 4, minProtocolVersion: 4 }) }
       : args[0] === "--version"
-        ? { code: 0, output: "Version: 2.45.3\n" }
+        ? { code: 0, output: `Version: ${PINNED_XCODEGEN_VERSION}\n` }
         : { code: 0, output: "" };
     await preflightPayload(payload, run);
     await assert.rejects(
       preflightPayload(payload, async (_tool, args) => args[0] === "-e"
         ? { code: 0, output: JSON.stringify({ protocolVersion: 3, minProtocolVersion: 3 }) }
         : args[0] === "--version"
-          ? { code: 0, output: "Version: 2.45.3\n" }
+          ? { code: 0, output: `Version: ${PINNED_XCODEGEN_VERSION}\n` }
           : { code: 0, output: "" }),
       /protocol range is incompatible/
+    );
+    await assert.rejects(
+      preflightPayload(payload, async (_tool, args) => args[0] === "-e"
+        ? { code: 0, output: JSON.stringify({ protocolVersion: 4, minProtocolVersion: 4 }) }
+        : args[0] === "--version"
+          ? { code: 0, output: "Version: 0.0.0\n" }
+          : { code: 0, output: "" }),
+      /bundled XcodeGen must be version/
     );
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -54,6 +54,7 @@ const PAYLOAD_PI_CLI = "app/node_modules/@earendil-works/pi-coding-agent/dist/cl
 const PAYLOAD_PI_ALIAS_TARGET = "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js";
 const PROTOCOL_VERSION = 4;
 const MIN_PROTOCOL_VERSION = 4;
+export const PINNED_XCODEGEN_VERSION = "2.45.3";
 const LOCAL_CREDENTIAL_MAX_BYTES = 64 * 1024;
 const MAX_RETAINED_VERSIONS = 8;
 const REQUIREMENTS = [
@@ -1172,8 +1173,8 @@ export async function preflightPayload(root, runCommand = runBounded, timeoutMs 
   await runCommand(runtime, ["--check", entrypoint], { timeoutMs, maxOutputBytes: 64 * 1024 });
   const xcodegen = join(root, "runtime", "xcodegen", "bin", "xcodegen");
   const xcodegenResult = await runCommand(xcodegen, ["--version"], { timeoutMs, maxOutputBytes: 8 * 1024 });
-  if (!/^Version: \d+\.\d+\.\d+\s*$/u.test(xcodegenResult?.output ?? "")) {
-    throw new Error("candidate Gateway bundled XcodeGen is unavailable or malformed");
+  if ((xcodegenResult?.output ?? "").trim() !== `Version: ${PINNED_XCODEGEN_VERSION}`) {
+    throw new Error(`candidate Gateway bundled XcodeGen must be version ${PINNED_XCODEGEN_VERSION}`);
   }
   const nativeModules = (await regularFiles(root, "app/node_modules"))
     .filter((entry) => entry.target === undefined && entry.path.endsWith(".node"))

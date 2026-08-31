@@ -604,6 +604,9 @@ export function iosDeviceInstallHelperEnvironment(
   runtimeExecutable = process.execPath,
 ): NodeJS.ProcessEnv {
   const immutableXcodegen = bundledXcodegen(runtimeExecutable);
+  if (!immutableXcodegen) {
+    throw new GatewayError("conflict", "The supervised Gateway payload is missing its pinned XcodeGen executable");
+  }
   const result: NodeJS.ProcessEnv = {
     PATH: inherited.PATH ?? "/usr/bin:/bin:/usr/sbin:/sbin",
     HOME: inherited.HOME,
@@ -613,7 +616,7 @@ export function iosDeviceInstallHelperEnvironment(
     LANG: inherited.LANG,
     LC_ALL: inherited.LC_ALL,
     DEVELOPER_DIR: inherited.DEVELOPER_DIR,
-    TRON_XCODEGEN: immutableXcodegen ?? inherited.TRON_XCODEGEN,
+    TRON_XCODEGEN: immutableXcodegen,
     TRON_IOS_GATEWAY_PROTOCOL_TARGET: config.gatewayChannel === "dev" ? "source" : "stable",
   };
   return Object.fromEntries(Object.entries(result).filter((entry): entry is [string, string] => typeof entry[1] === "string"));

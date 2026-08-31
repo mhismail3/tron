@@ -193,6 +193,11 @@ describe("IosDeviceInstallService", () => {
     expect(environment.TRON_XCODEGEN).toBe(xcodegen);
     expect(environment.PATH).toBe("/usr/bin:/bin");
     expect(environment.TRON_IOS_GATEWAY_PROTOCOL_TARGET).toBe("stable");
+    expect(() => iosDeviceInstallHelperEnvironment(
+      config,
+      { PATH: "/ambient/bin", TRON_XCODEGEN: "/ambient/bin/xcodegen" },
+      join(toolRoot, "ambient-node"),
+    )).toThrowError("The supervised Gateway payload is missing its pinned XcodeGen executable");
   });
 
   it("projects only opaque targets through paired-device receipt-backed RPC", async () => {
