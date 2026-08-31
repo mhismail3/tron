@@ -94,8 +94,9 @@ struct PairedDeviceDetailView: View {
             TronConfirmationSheet(
                 title: "Rebuild and install Tron?",
                 message: "The Mac will resolve this authorized device to the sole eligible physical iOS device, build the fixed Tron Device + LocalDevice configuration from the configured repository, validate its signing and Gateway protocol, overwrite-install it on \(authorized.device.name), and relaunch it without erasing app or Keychain data.",
-                confirmTitle: "Build and Install",
+                confirmTitle: "Install",
                 centersTitle: true,
+                alwaysUsesToolbarActions: true,
                 icon: "iphone.and.arrow.forward",
                 onConfirm: { Task { await requestInstall() } }
             )

@@ -790,6 +790,7 @@ struct TronConfirmationSheet: View {
     let destructive: Bool
     let secondaryTitle: String?
     let centersTitle: Bool
+    let alwaysUsesToolbarActions: Bool
     let onConfirm: () -> Void
     let onSecondary: (() -> Void)?
     let icon: String
@@ -804,6 +805,7 @@ struct TronConfirmationSheet: View {
         destructive: Bool = false,
         secondaryTitle: String? = nil,
         centersTitle: Bool = false,
+        alwaysUsesToolbarActions: Bool = false,
         icon: String = "exclamationmark.triangle.fill",
         onConfirm: @escaping () -> Void,
         onSecondary: (() -> Void)? = nil
@@ -814,6 +816,7 @@ struct TronConfirmationSheet: View {
         self.destructive = destructive
         self.secondaryTitle = secondaryTitle
         self.centersTitle = centersTitle
+        self.alwaysUsesToolbarActions = alwaysUsesToolbarActions
         self.icon = icon
         self.onConfirm = onConfirm
         self.onSecondary = onSecondary
@@ -821,11 +824,13 @@ struct TronConfirmationSheet: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let placement = TronConfirmationActionPlacementPolicy.placement(
-                for: confirmTitle,
-                containerWidth: geometry.size.width,
-                dynamicTypeSize: dynamicTypeSize
-            )
+            let placement = alwaysUsesToolbarActions
+                ? TronConfirmationActionPlacement.toolbar
+                : TronConfirmationActionPlacementPolicy.placement(
+                    for: confirmTitle,
+                    containerWidth: geometry.size.width,
+                    dynamicTypeSize: dynamicTypeSize
+                )
             NavigationStack {
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .center, spacing: 16) {

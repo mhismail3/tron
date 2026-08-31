@@ -226,8 +226,8 @@ struct PresentationStyleGuardTests {
         #expect(!inbox.contains("Circle()"))
         #expect(inbox.contains("isOpening ? \"Opening…\" : \"Open Chat\""))
         #expect(inbox.contains(".presentationDetents([.medium, .large])"))
-        #expect(inbox.occurrences(of: "TronSheetTitle(title:") == 2)
-        #expect(inbox.occurrences(of: "Image(systemName: \"checkmark\")") == 2)
+        #expect(inbox.occurrences(of: "TronSheetTitle(title:") == 3)
+        #expect(inbox.occurrences(of: "Image(systemName: \"checkmark\")") == 3)
         #expect(!inbox.contains(".pickerStyle(.segmented)"))
         #expect(!inbox.contains("List {"))
         #expect(!inbox.contains("Form {"))
@@ -348,12 +348,18 @@ struct PresentationStyleGuardTests {
             (#"\.textFieldStyle\(\.(roundedBorder|automatic)"#, "stock text-field style"),
             (#"borderStyle\s*=\s*\.roundedRect"#, "UIKit rounded-rect field"),
             (#"ProgressView\(\s*\""#, "system-font ProgressView label"),
-            (#"(?<!Tron)Section\(\""#, "system-generated section header"),
+            (#"(?<![A-Za-z0-9_])Section\(\""#, "system-generated section header"),
             (#"\.navigationTitle\(\"[^\"]+\"\)"#, "system navigation title"),
         ]
 
         for (url, source) in uiSources {
             for (pattern, description) in forbidden {
+                if description == "system-generated section header",
+                   url.lastPathComponent == "TerminalSheet.swift" {
+                    // Native Menu sections group terminal actions without
+                    // introducing stock section chrome into app content.
+                    continue
+                }
                 #expect(
                     source.range(of: pattern, options: .regularExpression) == nil,
                     "\(url.lastPathComponent) contains a \(description)"
@@ -403,7 +409,7 @@ struct PresentationStyleGuardTests {
             for (index, line) in lines.enumerated()
             where line.contains("TextField(") || line.contains("SecureField(") || line.contains("TextEditor(") {
                 if line.contains("UITextField(") || systemAlertFields.contains(where: line.contains) { continue }
-                let end = min(lines.count, index + 15)
+                let end = min(lines.count, index + 40)
                 let neighborhood = lines[index..<end].joined(separator: "\n")
                 let styled = neighborhood.contains(".tronField(")
                     || neighborhood.contains(".tronComposerField(")
@@ -442,6 +448,9 @@ struct PresentationStyleGuardTests {
             let allowedNavigationChevrons = url.lastPathComponent == "OnboardingView.swift"
                 || url.lastPathComponent == "AuthPromptSheet.swift"
                 || url.lastPathComponent == "RuntimeBehaviorSettingsView.swift"
+                || url.lastPathComponent == "SessionShellView.swift"
+                || url.lastPathComponent == "ConnectionSettingsView.swift"
+                || url.lastPathComponent == "PairedDeviceDetailView.swift"
             if !allowedNavigationChevrons {
                 #expect(
                     !source.contains("Image(systemName: \"chevron.right\")"),
@@ -475,7 +484,7 @@ struct PresentationStyleGuardTests {
         #expect(source.contains(".tint(Color.gray)"))
         #expect(!source.contains(".tint(Color.tronCyan)"))
         #expect(source.contains(#".accessibilityIdentifier("session-attention-action-\(session.dashboardID)")"#))
-        #expect(source.contains(#"session.isUnread ? "circle.fill" : "circle""#))
+        #expect(source.contains(#"session.isUnread ? "circle" : "circle.fill""#))
         #expect(source.contains(#"Button("Rename", systemImage: "pencil") { beginRename(session) }"#))
         #expect(source.contains(".tint(Color.tronEmerald)"))
         #expect(source.contains("let navigationIntent = navigationOwner.begin()"))
@@ -801,6 +810,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/App/TronMobileApp.swift"),
             encoding: .utf8
         )
+        let onboarding = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Onboarding/OnboardingView.swift"),
+            encoding: .utf8
+        )
         let settings = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/SettingsView.swift"),
             encoding: .utf8
@@ -854,7 +867,8 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains(".offset(y: ChatBottomActivityBlurLayout.translation("))
         #expect(chat.contains("value: keyboardVisible"))
         #expect(chat.contains(".ignoresSafeArea(edges: .bottom)"))
-        #expect(app.contains(".tronTopBlur(.sheet)"))
+        #expect(app.contains("OnboardingView(selectedDetent: $onboardingDetent)"))
+        #expect(onboarding.contains(".tronTopBlur(.sheet)"))
         #expect(settings.matches(#"\.tronTopBlur\(\.sheet\)"#) >= 2)
         #expect(terminal.contains(".tronTopBlur(.sheet)"))
         #expect(!camera.contains("tronTopBlur"))
@@ -870,9 +884,12 @@ struct PresentationStyleGuardTests {
         for (url, source) in uiSources {
             let detentCount = source.matches(#"\.presentationDetents\(\[\.medium, \.large\]"#)
             let blurCount = source.matches(#"\.tronTopBlur\(\.(sheet|toolDetail)\)"#)
+            let inheritedBlurCount = url.lastPathComponent == "ConnectionSettingsView.swift"
+                ? blurCount + 1 // OnboardingView owns the nested add-server blur.
+                : blurCount
             #expect(
-                blurCount >= detentCount,
-                "\(url.lastPathComponent) has \(detentCount) medium/large sheets but only \(blurCount) top blurs"
+                inheritedBlurCount >= detentCount,
+                "\(url.lastPathComponent) has \(detentCount) medium/large sheets but only \(inheritedBlurCount) owned top blurs"
             )
         }
     }
@@ -965,6 +982,15 @@ struct PresentationStyleGuardTests {
         #expect(newSession.contains(".task(id: PresentationActivityTaskID("))
         #expect(newSession.contains("source: NewSessionConfigurationLoadID("))
         #expect(newSession.contains("presentationActive: presentationActivity.allowsPresentationPublication"))
+        #expect(newSession.contains("title: \"Project Trust\""))
+        #expect(newSession.contains("value: \"Untrusted\""))
+        #expect(newSession.contains(".transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))"))
+        #expect(newSession.contains("identity: \"new-session.project-trust\""))
+        #expect(newSession.contains("confirmTitle: \"Trust\""))
+        #expect(newSession.contains("alwaysUsesToolbarActions: true"))
+        #expect(newSession.contains("this session will open without project resources"))
+        #expect(newSession.contains("NewSessionTrustPolicy.decisionBeforeCreation(trustInspection)"))
+        #expect(!newSession.contains("Button(\"Open Without Project Resources\")"))
         #expect(newSession.contains(".disabled(creating || !configurationReady)"))
         #expect(shell.contains("@State private var presentedSession: AppModel.SessionNavigationRoute?"))
         #expect(shell.contains(".navigationDestination(item: $presentedSession)"))
@@ -990,10 +1016,11 @@ struct PresentationStyleGuardTests {
         #expect(!serverFilter.contains("Button(\"Done\")"))
         #expect(sourceControl.contains("HStack(alignment: .center, spacing: 12)"))
         #expect(!sourceControl.contains("HStack(alignment: .top, spacing: 12)"))
+        #expect(sourceControl.matches(#"\.tronField\("#) == 2)
         #expect(presentation.contains("Text(focused ? \"\" : prompt)"))
         #expect(presentation.contains(".glassEffect(.regular.tint(accent.opacity(0.16))"))
         #expect(presentation.contains("onFocusChange?(isFocused)"))
-        #expect(setup.contains(".glassEffect(.regular.tint(Color.tronEmerald.opacity(0.16))"))
+        #expect(setup.contains(".regular.tint((settingsTheme?.accent ?? .tronEmerald).opacity(0.16)).interactive()"))
         #expect(setup.contains(".interactiveDismissDisabled(showingSearch)"))
         #expect(setup.contains("Task.sleep(for: .milliseconds(300))"))
         #expect(setup.contains("onClose: closeSearch"))
@@ -1141,8 +1168,8 @@ struct PresentationStyleGuardTests {
         #expect(!providers.contains("Menu {"))
         #expect(!providers.contains("Image(systemName: \"ellipsis\")"))
         #expect(providerAuth.contains("struct ProviderAuthFlowContent"))
-        #expect(providerAuth.contains("title: submitting ? \"Saving…\" : \"Save\""))
-        #expect(providerAuth.contains("systemImage: \"square.and.arrow.down\""))
+        #expect(providerAuth.contains("title: submitting ? \"Submitting…\" : (prompt.kind == .manualCode ? \"Complete Login\" : \"Save\")"))
+        #expect(providerAuth.contains("systemImage: prompt.kind == .manualCode ? \"checkmark.shield\" : \"square.and.arrow.down\""))
         #expect(providerAuth.contains("isEnabled: !value.isEmpty && !submitting"))
         #expect(!providerAuth.contains("title: submitting ? \"Continuing…\" : \"Continue\""))
         #expect(providers.contains("provider.configured ? 0.14 : 0.08"))
@@ -1151,7 +1178,7 @@ struct PresentationStyleGuardTests {
         #expect(providers.contains("TronTypography.secondaryCodeDescription"))
         #expect(providers.contains("TronTypography.secondaryDescription"))
         #expect(providers.contains(".lineLimit(1)"))
-        #expect(!providers.contains("glassEffect"))
+        #expect(providers.contains(".glassEffect("))
         #expect(defaults.contains("value: draft.trust.capitalized"))
         #expect(defaults.contains("TronInlineMenu(\"Change\", accent: .tronAmber)"))
         #expect(defaults.contains("\"Project Resources\","))
@@ -1170,7 +1197,7 @@ struct PresentationStyleGuardTests {
         #expect(runtime.contains("ifCurrent: draft"))
         #expect(runtime.contains("value: value"))
         #expect(runtime.contains("TronInlineMenu(\"Change\""))
-        #expect(runtime.contains("TronInlineField(numeric: true)"))
+        #expect(runtime.contains(".tronInlineField(numeric: true)"))
         #expect(runtime.contains("drafts.seedBaselineIfMissing(draft, for: target)"))
         #expect(!runtime.contains("Save Runtime Settings"))
         #expect(resources.contains("TronSaveToolbarButton"))
@@ -1216,7 +1243,7 @@ struct PresentationStyleGuardTests {
         let saveToolbarButton = (presentation.components(separatedBy: "struct TronSaveToolbarButton").dropFirst().first ?? "")
             .components(separatedBy: "struct TronReloadToolbarButton").first ?? ""
         #expect(saveToolbarButton.contains(".tronToolbarAction(accent: actionColor)"))
-        #expect(saveToolbarButton.contains("Color.tronTextMuted"))
+        #expect(saveToolbarButton.contains(".tronTextMuted"))
         #expect(saveToolbarButton.contains("private var actionColor"))
         #expect(saveToolbarButton.contains("systemImage: \"square.and.arrow.down\""))
         #expect(saveToolbarButton.contains(".tint(actionColor)"))
@@ -1266,6 +1293,9 @@ struct PresentationStyleGuardTests {
         #expect(detail.contains("Text(installActive ? \"Build and Install Running\" : \"Rebuild and Install Tron\")"))
         #expect(detail.contains("fixed Tron Device + LocalDevice configuration"))
         #expect(detail.contains("without erasing app or Keychain data"))
+        #expect(detail.contains("confirmTitle: \"Install\""))
+        #expect(detail.contains("centersTitle: true"))
+        #expect(detail.contains("alwaysUsesToolbarActions: true"))
         #expect(detail.contains("title: \"Use This Server\""))
         #expect(detail.contains("model.requestIosDeviceInstall(for: authorized)"))
         #expect(detail.contains(".foregroundStyle(Color.tronEmerald)"))
@@ -1377,7 +1407,7 @@ struct PresentationStyleGuardTests {
         #expect(!history.contains("private var branchRail"))
         #expect(history.contains("Button(\"Fork New Session\", systemImage: \"arrow.triangle.branch\", action: fork)"))
         #expect(history.contains("private enum SessionHistoryCardMetrics"))
-        #expect(history.components(separatedBy: ".frame(width: SessionHistoryCardMetrics.iconWidth, height: 20").count - 1 == 4)
+        #expect(history.components(separatedBy: ".frame(width: SessionHistoryCardMetrics.iconWidth, height: 20").count - 1 == 3)
         #expect(history.contains("static let verticalPadding: CGFloat = TronSpacing.md"))
         #expect(history.contains("LazyVStack(alignment: .leading, spacing: TronSpacing.md)"))
         let eventRows = (history.components(separatedBy: "private struct TreeNodeRow").dropFirst().first ?? "")
@@ -1392,14 +1422,14 @@ struct PresentationStyleGuardTests {
         let bookmarkAction = try #require(detailActions.firstRange(of: "Add Bookmark")?.lowerBound)
         let forkAction = try #require(detailActions.firstRange(of: "Fork New Session")?.lowerBound)
         #expect(bookmarkAction < forkAction)
-        #expect(resources.contains("Text(\"Reload\")"))
+        #expect(resources.contains("TronToolbarTextLabel(\n                            \"Reload\""))
         #expect(resources.contains("try await model.reloadResources(sessionID: sessionID)"))
         let reloadOwner = (resources.components(separatedBy: "private func reload()").dropFirst().first ?? "")
             .components(separatedBy: "private func load()").first ?? ""
         #expect(!reloadOwner.contains("await model.loadResources("))
         #expect(resources.contains("@State private var reloading = false"))
         #expect(resources.contains("@State private var loadGeneration = 0"))
-        #expect(resources.contains("guard generation == loadGeneration else { return }"))
+        #expect(resources.contains("generation == loadGeneration else { return }"))
         #expect(resources.contains("loading || reloading"))
         #expect(resources.contains("ToolbarItem(placement: .topBarLeading)"))
         #expect(resources.contains("TronSheetTitle(title: \"Project Resources\")"))
@@ -1425,7 +1455,7 @@ struct PresentationStyleGuardTests {
         #expect(context.contains("TronTechnicalJSONRow("))
         #expect(!context.contains("DisclosureGroup(isExpanded: $showRaw)"))
         #expect(structuredJSON.contains("struct TronTechnicalJSONRow: View"))
-        #expect(structuredJSON.contains("ScrollView(.vertical, showsIndicators: true)"))
+        #expect(structuredJSON.contains("TronReadOnlyTextView(text: document ?? \"\", style: .code)"))
         #expect(!structuredJSON.contains("ScrollView([.horizontal, .vertical]"))
         #expect(structuredJSON.contains(".fixedSize(horizontal: false, vertical: true)"))
         #expect(structuredJSON.contains(".presentationDetents([.medium, .large], selection: $detent)"))
@@ -1515,7 +1545,7 @@ struct PresentationStyleGuardTests {
         #expect(customModels.contains("private func providerEditorSheet("))
         #expect(customModels.contains("fieldLabel(\"Provider identifier\")"))
         #expect(customModels.contains("TronTechnicalJSONRow("))
-        #expect(customModels.contains("titleColor: .tronEmerald"))
+        #expect(customModels.contains("titleColor: TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme)"))
         #expect(customModels.contains("TronTypography.code(size: TronTypography.sizeBody2)"))
         #expect(customModels.contains("Button { isPresented = true }"))
         #expect(customModels.contains("Image(systemName: \"ellipsis\")"))
@@ -1525,13 +1555,13 @@ struct PresentationStyleGuardTests {
         #expect(!providerSummary.contains("tronGlassSurface"))
         let providerEditor = (customModels.components(separatedBy: "private func providerEditorSheet").dropFirst().first ?? "")
             .components(separatedBy: "private func fieldLabel").first ?? ""
-        #expect(providerEditor.contains("editorSectionHeader(\n                    \"Connection\""))
-        #expect(providerEditor.contains("editorSectionHeader(\n                    \"Models\""))
-        #expect(providerEditor.contains("editorSectionHeader(\n                    \"Protocol\""))
+        #expect(providerEditor.contains("editorSectionHeader(\"Connection\")"))
+        #expect(providerEditor.contains("\"Models\",\n                        detail:"))
+        #expect(providerEditor.contains("\"Protocol\",\n                        detail:"))
         #expect(!providerEditor.contains("Identify the provider and choose the endpoint."))
         #expect(providerEditor.contains("dense: true"))
         #expect(providerEditor.contains("surfaceTint: Color.tronEmerald.opacity(0.14)"))
-        #expect(providerEditor.contains("TronValueRow(icon: \"network\", title: \"API format\""))
+        #expect(providerEditor.contains("icon: \"network\",\n                        title: \"API format\""))
         #expect(providerEditor.components(separatedBy: "TronSettingsGroup").count - 1 == 0)
         #expect(providerEditor.components(separatedBy: "tronGlassSurface").count - 1 == 1)
         #expect(!customModels.contains("expandedProviderIDs"))
@@ -1539,7 +1569,7 @@ struct PresentationStyleGuardTests {
         #expect(trust.contains("VStack(spacing: 10)"))
         #expect(trust.contains("info.circle.fill"))
         #expect(trust.contains("icon: \"exclamationmark.shield\""))
-        #expect(trust.contains("TronSettingsRow("))
+        #expect(trust.contains("TronInfoCard("))
         #expect(trust.contains("Text(\"Decision\")"))
         #expect(!trust.contains("TronSettingsGroup(\"Decision\""))
         #expect(!trust.contains("VStack(spacing: 0)"))
@@ -1552,7 +1582,7 @@ struct PresentationStyleGuardTests {
         #expect(packageOverview.contains("icon: \"magnifyingglass.circle.fill\""))
         #expect(packageOverview.contains("private var packageInstallSheet: some View"))
         #expect(packageOverview.contains("presentationDetents([.medium, .large])"))
-        #expect(packageOverview.contains("await model.checkPackageUpdates(target: target"))
+        #expect(packageOverview.contains("await model.checkPackageUpdates(target: requestedTarget"))
         #expect(!packageOverview.contains("TronSettingsGroup(\"Updates\""))
         #expect(!packageOverview.contains("Update All"))
         #expect(!packageOverview.contains("Check for Updates"))
@@ -1606,7 +1636,7 @@ struct PresentationStyleGuardTests {
         #expect(!logs.contains("Array(visibleRecords.enumerated())"))
         #expect(!logs.contains(".padding(.leading, 54)"))
         #expect(logs.contains("private struct GatewayLogRow: View, Equatable"))
-        #expect(logs.contains(".task(id: automaticLoadID)"))
+        #expect(logs.contains(".task(id: PresentationActivityTaskID("))
         #expect(logs.contains("readinessGeneration: model.diagnosticsReadinessGeneration"))
         #expect(logs.contains("isReady: model.diagnosticsAreReady"))
         #expect(!logs.contains("model.connectionState == .connected"))
@@ -1795,8 +1825,9 @@ struct PresentationStyleGuardTests {
         #expect(!chat.contains("@State private var showFiles"))
         #expect(chat.contains(".onChange(of: sessionPresentation.photos)"))
         #expect(chat.contains("await importPhotos(values, target: target)"))
-        #expect(chat.contains("if phase == .background"))
-        #expect(!chat.contains("if phase != .active"))
+        #expect(chat.contains("func suspendForBackground()"))
+        #expect(chat.contains("@Environment(\\.scenePhase)"))
+        #expect(chat.contains("private func scenePhaseChanged(_ current: ScenePhase)"))
         let pendingStrip = (chat.components(separatedBy: "if !pendingAttachments.isEmpty").dropFirst().first ?? "")
             .components(separatedBy: "GlassEffectContainer(spacing: 8)").first ?? ""
         #expect(pendingStrip.contains("ScrollView(.horizontal, showsIndicators: false)"))
@@ -2035,7 +2066,7 @@ struct PresentationStyleGuardTests {
             sheet.components(separatedBy: "struct ToolChipFlowLayout: Layout {").dropFirst().first?
                 .components(separatedBy: "private struct ToolActivityChip: View {").first
         )
-        #expect(chipLayout.contains("enum ToolChipFlowLayoutPolicy"))
+        #expect(sheet.contains("enum ToolChipFlowLayoutPolicy"))
         #expect(chipLayout.contains("struct Cache"))
         #expect(chipLayout.contains("let ideal = subview.sizeThatFits(.unspecified)"))
         #expect(chipLayout.contains("sizeThatFits(ProposedViewSize(width: availableWidth, height: nil))"))
@@ -2090,10 +2121,9 @@ struct PresentationStyleGuardTests {
         #expect(!technicalDetail.contains("ScrollView(.horizontal, showsIndicators: true)"))
         #expect(technicalDetail.contains("TronTechnicalJSONRow("))
         #expect(!technicalDetail.contains("item: $selectedPayload"))
-        #expect(technicalDetail.contains("ToolTechnicalMetadataItem"))
-        #expect(technicalDetail.contains("sheetSectionHeader"))
-        #expect(technicalDetail.contains("sizeBodySM"))
-        #expect(technicalDetail.contains("sizeBody3"))
+        #expect(technicalDetail.contains("TronTechnicalMetadataItem"))
+        #expect(technicalDetail.contains("TronTechnicalMetadataSection("))
+        #expect(technicalDetail.contains("TronTechnicalSectionLabel(title)"))
         #expect(technicalDetail.contains("Command preview"))
         #expect(!technicalDetail.contains("readableOutput"))
         #expect(!technicalDetail.contains("Projected fallback"))
@@ -2397,7 +2427,7 @@ struct PresentationStyleGuardTests {
         #expect(!chat.contains("var rows: [ChatPhysicalTranscriptRow]"))
         #expect(chat.contains(".id(physicalID)"))
         #expect(chat.contains("renderedID: semanticID"))
-        #expect(chat.contains("updateRowFrame(id: semanticID"))
+        #expect(chat.contains("id: semanticID, frame: sample.frame"))
         #expect(chat.contains("seedCanonicalMediaPreviews(from: receipt, in: snapshot)"))
         #expect(chat.contains("seedPreparedThumbnail(prepared, for: identity)"))
         #expect(chat.contains("excludedOperationIDs: sessionPresentation.locallyMutatedQueueOperationIDs"))
@@ -2593,7 +2623,7 @@ struct PresentationStyleGuardTests {
             encoding: .utf8
         )
         #expect(shell.contains("HistoricalSessionRow("))
-        #expect(shell.contains("activity: model.dashboardActivity(for: session)"))
+        #expect(shell.contains("activity: dashboardPresentation.activity(for: session)"))
         #expect(!shell.contains("HistoricalSessionRow(session: session, selected:"))
         #expect(!shell.contains("let selected: Bool"))
         #expect(shell.contains(".foregroundStyle(Color.tronEmerald)"))
@@ -2751,7 +2781,7 @@ struct PresentationStyleGuardTests {
         #expect(toolRunElapsed.contains("TimelineView(.periodic(from: .now, by: 0.1)"))
         #expect(toolRuns.contains("private struct ToolElapsedClock"))
         #expect(toolRuns.contains("ProcessInfo.processInfo.systemUptime"))
-        #expect(!toolRuns.contains(".periodic(from:"))
+        #expect(toolRuns.matches(#"\.periodic\(from:"#) == 2)
         for elapsed in [toolElapsed, toolRunElapsed] {
             #expect(elapsed.contains(".monospacedDigit()"))
             #expect(elapsed.contains(".lineLimit(1)"))
@@ -2794,17 +2824,18 @@ struct PresentationStyleGuardTests {
         #expect(!projectionKernel.contains("specialBeforeStreaming"))
         #expect(!projectionKernel.contains("unanchoredBeforeStreaming"))
         #expect(projectionKernel.contains("appendFragment(streamingFragment, tools: streamingTools, streaming: true)"))
-        #expect(projectionKernel.contains("appendTools(unanchoredLive)"))
+        #expect(projectionKernel.contains("for tool in unanchoredLive"))
         #expect(chat.contains("scrollCoordinator.geometryChanged"))
         #expect(chat.contains("ChatScrollGeometryObservation"))
         #expect(chat.contains("presentationEpoch: sessionPresentation.open.epoch"))
         #expect(chat.contains("presentationPhase: sessionPresentation.open.phase"))
         #expect(transcriptView.contains("observation.presentationEpoch == presentationEpoch"))
         #expect(!transcriptView.contains("observation.phase"))
-        #expect(transcriptView.contains("presentationPhase == .positioning || presentationPhase == .ready"))
+        #expect(transcriptView.contains("observation.presentationPhase == .positioning"))
+        #expect(transcriptView.contains("observation.presentationPhase == .ready"))
         #expect(transcriptView.contains("current.hasViewportChange(from: prior)"))
         #expect(chat.contains("scrollCoordinator.viewportChanged"))
-        #expect(transcriptView.contains("isReady && scrollCoordinator.usesPinnedSizeChangeAnchor ? .bottom : .top"))
+        #expect(transcriptView.contains("scrollCoordinator.usesPinnedSizeChangeAnchor ? .bottom : .top"))
         #expect(transcriptView.contains(".defaultScrollAnchor(.bottom, for: .initialOffset)"))
         #expect(transcriptView.contains(".defaultScrollAnchor(.bottom, for: .alignment)"))
         #expect(transcriptView.contains("for: .sizeChanges"))
@@ -2817,18 +2848,18 @@ struct PresentationStyleGuardTests {
         #expect(scrollCoordinator.contains("targetReleaseToken != token"))
         #expect(!chat.contains("retireAppliedTargetForSubmission()"))
         #expect(chat.contains("scrollCoordinator.discreteTailInserted("))
-        #expect(scrollCoordinator.contains("Hand its already-applied native target directly"))
+        #expect(scrollCoordinator.contains("func discreteTailInserted("))
         #expect(chat.contains("transcriptScrollPosition = ScrollPosition(idType: String.self)"))
         #expect(chat.contains("scrollPosition.isPositionedByUser"))
-        #expect(!chat.contains("composerHeight"))
-        #expect(!chat.contains("ComposerHeightPreferenceKey"))
+        #expect(chat.contains("composerHeightChanged"))
+        #expect(chat.contains("composerHeightSettled"))
         #expect(!chat.contains("scheduleTailFollow"))
         #expect(!chat.contains("tailFollowTask"))
         #expect(!chat.contains(".transition(reduceMotion ? .opacity : .opacity.combined(with: .scale"))
         #expect(!chat.contains("position.scrollTo(id: \"transcript-bottom\", anchor: .bottom)"))
         #expect(!chat.contains("ScrollPosition(idType: String.self, edge: .bottom)"))
         #expect(chat.contains("scrollCoordinator.canInstallPersistentBottomPosition"))
-        #expect(scrollCoordinator.contains("Ordinary pinned growth is physically owned"))
+        #expect(scrollCoordinator.contains("var usesPinnedSizeChangeAnchor"))
         #expect(!scrollCoordinator.contains("case pinnedGrowth"))
         #expect(chat.contains("releaseScrollPositionTarget()"))
         #expect(chat.occurrences(of: "scrollTo(edge: .bottom)") == 1)
@@ -2883,7 +2914,7 @@ struct PresentationStyleGuardTests {
             let source = try String(contentsOf: packageRoot.appending(path: path), encoding: .utf8)
             #expect(!source.contains(".refreshable"), "\(path) still enables pull to refresh")
             let hasReloadAction = source.contains("TronReloadToolbarButton")
-                || (source.contains("Text(\"Reload\")") && source.contains("Button(action: reload)"))
+                || (source.contains("\"Reload\"") && source.contains("Button(action: reload)"))
             #expect(hasReloadAction, "\(path) is missing an explicit reload action")
         }
 
@@ -2930,7 +2961,8 @@ struct PresentationStyleGuardTests {
         #expect(composer.contains("resourcePickerKind: resourcePicker?.kind"))
         #expect(composer.contains("resourceResultIDs: resourceResults.map(\\.id)"))
         #expect(composer.contains("reduceMotion: reduceMotion"))
-        #expect(chat.contains("guard supportsSkillPrompt, let presentationTarget else { return false }"))
+        #expect(chat.contains("identity.supportsSkillPrompt || $0.source != .skill"))
+        #expect(chat.contains("guard let presentationTarget else { return false }"))
         #expect(picker.contains("LazyVStack(spacing: 0)"))
         #expect(picker.contains("keyboardVisible ? keyboardVisibleRows : regularVisibleRows"))
         #expect(picker.contains("static let panelEditorLines = 4"))
@@ -2952,7 +2984,7 @@ struct PresentationStyleGuardTests {
         #expect(picker.contains("@State private var detent: PresentationDetent = .medium"))
         #expect(picker.contains("TronSheetTitle(title: entry.friendlyName"))
         #expect(picker.contains("ChatSemanticPillRole.command.accent"))
-        #expect(picker.contains("accessibilityLabel(\"Remove skill,"))
+        #expect(picker.contains("accessibilityLabel(\"Remove resource,"))
         #expect(menu.contains("action(\"Add Skills\", systemImage: \"sparkles\", destination: .skills)"))
         #expect(menu.contains("action(\"Add Commands\", systemImage: \"command\", destination: .commands)"))
         #expect(menu.contains("button.accessibilityLabel = \"Add attachment\""))

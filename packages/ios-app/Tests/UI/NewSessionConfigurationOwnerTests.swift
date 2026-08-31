@@ -37,8 +37,7 @@ struct NewSessionConfigurationOwnerTests {
         #expect(owner.isLoading(profileID: "profile-a", workspace: "/workspace/a"))
         #expect(!owner.permitsCreation(
             profileID: "profile-a",
-            workspace: "/workspace/a",
-            requiresTrust: false
+            workspace: "/workspace/a"
         ))
 
         let admittedA = owner.admit(
@@ -51,18 +50,11 @@ struct NewSessionConfigurationOwnerTests {
         #expect(!owner.isLoading(profileID: "profile-a", workspace: "/workspace/a"))
         #expect(owner.permitsCreation(
             profileID: "profile-a",
-            workspace: "/workspace/a",
-            requiresTrust: false
-        ))
-        #expect(!owner.permitsCreation(
-            profileID: "profile-a",
-            workspace: "/workspace/a",
-            requiresTrust: true
+            workspace: "/workspace/a"
         ))
         #expect(!owner.permitsCreation(
             profileID: "profile-b",
-            workspace: "/workspace/a",
-            requiresTrust: false
+            workspace: "/workspace/a"
         ))
         #expect(owner.isLoading(profileID: "profile-b", workspace: "/workspace/a"))
 
@@ -88,6 +80,30 @@ struct NewSessionConfigurationOwnerTests {
             trustReady: true
         )
         #expect(admittedB)
+    }
+
+    @Test("an unresolved trust prompt defaults creation to blocked project resources")
+    func unresolvedTrustFallback() {
+        let unresolved = JSONValue.object([
+            "requiresDecision": .bool(true),
+            "effectiveDecision": .null
+        ])
+        let trusted = JSONValue.object([
+            "requiresDecision": .bool(true),
+            "effectiveDecision": .bool(true)
+        ])
+        let notRequired = JSONValue.object([
+            "requiresDecision": .bool(false),
+            "effectiveDecision": .null
+        ])
+
+        #expect(NewSessionTrustPolicy.requiresDecision(unresolved))
+        #expect(NewSessionTrustPolicy.decisionBeforeCreation(unresolved) == false)
+        #expect(!NewSessionTrustPolicy.requiresDecision(trusted))
+        #expect(NewSessionTrustPolicy.decisionBeforeCreation(trusted) == nil)
+        #expect(!NewSessionTrustPolicy.requiresDecision(notRequired))
+        #expect(NewSessionTrustPolicy.decisionBeforeCreation(notRequired) == nil)
+        #expect(NewSessionTrustPolicy.decisionBeforeCreation(nil) == nil)
     }
 
     @Test("one creation gesture owns the mutation until terminal completion")

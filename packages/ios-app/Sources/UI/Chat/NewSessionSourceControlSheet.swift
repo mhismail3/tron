@@ -68,12 +68,11 @@ struct NewSessionSourceControlSheet: View {
                                 )
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
-                                .font(TronTypography.codeContent)
-                                .padding(.horizontal, 12)
-                                .frame(minHeight: 44)
-                                .glassEffect(
-                                    .regular.tint(Color.tronTeal.opacity(0.10)).interactive(),
-                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .tronField(
+                                    monospaced: true,
+                                    compact: true,
+                                    surfaceTint: Color.tronTeal.opacity(0.10),
+                                    border: Color.tronTeal.opacity(0.30)
                                 )
 
                                 if selection.mode == .newBranchWorktree {
@@ -83,12 +82,11 @@ struct NewSessionSourceControlSheet: View {
                                     )
                                     .textInputAutocapitalization(.never)
                                     .autocorrectionDisabled()
-                                    .font(TronTypography.codeContent)
-                                    .padding(.horizontal, 12)
-                                    .frame(minHeight: 44)
-                                    .glassEffect(
-                                        .regular.tint(Color.tronTeal.opacity(0.10)).interactive(),
-                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .tronField(
+                                        monospaced: true,
+                                        compact: true,
+                                        surfaceTint: Color.tronTeal.opacity(0.10),
+                                        border: Color.tronTeal.opacity(0.30)
                                     )
                                 }
                             }

@@ -4,6 +4,7 @@ struct NewSessionSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var workspace = ""
     @State private var selectedServerID: String?
     @State private var useDefaultWorkspace = true
@@ -16,6 +17,7 @@ struct NewSessionSheet: View {
     @State private var showServers = false
     @State private var showSourceControl = false
     @State private var showModels = false
+    @State private var confirmingTrust = false
     @State private var trustInspection: JSONValue?
     @State private var configurationOwner = NewSessionConfigurationOwner()
     @State private var creationOwner = NewSessionCreationOwner()
@@ -94,21 +96,21 @@ struct NewSessionSheet: View {
                     ) { showModels = true }
 
                     if needsTrust {
-                        TronSettingsGroup(
-                            "Project Trust",
-                            detail: "Project resources execute with your Mac user authority. Trust is not a sandbox.",
+                        setupCard(
+                            icon: "checkmark.shield",
+                            title: "Project Trust",
+                            value: "Untrusted",
+                            caption: "This session will open without project resources unless you trust this project.",
                             accent: .tronAmber
-                        ) {
-                            VStack(spacing: 10) {
-                                Button("Trust Project") { Task { await trust(true) } }
-                                    .buttonStyle(TronActionButtonStyle(role: .primary))
-                                Button("Open Without Project Resources") { Task { await trust(false) } }
-                                    .buttonStyle(TronActionButtonStyle(role: .destructive))
-                            }
-                            .padding(12)
-                        }
+                        ) { confirmingTrust = true }
+                        .accessibilityHint("Opens a confirmation to trust project resources")
+                        .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                     }
                 }
+                .animation(
+                    reduceMotion ? .easeInOut(duration: 0.12) : .smooth(duration: 0.24),
+                    value: needsTrust
+                )
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
                 .padding(.bottom, 28)
@@ -128,6 +130,17 @@ struct NewSessionSheet: View {
                     }
                     .disabled(creating || !configurationReady)
                 }
+            }
+            .tronManagedSheet(isPresented: $confirmingTrust, identity: "new-session.project-trust") {
+                TronConfirmationSheet(
+                    title: "Trust this project?",
+                    message: "Trusting allows project-local settings, extensions, skills, prompts, packages, and system prompt files to load and execute with your Mac user authority. Trust is not a sandbox. If you cancel, this session will open without project resources.",
+                    confirmTitle: "Trust",
+                    centersTitle: true,
+                    alwaysUsesToolbarActions: true,
+                    icon: "checkmark.shield",
+                    onConfirm: { Task { await trust(true) } }
+                )
             }
             .tronManagedSheet(isPresented: $showBrowser, identity: "new-session.workspace") {
                 WorkspaceBrowser(shortcuts: recentWorkspaces, initialPath: workspace) { value in
@@ -367,8 +380,7 @@ struct NewSessionSheet: View {
     }
 
     private var needsTrust: Bool {
-        guard let value = trustInspection?.objectValue else { return false }
-        return value["requiresDecision"]?.boolValue == true && value["effectiveDecision"] == .null
+        NewSessionTrustPolicy.requiresDecision(trustInspection)
     }
 
     private var quickSelections: [NewSessionQuickSelection] {
@@ -452,8 +464,7 @@ struct NewSessionSheet: View {
     private var configurationReady: Bool {
         configurationOwner.permitsCreation(
             profileID: activeProfileID,
-            workspace: workspace,
-            requiresTrust: needsTrust
+            workspace: workspace
         ) && sourceControl.isAdmissible(for: gitInspection)
     }
 
@@ -480,16 +491,32 @@ struct NewSessionSheet: View {
             configured: configuredModel
         )
         let requestedSourceControl = sourceControl
-        Task { await create(cwd: cwd, sourceControl: requestedSourceControl, modelOverride: modelOverride) }
+        let trustDecision = NewSessionTrustPolicy.decisionBeforeCreation(trustInspection)
+        Task {
+            await create(
+                cwd: cwd,
+                sourceControl: requestedSourceControl,
+                modelOverride: modelOverride,
+                trustDecision: trustDecision
+            )
+        }
     }
 
     private func create(
         cwd: String,
         sourceControl: SessionSourceControlSelection,
-        modelOverride: ModelRef?
+        modelOverride: ModelRef?,
+        trustDecision: Bool?
     ) async {
         defer { creationOwner.finish() }
         do {
+            if let trustDecision {
+                guard let target = TrustTarget(cwd: cwd) else {
+                    model.presentError("The selected workspace cannot receive a project trust decision.")
+                    return
+                }
+                _ = try await model.setTrust(target: target, decision: trustDecision)
+            }
             let route = try await model.createSession(cwd: cwd, sourceControl: sourceControl)
             guard model.ownsNavigationRoute(route) else {
                 model.presentError("The new session was created, but this navigation request is no longer current.")

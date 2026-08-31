@@ -17,6 +17,20 @@ struct NewSessionConfigurationLoadID: Hashable {
     }
 }
 
+enum NewSessionTrustPolicy {
+    static func requiresDecision(_ inspection: JSONValue?) -> Bool {
+        guard let value = inspection?.objectValue else { return false }
+        return value["requiresDecision"]?.boolValue == true
+            && value["effectiveDecision"] == .null
+    }
+
+    /// An unresolved prompt defaults to blocking project-local resources. The
+    /// explicit Trust action replaces this fallback before session creation.
+    static func decisionBeforeCreation(_ inspection: JSONValue?) -> Bool? {
+        requiresDecision(inspection) ? false : nil
+    }
+}
+
 struct NewSessionConfigurationOwner: Equatable, Sendable {
     private(set) var profileID: String?
     private(set) var workspace: String?
@@ -40,13 +54,12 @@ struct NewSessionConfigurationOwner: Equatable, Sendable {
         return isReady
     }
 
-    func permitsCreation(profileID: String?, workspace: String, requiresTrust: Bool) -> Bool {
+    func permitsCreation(profileID: String?, workspace: String) -> Bool {
         !workspace.isEmpty
             && profileID != nil
             && self.profileID == profileID
             && self.workspace == workspace
             && isReady
-            && !requiresTrust
     }
 
     func isLoading(profileID: String?, workspace: String) -> Bool {
