@@ -67,6 +67,8 @@ export interface SessionSummary {
   foregroundPhase?: SessionPhase;
   /** True when at least one detached subagent activity remains active. */
   hasActiveSubagents?: boolean;
+  /** True while the authoritative runtime is blocked on a semantic user interaction. */
+  waitingForUser?: boolean;
   summaryRevision: number;
   /** Gateway-canonical cross-client attention projection. Missing only during a rolling upgrade. */
   completionRevision?: number;
@@ -84,6 +86,8 @@ export interface SessionSummaryUpdate {
   foregroundPhase?: SessionPhase;
   /** True when at least one detached subagent activity remains active. */
   hasActiveSubagents?: boolean;
+  /** True while the authoritative runtime is blocked on a semantic user interaction. */
+  waitingForUser?: boolean;
   name?: string;
   updatedAt: string;
   /** Stable Gateway-observed start of the current active dashboard period. */

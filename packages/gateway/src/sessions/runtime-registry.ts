@@ -338,6 +338,7 @@ interface CatalogPageSeed {
   readonly phase: SessionSummary["phase"];
   readonly foregroundPhase?: SessionSummary["foregroundPhase"];
   readonly hasActiveSubagents?: boolean;
+  readonly waitingForUser?: boolean;
   readonly summaryRevision: number;
   readonly attention: SessionAttentionProjection;
 }
@@ -1999,6 +2000,9 @@ export class RuntimeRegistry {
         ...(latest?.hasActiveSubagents !== undefined
           ? { hasActiveSubagents: latest.hasActiveSubagents }
           : slot ? { hasActiveSubagents: slot.catalogHasActiveSubagents } : {}),
+        ...(latest?.waitingForUser !== undefined
+          ? { waitingForUser: latest.waitingForUser }
+          : slot ? { waitingForUser: slot.catalogWaitingForUser } : {}),
         summaryRevision: latest?.summaryRevision ?? 0,
         attention: this.attention.projection(session.id),
       });
@@ -2020,6 +2024,7 @@ export class RuntimeRegistry {
           phase: latest?.phase ?? slot.catalogPhase,
           foregroundPhase: latest?.foregroundPhase ?? slot.catalogForegroundPhase,
           hasActiveSubagents: latest?.hasActiveSubagents ?? slot.catalogHasActiveSubagents,
+          waitingForUser: latest?.waitingForUser ?? slot.catalogWaitingForUser,
           summaryRevision: latest?.summaryRevision ?? 0,
           attention: this.attention.projection(id),
         });
@@ -2061,6 +2066,9 @@ export class RuntimeRegistry {
         ...(seed.foregroundPhase ? { foregroundPhase: seed.foregroundPhase } : {}),
         ...(seed.hasActiveSubagents !== undefined
           ? { hasActiveSubagents: seed.hasActiveSubagents }
+          : {}),
+        ...(seed.waitingForUser !== undefined
+          ? { waitingForUser: seed.waitingForUser }
           : {}),
         summaryRevision: seed.summaryRevision,
         ...seed.attention,

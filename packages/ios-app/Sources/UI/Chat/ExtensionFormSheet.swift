@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Native projection of one bounded semantic form. The Gateway owns the
-/// interaction and lifecycle; this view owns only an ephemeral, ID-keyed draft.
+/// interaction and lifecycle; this view edits a bounded device-local, ID-keyed draft.
 struct ExtensionFormSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -57,19 +57,20 @@ struct ExtensionFormSheet: View {
                         .padding(20)
                 }
             }
+            .background(Color.tronBackground)
+            .tronTopBlurSurface()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    if expired || form?.allowCancel == true {
-                        Button(action: close) {
-                            Image(systemName: "xmark")
-                                .font(TronTypography.buttonSM)
-                        }
-                        .tronToolbarAction(accent: .tronTextMuted)
-                        .disabled(submitting)
-                        .accessibilityLabel(expired ? "Close expired form" : "Cancel form")
+                    Button(action: close) {
+                        Image(systemName: "xmark")
+                            .font(TronTypography.buttonSM)
                     }
+                    .tronToolbarAction(accent: .tronTextMuted)
+                    .disabled(submitting)
+                    .accessibilityLabel("Close form and keep answers")
                 }
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: form?.title ?? "Questions", accent: .tronAmber)
@@ -99,6 +100,7 @@ struct ExtensionFormSheet: View {
         .interactiveDismissDisabled()
         .onAppear { reset() }
         .onChange(of: interactionScope) { _, _ in reset() }
+        .onChange(of: currentQuestionIndex) { _, _ in persistDraft() }
         .task(id: interactionScope) {
             while !Task.isCancelled {
                 now = Date()
@@ -183,7 +185,6 @@ struct ExtensionFormSheet: View {
             .padding(.bottom, 40)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .tronScrollEdgeChrome()
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
         .accessibilityLabel("Question \(index + 1) of \(form?.questions.count ?? 1)")
@@ -199,6 +200,7 @@ struct ExtensionFormSheet: View {
                 focusedQuestionID = nil
             }
             errorMessage = nil
+            persistDraft()
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: selectionIcon(selected: selected, multiSelect: question.multiSelect))
@@ -244,6 +246,7 @@ struct ExtensionFormSheet: View {
                     focusedQuestionID = question.id
                 }
                 errorMessage = nil
+                persistDraft()
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: selectionIcon(selected: selected, multiSelect: question.multiSelect))
@@ -265,8 +268,12 @@ struct ExtensionFormSheet: View {
                 TextField("Type your answer", text: Binding(
                     get: { draft.value(for: question.id).other },
                     set: { text in
-                        if draft.setOther(text, for: question) { errorMessage = nil }
-                        else { errorMessage = "Other responses are limited to 32 KiB of UTF-8 text." }
+                        if draft.setOther(text, for: question) {
+                            errorMessage = nil
+                            persistDraft()
+                        } else {
+                            errorMessage = "Other responses are limited to 32 KiB of UTF-8 text."
+                        }
                     }
                 ), axis: .vertical)
                     .font(TronTypography.bodySM)
@@ -308,9 +315,16 @@ struct ExtensionFormSheet: View {
     }
 
     private func reset() {
-        draft = form.map(ExtensionFormDraft.init(form:)) ?? ExtensionFormDraft()
-        activeOtherQuestionIDs = []
-        currentQuestionIndex = 0
+        if let form,
+           let stored = model.extensionInteractionDrafts.formDraft(sessionID: sessionID, interaction: interaction) {
+            draft = ExtensionFormDraft(restoring: stored.draft, for: form)
+            activeOtherQuestionIDs = stored.activeOtherQuestionIDs
+            currentQuestionIndex = min(stored.currentQuestionIndex, form.questions.count - 1)
+        } else {
+            draft = form.map(ExtensionFormDraft.init(form:)) ?? ExtensionFormDraft()
+            activeOtherQuestionIDs = []
+            currentQuestionIndex = 0
+        }
         submitting = false
         errorMessage = nil
         focusedQuestionID = nil
@@ -318,9 +332,23 @@ struct ExtensionFormSheet: View {
     }
 
     private func close() {
-        if expired { onLocallyClosed(); dismiss(); return }
-        guard !submitting, form?.allowCancel == true else { return }
-        respond(value: nil, cancelled: true)
+        guard !submitting else { return }
+        persistDraft()
+        onLocallyClosed()
+        dismiss()
+    }
+
+    private func persistDraft() {
+        guard let form, form.questions.indices.contains(currentQuestionIndex) else { return }
+        model.extensionInteractionDrafts.saveForm(
+            StoredExtensionFormDraft(
+                draft: draft,
+                activeOtherQuestionIDs: activeOtherQuestionIDs,
+                currentQuestionIndex: currentQuestionIndex
+            ),
+            sessionID: sessionID,
+            interaction: interaction
+        )
     }
 
     private func submit() {
@@ -329,20 +357,22 @@ struct ExtensionFormSheet: View {
         guard ExtensionInteractionResponsePolicy.formError(answer, descriptor: form) == nil,
               let data = try? JSONEncoder.gateway.encode(answer),
               let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: data) else { return }
-        respond(value: value, cancelled: false)
+        respond(value: value)
     }
 
-    private func respond(value: JSONValue?, cancelled: Bool) {
+    private func respond(value: JSONValue?) {
         submitting = true
         errorMessage = nil
         Task {
             do {
-                try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: cancelled)
+                try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: false)
+                model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
                 onResolved()
                 dismiss()
             } catch is CancellationError {
                 submitting = false
             } catch let failure as GatewayFailure where failure.code == "not_found" || failure.code == "conflict" {
+                model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
                 onLocallyClosed()
                 dismiss()
             } catch {

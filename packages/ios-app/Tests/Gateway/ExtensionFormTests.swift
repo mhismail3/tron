@@ -120,6 +120,89 @@ struct ExtensionFormTests {
         #expect(draft.value(for: "regions").other.isEmpty)
     }
 
+    @MainActor
+    @Test func localDraftStoreSurvivesRecreationAndClearsOnlyAfterAuthoritativeRetirement() throws {
+        let suiteName = "ExtensionFormTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let form = descriptor()
+        let pending = interaction(form: form)
+        var draft = ExtensionFormDraft(form: form)
+        draft.toggle(optionID: "sqlite", for: form.questions[0])
+        draft.activateOther(for: form.questions[1])
+        draft.setOther("LATAM", for: form.questions[1])
+
+        let first = ExtensionInteractionDraftStore(defaults: defaults)
+        first.saveForm(
+            StoredExtensionFormDraft(
+                draft: draft,
+                activeOtherQuestionIDs: ["regions"],
+                currentQuestionIndex: 1
+            ),
+            sessionID: "session",
+            interaction: pending
+        )
+
+        let restored = ExtensionInteractionDraftStore(defaults: defaults)
+        #expect(restored.formDraft(sessionID: "session", interaction: pending) == StoredExtensionFormDraft(
+            draft: draft,
+            activeOtherQuestionIDs: ["regions"],
+            currentQuestionIndex: 1
+        ))
+        restored.reconcile(sessionID: "session", pendingInteractions: [pending])
+        #expect(restored.formDraft(sessionID: "session", interaction: pending) != nil)
+        restored.reconcile(sessionID: "session", pendingInteractions: [])
+        #expect(restored.formDraft(sessionID: "session", interaction: pending) == nil)
+
+        let primitive = interaction()
+        restored.savePrimitive(
+            StoredPrimitiveInteractionDraft(text: "", selectedOption: "One", confirmValue: nil),
+            sessionID: "session",
+            interaction: primitive
+        )
+        let primitiveRestore = ExtensionInteractionDraftStore(defaults: defaults)
+        #expect(primitiveRestore.primitiveDraft(sessionID: "session", interaction: primitive) == StoredPrimitiveInteractionDraft(
+            text: "",
+            selectedOption: "One",
+            confirmValue: nil
+        ))
+    }
+
+    @Test func completedAskUserResultBuildsReadOnlyQuestionsAndCanonicalAnswers() throws {
+        let response = try JSONDecoder.gateway.decode(JSONValue.self, from: Data(#"""
+        {
+          "questions":[
+            {"header":"DB","question":"Which database?","context":"Need transactions.","options":[{"label":"Postgres","description":"Server"},{"label":"SQLite"}],"multiSelect":false},
+            {"header":"Regions","question":"Which regions?","options":[{"label":"US"},{"label":"EU"},{"label":"APAC"}],"multiSelect":true}
+          ],
+          "answers":{
+            "Which database?":{"selected":["SQLite"],"other":null},
+            "Which regions?":{"selected":["US","APAC"],"other":"LATAM"}
+          },
+          "cancelled":false
+        }
+        """#.utf8))
+        let owner = ExtensionOwner(
+            id: "ask-user",
+            title: "Pi Ask User",
+            source: AskUserToolPresentation.auditedSource
+        )
+        let tool = ChatToolPresentation(
+            id: "call", title: "Ask User", toolName: "ask_user", subtitle: "Completed",
+            request: nil, response: response, content: "", fallbackContent: nil,
+            error: false, startedAt: nil, completedAt: nil, durationMs: nil,
+            lastProgressAt: nil, progressSequence: nil,
+            extensionOrigin: ExtensionToolOrigin(source: AskUserToolPresentation.auditedSource, owner: owner)
+        )
+        let presentation = try #require(AskUserToolPresentation.completed(tool: tool))
+        #expect(!presentation.cancelled)
+        #expect(presentation.form.questions.count == 2)
+        #expect(presentation.answer == ExtensionFormAnswer(version: 1, answers: [
+            ExtensionFormQuestionAnswer(questionId: "question-0", optionIds: ["question-0-option-1"], other: nil),
+            ExtensionFormQuestionAnswer(questionId: "question-1", optionIds: ["question-1-option-0", "question-1-option-2"], other: "LATAM"),
+        ]))
+    }
+
     @Test func sheetRestoresIndependentSwipePagesWithFixedProgressAndDirectRows() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -132,6 +215,10 @@ struct ExtensionFormTests {
         #expect(source.contains("TabView(selection: $currentQuestionIndex)"))
         #expect(source.contains(".tabViewStyle(.page(indexDisplayMode: .never))"))
         #expect(source.contains("fixedQuestionStatus(form)"))
+        #expect(source.contains(".tronTopBlurSurface()"))
+        #expect(!source.contains(".tronScrollEdgeChrome()"))
+        #expect(!source.contains("respond(value: nil, cancelled: true)"))
+        #expect(source.contains("onLocallyClosed()"))
         #expect(source.contains("page == currentQuestionIndex"))
         #expect(source.contains("questionPage(question, index: index)"))
         #expect(source.contains("private func questionPage"))
@@ -144,6 +231,31 @@ struct ExtensionFormTests {
         #expect(!source.contains("Review your answers"))
         #expect(!source.contains("Button(\"Next\""))
         #expect(!source.contains("ProgressView(value:"))
+    }
+
+    @Test func pendingToolChipsReopenNativeInteractionsAndCompletedAskUserDetailsAreReadOnly() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let toolRuns = try String(
+            contentsOf: root.appending(path: "Sources/UI/Chat/ChatToolRunViews.swift"),
+            encoding: .utf8
+        )
+        let toolDetails = try String(
+            contentsOf: root.appending(path: "Sources/UI/Chat/ToolDetailSheet.swift"),
+            encoding: .utf8
+        )
+        let primitiveSheet = try String(
+            contentsOf: root.appending(path: "Sources/UI/Chat/ExtensionInteractionSheet.swift"),
+            encoding: .utf8
+        )
+        #expect(toolRuns.contains("PendingExtensionInteractionToolPresentation.interaction("))
+        #expect(toolRuns.contains("pendingInteractionSheet("))
+        #expect(toolDetails.contains("AskUserToolPresentation.completed(tool: tool)"))
+        #expect(toolDetails.contains("AskUserCompletedFormView"))
+        #expect(!primitiveSheet.contains("cancelled: true"))
+        #expect(primitiveSheet.contains("extensionInteractionDrafts.savePrimitive("))
     }
 
     @Test func responsePolicyRequiresExactCoverageAndBoundsOtherByUTF8Bytes() {

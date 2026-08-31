@@ -1,6 +1,31 @@
 import SwiftUI
 
+@ViewBuilder
+private func pendingInteractionSheet(
+    _ interaction: ExtensionInteraction,
+    sessionID: String,
+    onClose: @escaping @MainActor @Sendable () -> Void
+) -> some View {
+    if interaction.method == .form {
+        ExtensionFormSheet(
+            sessionID: sessionID,
+            interaction: interaction,
+            onResolved: { onClose() },
+            onLocallyClosed: { onClose() }
+        )
+    } else {
+        ExtensionInteractionSheet(
+            sessionID: sessionID,
+            interaction: interaction,
+            onResolved: { onClose() },
+            onLocallyClosed: { onClose() }
+        )
+    }
+}
+
 struct ToolCard: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.canonicalResourceSessionID) private var sessionID
     let title: String
     let subtitle: String
     let content: String
@@ -12,6 +37,7 @@ struct ToolCard: View {
     var timing: ChatToolDescriptor? = nil
     var onOpenDetails: ((String) -> Void)? = nil
     @State private var detailPresentation: ToolDetailRoute?
+    @State private var pendingInteraction: ExtensionInteraction?
     @State private var detailDetent: PresentationDetent = .medium
 
     init(
@@ -101,10 +127,29 @@ struct ToolCard: View {
             detent: $detailDetent,
             tool: detailPresentation?.resolve(in: [detailTool])
         )
+        .tronManagedSheet(
+            item: $pendingInteraction,
+            identity: { "chat.extension-interaction.\($0.id)" }
+        ) { interaction in
+            if let sessionID {
+                pendingInteractionSheet(
+                    interaction,
+                    sessionID: sessionID,
+                    onClose: { pendingInteraction = nil }
+                )
+            }
+        }
     }
 
     private func openDetails() {
-        if let onOpenDetails {
+        if let sessionID,
+           let interaction = PendingExtensionInteractionToolPresentation.interaction(
+               toolCallIDs: [detailTool.id],
+               sessionID: sessionID,
+               model: model
+           ) {
+            pendingInteraction = interaction
+        } else if let onOpenDetails {
             onOpenDetails(detailTool.id)
         } else {
             detailDetent = .medium
@@ -172,11 +217,14 @@ private struct ToolRunResolvedState: Equatable {
 }
 
 struct ToolRunView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.canonicalResourceSessionID) private var sessionID
     let run: ChatToolRunPresentation
     let installationTag: ChatTranscriptProjectionTag
     let resolveDetails: ([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?
     let recordChip: (ToolChipInstrumentationSample) -> Void
     @State private var resolvedState: ToolRunResolvedState?
+    @State private var pendingInteraction: ExtensionInteraction?
     @State private var detailDetent: PresentationDetent = .medium
 
     var body: some View {
@@ -229,6 +277,18 @@ struct ToolRunView: View {
                     }
                 }
             }
+            .tronManagedSheet(
+                item: $pendingInteraction,
+                identity: { "chat.extension-interaction.\($0.id)" }
+            ) { interaction in
+                if let sessionID {
+                    pendingInteractionSheet(
+                        interaction,
+                        sessionID: sessionID,
+                        onClose: { pendingInteraction = nil }
+                    )
+                }
+            }
             .onChange(of: installationTag) { _, currentTag in
                 refreshResolvedDetails(for: currentTag)
             }
@@ -239,6 +299,15 @@ struct ToolRunView: View {
     }
 
     private func openDetails() {
+        if let sessionID,
+           let interaction = PendingExtensionInteractionToolPresentation.interaction(
+               toolCallIDs: detailToolIDs,
+               sessionID: sessionID,
+               model: model
+           ) {
+            pendingInteraction = interaction
+            return
+        }
         guard let details = resolveDetails(detailToolIDs, installationTag), !details.isEmpty else { return }
         detailDetent = .medium
         resolvedState = ToolRunResolvedState(

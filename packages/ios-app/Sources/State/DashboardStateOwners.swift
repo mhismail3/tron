@@ -29,6 +29,7 @@ enum SessionCatalogFreshness: Equatable, Sendable {
 enum DashboardSessionActivity: Equatable, Sendable {
     case idle
     case active
+    case waitingForUser
     case subagentsWorking
     case resuming
     case interrupted
@@ -284,6 +285,7 @@ struct SessionCatalogCoordinator: Equatable {
         guard isLive else {
             return phase == .idle ? .idle : .resuming
         }
+        if sessions[index].waitingForUser { return .waitingForUser }
         if phase.isActive {
             return sessions[index].hasOnlyActiveSubagents ? .subagentsWorking : .active
         }
@@ -350,6 +352,7 @@ struct SessionCatalogCoordinator: Equatable {
                 phase: update.phase,
                 foregroundPhase: update.foregroundPhase,
                 hasActiveSubagents: update.hasActiveSubagents,
+                waitingForUser: update.waitingForUser,
                 name: update.name,
                 updatedAt: update.updatedAt,
                 activeSince: update.activeSince,
@@ -374,6 +377,7 @@ struct SessionCatalogCoordinator: Equatable {
             phase: current.phase,
             foregroundPhase: current.foregroundPhase,
             hasActiveSubagents: current.hasActiveSubagents,
+            waitingForUser: current.waitingForUser,
             summaryRevision: current.summaryRevision,
             completionRevision: projection.completionRevision,
             attentionRevision: projection.attentionRevision,
@@ -449,6 +453,7 @@ struct SessionCatalogCoordinator: Equatable {
             phase: update.phase,
             foregroundPhase: update.foregroundPhase,
             hasActiveSubagents: update.hasActiveSubagents,
+            waitingForUser: update.waitingForUser,
             name: update.name,
             updatedAt: update.updatedAt,
             activeSince: update.activeSince,
@@ -480,6 +485,7 @@ struct SessionCatalogCoordinator: Equatable {
             phase: update.phase,
             foregroundPhase: update.foregroundPhase,
             hasActiveSubagents: update.hasActiveSubagents,
+            waitingForUser: update.waitingForUser,
             summaryRevision: update.summaryRevision,
             completionRevision: preserve ? summary.completionRevision : update.completionRevision,
             attentionRevision: preserve ? summary.attentionRevision : update.attentionRevision,

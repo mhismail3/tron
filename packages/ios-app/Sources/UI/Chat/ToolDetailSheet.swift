@@ -8,9 +8,17 @@ struct ToolDetailSheet: View {
 
     private var accent: Color { tool.error ? .tronError : ChatSemanticPillRole.tool.accent }
 
+    @ViewBuilder
     var body: some View {
-        let presentation = ToolDetailPresentation(tool: tool)
-        return ScrollView {
+        if let askUser = AskUserToolPresentation.completed(tool: tool) {
+            AskUserCompletedFormView(presentation: askUser)
+        } else {
+            standardDetail(ToolDetailPresentation(tool: tool))
+        }
+    }
+
+    private func standardDetail(_ presentation: ToolDetailPresentation) -> some View {
+        ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 chipSection(presentation)
                 primarySection(presentation)

@@ -986,6 +986,7 @@ enum DashboardSessionIndicatorState: Hashable {
     case idleRead
     case idleUnread
     case active
+    case waitingForUser
     case subagentsWorking
     case resuming
     case interrupted
@@ -994,6 +995,7 @@ enum DashboardSessionIndicatorState: Hashable {
         self = switch activity {
         case .idle: isUnread ? .idleUnread : .idleRead
         case .active: .active
+        case .waitingForUser: .waitingForUser
         case .subagentsWorking: .subagentsWorking
         case .resuming: .resuming
         case .interrupted: .interrupted
@@ -1035,6 +1037,7 @@ private struct HistoricalSessionRow: View {
 
     private func row(relativeTo now: Date) -> some View {
         let relativeActivity = session.relativeActivityDescription(relativeTo: now)
+        let trailingStatus = activity == .waitingForUser ? "Waiting for you" : relativeActivity
         return HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
             ZStack {
                 sessionIndicator
@@ -1062,9 +1065,9 @@ private struct HistoricalSessionRow: View {
 
             Spacer(minLength: 10)
 
-            Text(relativeActivity)
+            Text(trailingStatus)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                .foregroundStyle(Color.tronTextMuted)
+                .foregroundStyle(activity == .waitingForUser ? Color.tronAmber : Color.tronTextMuted)
                 .lineLimit(1)
         }
         .padding(.horizontal, SessionDashboardLayout.rowContentHorizontalPadding)
@@ -1095,6 +1098,10 @@ private struct HistoricalSessionRow: View {
             )
         case .active, .resuming:
             TronPulseLoadingIndicator(accent: .tronEmerald, size: 18)
+        case .waitingForUser:
+            Image(systemName: "questionmark.bubble.fill")
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                .foregroundStyle(Color.tronAmber)
         case .interrupted:
             Image(systemName: "exclamationmark.circle")
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
@@ -1139,6 +1146,7 @@ private extension DashboardSessionActivity {
         switch self {
         case .idle: "idle"
         case .active: "active"
+        case .waitingForUser: "waiting for you"
         case .subagentsWorking: "subagents working"
         case .resuming: "resuming"
         case .interrupted: "interrupted"

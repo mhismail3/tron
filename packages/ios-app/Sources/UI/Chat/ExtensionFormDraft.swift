@@ -1,19 +1,35 @@
 import Foundation
 
-struct ExtensionFormQuestionDraft: Equatable, Sendable {
+struct ExtensionFormQuestionDraft: Codable, Equatable, Sendable {
     var optionIDs: Set<String> = []
     var other = ""
 }
 
 /// Ephemeral, ID-keyed form state. The Gateway descriptor remains authoritative;
 /// this draft never enters session cache or canonical state.
-struct ExtensionFormDraft: Equatable, Sendable {
+struct ExtensionFormDraft: Codable, Equatable, Sendable {
     private(set) var values: [String: ExtensionFormQuestionDraft] = [:]
 
     init() {}
 
     init(form: ExtensionFormDescriptor) {
         values = Dictionary(uniqueKeysWithValues: form.questions.map { ($0.id, ExtensionFormQuestionDraft()) })
+    }
+
+    init(restoring stored: ExtensionFormDraft, for form: ExtensionFormDescriptor) {
+        values = Dictionary(uniqueKeysWithValues: form.questions.map { question in
+            let candidate = stored.value(for: question.id)
+            let allowed = Set(question.options.map(\.id))
+            let optionIDs = candidate.optionIDs.filter(allowed.contains)
+            let admittedOptionIDs = question.multiSelect ? optionIDs : Set(optionIDs.prefix(1))
+            let other = question.allowOther
+                && candidate.other.utf8.count <= ExtensionInteractionResponsePolicy.maximumOtherBytes
+                ? candidate.other : ""
+            let value = !question.multiSelect && !other.isEmpty
+                ? ExtensionFormQuestionDraft(optionIDs: [], other: other)
+                : ExtensionFormQuestionDraft(optionIDs: admittedOptionIDs, other: other)
+            return (question.id, value)
+        })
     }
 
     func value(for questionID: String) -> ExtensionFormQuestionDraft {

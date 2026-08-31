@@ -753,12 +753,19 @@ struct ChatView: View {
         if presentationActivity.allowsPresentationPublication {
             Color.clear
                 .onChange(of: pendingInteractionScopes, initial: true) { _, _ in
+                    reconcileInteractionDraftsIfAuthoritative()
                     guard let suppressedInteractionScope = sessionPresentation.suppressedInteractionScope,
                           ChatExtensionInteractionPolicy.shouldClearSuppression(
                               suppressedInteractionScope,
                               from: selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? []
                           ) else { return }
                     sessionPresentation.suppressedInteractionScope = nil
+                }
+                .onChange(of: initialModelSettled) { _, _ in
+                    reconcileInteractionDraftsIfAuthoritative()
+                }
+                .onChange(of: model.connectionState) { _, _ in
+                    reconcileInteractionDraftsIfAuthoritative()
                 }
                 .onChange(of: transcriptProjectionSource, initial: true) { _, source in
                     guard let capture = transcriptProjectionCapture else {
@@ -936,6 +943,16 @@ struct ChatView: View {
         )
         return model.composerDrafts.pendingAttachments(for: target)
             .filter { !submittedIDs.contains($0.id) }
+    }
+
+    private func reconcileInteractionDraftsIfAuthoritative() {
+        guard initialModelSettled,
+              model.connectionState == .connected,
+              let snapshot = selectedAuthoritativeSnapshot else { return }
+        model.extensionInteractionDrafts.reconcile(
+            sessionID: sessionID,
+            pendingInteractions: snapshot.extensionPresentation.pendingInteractions
+        )
     }
 
     private var submittedAttachments: [PendingAttachment] {

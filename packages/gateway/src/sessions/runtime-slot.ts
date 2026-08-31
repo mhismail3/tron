@@ -499,6 +499,10 @@ export class RuntimeSlot {
     const presentation = new ExtensionPresentationStore((topic, payload) => {
       this.revision += 1;
       this.emit(topic, payload);
+      // Interaction admission and settlement change who can advance the
+      // session even when no transcript entry changes. Publish that transition
+      // immediately to shallow dashboard subscribers.
+      this.publishSummary();
     }, {
       capabilities: [
         "semantic.dialogs", "semantic.form.v1", "semantic.notifications", "semantic.status", "semantic.working",
@@ -937,6 +941,10 @@ export class RuntimeSlot {
 
   get catalogHasActiveSubagents(): boolean {
     return this.hasDetachedDashboardWork();
+  }
+
+  get catalogWaitingForUser(): boolean {
+    return this.ui.hasPendingInteractions;
   }
 
   get touchedAt(): number {
@@ -1855,6 +1863,7 @@ export class RuntimeSlot {
       phase: this.dashboardPhase,
       foregroundPhase: this.effectivePhase,
       hasActiveSubagents: this.hasDetachedDashboardWork(),
+      waitingForUser: this.ui.hasPendingInteractions,
       ...canonical,
       updatedAt,
       ...(activeSince ? { activeSince } : {}),
@@ -4576,6 +4585,7 @@ export class RuntimeSlot {
       || summary.phase !== this.lastPublishedSummary.phase
       || summary.foregroundPhase !== this.lastPublishedSummary.foregroundPhase
       || summary.hasActiveSubagents !== this.lastPublishedSummary.hasActiveSubagents
+      || summary.waitingForUser !== this.lastPublishedSummary.waitingForUser
       || summary.name !== this.lastPublishedSummary.name
       || summary.updatedAt !== this.lastPublishedSummary.updatedAt
       || summary.activeSince !== this.lastPublishedSummary.activeSince

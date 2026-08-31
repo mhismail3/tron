@@ -59,12 +59,12 @@ struct ExtensionInteractionSheet: View {
             .navigationTitle("")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: cancel) {
+                    Button(action: close) {
                         Image(systemName: "xmark")
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                             .foregroundStyle(Color.tronTextMuted)
                     }
-                    .accessibilityLabel(isExpired ? "Close expired question" : "Cancel question")
+                    .accessibilityLabel("Close question and keep answer")
                     .disabled(submitting)
                 }
                 ToolbarItem(placement: .principal) {
@@ -92,6 +92,9 @@ struct ExtensionInteractionSheet: View {
         .interactiveDismissDisabled()
         .onAppear { resetState() }
         .onChange(of: interactionScope) { _, _ in resetState() }
+        .onChange(of: text) { _, _ in persistDraft() }
+        .onChange(of: selectedOption) { _, _ in persistDraft() }
+        .onChange(of: confirmValue) { _, _ in persistDraft() }
         .task(id: interaction.id) {
             guard let expiresAt = interaction.expiresAt,
                   let expiration = GatewayTimestamp.parse(expiresAt) else { return }
@@ -207,9 +210,18 @@ struct ExtensionInteractionSheet: View {
     }
 
     private func resetState() {
-        text = interaction.prefill ?? ""
-        selectedOption = nil
-        confirmValue = nil
+        if let stored = model.extensionInteractionDrafts.primitiveDraft(
+            sessionID: sessionID,
+            interaction: interaction
+        ) {
+            text = stored.text
+            selectedOption = stored.selectedOption
+            confirmValue = stored.confirmValue
+        } else {
+            text = interaction.prefill ?? ""
+            selectedOption = nil
+            confirmValue = nil
+        }
         submissionError = nil
         submitting = false
         currentDate = Date()
@@ -224,7 +236,7 @@ struct ExtensionInteractionSheet: View {
         case .input, .editor: value = .string(text)
         case .form: return
         }
-        respond(value: value, cancelled: false)
+        respond(value: value)
     }
 
     private var responseValidationMessage: String? {
@@ -232,22 +244,40 @@ struct ExtensionInteractionSheet: View {
         return ExtensionInteractionResponsePolicy.primitiveTextError(text)
     }
 
-    private func cancel() {
+    private func close() {
         guard !submitting else { return }
-        if isExpired { onLocallyClosed(); dismiss(); return }
-        respond(value: nil, cancelled: true)
+        persistDraft()
+        onLocallyClosed()
+        dismiss()
     }
 
-    private func respond(value: JSONValue?, cancelled: Bool) {
+    private func persistDraft() {
+        model.extensionInteractionDrafts.savePrimitive(
+            StoredPrimitiveInteractionDraft(
+                text: text,
+                selectedOption: selectedOption,
+                confirmValue: confirmValue
+            ),
+            sessionID: sessionID,
+            interaction: interaction
+        )
+    }
+
+    private func respond(value: JSONValue?) {
         submitting = true
         submissionError = nil
         Task {
             do {
-                try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: cancelled)
+                try await model.answerInteraction(interaction, sessionID: sessionID, value: value, cancelled: false)
+                model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
                 onResolved()
                 dismiss()
             } catch is CancellationError {
                 submitting = false
+            } catch let failure as GatewayFailure where failure.code == "not_found" || failure.code == "conflict" {
+                model.extensionInteractionDrafts.clear(sessionID: sessionID, interaction: interaction)
+                onLocallyClosed()
+                dismiss()
             } catch {
                 submitting = false
                 submissionError = error.localizedDescription

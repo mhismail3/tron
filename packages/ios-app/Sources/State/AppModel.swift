@@ -158,6 +158,7 @@ final class AppModel {
     private let packageConfiguration: PackageConfigurationCoordinator
     private let customModelConfiguration: CustomModelConfigurationCoordinator
     let composerDrafts: ComposerDraftCoordinator
+    let extensionInteractionDrafts: ExtensionInteractionDraftStore
     let gatewayDiagnostics: GatewayDiagnosticsService
     private var iosClientDiagnostics = IOSClientDiagnosticBuffer()
     let chatMedia: ChatMediaLoader
@@ -290,6 +291,7 @@ final class AppModel {
         composerFileUpload: ComposerFileUploadOperation? = nil,
         composerAttachmentFileAccess: ComposerAttachmentFileAccess = .live,
         composerDraftStore: ComposerDraftStore = ComposerDraftStore(),
+        extensionInteractionDrafts: ExtensionInteractionDraftStore = ExtensionInteractionDraftStore(),
         exportArtifacts: SessionExportArtifactStore = SessionExportArtifactStore()
     ) {
         let resolvedPairingCommit = pairingCommit ?? { profile, token in
@@ -429,6 +431,7 @@ final class AppModel {
         self.packageConfiguration = packageConfiguration
         self.customModelConfiguration = customModelConfiguration
         self.composerDrafts = composerDrafts
+        self.extensionInteractionDrafts = extensionInteractionDrafts
         self.gatewayDiagnostics = gatewayDiagnostics
         self.chatMedia = chatMedia
         self.chatMediaMemoryPressureObserver = chatMediaMemoryPressureObserver
@@ -446,6 +449,7 @@ final class AppModel {
             UserDefaults.standard.removeObject(forKey: "tronSetupComplete.v1")
             UserDefaults.standard.removeObject(forKey: "piSetupComplete.v1")
             UserDefaults.standard.removeObject(forKey: "defaultWorkspace.v1")
+            extensionInteractionDrafts.removeAll()
         }
         #endif
         lifecycle.delegate = self
@@ -795,6 +799,7 @@ final class AppModel {
         }
         let live = dashboardStatesByProfile[profileID] == .connected
         guard live else { return session.phase == .idle ? .idle : .resuming }
+        if session.waitingForUser { return .waitingForUser }
         if session.phase.isActive {
             return session.hasOnlyActiveSubagents ? .subagentsWorking : .active
         }

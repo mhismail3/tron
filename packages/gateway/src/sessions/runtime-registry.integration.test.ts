@@ -4031,9 +4031,10 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }\n`);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
+    const summaries: SessionSummaryUpdate[] = [];
     const registry = new RuntimeRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
-      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+      broadcast: () => {}, sessionSummaryChanged: (summary) => summaries.push(summary), sessionListChanged: () => {},
     });
     registries.push(registry);
     await registry.initialize();
@@ -4043,8 +4044,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const pending = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
     expect(pending.method).toBe("select");
     expect(pending.options).toEqual(["Keep", "Change"]);
+    expect(summaries.at(-1)?.waitingForUser).toBe(true);
+    expect((await registry.list()).find((session) => session.id === slot.id)?.waitingForUser).toBe(true);
     const internal = slot as unknown as { respondToInteraction: (id: string, epoch: string, revision: number, value: unknown, cancelled: boolean) => void };
     internal.respondToInteraction(pending.id, pending.hostEpoch, pending.presentationRevision, "Keep", false);
+    expect(summaries.at(-1)?.waitingForUser).toBe(false);
+    expect((await registry.list()).find((session) => session.id === slot.id)?.waitingForUser).toBe(false);
     await command;
     expect(slot.snapshot().extensionPresentation.semanticState.statuses.answer).toBe("Keep");
   });

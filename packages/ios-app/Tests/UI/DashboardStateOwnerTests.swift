@@ -677,6 +677,34 @@ struct DashboardStateOwnerTests {
         #expect(owner.sessions.count == 1)
     }
 
+    @Test("pending user interaction has a distinct live dashboard activity")
+    func waitingForUserActivity() {
+        var owner = SessionCatalogCoordinator()
+        let load = owner.beginLoad()
+        let published = owner.publishAuthoritative([
+            summary(revision: 1, phase: .running, waitingForUser: true),
+        ], admission: load)
+        #expect(published)
+        #expect(owner.activity(for: "session") == .waitingForUser)
+
+        let cleared = owner.apply(update(
+            revision: 2,
+            phase: .running,
+            waitingForUser: false
+        ))
+        #expect(cleared == .updated)
+        #expect(owner.activity(for: "session") == .active)
+
+        let waitingAgain = owner.apply(update(
+            revision: 3,
+            phase: .running,
+            waitingForUser: true
+        ))
+        #expect(waitingAgain == .updated)
+        owner.markDisconnected()
+        #expect(owner.activity(for: "session") == .resuming)
+    }
+
     @Test("settled foreground with active subagents has distinct live activity")
     func activeSubagentActivity() {
         var owner = SessionCatalogCoordinator()
@@ -828,6 +856,7 @@ struct DashboardStateOwnerTests {
         #expect(DashboardSessionIndicatorState(activity: .idle, isUnread: false) == .idleRead)
         #expect(DashboardSessionIndicatorState(activity: .idle, isUnread: true) == .idleUnread)
         #expect(DashboardSessionIndicatorState(activity: .active, isUnread: false) == .active)
+        #expect(DashboardSessionIndicatorState(activity: .waitingForUser, isUnread: false) == .waitingForUser)
         #expect(DashboardSessionIndicatorState(activity: .subagentsWorking, isUnread: false) == .subagentsWorking)
         #expect(DashboardSessionIndicatorState(activity: .resuming, isUnread: false) == .resuming)
         #expect(DashboardSessionIndicatorState(activity: .interrupted, isUnread: true) == .interrupted)
@@ -863,7 +892,8 @@ struct DashboardStateOwnerTests {
         revision: Int,
         phase: SessionPhase = .idle,
         foregroundPhase: SessionPhase? = nil,
-        hasActiveSubagents: Bool = false
+        hasActiveSubagents: Bool = false,
+        waitingForUser: Bool = false
     ) -> SessionSummary {
         SessionSummary(
             id: "session",
@@ -877,6 +907,7 @@ struct DashboardStateOwnerTests {
             phase: phase,
             foregroundPhase: foregroundPhase,
             hasActiveSubagents: hasActiveSubagents,
+            waitingForUser: waitingForUser,
             summaryRevision: revision
         )
     }
@@ -886,6 +917,7 @@ struct DashboardStateOwnerTests {
         phase: SessionPhase,
         foregroundPhase: SessionPhase? = nil,
         hasActiveSubagents: Bool = false,
+        waitingForUser: Bool = false,
         activeSince: String? = nil,
         completionRevision: Int = 0,
         isUnread: Bool = false
@@ -896,6 +928,7 @@ struct DashboardStateOwnerTests {
             phase: phase,
             foregroundPhase: foregroundPhase,
             hasActiveSubagents: hasActiveSubagents,
+            waitingForUser: waitingForUser,
             name: "Updated",
             updatedAt: "2026-01-01T00:00:01Z",
             activeSince: activeSince,

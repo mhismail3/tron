@@ -25,6 +25,8 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     /// means detached subagents are the only remaining dashboard work.
     let foregroundPhase: SessionPhase?
     let hasActiveSubagents: Bool
+    /// Gateway truth that a semantic interaction is awaiting a user response.
+    let waitingForUser: Bool
     let summaryRevision: Int?
     let completionRevision: Int
     let attentionRevision: Int
@@ -37,7 +39,8 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         id: String, name: String?, cwd: String, kind: Kind = .user, parentSessionId: String?,
         createdAt: String, updatedAt: String, activeSince: String? = nil, messageCount: Int,
         firstMessage: String, phase: SessionPhase, foregroundPhase: SessionPhase? = nil,
-        hasActiveSubagents: Bool = false, summaryRevision: Int? = nil, completionRevision: Int = 0,
+        hasActiveSubagents: Bool = false, waitingForUser: Bool = false,
+        summaryRevision: Int? = nil, completionRevision: Int = 0,
         attentionRevision: Int = 0, isUnread: Bool = false,
         gatewayProfileID: String? = nil, gatewayProfileLabel: String? = nil
     ) {
@@ -54,6 +57,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         self.phase = phase
         self.foregroundPhase = foregroundPhase
         self.hasActiveSubagents = hasActiveSubagents
+        self.waitingForUser = waitingForUser
         self.summaryRevision = summaryRevision
         self.completionRevision = completionRevision
         self.attentionRevision = attentionRevision
@@ -63,7 +67,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, cwd, kind, parentSessionId, createdAt, updatedAt, activeSince, messageCount, firstMessage, phase, foregroundPhase, hasActiveSubagents, summaryRevision
+        case id, name, cwd, kind, parentSessionId, createdAt, updatedAt, activeSince, messageCount, firstMessage, phase, foregroundPhase, hasActiveSubagents, waitingForUser, summaryRevision
         case completionRevision, attentionRevision, isUnread
     }
 
@@ -82,6 +86,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         phase = try container.decode(SessionPhase.self, forKey: .phase)
         foregroundPhase = try container.decodeIfPresent(SessionPhase.self, forKey: .foregroundPhase)
         hasActiveSubagents = try container.decodeIfPresent(Bool.self, forKey: .hasActiveSubagents) ?? false
+        waitingForUser = try container.decodeIfPresent(Bool.self, forKey: .waitingForUser) ?? false
         summaryRevision = try container.decodeIfPresent(Int.self, forKey: .summaryRevision)
         let decodedCompletionRevision = try container.decodeIfPresent(Int.self, forKey: .completionRevision) ?? 0
         let decodedAttentionRevision = try container.decodeIfPresent(Int.self, forKey: .attentionRevision) ?? 0
@@ -113,6 +118,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
             phase: phase,
             foregroundPhase: foregroundPhase,
             hasActiveSubagents: hasActiveSubagents,
+            waitingForUser: waitingForUser,
             summaryRevision: summaryRevision,
             completionRevision: completionRevision,
             attentionRevision: attentionRevision,
@@ -216,6 +222,8 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
     let phase: SessionPhase
     let foregroundPhase: SessionPhase?
     let hasActiveSubagents: Bool
+    /// Gateway truth that a semantic interaction is awaiting a user response.
+    let waitingForUser: Bool
     let name: String?
     let updatedAt: String
     let activeSince: String?
@@ -228,7 +236,7 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
     init(
         sessionId: String, summaryRevision: Int, phase: SessionPhase,
         foregroundPhase: SessionPhase? = nil, hasActiveSubagents: Bool = false,
-        name: String?, updatedAt: String, activeSince: String? = nil,
+        waitingForUser: Bool = false, name: String?, updatedAt: String, activeSince: String? = nil,
         messageCount: Int, firstMessage: String,
         completionRevision: Int = 0, attentionRevision: Int = 0, isUnread: Bool = false
     ) {
@@ -237,6 +245,7 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
         self.phase = phase
         self.foregroundPhase = foregroundPhase
         self.hasActiveSubagents = hasActiveSubagents
+        self.waitingForUser = waitingForUser
         self.name = name
         self.updatedAt = updatedAt
         self.activeSince = activeSince
@@ -248,7 +257,7 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case sessionId, summaryRevision, phase, foregroundPhase, hasActiveSubagents, name, updatedAt, activeSince, messageCount, firstMessage
+        case sessionId, summaryRevision, phase, foregroundPhase, hasActiveSubagents, waitingForUser, name, updatedAt, activeSince, messageCount, firstMessage
         case completionRevision, attentionRevision, isUnread
     }
 
@@ -259,6 +268,7 @@ struct SessionSummaryUpdate: Codable, Hashable, Sendable {
         phase = try container.decode(SessionPhase.self, forKey: .phase)
         foregroundPhase = try container.decodeIfPresent(SessionPhase.self, forKey: .foregroundPhase)
         hasActiveSubagents = try container.decodeIfPresent(Bool.self, forKey: .hasActiveSubagents) ?? false
+        waitingForUser = try container.decodeIfPresent(Bool.self, forKey: .waitingForUser) ?? false
         name = try container.decodeIfPresent(String.self, forKey: .name)
         updatedAt = try container.decode(String.self, forKey: .updatedAt)
         activeSince = try container.decodeIfPresent(String.self, forKey: .activeSince)
