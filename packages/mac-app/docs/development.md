@@ -32,7 +32,10 @@ before touching the shared dependency tree, assemble and verify generated
 resources under a private source-local staging root, and publish the payload,
 launcher, and icon through bounded backup renames. Failure or interruption
 restores the prior generated projection; `ensure-gateway-bundle.sh` never erases
-that projection before a replacement is ready. The completed app uses only those
+that projection before a replacement is ready. Filesystem admission and lock
+recovery invoke the canonical macOS system tools by absolute path, so a user's
+Homebrew GNU compatibility `PATH` cannot change `stat` semantics during staging.
+The completed app uses only those
 embedded runtimes for supervised work and does not consult Homebrew, NVM, or the
 destination checkout's `.ci-tools` cache.
 

@@ -159,6 +159,8 @@ struct MacSourceGuardTests {
         #expect(bundleScript.contains("checksum mismatch"))
         #expect(bundleScript.contains("architecture mismatch"))
         #expect(bundleScript.contains("TRON_NODE_BIN"))
+        #expect(bundleScript.components(separatedBy: "/usr/bin/stat -f").count - 1 == 3)
+        #expect(!bundleScript.contains("\"$(stat -f"))
         #expect(!bundleScript.contains("TRON_NPM_BIN"))
         #expect(bundleScript.contains("command -v node"))
         #expect(bundleScript.contains("${NVM_DIR:-${HOME:-}/.nvm}/versions/node/v${NODE_VERSION}/bin/node"))

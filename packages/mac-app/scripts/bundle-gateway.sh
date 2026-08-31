@@ -70,7 +70,7 @@ assert_owned_ancestors() {
     local path="$1" cursor="$1" info
     while [[ "$cursor" == "$REPO_ROOT"/* || "$cursor" == "$REPO_ROOT" ]]; do
         if [[ -e "$cursor" || -L "$cursor" ]]; then
-            info="$(stat -f '%HT' "$cursor" 2>/dev/null || true)"
+            info="$(/usr/bin/stat -f '%HT' "$cursor" 2>/dev/null || true)"
             [[ "$info" != "Symbolic Link" && ! -L "$cursor" ]] || {
                 echo "generated bundle path has a symlinked ancestor: $path" >&2
                 exit 78
@@ -172,7 +172,7 @@ acquire_bundle_lock() {
         # that tiny window must not erase the new owner's lock; only malformed
         # owner metadata older than the bounded startup grace is recoverable.
         if [[ ! "$owner" =~ ^[1-9][0-9]{0,9}$ ]]; then
-            modified="$(stat -f '%m' "$BUNDLE_LOCK" 2>/dev/null || printf '0')"
+            modified="$(/usr/bin/stat -f '%m' "$BUNDLE_LOCK" 2>/dev/null || printf '0')"
             now="$(date +%s)"
             if [[ "$modified" =~ ^[0-9]+$ ]] && ((now - modified < 30)); then
                 echo "Gateway bundle build lock owner is not settled; retry shortly" >&2
@@ -518,7 +518,7 @@ mkdir -p "$PUBLISHED_HELPER_DIR/MacOS" "$PUBLISHED_HELPER_DIR/Resources"
 if [[ -e "$PUBLISHED_PAYLOAD_DIR" || -L "$PUBLISHED_PAYLOAD_DIR" ]]; then
     HAD_PUBLISHED_PAYLOAD=1
     if [[ -d "$PUBLISHED_PAYLOAD_DIR" && ! -L "$PUBLISHED_PAYLOAD_DIR" ]]; then
-        PUBLISHED_PAYLOAD_MODE="$(stat -f '%Lp' "$PUBLISHED_PAYLOAD_DIR")"
+        PUBLISHED_PAYLOAD_MODE="$(/usr/bin/stat -f '%Lp' "$PUBLISHED_PAYLOAD_DIR")"
         chmod u+w "$PUBLISHED_PAYLOAD_DIR"
     fi
     mv "$PUBLISHED_PAYLOAD_DIR" "$BACKUP_ROOT/Gateway"
