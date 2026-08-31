@@ -1086,6 +1086,7 @@ final class ChatTranscriptPresentationStore {
     @ObservationIgnored private var workerID: UInt64 = 0
     @ObservationIgnored private var readyToInstall: InstalledChatTranscript?
     @ObservationIgnored private var consumedEntranceSuppressionGeneration: Int?
+    @ObservationIgnored private var suppressesNextInstallationEntrances = false
     @ObservationIgnored private var entranceSuppressedInstallationTag: ChatTranscriptProjectionTag?
     @ObservationIgnored private var consumedLifecycleEntranceIDs: Set<String> = []
     @ObservationIgnored private var installFrameTask: Task<Void, Never>?
@@ -1243,6 +1244,22 @@ final class ChatTranscriptPresentationStore {
     }
 
     func waitForInstall(of tag: ChatTranscriptProjectionTag) async throws -> InstalledChatTranscript {
+        try await waitForInstall(of: tag, onRegistered: nil)
+    }
+
+    #if HOSTED_TEST
+    func hostedWaitForInstall(
+        of tag: ChatTranscriptProjectionTag,
+        onRegistered: @escaping () -> Void
+    ) async throws -> InstalledChatTranscript {
+        try await waitForInstall(of: tag, onRegistered: onRegistered)
+    }
+    #endif
+
+    private func waitForInstall(
+        of tag: ChatTranscriptProjectionTag,
+        onRegistered: (() -> Void)?
+    ) async throws -> InstalledChatTranscript {
         if let installed, installed.tag == tag { return installed }
         guard desiredTag == tag || pending?.tag == tag || buildingTag == tag else {
             throw ChatTranscriptPresentationStoreError.superseded
@@ -1271,6 +1288,7 @@ final class ChatTranscriptPresentationStore {
                     )
                 }
                 waiters.append(.init(id: waiterID, tag: tag, continuation: continuation))
+                onRegistered?()
             }
         } onCancel: {
             Task { @MainActor [weak self] in self?.cancelWaiter(id: waiterID) }
@@ -1387,6 +1405,29 @@ final class ChatTranscriptPresentationStore {
         Task { await projectionWorker.removePreparedText() }
     }
 
+    /// Retires disposable derivation while preserving the last complete frame.
+    /// Authority continues in SessionPresentationStore; the caller submits one
+    /// newest immutable cut when its surface becomes active again.
+    func suspendPendingWork() {
+        generation &+= 1
+        let retiredEpoch = generation
+        Task { await projectionWorker.retire(before: retiredEpoch) }
+        desiredTag = nil
+        pending = nil
+        worker?.cancel()
+        worker = nil
+        workerID &+= 1
+        buildingTag = nil
+        readyToInstall = nil
+        installFrameTask?.cancel()
+        installFrameTask = nil
+        suppressesNextInstallationEntrances = true
+        failAllWaiters(with: CancellationError())
+        #if HOSTED_TEST
+        failAllHostedCompletionWaiters(with: CancellationError())
+        #endif
+    }
+
     func reset() {
         generation &+= 1
         let retiredEpoch = generation
@@ -1399,6 +1440,7 @@ final class ChatTranscriptPresentationStore {
         buildingTag = nil
         readyToInstall = nil
         consumedEntranceSuppressionGeneration = nil
+        suppressesNextInstallationEntrances = false
         entranceSuppressedInstallationTag = nil
         consumedLifecycleEntranceIDs.removeAll(keepingCapacity: false)
         installFrameTask?.cancel()
@@ -1506,15 +1548,19 @@ final class ChatTranscriptPresentationStore {
     @discardableResult
     private func install(_ candidate: InstalledChatTranscript) -> InstalledChatTranscript {
         let output = candidate.reconcilingProjectionLineage(previous: installed)
-        let suppressEntrances = output.tag.entranceSuppressionGeneration.map { generation in
+        let foregroundSuppressesEntrances = output.tag.entranceSuppressionGeneration.map { generation in
             generation > (consumedEntranceSuppressionGeneration ?? -1)
         } ?? false
+        let suppressEntrances = suppressesNextInstallationEntrances || foregroundSuppressesEntrances
+        suppressesNextInstallationEntrances = false
         let inserted = suppressEntrances
             ? []
             : ChatTranscriptTransitionPolicy.discreteInsertedIDs(previous: installed, next: output)
         entranceSuppressedInstallationTag = suppressEntrances ? output.tag : nil
         if suppressEntrances {
-            consumedEntranceSuppressionGeneration = output.tag.entranceSuppressionGeneration
+            if let generation = output.tag.entranceSuppressionGeneration {
+                consumedEntranceSuppressionGeneration = generation
+            }
             clearEntranceBookkeeping(keepingCapacity: true)
         }
         synchronizeEntranceBookkeeping(with: output)

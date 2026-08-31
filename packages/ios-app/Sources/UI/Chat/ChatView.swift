@@ -18,6 +18,7 @@ struct ChatView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var sessionPresentation: ChatSessionPresentation
     @State private var composerScope: ComposerDraftScope?
     @State private var initialModelSettled = true
@@ -94,7 +95,7 @@ struct ChatView: View {
     }
     #endif
 
-    var body: some View {
+    private var contentSurface: some View {
         transcript
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 // The complete composer is the sole structural inset owner, so
@@ -234,6 +235,10 @@ struct ChatView: View {
         .onChange(of: composerFocused) { _, _ in
             keyboardObserver.setOwnerWindow(composerResponder.window)
         }
+    }
+
+    var body: some View {
+        contentSurface
         .onAppear {
             keyboardObserver.setOwnerWindow(composerResponder.window)
             keyboardObserver.start()
@@ -269,7 +274,9 @@ struct ChatView: View {
             scenePhaseChanged(current)
         }
         .onChange(of: model.connectionState) { _, state in
-            guard scenePhase == .active, state == .connected,
+            guard scenePhase == .active,
+                  presentationActivity.allowsPresentationPublication,
+                  state == .connected,
                   (sessionPresentation.needsOpeningResume
                     || transcriptPresentation.installed == nil) else { return }
             beginOpeningAfterForegroundWhenConnected()
@@ -277,29 +284,31 @@ struct ChatView: View {
         .onChange(of: model.foregroundReconciliationGeneration) { _, _ in
             foregroundReconciliationCompleted()
         }
-        .task(id: sessionID) { await beginOpeningPresentation() }
-        .onChange(of: pendingInteractionScopes, initial: true) { _, scopes in
-            guard let suppressedInteractionScope = sessionPresentation.suppressedInteractionScope,
-                  ChatExtensionInteractionPolicy.shouldClearSuppression(
-                      suppressedInteractionScope,
-                      from: selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? []
-                  ) else { return }
-            sessionPresentation.suppressedInteractionScope = nil
-        }
-        .onChange(of: transcriptProjectionSource, initial: true) { _, source in
-            guard let capture = transcriptProjectionCapture else {
-                // A recycled same-session owner can briefly have no exact
-                // generation while the retained canonical snapshot is still
-                // valid. Keep the mounted projection until its replacement
-                // installs; only a genuinely absent session clears the view.
-                if selectedAuthoritativeSnapshot == nil { transcriptPresentation.reset() }
-                return
+        .onChange(of: presentationActivity) { previous, current in
+            if previous.allowsPresentationPublication,
+               !current.allowsPresentationPublication {
+                transcriptPresentation.suspendPendingWork()
             }
-            // Ignore a callback captured before opening installed its mounted
-            // generation; the newer exact source owns submission.
-            guard source == capture.tag else { return }
-            intakeTranscriptProjection(capture)
         }
+        .task(id: presentationActivity.allowsPresentationPublication) {
+            switch ChatOpeningSurfacePolicy.action(
+                surfaceActive: presentationActivity.allowsPresentationPublication,
+                hasOpeningTask: sessionPresentation.openingTask != nil,
+                needsOpeningResume: sessionPresentation.needsOpeningResume
+            ) {
+            case .none:
+                return
+            case .begin:
+                await beginOpeningPresentation()
+            case .waitForCurrentThenBeginIfNeeded:
+                await sessionPresentation.openingTask?.value
+                guard !Task.isCancelled,
+                      presentationActivity.allowsPresentationPublication,
+                      sessionPresentation.needsOpeningResume else { return }
+                await beginOpeningPresentation()
+            }
+        }
+        .background { activeProjectionObservationDriver }
         .onChange(of: transcriptPresentation.installed?.tag) { previousTag, _ in
             let installed = transcriptPresentation.installed
             scrollCoordinator.reconcileMaterializationRows { renderedID in
@@ -366,6 +375,7 @@ struct ChatView: View {
             // AppModel retains accepted uploads and submissions.
             sessionPresentation.suspendForBackground()
         } else if current == .active,
+                  presentationActivity.allowsPresentationPublication,
                   !sessionPresentation.needsOpeningResume,
                   transcriptPresentation.installed != nil {
             if sessionPresentation.open.phase == .ready,
@@ -377,7 +387,8 @@ struct ChatView: View {
     }
 
     private func foregroundReconciliationCompleted() {
-        guard scenePhase == .active else { return }
+        guard scenePhase == .active,
+              presentationActivity.allowsPresentationPublication else { return }
         if sessionPresentation.needsOpeningResume
             || transcriptPresentation.installed == nil {
             beginOpeningAfterForegroundWhenConnected()
@@ -553,7 +564,8 @@ struct ChatView: View {
         _ capture: ChatTranscriptProjectionCapture,
         permitsQueueMutationDeferral: Bool = true
     ) {
-        guard capture.tag.presentationGeneration == sessionPresentation.modelPresentationGeneration,
+        guard presentationActivity.allowsPresentationPublication,
+              capture.tag.presentationGeneration == sessionPresentation.modelPresentationGeneration,
               transcriptProjectionSource == capture.tag else { return }
         if permitsQueueMutationDeferral,
            deferQueueMutationProjectionIfNeeded(capture) {
@@ -736,6 +748,35 @@ struct ChatView: View {
         #endif
     }
 
+    @ViewBuilder
+    private var activeProjectionObservationDriver: some View {
+        if presentationActivity.allowsPresentationPublication {
+            Color.clear
+                .onChange(of: pendingInteractionScopes, initial: true) { _, _ in
+                    guard let suppressedInteractionScope = sessionPresentation.suppressedInteractionScope,
+                          ChatExtensionInteractionPolicy.shouldClearSuppression(
+                              suppressedInteractionScope,
+                              from: selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? []
+                          ) else { return }
+                    sessionPresentation.suppressedInteractionScope = nil
+                }
+                .onChange(of: transcriptProjectionSource, initial: true) { _, source in
+                    guard let capture = transcriptProjectionCapture else {
+                        // A recycled same-session owner can briefly have no exact
+                        // generation while the retained canonical snapshot is still
+                        // valid. Keep the mounted projection until its replacement
+                        // installs; only a genuinely absent session clears the view.
+                        if selectedAuthoritativeSnapshot == nil { transcriptPresentation.reset() }
+                        return
+                    }
+                    // Ignore a callback captured before opening installed its mounted
+                    // generation; the newer exact source owns submission.
+                    guard source == capture.tag else { return }
+                    intakeTranscriptProjection(capture)
+                }
+        }
+    }
+
     private var selectedAuthoritativeSnapshot: SessionSnapshot? {
         model.authoritativeSnapshot(for: sessionID)
     }
@@ -835,6 +876,9 @@ struct ChatView: View {
                 guard resolution == .commandCompleted else { throw CancellationError() }
                 continue
             }
+            guard presentationActivity.allowsPresentationPublication else {
+                throw CancellationError()
+            }
             transcriptPresentation.submit(
                 snapshot: snapshot,
                 handoff: capture.handoff,
@@ -843,7 +887,8 @@ struct ChatView: View {
             )
             do {
                 let installed = try await transcriptPresentation.waitForInstall(of: tag)
-                guard sessionPresentation.modelPresentationGeneration == presentationGeneration else {
+                guard presentationActivity.allowsPresentationPublication,
+                      sessionPresentation.modelPresentationGeneration == presentationGeneration else {
                     throw CancellationError()
                 }
                 if transcriptProjectionSource == tag,
@@ -1040,7 +1085,8 @@ struct ChatView: View {
     }
 
     private var admitsScrollGeometryCallbacks: Bool {
-        sessionPresentation.open.phase == .positioning || sessionPresentation.open.phase == .ready
+        presentationActivity.allowsViewportObservation
+            && (sessionPresentation.open.phase == .positioning || sessionPresentation.open.phase == .ready)
     }
 
     private var admitsNativeScrollCallbacks: Bool {
@@ -1089,6 +1135,7 @@ struct ChatView: View {
     @MainActor
     private func beginOpeningAfterForegroundWhenConnected() {
         guard scenePhase == .active,
+              presentationActivity.allowsPresentationPublication,
               !model.isReconcilingForeground,
               model.admitsSessionPresentationOpen,
               sessionPresentation.openingTask == nil else { return }
@@ -2350,7 +2397,9 @@ struct ChatView: View {
                 // Exact extension commands do not create a canonical user
                 // message in Pi. Never graft a prompt bubble that can become a
                 // phantom row; the canonical invocation receipt owns its row.
-                let grafted = isExtensionCommand ? false : transcriptPresentation.graftLocalLifecycle(
+                let grafted = isExtensionCommand || !presentationActivity.allowsPresentationPublication
+                    ? false
+                    : transcriptPresentation.graftLocalLifecycle(
                     handoff: .outgoing(
                         presentation: ChatOutgoingSubmissionPresentation(
                             snapshot: submission,

@@ -3,13 +3,18 @@ import Testing
 
 @Suite("Tron pulse loading indicator")
 struct TronPulseLoadingIndicatorTests {
-    @Test("pauses for reduced motion or an inactive scene")
+    @Test("pauses for reduced motion, an inactive scene, or a covered surface")
     func pausePolicy() {
         #expect(TronPulseLoadingIndicatorEngine.animationPaused(
             reduceMotion: true, sceneActive: true
         ))
         #expect(TronPulseLoadingIndicatorEngine.animationPaused(
             reduceMotion: false, sceneActive: false
+        ))
+        #expect(TronPulseLoadingIndicatorEngine.animationPaused(
+            reduceMotion: false,
+            sceneActive: true,
+            surfaceActive: false
         ))
         #expect(!TronPulseLoadingIndicatorEngine.animationPaused(
             reduceMotion: false, sceneActive: true

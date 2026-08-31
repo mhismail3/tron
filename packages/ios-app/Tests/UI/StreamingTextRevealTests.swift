@@ -11,6 +11,25 @@ struct StreamingTextRevealTests {
         #expect(ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: -1) == 0)
     }
 
+    @Test("covered or reduced-motion text never admits fades")
+    func fadeAdmissionRequiresAnActiveSurface() {
+        #expect(ChatStreamingTextRevealPolicy.shouldAnimate(
+            streaming: true,
+            reduceMotion: false,
+            surfaceActive: true
+        ))
+        #expect(!ChatStreamingTextRevealPolicy.shouldAnimate(
+            streaming: true,
+            reduceMotion: false,
+            surfaceActive: false
+        ))
+        #expect(!ChatStreamingTextRevealPolicy.shouldAnimate(
+            streaming: true,
+            reduceMotion: true,
+            surfaceActive: true
+        ))
+    }
+
     @Test("large initial and live backlogs catch up instead of lagging authoritative text")
     func backlogCatchesUp() {
         #expect(!ChatStreamingTextRevealPolicy.shouldCatchUp(pendingTokenCount: 1))

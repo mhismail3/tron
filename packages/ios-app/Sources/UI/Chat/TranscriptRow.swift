@@ -358,7 +358,10 @@ private struct ThinkingBlock: View {
         .accessibilityAddTraits(isOverflowing ? .isButton : [])
         .accessibilityHint(isOverflowing ? "Double-tap to view the full thinking trace" : "")
         .overlay(alignment: .topLeading) { measurementProbe }
-        .sheet(isPresented: $showingDetails) {
+        .tronManagedSheet(
+            isPresented: $showingDetails,
+            identity: "chat.thinking-trace.\(traceIdentity)"
+        ) {
             ThinkingTraceDetailSheet(
                 inline: preparedInline,
                 identity: traceIdentity,
@@ -618,6 +621,7 @@ private struct TranscriptImageChip: View {
     }
 
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     let blobID: String
     @State private var thumbnail: UIImage?
     @State private var thumbnailIdentity: ChatMediaIdentity?
@@ -689,7 +693,11 @@ private struct TranscriptImageChip: View {
         // The slot is stable from projection install; thumbnail replacement
         // must not animate as a second chip insertion during prompt settlement.
         .accessibilityLabel(loadFailed ? "Image attachment unavailable, retry" : "Image attachment")
-        .task(id: loadKey) {
+        .task(id: PresentationActivityTaskID(
+            source: loadKey,
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication else { return }
             let requestedKey = loadKey
             guard let identity = requestedKey.identity else {
                 failedLoadKey = requestedKey
@@ -712,7 +720,10 @@ private struct TranscriptImageChip: View {
             previewRequest = nil
         }
         .accessibilityHint(currentThumbnail == nil ? "Loads the unavailable image again" : "Opens a photo preview")
-        .sheet(item: $previewRequest) { request in
+        .tronManagedSheet(
+            item: $previewRequest,
+            identity: { "chat.image-preview.\($0.id)" }
+        ) { request in
             AttachmentImagePreviewSheet(image: previewImage ?? request.initialImage)
                 .task(id: request.id) {
                     guard let full = try? await model.chatMedia.fullPreview(
@@ -737,6 +748,7 @@ private struct TranscriptImageChip: View {
 
 struct TranscriptFileChip: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     let name: String
     let mimeType: String
     let size: Int?
@@ -770,8 +782,12 @@ struct TranscriptFileChip: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("File attachment, \(name), \(detail)")
         .accessibilityHint("Opens the file preview")
-        .task(id: identity) {
-            guard let identity,
+        .task(id: PresentationActivityTaskID(
+            source: identity,
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication,
+                  let identity,
                   thumbnailIdentity != identity || thumbnail == nil else { return }
             guard let loaded = try? await model.chatMedia.fileThumbnail(
                 for: identity,
@@ -782,7 +798,10 @@ struct TranscriptFileChip: View {
             thumbnailIdentity = identity
         }
         .onChange(of: identity) { _, _ in previewRequest = nil }
-        .sheet(item: $previewRequest) { request in
+        .tronManagedSheet(
+            item: $previewRequest,
+            identity: { "chat.file-preview.\($0.id)" }
+        ) { request in
             AttachmentFilePreviewSheet(
                 name: name,
                 mimeType: mimeType,

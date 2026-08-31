@@ -10,7 +10,9 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var showsNotifications = false
+    @State private var hasRefreshedNotificationBadge = false
 
     init(
         scope: Scope = .dashboard,
@@ -167,15 +169,21 @@ struct SettingsView: View {
         }
         .tronTopBlur(.sheet)
         .presentationDragIndicator(.hidden)
-        .sheet(isPresented: $showsNotifications) {
+        .tronManagedSheet(
+            isPresented: $showsNotifications,
+            identity: "settings.notifications"
+        ) {
             NotificationInboxView(onOpenSession: onImported)
         }
-        .task {
+        .task(id: presentationActivity.allowsPresentationPublication) {
+            guard presentationActivity.allowsPresentationPublication,
+                  !hasRefreshedNotificationBadge else { return }
+            // Only the root-owned badge is refreshed here. Destination owners
+            // load their own settings data after the sheet transition, keeping
+            // unrelated network publications out of the presentation path.
             await model.refreshNotificationInbox()
-            await model.refreshAll(
-                settingsTarget: projectCWD.map(SettingsTarget.project(cwd:)) ?? .global,
-                providerTarget: projectSessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
-            )
+            guard !Task.isCancelled else { return }
+            hasRefreshedNotificationBadge = true
         }
         .tronPresentation()
     }
@@ -235,7 +243,10 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
         Button { isPresented = true } label: { label }
             .buttonStyle(.plain)
             .accessibilityLabel(accessibilityLabel)
-            .sheet(isPresented: $isPresented) {
+            .tronManagedSheet(
+                isPresented: $isPresented,
+                identity: "settings.\(accessibilityLabel)"
+            ) {
                 NavigationStack {
                     destinationContent
                         .toolbar {

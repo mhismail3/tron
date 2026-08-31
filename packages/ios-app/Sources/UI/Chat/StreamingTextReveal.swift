@@ -11,6 +11,14 @@ enum ChatStreamingTextRevealPolicy {
         pendingTokenCount > maximumAnimatedBacklog
     }
 
+    static func shouldAnimate(
+        streaming: Bool,
+        reduceMotion: Bool,
+        surfaceActive: Bool
+    ) -> Bool {
+        streaming && !reduceMotion && surfaceActive
+    }
+
     static func opacity(elapsedMilliseconds: Int, fadeMilliseconds: Int = Self.fadeMilliseconds) -> Double {
         guard elapsedMilliseconds > 0 else { return 0 }
         guard fadeMilliseconds > 0 else { return 1 }
@@ -75,6 +83,7 @@ struct ChatStreamingInlineText: View {
     let streaming: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var revealedIDs: Set<String> = []
     @State private var revealStarts: [String: Date] = [:]
     @State private var animationTick = 0
@@ -92,7 +101,8 @@ struct ChatStreamingInlineText: View {
         TaskKey(
             tokenIDs: tokens.map(\.id),
             streaming: streaming,
-            reduceMotion: reduceMotion
+            reduceMotion: reduceMotion,
+            surfaceActive: presentationActivity.allowsContinuousAnimation
         )
     }
 
@@ -127,7 +137,11 @@ struct ChatStreamingInlineText: View {
     }
 
     private func tokenOpacity(_ id: String, now: Date) -> Double {
-        guard streaming, !reduceMotion else { return 1 }
+        guard ChatStreamingTextRevealPolicy.shouldAnimate(
+            streaming: streaming,
+            reduceMotion: reduceMotion,
+            surfaceActive: presentationActivity.allowsContinuousAnimation
+        ) else { return 1 }
         // The first body evaluation happens before the bookkeeping task. Keep
         // the authoritative initial source visible during that handoff; a
         // missing reveal start is only hidden for tokens admitted later.
@@ -142,6 +156,14 @@ struct ChatStreamingInlineText: View {
     @MainActor
     private func reconcile() async {
         let currentIDs = Set(tokens.filter(\.isWord).map(\.id))
+        guard presentationActivity.allowsContinuousAnimation else {
+            // Covered content must never replay a reveal backlog when it is
+            // uncovered; its authoritative text remains immediately visible.
+            revealedIDs.formUnion(currentIDs)
+            revealStarts.removeAll()
+            hasAdmittedInitialContent = true
+            return
+        }
         revealedIDs.formIntersection(currentIDs)
         revealStarts = revealStarts.filter { currentIDs.contains($0.key) }
 
@@ -207,6 +229,7 @@ struct ChatStreamingInlineText: View {
         let tokenIDs: [String]
         let streaming: Bool
         let reduceMotion: Bool
+        let surfaceActive: Bool
     }
 
     private static func tokens(

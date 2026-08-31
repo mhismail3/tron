@@ -414,7 +414,10 @@ struct ComposerResourcePicker: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
-        .sheet(item: $detail) { entry in
+        .tronManagedSheet(
+            item: $detail,
+            identity: { "composer.resource.\($0.id)" }
+        ) { entry in
             ComposerResourceDetailSheet(
                 sessionID: sessionID,
                 entry: entry,
@@ -721,7 +724,10 @@ struct ComposerResourceChip: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .sheet(isPresented: $showsDetail) {
+        .tronManagedSheet(
+            isPresented: $showsDetail,
+            identity: "composer.canonical-resource.\(resource.id)"
+        ) {
             ComposerResourceDetailSheet(
                 sessionID: sessionID,
                 entry: resource,

@@ -26,7 +26,10 @@ struct SessionProcessesSheet: View {
             .tronNavigationTitle("Subagents")
             .toolbar { doneToolbar }
         }
-        .sheet(item: $selectedProcess) { process in
+        .tronManagedSheet(
+            item: $selectedProcess,
+            identity: { "process.\($0.id)" }
+        ) { process in
             ReadOnlySubagentSessionSheet(parentSessionID: sessionID, process: process)
         }
         .tronTopBlur(.sheet)
@@ -90,6 +93,7 @@ struct ProcessHistorySheet: View {
     let sessionID: String
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var store: SessionProcessHistoryStore?
     @State private var generation = 0
     @State private var selectedProcess: SessionProcessActivity?
@@ -104,15 +108,25 @@ struct ProcessHistorySheet: View {
             .tronNavigationTitle("Subagent History")
             .toolbar { doneToolbar }
         }
-        .sheet(item: $selectedProcess) { process in
+        .tronManagedSheet(
+            item: $selectedProcess,
+            identity: { "process-history.\($0.id)" }
+        ) { process in
             ReadOnlySubagentSessionSheet(parentSessionID: sessionID, process: process)
         }
-        .task(id: model.presentationGeneration(for: sessionID)) {
-            guard let target = model.presentationTarget(for: sessionID) else { return }
+        .task(id: "\(model.presentationGeneration(for: sessionID) ?? -1):\(presentationActivity.allowsPresentationPublication)") {
+            guard presentationActivity.allowsPresentationPublication,
+                  let target = model.presentationTarget(for: sessionID) else { return }
             generation = target.generation
             if store == nil { store = SessionProcessHistoryStore(client: model.client) }
-            store?.reset(sessionID: sessionID, presentationGeneration: target.generation)
+            if store?.sessionID != sessionID
+                || store?.presentationGeneration != target.generation {
+                store?.reset(sessionID: sessionID, presentationGeneration: target.generation)
+            }
             store?.loadNext(sessionID: sessionID, presentationGeneration: target.generation)
+        }
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
+            if !active { store?.suspendPendingWork() }
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large], selection: $detent)
@@ -290,6 +304,7 @@ private struct SessionProcessRow: View {
     let accent: Color
     let surfaceStyle: SessionProcessRowSurfaceStyle
     let openTranscript: () -> Void
+    @State private var isVisible = false
 
     var body: some View {
         Button(action: openTranscript) { card }
@@ -299,6 +314,8 @@ private struct SessionProcessRow: View {
             .accessibilityLabel(process.title)
             .accessibilityValue(accessibilityValue)
             .accessibilityHint(accessibilityHint)
+            .onAppear { isVisible = true }
+            .onDisappear { isVisible = false }
     }
 
     @ViewBuilder
@@ -335,6 +352,7 @@ private struct SessionProcessRow: View {
                     ProcessActivityOrb(
                         mode: orbMode,
                         size: 24,
+                        isVisible: isVisible,
                         animationSpeedScale: ProcessActivityOrbEngine.durationSpeedScale(durationMs: process.durationMs)
                     )
                     .frame(width: 28, height: 28)

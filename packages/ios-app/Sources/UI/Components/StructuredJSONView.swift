@@ -184,7 +184,10 @@ struct TronStructuredJSONView: View {
                 TronTechnicalJSONRow(value: value)
             }
         }
-        .sheet(item: $selectedField) { selection in
+        .tronManagedSheet(
+            item: $selectedField,
+            identity: { _ in "structured-json.field" }
+        ) { selection in
             JSONFieldSheet(
                 selection: selection,
                 rootValue: authoritativeRoot,
@@ -287,7 +290,10 @@ struct TronTechnicalJSONRow: View {
         .tronGlassSurface(accent: accent, tintOpacity: 0.08, interactive: true)
         .accessibilityIdentifier("technical-json-row")
         .accessibilityHint("Opens scrollable JSON details")
-        .sheet(isPresented: $isPresented) {
+        .tronManagedSheet(
+            isPresented: $isPresented,
+            identity: "structured-json.technical"
+        ) {
             TechnicalJSONSheet(
                 value: value,
                 title: sheetTitle,

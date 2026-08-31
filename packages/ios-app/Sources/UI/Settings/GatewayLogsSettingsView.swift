@@ -24,6 +24,7 @@ extension GatewayLogRecord {
 
 struct GatewayLogsSettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var recordIndex = GatewayLogRecordIndex()
     @State private var selectedLog: GatewayProfileLogRecord?
     @State private var selectedLevel = "all"
@@ -110,11 +111,18 @@ struct GatewayLogsSettingsView: View {
             }
         }
         .sensoryFeedback(.success, trigger: copySucceeded)
-        .task(id: automaticLoadID) {
-            guard automaticLoadID.isReady else { return }
+        .task(id: PresentationActivityTaskID(
+            source: automaticLoadID,
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication,
+                  automaticLoadID.isReady else { return }
             await loadLogs(preserveExistingOnEmpty: true)
         }
-        .sheet(item: $selectedLog) { record in
+        .tronManagedSheet(
+            item: $selectedLog,
+            identity: { _ in "settings.gateway-log-detail" }
+        ) { record in
             GatewayLogDetailView(record: record)
         }
         .tronTopBlur(.logs)
@@ -199,7 +207,7 @@ struct GatewayLogsSettingsView: View {
     }
 }
 
-struct GatewayLogsLoadID: Equatable {
+struct GatewayLogsLoadID: Hashable {
     let readinessGeneration: Int
     let isReady: Bool
 }

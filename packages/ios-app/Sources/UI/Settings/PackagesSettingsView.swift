@@ -34,6 +34,7 @@ enum PackageMutationOperation: Hashable {
 
 struct PackagesSettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     let projectCWD: String?
     private var target: PackageConfigurationTarget {
         PackageConfigurationTarget(cwd: projectCWD)
@@ -147,12 +148,16 @@ struct PackagesSettingsView: View {
                 TronReloadToolbarButton(isReloading: reloading, action: reload)
             }
         }
-        .task(id: PackageLoadID(
-            target: target,
-            profileRevision: model.profileRevision,
-            invalidationGeneration: model.packageInvalidationGeneration,
-            refreshGeneration: refreshGeneration
+        .task(id: PresentationActivityTaskID(
+            source: PackageLoadID(
+                target: target,
+                profileRevision: model.profileRevision,
+                invalidationGeneration: model.packageInvalidationGeneration,
+                refreshGeneration: refreshGeneration
+            ),
+            presentationActive: presentationActivity.allowsPresentationPublication
         )) {
+            guard presentationActivity.allowsPresentationPublication else { return }
             let requestedTarget = target
             let profileRevision = model.profileRevision
             let generation = refreshGeneration
@@ -178,7 +183,10 @@ struct PackagesSettingsView: View {
         .onDisappear {
             revokeMutationTasks()
         }
-        .sheet(isPresented: $showingInstall) {
+        .tronManagedSheet(
+            isPresented: $showingInstall,
+            identity: "settings.packages.install"
+        ) {
             NavigationStack {
                 packageInstallSheet
             }
@@ -187,7 +195,10 @@ struct PackagesSettingsView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
         }
-        .sheet(item: $packageToRemove) { package in
+        .tronManagedSheet(
+            item: $packageToRemove,
+            identity: { _ in "settings.packages.remove" }
+        ) { package in
             TronConfirmationSheet(
                 title: "Remove this package?",
                 message: package.source,

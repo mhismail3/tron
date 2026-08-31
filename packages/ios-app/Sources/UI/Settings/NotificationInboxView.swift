@@ -40,10 +40,13 @@ struct NotificationInboxView: View {
     let onOpenSession: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.scenePhase) private var scenePhase
     @State private var filter: NotificationInboxFilter = .all
     @State private var selectedItem: NotificationInboxItem?
     @State private var openingItemID: String?
     @State private var showsHistory = false
+    @State private var hasRefreshed = false
 
     private var filteredNotifications: [NotificationInboxItem] {
         switch filter {
@@ -67,10 +70,21 @@ struct NotificationInboxView: View {
                     } else if filteredNotifications.isEmpty {
                         emptyState
                     } else {
-                        TimelineView(.periodic(from: .now, by: DashboardActivityClock.refreshInterval)) { timeline in
+                        if PresentationClockPolicy.runs(
+                            surfaceActive: presentationActivity.allowsContinuousAnimation,
+                            sceneActive: scenePhase == .active
+                        ) {
+                            TimelineView(.periodic(from: .now, by: DashboardActivityClock.refreshInterval)) { timeline in
+                                LazyVStack(spacing: TronSpacing.md) {
+                                    ForEach(recentNotifications) { item in
+                                        notificationRow(item, relativeTo: timeline.date, style: .glass)
+                                    }
+                                }
+                            }
+                        } else {
                             LazyVStack(spacing: TronSpacing.md) {
                                 ForEach(recentNotifications) { item in
-                                    notificationRow(item, relativeTo: timeline.date, style: .glass)
+                                    notificationRow(item, relativeTo: .now, style: .glass)
                                 }
                             }
                         }
@@ -101,15 +115,27 @@ struct NotificationInboxView: View {
         .tronPresentation()
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .task { await model.refreshNotificationInbox() }
-        .sheet(item: $selectedItem) { item in
+        .task(id: presentationActivity.allowsPresentationPublication) {
+            guard presentationActivity.allowsPresentationPublication,
+                  !hasRefreshed else { return }
+            await model.refreshNotificationInbox()
+            guard !Task.isCancelled else { return }
+            hasRefreshed = true
+        }
+        .tronManagedSheet(
+            item: $selectedItem,
+            identity: { "notifications.detail.\($0.id)" }
+        ) { item in
             NotificationInboxDetailView(
                 item: item,
                 isOpening: openingItemID == item.id,
                 onOpenSession: { openSession(item) }
             )
         }
-        .sheet(isPresented: $showsHistory) {
+        .tronManagedSheet(
+            isPresented: $showsHistory,
+            identity: "notifications.history"
+        ) {
             NotificationInboxHistoryView(
                 openingItemID: openingItemID,
                 onOpenSession: openSession
@@ -232,6 +258,8 @@ private struct NotificationInboxHistoryView: View {
     let onOpenSession: (NotificationInboxItem) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.scenePhase) private var scenePhase
     @State private var filter: NotificationInboxFilter = .all
     @State private var selectedItem: NotificationInboxItem?
 
@@ -239,6 +267,20 @@ private struct NotificationInboxHistoryView: View {
         switch filter {
         case .all: model.notificationInbox.notifications
         case .unread: model.notificationInbox.notifications.filter(\.notification.isUnread)
+        }
+    }
+
+    @ViewBuilder
+    private func notificationHistoryRows(relativeTo date: Date) -> some View {
+        LazyVStack(spacing: TronSpacing.sm) {
+            ForEach(visibleNotifications) { item in
+                NotificationInboxRow(item: item, relativeTo: date, style: .plain) {
+                    selectedItem = item
+                    if item.notification.isUnread {
+                        Task { await model.markNotificationRead(item) }
+                    }
+                }
+            }
         }
     }
 
@@ -255,19 +297,15 @@ private struct NotificationInboxHistoryView: View {
 
                     if visibleNotifications.isEmpty {
                         historyEmptyState
-                    } else {
+                    } else if PresentationClockPolicy.runs(
+                        surfaceActive: presentationActivity.allowsContinuousAnimation,
+                        sceneActive: scenePhase == .active
+                    ) {
                         TimelineView(.periodic(from: .now, by: DashboardActivityClock.refreshInterval)) { timeline in
-                            LazyVStack(spacing: TronSpacing.sm) {
-                                ForEach(visibleNotifications) { item in
-                                    NotificationInboxRow(item: item, relativeTo: timeline.date, style: .plain) {
-                                        selectedItem = item
-                                        if item.notification.isUnread {
-                                            Task { await model.markNotificationRead(item) }
-                                        }
-                                    }
-                                }
-                            }
+                            notificationHistoryRows(relativeTo: timeline.date)
                         }
+                    } else {
+                        notificationHistoryRows(relativeTo: .now)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -293,7 +331,10 @@ private struct NotificationInboxHistoryView: View {
         .tronPresentation()
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
-        .sheet(item: $selectedItem) { item in
+        .tronManagedSheet(
+            item: $selectedItem,
+            identity: { "notifications.history.detail.\($0.id)" }
+        ) { item in
             NotificationInboxDetailView(
                 item: item,
                 isOpening: openingItemID == item.id,

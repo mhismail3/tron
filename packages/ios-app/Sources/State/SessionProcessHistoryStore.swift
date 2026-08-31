@@ -131,6 +131,20 @@ final class SessionProcessHistoryStore {
         status = .idle
     }
 
+    /// Cancels disposable list/detail requests while preserving the last
+    /// complete projection for a covered surface.
+    func suspendPendingWork() {
+        pageGeneration &+= 1
+        pageTask?.cancel()
+        pageTask = nil
+        detailGenerationCounter &+= 1
+        detailTask?.cancel()
+        detailTask = nil
+        if status == .loading {
+            status = processes.isEmpty ? .idle : .loaded
+        }
+    }
+
     func loadNext(sessionID: String, presentationGeneration: Int) {
         guard self.sessionID == sessionID,
               self.presentationGeneration == presentationGeneration,
@@ -292,6 +306,21 @@ final class SessionProcessHistoryStore {
             } catch { /* A disappearing canonical route remains unavailable. */ }
         }
     }
+
+    #if HOSTED_TEST
+    func installHostedPendingPage(
+        sessionID: String,
+        presentationGeneration: Int
+    ) {
+        reset(sessionID: sessionID, presentationGeneration: presentationGeneration)
+        status = .loading
+        pageTask = Task {
+            try? await Task.sleep(for: .seconds(30))
+        }
+    }
+
+    var hostedHasPendingPage: Bool { pageTask != nil }
+    #endif
 
     private static let maximumRetainedPages = 8
     private static let maximumRetainedItems = 400

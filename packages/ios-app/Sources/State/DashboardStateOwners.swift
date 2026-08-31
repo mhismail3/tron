@@ -33,6 +33,15 @@ enum DashboardSessionActivity: Equatable, Sendable {
     case interrupted
 }
 
+struct DashboardPresentationSnapshot: Equatable {
+    var sessions: [SessionSummary] = []
+    var activityByDashboardID: [String: DashboardSessionActivity] = [:]
+
+    func activity(for session: SessionSummary) -> DashboardSessionActivity {
+        activityByDashboardID[session.dashboardID] ?? .idle
+    }
+}
+
 enum DashboardActivityClock {
     /// Relative labels age while the dashboard is otherwise idle. Gateway live
     /// summaries still drive exact activity timestamps and row reordering.

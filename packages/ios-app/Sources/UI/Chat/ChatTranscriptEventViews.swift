@@ -48,7 +48,10 @@ struct ChatNotificationView: View {
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
         .contentTransition(.interpolate)
         .accessibilityLabel(accessibilityLabel)
-        .sheet(isPresented: $showingDetail) { detailSheet }
+        .tronManagedSheet(
+            isPresented: $showingDetail,
+            identity: "chat.transcript-event-detail"
+        ) { detailSheet }
     }
 
     private var pill: some View {

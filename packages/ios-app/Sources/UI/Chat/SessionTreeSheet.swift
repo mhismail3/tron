@@ -159,6 +159,7 @@ struct SessionTreeSheet: View {
     let onNavigated: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var mode: SessionHistoryMode = .timeline
     @State private var selection: SessionHistorySelection?
     @State private var labelNode: SessionTreeNode?
@@ -232,13 +233,25 @@ struct SessionTreeSheet: View {
                     .accessibilityLabel("Done")
                 }
             }
-            .task(id: model.sessionStructureRevision(for: sessionID)) { await load() }
+            .task(id: "\(model.sessionStructureRevision(for: sessionID)):\(presentationActivity.allowsPresentationPublication)") {
+                guard presentationActivity.allowsPresentationPublication else { return }
+                await load()
+            }
+            .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
+                guard !active else { return }
+                rowPreparationGeneration &+= 1
+                rowPreparationTask?.cancel()
+                rowPreparationTask = nil
+            }
             .onDisappear {
                 rowPreparationGeneration &+= 1
                 rowPreparationTask?.cancel()
                 rowPreparationTask = nil
             }
-            .sheet(item: $selection) { selection in
+            .tronManagedSheet(
+                item: $selection,
+                identity: { "history.\(sessionID).\($0.id)" }
+            ) { selection in
                 switch selection.action {
                 case .details:
                     HistoryEntryDetailsSheet(
@@ -255,15 +268,16 @@ struct SessionTreeSheet: View {
                     )
                 }
             }
-            .alert("Bookmark", isPresented: Binding(
-                get: { labelNode != nil },
-                set: { if !$0 { labelNode = nil } }
-            )) {
+            .alert("Bookmark", isPresented: labelEditorPresented) {
                 TextField("Label", text: $label)
                 Button("Save") { saveBookmark() }
                 if labelNode?.label != nil { Button("Remove", role: .destructive) { removeBookmark() } }
                 Button("Cancel", role: .cancel) { labelNode = nil }
             }
+            .tronManagedSystemPresentation(
+                isPresented: labelEditorPresented,
+                identity: "history.bookmark"
+            )
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
@@ -394,14 +408,18 @@ struct SessionTreeSheet: View {
     }
 
     private func load() async {
+        guard presentationActivity.allowsPresentationPublication else { return }
         if visibleRows.isEmpty { await installRows(for: mode) }
         reloading = true
         defer { reloading = false }
         await model.loadTree(sessionID: sessionID)
+        guard !Task.isCancelled,
+              presentationActivity.allowsPresentationPublication else { return }
         await installRows(for: mode)
     }
 
     private func installRows(for requestedMode: SessionHistoryMode) async {
+        guard presentationActivity.allowsPresentationPublication else { return }
         rowPreparationGeneration &+= 1
         let generation = rowPreparationGeneration
         let nodes = model.sessionTree
@@ -423,6 +441,7 @@ struct SessionTreeSheet: View {
             worker.cancel()
         }
         guard !Task.isCancelled,
+              presentationActivity.allowsPresentationPublication,
               generation == rowPreparationGeneration,
               requestedMode == mode else { return }
         rowPreparationTask = nil
@@ -432,6 +451,13 @@ struct SessionTreeSheet: View {
     private func reload() {
         guard !reloading else { return }
         Task { await load() }
+    }
+
+    private var labelEditorPresented: Binding<Bool> {
+        Binding(
+            get: { labelNode != nil },
+            set: { if !$0 { labelNode = nil } }
+        )
     }
 
     private func saveBookmark() {
@@ -602,14 +628,20 @@ private struct HistoryEntryDetailsSheet: View {
                         .accessibilityLabel("Done")
                 }
             }
-            .sheet(isPresented: $showContinue) {
+            .tronManagedSheet(
+                isPresented: $showContinue,
+                identity: "history.continue.\(sessionID)"
+            ) {
                 NavigationSheet(
                     sessionID: sessionID,
                     node: node,
                     onNavigated: onNavigated
                 )
             }
-            .sheet(isPresented: $showFork) {
+            .tronManagedSheet(
+                isPresented: $showFork,
+                identity: "history.fork.\(sessionID)"
+            ) {
                 ForkConfirmationSheet(sessionID: sessionID, node: node, onCreated: onForkCreated)
             }
             .alert("Bookmark", isPresented: $showBookmark) {
@@ -618,6 +650,10 @@ private struct HistoryEntryDetailsSheet: View {
                 if node.label != nil { Button("Remove", role: .destructive) { saveBookmark(nil) } }
                 Button("Cancel", role: .cancel) {}
             }
+            .tronManagedSystemPresentation(
+                isPresented: $showBookmark,
+                identity: "history.entry-bookmark"
+            )
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])

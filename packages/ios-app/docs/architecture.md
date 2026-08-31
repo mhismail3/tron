@@ -1416,3 +1416,26 @@ The app has no Engine transport, SQLite event store, reconstruction plugins,
 Activity feed, workers, reusable-agent management, coordination dashboard, or
 worker speech service. Generic runtime tools and extension interactions are
 rendered directly from snapshot contracts.
+
+## Presentation activity
+
+A scene-owned `PresentationActivityCoordinator` owns the ephemeral stack of
+mounted UI surfaces, including the scene's separately hosted notice window. It
+is separate from Gateway session visibility and canonical state.
+Only the topmost surface receives continuous presentation, viewport, and
+animation work; covered surfaces retain their installed frame while authority
+intake and user-started operations continue. On uncover, each presentation
+owner derives one current aggregate and installs it atomically. Surface tokens
+are generation-qualified so stale route callbacks and asynchronous results are
+ignored. Binding intent registers a child before its transition begins. A
+dismissal lease retains the exact retiring generation until SwiftUI's dismissal
+callback, so cancellation and rapid re-presentation cannot retire a replacement.
+All app-owned sheets and binding-owned system picker
+and alert boundaries use the managed presentation modifiers; direct sheet
+ownership outside that boundary is rejected by source-policy tests. Disposable
+view loads and polls include surface activity in their task identities: cover
+cancels them, uncover restarts from current canonical inputs, and user-started
+mutations remain owned by their domain coordinators. The dashboard retains one
+atomic rows/activity snapshot while covered, and Manage Session observes a
+state-owned narrow projection that excludes streaming-only transcript churn.
+The stack is never persisted and is not a second state authority.

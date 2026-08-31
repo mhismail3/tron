@@ -158,3 +158,20 @@ TRON_PERFORMANCE_BASELINE_VALUE=1 xcodebuild test-without-building \
 
 Do not add device identifiers, profile data, fixture content, or other personal
 values to this report or performance signposts.
+
+## Multi-surface workload
+
+Performance validation must include one and five concurrent active sessions,
+with dashboard → chat → sheet → nested-sheet presentation while streams and
+summary updates continue. Record frame hitches, MainActor latency, CPU/GPU
+activity, active animation count, suppressed covered-surface work, and
+uncover-to-reconciled-frame latency. Functional gates are zero covered-surface
+animation clocks, zero covered transcript/dashboard installations, one bounded
+aggregate catch-up before ordinary live updates resume, and no authority event
+loss. Settled screenshots, accessibility trees, and scroll-anchor behavior must
+remain equivalent to the active-surface baseline. Simulator measurements are
+diagnostic; physical-device evidence is authoritative. This workload is a
+manual release-validation contract today: the repository does not yet automate
+five simultaneous nested presentation flows or collect the physical-device
+frame/CPU/GPU trace. The focused coordinator, projection, and clock tests prove
+admission invariants only and must not be reported as measured device evidence.

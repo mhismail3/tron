@@ -46,6 +46,12 @@ struct ProcessActivityOrbTests {
         #expect(ProcessActivityOrbEngine.animationPaused(
             reduceMotion: false, isVisible: true, sceneActive: false
         ))
+        #expect(ProcessActivityOrbEngine.animationPaused(
+            reduceMotion: false,
+            isVisible: true,
+            sceneActive: true,
+            surfaceActive: false
+        ))
         #expect(!ProcessActivityOrbEngine.animationPaused(
             reduceMotion: false, isVisible: true, sceneActive: true
         ))

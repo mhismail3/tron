@@ -29,7 +29,7 @@ struct AttachmentFilePreviewGuardTests {
         let sent = transcript.components(separatedBy: "struct TranscriptFileChip").dropFirst().first ?? ""
         #expect(sent.contains("Button {"))
         #expect(sent.contains("AttachmentThumbnailSurface(image: currentThumbnail"))
-        #expect(sent.contains(".sheet(item: $previewRequest)"))
+        #expect(sent.contains("item: $previewRequest"))
         #expect(sent.contains("AttachmentFilePreviewSheet("))
         #expect(sent.contains(".remote(identity: $0, leaseID: request.id)"))
 

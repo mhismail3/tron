@@ -178,7 +178,10 @@ struct InboundProducerMessageView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Inbound context from \(originLabel), \(originTitle), \(status). \(messageText)")
         .accessibilityHint("Shows the full message and technical details")
-        .sheet(isPresented: $showingDetails) {
+        .tronManagedSheet(
+            isPresented: $showingDetails,
+            identity: "chat.inbound-context.\(item.id)"
+        ) {
             InboundContextDetailsSheet(item: item)
         }
     }

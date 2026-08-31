@@ -46,7 +46,10 @@ struct CommandLifecycleView: View {
         .frame(maxWidth: .infinity, alignment: .center)
         .accessibilityLabel("\(origin) command \(commandLabel), \(state)")
         .accessibilityHint("Shows command details")
-        .sheet(isPresented: $showingDetails) {
+        .tronManagedSheet(
+            isPresented: $showingDetails,
+            identity: "chat.command.\(item.id)"
+        ) {
             CommandLifecycleDetailsSheet(item: item)
         }
     }

@@ -12,15 +12,10 @@ struct TronMobileApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .background {
-                    InAppNoticeWindowInstaller(
-                        model: model,
-                        colorScheme: appearance.mode.colorScheme
-                    )
-                    .frame(width: 0, height: 0)
-                    .allowsHitTesting(false)
-                }
+            SceneRootView(
+                model: model,
+                colorScheme: appearance.mode.colorScheme
+            )
                 .environment(model)
                 .environment(pushNotifications)
                 .tronPresentation()
@@ -108,6 +103,26 @@ struct TronMobileApp: App {
 
 }
 
+private struct SceneRootView: View {
+    let model: AppModel
+    let colorScheme: ColorScheme?
+    @State private var presentationActivity = PresentationActivityCoordinator()
+
+    var body: some View {
+        RootView()
+            .background {
+                InAppNoticeWindowInstaller(
+                    model: model,
+                    colorScheme: colorScheme,
+                    presentationActivity: presentationActivity
+                )
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
+            }
+            .environment(\.tronPresentationActivityCoordinator, presentationActivity)
+    }
+}
+
 private struct RootView: View {
     @Environment(AppModel.self) private var model
     @State private var onboardingDetent: PresentationDetent = .medium
@@ -115,7 +130,10 @@ private struct RootView: View {
 
     var body: some View {
         SessionShellView()
-        .sheet(isPresented: $showOnboarding) {
+        .tronManagedSheet(
+            isPresented: $showOnboarding,
+            identity: "app.onboarding"
+        ) {
             OnboardingView(selectedDetent: $onboardingDetent) {
                 showOnboarding = false
             }

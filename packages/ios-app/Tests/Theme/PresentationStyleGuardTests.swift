@@ -39,6 +39,17 @@ struct PresentationStyleGuardTests {
             .compactMap { url in String(data: (try? Data(contentsOf: url)) ?? Data(), encoding: .utf8).map { (url, $0) } }
     }
 
+    private func containsCall(_ name: String, in source: String) -> Bool {
+        source.range(
+            of: "(^|[^A-Za-z0-9_])\(NSRegularExpression.escapedPattern(for: name))\\(",
+            options: .regularExpression
+        ) != nil
+    }
+
+    private func occurrenceCount(_ needle: String, in source: String) -> Int {
+        max(0, source.components(separatedBy: needle).count - 1)
+    }
+
     private func toolbarItemBlocks(in source: String) -> [String] {
         var blocks: [String] = []
         var searchStart = source.startIndex
@@ -58,12 +69,47 @@ struct PresentationStyleGuardTests {
         return blocks
     }
 
+    @Test("app-owned blocking presentations use the canonical activity lifecycle")
+    func blockingPresentationsUseCanonicalLifecycle() throws {
+        let coordinatorPath = "Sources/State/PresentationActivityCoordinator.swift"
+        for (url, source) in swiftSources(at: packageRoot.appending(path: "Sources"))
+            where !url.path.hasSuffix(coordinatorPath) {
+            #expect(!source.contains(".sheet("), "Raw sheet in \(url.lastPathComponent)")
+            #expect(!source.contains(".fullScreenCover("), "Raw full-screen cover in \(url.lastPathComponent)")
+        }
+        let app = try String(
+            contentsOf: packageRoot.appending(path: "Sources/App/TronMobileApp.swift"),
+            encoding: .utf8
+        )
+        let notices = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Components/InAppNoticePresentation.swift"),
+            encoding: .utf8
+        )
+        #expect(app.contains("struct SceneRootView: View"))
+        #expect(app.contains("@State private var presentationActivity = PresentationActivityCoordinator()"))
+        #expect(notices.contains(".environment(\\.tronPresentationActivityCoordinator, presentationActivity)"))
+    }
+
+    @Test("binding-owned system presentations use the canonical activity lifecycle")
+    func systemPresentationsUseCanonicalLifecycle() {
+        for (url, source) in swiftSources(at: packageRoot.appending(path: "Sources")) {
+            let boundaries = occurrenceCount(".alert(", in: source)
+                + occurrenceCount(".fileImporter(", in: source)
+                + occurrenceCount(".photosPicker(", in: source)
+            guard boundaries > 0 else { continue }
+            #expect(
+                occurrenceCount(".tronManagedSystemPresentation(", in: source) >= boundaries,
+                "Unmanaged system presentation in \(url.lastPathComponent)"
+            )
+        }
+    }
+
     @Test("text toolbar actions use a leading icon and the system toolbar weight")
     func textToolbarActionsUseIconsAndDefaultWeight() throws {
         for (url, source) in uiSources {
             for block in toolbarItemBlocks(in: source) where block.contains("Button") {
-                let hasInlineText = block.contains("Text(")
-                    || block.contains("Label(")
+                let hasInlineText = containsCall("Text", in: block)
+                    || containsCall("Label", in: block)
                     || block.contains("Button(\"")
                 guard hasInlineText else { continue }
                 #expect(
@@ -416,7 +462,7 @@ struct PresentationStyleGuardTests {
         )
 
         #expect(source.contains(#"confirmTitle: "Delete""#))
-        #expect(source.contains(".sheet(item: $sessionToDelete)"))
+        #expect(source.contains("item: $sessionToDelete"))
         #expect(source.contains("onConfirm: { delete(session) }"))
         #expect(!source.contains("SessionShellDeletionConfirmationOwner"))
         #expect(!source.contains("confirmedDeletedDashboardIDs"))
@@ -884,7 +930,9 @@ struct PresentationStyleGuardTests {
         #expect(newSession.contains("private func selectServer(_ profile: GatewayProfile)"))
         #expect(newSession.contains("session.gatewayProfileID == profileID"))
         #expect(newSession.contains("model.profiles.selected?.id == profileID"))
-        #expect(newSession.contains(".task(id: NewSessionConfigurationLoadID("))
+        #expect(newSession.contains(".task(id: PresentationActivityTaskID("))
+        #expect(newSession.contains("source: NewSessionConfigurationLoadID("))
+        #expect(newSession.contains("presentationActive: presentationActivity.allowsPresentationPublication"))
         #expect(newSession.contains(".disabled(creating || !configurationReady)"))
         #expect(shell.contains("@State private var presentedSession: AppModel.SessionNavigationRoute?"))
         #expect(shell.contains(".navigationDestination(item: $presentedSession)"))
@@ -1010,7 +1058,7 @@ struct PresentationStyleGuardTests {
         #expect(connections.contains("gatewayActionButton"))
         #expect(providerSettings.contains("struct ProvidersSettingsView"))
         #expect(defaults.contains("struct AgentDefaultsSettingsView"))
-        #expect(settings.contains(".sheet(isPresented: $isPresented)"))
+        #expect(settings.contains("isPresented: $isPresented"))
         #expect(!settings.contains("Button(\"Log Out\""))
         #expect(settings.contains("enum Scope { case dashboard, project }"))
         #expect(settings.contains("if scope == .project"))
@@ -1364,13 +1412,12 @@ struct PresentationStyleGuardTests {
         #expect(context.contains("gitLoadGeneration &+= 1"))
         #expect(context.contains("case .failed"))
         #expect(!context.contains("await model.refreshSessions()"))
-        let gitTask = (context.components(separatedBy: ".task(id: model.authoritativeSnapshot(for: sessionID)?.cwd)").dropFirst().first ?? "")
-            .components(separatedBy: ".task(id: model.sessionContextRevision").first ?? ""
-        #expect(gitTask.contains("await loadGit("))
-        #expect(!gitTask.contains("loadContext("))
-        #expect(!gitTask.contains("loadResources("))
-        #expect(context.contains(".task(id: model.sessionContextRevision(for: sessionID))"))
-        #expect(resources.contains(".task(id: model.sessionResourceRevision(for: sessionID))"))
+        #expect(context.contains("await loadGit(snapshot: presentation"))
+        #expect(context.contains("model.sessionContextPresentation(for: sessionID)"))
+        #expect(context.contains("model.sessionContextRevision(for: sessionID)"))
+        #expect(resources.contains("model.sessionResourceRevision(for: sessionID)"))
+        #expect(context.contains("guard presentationActivity.allowsPresentationPublication else { return }"))
+        #expect(resources.contains("guard presentationActivity.allowsPresentationPublication else { return }"))
         let presentationStore = try String(
             contentsOf: packageRoot.appending(path: "Sources/State/SessionPresentationStore.swift"),
             encoding: .utf8
@@ -1574,7 +1621,7 @@ struct PresentationStyleGuardTests {
         #expect(processSheets.occurrences(of: ".tronPresentation()") == 3)
         #expect(processSheets.occurrences(of: "@State private var detent: PresentationDetent = .medium") == 2)
         #expect(processSheets.occurrences(of: "@State private var detent: PresentationDetent = .large") == 1)
-        #expect(processSheets.occurrences(of: ".sheet(item: $selectedProcess)") == 2)
+        #expect(processSheets.occurrences(of: "item: $selectedProcess") == 2)
         #expect(!processSheets.contains("NavigationLink"))
         #expect(processSheets.contains("SessionProcessRow(process: process, accent: accent, surfaceStyle: .glass)"))
         #expect(processSheets.contains("SessionProcessRow(process: process, accent: accent, surfaceStyle: .scrollOptimized)"))
@@ -1713,7 +1760,7 @@ struct PresentationStyleGuardTests {
             .components(separatedBy: "private struct TranscriptFileChip").first ?? ""
         #expect(!sentImageChip.isEmpty)
         #expect(sentImageChip.contains(".frame(width: 64, height: 64)"))
-        #expect(sentImageChip.contains(".sheet(item: $previewRequest)"))
+        #expect(sentImageChip.contains("item: $previewRequest"))
         #expect(sentImageChip.contains("AttachmentImagePreviewSheet(image: previewImage ?? request.initialImage)"))
         #expect(sentImageChip.contains("model.chatMedia.thumbnail(for: identity)"))
         #expect(sentImageChip.contains("model.chatMedia.fullPreview("))
@@ -1723,7 +1770,7 @@ struct PresentationStyleGuardTests {
         )
         #expect(sentAttachmentStrip.contains(".padding(.vertical, item.role == .user ? 3 : 0)"))
         #expect(sentImageChip.contains("leaseID: request.leaseID"))
-        #expect(!sentImageChip.contains(".sheet(isPresented:"))
+        #expect(!sentImageChip.contains("isPresented: $showPreview"))
         #expect(!sentImageChip.contains("model.client.blob"))
         #expect(!sentImageChip.contains(".presentationDetents([.medium, .large])"))
         #expect(!transcript.contains("private struct ZoomableAttachmentImage"))
@@ -1811,7 +1858,7 @@ struct PresentationStyleGuardTests {
         #expect(block.contains("ChatThinkingTraceLayoutPolicy"))
         #expect(block.contains("maximumHeight"))
         #expect(block.contains(".onTapGesture"))
-        #expect(block.contains(".sheet(isPresented: $showingDetails)"))
+        #expect(block.contains("isPresented: $showingDetails"))
         #expect(block.contains("ThinkingTraceDetailSheet"))
         let compactViewport = (block.components(separatedBy: "private var traceViewport").dropFirst().first ?? "")
             .components(separatedBy: "private var paragraph").first ?? ""
@@ -1874,7 +1921,7 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/Support/GatewayTimestamp.swift"),
             encoding: .utf8
         )
-        #expect(transcript.contains("content.sheet(item: $route)"))
+        #expect(transcript.contains("content.tronManagedSheet("))
         #expect(transcript.contains("ToolDetailSheet("))
         #expect(transcript.contains("tool: tool"))
         #expect(transcript.contains("density: detent == .large ? .expanded : .glance"))
@@ -1893,7 +1940,7 @@ struct PresentationStyleGuardTests {
         #expect(runOwner.contains("resolvedState = ToolRunResolvedState(installationTag: tag, run: run, tools: details)"))
         let statePosition = try #require(runOwner.firstRange(of: "@State private var resolvedState")?.lowerBound)
         let chipPosition = try #require(runOwner.firstRange(of: "ToolActivityChip(")?.lowerBound)
-        let sheetPosition = try #require(runOwner.firstRange(of: ".sheet(isPresented:")?.lowerBound)
+        let sheetPosition = try #require(runOwner.firstRange(of: ".tronManagedSheet(")?.lowerBound)
         #expect(statePosition < chipPosition)
         #expect(chipPosition < sheetPosition)
         #expect(sheet.contains(".defaultScrollAnchor(.top, for: .initialOffset)"))
@@ -1969,7 +2016,7 @@ struct PresentationStyleGuardTests {
         #expect(!technicalDetail.contains("Text(value.prettyPrinted)"))
         #expect(!technicalDetail.contains("ScrollView(.horizontal, showsIndicators: true)"))
         #expect(technicalDetail.contains("TronTechnicalJSONRow("))
-        #expect(!technicalDetail.contains(".sheet(item: $selectedPayload)"))
+        #expect(!technicalDetail.contains("item: $selectedPayload"))
         #expect(technicalDetail.contains("ToolTechnicalMetadataItem"))
         #expect(technicalDetail.contains("sheetSectionHeader"))
         #expect(technicalDetail.contains("sizeBodySM"))
@@ -2437,7 +2484,7 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionShellView.swift"),
             encoding: .utf8
         )
-        #expect(shell.contains(".sheet(isPresented: $showingServerFilter)"))
+        #expect(shell.contains("isPresented: $showingServerFilter"))
         #expect(shell.contains(".presentationDetents([.medium])"))
         #expect(shell.contains("private var serverFilterSheet: some View"))
         let serversHeader = try #require(shell.range(of: "Text(\"Servers\")"))
@@ -2606,7 +2653,8 @@ struct PresentationStyleGuardTests {
         #expect(toolRuns.contains("selectedToolPresentation = newestTool"))
         #expect(toolRuns.contains("ToolRunSelectedDetailSheet("))
         #expect(toolRuns.occurrences(of: "ToolRunDetailSheet(run:") == 2)
-        #expect(toolRuns.contains(".sheet(item: $selectedToolRoute, onDismiss:"))
+        #expect(toolRuns.contains("item: $selectedToolRoute"))
+        #expect(toolRuns.contains("onDismiss: { selectedToolPresentation = nil }"))
         #expect(toolRuns.contains(".tronScrollSurface(accent: accent"))
         #expect(toolRuns.contains(".accessibilityElement(children: .ignore)"))
         #expect(toolRuns.contains(".accessibilityIdentifier(\"tool-run-summary-\\(tool.id)\")"))

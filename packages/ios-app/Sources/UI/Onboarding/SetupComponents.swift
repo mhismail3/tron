@@ -112,7 +112,10 @@ struct ProviderSetupRow: View {
             cornerRadius: 12,
             tintOpacity: provider.configured ? 0.14 : 0.08
         )
-        .sheet(isPresented: $showsConfiguration) {
+        .tronManagedSheet(
+            isPresented: $showsConfiguration,
+            identity: "onboarding.provider.\(provider.id)"
+        ) {
             ProviderConfigurationSheet(provider: provider, target: providerTarget)
         }
     }

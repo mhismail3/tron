@@ -46,6 +46,7 @@ struct GatewayConnectionStatusBadge: View {
 struct ConnectionsSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(PushNotificationCoordinator.self) private var pushNotifications
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var selectedProfile: GatewayProfile?
     @State private var serverDetailDetent: PresentationDetent = .medium
     @State private var deviceToRevoke: GatewayAuthorizedDevice?
@@ -200,7 +201,10 @@ struct ConnectionsSettingsView: View {
                 .accessibilityHint("Opens the Connect a Mac pairing screen")
             }
         }
-        .sheet(item: $selectedProfile) { profile in
+        .tronManagedSheet(
+            item: $selectedProfile,
+            identity: { "settings.connection.\($0.id)" }
+        ) { profile in
             NavigationStack {
                 GatewayConnectionDetailView(profile: profile)
             }
@@ -209,9 +213,11 @@ struct ConnectionsSettingsView: View {
             .presentationDragIndicator(.hidden)
             .presentationContentInteraction(.resizes)
         }
-        .sheet(isPresented: $showAddServer, onDismiss: {
-            model.isAddingServer = false
-        }) {
+        .tronManagedSheet(
+            isPresented: $showAddServer,
+            identity: "settings.connection.add-server",
+            onDismiss: { model.isAddingServer = false }
+        ) {
             OnboardingView(mode: .addServer, selectedDetent: $addServerDetent) {
                 showAddServer = false
             }
@@ -221,10 +227,7 @@ struct ConnectionsSettingsView: View {
         }
         .alert(
             "Revoke \(deviceToRevoke?.device.name ?? "device")?",
-            isPresented: Binding(
-                get: { deviceToRevoke != nil },
-                set: { if !$0 { deviceToRevoke = nil } }
-            ),
+            isPresented: deviceRevocationPresented,
             presenting: deviceToRevoke
         ) { authorized in
             Button("Cancel", role: .cancel) { deviceToRevoke = nil }
@@ -237,7 +240,21 @@ struct ConnectionsSettingsView: View {
         } message: { authorized in
             Text("This removes \(authorized.device.name)'s access to \(authorized.profileLabel).")
         }
-        .task(id: model.profileRevision) { await reload() }
+        .tronManagedSystemPresentation(
+            isPresented: deviceRevocationPresented,
+            identity: "settings.device-revocation"
+        )
+        .task(id: "\(model.profileRevision):\(presentationActivity.allowsPresentationPublication)") {
+            guard presentationActivity.allowsPresentationPublication else { return }
+            await reload()
+        }
+    }
+
+    private var deviceRevocationPresented: Binding<Bool> {
+        Binding(
+            get: { deviceToRevoke != nil },
+            set: { if !$0 { deviceToRevoke = nil } }
+        )
     }
 
     private func deviceDetail(_ authorized: GatewayAuthorizedDevice) -> String {
@@ -440,6 +457,7 @@ struct GatewayConnectionDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     let profile: GatewayProfile
     @State private var info: GatewayInfo?
     @State private var updateStatus: GatewayUpdateStatus?
@@ -630,9 +648,18 @@ struct GatewayConnectionDetailView: View {
                 .accessibilityLabel("Done")
             }
         }
-        .task(id: detailLoadIdentity) { await loadInfo() }
-        .task(id: updatePollIdentity) { await pollGatewayUpdate() }
-        .task(id: drainPollIdentity) { await pollAdministrativeDrain() }
+        .task(id: "\(detailLoadIdentity):\(presentationActivity.allowsPresentationPublication)") {
+            guard presentationActivity.allowsPresentationPublication else { return }
+            await loadInfo()
+        }
+        .task(id: "\(updatePollIdentity):\(presentationActivity.allowsPresentationPublication)") {
+            guard presentationActivity.allowsPresentationPublication else { return }
+            await pollGatewayUpdate()
+        }
+        .task(id: "\(drainPollIdentity):\(presentationActivity.allowsPresentationPublication)") {
+            guard presentationActivity.allowsPresentationPublication else { return }
+            await pollAdministrativeDrain()
+        }
         .alert("Forget \(currentProfile.label)?", isPresented: $confirmingForget) {
             Button("Cancel", role: .cancel) {}
             Button("Forget Server", role: .destructive) {
@@ -644,7 +671,14 @@ struct GatewayConnectionDetailView: View {
         } message: {
             Text("The pairing token will be removed from this iPhone. You must pair again to reconnect.")
         }
-        .sheet(isPresented: $configuringSourceRepository) {
+        .tronManagedSystemPresentation(
+            isPresented: $confirmingForget,
+            identity: "settings.connection.forget-confirmation"
+        )
+        .tronManagedSheet(
+            isPresented: $configuringSourceRepository,
+            identity: "settings.gateway-update.source"
+        ) {
             WorkspaceBrowser(initialPath: updateConfig?.sourceRoot) { sourceRoot in
                 Task {
                     guard let saved = await model.configureGatewayUpdate(
@@ -657,10 +691,16 @@ struct GatewayConnectionDetailView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingTechnicalDetails) {
+        .tronManagedSheet(
+            isPresented: $showingTechnicalDetails,
+            identity: "settings.gateway.technical"
+        ) {
             GatewayTechnicalDetailsSheet(details: technicalDetails)
         }
-        .sheet(item: $updateIntent) { intent in
+        .tronManagedSheet(
+            item: $updateIntent,
+            identity: { _ in "settings.gateway.update-confirmation" }
+        ) { intent in
             let presentation = intent.confirmationPresentation
             TronConfirmationSheet(
                 title: presentation.title,
@@ -692,7 +732,10 @@ struct GatewayConnectionDetailView: View {
                 }
             )
         }
-        .sheet(isPresented: $confirmingRollback) {
+        .tronManagedSheet(
+            isPresented: $confirmingRollback,
+            identity: "settings.gateway.rollback-confirmation"
+        ) {
             TronConfirmationSheet(
                 title: "Roll Back Tron Gateway?",
                 message: "The Gateway will restore the previous verified payload and reconnect automatically.",
@@ -710,7 +753,10 @@ struct GatewayConnectionDetailView: View {
                 }
             )
         }
-        .sheet(isPresented: $confirmingRestart) {
+        .tronManagedSheet(
+            isPresented: $confirmingRestart,
+            identity: "settings.gateway.restart-confirmation"
+        ) {
             TronConfirmationSheet(
                 title: "Restart Tron Gateway?",
                 message: "Accepted agent runs finish before Tron restarts. Active terminal sessions must be closed first; the app reconnects automatically.",
@@ -1108,6 +1154,10 @@ struct ImportSettingsView: View {
             allowedContentTypes: [.json, .plainText, .data],
             allowsMultipleSelection: false,
             onCompletion: handleSessionImport
+        )
+        .tronManagedSystemPresentation(
+            isPresented: $showSessionImporter,
+            identity: "settings.session-importer"
         )
         .task { await model.inspectLegacyImport() }
     }

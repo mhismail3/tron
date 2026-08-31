@@ -30,7 +30,7 @@ struct SessionProcessPresentationGuardTests {
         #expect(sheets.components(separatedBy: "@State private var detent: PresentationDetent = .medium").count - 1 == 2)
         #expect(sheets.components(separatedBy: "@State private var detent: PresentationDetent = .large").count - 1 == 1)
         #expect(sheets.components(separatedBy: ".presentationDetents([.medium, .large], selection: $detent)").count - 1 == 3)
-        #expect(sheets.components(separatedBy: ".sheet(item: $selectedProcess)").count - 1 == 2)
+        #expect(sheets.components(separatedBy: "item: $selectedProcess").count - 1 == 2)
         #expect(sheets.contains("Button(action: openTranscript)"))
         #expect(!sheets.contains("NavigationLink"))
         #expect(!sheets.contains(".navigationDestination"))

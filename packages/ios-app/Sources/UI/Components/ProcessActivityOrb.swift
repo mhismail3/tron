@@ -21,8 +21,13 @@ struct ProcessActivityOrbDot: Equatable, Sendable {
 enum ProcessActivityOrbEngine {
     static let reducedMotionTime = 0.6
 
-    static func animationPaused(reduceMotion: Bool, isVisible: Bool, sceneActive: Bool) -> Bool {
-        reduceMotion || !isVisible || !sceneActive
+    static func animationPaused(
+        reduceMotion: Bool,
+        isVisible: Bool,
+        sceneActive: Bool,
+        surfaceActive: Bool = true
+    ) -> Bool {
+        reduceMotion || !isVisible || !sceneActive || !surfaceActive
     }
 
     /// Longer delegated runs animate more slowly without allowing very long
@@ -308,6 +313,7 @@ struct ProcessActivityOrb: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.tronPresentationActivity) private var presentationActivity
 
     var body: some View {
         TimelineView(.animation(
@@ -315,7 +321,8 @@ struct ProcessActivityOrb: View {
             paused: ProcessActivityOrbEngine.animationPaused(
                 reduceMotion: reduceMotion,
                 isVisible: isVisible,
-                sceneActive: scenePhase == .active
+                sceneActive: scenePhase == .active,
+                surfaceActive: presentationActivity.allowsContinuousAnimation
             )
         )) { _ in
             Canvas(rendersAsynchronously: true) { context, canvasSize in

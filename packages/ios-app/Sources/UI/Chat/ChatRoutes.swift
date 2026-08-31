@@ -34,10 +34,16 @@ struct ChatRoutes: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .sheet(isPresented: $showContext) {
+            .tronManagedSheet(
+                isPresented: $showContext,
+                identity: "chat.\(sessionID).context"
+            ) {
                 SessionContextSheet(sessionID: sessionID, onForkCreated: onForkCreated)
             }
-            .sheet(isPresented: $showSettings) {
+            .tronManagedSheet(
+                isPresented: $showSettings,
+                identity: "chat.\(sessionID).settings"
+            ) {
                 SettingsView(
                     scope: .project,
                     projectSessionID: sessionID,
@@ -49,7 +55,10 @@ struct ChatRoutes: ViewModifier {
                 )
                 .presentationDragIndicator(.hidden)
             }
-            .sheet(item: $queuedMessageEditor) { route in
+            .tronManagedSheet(
+                item: $queuedMessageEditor,
+                identity: { "chat.\(sessionID).queue.\($0.id)" }
+            ) { route in
                 if let commit = QueuedMessageManagementPolicy.installedCommit(for: installed),
                    let message = commit.items.first(where: { $0.id == route.id }) {
                     QueuedMessageEditorSheet(
@@ -64,7 +73,10 @@ struct ChatRoutes: ViewModifier {
                     QueueEditingUnavailableSheet()
                 }
             }
-            .sheet(isPresented: $cameraPresented) {
+            .tronManagedSheet(
+                isPresented: $cameraPresented,
+                identity: "chat.\(sessionID).camera"
+            ) {
                 CameraCaptureSheet(onImageCaptured: onCameraImage)
             }
             .photosPicker(
@@ -73,10 +85,20 @@ struct ChatRoutes: ViewModifier {
                 maxSelectionCount: ChatAttachmentImportPolicy.maximumPhotoSelection,
                 matching: .images
             )
-            .sheet(isPresented: $processesPresented) {
+            .tronManagedSystemPresentation(
+                isPresented: $photosPresented,
+                identity: "chat.\(sessionID).photos"
+            )
+            .tronManagedSheet(
+                isPresented: $processesPresented,
+                identity: "chat.\(sessionID).processes"
+            ) {
                 SessionProcessesSheet(sessionID: sessionID)
             }
-            .sheet(item: $interaction) { value in
+            .tronManagedSheet(
+                item: $interaction,
+                identity: { "chat.\(sessionID).interaction.\($0.id)" }
+            ) { value in
                 if value.questionnaire != nil {
                     ExtensionQuestionnaireSheet(
                         sessionID: sessionID,
@@ -99,7 +121,14 @@ struct ChatRoutes: ViewModifier {
                 allowsMultipleSelection: true,
                 onCompletion: onFileImport
             )
-            .sheet(item: $editorRequest) { request in
+            .tronManagedSystemPresentation(
+                isPresented: $filesPresented,
+                identity: "chat.\(sessionID).files"
+            )
+            .tronManagedSheet(
+                item: $editorRequest,
+                identity: { "chat.\(sessionID).editor.\($0.id)" }
+            ) { request in
                 TronConfirmationSheet(
                     title: ComposerEditorRequestPolicy.confirmationTitle,
                     message: ComposerEditorRequestPolicy.confirmationMessage,

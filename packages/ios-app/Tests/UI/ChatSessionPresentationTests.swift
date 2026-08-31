@@ -85,6 +85,30 @@ struct ChatSessionPresentationTests {
         #expect(passive.needsOpeningResume)
     }
 
+    @Test("uncover waits for a covered opening and then retries only when still needed")
+    func coveredOpeningResumePolicy() {
+        #expect(ChatOpeningSurfacePolicy.action(
+            surfaceActive: false,
+            hasOpeningTask: true,
+            needsOpeningResume: false
+        ) == .none)
+        #expect(ChatOpeningSurfacePolicy.action(
+            surfaceActive: true,
+            hasOpeningTask: true,
+            needsOpeningResume: false
+        ) == .waitForCurrentThenBeginIfNeeded)
+        #expect(ChatOpeningSurfacePolicy.action(
+            surfaceActive: true,
+            hasOpeningTask: false,
+            needsOpeningResume: true
+        ) == .begin)
+        #expect(ChatOpeningSurfacePolicy.action(
+            surfaceActive: true,
+            hasOpeningTask: false,
+            needsOpeningResume: false
+        ) == .none)
+    }
+
     @Test("background suspension cancels an unanchored page task")
     func unanchoredPageCancellation() async throws {
         let clock = ManualClock()

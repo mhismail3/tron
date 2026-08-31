@@ -380,3 +380,22 @@ projection advancement does not replace the exact installation currently on scre
 remains tagged to that displayed installation until an actual installed transition occurs. Unanchored runtime
 tool ordering is status-independent, and only rendered IDs retained by the next installed output preserve a
 one-shot discrete-follow entitlement.
+
+## Covered presentation surfaces
+
+Surface coverage pauses only disposable presentation work. Gateway intake,
+sequence admission, canonical reduction, accepted mutations, drafts, receipts,
+and notifications continue unchanged. Covered transcript and dashboard views
+retain their last complete installation and do not replay intermediate events.
+When uncovered, the owning presentation store derives one latest aggregate and
+installs it through the existing generation and frame-admission rules. Chat
+retires any in-flight disposable projection when covered, retains its last
+complete installation, and suppresses accumulated row entrances on the first
+replacement. If coverage interrupts initial chat opening, uncover waits for the
+retiring opening lease and starts one new exact opening only when still needed.
+Dashboard summaries continue updating their indexed authority but publish one
+rows/activity cut only after the dashboard becomes active again. Disposable
+view loads, media preparation, and polls cancel on cover and restart from their
+latest source identity on uncover; accepted mutations and transport operations
+do not move into that lifecycle. A genuine cursor gap still uses normal
+authoritative synchronization.

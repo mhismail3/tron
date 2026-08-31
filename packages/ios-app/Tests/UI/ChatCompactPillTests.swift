@@ -83,6 +83,19 @@ struct ChatCompactPillTests {
         #expect(SessionCompactionControlPolicy.automaticStatus(nil) == "Unavailable")
     }
 
+    @Test("Manage Session projection ignores streaming-only snapshot churn")
+    func manageSessionProjectionIsNarrow() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 7_701)
+            .openingTail(targetEncodedBytes: 4_000)
+        let baseline = SessionContextPresentation(snapshot)
+        snapshot.streaming = SessionScenarioBuilder(seed: 7_702)
+            .historyPage(count: 1, longRowBytes: 16)[0]
+        #expect(SessionContextPresentation(snapshot) == baseline)
+
+        snapshot.contextUsage = ContextUsage(tokens: 100, contextWindow: 1_000, percent: 10)
+        #expect(SessionContextPresentation(snapshot) != baseline)
+    }
+
     @Test("Manage Session distinguishes compacted and pending usage refresh states")
     func sessionContextUsage() {
         #expect(SessionContextUsagePresentation(nil) == .unavailable)

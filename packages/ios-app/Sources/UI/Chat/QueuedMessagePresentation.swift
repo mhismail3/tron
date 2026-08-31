@@ -385,7 +385,10 @@ struct QueuedMessageAttachmentChipRow: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(QueuedMessageAttachmentPresentation.accessibilityLabel(chips: chips))
-        .sheet(item: $previewRequest) { request in
+        .tronManagedSheet(
+            item: $previewRequest,
+            identity: { "chat.queued-attachment.\($0.id)" }
+        ) { request in
             AttachmentFilePreviewSheet(
                 name: request.attachment?.name ?? "Attachment",
                 mimeType: request.attachment?.mimeType ?? "application/octet-stream",

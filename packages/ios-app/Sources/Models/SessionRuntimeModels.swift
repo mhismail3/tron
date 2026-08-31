@@ -455,6 +455,44 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     var displayedQueuedMessages: [QueuedMessage] { queuedItems }
 }
 
+/// Narrow, immutable facts used by Manage Session. Streaming transcript content
+/// is deliberately absent so its publication cannot invalidate that surface.
+struct SessionContextPresentation: Hashable, Sendable {
+    let sessionID: String
+    let phase: SessionPhase
+    let operationKind: SessionOperationState.Kind?
+    let compactionQueued: Bool
+    let contextUsage: ContextUsage?
+    let stats: SessionStats
+    let lastTranscriptKind: TranscriptItem.Kind?
+    let automaticCompactionEnabled: Bool
+    let processOverview: SessionProcessOverview?
+    let model: ModelRef?
+    let thinkingLevel: String
+    let availableThinkingLevels: [String]
+    let name: String?
+    let cwd: String
+    let diagnostics: [RuntimeDiagnostic]
+
+    init(_ snapshot: SessionSnapshot) {
+        sessionID = snapshot.sessionId
+        phase = snapshot.phase
+        operationKind = snapshot.operation?.kind
+        compactionQueued = snapshot.compactionQueued == true
+        contextUsage = snapshot.contextUsage
+        stats = snapshot.stats
+        lastTranscriptKind = snapshot.transcript.last?.kind
+        automaticCompactionEnabled = snapshot.automaticCompactionEnabled
+        processOverview = snapshot.processOverview
+        model = snapshot.model
+        thinkingLevel = snapshot.thinkingLevel
+        availableThinkingLevels = snapshot.availableThinkingLevels
+        name = snapshot.name
+        cwd = snapshot.cwd
+        diagnostics = snapshot.diagnostics
+    }
+}
+
 struct SessionEventEnvelope: Codable, Hashable, Sendable {
     let runtimeGeneration: String
     let eventSequence: Int

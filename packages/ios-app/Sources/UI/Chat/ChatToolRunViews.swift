@@ -186,10 +186,13 @@ struct ToolRunView: View {
             recordChip: recordChip,
             action: openDetails
         )
-            .sheet(isPresented: Binding(
-                get: { resolvedState != nil },
-                set: { if !$0 { resolvedState = nil } }
-            )) {
+            .tronManagedSheet(
+                isPresented: Binding(
+                    get: { resolvedState != nil },
+                    set: { if !$0 { resolvedState = nil } }
+                ),
+                identity: "chat.tool-run.\(run.id)"
+            ) {
                 if let resolvedState {
                     if resolvedState.run.displayCount == 1, let tool = resolvedState.tools.first {
                         let accent: Color = tool.error ? .tronError : .tronEmerald
@@ -270,7 +273,10 @@ struct ReadOnlyToolRunView: View {
             recordChip: { _ in },
             action: { if !resolvedTools.isEmpty { showsDetails = true } }
         )
-        .sheet(isPresented: $showsDetails) {
+        .tronManagedSheet(
+            isPresented: $showsDetails,
+            identity: "chat.read-only-tool-run.\(run.id)"
+        ) {
             if run.displayCount == 1, let tool = resolvedTools.first {
                 let accent: Color = tool.error ? .tronError : .tronEmerald
                 NavigationStack {
@@ -458,9 +464,11 @@ private struct ToolRunDetailSheet: View {
                 }
             }
         }
-        .sheet(item: $selectedToolRoute, onDismiss: {
-            selectedToolPresentation = nil
-        }) { _ in
+        .tronManagedSheet(
+            item: $selectedToolRoute,
+            identity: { "chat.tool-detail.\($0.id)" },
+            onDismiss: { selectedToolPresentation = nil }
+        ) { _ in
             ToolRunSelectedDetailSheet(
                 tool: $selectedToolPresentation,
                 detailDetent: $detailDetent,
@@ -815,16 +823,20 @@ private struct ToolElapsedText: View {
     let color: Color
     @State private var localClock: ToolElapsedClock?
     @State private var clockKey: ToolElapsedClockKey?
+    @State private var isVisible = false
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.scenePhase) private var scenePhase
 
     private var needsLocalClock: Bool { tool.isRunning && tool.durationMs == nil }
 
     var body: some View {
         Group {
-            if needsLocalClock {
-                // Compatibility fallback for older Gateways that do not send a
-                // runtime duration sample while a tool is running. The normal
-                // path renders Gateway-monotonic samples and never ticks from
-                // the device wall clock.
+            if needsLocalClock,
+               PresentationClockPolicy.runs(
+                   surfaceActive: presentationActivity.allowsContinuousAnimation,
+                   sceneActive: scenePhase == .active,
+                   viewportVisible: isVisible
+               ) {
                 TimelineView(.periodic(from: .now, by: 0.1)) { _ in
                     elapsed(at: .now)
                 }
@@ -832,7 +844,11 @@ private struct ToolElapsedText: View {
                 elapsed(at: .now)
             }
         }
-        .onAppear(perform: synchronizeLocalClock)
+        .onAppear {
+            isVisible = true
+            synchronizeLocalClock()
+        }
+        .onDisappear { isVisible = false }
         .onChange(of: tool.id) { _, _ in synchronizeLocalClock() }
         .onChange(of: tool.startedAt) { _, _ in synchronizeLocalClock() }
         .onChange(of: tool.isRunning) { _, _ in synchronizeLocalClock() }
@@ -878,6 +894,9 @@ private struct ToolRunElapsedText: View {
     let run: ChatToolRunPresentation
     let color: Color
     @State private var localClocks: [ToolElapsedClockKey: ToolElapsedClock] = [:]
+    @State private var isVisible = false
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.scenePhase) private var scenePhase
 
     private var needsLocalClocks: Bool {
         run.tools.contains { $0.isRunning && $0.durationMs == nil }
@@ -885,7 +904,12 @@ private struct ToolRunElapsedText: View {
 
     var body: some View {
         Group {
-            if needsLocalClocks {
+            if needsLocalClocks,
+               PresentationClockPolicy.runs(
+                   surfaceActive: presentationActivity.allowsContinuousAnimation,
+                   sceneActive: scenePhase == .active,
+                   viewportVisible: isVisible
+               ) {
                 TimelineView(.periodic(from: .now, by: 0.1)) { _ in
                     elapsed(at: .now)
                 }
@@ -893,7 +917,11 @@ private struct ToolRunElapsedText: View {
                 elapsed(at: .now)
             }
         }
-        .onAppear(perform: synchronizeLocalClocks)
+        .onAppear {
+            isVisible = true
+            synchronizeLocalClocks()
+        }
+        .onDisappear { isVisible = false }
         .onChange(of: run.tools) { _, _ in synchronizeLocalClocks() }
     }
 
@@ -961,7 +989,10 @@ private struct ToolDetailSheetHost: ViewModifier {
     let tool: ChatToolPresentation?
 
     func body(content: Content) -> some View {
-        content.sheet(item: $route) { _ in
+        content.tronManagedSheet(
+            item: $route,
+            identity: { "chat.tool-detail.\($0.id)" }
+        ) { _ in
             if let tool {
                 let accent: Color = tool.error ? .tronError : .tronEmerald
                 NavigationStack {

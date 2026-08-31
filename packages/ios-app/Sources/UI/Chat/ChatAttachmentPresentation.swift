@@ -142,7 +142,10 @@ struct PendingAttachmentChip: View {
     var body: some View {
         previewBase
             .overlay(alignment: .topTrailing) { removeButton }
-            .sheet(isPresented: $showPreview) { previewSheet }
+            .tronManagedSheet(
+                isPresented: $showPreview,
+                identity: "chat.pending-attachment-preview"
+            ) { previewSheet }
     }
 
     @ViewBuilder

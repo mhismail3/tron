@@ -103,6 +103,7 @@ struct ResourceSettingsView: View {
     }
 
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     let projectCWD: String?
     @State private var scope: SettingsScope = .global
     @State private var draft = ResourceSettingsDraft()
@@ -160,14 +161,24 @@ struct ResourceSettingsView: View {
                 }
             }
         }
-        .task(id: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration)) {
+        .task(id: PresentationActivityTaskID(
+            source: SettingsLoadID(
+                target: settingsTarget,
+                invalidationGeneration: model.settingsInvalidationGeneration
+            ),
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication else { return }
             if !allowsProjectScope { scope = .global }
             await load()
         }
         .onChange(of: draft) { _, value in
             if let target = settingsTarget { drafts.update(value, for: target) }
         }
-        .sheet(item: $editor) { value in editorSheet(value) }
+        .tronManagedSheet(
+            item: $editor,
+            identity: { _ in "settings.resource-editor" }
+        ) { value in editorSheet(value) }
     }
 
     private var scopeGroup: some View {

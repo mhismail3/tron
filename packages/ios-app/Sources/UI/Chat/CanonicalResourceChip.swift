@@ -90,7 +90,10 @@ struct CanonicalResourceChip: View, Equatable {
         ) {
             if detailEntry != nil { showsDetail = true }
         }
-        .sheet(isPresented: $showsDetail) {
+        .tronManagedSheet(
+            isPresented: $showsDetail,
+            identity: "chat.canonical-resource"
+        ) {
             if let detailEntry {
                 ComposerResourceDetailSheet(
                     sessionID: sessionID,

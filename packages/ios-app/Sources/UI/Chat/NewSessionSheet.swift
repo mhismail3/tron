@@ -3,6 +3,7 @@ import SwiftUI
 struct NewSessionSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var workspace = ""
     @State private var selectedServerID: String?
     @State private var useDefaultWorkspace = true
@@ -128,13 +129,13 @@ struct NewSessionSheet: View {
                     .disabled(creating || !configurationReady)
                 }
             }
-            .sheet(isPresented: $showBrowser) {
+            .tronManagedSheet(isPresented: $showBrowser, identity: "new-session.workspace") {
                 WorkspaceBrowser(shortcuts: recentWorkspaces, initialPath: workspace) { value in
                     workspace = value
                     useDefaultWorkspace = false
                 }
             }
-            .sheet(isPresented: $showSourceControl) {
+            .tronManagedSheet(isPresented: $showSourceControl, identity: "new-session.source-control") {
                 NewSessionSourceControlSheet(
                     selection: $sourceControl,
                     inspection: gitInspection,
@@ -144,7 +145,7 @@ struct NewSessionSheet: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.hidden)
             }
-            .sheet(isPresented: $showServers) {
+            .tronManagedSheet(isPresented: $showServers, identity: "new-session.servers") {
                 NavigationStack {
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(alignment: .leading, spacing: 16) {
@@ -190,7 +191,7 @@ struct NewSessionSheet: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.hidden)
             }
-            .sheet(isPresented: $showModels) {
+            .tronManagedSheet(isPresented: $showModels, identity: "new-session.models") {
                 NavigationStack {
                     ModelPicker(
                         selection: $selectedModel,
@@ -214,12 +215,16 @@ struct NewSessionSheet: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.hidden)
             }
-            .task(id: NewSessionConfigurationLoadID(
-                profileID: activeProfileID,
-                workspace: workspace,
-                trustInvalidationGeneration: model.trustRevision,
-                profileRevision: model.profileRevision
+            .task(id: PresentationActivityTaskID(
+                source: NewSessionConfigurationLoadID(
+                    profileID: activeProfileID,
+                    workspace: workspace,
+                    trustInvalidationGeneration: model.trustRevision,
+                    profileRevision: model.profileRevision
+                ),
+                presentationActive: presentationActivity.allowsPresentationPublication
             )) {
+                guard presentationActivity.allowsPresentationPublication else { return }
                 if selectedServerID == nil {
                     selectedServerID = model.profiles.selected?.id
                 }

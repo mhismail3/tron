@@ -135,7 +135,10 @@ struct OnboardingView: View {
         .tronTopBlur(.sheet)
         .tint(.tronEmerald)
         .onDisappear { model.noticeCenter.retire(scope: noticeScope) }
-        .sheet(isPresented: $showScanner) {
+        .tronManagedSheet(
+            isPresented: $showScanner,
+            identity: "onboarding.scanner"
+        ) {
             NavigationStack {
                 QRCodeScanner { value in
                     guard let url = URL(string: value), let invitation = PairingInvitationParser.parse(url) else {
@@ -160,7 +163,10 @@ struct OnboardingView: View {
                 }
             }
         }
-        .sheet(isPresented: $showWorkspace) {
+        .tronManagedSheet(
+            isPresented: $showWorkspace,
+            identity: "onboarding.workspace"
+        ) {
             WorkspaceBrowser { path in
                 trustInspection = nil
                 if let target = TrustTarget(cwd: path) { trustLoadOwner.begin(target: target) }

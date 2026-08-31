@@ -50,76 +50,118 @@ struct SessionShellView: View {
     @State private var serverFilter = DashboardServerFilterState()
     @State private var showingServerFilter = false
     @State private var openingSessionID: String?
+    @State private var dashboardPresentation = DashboardPresentationSnapshot()
+    @State private var dashboardPresentationIsActive = false
+    @State private var dashboardReconcileTask: Task<Void, Never>?
 
     init() {
         _serverFilter = State(initialValue: DashboardServerFilterPreferences.load())
     }
 
     var body: some View {
-        dashboardNavigation
-        .sheet(isPresented: $showNewSession) {
-            NewSessionSheet(onCreated: present)
-                .tronTopBlur(.sheet)
-                .presentationDetents([.medium, .large], selection: $newSessionDetent)
-                .presentationDragIndicator(.hidden)
-        }
-        .sheet(isPresented: $showSettings) {
-            SettingsView(onImported: { route in
-                showSettings = false
-                present(route)
-            })
-            .presentationDragIndicator(.hidden)
-        }
-        .sheet(isPresented: $showingServerFilter) {
-            serverFilterSheet
-                .tronTopBlur(.sheet)
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.hidden)
-        }
-        .sheet(item: $sessionToDelete) { session in
-            TronConfirmationSheet(
-                title: "Delete \(session.title)?",
-                message: "This removes the canonical session from the Mac and cannot be undone.",
-                confirmTitle: "Delete",
-                destructive: true,
-                icon: "trash",
-                onConfirm: { delete(session) }
-            )
-        }
-        .alert("Rename Session", isPresented: renameConfirmationPresented, presenting: sessionToRename) { session in
-            TextField("Session name", text: $renameName)
-            Button("Save") { rename(session) }
-                .disabled(renameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            Button("Cancel", role: .cancel) { sessionToRename = nil }
-        }
-        .onChange(of: model.profiles.selected?.id, initial: true) { _, profileID in
-            var route = presentedSession
-            profileRouteOwner.reconcile(
-                profileID: profileID,
-                presentedSession: &route,
-                presentationTarget: model.presentationTarget(for:),
-                revoke: model.revokePresentationIntake
-            )
-            if presentedSession != route {
-                navigationOwner.invalidate()
-                presentedSession = route
+        TronPresentationSurface(id: "dashboard") {
+            TronPresentationActivityReader { activity in
+                dashboardSurface(activity: activity)
             }
         }
-        .onChange(of: model.visibleSessions, initial: true) { _, sessions in
-            let groups = SessionListWorkspaceGroup.groups(from: sessions)
-            sessionExpansion.reconcile(
-                groupCounts: Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.sessions.count) })
+    }
+
+    private func dashboardSurface(activity: PresentationSurfaceActivity) -> some View {
+        dashboardNavigation
+            .tronManagedSheet(
+                isPresented: $showNewSession,
+                identity: "dashboard.new-session"
+            ) {
+                NewSessionSheet(onCreated: present)
+                    .tronTopBlur(.sheet)
+                    .presentationDetents([.medium, .large], selection: $newSessionDetent)
+                    .presentationDragIndicator(.hidden)
+            }
+            .tronManagedSheet(
+                isPresented: $showSettings,
+                identity: "dashboard.settings"
+            ) {
+                SettingsView(onImported: { route in
+                    showSettings = false
+                    present(route)
+                })
+                .presentationDragIndicator(.hidden)
+            }
+            .tronManagedSheet(
+                isPresented: $showingServerFilter,
+                identity: "dashboard.server-filter"
+            ) {
+                serverFilterSheet
+                    .tronTopBlur(.sheet)
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.hidden)
+            }
+            .tronManagedSheet(
+                item: $sessionToDelete,
+                identity: { "dashboard.delete.\($0.id)" }
+            ) { session in
+                TronConfirmationSheet(
+                    title: "Delete \(session.title)?",
+                    message: "This removes the canonical session from the Mac and cannot be undone.",
+                    confirmTitle: "Delete",
+                    destructive: true,
+                    icon: "trash",
+                    onConfirm: { delete(session) }
+                )
+            }
+            .alert("Rename Session", isPresented: renameConfirmationPresented, presenting: sessionToRename) { session in
+                TextField("Session name", text: $renameName)
+                Button("Save") { rename(session) }
+                    .disabled(renameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Cancel", role: .cancel) { sessionToRename = nil }
+            }
+            .tronManagedSystemPresentation(
+                isPresented: renameConfirmationPresented,
+                identity: "dashboard.rename-confirmation"
             )
-            workspaceDisclosure.reconcile(groupIDs: Set(groups.map(\.id)))
-        }
-        .onChange(of: model.dashboardServerSources, initial: true) { _, sources in
-            serverFilter.reconcile(profileIDs: sources.map(\.profileID))
-            if !sources.isEmpty { DashboardServerFilterPreferences.save(serverFilter) }
-        }
-        .task(id: model.actionablePushNavigationRequest?.id) {
-            guard let request = model.actionablePushNavigationRequest else { return }
-            await presentPushNavigation(request)
-        }
+            .onChange(of: model.profiles.selected?.id, initial: true) { _, profileID in
+                var route = presentedSession
+                profileRouteOwner.reconcile(
+                    profileID: profileID,
+                    presentedSession: &route,
+                    presentationTarget: model.presentationTarget(for:),
+                    revoke: model.revokePresentationIntake
+                )
+                if presentedSession != route {
+                    navigationOwner.invalidate()
+                    presentedSession = route
+                }
+                if activity.allowsPresentationPublication { scheduleDashboardReconciliation() }
+            }
+            .background {
+                if activity.allowsPresentationPublication {
+                    Color.clear
+                        .onChange(of: model.dashboardPresentationRevision, initial: true) { _, _ in
+                            scheduleDashboardReconciliation()
+                        }
+                }
+            }
+            .onChange(of: model.profileRevision) { _, _ in
+                guard activity.allowsPresentationPublication else { return }
+                scheduleDashboardReconciliation()
+            }
+            .onChange(of: activity, initial: true) { _, current in
+                dashboardPresentationIsActive = current.allowsPresentationPublication
+                if dashboardPresentationIsActive {
+                    scheduleDashboardReconciliation()
+                } else {
+                    dashboardReconcileTask?.cancel()
+                    dashboardReconcileTask = nil
+                }
+            }
+            .onDisappear {
+                dashboardReconcileTask?.cancel()
+                dashboardReconcileTask = nil
+            }
+            .task(id: model.actionablePushNavigationRequest?.id) {
+                guard let request = model.actionablePushNavigationRequest else { return }
+                await presentPushNavigation(request)
+            }
     }
 
     private var dashboardNavigation: some View {
@@ -158,6 +200,7 @@ struct SessionShellView: View {
                 onForkCreated: present
             )
             .id(route.id)
+            .tronPresentationSurface(id: "chat.\(route.id)")
         }
     }
 
@@ -595,7 +638,7 @@ struct SessionShellView: View {
         } label: {
             HistoricalSessionRow(
                 session: session,
-                activity: model.dashboardActivity(for: session),
+                activity: dashboardPresentation.activity(for: session),
                 showsContext: showsContext
             )
         }
@@ -673,8 +716,37 @@ struct SessionShellView: View {
         .accessibilityHint(isExpanded ? "Double tap to hide sessions" : "Double tap to show sessions")
     }
 
+    private func scheduleDashboardReconciliation() {
+        guard dashboardPresentationIsActive, dashboardReconcileTask == nil else { return }
+        dashboardReconcileTask = Task { @MainActor in
+            defer { dashboardReconcileTask = nil }
+            do { try await DisplayFrameScheduler.displayLink.nextFrame() }
+            catch { return }
+            guard !Task.isCancelled, dashboardPresentationIsActive else { return }
+            reconcileDashboardPresentation()
+        }
+    }
+
+    private func reconcileDashboardPresentation() {
+        let sessions = model.visibleSessions
+        dashboardPresentation = DashboardPresentationSnapshot(
+            sessions: sessions,
+            activityByDashboardID: Dictionary(uniqueKeysWithValues: sessions.map { session in
+                (session.dashboardID, model.dashboardActivity(for: session))
+            })
+        )
+        let groups = SessionListWorkspaceGroup.groups(from: sessions)
+        sessionExpansion.reconcile(
+            groupCounts: Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.sessions.count) })
+        )
+        workspaceDisclosure.reconcile(groupIDs: Set(groups.map(\.id)))
+        let sources = model.dashboardServerSources
+        serverFilter.reconcile(profileIDs: sources.map(\.profileID))
+        if !sources.isEmpty { DashboardServerFilterPreferences.save(serverFilter) }
+    }
+
     private var filteredSessions: [SessionSummary] {
-        model.visibleSessions.filter { session in
+        dashboardPresentation.sessions.filter { session in
             serverFilter.allows(
                 session.gatewayProfileID,
                 selectedProfileID: model.profiles.selected?.id
@@ -911,11 +983,26 @@ private struct HistoricalSessionRow: View {
     let session: SessionSummary
     let activity: DashboardSessionActivity
     let showsContext: Bool
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var isVisible = false
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: DashboardActivityClock.refreshInterval)) { timeline in
-            row(relativeTo: timeline.date)
+        Group {
+            if PresentationClockPolicy.runs(
+                surfaceActive: presentationActivity.allowsContinuousAnimation,
+                sceneActive: scenePhase == .active,
+                viewportVisible: isVisible
+            ) {
+                TimelineView(.periodic(from: .now, by: DashboardActivityClock.refreshInterval)) { timeline in
+                    row(relativeTo: timeline.date)
+                }
+            } else {
+                row(relativeTo: .now)
+            }
         }
+        .onAppear { isVisible = true }
+        .onDisappear { isVisible = false }
     }
 
     private func row(relativeTo now: Date) -> some View {

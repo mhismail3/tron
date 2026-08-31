@@ -3,6 +3,24 @@ import Observation
 import PhotosUI
 import SwiftUI
 
+enum ChatOpeningSurfaceAction: Equatable {
+    case none
+    case begin
+    case waitForCurrentThenBeginIfNeeded
+}
+
+enum ChatOpeningSurfacePolicy {
+    static func action(
+        surfaceActive: Bool,
+        hasOpeningTask: Bool,
+        needsOpeningResume: Bool
+    ) -> ChatOpeningSurfaceAction {
+        guard surfaceActive else { return .none }
+        if hasOpeningTask { return .waitForCurrentThenBeginIfNeeded }
+        return needsOpeningResume ? .begin : .none
+    }
+}
+
 /// Disposable, session-scoped presentation state. Canonical session facts stay
 /// in AppModel and the transcript store; this owner is abandoned on route
 /// retirement and rebuilt from canonical snapshot plus bounded draft facts.

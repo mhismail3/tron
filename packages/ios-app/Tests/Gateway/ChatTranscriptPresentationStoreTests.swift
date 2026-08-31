@@ -581,6 +581,59 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("covered suspension preserves the installed frame and reconciles once without entrances")
+    func coveredSuspensionPreservesAndReconciles() async throws {
+        try await withTestWatchdog { @MainActor in
+            var baseline = try SessionScenarioBuilder(seed: 1_220)
+                .openingTail(targetEncodedBytes: 8_000)
+            let barrier = TranscriptProjectionBarrier()
+            let store = ChatTranscriptPresentationStore(workGate: barrier.block)
+            let baselineTag = ChatTranscriptProjectionTag(snapshot: baseline, presentationGeneration: 7)
+            store.submit(snapshot: baseline, tag: baselineTag)
+            await barrier.waitForBuildCount(1)
+            barrier.releaseBuild(at: 0)
+            _ = try await store.waitForInstall(of: baselineTag)
+
+            let added = SessionScenarioBuilder(seed: 1_221)
+                .historyPage(count: 1, longRowBytes: 16)[0]
+            baseline.transcript.append(added)
+            baseline.transcriptTotal = baseline.transcript.count
+            baseline.revision += 1
+            baseline.eventSequence += 1
+            let coveredTag = ChatTranscriptProjectionTag(snapshot: baseline, presentationGeneration: 7)
+            #expect(store.submit(snapshot: baseline, tag: coveredTag))
+            await barrier.waitForBuildCount(2)
+            let (waiterRegistered, waiterRegistration) = AsyncStream<Void>.makeStream(
+                bufferingPolicy: .bufferingNewest(1)
+            )
+            let waiter = Task { @MainActor in
+                try await store.hostedWaitForInstall(of: coveredTag) {
+                    waiterRegistration.yield()
+                    waiterRegistration.finish()
+                }
+            }
+            for await _ in waiterRegistered { break }
+
+            store.suspendPendingWork()
+            barrier.releaseBuild(at: 1)
+            #expect(store.installed?.tag == baselineTag)
+            do {
+                _ = try await waiter.value
+                Issue.record("covered projection unexpectedly installed")
+            } catch is CancellationError {
+                // Covered derivation is disposable; authority remains elsewhere.
+            }
+
+            #expect(store.submit(snapshot: baseline, tag: coveredTag))
+            await barrier.waitForBuildCount(3)
+            barrier.releaseBuild(at: 2)
+            _ = try await store.waitForInstall(of: coveredTag)
+            #expect(store.suppressesEntrances(for: coveredTag))
+            #expect(store.pendingEntranceIDs.isEmpty)
+            #expect(!store.installed!.timeline.items.isEmpty)
+        }
+    }
+
     @Test("foreground aggregate reconciliation suppresses row entrance replay")
     func foregroundReconciliationSuppressesEntrances() async throws {
         try await withTestWatchdog { @MainActor in

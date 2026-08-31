@@ -153,6 +153,33 @@ struct SessionPresentationStoreTests {
         #expect(model.authoritativeSnapshot(for: snapshot.sessionId) == snapshot)
     }
 
+    @Test("Manage Session projection does not publish streaming-only snapshot churn")
+    func contextProjectionIsNarrowlyObservable() throws {
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        var snapshot = try SessionScenarioBuilder(seed: 8_101).openingTail(targetEncodedBytes: 4_096)
+        store.installHostedAuthoritativeSnapshot(snapshot)
+        let baseline = try #require(store.contextPresentation(for: snapshot.sessionId))
+        let changed = Mutex(false)
+        withObservationTracking {
+            _ = store.contextPresentation(for: snapshot.sessionId)
+        } onChange: {
+            changed.withLock { $0 = true }
+        }
+
+        snapshot.streaming = snapshot.transcript.last
+        store.replaceHostedSnapshot(snapshot)
+        #expect(store.contextPresentation(for: snapshot.sessionId) == baseline)
+        #expect(!changed.withLock { $0 })
+
+        snapshot.cwd += "/nested"
+        store.replaceHostedSnapshot(snapshot)
+        #expect(changed.withLock { $0 })
+        #expect(store.contextPresentation(for: snapshot.sessionId)?.cwd == snapshot.cwd)
+    }
+
     @Test("mounted transcript window retains only an exact prefix while authority stays unchanged")
     func mountedTranscriptWindowUsesExactCoverage() throws {
         var tail = try SessionScenarioBuilder(seed: 8_811).openingTail(targetEncodedBytes: 4_096)

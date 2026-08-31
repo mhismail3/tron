@@ -29,7 +29,10 @@ struct InAppNoticeHost: View {
         .ignoresSafeArea()
         .onAppear { consumeLogsIfOwner() }
         .onChange(of: model.logsPresentationRequested) { _, _ in consumeLogsIfOwner() }
-        .sheet(isPresented: $showLogs) {
+        .tronManagedSheet(
+            isPresented: $showLogs,
+            identity: "notice.gateway-logs"
+        ) {
             NavigationStack {
                 GatewayLogsSettingsView()
                     .toolbar {
@@ -355,9 +358,14 @@ private struct NoticeToolbarAlignmentReader: UIViewRepresentable {
 struct InAppNoticeWindowInstaller: UIViewRepresentable {
     let model: AppModel
     let colorScheme: ColorScheme?
+    let presentationActivity: PresentationActivityCoordinator
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(model: model, colorScheme: colorScheme)
+        Coordinator(
+            model: model,
+            colorScheme: colorScheme,
+            presentationActivity: presentationActivity
+        )
     }
 
     func makeUIView(context: Context) -> NoticeWindowAnchorView {
@@ -367,7 +375,11 @@ struct InAppNoticeWindowInstaller: UIViewRepresentable {
     }
 
     func updateUIView(_ view: NoticeWindowAnchorView, context: Context) {
-        context.coordinator.update(model: model, colorScheme: colorScheme)
+        context.coordinator.update(
+            model: model,
+            colorScheme: colorScheme,
+            presentationActivity: presentationActivity
+        )
         context.coordinator.attach(to: view.window?.windowScene)
     }
 
@@ -380,22 +392,33 @@ struct InAppNoticeWindowInstaller: UIViewRepresentable {
     final class Coordinator {
         private var model: AppModel
         private var colorScheme: ColorScheme?
+        private var presentationActivity: PresentationActivityCoordinator
         private var scene: UIWindowScene?
         private var overlayWindow: NoticeOverlayWindow?
         private let interactionRegistry = NoticeOverlayInteractionRegistry()
         private let hostingController: UIHostingController<AnyView>
 
-        init(model: AppModel, colorScheme: ColorScheme?) {
+        init(
+            model: AppModel,
+            colorScheme: ColorScheme?,
+            presentationActivity: PresentationActivityCoordinator
+        ) {
             self.model = model
             self.colorScheme = colorScheme
+            self.presentationActivity = presentationActivity
             hostingController = UIHostingController(rootView: AnyView(EmptyView()))
             hostingController.view.backgroundColor = .clear
             updateRootView()
         }
 
-        func update(model: AppModel, colorScheme: ColorScheme?) {
+        func update(
+            model: AppModel,
+            colorScheme: ColorScheme?,
+            presentationActivity: PresentationActivityCoordinator
+        ) {
             self.model = model
             self.colorScheme = colorScheme
+            self.presentationActivity = presentationActivity
             updateRootView()
         }
 
@@ -431,6 +454,7 @@ struct InAppNoticeWindowInstaller: UIViewRepresentable {
                 .coordinateSpace(name: NoticeOverlayCoordinateSpace.name)
                 .environment(model)
                 .environment(\.noticeOverlayInteractionRegistry, interactionRegistry)
+                .environment(\.tronPresentationActivityCoordinator, presentationActivity)
                 .tronPresentation()
                 .preferredColorScheme(colorScheme)
             )

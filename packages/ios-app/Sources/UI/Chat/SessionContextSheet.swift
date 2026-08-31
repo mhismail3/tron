@@ -18,16 +18,6 @@ enum SessionCompactionControlPolicy {
         return .idle
     }
 
-    static func canRequest(snapshot: SessionSnapshot, submitting: Bool, exporting: Bool) -> Bool {
-        canRequest(
-            phase: snapshot.phase,
-            operationKind: snapshot.operation?.kind,
-            compactionQueued: snapshot.compactionQueued == true,
-            submitting: submitting,
-            exporting: exporting
-        )
-    }
-
     static func canRequest(
         phase: SessionPhase,
         operationKind: SessionOperationState.Kind? = nil,
@@ -183,6 +173,7 @@ struct SessionContextSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var destination: ManageSessionDestination?
     @State private var showRename = false
     @State private var name = ""
@@ -194,6 +185,17 @@ struct SessionContextSheet: View {
     @State private var gitLoadGeneration = 0
     @State private var capturedNoticeScope: InAppNoticeScope?
     @State private var fallbackNoticeScope = InAppNoticeScope.presentation(UUID())
+    @State private var presentation: SessionContextPresentation?
+
+    private var presentationSource: SessionContextPresentation? {
+        model.sessionContextPresentation(for: sessionID)
+    }
+
+    private var displayedPresentation: SessionContextPresentation? {
+        presentation ?? (
+            presentationActivity.allowsPresentationPublication ? presentationSource : nil
+        )
+    }
 
     private var noticeScope: InAppNoticeScope {
         if let capturedNoticeScope { return capturedNoticeScope }
@@ -207,7 +209,7 @@ struct SessionContextSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    if let snapshot = model.authoritativeSnapshot(for: sessionID) {
+                    if let snapshot = displayedPresentation {
                         contextUsageCard(snapshot)
                         configurationSection(snapshot)
                         processHistorySection(snapshot)
@@ -224,7 +226,7 @@ struct SessionContextSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    if let snapshot = model.authoritativeSnapshot(for: sessionID) {
+                    if let snapshot = displayedPresentation {
                         compactToolbarButton(snapshot)
                     }
                 }
@@ -240,16 +242,31 @@ struct SessionContextSheet: View {
                     .accessibilityLabel("Done")
                 }
             }
-            .task(id: model.authoritativeSnapshot(for: sessionID)?.cwd) {
+            .task(id: "\(presentation?.cwd ?? "none"):\(presentationActivity.allowsPresentationPublication)") {
+                guard presentationActivity.allowsPresentationPublication else { return }
                 gitLoadGeneration &+= 1
                 let generation = gitLoadGeneration
                 gitPresentation = .loading
-                await loadGit(
-                    snapshot: model.authoritativeSnapshot(for: sessionID),
-                    generation: generation
-                )
+                await loadGit(snapshot: presentation, generation: generation)
             }
-            .sheet(item: $destination) { route in
+            .background {
+                if presentationActivity.allowsPresentationPublication {
+                    Color.clear
+                        .onChange(of: presentationSource, initial: true) { _, value in
+                            if presentation != value { presentation = value }
+                        }
+                }
+            }
+            .onChange(of: presentationActivity) { previous, current in
+                guard !previous.allowsPresentationPublication,
+                      current.allowsPresentationPublication else { return }
+                let value = presentationSource
+                if presentation != value { presentation = value }
+            }
+            .tronManagedSheet(
+                item: $destination,
+                identity: { "session.\(sessionID).manage.\($0.id)" }
+            ) { route in
                 switch route {
                 case .agentContext:
                     AgentContextSheet(sessionID: sessionID)
@@ -277,6 +294,10 @@ struct SessionContextSheet: View {
                 }
                 Button("Cancel", role: .cancel) {}
             }
+            .tronManagedSystemPresentation(
+                isPresented: $showRename,
+                identity: "manage-session.rename"
+            )
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
@@ -300,10 +321,12 @@ struct SessionContextSheet: View {
         }
     }
 
-    private func compactToolbarButton(_ snapshot: SessionSnapshot) -> some View {
+    private func compactToolbarButton(_ snapshot: SessionContextPresentation) -> some View {
         Button {
             guard SessionCompactionControlPolicy.canRequest(
-                snapshot: snapshot,
+                phase: snapshot.phase,
+                operationKind: snapshot.operationKind,
+                compactionQueued: snapshot.compactionQueued,
                 submitting: compacting,
                 exporting: exportingFormat != nil
             ) else { return }
@@ -332,7 +355,9 @@ struct SessionContextSheet: View {
             .tronToolbarAction()
         }
         .disabled(!SessionCompactionControlPolicy.canRequest(
-            snapshot: snapshot,
+            phase: snapshot.phase,
+            operationKind: snapshot.operationKind,
+            compactionQueued: snapshot.compactionQueued,
             submitting: compacting,
             exporting: exportingFormat != nil
         ))
@@ -341,7 +366,7 @@ struct SessionContextSheet: View {
             : (compacting || snapshot.phase == .compacting) ? "In progress" : "")
     }
 
-    private func contextUsageCard(_ snapshot: SessionSnapshot) -> some View {
+    private func contextUsageCard(_ snapshot: SessionContextPresentation) -> some View {
         let usage = SessionContextUsagePresentation(snapshot.contextUsage)
         let cacheValue = snapshot.stats.latestCacheHitRate.map {
             "\($0.formatted(.number.precision(.fractionLength(1))))%"
@@ -353,7 +378,7 @@ struct SessionContextSheet: View {
             nil
         }
         let refreshPresentation = SessionContextUsageRefreshPresentation(
-            lastTranscriptKind: snapshot.transcript.last?.kind,
+            lastTranscriptKind: snapshot.lastTranscriptKind,
             assistantMessages: snapshot.stats.assistantMessages
         )
         let statistics = [
@@ -420,7 +445,7 @@ struct SessionContextSheet: View {
         .accessibilityLabel(usage.accessibilityLabel)
     }
 
-    private func contextAndCompactionRow(contextValue: String?, snapshot: SessionSnapshot) -> some View {
+    private func contextAndCompactionRow(contextValue: String?, snapshot: SessionContextPresentation) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             if let contextValue {
                 Text(contextValue)
@@ -471,7 +496,7 @@ struct SessionContextSheet: View {
     private var configurationRowAccent: Color { .tronPurple }
     private var sessionRowAccent: Color { .tronBlue }
 
-    private func processHistorySection(_ snapshot: SessionSnapshot) -> some View {
+    private func processHistorySection(_ snapshot: SessionContextPresentation) -> some View {
         let overview = snapshot.processOverview
         let durable = model.gatewayInfo?.capabilities.contains(SessionProcessAdmissionPolicy.historyCapability) == true
         let subtitle: String
@@ -498,7 +523,7 @@ struct SessionContextSheet: View {
         }
     }
 
-    private func configurationSection(_ snapshot: SessionSnapshot) -> some View {
+    private func configurationSection(_ snapshot: SessionContextPresentation) -> some View {
         TronSettingsGroup("Configuration", accent: .tronPurple) {
             VStack(spacing: 0) {
                 TronModelSelectionRow(
@@ -547,7 +572,7 @@ struct SessionContextSheet: View {
         }
     }
 
-    private func sessionSection(_ snapshot: SessionSnapshot) -> some View {
+    private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {
         TronSettingsGroup("Session", detail: snapshot.cwd, detailInline: true, accent: .tronCyan) {
             VStack(spacing: 0) {
                 manageRow(
@@ -694,7 +719,7 @@ struct SessionContextSheet: View {
         ) ? "Exporting" : "")
     }
 
-    private func loadGit(snapshot: SessionSnapshot?, generation: Int) async {
+    private func loadGit(snapshot: SessionContextPresentation?, generation: Int) async {
         guard let snapshot else { return }
         do {
             let inspection = try await model.gatewayDiagnostics.inspectGit(path: snapshot.cwd)
@@ -702,7 +727,7 @@ struct SessionContextSheet: View {
                 requestGeneration: generation,
                 currentGeneration: gitLoadGeneration,
                 requestedCwd: snapshot.cwd,
-                currentCwd: model.authoritativeSnapshot(for: sessionID)?.cwd
+                currentCwd: presentation?.cwd
             ) else { return }
             gitPresentation = SessionGitPresentation.resolve(inspection)
         } catch is CancellationError {
@@ -712,7 +737,7 @@ struct SessionContextSheet: View {
                 requestGeneration: generation,
                 currentGeneration: gitLoadGeneration,
                 requestedCwd: snapshot.cwd,
-                currentCwd: model.authoritativeSnapshot(for: sessionID)?.cwd
+                currentCwd: presentation?.cwd
             ) else { return }
             gitPresentation = .failed(error.localizedDescription)
             surfaceActionError(error)
@@ -766,6 +791,7 @@ private struct AgentContextSheet: View {
     let sessionID: String
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var showInstructions = false
 
     var body: some View {
@@ -867,10 +893,14 @@ private struct AgentContextSheet: View {
                     .accessibilityLabel("Done")
                 }
             }
-            .task(id: model.sessionContextRevision(for: sessionID)) {
+            .task(id: "\(model.sessionContextRevision(for: sessionID)):\(presentationActivity.allowsPresentationPublication)") {
+                guard presentationActivity.allowsPresentationPublication else { return }
                 await model.loadContext(sessionID: sessionID)
             }
-            .sheet(isPresented: $showInstructions) {
+            .tronManagedSheet(
+                isPresented: $showInstructions,
+                identity: "session.\(sessionID).agent-context.instructions"
+            ) {
                 NavigationStack {
                     TronReadOnlyTextView(text: summary.instructions)
                         .tronTopBlurSurface()

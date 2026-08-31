@@ -77,6 +77,10 @@ struct TerminalSheet: View {
         } message: {
             Text("The shell and its running process group will stop. Closing the sheet alone only detaches.")
         }
+        .tronManagedSystemPresentation(
+            isPresented: $confirmQuit,
+            identity: "terminal.quit-confirmation"
+        )
         .tronTopBlur(.sheet)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)

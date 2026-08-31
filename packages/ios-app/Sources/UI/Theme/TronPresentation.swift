@@ -1576,8 +1576,12 @@ enum TronPulseLoadingIndicatorEngine {
     static let pulseCount = 3
     static let cycleDuration = 1.6
 
-    static func animationPaused(reduceMotion: Bool, sceneActive: Bool) -> Bool {
-        reduceMotion || !sceneActive
+    static func animationPaused(
+        reduceMotion: Bool,
+        sceneActive: Bool,
+        surfaceActive: Bool = true
+    ) -> Bool {
+        reduceMotion || !sceneActive || !surfaceActive
     }
 
     static func progress(pulse: Int, time: Double) -> Double {
@@ -1603,6 +1607,8 @@ struct TronPulseLoadingIndicator: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @State private var isVisible = false
 
     var body: some View {
         let resolvedAccent = settingsTheme?.accent ?? accent
@@ -1610,10 +1616,11 @@ struct TronPulseLoadingIndicator: View {
             minimumInterval: 1 / 30,
             paused: TronPulseLoadingIndicatorEngine.animationPaused(
                 reduceMotion: reduceMotion,
-                sceneActive: scenePhase == .active
+                sceneActive: scenePhase == .active,
+                surfaceActive: presentationActivity.allowsContinuousAnimation && isVisible
             )
         )) { _ in
-            Canvas { context, canvasSize in
+            Canvas(rendersAsynchronously: true) { context, canvasSize in
                 let diameter = min(canvasSize.width, canvasSize.height)
                 let center = CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
                 if reduceMotion {
@@ -1652,6 +1659,8 @@ struct TronPulseLoadingIndicator: View {
             }
         }
         .frame(width: size, height: size)
+        .onAppear { isVisible = true }
+        .onDisappear { isVisible = false }
         .accessibilityHidden(true)
     }
 }

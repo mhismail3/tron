@@ -193,6 +193,7 @@ final class AppModel {
     /// GatewayProfileStore owns transactional persistence; this revision makes
     /// profile metadata changes observable to SwiftUI without duplicating it.
     private(set) var profileRevision = 0
+    private(set) var dashboardPresentationRevision = 0
     var legacyImportAvailable = false
     var legacyImportedCount = 0
     var workspace: WorkspaceListing?
@@ -450,6 +451,10 @@ final class AppModel {
 
     func authoritativeSnapshot(for sessionID: String) -> SessionSnapshot? {
         sessionPresentation.authoritativeSnapshot(for: sessionID)
+    }
+
+    func sessionContextPresentation(for sessionID: String) -> SessionContextPresentation? {
+        sessionPresentation.contextPresentation(for: sessionID)
     }
 
     func transcriptSnapshot(for sessionID: String) -> SessionSnapshot? {
@@ -2868,10 +2873,14 @@ final class AppModel {
     }
 
     private func installSelectedDashboardCatalog() {
-        guard let profile = profiles.selected else { return }
+        guard let profile = profiles.selected else {
+            dashboardPresentationRevision &+= 1
+            return
+        }
         dashboardSessionsByProfile[profile.id] = sessionCatalog.sessions.map {
             $0.withGatewaySource(id: profile.id, label: profile.label)
         }
+        dashboardPresentationRevision &+= 1
     }
 
     private func adoptConnectedGatewayIdentity() {
@@ -2903,6 +2912,7 @@ final class AppModel {
         for profileID in Array(dashboardStatesByProfile.keys) where !currentProfileIDs.contains(profileID) {
             dashboardStatesByProfile[profileID] = nil
         }
+        dashboardPresentationRevision &+= 1
         dashboardConnections.reconcile(
             profiles: profiles.profiles,
             selectedProfileID: selectedProfileID,
@@ -2921,6 +2931,7 @@ final class AppModel {
                     $0.withGatewaySource(id: profile.id, label: profile.label)
                 }
                 self.dashboardStatesByProfile[profile.id] = .stale
+                self.dashboardPresentationRevision &+= 1
             }
         }
     }
@@ -2944,6 +2955,7 @@ final class AppModel {
             }
             dashboardStatesByProfile[profile.id] = .stale
         }
+        dashboardPresentationRevision &+= 1
     }
 
     private func reconcileSelection() {
@@ -3062,11 +3074,16 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
             incomingSessionCount: sessions.count,
             state: state
         ) {
+            guard dashboardStatesByProfile[profileID] != state else { return }
             dashboardStatesByProfile[profileID] = state
+            dashboardPresentationRevision &+= 1
             return
         }
+        guard dashboardSessionsByProfile[profileID] != sessions
+            || dashboardStatesByProfile[profileID] != state else { return }
         dashboardSessionsByProfile[profileID] = sessions
         dashboardStatesByProfile[profileID] = state
+        dashboardPresentationRevision &+= 1
     }
 }
 

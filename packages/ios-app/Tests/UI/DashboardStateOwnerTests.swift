@@ -785,9 +785,36 @@ struct DashboardStateOwnerTests {
         } onChange: {
             changed.withLock { $0 = true }
         }
+        let presentationRevision = model.dashboardPresentationRevision
         model.sessions = [summary(revision: 1)]
         #expect(changed.withLock { $0 })
         #expect(model.sessions.first?.id == "session")
+        #expect(model.dashboardPresentationRevision > presentationRevision)
+    }
+
+    @Test("dashboard presentation freezes exact rows and activity together")
+    func dashboardPresentationSnapshotIsAtomic() {
+        let session = summary(revision: 3, phase: .running)
+        let snapshot = DashboardPresentationSnapshot(
+            sessions: [session],
+            activityByDashboardID: [session.dashboardID: .active]
+        )
+        #expect(snapshot.sessions == [session])
+        #expect(snapshot.activity(for: session) == .active)
+
+        let unknown = SessionSummary(
+            id: "unknown",
+            name: "Unknown",
+            cwd: "/workspace",
+            parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            messageCount: 0,
+            firstMessage: "",
+            phase: .idle,
+            summaryRevision: 1
+        )
+        #expect(snapshot.activity(for: unknown) == .idle)
     }
 
     private func summary(

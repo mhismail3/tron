@@ -178,7 +178,15 @@ final class SessionPresentationStore {
 
     private(set) var target: SessionPresentationIdentity?
     private var pendingTarget: SessionPresentationIdentity?
-    private(set) var snapshot: SessionSnapshot?
+    private(set) var snapshot: SessionSnapshot? {
+        didSet {
+            let next = snapshot.map(SessionContextPresentation.init)
+            if sessionContextPresentation != next {
+                sessionContextPresentation = next
+            }
+        }
+    }
+    private(set) var sessionContextPresentation: SessionContextPresentation?
     private(set) var chatCanonicalGeneration = 0
     private(set) var chatTimelineGeneration = 0
     private(set) var isAuthoritative = false
@@ -258,6 +266,13 @@ final class SessionPresentationStore {
     func authoritativeSnapshot(for sessionID: String) -> SessionSnapshot? {
         guard isAuthoritative, ownsSession(sessionID), snapshot?.sessionId == sessionID else { return nil }
         return snapshot
+    }
+
+    func contextPresentation(for sessionID: String) -> SessionContextPresentation? {
+        guard isAuthoritative,
+              ownsSession(sessionID),
+              sessionContextPresentation?.sessionID == sessionID else { return nil }
+        return sessionContextPresentation
     }
 
     var mountedTranscriptCoverage: MountedTranscriptCoverage? {

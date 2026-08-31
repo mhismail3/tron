@@ -183,6 +183,7 @@ struct ProjectResourcesView: View {
     let sessionID: String
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var loading = false
     @State private var reloading = false
     @State private var loadGeneration = 0
@@ -253,11 +254,15 @@ struct ProjectResourcesView: View {
                     .accessibilityLabel("Done")
                 }
             }
-            .task(id: model.sessionResourceRevision(for: sessionID)) {
+            .task(id: "\(model.sessionResourceRevision(for: sessionID)):\(presentationActivity.allowsPresentationPublication)") {
+                guard presentationActivity.allowsPresentationPublication else { return }
                 if overviewSections.isEmpty { installOverview() }
                 await load()
             }
-            .sheet(item: $selected) { selection in
+            .tronManagedSheet(
+                item: $selected,
+                identity: { _ in "settings.project-resource-detail" }
+            ) { selection in
                 ProjectResourceDetailSheet(selection: selection) {
                     selected = nil
                 }
@@ -386,13 +391,18 @@ struct ProjectResourcesView: View {
     }
 
     private func load() async {
+        guard presentationActivity.allowsPresentationPublication else { return }
         loadGeneration &+= 1
         let generation = loadGeneration
         loading = true
+        defer {
+            if generation == loadGeneration { loading = false }
+        }
         await model.loadResources(sessionID: sessionID)
-        guard generation == loadGeneration else { return }
+        guard !Task.isCancelled,
+              presentationActivity.allowsPresentationPublication,
+              generation == loadGeneration else { return }
         installOverview()
-        loading = false
     }
 }
 

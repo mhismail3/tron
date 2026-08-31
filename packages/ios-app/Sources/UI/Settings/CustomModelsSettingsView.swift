@@ -4,6 +4,7 @@ struct CustomModelsSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     private let target = CustomModelTarget.global
     @State private var document = ""
     @State private var documentRoot: [String: JSONValue] = [:]
@@ -86,13 +87,29 @@ struct CustomModelsSettingsView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingAdvanced) {
+        .tronManagedSheet(
+            isPresented: $showingAdvanced,
+            identity: "settings.custom-model.advanced"
+        ) {
             advancedEditorSheet
         }
-        .task(id: CustomModelLoadID(
-            target: target,
-            invalidationGeneration: model.customModelInvalidationGeneration
-        )) { await load() }
+        .task(id: PresentationActivityTaskID(
+            source: CustomModelLoadID(
+                target: target,
+                invalidationGeneration: model.customModelInvalidationGeneration
+            ),
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication else { return }
+            await load()
+        }
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
+            guard !active else { return }
+            rebuildTask?.cancel()
+            rebuildTask = nil
+            localTransformationTask?.cancel()
+            localTransformationTask = nil
+        }
         .onDisappear {
             rebuildTask?.cancel()
             rebuildTask = nil
@@ -101,7 +118,7 @@ struct CustomModelsSettingsView: View {
         }
         .alert(
             "Remove \(providerRemovalName)?",
-            isPresented: Binding(get: { providerToRemove != nil }, set: { if !$0 { providerToRemove = nil } })
+            isPresented: providerRemovalPresented
         ) {
             Button("Cancel", role: .cancel) { providerToRemove = nil }
             Button("Remove Provider", role: .destructive) {
@@ -113,6 +130,17 @@ struct CustomModelsSettingsView: View {
                 rebuildDocument()
             }
         }
+        .tronManagedSystemPresentation(
+            isPresented: providerRemovalPresented,
+            identity: "settings.custom-model.remove-confirmation"
+        )
+    }
+
+    private var providerRemovalPresented: Binding<Bool> {
+        Binding(
+            get: { providerToRemove != nil },
+            set: { if !$0 { providerToRemove = nil } }
+        )
     }
 
     private var advancedEditorSheet: some View {
@@ -362,17 +390,23 @@ struct CustomModelsSettingsView: View {
     }
 
     private func load() async {
-        guard await model.loadCustomModels(target: target) else { return }
+        guard presentationActivity.allowsPresentationPublication,
+              await model.loadCustomModels(target: target),
+              !Task.isCancelled,
+              presentationActivity.allowsPresentationPublication else { return }
         await loadFromProjection()
     }
 
     private func loadFromProjection() async {
-        guard !saving, draftOwner.admitsPublication,
+        guard presentationActivity.allowsPresentationPublication,
+              !saving, draftOwner.admitsPublication,
               let root = model.customModels(for: target)?.objectValue else { return }
         let value = root["document"] ?? .object(["providers": .object([:])])
         do {
             let prepared = try await prepareOffMain(value)
-            guard !saving, draftOwner.admitsPublication,
+            guard !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  !saving, draftOwner.admitsPublication,
                   model.customModels(for: target)?.objectValue == root else { return }
             install(prepared)
             redacted = root["redacted"]?.boolValue ?? false
@@ -568,7 +602,10 @@ private struct CustomModelProviderRow<Label: View, Destination: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
-        .sheet(isPresented: $isPresented) {
+        .tronManagedSheet(
+            isPresented: $isPresented,
+            identity: "settings.custom-model.destination.\(provider.identifier)"
+        ) {
             NavigationStack {
                 destination()
                     .toolbar {
