@@ -11,55 +11,60 @@ struct ExtensionFormSheet: View {
     let onLocallyClosed: () -> Void
 
     @State private var draft = ExtensionFormDraft()
-    @State private var currentIndex = 0
-    @State private var reviewing = false
+    @State private var activeOtherQuestionIDs: Set<String> = []
+    @State private var currentQuestionIndex = 0
     @State private var submitting = false
     @State private var errorMessage: String?
     @State private var now = Date()
+    @FocusState private var focusedQuestionID: String?
 
     private var form: ExtensionFormDescriptor? { interaction.form }
     private var currentQuestion: ExtensionFormQuestion? {
-        guard let form, form.questions.indices.contains(currentIndex) else { return nil }
-        return form.questions[currentIndex]
+        guard let form, form.questions.indices.contains(currentQuestionIndex) else { return nil }
+        return form.questions[currentQuestionIndex]
     }
     private var expiry: Date? { interaction.expiresAt.flatMap(GatewayTimestamp.parse) }
     private var expired: Bool { expiry.map { now >= $0 } ?? false }
     private var interactionScope: String { "\(interaction.id)|\(interaction.hostEpoch)|\(interaction.presentationRevision)" }
     private var responseValidationMessage: String? {
-        guard let form, draft.isComplete(form) else { return nil }
+        guard let form, draftIsComplete(form) else { return nil }
         return ExtensionInteractionResponsePolicy.formError(draft.answer(for: form), descriptor: form)
     }
     private var canSubmit: Bool {
         guard !expired, !submitting, let form else { return false }
-        return draft.isComplete(form) && responseValidationMessage == nil
+        return draftIsComplete(form) && responseValidationMessage == nil
     }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if let form {
-                        progress(form)
-                        if reviewing { review(form) }
-                        else if let currentQuestion { questionView(currentQuestion) }
-                        navigation(form)
-                    } else {
-                        Label("This form is unavailable.", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(Color.tronError)
+            VStack(spacing: 0) {
+                if let form {
+                    fixedQuestionStatus(form)
+
+                    TabView(selection: $currentQuestionIndex) {
+                        ForEach(Array(form.questions.enumerated()), id: \.element.id) { index, question in
+                            questionPage(question, index: index)
+                                .tag(index)
+                        }
                     }
-                    if let errorMessage { error(errorMessage) }
-                    if let responseValidationMessage { error(responseValidationMessage) }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .animation(.snappy(duration: 0.24), value: currentQuestionIndex)
+                } else {
+                    Label("This form is unavailable.", systemImage: "exclamationmark.triangle.fill")
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronError)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(20)
                 }
-                .padding(20)
             }
-            .tronScrollEdgeChrome()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if expired || form?.allowCancel == true {
                         Button(action: close) {
-                            TronToolbarTextLabel(expired ? "Close" : "Cancel", systemImage: "xmark")
+                            Image(systemName: "xmark")
+                                .font(TronTypography.buttonSM)
                         }
                         .tronToolbarAction(accent: .tronTextMuted)
                         .disabled(submitting)
@@ -70,11 +75,18 @@ struct ExtensionFormSheet: View {
                     TronSheetTitle(title: form?.title ?? "Questions", accent: .tronAmber)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    if reviewing || form?.questions.count == 1 {
+                    if form != nil {
                         Button(action: submit) {
-                            TronToolbarTextLabel("Submit", systemImage: "paperplane.fill", isWorking: submitting)
-                                .tronToolbarAction(accent: canSubmit ? .tronAmber : .tronTextMuted)
+                            if submitting {
+                                ProgressView()
+                                    .scaleEffect(0.72)
+                                    .tint(Color.tronAmber)
+                            } else {
+                                Image(systemName: "paperplane.fill")
+                                    .font(TronTypography.buttonSM)
+                            }
                         }
+                        .tronToolbarAction(accent: canSubmit ? .tronAmber : .tronTextMuted)
                         .disabled(!canSubmit)
                         .accessibilityLabel("Submit all answers")
                     }
@@ -96,52 +108,85 @@ struct ExtensionFormSheet: View {
         }
     }
 
-    private func progress(_ form: ExtensionFormDescriptor) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(reviewing ? "Review" : "Question \(currentIndex + 1) of \(form.questions.count)")
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextSecondary)
-                Spacer()
-                Text("\(form.questions.filter(draft.isAnswered).count)/\(form.questions.count) answered")
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextMuted)
-            }
-            ProgressView(value: Double(form.questions.filter(draft.isAnswered).count), total: Double(form.questions.count))
-                .tint(Color.tronAmber)
+    private func fixedQuestionStatus(_ form: ExtensionFormDescriptor) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            pageProgress(form)
+
             if let expiry {
-                Text(expired ? "This form expired. You can close it." : "Expires \(expiry, style: .relative)")
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(expired ? Color.tronError : Color.tronTextMuted)
+                Label(
+                    expired ? "This form expired. You can close it." : "Expires \(expiry, style: .relative)",
+                    systemImage: expired ? "clock.badge.exclamationmark" : "clock"
+                )
+                .font(TronTypography.bodySM)
+                .foregroundStyle(expired ? Color.tronError : Color.tronTextMuted)
             }
+            if let errorMessage { error(errorMessage) }
+            if let responseValidationMessage { error(responseValidationMessage) }
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(reviewing ? "Review answers" : "Question \(currentIndex + 1) of \(form.questions.count)")
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
     }
 
-    private func questionView(_ question: ExtensionFormQuestion) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 7) {
-                if let context = question.context, !context.isEmpty {
-                    Text(context).font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary)
+    private func pageProgress(_ form: ExtensionFormDescriptor) -> some View {
+        HStack(spacing: 10) {
+            Text(currentQuestion?.multiSelect == true ? "Select all that apply" : "Select one")
+                .font(TronTypography.bodySM)
+                .foregroundStyle(Color.tronTextSecondary)
+
+            Spacer(minLength: 8)
+
+            if form.questions.count > 1 {
+                HStack(spacing: 5) {
+                    ForEach(form.questions.indices, id: \.self) { page in
+                        Circle()
+                            .fill(page == currentQuestionIndex ? Color.tronAmber : Color.tronTextMuted.opacity(0.35))
+                            .frame(width: 7, height: 7)
+                    }
                 }
+                .accessibilityHidden(true)
+            }
+
+            Text("\(currentQuestionIndex + 1)/\(form.questions.count)")
+                .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(Color.tronAmber)
+        }
+        .animation(.easeInOut(duration: 0.18), value: currentQuestionIndex)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Question \(currentQuestionIndex + 1) of \(form.questions.count)")
+    }
+
+    private func questionPage(_ question: ExtensionFormQuestion, index: Int) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                if let context = question.context, !context.isEmpty {
+                    Text(context)
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 Text(question.question)
                     .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                VStack(spacing: 10) {
+                    ForEach(question.options) { option in
+                        optionRow(option, question: question)
+                    }
+                    if question.allowOther { otherRow(question) }
+                }
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.10)
-            .accessibilityElement(children: .combine)
-
-            Text(question.multiSelect ? "Select all that apply" : "Select one")
-                .font(TronTypography.bodySM)
-                .foregroundStyle(Color.tronTextMuted)
-
-            ForEach(question.options) { option in optionRow(option, question: question) }
-            if question.allowOther { otherRow(question) }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 40)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
+        .tronScrollEdgeChrome()
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollDismissesKeyboard(.interactively)
+        .accessibilityLabel("Question \(index + 1) of \(form?.questions.count ?? 1)")
     }
 
     private func optionRow(_ option: ExtensionFormOption, question: ExtensionFormQuestion) -> some View {
@@ -149,24 +194,34 @@ struct ExtensionFormSheet: View {
         return Button {
             guard !submitting, !expired else { return }
             draft.toggle(optionID: option.id, for: question)
+            if !question.multiSelect {
+                activeOtherQuestionIDs.remove(question.id)
+                focusedQuestionID = nil
+            }
             errorMessage = nil
         } label: {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: selected ? (question.multiSelect ? "checkmark.square.fill" : "checkmark.circle.fill") : (question.multiSelect ? "square" : "circle"))
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: selectionIcon(selected: selected, multiSelect: question.multiSelect))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(selected ? Color.tronAmber : Color.tronTextMuted)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(option.label).font(TronTypography.body).foregroundStyle(Color.tronTextPrimary)
+                    Text(option.label)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(Color.tronTextPrimary)
                     if let description = option.description, !description.isEmpty {
-                        Text(description).font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary)
+                        Text(description)
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer(minLength: 0)
             }
+            .padding(14)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(submitting || expired)
-        .padding(12)
         .tronGlassSurface(accent: selected ? .tronAmber : .tronCyan, tintOpacity: selected ? 0.16 : 0.06)
         .accessibilityLabel(option.description.map { "\(option.label), \($0)" } ?? option.label)
         .accessibilityValue(selected ? "Selected" : "Not selected")
@@ -174,80 +229,74 @@ struct ExtensionFormSheet: View {
     }
 
     private func otherRow(_ question: ExtensionFormQuestion) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Other").font(TronTypography.body).foregroundStyle(Color.tronTextPrimary)
-            TextField("Type your response", text: Binding(
-                get: { draft.value(for: question.id).other },
-                set: { text in
-                    if draft.setOther(text, for: question) { errorMessage = nil }
-                    else { errorMessage = "Other responses are limited to 32 KiB of UTF-8 text." }
+        let selected = activeOtherQuestionIDs.contains(question.id)
+            || !draft.value(for: question.id).other.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return VStack(alignment: .leading, spacing: 10) {
+            Button {
+                guard !submitting, !expired else { return }
+                if question.multiSelect && selected {
+                    activeOtherQuestionIDs.remove(question.id)
+                    draft.clearOther(for: question)
+                    focusedQuestionID = nil
+                } else {
+                    activeOtherQuestionIDs.insert(question.id)
+                    draft.activateOther(for: question)
+                    focusedQuestionID = question.id
                 }
-            ), axis: .vertical)
-                .lineLimit(2...7)
-                .tronField()
-                .disabled(submitting || expired)
-                .accessibilityLabel("Other response for \(question.header ?? question.question)")
-        }
-        .padding(12)
-        .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.06)
-    }
-
-    private func review(_ form: ExtensionFormDescriptor) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Review your answers")
-                .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
-                .foregroundStyle(Color.tronTextPrimary)
-            ForEach(Array(form.questions.enumerated()), id: \.element.id) { index, question in
-                Button {
-                    currentIndex = index
-                    reviewing = false
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(question.header ?? question.question)
-                            .font(TronTypography.bodySM)
-                            .foregroundStyle(Color.tronTextSecondary)
-                        Text(draft.summary(for: question))
-                            .font(TronTypography.body)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .padding(12)
-                    .contentShape(Rectangle())
+                errorMessage = nil
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: selectionIcon(selected: selected, multiSelect: question.multiSelect))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
+                        .foregroundStyle(selected ? Color.tronAmber : Color.tronTextMuted)
+                    Text("Other")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(Color.tronTextPrimary)
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.plain)
-                .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.06)
-                .accessibilityLabel("Edit \(question.header ?? question.question), answer \(draft.summary(for: question))")
+                .padding(.top, 14)
+                .padding(.horizontal, 14)
+                .padding(.bottom, selected ? 0 : 14)
+                .contentShape(Rectangle())
             }
-        }
-    }
+            .buttonStyle(.plain)
 
-    @ViewBuilder
-    private func navigation(_ form: ExtensionFormDescriptor) -> some View {
-        if form.questions.count > 1 {
-            HStack(spacing: 12) {
-                if reviewing || currentIndex > 0 {
-                    Button(reviewing ? "Back to questions" : "Previous") {
-                        if reviewing { reviewing = false }
-                        else { currentIndex -= 1 }
+            if selected {
+                TextField("Type your answer", text: Binding(
+                    get: { draft.value(for: question.id).other },
+                    set: { text in
+                        if draft.setOther(text, for: question) { errorMessage = nil }
+                        else { errorMessage = "Other responses are limited to 32 KiB of UTF-8 text." }
                     }
-                    .buttonStyle(TronActionButtonStyle(expands: false))
-                    .disabled(submitting)
-                }
-                Spacer()
-                if !reviewing {
-                    Button(currentIndex == form.questions.count - 1 ? "Review" : "Next") {
-                        guard let question = currentQuestion, draft.isAnswered(question) else {
-                            errorMessage = "Choose an answer before continuing."
-                            return
-                        }
-                        errorMessage = nil
-                        if currentIndex == form.questions.count - 1 { reviewing = true }
-                        else { currentIndex += 1 }
-                    }
-                    .buttonStyle(TronActionButtonStyle(role: .primary, expands: false, accent: .tronAmber))
+                ), axis: .vertical)
+                    .font(TronTypography.bodySM)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(2...6)
+                    .focused($focusedQuestionID, equals: question.id)
+                    .tronField()
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 14)
                     .disabled(submitting || expired)
-                }
+                    .accessibilityLabel("Other response for \(question.header ?? question.question)")
             }
+        }
+        .tronGlassSurface(accent: selected ? .tronAmber : .tronCyan, tintOpacity: selected ? 0.16 : 0.06)
+        .accessibilityValue(selected ? "Selected" : "Not selected")
+    }
+
+    private func selectionIcon(selected: Bool, multiSelect: Bool) -> String {
+        if multiSelect { return selected ? "checkmark.square.fill" : "square" }
+        return selected ? "checkmark.circle.fill" : "circle"
+    }
+
+    private func draftIsComplete(_ form: ExtensionFormDescriptor) -> Bool {
+        form.questions.allSatisfy { question in
+            guard draft.isAnswered(question) else { return false }
+            if activeOtherQuestionIDs.contains(question.id) {
+                return !draft.value(for: question.id).other
+                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            return true
         }
     }
 
@@ -260,10 +309,11 @@ struct ExtensionFormSheet: View {
 
     private func reset() {
         draft = form.map(ExtensionFormDraft.init(form:)) ?? ExtensionFormDraft()
-        currentIndex = 0
-        reviewing = false
+        activeOtherQuestionIDs = []
+        currentQuestionIndex = 0
         submitting = false
         errorMessage = nil
+        focusedQuestionID = nil
         now = Date()
     }
 

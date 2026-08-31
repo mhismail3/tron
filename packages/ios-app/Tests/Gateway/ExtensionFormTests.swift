@@ -89,7 +89,6 @@ struct ExtensionFormTests {
         draft.toggle(optionID: "us", for: form.questions[1])
         draft.setOther("LATAM", for: form.questions[1])
         #expect(draft.isComplete(form))
-        #expect(draft.summary(for: form.questions[0]) == "SQLite")
         #expect(draft.answer(for: form) == ExtensionFormAnswer(version: 1, answers: [
             ExtensionFormQuestionAnswer(questionId: "db", optionIds: ["sqlite"], other: nil),
             ExtensionFormQuestionAnswer(questionId: "regions", optionIds: ["us", "apac"], other: "LATAM"),
@@ -106,17 +105,45 @@ struct ExtensionFormTests {
         #expect(draft.value(for: "db").other.isEmpty)
     }
 
-    @Test func draftRejectsOversizedOtherWithoutDiscardingTheLastValidValueAndBoundsReviewSummary() {
+    @Test func draftActivatesOtherBeforeTypingAndRejectsOversizedTextWithoutDiscardingTheLastValue() {
         let form = descriptor()
         var draft = ExtensionFormDraft(form: form)
+        draft.toggle(optionID: "postgres", for: form.questions[0])
+        draft.activateOther(for: form.questions[0])
+        #expect(draft.value(for: "db").optionIDs.isEmpty)
         let admitted = draft.setOther("valid", for: form.questions[1])
         let rejected = draft.setOther(String(repeating: "é", count: ExtensionInteractionResponsePolicy.maximumOtherBytes / 2 + 1), for: form.questions[1])
         #expect(admitted)
         #expect(!rejected)
         #expect(draft.value(for: "regions").other == "valid")
-        draft.setOther(String(repeating: "x", count: 600), for: form.questions[1])
-        #expect(draft.summary(for: form.questions[1]).count == 513)
-        #expect(draft.summary(for: form.questions[1]).hasSuffix("…"))
+        draft.clearOther(for: form.questions[1])
+        #expect(draft.value(for: "regions").other.isEmpty)
+    }
+
+    @Test func sheetRestoresIndependentSwipePagesWithFixedProgressAndDirectRows() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: root.appending(path: "Sources/UI/Chat/ExtensionFormSheet.swift"),
+            encoding: .utf8
+        )
+        #expect(source.contains("TabView(selection: $currentQuestionIndex)"))
+        #expect(source.contains(".tabViewStyle(.page(indexDisplayMode: .never))"))
+        #expect(source.contains("fixedQuestionStatus(form)"))
+        #expect(source.contains("page == currentQuestionIndex"))
+        #expect(source.contains("questionPage(question, index: index)"))
+        #expect(source.contains("private func questionPage"))
+        #expect(source.contains("ScrollView"))
+        #expect(source.contains("activeOtherQuestionIDs"))
+        #expect(source.contains("focused($focusedQuestionID, equals: question.id)"))
+        #expect(source.contains("ToolbarItem(placement: .topBarTrailing)"))
+        #expect(source.contains("Button(action: submit)"))
+        #expect(!source.contains("reviewing"))
+        #expect(!source.contains("Review your answers"))
+        #expect(!source.contains("Button(\"Next\""))
+        #expect(!source.contains("ProgressView(value:"))
     }
 
     @Test func responsePolicyRequiresExactCoverageAndBoundsOtherByUTF8Bytes() {

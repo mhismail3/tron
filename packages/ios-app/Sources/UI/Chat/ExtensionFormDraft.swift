@@ -33,6 +33,19 @@ struct ExtensionFormDraft: Equatable, Sendable {
         values[question.id] = value
     }
 
+    mutating func activateOther(for question: ExtensionFormQuestion) {
+        guard question.allowOther else { return }
+        var value = self.value(for: question.id)
+        if !question.multiSelect { value.optionIDs.removeAll() }
+        values[question.id] = value
+    }
+
+    mutating func clearOther(for question: ExtensionFormQuestion) {
+        var value = self.value(for: question.id)
+        value.other = ""
+        values[question.id] = value
+    }
+
     @discardableResult
     mutating func setOther(_ text: String, for question: ExtensionFormQuestion) -> Bool {
         guard question.allowOther,
@@ -66,14 +79,5 @@ struct ExtensionFormDraft: Equatable, Sendable {
                 return ExtensionFormQuestionAnswer(questionId: question.id, optionIds: optionIDs, other: other)
             }
         )
-    }
-
-    func summary(for question: ExtensionFormQuestion, maximumCharacters: Int = 512) -> String {
-        let value = value(for: question.id)
-        var parts = question.options.filter { value.optionIDs.contains($0.id) }.map(\.label)
-        if !value.other.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { parts.append(value.other) }
-        let complete = parts.joined(separator: ", ")
-        guard complete.count > maximumCharacters else { return complete }
-        return String(complete.prefix(maximumCharacters)) + "…"
     }
 }
