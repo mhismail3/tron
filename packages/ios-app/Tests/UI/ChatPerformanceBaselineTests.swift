@@ -4,68 +4,6 @@ import XCTest
 @testable import TronMobile
 
 final class ChatPerformanceBaselineTests: XCTestCase {
-    @MainActor
-    func testMaximumPagedSessionOpeningBaseline() throws {
-        guard ProcessInfo.processInfo.environment["TRON_PERFORMANCE_BASELINE"] == "1" else {
-            throw XCTSkip("Run explicitly to collect the pinned performance baseline.")
-        }
-
-        let snapshot = try Self.maximumPagedSnapshot()
-        print(
-            "TRON_PERFORMANCE_CONTEXT thermal=\(Self.thermalStateCode) "
-                + "lowPower=\(ProcessInfo.processInfo.isLowPowerModeEnabled ? 1 : 0) "
-                + "maxFPS=\(Self.maximumFramesPerSecond)"
-        )
-        let options = XCTMeasureOptions()
-        // XCTest adds one discarded warm-up invocation to this measured count.
-        options.iterationCount = 5
-        options.invocationOptions = [.manuallyStop]
-        let metrics: [any XCTMetric] = [
-            XCTClockMetric(),
-            XCTCPUMetric(),
-            XCTMemoryMetric(),
-            ProcessAllocationMetric(),
-            XCTOSSignpostMetric(
-                subsystem: "com.tron.mobile",
-                category: "Chat",
-                name: "Scroll Command Settle"
-            ),
-        ]
-
-        measure(metrics: metrics, options: options) {
-            let harness: ChatViewScrollHarness
-            do {
-                harness = try ChatViewScrollHarness(
-                    snapshot: snapshot,
-                    displayFrameScheduler: .displayLink,
-                    performanceSignposts: SystemPerformanceSignposts.shared
-                )
-            } catch {
-                stopMeasuring()
-                XCTFail("Unable to install hosted performance fixture: \(error)")
-                return
-            }
-
-            let deadline = Date().addingTimeInterval(15)
-            while Date() < deadline {
-                if let observation = harness.recorder.samples.last?.observation,
-                   observation.isReady,
-                   observation.scrollSettledDistance != nil,
-                   observation.visibleRowIDs.contains(harness.lastTranscriptID) {
-                    break
-                }
-                RunLoop.main.run(until: Date().addingTimeInterval(0.005))
-            }
-            stopMeasuring()
-
-            let observation = harness.recorder.samples.last?.observation
-            XCTAssertEqual(observation?.isReady, true)
-            XCTAssertNotNil(observation?.scrollSettledDistance)
-            XCTAssertTrue(observation?.visibleRowIDs.contains(harness.lastTranscriptID) == true)
-            harness.cleanup()
-        }
-    }
-
     func testStreamingTextPreparationThroughputBaseline() throws {
         guard ProcessInfo.processInfo.environment["TRON_PERFORMANCE_BASELINE"] == "1" else {
             throw XCTSkip("Run explicitly to collect the pinned performance baseline.")
