@@ -2,6 +2,16 @@ import Foundation
 @preconcurrency import UIKit
 
 @MainActor
+private final class ChatUIKitComposerHostView: UIView {
+    var onWindowChange: ((UIWindow?) -> Void)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        onWindowChange?(window)
+    }
+}
+
+@MainActor
 final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     UIContextMenuInteractionDelegate {
     typealias IntentHandler = @MainActor (ChatUIKitComposerIntent) -> Void
@@ -38,7 +48,17 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     /// Read-only lifecycle evidence for the hosted UIKit gate. Production has
     /// no observer-count API and retains the normal view lifecycle owner.
     var hostedKeyboardObserverCount: Int { keyboardObservers.count }
+    var hostedTrailingButton: UIButton { trailingButton }
     #endif
+
+    override func loadView() {
+        let host = ChatUIKitComposerHostView()
+        host.onWindowChange = { [weak self] window in
+            if window == nil { self?.removeKeyboardObservers() }
+            else { self?.installKeyboardObservers() }
+        }
+        view = host
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()

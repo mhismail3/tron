@@ -8,7 +8,7 @@ import Foundation
 @MainActor
 final class ChatUIKitChatViewController: UIViewController,
     UICollectionViewDataSource,
-    UICollectionViewDelegateFlowLayout,
+    UICollectionViewDelegate,
     UIScrollViewDelegate
 {
     private(set) var input: ChatUIKitPresentationInput?
@@ -26,6 +26,7 @@ final class ChatUIKitChatViewController: UIViewController,
     var chatMediaIdentity: ((String) -> ChatMediaIdentity?)?
     var onTransactionOutcome: ((ChatUIKitViewportTransactionOutcome) -> Void)?
     private var presentationActivity = ChatUIKitPresentationActivity.active(generation: 0)
+    private var isApplyingPresentation = false
 
     #if HOSTED_TEST
     /// Read-only lifecycle evidence for the hosted UIKit gate.
@@ -37,10 +38,18 @@ final class ChatUIKitChatViewController: UIViewController,
     private let collectionView: UICollectionView
 
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
-        let layout = UICollectionViewFlowLayout()
-        layout.minimumLineSpacing = 1
-        layout.estimatedItemSize = UICollectionViewFlowLayout.automaticSize
-        collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        let itemSize = NSCollectionLayoutSize(
+            widthDimension: .fractionalWidth(1),
+            heightDimension: .estimated(44)
+        )
+        let item = NSCollectionLayoutItem(layoutSize: itemSize)
+        let group = NSCollectionLayoutGroup.vertical(layoutSize: itemSize, subitems: [item])
+        let section = NSCollectionLayoutSection(group: group)
+        section.interGroupSpacing = 1
+        collectionView = UICollectionView(
+            frame: .zero,
+            collectionViewLayout: UICollectionViewCompositionalLayout(section: section)
+        )
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
     }
 
@@ -113,13 +122,21 @@ final class ChatUIKitChatViewController: UIViewController,
         }
         viewportState.transactionID += 1
         let transactionID = viewportState.transactionID
-        // Capture the semantic row and its measured pixel offset before any
-        // mutation. Native contentOffset alone cannot account for prepend or
-        // row-height changes while a gesture is in flight.
-        let anchor = captureAnchor()
+        isApplyingPresentation = true
+        defer { isApplyingPresentation = false }
         let intent = viewportState.intent
         let isInteracting = viewportState.interaction == .tracking
             || viewportState.interaction == .decelerating
+        // A gesture owns the semantic anchor captured by scroll callbacks.
+        // Re-capturing after self-sizing has begun would ratchet any native
+        // layout displacement into the next transaction. Outside a gesture,
+        // current measured geometry remains the fallback.
+        let anchor: ChatUIKitSemanticAnchor? = if isInteracting,
+                                                  case .preserve(let semantic) = intent {
+            semantic
+        } else {
+            captureAnchor()
+        }
         let previousRows = input?.rows ?? []
         let previousHistory = input?.history ?? .hidden
         input = next
@@ -253,6 +270,15 @@ final class ChatUIKitChatViewController: UIViewController,
         if let anchor = captureAnchor() { viewportState.intent = .preserve(anchor) }
     }
 
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard !isApplyingPresentation,
+              viewportState.interaction == .tracking || viewportState.interaction == .decelerating,
+              let anchor = captureAnchor() else { return }
+        // Track incremental native movement as user intent. Programmatic
+        // restoration inside apply is excluded by isApplyingPresentation.
+        viewportState.intent = .preserve(anchor)
+    }
+
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if decelerate {
             viewportState.interaction = .decelerating
@@ -295,10 +321,22 @@ final class ChatUIKitChatViewController: UIViewController,
         let index = rows.firstIndex(where: { $0.id == anchor.rowID })
             ?? min(max(anchor.ordinal, 0), rows.count - 1)
         let path = IndexPath(item: index + historyOffset, section: 0)
-        guard let attributes = collectionView.layoutAttributesForItem(at: path) else {
-            return nil
+        // Self-sizing collection cells can refine their layout attributes after
+        // an offset write materializes a different visible set. Correct from
+        // measured post-write geometry for a small bounded number of passes;
+        // this remains one synchronous viewport transaction and one offset
+        // owner, while avoiding an unbounded callback/watchdog loop.
+        for _ in 0..<3 {
+            collectionView.layoutIfNeeded()
+            guard let attributes = collectionView.layoutAttributesForItem(at: path) else {
+                return nil
+            }
+            let currentViewportTop = attributes.frame.minY - collectionView.contentOffset.y
+            let correction = currentViewportTop - anchor.topOffset
+            guard abs(correction) > 0.5 else { break }
+            setOffset(y: collectionView.contentOffset.y + correction)
         }
-        setOffset(y: attributes.frame.minY - anchor.topOffset)
+        collectionView.layoutIfNeeded()
         return ChatUIKitSemanticAnchor(rowID: rows[index].id, ordinal: index, topOffset: anchor.topOffset)
     }
 

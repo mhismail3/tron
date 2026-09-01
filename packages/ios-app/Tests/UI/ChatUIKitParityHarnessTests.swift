@@ -52,7 +52,7 @@ struct ChatUIKitParityHarnessTests {
         harness.transcript.scrollViewWillBeginDragging(collection)
         harness.transcript.scrollViewDidEndDragging(collection, willDecelerate: true)
         let anchorID = try #require(harness.firstVisibleRowID)
-        let initialTop = try #require(harness.rowFrame(for: anchorID)?.minY)
+        let initialTop = try #require(harness.rowViewportTop(for: anchorID))
 
         for index in 1...12 {
             snapshot.revision += 1
@@ -61,7 +61,7 @@ struct ChatUIKitParityHarnessTests {
             {"id":"\(streamID)","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","presentationId":"\(streamID)","content":[{"id":"stream-text","type":"text","text":"\(String(repeating: "stream-\(index) ", count: index * 12))"}]}
             """)
             _ = try await harness.commit(snapshot)
-            let top = try #require(harness.rowFrame(for: anchorID)?.minY)
+            let top = try #require(harness.rowViewportTop(for: anchorID))
             #expect(abs(top - initialTop) <= 2.0)
             #expect(harness.hasLegalNonblankViewport)
         }
@@ -75,7 +75,7 @@ struct ChatUIKitParityHarnessTests {
         _ = try await harness.commit(snapshot)
         harness.transcript.scrollViewDidEndDecelerating(collection)
         #expect(harness.transcript.viewportState.interaction == .idle)
-        #expect(abs((try #require(harness.rowFrame(for: anchorID)?.minY)) - initialTop) <= 2.0)
+        #expect(abs((try #require(harness.rowViewportTop(for: anchorID))) - initialTop) <= 2.0)
         #expect(harness.hasLegalNonblankViewport)
     }
 
@@ -206,7 +206,7 @@ struct ChatUIKitParityHarnessTests {
         #expect(rows.contains { !$0.attachmentFacts.isEmpty })
         #expect(rows.contains { $0.kind == .tool })
         #expect(rows.contains { $0.kind == .status })
-        #expect(harness.collectionView.visibleCells.contains { $0.accessibilityLabel != nil || $0.accessibilityValue != nil })
+        #expect(harness.collectionView.visibleCells.contains(where: harness.hasAccessibleContent(in:)))
 
         harness.window.overrideUserInterfaceStyle = .dark
         harness.shell.setOverrideTraitCollection(
@@ -227,10 +227,12 @@ struct ChatUIKitParityHarnessTests {
     func keyboardAndLifecycleOwnership() async throws {
         let harness = try await ChatUIKitHostedHarness(snapshot: harnessSnapshot(seed: 707, count: 8))
         #expect(harness.composer.view.window === harness.window)
-        harness.composer.viewDidAppear(false)
         #expect(harness.composer.hostedKeyboardObserverCount == 2)
         NotificationCenter.default.post(name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
-        harness.composer.viewWillDisappear(false)
+        harness.composer.view.removeFromSuperview()
+        await Task.yield()
+        await Task.yield()
+        #expect(harness.composer.view.window == nil)
         #expect(harness.composer.hostedKeyboardObserverCount == 0)
 
         let inactive = ChatUIKitPresentationActivity.inactive(generation: 9)
@@ -243,6 +245,10 @@ struct ChatUIKitParityHarnessTests {
 
 @MainActor
 private final class ChatUIKitHostedHarness {
+    // Keep test windows alive for the suite so UIKit does not tear down a key
+    // root controller mid-appearance between Swift Testing cases. The one
+    // lifecycle test detaches its root explicitly and verifies cleanup.
+    private static var retainedWindows: [UIWindow] = []
     enum Resolution { case accepted, rejected, unacknowledged }
 
     struct Command: Equatable {
@@ -255,6 +261,7 @@ private final class ChatUIKitHostedHarness {
         let accepted: Bool
     }
 
+    @MainActor
     final class RecordingCommandAdapter {
         var commands: [Command] = []
         var settlements: [Settlement] = []
@@ -296,7 +303,7 @@ private final class ChatUIKitHostedHarness {
     let window: UIWindow
     let commandAdapter = RecordingCommandAdapter()
     private(set) var input: ChatUIKitPresentationInput
-    private(set) var nextUIVersion: UInt64
+    var nextUIVersion: UInt64
     var loadEarlierRequestCount = 0
     var onLoadEarlier: (() -> Void)? {
         didSet { transcript.onLoadEarlier = onLoadEarlier }
@@ -314,8 +321,14 @@ private final class ChatUIKitHostedHarness {
         nextUIVersion = version
         window.rootViewController = shell
         window.makeKeyAndVisible()
+        Self.retainedWindows.append(window)
         shell.loadViewIfNeeded()
         shell.view.frame = window.bounds
+        shell.view.layoutIfNeeded()
+        // Let UIKit finish the real root-controller appearance transition
+        // before lifecycle and trait assertions inspect the mounted children.
+        await Task.yield()
+        await Task.yield()
         shell.view.layoutIfNeeded()
         transcript.loadViewIfNeeded()
         composer.loadViewIfNeeded()
@@ -374,11 +387,7 @@ private final class ChatUIKitHostedHarness {
     }
 
     func tapSend() throws {
-        let button = try #require(descendant(of: composer.view) { view in
-            guard let button = view as? UIButton else { return false }
-            return button.accessibilityLabel == "Send message"
-        } as? UIButton)
-        button.sendActions(for: .primaryActionTriggered)
+        composer.hostedTrailingButton.sendActions(for: .primaryActionTriggered)
     }
 
     var collectionView: UICollectionView {
@@ -412,12 +421,23 @@ private final class ChatUIKitHostedHarness {
         return collectionView.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame
     }
 
+    func rowViewportTop(for id: String) -> CGFloat? {
+        rowFrame(for: id).map { $0.minY - collectionView.contentOffset.y }
+    }
+
     var hasLegalNonblankViewport: Bool {
         let minimum = -collectionView.adjustedContentInset.top
         let maximum = max(minimum, collectionView.contentSize.height - collectionView.bounds.height + collectionView.adjustedContentInset.bottom)
         let legal = collectionView.contentOffset.y >= minimum - 0.5 && collectionView.contentOffset.y <= maximum + 0.5
         let visible = collectionView.visibleCells.contains { $0.frame.intersects(collectionView.bounds.insetBy(dx: 0, dy: 1)) }
         return legal && (input.rows.isEmpty || visible)
+    }
+
+    func hasAccessibleContent(in view: UIView) -> Bool {
+        if !(view.accessibilityLabel ?? "").isEmpty || !(view.accessibilityValue ?? "").isEmpty {
+            return true
+        }
+        return view.subviews.contains(where: hasAccessibleContent(in:))
     }
 
     private func descendant<T: UIView>(of view: UIView, matching type: T.Type) -> T? {
@@ -491,10 +511,10 @@ private func transcriptItem(_ json: String) throws -> TranscriptItem {
 private func canonicalRowsFixture() throws -> [TranscriptItem] {
     try [
         transcriptItem("""
-        {"id":"user-rich","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","presentationId":"user-rich","content":[{"id":"user-text","type":"text","text":"Review [the link](https://example.invalid/docs)\n\n```swift\nlet value = 1\n```\n\n| Name | Value |\n| --- | --- |\n| one | two |"}]}
+        {"id":"user-rich","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","presentationId":"user-rich","content":[{"id":"user-text","type":"text","text":"Review [the link](https://example.invalid/docs)\\n\\n```swift\\nlet value = 1\\n```\\n\\n| Name | Value |\\n| --- | --- |\\n| one | two |"}]}
         """),
         transcriptItem("""
-        {"id":"assistant-rich","parentId":"user-rich","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","presentationId":"assistant-rich","content":[{"id":"thinking","type":"thinking","text":"Checking the request"},{"id":"answer","type":"text","text":"See [details](https://example.invalid/details)\n\n```swift\nlet value = 1\n```\n\n| Name | Value |\n| --- | --- |\n| one | two |"},{"id":"attachment","type":"image","attachment":{"name":"diagram.png","mimeType":"image/png","size":12},"mimeType":"image/png","blobId":"blob-706"}]}
+        {"id":"assistant-rich","parentId":"user-rich","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","presentationId":"assistant-rich","content":[{"id":"thinking","type":"thinking","text":"Checking the request"},{"id":"answer","type":"text","text":"See [details](https://example.invalid/details)\\n\\n```swift\\nlet value = 1\\n```\\n\\n| Name | Value |\\n| --- | --- |\\n| one | two |"},{"id":"attachment","type":"image","attachment":{"name":"diagram.png","mimeType":"image/png","size":12},"mimeType":"image/png","blobId":"blob-706"}]}
         """),
         transcriptItem("""
         {"id":"custom-rich","parentId":"assistant-rich","timestamp":"2026-01-01T00:00:02Z","kind":"customMessage","customType":"notice","content":[{"id":"custom-text","type":"text","text":"Inbound context"}]}

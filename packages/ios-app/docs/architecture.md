@@ -51,7 +51,9 @@ Every transaction has an overflow-safe sequence with explicit applied, stale, re
 The installed source-window projection supplies the single earlier-history affordance and one
 load-earlier intent; UIKit owns no paging cursor or loading state. During native tracking and
 deceleration, measured semantic row attributes retain both row identity and pixel offset across
-prepend, append, and shrink, falling back to the nearest retained ordinal. Row-local Markdown,
+prepend, append, and shrink, falling back to the nearest retained ordinal. A full-width compositional
+layout owns self-sizing rows; restoration performs at most three synchronous measured correction
+passes inside the same transaction so materialization cannot create another callback-driven owner. Row-local Markdown,
 streaming, media, tool, and indicator work is leased to one explicit presentation-activity input
 and reset on reuse/generation replacement. The composer uses authoritative focus/resign input and
 an explicit bounded send handoff, so rejected sends can retry without duplicate accepted sends.
