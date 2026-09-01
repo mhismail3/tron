@@ -6,6 +6,12 @@ enum PushNavigationFailureAdmission {
     }
 }
 
+enum PushNavigationPresentationPolicy {
+    static func retainsCurrent(presentedRouteID: String?, targetRouteID: String) -> Bool {
+        presentedRouteID == targetRouteID
+    }
+}
+
 struct SessionShellProfileRouteOwner {
     private var hasObservedProfile = false
     private var profileID: String?
@@ -246,21 +252,34 @@ struct SessionShellView: View {
         showingServerFilter = false
         if showingSearch { dismissDashboardSearch() }
 
-        if let current = presentedSession {
-            if let target = model.presentationTarget(for: current.sessionID) {
-                model.revokePresentationIntake(target)
-            }
-            withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
-                presentedSession = nil
-            }
-            if !reduceMotion {
-                do { try await Task.sleep(for: .milliseconds(260)) }
-                catch { return }
-            }
-        }
-
         do {
+            // Keep the current chat mounted while the target transport is being
+            // prepared. A slow reconnect must not strand the user on an empty
+            // dashboard, and an exact same-route tap is a navigation no-op.
             let route = try await model.navigationRoute(for: request.tap)
+            try Task.checkCancellation()
+            guard model.pushNavigationRequest?.id == request.id,
+                  model.ownsNavigationRoute(route) else { return }
+            if PushNavigationPresentationPolicy.retainsCurrent(
+                presentedRouteID: presentedSession?.id,
+                targetRouteID: route.id
+            ) {
+                model.consumePushNavigation(request.id)
+                return
+            }
+
+            if let current = presentedSession {
+                if let target = model.presentationTarget(for: current.sessionID) {
+                    model.revokePresentationIntake(target)
+                }
+                withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
+                    presentedSession = nil
+                }
+                if !reduceMotion {
+                    try await Task.sleep(for: .milliseconds(260))
+                }
+            }
+
             try Task.checkCancellation()
             guard model.pushNavigationRequest?.id == request.id,
                   model.ownsNavigationRoute(route) else { return }

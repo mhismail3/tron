@@ -17,6 +17,10 @@ private func canonicalAppAttestKey(_ label: String) -> String {
         .replacingOccurrences(of: "=", with: "")
 }
 
+private func pushHelloFrame() -> Data {
+    Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
+}
+
 @Suite("Push notification registration")
 struct PushNotificationCoordinatorTests {
     @Test("product origin admits only one exact HTTPS origin")
@@ -177,6 +181,146 @@ struct PushNotificationCoordinatorTests {
         #expect(model.actionablePushNavigationRequest == nil)
         await model.becameActive()?.value
         #expect(model.actionablePushNavigationRequest?.tap == tap)
+    }
+
+    @MainActor
+    @Test("push routing uses the admitted session identity without a catalog read")
+    func pushRouteBypassesCatalog() async throws {
+        let suiteName = "PushNavigationDirectRouteTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: suiteName)
+        let profile = GatewayProfile(
+            id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device"
+        )
+        defaults.set(
+            try JSONEncoder.gateway.encode(GatewayProfileDocument(
+                profiles: [profile],
+                selectedProfileID: profile.id
+            )),
+            forKey: "gatewayProfiles.v2"
+        )
+        let socket = ScriptedGatewaySocket()
+        let factory = ScriptedGatewaySocketFactory(socket: socket)
+        let client = GatewayClient(socketFactory: factory.factory)
+        let model = AppModel(
+            client: client,
+            profiles: GatewayProfileStore(defaults: defaults),
+            cache: SnapshotCache(root: cacheRoot),
+            profileTokenLookup: { _ in "token" }
+        )
+
+        do {
+            try await withTestWatchdog {
+                await socket.enqueue(pushHelloFrame())
+                try await model.connectHostedGateway(profile: profile, token: "token")
+                await model.start(sceneIsActive: true)
+
+                let route = try await model.navigationRoute(for: PushNotificationTap(
+                    sessionID: "session-from-push",
+                    machineID: profile.machineId
+                ))
+                #expect(route.sessionID == "session-from-push")
+                #expect(await MainActor.run { model.ownsNavigationRoute(route) })
+                #expect(factory.requests.count == 1)
+                #expect(await socket.sentFrames().count == 1)
+            }
+        } catch {
+            await model.teardown()
+            await client.close()
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: cacheRoot)
+            throw error
+        }
+        await model.teardown()
+        await client.close()
+        defaults.removePersistentDomain(forName: suiteName)
+        try? FileManager.default.removeItem(at: cacheRoot)
+    }
+
+    @MainActor
+    @Test("background push routing joins one same-profile reconnect before projection refresh")
+    func backgroundPushJoinsReconnect() async throws {
+        let suiteName = "PushNavigationReconnectTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: suiteName)
+        let profile = GatewayProfile(
+            id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device"
+        )
+        defaults.set(
+            try JSONEncoder.gateway.encode(GatewayProfileDocument(
+                profiles: [profile],
+                selectedProfileID: profile.id
+            )),
+            forKey: "gatewayProfiles.v2"
+        )
+        let oldSocket = ScriptedGatewaySocket()
+        let replacementSocket = ScriptedGatewaySocket()
+        let unexpectedSocket = ScriptedGatewaySocket()
+        let factory = ScriptedGatewaySocketFactory(
+            sockets: [oldSocket, replacementSocket, unexpectedSocket]
+        )
+        let client = GatewayClient(socketFactory: factory.factory)
+        let model = AppModel(
+            client: client,
+            profiles: GatewayProfileStore(defaults: defaults),
+            cache: SnapshotCache(root: cacheRoot),
+            profileTokenLookup: { _ in "token" }
+        )
+
+        do {
+            try await withTestWatchdog {
+                await oldSocket.enqueue(pushHelloFrame())
+                try await model.connectHostedGateway(profile: profile, token: "token")
+                await model.start(sceneIsActive: true)
+                await model.enteredBackground().value
+                try await oldSocket.waitUntilClosed()
+                #expect(await oldSocket.closed())
+
+                let tap = PushNotificationTap(
+                    sessionID: "session-from-push",
+                    machineID: profile.machineId
+                )
+                await model.requestPushNavigation(tap)
+                await model.becameActive()?.value
+                let routing = Task { try await model.navigationRoute(for: tap) }
+                try await replacementSocket.waitUntilSent(count: 1)
+                await replacementSocket.enqueue(pushHelloFrame())
+
+                let route = try await routing.value
+                #expect(route.sessionID == "session-from-push")
+                #expect(await MainActor.run { model.ownsNavigationRoute(route) })
+                #expect(factory.requests.count == 2)
+                #expect(await MainActor.run { model.connectionState } == .reconnecting)
+            }
+        } catch {
+            await model.teardown()
+            await client.close()
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: cacheRoot)
+            throw error
+        }
+        await model.teardown()
+        await client.close()
+        defaults.removePersistentDomain(forName: suiteName)
+        try? FileManager.default.removeItem(at: cacheRoot)
+    }
+
+    @Test("same-route notification navigation retains the mounted presentation")
+    func sameRouteRetainsPresentation() {
+        #expect(PushNavigationPresentationPolicy.retainsCurrent(
+            presentedRouteID: "profile:session",
+            targetRouteID: "profile:session"
+        ))
+        #expect(!PushNavigationPresentationPolicy.retainsCurrent(
+            presentedRouteID: "profile:other",
+            targetRouteID: "profile:session"
+        ))
+        #expect(!PushNavigationPresentationPolicy.retainsCurrent(
+            presentedRouteID: nil,
+            targetRouteID: "profile:session"
+        ))
     }
 
     @Test("canceled route work retains the current notification request")

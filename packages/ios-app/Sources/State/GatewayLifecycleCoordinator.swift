@@ -78,6 +78,10 @@ final class GatewayLifecycleCoordinator {
     private(set) var hasResolvedLaunchState = false
     private(set) var gatewayInfo: GatewayInfo?
     private(set) var connectionID: Int?
+    /// The exact socket whose receive/event delivery loop has been activated.
+    /// `connectionID` is installed slightly earlier so the first buffered event
+    /// can be admitted; route work must wait for this stronger boundary.
+    private var activatedConnectionID: Int?
 
     private var phase: Phase = .active(0)
     private var completedTransitionGeneration = 0
@@ -142,6 +146,9 @@ final class GatewayLifecycleCoordinator {
     }
 
     var admitsWork: Bool { phase.admitsWork && !sceneIsBackgrounded }
+    /// Foreground routing must not start until an already-scheduled background
+    /// socket retirement has finished and queued its replacement reconnect.
+    var routeActivationRequiresRetirementBarrier: Bool { backgroundRetirementTask != nil }
 
     func admits(_ admission: Admission) -> Bool {
         guard phase.admitsWork, !sceneIsBackgrounded, phase.generation == admission.generation else { return false }
@@ -257,6 +264,7 @@ final class GatewayLifecycleCoordinator {
         deferredProjectionTask = nil
         delegate?.lifecycleInvalidateSessionConnectionOwnership()
         connectionID = nil
+        activatedConnectionID = nil
         sceneIsBackgrounded = true
         guard phase.admitsWork else { return }
         let previousRetirement = backgroundRetirementTask
@@ -391,6 +399,9 @@ final class GatewayLifecycleCoordinator {
 
     func noteDisconnected(connectionID deliveredConnectionID: Int?) {
         guard admitsEvent(connectionID: deliveredConnectionID) else { return }
+        if activatedConnectionID == deliveredConnectionID || deliveredConnectionID == nil {
+            activatedConnectionID = nil
+        }
         connectionID = nil
     }
 
@@ -430,8 +441,54 @@ final class GatewayLifecycleCoordinator {
             cancelReconnect()
         }
         guard reconnectTask == nil else { return }
+        activatedConnectionID = nil
         connectionState = restartRequested ? .restarting : .reconnecting
         scheduleReconnect(immediate: immediate)
+    }
+
+    /// Waits only for an exact activated transport on the requested profile.
+    /// Unlike public `.connected` readiness, this does not wait for dashboard,
+    /// settings, device, terminal, or mounted-presentation reconciliation.
+    /// Notification routing uses this narrow boundary before `session.open`.
+    func waitForRouteConnection(
+        profileID: String,
+        until deadline: ContinuousClock.Instant,
+        admission: Admission
+    ) async -> Admission? {
+        while clock.now() < deadline {
+            guard !Task.isCancelled,
+                  admitsGeneration(admission.generation),
+                  selectedProfileID == profileID else { return nil }
+            if let activatedConnectionID,
+               connectionID == activatedConnectionID {
+                let activeConnectionID = await client.activeConnectionID()
+                guard !Task.isCancelled,
+                      admitsGeneration(admission.generation),
+                      selectedProfileID == profileID else { return nil }
+                if activeConnectionID == activatedConnectionID {
+                    return Admission(
+                        generation: admission.generation,
+                        connectionID: activatedConnectionID
+                    )
+                }
+                self.activatedConnectionID = nil
+                if connectionID == activatedConnectionID { connectionID = nil }
+                connectionState = .reconnecting
+            }
+            switch connectionState {
+            case .unpaired, .unauthorized:
+                return nil
+            case .offline, .reconnecting, .restarting, .connected:
+                if reconnectTask == nil, committedConnectionTask == nil {
+                    requestReconnect(immediate: true)
+                }
+            case .connecting:
+                break
+            }
+            do { try await clock.sleep(.milliseconds(100)) }
+            catch { return nil }
+        }
+        return nil
     }
 
     func waitForConnected(
@@ -467,6 +524,7 @@ final class GatewayLifecycleCoordinator {
         try require(admission)
         connectionID = connection.id
         try await client.activateEvents(connectionID: connection.id)
+        activatedConnectionID = connection.id
         let connectedAdmission = Admission(
             generation: admission.generation,
             connectionID: connection.id
@@ -578,6 +636,7 @@ final class GatewayLifecycleCoordinator {
         deferredProjection?.cancel()
         gatewayInfo = nil
         connectionID = nil
+        activatedConnectionID = nil
         projectionFailureGeneration = nil
 
         let transition = Task { @MainActor [weak self] in
@@ -627,6 +686,7 @@ final class GatewayLifecycleCoordinator {
         awaitProjection: Bool = true
     ) async {
         guard admits(admission) else { return }
+        activatedConnectionID = nil
         connectionState = .connecting
         var establishedConnectionID: Int?
         do {
@@ -636,6 +696,7 @@ final class GatewayLifecycleCoordinator {
             if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
             connectionID = connection.id
             try await client.activateEvents(connectionID: connection.id)
+            activatedConnectionID = connection.id
             let connectedAdmission = Admission(
                 generation: admission.generation,
                 connectionID: connection.id
@@ -689,6 +750,7 @@ final class GatewayLifecycleCoordinator {
         } catch {
             if let establishedConnectionID {
                 await client.closeIfCurrent(connectionID: establishedConnectionID)
+                if activatedConnectionID == establishedConnectionID { activatedConnectionID = nil }
                 if connectionID == establishedConnectionID { connectionID = nil }
             }
             guard admitsGeneration(admission.generation) else { return }
@@ -797,6 +859,7 @@ final class GatewayLifecycleCoordinator {
                         )
                         self.connectionID = connection.id
                         try await self.client.activateEvents(connectionID: connection.id)
+                        self.activatedConnectionID = connection.id
                         try self.requireReconnect(
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration
@@ -879,6 +942,7 @@ final class GatewayLifecycleCoordinator {
                         }
                         if let establishedConnectionID {
                             await self.client.closeIfCurrent(connectionID: establishedConnectionID)
+                            if self.activatedConnectionID == establishedConnectionID { self.activatedConnectionID = nil }
                             if self.connectionID == establishedConnectionID { self.connectionID = nil }
                         }
                         guard !Task.isCancelled, self.admitsReconnect(
@@ -904,6 +968,7 @@ final class GatewayLifecycleCoordinator {
                         }
                         if let establishedConnectionID {
                             await self.client.closeIfCurrent(connectionID: establishedConnectionID)
+                            if self.activatedConnectionID == establishedConnectionID { self.activatedConnectionID = nil }
                             if self.connectionID == establishedConnectionID { self.connectionID = nil }
                         }
                         return
@@ -916,6 +981,7 @@ final class GatewayLifecycleCoordinator {
                         }
                         if let establishedConnectionID {
                             await self.client.closeIfCurrent(connectionID: establishedConnectionID)
+                            if self.activatedConnectionID == establishedConnectionID { self.activatedConnectionID = nil }
                             if self.connectionID == establishedConnectionID { self.connectionID = nil }
                         }
                         guard !Task.isCancelled, self.admitsReconnect(

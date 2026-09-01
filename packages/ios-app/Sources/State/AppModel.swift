@@ -63,6 +63,10 @@ private struct GatewayUpdateAcknowledgement: Codable {
     }
 }
 
+enum PushNavigationConnectionPolicy {
+    static let readinessDeadline: Duration = .seconds(15)
+}
+
 enum SessionMountedAuthorityPolicy {
     static func admits(
         ownsPresentation: Bool,
@@ -903,14 +907,21 @@ final class AppModel {
         pushNavigationActivationGeneration &+= 1
         let activationGeneration = pushNavigationActivationGeneration
         noticeCenter.setBackgrounded(false)
+        let requiresRetirementBarrier = lifecycle.routeActivationRequiresRetirementBarrier
         let lifecycleTask = lifecycle.becameActive()
         return Task { @MainActor [weak self] in
-            if let lifecycleTask { await lifecycleTask.value }
+            // A true background transition must first finish retiring the old
+            // socket; an inactive/active transition already has a safe route
+            // transport and must not wait for full foreground reconciliation.
+            if requiresRetirementBarrier, let lifecycleTask { await lifecycleTask.value }
             guard let self else { return }
             await self.dashboardConnections.waitForRetirement()
             guard self.sceneAllowsCatalogRefresh,
                   self.pushNavigationActivationGeneration == activationGeneration else { return }
             self.pushNavigationActivationReady = true
+            if !requiresRetirementBarrier, let lifecycleTask { await lifecycleTask.value }
+            guard self.sceneAllowsCatalogRefresh,
+                  self.pushNavigationActivationGeneration == activationGeneration else { return }
             self.reconcileDashboardConnections()
         }
     }
@@ -1945,6 +1956,13 @@ final class AppModel {
         pushNavigationRequest = nil
     }
 
+    func acknowledgePushNavigation(_ tap: PushNotificationTap) {
+        guard let requestID = tap.requestID, let route = tap.route else { return }
+        Task { @MainActor [weak self] in
+            await self?.markNotificationRead(requestID: requestID, machineID: route.machineID)
+        }
+    }
+
     func navigationRoute(for session: SessionSummary) async throws -> SessionNavigationRoute {
         let owner = try await activateDashboardProfile(session.gatewayProfileID ?? profiles.selected?.id)
         return SessionNavigationRoute(
@@ -1957,8 +1975,7 @@ final class AppModel {
 
     func navigationRoute(for tap: PushNotificationTap) async throws -> SessionNavigationRoute {
         guard let route = tap.route else { throw CancellationError() }
-        let candidates = profiles.profiles.filter { $0.machineId == route.machineID && $0.isEnabled }
-        guard let profile = candidates.first(where: { $0.id == profiles.selected?.id }) ?? candidates.first else {
+        guard let profile = pushNavigationProfile(machineID: route.machineID) else {
             throw GatewayFailure(
                 code: "not_found",
                 message: "The server for this notification is no longer paired.",
@@ -1969,10 +1986,20 @@ final class AppModel {
         guard didStart, sceneAllowsCatalogRefresh, pushNavigationActivationReady else {
             throw CancellationError()
         }
-        if profiles.selected?.id != profile.id || connectionState != .connected {
+        // A selected profile may already be publishing its replacement socket
+        // after foreground activation. Join that handoff; switching the same
+        // profile would cancel the useful reconnect and start a second one.
+        if profiles.selected?.id != profile.id {
             await switchGateway(profile)
         }
-        guard profiles.selected?.id == profile.id, connectionState == .connected else {
+        guard profiles.selected?.id == profile.id,
+              let generationAdmission = lifecycle.generationAdmission,
+              let routeAdmission = await lifecycle.waitForRouteConnection(
+                  profileID: profile.id,
+                  until: clock.now() + PushNavigationConnectionPolicy.readinessDeadline,
+                  admission: generationAdmission
+              ),
+              lifecycle.admits(routeAdmission) else {
             throw GatewayFailure(
                 code: "disconnected",
                 message: "The server for this notification is offline.",
@@ -1980,21 +2007,21 @@ final class AppModel {
                 details: nil
             )
         }
-        _ = await refreshSessions()
-        guard let session = sessionCatalog.sessions.first(where: { $0.id == route.sessionID }) else {
-            throw GatewayFailure(
-                code: "not_found",
-                message: "The chat from this notification is no longer available.",
-                retryable: false,
-                details: nil
-            )
-        }
-        if let requestID = tap.requestID {
-            Task { @MainActor [weak self] in
-                await self?.markNotificationRead(requestID: requestID, machineID: route.machineID)
-            }
-        }
-        return try await navigationRoute(for: session.withGatewaySource(id: profile.id, label: profile.label))
+        // The payload already carries the admitted canonical identity. Do not
+        // gate chat availability on a potentially paginated dashboard catalog;
+        // `session.open` remains the authoritative existence/permission check.
+        acknowledgePushNavigation(tap)
+        return SessionNavigationRoute(
+            sessionID: route.sessionID,
+            editorText: nil,
+            gatewayProfileID: profile.id,
+            gatewayLifecycleGeneration: routeAdmission.generation
+        )
+    }
+
+    private func pushNavigationProfile(machineID: String) -> GatewayProfile? {
+        let candidates = profiles.profiles.filter { $0.machineId == machineID && $0.isEnabled }
+        return candidates.first(where: { $0.id == profiles.selected?.id }) ?? candidates.first
     }
 
     func performOnOwningGateway<Value>(
