@@ -85,9 +85,38 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Components/InAppNoticePresentation.swift"),
             encoding: .utf8
         )
+        let chat = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        let coordinator = try String(
+            contentsOf: packageRoot.appending(path: coordinatorPath),
+            encoding: .utf8
+        )
+        let transcriptScroll = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptScrollView.swift"),
+            encoding: .utf8
+        )
+        let toolRuns = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatToolRunViews.swift"),
+            encoding: .utf8
+        )
         #expect(app.contains("struct SceneRootView: View"))
         #expect(app.contains("@State private var presentationActivity = PresentationActivityCoordinator()"))
         #expect(notices.contains(".environment(\\.tronPresentationActivityCoordinator, presentationActivity)"))
+        #expect(coordinator.contains("static let presentingDescendant"))
+        #expect(coordinator.contains("allowsDataPublication: true"))
+        #expect(chat.contains("if presentationActivity.allowsPresentationPublication {\n                Color.clear\n                    .onChange(of: pendingInteractionScopes"))
+        #expect(chat.contains("if presentationActivity.allowsDataPublication {\n                Color.clear\n                    .onChange(of: transcriptProjectionSource"))
+        #expect(chat.contains("if previous.allowsDataPublication"))
+        #expect(chat.contains("if presentationActivity.allowsViewportObservation {\n                reconcileInstalledProjectionForViewport"))
+        #expect(chat.contains("if startedWork, presentationActivity.allowsViewportObservation"))
+        #expect(chat.contains("guard presentationActivity.allowsViewportObservation else { return false }"))
+        #expect(chat.contains("reconcileDeferredViewportProjectionIfNeeded()"))
+        #expect(coordinator.contains("retiredTokenLimit = 512"))
+        #expect(coordinator.contains("parent.map({ !retiredTokens.contains($0) })"))
+        #expect(transcriptScroll.contains("|| !admitsGeometryCallbacks"))
+        #expect(toolRuns.contains("guard presentationActivity.allowsContinuousAnimation else"))
     }
 
     @Test("binding-owned system presentations use the canonical activity lifecycle")

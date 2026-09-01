@@ -519,8 +519,8 @@ history back to the retained authoritative tail. Opening ownership is one mutual
 prove that only explicit takeover, return, catch-up, opening, submission, prepend, and presentation
 intents can change durable viewport authority. `ChatScrollCoordinatorTests` assert observable outcomes:
 the native bottom size-change anchor absorbs pinned continuous stream/composer/keyboard and existing-row growth with zero app offset writes; a genuinely new lazy physical row owns at most one stable-sentinel materialization lease until fresh current-layout semantic geometry, row-frame-before-request and request-before-row-frame ordering both settle, and burst requests are retained/coalesced, while detached growth remains target-free;
-direct return clears catch-up and unread; a foreground topmost chat publishes its exact synchronized
-subscription visibility lease before scroll positioning finishes, renews it before expiry, retires it on covering sheets/inactivity/navigation/connection
+direct return clears catch-up and unread; a foreground chat on the active presentation lineage publishes its exact synchronized
+subscription visibility lease before scroll positioning finishes, renews it before expiry, retains it while descendant tool/command/detail sheets are open, keeps their bounded tool projection current without hidden viewport callbacks or chip/row motion, rebases the newest complete projection once on uncover, and retires the lease on unrelated coverage/inactivity/navigation/connection
 replacement, and acknowledges later unread summary revisions through the same token-gated absolute read;
 bottom rubber-band callbacks remain pinned and keep catch-up
 hidden in both geometry/ownership orders, while the same gesture detaches as soon as valid geometry moves

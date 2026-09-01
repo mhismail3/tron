@@ -576,7 +576,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         ) {
             if pending.promptBehavior.isQueuedKind {
                 ChatQueuedMessageEntranceRow(
-                    animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
+                    animatesEntrance: admitsGeometryCallbacks
+                        && ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
                         isReady: isReady,
                         entranceSuppressed: entranceSuppressed,
                         hasIdentityAlias: false
@@ -589,7 +590,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             } else {
                 ChatOutgoingSubmissionEntranceRow(
                     reduceMotion: reduceMotion,
-                    animatesEntrance: !entranceSuppressed
+                    animatesEntrance: admitsGeometryCallbacks
+                        && !entranceSuppressed
                         && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
                     kind: ChatPromptLifecycleTransitionPolicy.entranceKind(for: pending.promptBehavior),
                     onEntranceConsumed: {
@@ -616,7 +618,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         ) {
             ChatOutgoingSubmissionEntranceRow(
                 reduceMotion: reduceMotion,
-                animatesEntrance: (outgoing.promptBehavior.isQueuedKind
+                animatesEntrance: admitsGeometryCallbacks
+                    && (outgoing.promptBehavior.isQueuedKind
                     ? ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
                         isReady: isReady,
                         entranceSuppressed: entranceSuppressed,
@@ -665,7 +668,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             entranceState: .none
         ) {
             ChatQueuedMessageEntranceRow(
-                animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
+                animatesEntrance: admitsGeometryCallbacks
+                    && ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
                     isReady: isReady,
                     entranceSuppressed: entranceSuppressed,
                     hasIdentityAlias: aliasID != nil || suppressed
@@ -701,6 +705,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     ) -> some View {
         let kind = ChatContentEntranceKind.classify(item)
         let state: ChatTranscriptEntranceState = canonicalSubmissionIDs.contains(semanticID)
+                || !admitsGeometryCallbacks
             ? .none
             : transcriptPresentation.entranceState(for: semanticID)
         return stableRow(

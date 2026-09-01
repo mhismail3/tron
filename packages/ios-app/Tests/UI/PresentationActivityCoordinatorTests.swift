@@ -41,15 +41,23 @@ struct PresentationActivityCoordinatorTests {
         try await waitForSurfaceCount(1, coordinator: coordinator)
     }
 
-    @Test("only the topmost registered surface is active")
-    func topmostSurfaceWins() {
+    @Test("the topmost surface owns motion while its ancestors keep descendant data live")
+    func activeLineageSeparatesPublicationFromMotion() {
         let coordinator = PresentationActivityCoordinator()
-        let root = PresentationSurfaceToken(id: "dashboard", generation: UUID())
-        let child = PresentationSurfaceToken(id: "settings", generation: UUID())
+        let root = PresentationSurfaceToken(id: "chat", generation: UUID())
+        let child = PresentationSurfaceToken(id: "tool-run", generation: UUID())
+        let grandchild = PresentationSurfaceToken(id: "tool-detail", generation: UUID())
         coordinator.register(root, parent: nil)
         coordinator.register(child, parent: root)
-        #expect(coordinator.activity(for: root) == .covered)
-        #expect(coordinator.activity(for: child) == .active)
+        coordinator.register(grandchild, parent: child)
+
+        #expect(coordinator.activity(for: root) == .presentingDescendant)
+        #expect(coordinator.activity(for: child) == .presentingDescendant)
+        #expect(coordinator.activity(for: grandchild) == .active)
+        #expect(coordinator.activity(for: root).allowsDataPublication)
+        #expect(!coordinator.activity(for: root).allowsPresentationPublication)
+        #expect(!coordinator.activity(for: root).allowsContinuousAnimation)
+        #expect(!coordinator.activity(for: root).allowsViewportObservation)
     }
 
     @Test("a child remains active when binding intent registers before its parent appears")
@@ -59,7 +67,7 @@ struct PresentationActivityCoordinatorTests {
         let child = PresentationSurfaceToken(id: "child", generation: UUID())
         coordinator.register(child, parent: root)
         coordinator.register(root, parent: nil)
-        #expect(coordinator.activity(for: root) == .covered)
+        #expect(coordinator.activity(for: root) == .presentingDescendant)
         #expect(coordinator.activity(for: child) == .active)
     }
 
@@ -127,9 +135,29 @@ struct PresentationActivityCoordinatorTests {
             let consumed = owners[index].consume()
             let forwarded = try #require(consumed)
             if index + 1 < owners.count { owners[index + 1].stage(forwarded) }
-            #expect(coordinator.activity(for: chat) == (index == owners.count - 1 ? .active : .covered))
+            #expect(coordinator.activity(for: chat) == (index == owners.count - 1 ? .active : .presentingDescendant))
         }
         #expect(coordinator.mountedSurfaceCount == 1)
+    }
+
+    @Test("a child delayed beyond exact parent retirement cannot escape as an independent branch")
+    func retiredParentRejectsLateChildRegistration() {
+        let coordinator = PresentationActivityCoordinator()
+        let parent = PresentationSurfaceToken(id: "tool-run", generation: UUID())
+        let lateChild = PresentationSurfaceToken(id: "tool-detail", generation: UUID())
+        coordinator.register(parent, parent: nil)
+        coordinator.retire(parent)
+        coordinator.register(lateChild, parent: parent)
+
+        #expect(coordinator.mountedSurfaceCount == 0)
+        #expect(coordinator.activity(for: lateChild) == .covered)
+
+        let replacementParent = PresentationSurfaceToken(id: parent.id, generation: UUID())
+        let replacementChild = PresentationSurfaceToken(id: lateChild.id, generation: UUID())
+        coordinator.register(replacementParent, parent: nil)
+        coordinator.register(replacementChild, parent: replacementParent)
+        #expect(coordinator.activity(for: replacementParent) == .presentingDescendant)
+        #expect(coordinator.activity(for: replacementChild) == .active)
     }
 
     @Test("a stale generation cannot retire a replacement")

@@ -64,8 +64,17 @@ struct ToolDetailPresentationTests {
         }
     }
 
-    @Test("tool detail routes resolve newest live data by stable call ID")
+    @Test("mounted tool detail routes resolve live output and terminal state by stable call ID")
+    @MainActor
     func toolDetailRouteResolution() throws {
+        let coordinator = PresentationActivityCoordinator()
+        let chat = PresentationSurfaceToken(id: "chat", generation: UUID())
+        let detail = PresentationSurfaceToken(id: "tool-detail", generation: UUID())
+        coordinator.register(chat, parent: nil)
+        coordinator.register(detail, parent: chat)
+        #expect(coordinator.activity(for: chat) == .presentingDescendant)
+        #expect(coordinator.activity(for: chat).allowsDataPublication)
+
         let original = tool("edit", subtitle: "Running", content: "first")
         let second = tool("bash", subtitle: "Running", content: "other")
         let newest = ChatToolPresentation(
@@ -87,7 +96,28 @@ struct ToolDetailPresentationTests {
         #expect(route.resolve(in: [original])?.content == "first")
         #expect(route.resolve(in: [newest, second])?.content == "settled")
         #expect(route.resolve(in: [newest, second])?.progressSequence == 2)
-        #expect(ToolDetailRoute(toolID: "missing").resolve(in: [newest, second]) == nil)
+
+        let failed = ChatToolPresentation(
+            id: original.id,
+            title: original.title,
+            subtitle: "Failed",
+            request: original.request,
+            response: .object(["error": .string("failed output")]),
+            content: "failed output",
+            fallbackContent: nil,
+            error: true,
+            startedAt: original.startedAt,
+            completedAt: "2026-01-01T00:00:03Z",
+            durationMs: 3_000,
+            lastProgressAt: "2026-01-01T00:00:03Z",
+            progressSequence: 3
+        )
+        #expect(route.resolve(in: [failed, second])?.content == "failed output")
+        #expect(route.resolve(in: [failed, second])?.error == true)
+        #expect(coordinator.activity(for: chat) == .presentingDescendant)
+        #expect(coordinator.activity(for: detail) == .active)
+        #expect(coordinator.mountedSurfaceCount == 2)
+        #expect(ToolDetailRoute(toolID: "missing").resolve(in: [failed, second]) == nil)
     }
 
     @Test("status chips combine state and elapsed time with stable semantics")

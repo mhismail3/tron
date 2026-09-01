@@ -40,6 +40,11 @@ struct ChatView: View {
     @State private var composerResourceCatalog = ComposerResourceCatalog(commands: [])
     @State private var composerResourcePicker: ComposerResourcePickerSource?
     @State private var composerResourceResults: [ComposerResourceEntry] = []
+    /// The exact installed frame from before a descendant began consuming live
+    /// transcript data. Viewport work is rebased once on uncover rather than on
+    /// every hidden tool-output update.
+    @State private var deferredViewportProjectionBaseline: InstalledChatTranscript?
+    @State private var hasDeferredViewportProjection = false
 
     #if HOSTED_TEST
     init(
@@ -291,11 +296,33 @@ struct ChatView: View {
         }
         .onChange(of: presentationActivity) { previous, current in
             reconcileSessionPresentationVisibility(
-                surfaceActive: current.allowsPresentationPublication
+                surfaceActive: current.allowsDataPublication
             )
-            if previous.allowsPresentationPublication,
-               !current.allowsPresentationPublication {
+            if previous.allowsContinuousAnimation,
+               !current.allowsContinuousAnimation {
+                abandonLayoutTransaction()
+            }
+            if previous.allowsViewportObservation,
+               !current.allowsViewportObservation,
+               current.allowsDataPublication,
+               !hasDeferredViewportProjection {
+                deferredViewportProjectionBaseline = transcriptPresentation.installed
+                hasDeferredViewportProjection = true
+            }
+            if previous.allowsDataPublication,
+               !current.allowsDataPublication {
                 transcriptPresentation.suspendPendingWork()
+                deferredViewportProjectionBaseline = nil
+                hasDeferredViewportProjection = false
+            }
+            if !previous.allowsViewportObservation,
+               current.allowsViewportObservation {
+                reconcileDeferredViewportProjectionIfNeeded()
+                if scenePhase == .active,
+                   !sessionPresentation.needsOpeningResume,
+                   transcriptPresentation.installed != nil {
+                    scrollCoordinator.foregroundViewportBecameActive()
+                }
             }
         }
         .task(id: presentationActivity.allowsPresentationPublication) {
@@ -321,17 +348,6 @@ struct ChatView: View {
         .background { activeProjectionObservationDriver }
         .onChange(of: transcriptPresentation.installed?.tag) { previousTag, _ in
             let installed = transcriptPresentation.installed
-            scrollCoordinator.reconcileMaterializationRows { renderedID in
-                installed?.containsPhysicalRowID(renderedID) == true
-            }
-            let outgoingPresentation = installed?.handoff.outgoingPresentation
-            let installedLifecycleID = outgoingPresentation?.id
-            if let generation = morphRegistry.reconcile(
-                installedLifecycleID: installedLifecycleID,
-                permitsFlight: outgoingPresentation?.usesQueuedCardVisual != true
-            ) {
-                layoutTransaction.settle(generation, source: .morphFlight)
-            }
             if ChatQueueMutationProjectionPolicy.shouldRetirePresentationState(
                 commandIsPending: sessionPresentation.queueMutationCommandIsPending,
                 expectedRevision: sessionPresentation.pendingQueueMutationRevision,
@@ -339,23 +355,11 @@ struct ChatView: View {
             ) {
                 clearSettledQueueMutationPresentationState()
             }
-            let projectionLayoutChanged = previousTag.map { previousTag in
-                installed.map { !previousTag.matchesProjectionPayload(of: $0.tag) } ?? true
-            } ?? true
-            let physicalProjectionChanged = previousTag.map { previous in
-                guard let installed else { return true }
-                return previous.layoutIdentity != installed.tag.layoutIdentity
-                    || previous.handoffIdentity != installed.tag.handoffIdentity
-            } ?? true
-            if physicalProjectionChanged {
-                // Every mounted tag change that can alter row heights, including
-                // a lifecycle-only or compaction/tool settlement replacement,
-                // invalidates delayed marker callbacks before they can prove the
-                // new physical layout. Authority-only tag changes stay inert.
-                scrollCoordinator.projectionInstalled()
-            }
-            if projectionLayoutChanged {
-                scrollCoordinator.installedTranscriptChanged(installed)
+            if presentationActivity.allowsViewportObservation {
+                reconcileInstalledProjectionForViewport(
+                    previousTag: previousTag,
+                    installed: installed
+                )
             }
             #if HOSTED_TEST
             if let installed {
@@ -387,7 +391,7 @@ struct ChatView: View {
             visible: ChatSessionVisibilityPolicy.isVisible(
                 sceneActive: sceneActive ?? (scenePhase == .active),
                 surfaceActive: surfaceActive
-                    ?? presentationActivity.allowsPresentationPublication,
+                    ?? presentationActivity.allowsDataPublication,
                 hasMountedAuthority: hasMountedAuthority
             )
         )
@@ -444,6 +448,62 @@ struct ChatView: View {
     private func abandonLayoutTransaction() {
         morphRegistry.abandon()
         layoutTransaction.abandon()
+    }
+
+    /// Projection data can advance while a descendant sheet is visible, but
+    /// the covered transcript must not mutate scroll, morph, or layout owners.
+    /// Reconcile the newest complete installation once the viewport is active.
+    private func reconcileDeferredViewportProjectionIfNeeded() {
+        guard hasDeferredViewportProjection else { return }
+        let baseline = deferredViewportProjectionBaseline
+        deferredViewportProjectionBaseline = nil
+        hasDeferredViewportProjection = false
+        let installed = transcriptPresentation.installed
+        guard baseline?.tag != installed?.tag else { return }
+        if let baseline {
+            scrollCoordinator.transcriptProjectionWillChange(from: baseline)
+        }
+        reconcileInstalledProjectionForViewport(
+            previousTag: baseline?.tag,
+            installed: installed
+        )
+    }
+
+    private func reconcileInstalledProjectionForViewport(
+        previousTag: ChatTranscriptProjectionTag?,
+        installed: InstalledChatTranscript?
+    ) {
+        guard presentationActivity.allowsViewportObservation else { return }
+        scrollCoordinator.reconcileMaterializationRows { renderedID in
+            installed?.containsPhysicalRowID(renderedID) == true
+        }
+        if presentationActivity.allowsContinuousAnimation {
+            let outgoingPresentation = installed?.handoff.outgoingPresentation
+            if let generation = morphRegistry.reconcile(
+                installedLifecycleID: outgoingPresentation?.id,
+                permitsFlight: outgoingPresentation?.usesQueuedCardVisual != true
+            ) {
+                layoutTransaction.settle(generation, source: .morphFlight)
+            }
+        }
+        let projectionLayoutChanged = previousTag.map { previousTag in
+            installed.map { !previousTag.matchesProjectionPayload(of: $0.tag) } ?? true
+        } ?? true
+        let physicalProjectionChanged = previousTag.map { previous in
+            guard let installed else { return true }
+            return previous.layoutIdentity != installed.tag.layoutIdentity
+                || previous.handoffIdentity != installed.tag.handoffIdentity
+        } ?? true
+        if physicalProjectionChanged {
+            // Every mounted tag change that can alter row heights, including a
+            // lifecycle-only or compaction/tool settlement replacement,
+            // invalidates delayed marker callbacks before they can prove the
+            // new physical layout. Authority-only tag changes stay inert.
+            scrollCoordinator.projectionInstalled()
+        }
+        if projectionLayoutChanged {
+            scrollCoordinator.installedTranscriptChanged(installed)
+        }
     }
 
     private func settleTranscriptEntrance(renderedID: String) {
@@ -587,7 +647,7 @@ struct ChatView: View {
         _ capture: ChatTranscriptProjectionCapture,
         permitsQueueMutationDeferral: Bool = true
     ) {
-        guard presentationActivity.allowsPresentationPublication,
+        guard presentationActivity.allowsDataPublication,
               capture.tag.presentationGeneration == sessionPresentation.modelPresentationGeneration,
               transcriptProjectionSource == capture.tag else { return }
         if permitsQueueMutationDeferral,
@@ -672,13 +732,18 @@ struct ChatView: View {
         // Projection intake remains live during prepend. The scroll owner
         // preserves the exact anchor, while this store coalesces to the newest
         // complete desired commit.
+        if !presentationActivity.allowsViewportObservation,
+           !hasDeferredViewportProjection {
+            deferredViewportProjectionBaseline = installedBeforeSubmission
+            hasDeferredViewportProjection = true
+        }
         let startedWork = transcriptPresentation.submit(
             snapshot: snapshot,
             handoff: capture.handoff,
             queuePresentationIDByOperationID: capture.queuePresentationIDByOperationID,
             tag: currentSource
         )
-        if startedWork {
+        if startedWork, presentationActivity.allowsViewportObservation {
             scrollCoordinator.transcriptProjectionWillChange(from: installedBeforeSubmission)
         }
         #if HOSTED_TEST
@@ -773,34 +838,39 @@ struct ChatView: View {
 
     @ViewBuilder
     private var activeProjectionObservationDriver: some View {
-        if presentationActivity.allowsPresentationPublication {
-            Color.clear
-                .onChange(of: pendingInteractionScopes, initial: true) { _, _ in
-                    reconcileInteractionDraftsIfAuthoritative()
-                    sessionPresentation.reconcileInteractionPresentation(
-                        with: selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? []
-                    )
-                }
-                .onChange(of: initialModelSettled) { _, _ in
-                    reconcileInteractionDraftsIfAuthoritative()
-                }
-                .onChange(of: model.connectionState) { _, _ in
-                    reconcileInteractionDraftsIfAuthoritative()
-                }
-                .onChange(of: transcriptProjectionSource, initial: true) { _, source in
-                    guard let capture = transcriptProjectionCapture else {
-                        // A recycled same-session owner can briefly have no exact
-                        // generation while the retained canonical snapshot is still
-                        // valid. Keep the mounted projection until its replacement
-                        // installs; only a genuinely absent session clears the view.
-                        if selectedAuthoritativeSnapshot == nil { transcriptPresentation.reset() }
-                        return
+        ZStack {
+            if presentationActivity.allowsPresentationPublication {
+                Color.clear
+                    .onChange(of: pendingInteractionScopes, initial: true) { _, _ in
+                        reconcileInteractionDraftsIfAuthoritative()
+                        sessionPresentation.reconcileInteractionPresentation(
+                            with: selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? []
+                        )
                     }
-                    // Ignore a callback captured before opening installed its mounted
-                    // generation; the newer exact source owns submission.
-                    guard source == capture.tag else { return }
-                    intakeTranscriptProjection(capture)
-                }
+                    .onChange(of: initialModelSettled) { _, _ in
+                        reconcileInteractionDraftsIfAuthoritative()
+                    }
+                    .onChange(of: model.connectionState) { _, _ in
+                        reconcileInteractionDraftsIfAuthoritative()
+                    }
+            }
+            if presentationActivity.allowsDataPublication {
+                Color.clear
+                    .onChange(of: transcriptProjectionSource, initial: true) { _, source in
+                        guard let capture = transcriptProjectionCapture else {
+                            // A recycled same-session owner can briefly have no exact
+                            // generation while the retained canonical snapshot is still
+                            // valid. Keep the mounted projection until its replacement
+                            // installs; only a genuinely absent session clears the view.
+                            if selectedAuthoritativeSnapshot == nil { transcriptPresentation.reset() }
+                            return
+                        }
+                        // Ignore a callback captured before opening installed its mounted
+                        // generation; the newer exact source owns submission.
+                        guard source == capture.tag else { return }
+                        intakeTranscriptProjection(capture)
+                    }
+            }
         }
     }
 
@@ -1129,10 +1199,11 @@ struct ChatView: View {
     }
 
     private var admitsNativeScrollCallbacks: Bool {
+        guard presentationActivity.allowsViewportObservation else { return false }
         #if HOSTED_TEST
-        hostedProbe?.admitsNativeScrollCallbacks != false
+        return hostedProbe?.admitsNativeScrollCallbacks != false
         #else
-        true
+        return true
         #endif
     }
 

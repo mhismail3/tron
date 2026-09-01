@@ -349,6 +349,7 @@ private struct ToolActivityChip: View {
     let recordChip: (ToolChipInstrumentationSample) -> Void
     let action: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var displayedState: ChatCompactPillVisualState?
     @State private var transitionState = ChatToolChipTransitionState()
 
@@ -401,6 +402,13 @@ private struct ToolActivityChip: View {
     private func retarget(_ target: ChatCompactPillVisualState) {
         let token = transitionState.retarget(target)
         guard transitionState.admits(token) else { return }
+        guard presentationActivity.allowsContinuousAnimation else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { displayedState = target }
+            recordSample(target, token: token)
+            return
+        }
         let animation: Animation = reduceMotion
             ? .linear(duration: 0.10)
             : .smooth(duration: 0.20)

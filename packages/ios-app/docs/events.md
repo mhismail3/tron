@@ -71,11 +71,11 @@ admits and reduces mounted-session topics:
   continuous active period, so live `updatedAt` progress and heartbeat updates refresh row content
   without repeatedly reordering concurrent work; older Gateways fall back to stable profile-qualified
   identity for active-row ties. A final prompt response becomes unread only
-  at truthful settlement. Once an exact synchronized chat is mounted as the topmost surface in an
+  at truthful settlement. Once an exact synchronized chat is mounted on the active presentation lineage in an
   active scene, `SessionPresentationStore` publishes and renews a token-bound, revision-ordered
-  `session.presentation.set` lease without waiting for scroll positioning or a first-ready-frame delay;
-  covering sheets, inactivity, route retirement, subscription replacement, and
-  connection retirement revoke it. Gateway uses the completion entry's one latched lease disposition
+  `session.presentation.set` lease without waiting for scroll positioning or a first-ready-frame delay.
+  Descendant tool, command, and detail sheets retain that lineage; an unrelated covering branch, inactivity, route retirement, subscription replacement, or
+  connection retirement revokes it. Gateway uses the completion entry's one latched lease disposition
   for both canonical read-through and automatic completion-alert suppression. Opening still
   acknowledges only the completion revision installed by that exact presentation/connection owner,
   mounted unread summary revisions converge through the same absolute read operation, transient
@@ -414,11 +414,11 @@ one-shot discrete-follow entitlement.
 
 Surface coverage pauses only disposable presentation work. Gateway intake,
 sequence admission, canonical reduction, accepted mutations, drafts, receipts,
-and notifications continue unchanged. Covered transcript and dashboard views
+and notifications continue unchanged. Ancestors of the topmost surface continue only the bounded data publication needed so a visible descendant tool or command sheet receives live output and terminal status; their own loads, polls, automatic presentation effects, continuous animation, native scroll callbacks, and viewport observation remain paused. Tool payload-only revisions use the indexed projection fast path and the worker remains serial/latest-wins. The covered chat retains one pre-cover viewport baseline and rebases once against the newest complete installation when uncovered instead of processing every hidden update. Covered branches outside that active lineage
 retain their last complete installation and do not replay intermediate events.
 When uncovered, the owning presentation store derives one latest aggregate and
 installs it through the existing generation and frame-admission rules. Chat
-retires any in-flight disposable projection when covered, retains its last
+retires an in-flight disposable projection only when it leaves the active lineage, retains its last
 complete installation, and suppresses accumulated row entrances on the first
 replacement. If coverage interrupts initial chat opening, uncover waits for the
 retiring opening lease and starts one new exact opening only when still needed.

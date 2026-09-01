@@ -189,11 +189,16 @@ struct ChatSessionPresentationTests {
         #expect(contextSheet.consume() == nil)
     }
 
-    @Test("session visibility follows synchronized topmost foreground authority, not ready-frame timing")
+    @Test("session visibility follows synchronized foreground lineage, not ready-frame timing")
     func sessionVisibilityPolicy() {
         #expect(ChatSessionVisibilityPolicy.isVisible(
             sceneActive: true,
             surfaceActive: true,
+            hasMountedAuthority: true
+        ))
+        #expect(ChatSessionVisibilityPolicy.isVisible(
+            sceneActive: true,
+            surfaceActive: PresentationSurfaceActivity.presentingDescendant.allowsDataPublication,
             hasMountedAuthority: true
         ))
         #expect(!ChatSessionVisibilityPolicy.isVisible(

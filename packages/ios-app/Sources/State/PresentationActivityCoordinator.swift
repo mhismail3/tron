@@ -3,20 +3,34 @@ import Observation
 import SwiftUI
 
 /// Rendering activity is intentionally independent from Gateway/session
-/// visibility. Covered surfaces continue admitting authoritative work while
-/// suppressing presentation work that cannot be interacted with.
+/// authority. The topmost surface owns animation and viewport work; its
+/// mounted ancestors continue publishing the bounded state consumed by that
+/// visible descendant. Unrelated covered branches suppress presentation work.
 struct PresentationSurfaceActivity: Equatable, Sendable {
+    /// Bounded parent data needed by the visible surface, such as the exact
+    /// tool payload selected by a descendant detail sheet.
+    let allowsDataPublication: Bool
+    /// Surface-owned loads, polls, and automatic presentation effects.
     let allowsPresentationPublication: Bool
     let allowsContinuousAnimation: Bool
     let allowsViewportObservation: Bool
 
     static let active = Self(
+        allowsDataPublication: true,
         allowsPresentationPublication: true,
         allowsContinuousAnimation: true,
         allowsViewportObservation: true
     )
 
+    static let presentingDescendant = Self(
+        allowsDataPublication: true,
+        allowsPresentationPublication: false,
+        allowsContinuousAnimation: false,
+        allowsViewportObservation: false
+    )
+
     static let covered = Self(
+        allowsDataPublication: false,
         allowsPresentationPublication: false,
         allowsContinuousAnimation: false,
         allowsViewportObservation: false
@@ -54,13 +68,22 @@ final class PresentationActivityCoordinator {
         let parent: PresentationSurfaceToken?
     }
 
+    private static let retiredTokenLimit = 512
+
     private var surfaces: [PresentationSurfaceToken: Surface] = [:]
     private var order: [PresentationSurfaceToken] = []
+    /// A dismissal can retire binding intent before delayed SwiftUI content
+    /// appears. Keep an exact, bounded tombstone ledger so that late content—or
+    /// a late child of that content—cannot escape as a new independent branch.
+    private var retiredTokens: Set<PresentationSurfaceToken> = []
+    private var retiredTokenOrder: [PresentationSurfaceToken] = []
 
     /// Registration is idempotent so binding intent and mounted content can
     /// both establish the same generation without creating duplicate leases.
     func register(_ token: PresentationSurfaceToken, parent: PresentationSurfaceToken?) {
-        guard surfaces[token] == nil else { return }
+        guard surfaces[token] == nil,
+              !retiredTokens.contains(token),
+              parent.map({ !retiredTokens.contains($0) }) ?? true else { return }
         surfaces[token] = Surface(parent: parent)
         order.append(token)
     }
@@ -68,21 +91,35 @@ final class PresentationActivityCoordinator {
     /// Retires one exact generation and every mounted descendant. A delayed
     /// callback from an earlier route cannot affect its replacement.
     func retire(_ token: PresentationSurfaceToken) {
-        let retired = Set(order.filter { candidate in
+        let descendants = order.filter { candidate in
             candidate == token || isDescendant(candidate, of: token)
-        })
-        guard !retired.isEmpty else { return }
-        for token in retired { surfaces.removeValue(forKey: token) }
+        }
+        let retired = Set(descendants).union([token])
+        for retiredToken in retired {
+            surfaces.removeValue(forKey: retiredToken)
+            rememberRetired(retiredToken)
+        }
         order.removeAll { retired.contains($0) }
     }
 
     func activity(for token: PresentationSurfaceToken?) -> PresentationSurfaceActivity {
         guard let token else { return .active }
-        guard surfaces[token] != nil else { return .covered }
-        return topmostToken == token ? .active : .covered
+        guard surfaces[token] != nil, let topmostToken else { return .covered }
+        if topmostToken == token { return .active }
+        if isDescendant(topmostToken, of: token) { return .presentingDescendant }
+        return .covered
     }
 
     var mountedSurfaceCount: Int { order.count }
+
+    private func rememberRetired(_ token: PresentationSurfaceToken) {
+        guard retiredTokens.insert(token).inserted else { return }
+        retiredTokenOrder.append(token)
+        let excess = retiredTokenOrder.count - Self.retiredTokenLimit
+        guard excess > 0 else { return }
+        for expired in retiredTokenOrder.prefix(excess) { retiredTokens.remove(expired) }
+        retiredTokenOrder.removeFirst(excess)
+    }
 
     private var topmostToken: PresentationSurfaceToken? {
         order.reversed().first { candidate in
