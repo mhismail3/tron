@@ -203,9 +203,12 @@ entries, which the chat can request backward in 600 KB/512-item pages without ri
 oversized or generically truncated WebSocket frame. Page `start`/`end`/`total`, item count,
 neighbor identity, mount, runtime, and subscription ownership must all agree before prepend.
 The presentation owner keeps the newest authoritative tail separate from explicitly loaded
-older browsing rows. Opening publishes the usable bounded authoritative tail immediately; earlier
-rows remain explicit canonical paging and never extend the synchronization quarantine. Every
-compatible replacement/reconnect reconciles only an exact visible prefix: the visible coverage end
+older browsing rows. Opening publishes the usable bounded authoritative tail immediately and never
+extends the synchronization quarantine. If that exact tail has a positive start and fewer than 512
+visible rows, the mounted presentation schedules one optional exact backward page through the same
+paging owner, trims the combined recent window to 512 rows, and fails silently back to the usable
+tail. Further history remains explicit canonical paging. Every compatible replacement/reconnect
+reconciles only an exact visible prefix: the visible coverage end
 is the authority tail end, sliding tails promote covered old-tail rows, backward expansion trims the
 prefix, and ordinal ID overlap, parent, leaf, and runtime/total identity conflicts fail closed. A
 detached reader retains loaded rows; physical return to latest never mutates transcript coverage.

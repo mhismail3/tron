@@ -1596,8 +1596,8 @@ struct SessionPresentationStoreTests {
         }
     }
 
-    @Test("active fresh open publishes an empty positive-start tail before optional history")
-    func freshOpenPublishesEmptyActiveTailImmediately() async throws {
+    @Test("active fresh open backfills an empty positive-start tail once")
+    func freshOpenBackfillsEmptyActiveTail() async throws {
         try await withTestWatchdog { @MainActor in
             let socket = ScriptedGatewaySocket()
             let client = GatewayClient(
@@ -1650,13 +1650,40 @@ struct SessionPresentationStoreTests {
                 "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
                 "result": .object(["synchronized": .bool(true)]),
             ])))
-            try await answerAttentionRead(socket, frameIndex: 3, expectedRevision: 6)
+            let attentionIndex = try await answerAttentionRead(
+                socket,
+                frameIndex: 3,
+                expectedRevision: 6
+            )
 
             _ = try await opening.value
+            let transcriptRequest = try await nextRequest(
+                "session.transcript",
+                socket: socket,
+                startingAt: attentionIndex + 1
+            )
+            request = transcriptRequest.request
+            requestID = try #require(request.objectValue?["id"]?.stringValue)
+            let earlier = SessionScenarioBuilder(seed: 8_904)
+                .historyPage(count: 10, longRowBytes: 16)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
+                "result": .object([
+                    "items": try JSONValue.encode(earlier),
+                    "start": .number(0), "end": .number(10), "total": .number(10),
+                    "nextEntryId": .null,
+                    "runtimeGeneration": .string(baseline.runtimeGeneration),
+                    "leafEntryId": baseline.leafEntryId.map(JSONValue.string) ?? .null,
+                ]),
+            ])))
+            for _ in 0..<100 where store.visibleTranscriptStart != 0 {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+
             #expect(store.snapshot?.phase == .compacting)
             #expect(store.snapshot?.transcriptStart == 10)
             #expect(store.snapshot?.transcript.isEmpty == true)
-            #expect(await socket.sentFrames().count >= 4)
+            #expect(store.visibleTranscript.map(\.id) == earlier.map(\.id))
             await client.close()
         }
     }
@@ -1720,8 +1747,8 @@ struct SessionPresentationStoreTests {
         }
     }
 
-    @Test("active fresh open publishes a sparse fitted tail without mandatory history catch-up")
-    func freshOpenPublishesSparseActiveTailImmediately() async throws {
+    @Test("active fresh open backfills a sparse fitted tail to its bounded recent window")
+    func freshOpenBackfillsSparseActiveTail() async throws {
         try await withTestWatchdog { @MainActor in
             let socket = ScriptedGatewaySocket()
             let client = GatewayClient(
@@ -1774,16 +1801,39 @@ struct SessionPresentationStoreTests {
                 "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
                 "result": .object(["synchronized": .bool(true)]),
             ])))
-            try await answerAttentionRead(socket, frameIndex: 3, expectedRevision: 6)
+            let attentionIndex = try await answerAttentionRead(
+                socket,
+                frameIndex: 3,
+                expectedRevision: 6
+            )
 
             _ = try await opening.value
+            let transcriptRequest = try await nextRequest(
+                "session.transcript",
+                socket: socket,
+                startingAt: attentionIndex + 1
+            )
+            request = transcriptRequest.request
+            requestID = try #require(request.objectValue?["id"]?.stringValue)
+            let earlier = SessionScenarioBuilder(seed: 8_906)
+                .historyPage(count: 10, longRowBytes: 16)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
+                "result": .object([
+                    "items": try JSONValue.encode(earlier),
+                    "start": .number(0), "end": .number(10), "total": .number(30),
+                    "nextEntryId": baseline.transcript.first.map { JSONValue.string($0.id) } ?? .null,
+                    "runtimeGeneration": .string(baseline.runtimeGeneration),
+                    "leafEntryId": baseline.leafEntryId.map(JSONValue.string) ?? .null,
+                ]),
+            ])))
+            for _ in 0..<100 where store.visibleTranscriptStart != 0 {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+
             #expect(store.snapshot?.phase == .running)
             #expect(store.snapshot?.transcript.map(\.id) == baseline.transcript.map(\.id))
-            let methods = try await socket.sentFrames().dropFirst().compactMap { frame -> String? in
-                let value = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
-                return value.objectValue?["method"]?.stringValue
-            }
-            #expect(!methods.contains("session.transcript"))
+            #expect(store.visibleTranscript.map(\.id) == earlier.map(\.id) + baseline.transcript.map(\.id))
             await client.close()
         }
     }

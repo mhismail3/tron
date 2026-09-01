@@ -194,6 +194,8 @@ final class SessionPresentationStore {
     private(set) var loadingEarlierTranscript = false
     private(set) var transcriptLoadState: SessionTranscriptLoadState = .idle
     @ObservationIgnored private var transcriptLoadTarget: SessionPresentationIdentity?
+    @ObservationIgnored private var recentTailBackfillTask: Task<Void, Never>?
+    private var recentTailBackfillTarget: SessionPresentationIdentity?
     // At most one target can be mounted or in replacement intake. Keeping the
     // revoked marker exact avoids retaining every historical presentation.
     private var revokedTarget: SessionPresentationIdentity?
@@ -471,6 +473,7 @@ final class SessionPresentationStore {
         )
         pendingTarget = requested
         terminalSynchronizationFailures[requested] = nil
+        cancelRecentTailBackfill()
         transcriptLoadTarget = nil
         loadingEarlierTranscript = false
         transcriptLoadState = .idle
@@ -519,6 +522,7 @@ final class SessionPresentationStore {
         }
         didOpen = true
         result = .success
+        scheduleRecentTailBackfill(for: requested)
         return requested.generation
     }
 
@@ -541,6 +545,7 @@ final class SessionPresentationStore {
         target = nil
         if pendingTarget == requested { pendingTarget = nil }
         isAuthoritative = false
+        cancelRecentTailBackfill()
         transcriptLoadTarget = nil
         loadingEarlierTranscript = false
         transcriptLoadState = .idle
@@ -683,6 +688,20 @@ final class SessionPresentationStore {
     }
 
     func loadEarlier(sessionID: String, presentationGeneration: Int) async -> SessionTranscriptLoadResult {
+        await loadEarlier(
+            sessionID: sessionID,
+            presentationGeneration: presentationGeneration,
+            maximumVisibleCount: nil,
+            optional: false
+        )
+    }
+
+    private func loadEarlier(
+        sessionID: String,
+        presentationGeneration: Int,
+        maximumVisibleCount: Int?,
+        optional: Bool
+    ) async -> SessionTranscriptLoadResult {
         guard !loadingEarlierTranscript else { return .unavailable }
         guard let loadTarget = mountedTarget,
               loadTarget.sessionID == sessionID,
@@ -699,6 +718,9 @@ final class SessionPresentationStore {
             if transcriptLoadTarget == loadTarget {
                 transcriptLoadTarget = nil
                 loadingEarlierTranscript = false
+                if optional, case .failed = transcriptLoadState {
+                    transcriptLoadState = .idle
+                }
             }
         }
 
@@ -736,9 +758,10 @@ final class SessionPresentationStore {
             }
         }
         // A cursor can become stale while the Gateway request is suspended.
-        // Retry a bounded number of times; never recurse through an unbounded
-        // stream of moving cursors or leave the loading state wedged.
-        for attempt in 0...2 {
+        // Explicit reader intent retries twice; optional recent-tail hydration
+        // makes one short attempt and never delays or wedges the usable mount.
+        let maximumAttempt = optional ? 0 : 2
+        for attempt in 0...maximumAttempt {
             guard let target,
                   target == loadTarget,
                   owns(target),
@@ -786,7 +809,7 @@ final class SessionPresentationStore {
                         expectedRuntimeGeneration: current.runtimeGeneration,
                         expectedLeafEntryId: current.leafEntryId
                     ),
-                    timeout: .seconds(15)
+                    timeout: optional ? .seconds(5) : .seconds(15)
                 )
                 guard !Task.isCancelled,
                       let currentTarget = self.mountedTarget,
@@ -819,7 +842,7 @@ final class SessionPresentationStore {
                     transcriptTotal: self.visibleTranscriptTotal,
                     firstTranscriptID: self.visibleTranscript.first?.id
                 ) else {
-                    if attempt < 2 { continue }
+                    if attempt < maximumAttempt { continue }
                     updateTranscriptLoadState(
                         .failed("History changed while loading. Tap to retry."),
                         for: loadTarget
@@ -861,18 +884,33 @@ final class SessionPresentationStore {
                     )
                     return .stale
                 }
-                let retainedPrefix = (self.mountedTranscriptWindow?.prefixItems ?? [])
+                let retainedPrefix = self.mountedTranscriptWindow?.prefixItems ?? []
+                var nextPrefix = response.items + retainedPrefix
+                var nextStart = response.start
+                if let maximumVisibleCount {
+                    let allowedPrefixCount = max(0, maximumVisibleCount - installed.transcript.count)
+                    if nextPrefix.count > allowedPrefixCount {
+                        let dropCount = nextPrefix.count - allowedPrefixCount
+                        nextPrefix.removeFirst(dropCount)
+                        let (trimmedStart, overflow) = nextStart.addingReportingOverflow(dropCount)
+                        guard !overflow else {
+                            updateTranscriptLoadState(.failed("History bounds are invalid."), for: loadTarget)
+                            return .stale
+                        }
+                        nextStart = trimmedStart
+                    }
+                }
                 guard let coverage = self.coverage(
                     for: installed,
-                    prefix: response.items + retainedPrefix,
-                    start: response.start
+                    prefix: nextPrefix,
+                    start: nextStart
                 ), coverage.end == (installed.transcriptStart ?? 0) + installed.transcript.count else {
                     updateTranscriptLoadState(.failed("History bounds are invalid."), for: loadTarget)
                     return .stale
                 }
                 self.mountedTranscriptWindow = MountedTranscriptWindow(
                     coverage: coverage,
-                    prefixItems: response.items + retainedPrefix
+                    prefixItems: nextPrefix
                 )
                 advanceChatProjection(canonical: true)
                 updateTranscriptLoadState(.idle, for: loadTarget)
@@ -881,11 +919,15 @@ final class SessionPresentationStore {
             } catch is CancellationError {
                 updateTranscriptLoadState(.idle, for: loadTarget)
                 return .unavailable
-            } catch let error as GatewayFailure where error.code == "conflict" && attempt < 2 {
+            } catch let error as GatewayFailure where error.code == "conflict"
+                    && attempt < maximumAttempt {
                 continue
             } catch {
-                updateTranscriptLoadState(.failed(error.localizedDescription), for: loadTarget)
-                delegate?.sessionPresentationStoreSurface(error)
+                updateTranscriptLoadState(
+                    optional ? .idle : .failed(error.localizedDescription),
+                    for: loadTarget
+                )
+                if !optional { delegate?.sessionPresentationStoreSurface(error) }
                 return .failed
             }
         }
@@ -894,6 +936,46 @@ final class SessionPresentationStore {
             for: loadTarget
         )
         return .stale
+    }
+
+    private func scheduleRecentTailBackfill(for target: SessionPresentationIdentity) {
+        guard owns(target), isAuthoritative,
+              snapshot?.sessionId == target.sessionID,
+              let start = visibleTranscriptStart, start > 0,
+              let total = visibleTranscriptTotal,
+              visibleTranscriptEnd == total,
+              visibleTranscript.count < ChatTranscriptPageRequest.maximumItemCount else { return }
+        cancelRecentTailBackfill()
+        recentTailBackfillTarget = target
+        recentTailBackfillTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self else { return }
+            guard !Task.isCancelled,
+                  self.recentTailBackfillTarget == target,
+                  self.owns(target),
+                  self.isAuthoritative else {
+                if self.recentTailBackfillTarget == target {
+                    self.recentTailBackfillTask = nil
+                    self.recentTailBackfillTarget = nil
+                }
+                return
+            }
+            _ = await self.loadEarlier(
+                sessionID: target.sessionID,
+                presentationGeneration: target.generation,
+                maximumVisibleCount: ChatTranscriptPageRequest.maximumItemCount,
+                optional: true
+            )
+            guard self.recentTailBackfillTarget == target else { return }
+            self.recentTailBackfillTask = nil
+            self.recentTailBackfillTarget = nil
+        }
+    }
+
+    private func cancelRecentTailBackfill() {
+        recentTailBackfillTask?.cancel()
+        recentTailBackfillTask = nil
+        recentTailBackfillTarget = nil
     }
 
     private func updateTranscriptLoadState(
@@ -936,6 +1018,7 @@ final class SessionPresentationStore {
         observedAttentionSummary = nil
         retirePresentationVisibilityLocally()
         connectionGeneration &+= 1
+        cancelRecentTailBackfill()
         transcriptLoadTarget = nil
         loadingEarlierTranscript = false
         transcriptLoadState = .idle
@@ -2840,6 +2923,7 @@ final class SessionPresentationStore {
         let target = SessionPresentationIdentity(sessionID: snapshot.sessionId, generation: nextPresentationGeneration)
         self.target = target
         pendingTarget = nil
+        cancelRecentTailBackfill()
         transcriptLoadTarget = nil
         loadingEarlierTranscript = false
         transcriptLoadState = .idle
