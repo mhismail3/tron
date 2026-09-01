@@ -28,6 +28,15 @@ struct ChatUIKitTranscriptParityTests {
         #expect(row.resourceInvocation == resource)
     }
 
+    @Test("UIKit theme keeps code geometry aligned with the native Markdown contract")
+    @MainActor
+    func codePresentationContract() {
+        #expect(ChatUIKitTheme.codeTextInsets == UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12))
+        #expect(ChatUIKitTheme.codeLineSpacing == 3)
+        #expect(ChatUIKitTheme.elevatedSurface.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light)) != ChatUIKitTheme.elevatedSurface.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark)))
+        #expect(!ChatUIKitPulseLoadingView(accent: ChatUIKitTheme.emerald).isAccessibilityElement)
+    }
+
     @Test("UIKit attachment equality ignores decoded image object identity")
     func attachmentEqualityUsesWireFacts() {
         let first = ChatUIKitTranscriptAttachment(

@@ -42,11 +42,28 @@ final class ChatUIKitChatViewController: UIViewController,
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory
+            || previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle else { return }
+        view.backgroundColor = ChatUIKitTheme.background
+        collectionView.backgroundColor = ChatUIKitTheme.background
+        collectionView.collectionViewLayout.invalidateLayout()
+        if let input {
+            for cell in collectionView.visibleCells {
+                guard let transcriptCell = cell as? ChatUIKitTranscriptCell,
+                      let indexPath = collectionView.indexPath(for: cell),
+                      let rowIndex = rowIndex(for: indexPath), rowIndex < input.rows.count else { continue }
+                transcriptCell.configure(input.rows[rowIndex])
+            }
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = ChatUIKitTheme.background
         collectionView.translatesAutoresizingMaskIntoConstraints = false
-        collectionView.backgroundColor = .systemBackground
+        collectionView.backgroundColor = ChatUIKitTheme.background
         collectionView.alwaysBounceVertical = true
         collectionView.dataSource = self
         collectionView.delegate = self
@@ -153,7 +170,8 @@ final class ChatUIKitChatViewController: UIViewController,
     func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
         presentationActivity = activity
         for cell in collectionView.visibleCells {
-            (cell as? ChatUIKitTranscriptCell)?.setPresentationActivity(activity)
+            if let historyCell = cell as? ChatUIKitHistoryCell { historyCell.setPresentationActivity(activity) }
+            if let transcriptCell = cell as? ChatUIKitTranscriptCell { transcriptCell.setPresentationActivity(activity) }
         }
     }
 
@@ -182,6 +200,7 @@ final class ChatUIKitChatViewController: UIViewController,
                 withReuseIdentifier: ChatUIKitHistoryCell.reuseIdentifier,
                 for: indexPath
             ) as! ChatUIKitHistoryCell
+            cell.setPresentationActivity(presentationActivity)
             cell.configure(input?.history ?? .hidden) { [weak self] in self?.onLoadEarlier?() }
             return cell
         }

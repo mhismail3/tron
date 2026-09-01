@@ -1,18 +1,13 @@
 import Foundation
 @preconcurrency import UIKit
 
-private extension UIColor {
-    static var chatUIKitMarkdownBorder: UIColor {
-        UIColor { traits in
-            traits.userInterfaceStyle == .dark ? UIColor(hex: "#3B424D") : UIColor(hex: "#D8DEE6")
-        }
-    }
-}
-
 private final class ChatUIKitThinkingTraceView: UIView {
     private let textView = UITextView()
     private let fade = CAGradientLayer()
-    private let maximumHeight = ChatThinkingTraceLayoutPolicy.fallbackLineHeight * CGFloat(ChatThinkingTraceLayoutPolicy.maximumLines)
+    private var maximumHeight: CGFloat {
+        (textView.font?.lineHeight ?? ChatThinkingTraceLayoutPolicy.fallbackLineHeight)
+            * CGFloat(ChatThinkingTraceLayoutPolicy.maximumLines)
+    }
     let detailsButton = UIButton(type: .system)
     var onDetails: (() -> Void)?
 
@@ -22,22 +17,26 @@ private final class ChatUIKitThinkingTraceView: UIView {
         textView.isSelectable = true
         textView.isScrollEnabled = false
         textView.text = text
-        textView.font = TronFontLoader.createUIFont(size: 11, weight: .regular)
-        textView.textColor = .secondaryLabel
+        let baseFont = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 12, weight: .regular), compatibleWith: traitCollection)
+        textView.font = baseFont.fontDescriptor.withSymbolicTraits(.traitItalic).map { UIFont(descriptor: $0, size: baseFont.pointSize) } ?? baseFont
+        textView.textColor = ChatUIKitTheme.secondary
         textView.textContainerInset = .zero
         textView.textContainer.lineFragmentPadding = 0
         textView.accessibilityLabel = text
         clipsToBounds = true
         addSubview(textView)
         detailsButton.setTitle("Show full thinking trace", for: .normal)
-        detailsButton.titleLabel?.font = TronFontLoader.createUIFont(size: 11, weight: .medium)
+        detailsButton.titleLabel?.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 11, weight: .medium), compatibleWith: traitCollection)
+        detailsButton.accessibilityLabel = "Show full thinking trace"
+        detailsButton.accessibilityHint = "Opens the complete thinking trace"
         detailsButton.addAction(UIAction { [weak self] _ in self?.onDetails?() }, for: .primaryActionTriggered)
         detailsButton.isHidden = true
         addSubview(detailsButton)
         fade.colors = [UIColor.clear.cgColor, UIColor.black.cgColor]
         fade.locations = [0, 0.35]
-        isAccessibilityElement = true
-        accessibilityLabel = text
+        // Text and the details control remain separate VoiceOver elements.
+        isAccessibilityElement = false
+        accessibilityElements = [textView, detailsButton]
     }
 
     @available(*, unavailable)
@@ -57,6 +56,15 @@ private final class ChatUIKitThinkingTraceView: UIView {
         detailsButton.isHidden = !overflow
         fade.frame = CGRect(x: 0, y: max(0, measured - viewport), width: bounds.width, height: viewport)
         textView.layer.mask = fade
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory else { return }
+        let baseFont = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 12, weight: .regular), compatibleWith: traitCollection)
+        textView.font = baseFont.fontDescriptor.withSymbolicTraits(.traitItalic).map { UIFont(descriptor: $0, size: baseFont.pointSize) } ?? baseFont
+        detailsButton.titleLabel?.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 11, weight: .medium), compatibleWith: traitCollection)
+        setNeedsLayout()
     }
 
     override var intrinsicContentSize: CGSize {
@@ -84,8 +92,8 @@ private final class ChatUIKitStreamingInlineTextView: UITextView {
         self.streaming = streaming
         isEditable = false; isSelectable = true; isScrollEnabled = false
         backgroundColor = .clear; textContainerInset = .zero; textContainer.lineFragmentPadding = 0
-        font = TronFontLoader.createUIFont(size: 14, weight: .regular)
-        textColor = UIColor { traits in traits.userInterfaceStyle == .dark ? UIColor(hex: "#F8FAFC") : UIColor(hex: "#111827") }
+        font = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 14, weight: .regular), compatibleWith: traitCollection)
+        textColor = ChatUIKitTheme.primary
         baseAttributedText = NSAttributedString(inline.attributedString ?? AttributedString(inline.source))
         attributedText = baseAttributedText
         // Markdown may normalize the attributed string (for example by
@@ -159,7 +167,7 @@ private final class ChatUIKitStreamingInlineTextView: UITextView {
             else if let start = revealStarts[token.id] {
                 opacity = CGFloat(ChatStreamingTextRevealPolicy.opacity(elapsedMilliseconds: max(0, Int(now.timeIntervalSince(start) * 1_000))))
             } else { opacity = 0 }
-            let color = (output.attribute(.foregroundColor, at: token.range.location, effectiveRange: nil) as? UIColor) ?? textColor ?? .label
+            let color = (output.attribute(.foregroundColor, at: token.range.location, effectiveRange: nil) as? UIColor) ?? textColor ?? ChatUIKitTheme.primary
             output.addAttribute(.foregroundColor, value: color.withAlphaComponent(opacity), range: token.range)
         }
         super.attributedText = output
@@ -182,13 +190,42 @@ private final class ChatUIKitStreamingInlineTextView: UITextView {
     }
 }
 
+private final class ChatUIKitCodeTextView: UITextView {
+    var lineSpacing: CGFloat = 0 { didSet { applyParagraphStyle() } }
+
+    override var intrinsicContentSize: CGSize {
+        guard let font else { return super.intrinsicContentSize }
+        let lines = max(1, (text as NSString).components(separatedBy: "\n").count)
+        let maxLineWidth = (text as NSString).components(separatedBy: "\n").map {
+            ($0 as NSString).size(withAttributes: [.font: font]).width
+        }.max() ?? 0
+        return CGSize(
+            width: ceil(maxLineWidth) + textContainerInset.left + textContainerInset.right + 1,
+            height: ceil(font.lineHeight * CGFloat(lines) + lineSpacing * CGFloat(max(0, lines - 1))) + textContainerInset.top + textContainerInset.bottom
+        )
+    }
+
+    override var text: String! {
+        didSet { applyParagraphStyle() }
+    }
+
+    private func applyParagraphStyle() {
+        guard textStorage.length > 0 else { return }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = lineSpacing
+        paragraph.lineBreakMode = .byClipping
+        textStorage.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: textStorage.length))
+        invalidateIntrinsicContentSize()
+    }
+}
+
 final class ChatUIKitMarkdownView: UIView {
     private let stack = UIStackView()
     private var inlineViews: [String: ChatUIKitStreamingInlineTextView] = [:]
     private var activeInlineIDs: Set<String> = []
     private var codeButtons: [UIButton] = []
     private var thinkingButton: UIButton?
-    private var activityIndicators: [UIActivityIndicatorView] = []
+    private var activityIndicators: [ChatUIKitPulseLoadingView] = []
     private var presentationActivity = ChatUIKitPresentationActivity.active(generation: 0)
     var onCodeCopied: ((String) -> Void)?
     var onThinkingDetails: (() -> Void)?
@@ -283,58 +320,62 @@ final class ChatUIKitMarkdownView: UIView {
     private func toolRunView(_ presentation: ChatToolRunPresentation) -> UIView {
         let card = UIView()
         card.translatesAutoresizingMaskIntoConstraints = false
-        card.backgroundColor = UIColor { traits in traits.userInterfaceStyle == .dark ? UIColor(hex: "#14324A") : UIColor(hex: "#E0F2FE") }
+        card.backgroundColor = ChatUIKitTheme.toolBubble
         card.layer.cornerRadius = 10
         card.layer.borderWidth = 0.5
-        card.layer.borderColor = UIColor { traits in traits.userInterfaceStyle == .dark ? UIColor(hex: "#3B424D") : UIColor(hex: "#D8DEE6") }.cgColor
+        card.layer.borderColor = ChatUIKitTheme.border.resolvedColor(with: traitCollection).cgColor
         let stack = UIStackView(); stack.axis = .vertical; stack.spacing = 5; stack.translatesAutoresizingMaskIntoConstraints = false
-        let title = UILabel(); title.text = presentation.title; title.font = TronFontLoader.createUIFont(size: 12, weight: .semibold); title.textColor = .label
-        let status = UILabel(); status.text = [presentation.status, presentation.elapsedMilliseconds().map { ToolTiming.format(milliseconds: $0) }].compactMap { $0 }.joined(separator: " · "); status.font = TronFontLoader.createUIFont(size: 11); status.textColor = presentation.failureCount > 0 ? .systemRed : .secondaryLabel
+        let title = UILabel(); title.text = presentation.title; title.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 12, weight: .semibold), compatibleWith: traitCollection); title.textColor = ChatUIKitTheme.primary
+        let status = UILabel(); status.text = [presentation.status, presentation.elapsedMilliseconds().map { ToolTiming.format(milliseconds: $0) }].compactMap { $0 }.joined(separator: " · "); status.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 11), compatibleWith: traitCollection); status.textColor = presentation.failureCount > 0 ? ChatUIKitTheme.error : ChatUIKitTheme.secondary
         stack.addArrangedSubview(title); stack.addArrangedSubview(status)
         if presentation.isRunning {
-            let indicator = UIActivityIndicatorView(style: .medium)
+            let indicator = ChatUIKitPulseLoadingView(accent: ChatUIKitTheme.emerald)
+            indicator.translatesAutoresizingMaskIntoConstraints = false
+            indicator.widthAnchor.constraint(equalToConstant: 16).isActive = true
+            indicator.heightAnchor.constraint(equalToConstant: 16).isActive = true
             activityIndicators.append(indicator)
             stack.addArrangedSubview(indicator)
             if presentationActivity.isActive { indicator.startAnimating() }
         }
         for descriptor in presentation.reverseChronologicalTools {
-            let line = UILabel(); line.text = "• \(descriptor.title): \(descriptor.subtitle)"; line.font = TronFontLoader.createUIFont(size: 11); line.textColor = .secondaryLabel; line.numberOfLines = 0; stack.addArrangedSubview(line)
+            let line = UILabel(); line.text = "• \(descriptor.title): \(descriptor.subtitle)"; line.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 11), compatibleWith: traitCollection); line.textColor = ChatUIKitTheme.secondary; line.numberOfLines = 0; stack.addArrangedSubview(line)
         }
         card.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12), stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12), stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 10), stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -10)])
-        card.isAccessibilityElement = true; card.accessibilityLabel = [presentation.title, presentation.status].compactMap { $0 }.joined(separator: ". "); card.accessibilityTraits = presentation.isRunning ? .updatesFrequently : .staticText
+        card.isAccessibilityElement = false
+        card.accessibilityElements = stack.arrangedSubviews
         return card
     }
 
     private func notificationView(_ presentation: ChatNotificationPresentation) -> UIView {
         let card = UIView(); card.translatesAutoresizingMaskIntoConstraints = false
-        card.backgroundColor = presentation.material == .glass ? UIColor { traits in traits.userInterfaceStyle == .dark ? UIColor(hex: "#252A32") : UIColor(hex: "#EEF2F6") } : .clear
+        card.backgroundColor = presentation.material == .glass ? ChatUIKitTheme.elevatedSurface : .clear
         card.layer.cornerRadius = presentation.material == .glass ? 10 : 0
         card.layer.borderWidth = presentation.material == .glass ? 0.5 : 0
-        card.layer.borderColor = UIColor.separator.cgColor
+        card.layer.borderColor = ChatUIKitTheme.border.resolvedColor(with: traitCollection).cgColor
         let row = UIStackView(); row.axis = .horizontal; row.spacing = 8; row.alignment = .top; row.translatesAutoresizingMaskIntoConstraints = false
         let icon = UIImageView(image: UIImage(systemName: presentation.icon)); icon.tintColor = notificationColor(presentation.tone); icon.setContentHuggingPriority(.required, for: .horizontal)
         let text = UIStackView(); text.axis = .vertical; text.spacing = 2
-        let title = UILabel(); title.text = presentation.title; title.font = TronFontLoader.createUIFont(size: 12, weight: .semibold)
+        let title = UILabel(); title.text = presentation.title; title.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 12, weight: .semibold), compatibleWith: traitCollection); title.textColor = ChatUIKitTheme.primary
         text.addArrangedSubview(title)
-        if let detail = presentation.detail { let label = UILabel(); label.text = detail; label.font = TronFontLoader.createUIFont(size: 11); label.textColor = .secondaryLabel; text.addArrangedSubview(label) }
-        if let body = presentation.body { let label = UILabel(); label.text = body; label.font = TronFontLoader.createUIFont(size: 12); label.numberOfLines = 0; text.addArrangedSubview(label) }
+        if let detail = presentation.detail { let label = UILabel(); label.text = detail; label.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 11), compatibleWith: traitCollection); label.textColor = ChatUIKitTheme.secondary; text.addArrangedSubview(label) }
+        if let body = presentation.body { let label = UILabel(); label.text = body; label.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 12), compatibleWith: traitCollection); label.numberOfLines = 0; label.textColor = ChatUIKitTheme.primary; text.addArrangedSubview(label) }
         if presentation.hasDetailSheet {
             let details = UIButton(type: .system)
             details.setTitle("Details", for: .normal)
-            details.titleLabel?.font = TronFontLoader.createUIFont(size: 11, weight: .medium)
+            details.titleLabel?.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 11, weight: .medium), compatibleWith: traitCollection)
             details.addAction(UIAction { [weak self] _ in self?.onNotificationDetails?() }, for: .primaryActionTriggered)
             text.addArrangedSubview(details)
         }
         row.addArrangedSubview(icon); row.addArrangedSubview(text); card.addSubview(row)
         NSLayoutConstraint.activate([row.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 10), row.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -10), row.topAnchor.constraint(equalTo: card.topAnchor, constant: 8), row.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -8), icon.widthAnchor.constraint(equalToConstant: 18)])
-        card.isAccessibilityElement = true; card.accessibilityLabel = [presentation.title, presentation.detail, presentation.body].compactMap { $0 }.joined(separator: ". ")
-        card.accessibilityTraits = presentation.hasDetailSheet ? .button : .staticText
+        card.isAccessibilityElement = false
+        card.accessibilityElements = row.arrangedSubviews
         return card
     }
 
     private func notificationColor(_ tone: ChatNotificationTone) -> UIColor {
-        switch tone { case .error: return .systemRed; case .warning: return .systemOrange; case .tool: return .systemBlue; case .accent, .command: return UIColor(hex: "#059669"); case .purple: return .systemPurple; case .information: return .systemBlue; case .neutral: return .secondaryLabel }
+        switch tone { case .error: return ChatUIKitTheme.error; case .warning: return ChatUIKitTheme.amber; case .tool: return ChatUIKitTheme.blue; case .accent, .command: return ChatUIKitTheme.emerald; case .purple: return ChatUIKitTheme.purple; case .information: return ChatUIKitTheme.info; case .neutral: return ChatUIKitTheme.muted }
     }
 
     private func render(document: MarkdownPresentation.Document, identityPrefix: String, streaming: Bool) {
@@ -356,7 +397,7 @@ final class ChatUIKitMarkdownView: UIView {
             case .table(let rows): stack.addArrangedSubview(tableView(rows))
             case .rule:
                 let rule = UIView()
-                rule.backgroundColor = .chatUIKitMarkdownBorder
+                rule.backgroundColor = ChatUIKitTheme.border
                 rule.heightAnchor.constraint(equalToConstant: 1 / traitCollection.displayScale).isActive = true
                 stack.addArrangedSubview(rule)
             }
@@ -378,7 +419,7 @@ final class ChatUIKitMarkdownView: UIView {
         row.axis = .horizontal
         row.spacing = 10
         let bar = UIView()
-        bar.backgroundColor = .chatUIKitMarkdownBorder
+        bar.backgroundColor = ChatUIKitTheme.border
         bar.widthAnchor.constraint(equalToConstant: 3).isActive = true
         row.insertArrangedSubview(bar, at: 0)
         return row
@@ -409,30 +450,32 @@ final class ChatUIKitMarkdownView: UIView {
     private func codeView(language: String?, code: String, streaming: Bool) -> UIView {
         let container = UIView()
         container.translatesAutoresizingMaskIntoConstraints = false
-        container.backgroundColor = UIColor { traits in traits.userInterfaceStyle == .dark ? UIColor(hex: "#252A32") : UIColor(hex: "#EEF2F6") }
+        container.backgroundColor = ChatUIKitTheme.elevatedSurface
         container.layer.cornerRadius = 9
         container.layer.borderWidth = 0.5
-        container.layer.borderColor = UIColor { traits in traits.userInterfaceStyle == .dark ? UIColor(hex: "#3B424D") : UIColor(hex: "#D8DEE6") }.cgColor
+        container.layer.borderColor = ChatUIKitTheme.border.resolvedColor(with: traitCollection).cgColor
         let header = UIStackView()
         header.axis = .horizontal
         header.alignment = .center
         header.translatesAutoresizingMaskIntoConstraints = false
         let title = UILabel()
         title.text = language?.isEmpty == false ? language : "code"
-        title.font = TronFontLoader.createUIFont(size: 10, weight: .medium, mono: false)
-        title.textColor = UIColor(hex: "#6B7280")
+        title.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: TronFontLoader.createUIFont(size: 10, weight: .medium, mono: false), compatibleWith: traitCollection)
+        title.textColor = ChatUIKitTheme.muted
         header.addArrangedSubview(title)
         header.addArrangedSubview(UIView())
         if streaming {
-            let indicator = UIActivityIndicatorView(style: .medium)
-            indicator.color = UIColor(hex: "#059669")
+            let indicator = ChatUIKitPulseLoadingView(accent: ChatUIKitTheme.emerald)
+            indicator.translatesAutoresizingMaskIntoConstraints = false
+            indicator.widthAnchor.constraint(equalToConstant: 16).isActive = true
+            indicator.heightAnchor.constraint(equalToConstant: 16).isActive = true
             activityIndicators.append(indicator)
             if presentationActivity.isActive { indicator.startAnimating() }
             header.addArrangedSubview(indicator)
         }
         let copy = UIButton(type: .system)
         copy.setTitle("Copy", for: .normal)
-        copy.titleLabel?.font = TronFontLoader.createUIFont(size: 10, weight: .medium, mono: false)
+        copy.titleLabel?.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: TronFontLoader.createUIFont(size: 10, weight: .medium, mono: false), compatibleWith: traitCollection)
         copy.accessibilityLabel = "Copy code"
         copy.addAction(UIAction { [weak copy, weak self] _ in
             UIPasteboard.general.string = code
@@ -442,28 +485,29 @@ final class ChatUIKitMarkdownView: UIView {
         }, for: .primaryActionTriggered)
         header.addArrangedSubview(copy)
         let divider = UIView()
-        divider.backgroundColor = UIColor.separator
+        divider.backgroundColor = ChatUIKitTheme.border
         divider.heightAnchor.constraint(equalToConstant: 1 / traitCollection.displayScale).isActive = true
         let scroll = UIScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.alwaysBounceHorizontal = true
         scroll.showsHorizontalScrollIndicator = false
-        let text = UITextView()
+        let text = ChatUIKitCodeTextView()
         text.isEditable = false
         text.isSelectable = true
         text.isScrollEnabled = false
         text.translatesAutoresizingMaskIntoConstraints = false
-        text.font = TronFontLoader.createUIFont(size: 13, weight: .regular, mono: true)
-        text.textColor = UIColor { traits in traits.userInterfaceStyle == .dark ? UIColor(hex: "#F8FAFC") : UIColor(hex: "#111827") }
+        text.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 13, weight: .regular, mono: true), compatibleWith: traitCollection)
+        text.textColor = ChatUIKitTheme.primary
         text.text = code
-        text.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        text.lineSpacing = ChatUIKitTheme.codeLineSpacing
+        text.textContainerInset = ChatUIKitTheme.codeTextInsets
         text.textContainer.lineFragmentPadding = 0
         scroll.addSubview(text)
         NSLayoutConstraint.activate([
             header.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12), header.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12), header.topAnchor.constraint(equalTo: container.topAnchor, constant: 7),
             divider.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 7), divider.leadingAnchor.constraint(equalTo: container.leadingAnchor), divider.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scroll.topAnchor.constraint(equalTo: divider.bottomAnchor), scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor), scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor), scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 40),
-            text.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor), text.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor), text.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor), text.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor), text.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor)
+            text.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor), text.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor), text.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor), text.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor), text.widthAnchor.constraint(greaterThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor), text.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor)
         ])
         container.addSubview(header); container.addSubview(divider); container.addSubview(scroll)
         return container
@@ -486,20 +530,21 @@ final class ChatUIKitMarkdownView: UIView {
             for value in values {
                 let label = UILabel()
                 label.text = value
-                label.font = TronFontLoader.createUIFont(size: 12, weight: rowIndex == 0 ? .semibold : .regular)
+                label.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 12, weight: rowIndex == 0 ? .semibold : .regular), compatibleWith: traitCollection)
+                label.textColor = ChatUIKitTheme.primary
                 label.numberOfLines = 0
                 label.widthAnchor.constraint(greaterThanOrEqualToConstant: 50).isActive = true
                 row.addArrangedSubview(label)
             }
             table.addArrangedSubview(row)
-            if rowIndex == 0 { let divider = UIView(); divider.backgroundColor = .separator; divider.heightAnchor.constraint(equalToConstant: 1 / traitCollection.displayScale).isActive = true; table.addArrangedSubview(divider) }
+            if rowIndex == 0 { let divider = UIView(); divider.backgroundColor = ChatUIKitTheme.border; divider.heightAnchor.constraint(equalToConstant: 1 / traitCollection.displayScale).isActive = true; table.addArrangedSubview(divider) }
         }
         table.isLayoutMarginsRelativeArrangement = true
         table.layoutMargins = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
         NSLayoutConstraint.activate([
             table.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor), table.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor), table.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor), table.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor), table.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor)
         ])
-        scroll.backgroundColor = UIColor { traits in traits.userInterfaceStyle == .dark ? UIColor(hex: "#252A32") : UIColor(hex: "#EEF2F6") }
+        scroll.backgroundColor = ChatUIKitTheme.elevatedSurface
         scroll.layer.cornerRadius = 9
         return scroll
     }
@@ -511,15 +556,15 @@ final class ChatUIKitMarkdownView: UIView {
         if let label, !label.isEmpty {
             let title = UILabel()
             title.text = label
-            title.font = TronFontLoader.createUIFont(size: 11, weight: .semibold)
-            title.textColor = .secondaryLabel
+            title.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: TronFontLoader.createUIFont(size: 11, weight: .semibold), compatibleWith: traitCollection)
+            title.textColor = ChatUIKitTheme.secondary
             wrapper.addArrangedSubview(title)
         }
         let trace = ChatUIKitThinkingTraceView(text: segments.map(\.text).joined(separator: " "))
         trace.onDetails = onThinkingDetails
         wrapper.addArrangedSubview(trace)
-        wrapper.isAccessibilityElement = true
-        wrapper.accessibilityLabel = [label, segments.map(\.text).joined(separator: " ")].compactMap { $0 }.joined(separator: ". ")
+        // The details button must remain a separate VoiceOver action.
+        wrapper.isAccessibilityElement = false
         stack.addArrangedSubview(wrapper)
     }
 }

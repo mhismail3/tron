@@ -75,13 +75,17 @@ accessors derived from that payload rather than competing stored fields. The UIK
 shared `MarkdownPresentation.Document` and `Inline` values to native TextKit, code, table, quote,
 list, rule, thinking-tail, and streaming views; normalized attributed-string ranges are measured
 against the rendered TextKit string, and its fallback label is not an authority model. The
-implementation is split into
-`ChatUIKitTranscriptTypes`, `ChatUIKitViewportState`, `ChatUIKitMarkdownRenderer`,
-`ChatUIKitTranscriptCells`, and `ChatUIKitViewportController` so authority, rendering, cells, and
-viewport ownership remain discoverable. Native tool-run and notification cards consume their
-installed presentation values, but attachment media, command/lifecycle/status/queue rows, resource
-chips, error/model footers, and detail sheets still require parity work. Until that evidence exists,
-the UIKit controller must remain isolated and no runtime switch may expose it to users.
+implementation is split into cohesive owner files: composer contracts, controller, and
+components (`ChatUIKitComposerContracts`, `ChatUIKitComposerController`,
+`ChatUIKitComposerComponents`), plus transcript lifecycle cells, message cells, components, and
+Markdown (`ChatUIKitTranscriptLifecycleCells`, `ChatUIKitTranscriptMessageCells`,
+`ChatUIKitTranscriptComponents`, `ChatUIKitMarkdownRenderer`). `ChatUIKitTheme` bridges the
+canonical Tron palette, thin-material surface, Dynamic Type, Reduce Motion, and lifecycle-bound
+pulse loading presentation into UIKit. Native tool-run and notification cards consume their installed presentation values, while attachment
+media preserves filename/MIME/size facts, preview loading and retry states, and horizontal behavior.
+Command/lifecycle/status/queue rows, resource chips, error/model footers, and detail actions remain
+owned by the same immutable row payload. UIKit remains isolated by policy; no runtime switch exposes
+it to users during this uncut production phase.
 
 ## State flow
 
