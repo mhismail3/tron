@@ -111,6 +111,34 @@ struct ChatArchitectureContractTests {
         #expect(replacement.kind == .replacement)
     }
 
+    @Test("missing presentation IDs never establish a live canonical successor")
+    func missingPresentationIDsDoNotMatch() {
+        #expect(!ChatLiveCanonicalIdentityPolicy.matches(
+            streamingID: "streaming",
+            streamingPresentationID: nil,
+            canonicalID: "canonical",
+            canonicalPresentationID: nil
+        ))
+        #expect(!ChatLiveCanonicalIdentityPolicy.matches(
+            streamingID: "streaming",
+            streamingPresentationID: "",
+            canonicalID: "canonical",
+            canonicalPresentationID: ""
+        ))
+        #expect(ChatLiveCanonicalIdentityPolicy.matches(
+            streamingID: "streaming",
+            streamingPresentationID: "handoff",
+            canonicalID: "canonical",
+            canonicalPresentationID: "handoff"
+        ))
+        #expect(ChatLiveCanonicalIdentityPolicy.matches(
+            streamingID: "streaming",
+            streamingPresentationID: nil,
+            canonicalID: "streaming",
+            canonicalPresentationID: nil
+        ))
+    }
+
     @Test("UIKit commit rejects duplicate row identities")
     func uikitCommitRejectsDuplicateRows() {
         let first = ChatUIKitTranscriptRow(id: "same", text: "one")!
