@@ -18,6 +18,11 @@ final class ChatUIKitChatViewController: UIViewController,
     var onAttachmentTapped: ((String, Int) -> Void)?
     var onToolTapped: ((String) -> Void)?
     var onThinkingDetails: ((String) -> Void)?
+    var onNotificationDetails: ((String) -> Void)?
+    /// The app/model owner supplies the existing lifecycle-bound media loader;
+    /// UIKit never creates a second cache or fetches Gateway blobs itself.
+    var chatMediaLoader: ChatMediaLoader?
+    var chatMediaIdentity: ((String) -> ChatMediaIdentity?)?
     var onTransactionOutcome: ((ChatUIKitViewportTransactionOutcome) -> Void)?
 
     private var rows: [ChatUIKitTranscriptRow] { input?.rows ?? [] }
@@ -183,7 +188,9 @@ final class ChatUIKitChatViewController: UIViewController,
         }
         cell.onToolTapped = { [weak self] in self?.onToolTapped?(row.id) }
         cell.onThinkingDetails = { [weak self] in self?.onThinkingDetails?(row.id) }
-        cell.onNotificationDetails = { [weak self] in self?.onThinkingDetails?(row.id) }
+        cell.onNotificationDetails = { [weak self] in self?.onNotificationDetails?(row.id) }
+        cell.mediaLoader = chatMediaLoader
+        cell.mediaIdentity = chatMediaIdentity
         cell.configure(row)
         return cell
     }

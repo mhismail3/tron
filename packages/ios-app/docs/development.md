@@ -457,7 +457,11 @@ state must retain a full-parse fallback.
 
 Phase 6.3 routes transcript blobs through `ChatMediaLoader`; transcript views must not call
 `GatewayClient.blob` directly. Identity includes profile, lifecycle generation, connection, and blob
-ID. Tests own exact 192-pixel oriented downsampling, duplicate single-flight behavior, one shared
+ID. The UIKit transcript parity renderer consumes the same installed physical-row payload as SwiftUI:
+message parts retain Markdown blocks and thinking tails, lifecycle/tool/notification rows retain their
+compact state and detail callbacks, and attachment chips use the existing loader's cache and single-flight
+authority. UIKit cells retain row-local Markdown/media children for payload updates and never own transcript
+ordering, canonical data, or viewport offsets. Tests own exact 192-pixel oriented downsampling, duplicate single-flight behavior, one shared
 preparation slot, the 32-flight ceiling, 64-item and 4 MiB decoded LRU eviction, transport-level 25 MiB
 response admission, stale-identity and late-publication rejection, uncached one-at-a-time full previews,
 and app-lifetime memory-pressure cleanup. Images and files share that single exact preview lease/priority slot;

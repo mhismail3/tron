@@ -14,6 +14,41 @@ struct ChatUIKitLink: Hashable, Sendable {
 
 /// Immutable UIKit input. Presentation owns ordering and identity; cells only
 /// render these facts and never inspect SessionSnapshot or issue scroll writes.
+struct ChatUIKitTranscriptAttachment: Hashable, Sendable {
+    let id: String
+    let name: String
+    let mimeType: String
+    let size: Int?
+    let blobID: String?
+    let preparedThumbnail: UIImage?
+
+    init(
+        id: String,
+        name: String,
+        mimeType: String,
+        size: Int? = nil,
+        blobID: String? = nil,
+        preparedThumbnail: UIImage? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.mimeType = mimeType
+        self.size = size
+        self.blobID = blobID
+        self.preparedThumbnail = preparedThumbnail
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id && lhs.name == rhs.name && lhs.mimeType == rhs.mimeType
+            && lhs.size == rhs.size && lhs.blobID == rhs.blobID
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id); hasher.combine(name); hasher.combine(mimeType)
+        hasher.combine(size); hasher.combine(blobID)
+    }
+}
+
 struct ChatUIKitTranscriptRow: Hashable {
     enum Kind: String, Hashable, Sendable {
         case user, assistant, streaming, thinking, tool, attachment, status
@@ -35,6 +70,8 @@ struct ChatUIKitTranscriptRow: Hashable {
     let kind: Kind
     let links: [ChatUIKitLink]
     let attachments: [String]
+    let attachmentFacts: [ChatUIKitTranscriptAttachment]
+    let resourceInvocation: ComposerResourceInvocation?
     let toolLabel: String?
 
     init?(
@@ -52,6 +89,8 @@ struct ChatUIKitTranscriptRow: Hashable {
         notification: ChatNotificationPresentation? = nil,
         links: [ChatUIKitLink] = [],
         attachments: [String] = [],
+        attachmentFacts: [ChatUIKitTranscriptAttachment] = [],
+        resourceInvocation: ComposerResourceInvocation? = nil,
         toolLabel: String? = nil
     ) {
         guard !id.isEmpty,
@@ -70,7 +109,9 @@ struct ChatUIKitTranscriptRow: Hashable {
         self.text = text
         self.kind = kind
         self.links = links
-        self.attachments = attachments
+        self.attachments = attachments.isEmpty ? attachmentFacts.map(\.name) : attachments
+        self.attachmentFacts = attachmentFacts
+        self.resourceInvocation = resourceInvocation
         self.toolLabel = toolLabel
     }
 }
@@ -118,7 +159,9 @@ enum ChatUIKitPresentationAdapter {
                 streaming: isStreaming(row.content),
                 toolRun: toolRun(for: row.content),
                 notification: notification(for: row.content),
-                attachments: attachmentNames(for: row.content),
+                attachments: attachmentFacts(for: row.content).map(\.name),
+                attachmentFacts: attachmentFacts(for: row.content),
+                resourceInvocation: resourceInvocation(for: row.content),
                 toolLabel: toolLabel(for: row.content)
             )
         }
@@ -220,11 +263,21 @@ enum ChatUIKitPresentationAdapter {
         return value
     }
 
-    private static func attachmentNames(
+    private static func attachmentFacts(
         for content: ChatPhysicalTranscriptRow.Content
-    ) -> [String] {
+    ) -> [ChatUIKitTranscriptAttachment] {
         switch content {
-        case .outgoing(_, let attachments): return attachments.map(\.name)
+        case .outgoing(_, let attachments):
+            return attachments.map { attachment in
+                ChatUIKitTranscriptAttachment(
+                    id: attachment.id,
+                    name: attachment.name,
+                    mimeType: attachment.mimeType,
+                    size: attachment.size,
+                    blobID: attachment.transportBlobID,
+                    preparedThumbnail: attachment.preparedThumbnail.map { UIImage(cgImage: $0.image) }
+                )
+            }
         case .transcript(let item, _):
             let parts: [ChatMessagePart]
             switch item {
@@ -233,10 +286,47 @@ enum ChatUIKitPresentationAdapter {
             case .toolRun, .notification: return []
             }
             return parts.compactMap { part in
-                guard case .content(let value) = part, let attachment = value.attachment else { return nil }
-                return attachment.name
+                guard case .content(let value) = part,
+                      value.type == .image || value.attachment != nil else { return nil }
+                let attachment = value.attachment
+                return ChatUIKitTranscriptAttachment(
+                    id: value.id,
+                    name: attachment?.name ?? "Image",
+                    mimeType: attachment?.mimeType ?? value.mimeType ?? "image/*",
+                    size: attachment?.size,
+                    blobID: value.blobId
+                )
             }
-        case .pending, .queued: return []
+        case .pending(let value):
+            return value.attachments?.map { attachment in
+                ChatUIKitTranscriptAttachment(
+                    id: attachment.id, name: attachment.name,
+                    mimeType: attachment.mimeType, size: attachment.size
+                )
+            } ?? []
+        case .queued(let entry):
+            return entry.message.attachments?.map { attachment in
+                ChatUIKitTranscriptAttachment(
+                    id: attachment.id, name: attachment.name,
+                    mimeType: attachment.mimeType, size: attachment.size
+                )
+            } ?? []
+        }
+    }
+
+    private static func resourceInvocation(
+        for content: ChatPhysicalTranscriptRow.Content
+    ) -> ComposerResourceInvocation? {
+        switch content {
+        case .pending(let value): return value.resourceInvocation
+        case .outgoing(let value, _): return value.resourceInvocation
+        case .queued(let entry): return entry.message.resourceInvocation
+        case .transcript(let item, _):
+            switch item {
+            case .transcript(let value): return value.semantic?.resourceInvocation
+            case .message(let value): return value.item.semantic?.resourceInvocation
+            case .toolRun, .notification: return nil
+            }
         }
     }
 
