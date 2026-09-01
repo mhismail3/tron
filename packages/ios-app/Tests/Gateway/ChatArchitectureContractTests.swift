@@ -147,6 +147,20 @@ struct ChatArchitectureContractTests {
         #expect(ChatUIKitTranscriptCommit(version: 1, rows: [first]) != nil)
     }
 
+    @Test("UIKit row input retains shared Markdown block identities")
+    func uikitRowRetainsMarkdownBlocks() throws {
+        let document = MarkdownPresentation.Document(source: "# Heading\n\n> quote\n\n- item\n\n```swift\nlet value = 1\n```\n\na | b\n--|--\nc | d\n\n---")
+        let row = try #require(ChatUIKitTranscriptRow(
+            id: "assistant-1",
+            text: document.source,
+            markdownDocuments: [document],
+            streaming: true
+        ))
+        #expect(row.markdownDocuments == [document])
+        #expect(row.markdownDocuments[0].blocks.count == 6)
+        #expect(row.streaming)
+    }
+
     @MainActor
     @Test("UIKit presentation adaptation retains installed physical row payloads")
     func presentationAdapterRetainsPayloads() async throws {

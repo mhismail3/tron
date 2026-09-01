@@ -150,8 +150,12 @@ enum ChatUIKitPresentationAdapter {
         switch content {
         case .transcript(let item, _):
             switch item {
-            case .transcript(let value): values = ChatTranscriptPresentation.messageParts(in: value)
-            case .message(let value): values = value.parts
+            case .transcript(let value):
+                guard value.role != .user else { return [] }
+                values = ChatTranscriptPresentation.messageParts(in: value)
+            case .message(let value):
+                guard value.item.role != .user else { return [] }
+                values = value.parts
             case .toolRun, .notification: return []
             }
         case .pending, .outgoing, .queued: return []
@@ -319,11 +323,11 @@ private final class ChatUIKitThinkingTraceView: UIView {
             fallbackLineHeight: ChatThinkingTraceLayoutPolicy.fallbackLineHeight
         )
         let overflow = ChatThinkingTraceLayoutPolicy.isOverflowing(contentHeight: measured, maximumHeight: maximumHeight)
-        let traceFrame = CGRect(x: 0, y: 0, width: bounds.width, height: viewport)
         textView.frame = CGRect(x: 0, y: -ChatThinkingTraceLayoutPolicy.tailOffset(contentHeight: measured, viewportHeight: viewport), width: bounds.width, height: measured)
         detailsButton.frame = CGRect(x: 0, y: viewport + 2, width: bounds.width, height: 24)
         detailsButton.isHidden = !overflow
-        fade.frame = traceFrame
+        fade.frame = CGRect(x: 0, y: max(0, measured - viewport), width: bounds.width, height: viewport)
+        textView.layer.mask = fade
     }
 
     override var intrinsicContentSize: CGSize {
@@ -570,6 +574,7 @@ private final class ChatUIKitMarkdownView: UIView {
 
     private func codeView(language: String?, code: String, streaming: Bool) -> UIView {
         let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
         container.backgroundColor = UIColor { traits in traits.userInterfaceStyle == .dark ? UIColor(hex: "#252A32") : UIColor(hex: "#EEF2F6") }
         container.layer.cornerRadius = 9
         container.layer.borderWidth = 0.5
@@ -605,6 +610,7 @@ private final class ChatUIKitMarkdownView: UIView {
         divider.backgroundColor = UIColor.separator
         divider.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale).isActive = true
         let scroll = UIScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.alwaysBounceHorizontal = true
         scroll.showsHorizontalScrollIndicator = false
         let text = UITextView()
@@ -630,6 +636,7 @@ private final class ChatUIKitMarkdownView: UIView {
 
     private func tableView(_ rows: [[String]]) -> UIView {
         let scroll = UIScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.alwaysBounceHorizontal = true
         scroll.showsHorizontalScrollIndicator = true
         let table = UIStackView()
