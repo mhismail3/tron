@@ -58,8 +58,10 @@ and `Inline` values to native TextKit, code, table, quote, list, rule, thinking-
 views; its fallback label is not an authority model. The implementation is split into
 `ChatUIKitTranscriptTypes`, `ChatUIKitViewportState`, `ChatUIKitMarkdownRenderer`,
 `ChatUIKitTranscriptCells`, and `ChatUIKitViewportController` so authority, rendering, cells, and
-viewport ownership remain discoverable. Until that evidence exists, the UIKit controller must remain isolated and
-no runtime switch may expose it to users.
+viewport ownership remain discoverable. Native tool-run and notification cards consume their
+installed presentation values, but attachment media, command/lifecycle/status/queue rows, resource
+chips, error/model footers, and detail sheets still require parity work. Until that evidence exists,
+the UIKit controller must remain isolated and no runtime switch may expose it to users.
 
 ## State flow
 
