@@ -1,6 +1,14 @@
 import Foundation
 @preconcurrency import UIKit
 
+private extension UIColor {
+    static var chatUIKitMarkdownBorder: UIColor {
+        UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(hex: "#3B424D") : UIColor(hex: "#D8DEE6")
+        }
+    }
+}
+
 private final class ChatUIKitThinkingTraceView: UIView {
     private let textView = UITextView()
     private let fade = CAGradientLayer()
@@ -78,7 +86,10 @@ private final class ChatUIKitStreamingInlineTextView: UITextView {
         textColor = UIColor { traits in traits.userInterfaceStyle == .dark ? UIColor(hex: "#F8FAFC") : UIColor(hex: "#111827") }
         baseAttributedText = NSAttributedString(inline.attributedString ?? AttributedString(inline.source))
         attributedText = baseAttributedText
-        tokens = Self.tokens(in: inline.source, identity: identity)
+        // Markdown may normalize the attributed string (for example by
+        // dropping source delimiters). Token ranges must be measured against
+        // the rendered TextKit string, never the source spelling.
+        tokens = Self.tokens(in: baseAttributedText?.string ?? inline.source, identity: identity)
         let current = Set(tokens.filter(\.isWord).map(\.id))
         guard streaming, !UIAccessibility.isReduceMotionEnabled else {
             revealedIDs.formUnion(current); revealStarts.removeAll(); admittedInitialContent = true; render(); return
@@ -193,10 +204,12 @@ final class ChatUIKitMarkdownView: UIView {
         let documents = row.markdownDocuments
         if let toolRun = row.toolRun {
             stack.addArrangedSubview(toolRunView(toolRun))
+            pruneInlineViews()
             return
         }
         if let notification = row.notification {
             stack.addArrangedSubview(notificationView(notification))
+            pruneInlineViews()
             return
         }
         if documents.isEmpty, row.thinkingSegments.isEmpty, !row.text.isEmpty {
@@ -220,6 +233,11 @@ final class ChatUIKitMarkdownView: UIView {
             spacer.heightAnchor.constraint(equalToConstant: 1).isActive = true
             stack.addArrangedSubview(spacer)
         }
+        pruneInlineViews()
+    }
+
+    private func pruneInlineViews() {
+        inlineViews = inlineViews.filter { activeInlineIDs.contains($0.key) }
     }
 
     private func toolRunView(_ presentation: ChatToolRunPresentation) -> UIView {
@@ -293,7 +311,7 @@ final class ChatUIKitMarkdownView: UIView {
             case .table(let rows): stack.addArrangedSubview(tableView(rows))
             case .rule:
                 let rule = UIView()
-                rule.backgroundColor = UIColor(hex: "#D8DEE6")
+                rule.backgroundColor = .chatUIKitMarkdownBorder
                 rule.heightAnchor.constraint(equalToConstant: 1 / traitCollection.displayScale).isActive = true
                 stack.addArrangedSubview(rule)
             }
@@ -309,30 +327,12 @@ final class ChatUIKitMarkdownView: UIView {
         return view
     }
 
-    private func legacyInlineView(_ inline: MarkdownPresentation.Inline) -> UITextView {
-        let view = UITextView()
-        view.translatesAutoresizingMaskIntoConstraints = false
-        view.isEditable = false
-        view.isSelectable = true
-        view.isScrollEnabled = false
-        view.backgroundColor = .clear
-        view.adjustsFontForContentSizeCategory = true
-        view.textContainerInset = .zero
-        view.textContainer.lineFragmentPadding = 0
-        view.font = TronFontLoader.createUIFont(size: 14, weight: .regular)
-        view.textColor = UIColor { traits in traits.userInterfaceStyle == .dark ? UIColor(hex: "#F8FAFC") : UIColor(hex: "#111827") }
-        view.attributedText = NSAttributedString(inline.attributedString ?? AttributedString(inline.source))
-        view.accessibilityLabel = inline.accessibilitySource
-        view.accessibilityTraits = .staticText
-        return view
-    }
-
     private func quoteView(_ inline: MarkdownPresentation.Inline, identity: String, streaming: Bool) -> UIView {
         let row = UIStackView(arrangedSubviews: [inlineView(inline, identity: identity, streaming: streaming)])
         row.axis = .horizontal
         row.spacing = 10
         let bar = UIView()
-        bar.backgroundColor = UIColor(hex: "#D8DEE6")
+        bar.backgroundColor = .chatUIKitMarkdownBorder
         bar.widthAnchor.constraint(equalToConstant: 3).isActive = true
         row.insertArrangedSubview(bar, at: 0)
         return row
@@ -387,9 +387,9 @@ final class ChatUIKitMarkdownView: UIView {
         copy.setTitle("Copy", for: .normal)
         copy.titleLabel?.font = TronFontLoader.createUIFont(size: 10, weight: .medium, mono: false)
         copy.accessibilityLabel = "Copy code"
-        copy.addAction(UIAction { [weak self] _ in
+        copy.addAction(UIAction { [weak copy, weak self] _ in
             UIPasteboard.general.string = code
-            copy.setTitle("Copied", for: .normal)
+            copy?.setTitle("Copied", for: .normal)
             self?.onCodeCopied?(code)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak copy] in copy?.setTitle("Copy", for: .normal) }
         }, for: .primaryActionTriggered)

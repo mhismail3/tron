@@ -9,12 +9,10 @@ import Foundation
 final class ChatUIKitChatViewController: UIViewController,
     UICollectionViewDataSource,
     UICollectionViewDelegateFlowLayout,
-    UIScrollViewDelegate,
-    UITextViewDelegate
+    UIScrollViewDelegate
 {
     private(set) var input: ChatUIKitPresentationInput?
     private(set) var viewportState = ChatUIKitViewportState()
-    var onSend: ((String) -> Void)?
     var onAttachmentTapped: ((String, Int) -> Void)?
     var onToolTapped: ((String) -> Void)?
     var onThinkingDetails: ((String) -> Void)?
@@ -27,11 +25,6 @@ final class ChatUIKitChatViewController: UIViewController,
 
     private var rows: [ChatUIKitTranscriptRow] { input?.rows ?? [] }
     private let collectionView: UICollectionView
-    private let composer = UITextView()
-    private let sendButton = UIButton(type: .system)
-    private var composerHeight: NSLayoutConstraint?
-    private let minimumComposerHeight: CGFloat = 40
-    private let maximumComposerHeight: CGFloat = 140
 
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
         let layout = UICollectionViewFlowLayout()
@@ -54,46 +47,12 @@ final class ChatUIKitChatViewController: UIViewController,
         collectionView.delegate = self
         collectionView.register(ChatUIKitTranscriptCell.self, forCellWithReuseIdentifier: ChatUIKitTranscriptCell.reuseIdentifier)
 
-        composer.translatesAutoresizingMaskIntoConstraints = false
-        composer.font = .preferredFont(forTextStyle: .body)
-        composer.adjustsFontForContentSizeCategory = true
-        composer.isScrollEnabled = false
-        composer.isEditable = true
-        composer.delegate = self
-        composer.accessibilityLabel = "Message"
-        composer.accessibilityHint = "Enter a message to send to Tron"
-        composer.layer.cornerRadius = 8
-        composer.layer.borderWidth = 1
-        composer.layer.borderColor = UIColor.separator.cgColor
-
-        sendButton.translatesAutoresizingMaskIntoConstraints = false
-        sendButton.setTitle("Send", for: .normal)
-        sendButton.accessibilityLabel = "Send message"
-        sendButton.addTarget(self, action: #selector(sendTapped), for: .touchUpInside)
-
-        let bar = UIView()
-        bar.translatesAutoresizingMaskIntoConstraints = false
-        bar.addSubview(composer)
-        bar.addSubview(sendButton)
         view.addSubview(collectionView)
-        view.addSubview(bar)
-        composerHeight = composer.heightAnchor.constraint(equalToConstant: minimumComposerHeight)
         NSLayoutConstraint.activate([
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             collectionView.topAnchor.constraint(equalTo: view.topAnchor),
-            collectionView.bottomAnchor.constraint(equalTo: bar.topAnchor),
-            bar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            bar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            bar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor, constant: -8),
-            composer.leadingAnchor.constraint(equalTo: bar.leadingAnchor),
-            composer.topAnchor.constraint(equalTo: bar.topAnchor),
-            composer.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
-            composerHeight!,
-            sendButton.leadingAnchor.constraint(equalTo: composer.trailingAnchor, constant: 8),
-            sendButton.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
-            sendButton.centerYAnchor.constraint(equalTo: composer.centerYAnchor),
-            sendButton.widthAnchor.constraint(equalToConstant: 52),
+            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
     }
 
@@ -131,6 +90,11 @@ final class ChatUIKitChatViewController: UIViewController,
             } else {
                 collectionView.reloadData()
             }
+            // Streaming changes retain row identity but can change TextKit
+            // height. Invalidate the native layout after the in-place update;
+            // otherwise estimated heights stay stale and the viewport can
+            // legally land beyond the nonblank intersection.
+            collectionView.collectionViewLayout.invalidateLayout()
             collectionView.layoutIfNeeded()
         }
         viewportState.appliedVersion = next.version
@@ -215,13 +179,6 @@ final class ChatUIKitChatViewController: UIViewController,
         clampOffset()
     }
 
-    func textViewDidChange(_ textView: UITextView) {
-        let fitting = textView.sizeThatFits(CGSize(width: textView.bounds.width, height: .greatestFiniteMagnitude))
-        composer.isScrollEnabled = fitting.height > maximumComposerHeight
-        composerHeight?.constant = min(max(fitting.height, minimumComposerHeight), maximumComposerHeight)
-        view.layoutIfNeeded()
-    }
-
     private func finishInteraction() {
         viewportState.interaction = .idle
         if let anchor = captureAnchor() {
@@ -298,13 +255,5 @@ final class ChatUIKitChatViewController: UIViewController,
     /// The only method in this type that writes native offset.
     private func setOffset(y: CGFloat) {
         collectionView.contentOffset = CGPoint(x: collectionView.contentOffset.x, y: min(max(y, minOffsetY), maxOffsetY))
-    }
-
-    @objc private func sendTapped() {
-        let text = composer.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        composer.text = nil
-        textViewDidChange(composer)
-        onSend?(text)
     }
 }

@@ -58,10 +58,13 @@ surface. The parity gate still requires mapping every installed row kind and exi
 tool, attachment, selection, link, accessibility, Dynamic Type, animation, keyboard, and composer
 behavior before the SwiftUI path can be deleted. The UIKit composer now covers the native editor,
 chips, resource panel, attachment menu intents, model/process controls, queue choices, send/stop
-state, and accessibility ordering in isolation. `ChatUIKitPresentationAdapter` carries complete installed physical-row content and prepared-text
-facts into the isolated surface. The UIKit renderer maps the shared `MarkdownPresentation.Document`
-and `Inline` values to native TextKit, code, table, quote, list, rule, thinking-tail, and streaming
-views; its fallback label is not an authority model. The implementation is split into
+state, and accessibility ordering in isolation. It is the only UIKit composer sizing owner; the
+viewport controller is transcript-only. `ChatUIKitPresentationAdapter` carries complete installed
+physical-row content and prepared-text facts into the isolated surface. The UIKit renderer maps the
+shared `MarkdownPresentation.Document` and `Inline` values to native TextKit, code, table, quote,
+list, rule, thinking-tail, and streaming views; normalized attributed-string ranges are measured
+against the rendered TextKit string, and its fallback label is not an authority model. The
+implementation is split into
 `ChatUIKitTranscriptTypes`, `ChatUIKitViewportState`, `ChatUIKitMarkdownRenderer`,
 `ChatUIKitTranscriptCells`, and `ChatUIKitViewportController` so authority, rendering, cells, and
 viewport ownership remain discoverable. Native tool-run and notification cards consume their

@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 @preconcurrency import UIKit
 
 /// The complete immutable projection needed by the UIKit composer. It contains
@@ -797,17 +796,23 @@ private final class ChatUIKitResourcePickerView: UIView, UITableViewDataSource, 
 }
 
 private enum ChatUIKitComposerColors {
-    static let background = UIColor(Color.tronBackground)
-    static let primary = UIColor(Color.tronTextPrimary)
-    static let secondary = UIColor(Color.tronTextSecondary)
-    static let muted = UIColor(Color.tronTextMuted)
-    static let emerald = UIColor(Color.tronEmerald)
-    static let cyan = UIColor(Color.tronCyan)
-    static let purple = UIColor(Color.tronPurple)
-    static let amber = UIColor(Color.tronAmber)
-    static let error = UIColor(Color.tronError)
-    static let blue = UIColor(Color.tronBlue)
-    static let border = UIColor(Color.tronBorder)
+    private static func dynamic(light: String, dark: String) -> UIColor {
+        UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light)
+        }
+    }
+
+    static let background = dynamic(light: "#F7F8FA", dark: "#090A0C")
+    static let primary = dynamic(light: "#111827", dark: "#F8FAFC")
+    static let secondary = dynamic(light: "#4B5563", dark: "#AAB2BF")
+    static let muted = dynamic(light: "#6B7280", dark: "#8B949E")
+    static let emerald = dynamic(light: "#059669", dark: "#10B981")
+    static let cyan = dynamic(light: "#0891B2", dark: "#06B6D4")
+    static let purple = dynamic(light: "#7C3AED", dark: "#8B5CF6")
+    static let amber = dynamic(light: "#D97706", dark: "#F59E0B")
+    static let error = dynamic(light: "#DC2626", dark: "#EF4444")
+    static let blue = dynamic(light: "#2563EB", dark: "#3B82F6")
+    static let border = dynamic(light: "#D8DEE6", dark: "#3B424D")
 }
 
 @MainActor

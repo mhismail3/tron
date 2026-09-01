@@ -622,42 +622,75 @@ private final class ChatUIKitMediaChip: UIControl {
     private var loadTask: Task<Void, Never>?
     private var loader: ChatMediaLoader?
     private var identity: ChatMediaIdentity?
+    private var loadGeneration: UInt64 = 0
     private var failed = false
+    private let normalAccessibilityLabel: String
 
     init(attachment: ChatUIKitTranscriptAttachment) {
-        self.attachment = attachment; super.init(frame: .zero)
+        self.attachment = attachment
+        normalAccessibilityLabel = attachment.mimeType.hasPrefix("image/")
+            ? "Image attachment, \(attachment.name)"
+            : "File attachment, \(attachment.name)"
+        super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([widthAnchor.constraint(equalToConstant: 64), heightAnchor.constraint(equalToConstant: 64)])
         imageView.translatesAutoresizingMaskIntoConstraints = false; addSubview(imageView)
         NSLayoutConstraint.activate([imageView.leadingAnchor.constraint(equalTo: leadingAnchor), imageView.trailingAnchor.constraint(equalTo: trailingAnchor), imageView.topAnchor.constraint(equalTo: topAnchor), imageView.bottomAnchor.constraint(equalTo: bottomAnchor)])
         imageView.contentMode = .scaleAspectFill; imageView.clipsToBounds = true; layer.cornerRadius = 14; layer.masksToBounds = true; layer.borderWidth = 0.5; layer.borderColor = UIColor.tronBorder.cgColor
         addTarget(self, action: #selector(activate), for: .primaryActionTriggered)
-        isAccessibilityElement = true; accessibilityTraits = .button; accessibilityLabel = attachment.mimeType.hasPrefix("image/") ? "Image attachment, \(attachment.name)" : "File attachment, \(attachment.name)"; accessibilityHint = "Opens a preview"
+        isAccessibilityElement = true; accessibilityTraits = .button; accessibilityLabel = normalAccessibilityLabel; accessibilityHint = "Opens a preview"
         showPlaceholder()
         if let image = attachment.preparedThumbnail { imageView.image = image }
     }
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func load(using loader: ChatMediaLoader?, identity: ChatMediaIdentity?) {
-        self.loader = loader; self.identity = identity
-        guard imageView.image == nil, let loader, let identity else { return }
-        if let cached = loader.cachedThumbnail(for: identity) { imageView.image = cached; return }
+        self.loader = loader
+        self.identity = identity
         loadTask?.cancel()
+        loadTask = nil
+        loadGeneration &+= 1
+        let generation = loadGeneration
+        // A prepared thumbnail is already the authoritative bounded image and
+        // must not be replaced by an asynchronous fetch.
+        guard attachment.preparedThumbnail == nil, let loader, let identity else { return }
+        if let cached = loader.cachedThumbnail(for: identity) {
+            imageView.image = cached
+            failed = false
+            return
+        }
+        showPlaceholder()
+        accessibilityLabel = normalAccessibilityLabel
         loadTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let image = try await loader.thumbnail(for: identity)
-                guard !Task.isCancelled else { return }
-                self.imageView.image = image; self.failed = false
+                guard !Task.isCancelled, self.loadGeneration == generation else { return }
+                self.imageView.image = image
+                self.failed = false
+                self.accessibilityLabel = self.normalAccessibilityLabel
             } catch {
-                guard !Task.isCancelled else { return }
-                self.failed = true; self.showFailure()
+                guard !Task.isCancelled, self.loadGeneration == generation else { return }
+                self.failed = true
+                self.showFailure()
             }
         }
     }
-    func cancelLoad() { loadTask?.cancel(); loadTask = nil }
+    func cancelLoad() {
+        loadGeneration &+= 1
+        loadTask?.cancel()
+        loadTask = nil
+    }
     private func showPlaceholder() { imageView.image = UIImage(systemName: attachment.mimeType.hasPrefix("image/") ? "photo" : "doc.text"); imageView.tintColor = UIColor.tronBlue; imageView.backgroundColor = UIColor.tronBlue.withAlphaComponent(0.10) }
     private func showFailure() { imageView.image = UIImage(systemName: "arrow.clockwise"); imageView.tintColor = UIColor.tronBlue; accessibilityLabel = "\(accessibilityLabel ?? "Attachment") unavailable, retry" }
-    @objc private func activate() { if failed { failed = false; showPlaceholder(); load(using: loader, identity: identity) } else { onActivate?() } }
+    @objc private func activate() {
+        if failed {
+            failed = false
+            showPlaceholder()
+            load(using: loader, identity: identity)
+        } else {
+            onActivate?()
+        }
+    }
 }
 
 @MainActor
