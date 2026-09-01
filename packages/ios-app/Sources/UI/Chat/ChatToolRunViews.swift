@@ -1,5 +1,16 @@
 import SwiftUI
 
+private enum ChatToolChipAnimationTransactionKey: TransactionKey {
+    static let defaultValue = false
+}
+
+private extension Transaction {
+    var admitsChatToolChipAnimation: Bool {
+        get { self[ChatToolChipAnimationTransactionKey.self] }
+        set { self[ChatToolChipAnimationTransactionKey.self] = newValue }
+    }
+}
+
 struct ToolCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.canonicalResourceSessionID) private var sessionID
@@ -434,7 +445,7 @@ private struct ToolActivityChip: View {
     }
 }
 
-private struct ToolRunDetailSheet: View {
+struct ToolRunDetailSheet: View {
     let run: ChatToolRunPresentation
     let tools: [ChatToolPresentation]
     @Environment(\.dismiss) private var dismiss

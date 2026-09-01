@@ -1,5 +1,9 @@
 import SwiftUI
 
+enum ChatTranscriptAnimationPolicy {
+    static let liveGrowthDuration = 0.16
+}
+
 struct TranscriptRow: View, Equatable {
     let item: TranscriptItem
     var streaming = false
@@ -402,7 +406,7 @@ private struct ThinkingBlock: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .animation(
             reduceMotion ? nil : .smooth(
-                duration: ChatScrollCoordinator.liveGrowthAnimationDuration
+                duration: ChatTranscriptAnimationPolicy.liveGrowthDuration
             ),
             value: CGSize(width: traceHeight, height: tailOffset)
         )

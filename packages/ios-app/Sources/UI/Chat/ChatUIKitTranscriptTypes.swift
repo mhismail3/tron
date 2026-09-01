@@ -551,6 +551,11 @@ enum ChatUIKitTranscriptDetailIntent {
     case notification(rowID: String)
 }
 
+struct ChatUIKitAttachmentDetailRoute: Identifiable {
+    let id: UUID
+    let attachment: ChatUIKitTranscriptAttachment
+}
+
 struct ChatUIKitThinkingDetailRoute: Identifiable {
     let id: String
     let label: String?
@@ -559,8 +564,8 @@ struct ChatUIKitThinkingDetailRoute: Identifiable {
 
 struct ChatUIKitDetailRoute: Identifiable {
     enum Kind {
-        case attachment(ChatUIKitTranscriptAttachment)
-        case tool(ChatToolPresentation)
+        case attachment(ChatUIKitAttachmentDetailRoute)
+        case toolRun(ChatToolRunPresentation, [ChatToolPresentation])
         case thinking(ChatUIKitThinkingDetailRoute)
         case notification(ChatNotificationPresentation)
     }

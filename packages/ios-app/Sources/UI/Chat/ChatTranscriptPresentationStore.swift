@@ -1069,6 +1069,9 @@ final class ChatTranscriptPresentationStore {
     #endif
 
     private(set) var installed: InstalledChatTranscript?
+    /// Exact bounded admission clock for native presentation consumers. It
+    /// advances only when the installed immutable payload changes.
+    private(set) var installedVersion: UInt64 = 0
     private(set) var pendingEntranceIDs: Set<String> = []
     private(set) var admittedEntranceIDs: Set<String> = []
     private(set) var displayedSemanticIDCount: Int = 0
@@ -1399,7 +1402,13 @@ final class ChatTranscriptPresentationStore {
     }
 
     func handleMemoryPressure() {
-        if let installed { self.installed = installed.removingPreparedText() }
+        if let installed {
+            let stripped = installed.removingPreparedText()
+            if stripped != installed {
+                self.installed = stripped
+                installedVersion &+= 1
+            }
+        }
         if let readyToInstall {
             self.readyToInstall = readyToInstall.removingPreparedText()
         }
@@ -1447,6 +1456,7 @@ final class ChatTranscriptPresentationStore {
         installFrameTask?.cancel()
         installFrameTask = nil
         installed = nil
+        installedVersion = 0
         clearEntranceBookkeeping(keepingCapacity: false)
         failAllWaiters(with: CancellationError())
         #if HOSTED_TEST
@@ -1549,6 +1559,7 @@ final class ChatTranscriptPresentationStore {
     @discardableResult
     private func install(_ candidate: InstalledChatTranscript) -> InstalledChatTranscript {
         let output = candidate.reconcilingProjectionLineage(previous: installed)
+        if output == installed { return output }
         let foregroundSuppressesEntrances = output.tag.entranceSuppressionGeneration.map { generation in
             generation > (consumedEntranceSuppressionGeneration ?? -1)
         } ?? false
@@ -1569,6 +1580,7 @@ final class ChatTranscriptPresentationStore {
         appendPendingEntrances(inserted, output: output)
         recordDisplayedSemanticIDs(from: output)
         installed = output
+        installedVersion &+= 1
         return output
     }
 

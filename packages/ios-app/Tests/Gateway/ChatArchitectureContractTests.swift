@@ -206,22 +206,73 @@ struct ChatArchitectureContractTests {
     @Test("UIKit host does not reapply an unchanged immutable source")
     func uikitHostSourceAdmissionIsStable() throws {
         let row = ChatUIKitTranscriptRow(id: "one", text: "one")!
-        let input = try #require(ChatUIKitPresentationInput(
-            generation: 4,
-            version: 20,
-            rows: [row]
-        ))
+        var buildCount = 0
+        func source(
+            generation: UInt64,
+            version: UInt64,
+            history: ChatUIKitHistoryState = .hidden,
+            aliases: [String: String] = [:]
+        ) -> ChatUIKitPresentationSource {
+            ChatUIKitPresentationSource(
+                identity: .init(
+                    generation: generation,
+                    version: version,
+                    history: history,
+                    canonicalAliases: aliases
+                ),
+                build: {
+                    buildCount += 1
+                    return ChatUIKitPresentationInput(
+                        generation: generation,
+                        version: version,
+                        rows: [row],
+                        history: history
+                    )
+                }
+            )
+        }
+
         let coordinator = ChatUIKitSessionSurfaceHost.Coordinator()
-        #expect(coordinator.admittedInput(input) != nil)
-        #expect(coordinator.admittedInput(input) == nil)
-        #expect(coordinator.uiVersion == 1)
-        let changed = try #require(ChatUIKitPresentationInput(
-            generation: 4,
-            version: 21,
-            rows: [ChatUIKitTranscriptRow(id: "one", text: "changed")!]
-        ))
-        #expect(coordinator.admittedInput(changed) != nil)
-        #expect(coordinator.uiVersion == 2)
+        let initial = source(generation: 4, version: 20)
+        #expect(coordinator.admittedInput(initial)?.version == 1)
+        #expect(coordinator.admittedInput(initial) == nil)
+        #expect(buildCount == 1)
+        #expect(coordinator.admittedInput(source(
+            generation: 4, version: 20, history: .loading
+        ))?.version == 2)
+        #expect(coordinator.admittedInput(source(
+            generation: 4, version: 21, history: .loading,
+            aliases: ["canonical": "presentation"]
+        ))?.version == 3)
+        #expect(coordinator.admittedInput(source(
+            generation: 5, version: 1
+        ))?.version == 4)
+        #expect(coordinator.admittedInput(source(
+            generation: 4, version: 22
+        )) == nil)
+        #expect(coordinator.uiVersion == 4)
+    }
+
+    @MainActor
+    @Test("installed native admission clock advances only with installed payload")
+    func installedNativeAdmissionClock() async throws {
+        let snapshot = try SessionScenarioBuilder(seed: 9_910)
+            .openingTail(targetEncodedBytes: 4_096)
+        let tag = ChatTranscriptProjectionTag(
+            snapshot: snapshot,
+            presentationGeneration: 1
+        )
+        let store = ChatTranscriptPresentationStore()
+        #expect(store.installedVersion == 0)
+        #expect(store.submit(snapshot: snapshot, tag: tag))
+        _ = try await store.waitForInstall(of: tag)
+        #expect(store.installedVersion == 1)
+        #expect(!store.submit(snapshot: snapshot, tag: tag))
+        #expect(store.installedVersion == 1)
+        store.handleMemoryPressure()
+        #expect(store.installedVersion == 2)
+        store.reset()
+        #expect(store.installedVersion == 0)
     }
 
     @MainActor

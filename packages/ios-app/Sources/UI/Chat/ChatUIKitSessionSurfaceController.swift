@@ -10,6 +10,7 @@ final class ChatUIKitSessionSurfaceController: UIViewController {
     let composer: ChatUIKitComposerController
 
     private var composerHeightConstraint: NSLayoutConstraint?
+    private var composerInput: ChatUIKitComposerInput?
     private var lastMeasuredWidth: CGFloat = 0
     private var isUpdatingComposerHeight = false
 
@@ -32,6 +33,13 @@ final class ChatUIKitSessionSurfaceController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = ChatUIKitTheme.background
+        composer.onPreferredHeightChange = { [weak self] in
+            guard let self else { return }
+            if self.updateComposerHeight() { self.view.layoutIfNeeded() }
+        }
+        transcript.onViewportStateChanged = { [weak self] state in
+            self?.viewportStateChanged(state)
+        }
         view.keyboardLayoutGuide.followsUndockedKeyboard = false
         view.keyboardLayoutGuide.usesBottomSafeArea = true
 
@@ -78,13 +86,25 @@ final class ChatUIKitSessionSurfaceController: UIViewController {
     @discardableResult
     func applyComposer(_ input: ChatUIKitComposerInput) -> Bool {
         loadViewIfNeeded()
-        guard composer.apply(input) else { return false }
+        composerInput = input
+        let nativeInput = input.replacingShowsCatchUp(
+            transcript.viewportState.intent != .followTail
+        )
+        guard composer.apply(nativeInput) else { return false }
         if updateComposerHeight() { view.layoutIfNeeded() }
         return true
     }
 
     func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
         transcript.setPresentationActivity(activity)
+    }
+
+    private func viewportStateChanged(_ state: ChatUIKitViewportState) {
+        guard let composerInput else { return }
+        _ = composer.apply(composerInput.replacingShowsCatchUp(
+            state.intent != .followTail
+        ))
+        if updateComposerHeight() { view.layoutIfNeeded() }
     }
 
     /// Auto Layout measures the complete native composer after each immutable

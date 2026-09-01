@@ -112,6 +112,15 @@ final class ChatQueueMutationResolutionOwner {
     }
 }
 
+enum ChatQueueReplacementPolicy {
+    static func suppressesReplacement(
+        pendingOperationID: String,
+        authoritativeQueueIDs: Set<String>
+    ) -> Bool {
+        authoritativeQueueIDs.contains(pendingOperationID)
+    }
+}
+
 enum ChatQueueMutationProjectionPolicy {
     enum Outcome: Equatable, Sendable {
         case success
@@ -326,204 +335,6 @@ enum QueuedMessageCardLayout {
     static let arrowContainerSize: CGFloat = 24
     static let attachmentChipSize: CGFloat = 22
     static let attachmentChipCornerRadius: CGFloat = 6
-}
-
-struct QueuedMessageAttachmentChipRow: View {
-    let chips: [QueuedMessageAttachmentChip]
-    let accent: Color
-    let morphDestinationIDs: [String: ChatMorphID]
-    let morphRegistry: ChatMorphFrameRegistry?
-
-    init(
-        chips: [QueuedMessageAttachmentChip],
-        accent: Color,
-        morphDestinationIDs: [String: ChatMorphID] = [:],
-        morphRegistry: ChatMorphFrameRegistry? = nil
-    ) {
-        self.chips = chips
-        self.accent = accent
-        self.morphDestinationIDs = morphDestinationIDs
-        self.morphRegistry = morphRegistry
-    }
-
-    @Environment(AppModel.self) private var model
-    @State private var previewRequest: FilePreviewRequest?
-
-    private struct FilePreviewRequest: Identifiable {
-        let id = UUID()
-        let attachment: SessionSnapshot.PromptAttachment?
-        let identity: ChatMediaIdentity?
-    }
-
-    var body: some View {
-        ToolChipFlowLayout(spacing: 4) {
-            ForEach(chips) { chip in
-                if chip.kind == .file {
-                    morphDestination(
-                        Button {
-                            previewRequest = FilePreviewRequest(
-                                attachment: chip.attachment,
-                                identity: chip.attachment.flatMap {
-                                    model.chatMediaIdentity(blobID: $0.id)
-                                }
-                            )
-                        } label: {
-                            chipSurface(chip)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(chip.attachment.map { "File attachment, \($0.name)" } ?? "File attachment")
-                        .accessibilityHint("Opens the file preview"),
-                        for: chip
-                    )
-                } else {
-                    morphDestination(
-                        chipSurface(chip).accessibilityHidden(true),
-                        for: chip
-                    )
-                }
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(QueuedMessageAttachmentPresentation.accessibilityLabel(chips: chips))
-        .tronManagedSheet(
-            item: $previewRequest,
-            identity: { "chat.queued-attachment.\($0.id)" }
-        ) { request in
-            AttachmentFilePreviewSheet(
-                name: request.attachment?.name ?? "Attachment",
-                mimeType: request.attachment?.mimeType ?? "application/octet-stream",
-                source: request.identity.map {
-                    .remote(identity: $0, leaseID: request.id)
-                } ?? .unavailable
-            )
-        }
-    }
-
-    @ViewBuilder
-    private func morphDestination<Content: View>(
-        _ content: Content,
-        for chip: QueuedMessageAttachmentChip
-    ) -> some View {
-        if let id = morphDestinationIDs[chip.id], let morphRegistry {
-            content.chatMorphDestination(id: id, registry: morphRegistry)
-        } else {
-            content
-        }
-    }
-
-    private func chipSurface(_ chip: QueuedMessageAttachmentChip) -> some View {
-        Image(systemName: chip.iconName)
-            .font(TronTypography.sans(size: 9, weight: .semibold))
-            .foregroundStyle(accent)
-            .frame(
-                width: QueuedMessageCardLayout.attachmentChipSize,
-                height: QueuedMessageCardLayout.attachmentChipSize
-            )
-            .background(
-                accent.opacity(0.13),
-                in: RoundedRectangle(
-                    cornerRadius: QueuedMessageCardLayout.attachmentChipCornerRadius,
-                    style: .continuous
-                )
-            )
-    }
-}
-
-struct QueuedMessageRow: View {
-    let message: SessionSnapshot.QueuedMessage
-    let position: Int
-    let total: Int
-    let managementAvailability: QueuedMessageManagementAvailability
-    let isMutating: Bool
-    let onEdit: () -> Void
-    let onClear: () -> Void
-    let canMoveEarlier: Bool
-    let canMoveLater: Bool
-    let onMove: (Int) -> Void
-
-    private var isManageable: Bool { managementAvailability.isManageable }
-
-    private var behavior: ChatPromptBehavior { ChatPromptBehavior(message.behavior) }
-
-    private var accent: Color {
-        behavior == .steer ? .tronEmerald : .tronPurple
-    }
-
-    private var deliveryDetail: String {
-        behavior == .steer ? "After the current turn" : "After current work"
-    }
-
-    var body: some View {
-        // Queue cards use the same single bounded layout as prompt bubbles;
-        // switching between intrinsic and wrapped ViewThatFits branches after
-        // a large queued prompt arrives causes a visible container flash.
-        card.fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
-        .contextMenu {
-            if isManageable && !isMutating {
-                if canMoveEarlier {
-                    Button("Move earlier", systemImage: "arrow.up") { onMove(-1) }
-                }
-                if canMoveLater {
-                    Button("Move later", systemImage: "arrow.down") { onMove(1) }
-                }
-                if total > 1 {
-                    Button("Clear entire queue", systemImage: "trash.slash", role: .destructive, action: onClear)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .accessibilityElement(children: .contain)
-        .accessibilityHint(isManageable ? "" : readOnlyExplanation)
-    }
-
-    private var card: some View {
-        let attachmentChips = QueuedMessageAttachmentPresentation.chips(for: message)
-        return VStack(alignment: .trailing, spacing: 4) {
-            if let resource = message.resourceInvocation, !resource.isExtensionCommand {
-                CanonicalResourceChip(resource: resource)
-            }
-            ChatPromptCard(
-                behavior: behavior,
-                text: message.text,
-                detail: "\(deliveryDetail) · \(position) of \(total)",
-                isInteractive: isManageable,
-                onActivate: isManageable && !isMutating ? onEdit : nil,
-                attachmentContent: {
-                    if !attachmentChips.isEmpty {
-                        QueuedMessageAttachmentChipRow(chips: attachmentChips, accent: accent)
-                    }
-                },
-                statusContent: { trailingStatus }
-            )
-        }
-    }
-
-    @ViewBuilder
-    private var trailingStatus: some View {
-        if isMutating {
-            TronPulseLoadingIndicator(accent: accent, size: 18)
-                .frame(width: 28, height: 28)
-        } else if !isManageable {
-            Image(systemName: "lock")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(Color.tronTextMuted)
-                .frame(width: 28, height: 28)
-                .accessibilityLabel("Queued message is read only")
-                .accessibilityHint(readOnlyExplanation)
-        }
-    }
-
-    private var readOnlyExplanation: String {
-        switch managementAvailability {
-        case .available:
-            ""
-        case .requiresGatewayUpdate:
-            "Update Tron on Mac to edit or remove queued messages"
-        case .invalidProjection:
-            "Reconnect to Tron on Mac to restore queue editing"
-        }
-    }
 }
 
 struct QueuedMessageEditorSheet: View {

@@ -85,9 +85,6 @@ struct ChatTranscriptPresentationTests {
         #expect(preflight.cardBehavior == .steer)
         #expect(preflight.cardTitle == "Message")
         #expect(preflight.cardDetail == "After compaction")
-        #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: behavior("steer")) == .queuedPrompt)
-        #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: behavior("followUp")) == .queuedPrompt)
-        #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: behavior(nil)) == .userPrompt)
     }
     @Test("pending direct prompts consume canonical entrance entitlement exactly once")
     func pendingCanonicalReplacementSuppressesSecondEntrance() throws {
@@ -106,15 +103,6 @@ struct ChatTranscriptPresentationTests {
         )
         #expect(ids == ["canonical"])
         #expect(ChatPendingCanonicalSuppressionPolicy.suppresses(pending, in: [canonical]))
-        // The owning ChatView records the exact pending operation as
-        // `queued-message-operation-1` in its suppression ledger when a
-        // pending prompt becomes a queue item; the queue entrance is then
-        // intentionally not replayed.
-        #expect(!ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
-            isReady: true,
-            entranceSuppressed: false,
-            hasIdentityAlias: true
-        ))
     }
 
     @Test("pending resource presentation preserves exact invocation identity")
@@ -233,18 +221,6 @@ struct ChatTranscriptPresentationTests {
             for: pending,
             in: [canonical]
         ) == nil)
-        #expect(!ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
-            isReady: true,
-            entranceSuppressed: false,
-            hasIdentityAlias: true
-        ))
-        #expect(ChatContentTransitionPolicy.revealAnimation(
-            for: .userPrompt,
-            reduceMotion: false
-        ) != ChatContentTransitionPolicy.revealAnimation(
-            for: .userPrompt,
-            reduceMotion: true
-        ))
     }
 
     @Test("queued replacement suppresses only the exact pending operation identity")
@@ -273,11 +249,6 @@ struct ChatTranscriptPresentationTests {
         )
         #expect(queue.id == pending.id)
         #expect(unrelated.id != pending.id)
-        #expect(ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
-            isReady: true,
-            entranceSuppressed: false,
-            hasIdentityAlias: true
-        ) == false)
     }
 
     @Test("queue-to-canonical replacement requires one exact mixed-attachment candidate")
@@ -2127,90 +2098,6 @@ struct ChatTranscriptPresentationTests {
         ]
         """)
         #expect(ChatPendingCanonicalSuppressionPolicy.suppresses(pending, in: ordered.transcript))
-    }
-
-    @Test("entrance geometry follows exact displayed install across desired and identity replacements")
-    func entranceGeometryAdmissionPolicy() throws {
-        var displayed = try fixture(transcript: "[]")
-        let displayedTag = ChatTranscriptProjectionTag(
-            snapshot: displayed,
-            presentationGeneration: 41,
-            canonicalGeneration: 10,
-            timelineGeneration: 20
-        )
-        var desired = displayed
-        desired.eventSequence += 1
-        let desiredTag = ChatTranscriptProjectionTag(
-            snapshot: desired,
-            presentationGeneration: 41,
-            canonicalGeneration: 10,
-            timelineGeneration: 21
-        )
-        let observation = ChatSemanticFrameObservation(
-            layoutEpoch: 7,
-            frame: CGRect(x: 0, y: 10, width: 100, height: 30),
-            entranceAdmissionTag: displayedTag
-        )
-
-        // Model-ahead desired source is intentionally absent from the policy:
-        // the displayed A installation remains sufficient admission authority.
-        #expect(desiredTag != displayedTag)
-        #expect(ChatEntranceGeometryAdmissionPolicy.admits(
-            observation: observation,
-            installedTag: displayedTag,
-            installedContainsRenderedID: true,
-            currentLayoutEpoch: 7,
-            entranceState: .pending
-        ))
-        #expect(!ChatEntranceGeometryAdmissionPolicy.admits(
-            observation: observation,
-            installedTag: desiredTag,
-            installedContainsRenderedID: true,
-            currentLayoutEpoch: 7,
-            entranceState: .pending
-        ))
-
-        displayed.runtimeGeneration = "replacement-runtime"
-        let runtimeReplacement = ChatTranscriptProjectionTag(
-            snapshot: displayed,
-            presentationGeneration: 41,
-            canonicalGeneration: 10,
-            timelineGeneration: 20
-        )
-        #expect(!ChatEntranceGeometryAdmissionPolicy.admits(
-            observation: observation,
-            installedTag: runtimeReplacement,
-            installedContainsRenderedID: true,
-            currentLayoutEpoch: 7,
-            entranceState: .pending
-        ))
-        let presentationReplacement = ChatTranscriptProjectionTag(
-            snapshot: desired,
-            presentationGeneration: 42,
-            canonicalGeneration: 10,
-            timelineGeneration: 21
-        )
-        #expect(!ChatEntranceGeometryAdmissionPolicy.admits(
-            observation: observation,
-            installedTag: presentationReplacement,
-            installedContainsRenderedID: true,
-            currentLayoutEpoch: 7,
-            entranceState: .pending
-        ))
-        #expect(!ChatEntranceGeometryAdmissionPolicy.admits(
-            observation: observation,
-            installedTag: displayedTag,
-            installedContainsRenderedID: true,
-            currentLayoutEpoch: 8,
-            entranceState: .pending
-        ))
-        #expect(!ChatEntranceGeometryAdmissionPolicy.admits(
-            observation: observation,
-            installedTag: displayedTag,
-            installedContainsRenderedID: true,
-            currentLayoutEpoch: 7,
-            entranceState: .admitted
-        ))
     }
 
     @Test("timeline projection closes one aggregate-only performance interval")

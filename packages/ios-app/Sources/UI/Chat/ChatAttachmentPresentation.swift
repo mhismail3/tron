@@ -136,7 +136,6 @@ struct AttachmentThumbnailSurface: View {
 struct PendingAttachmentChip: View {
     let attachment: PendingAttachment
     let onRemove: () -> Void
-    @Environment(AppModel.self) private var model
     @State private var showPreview = false
 
     var body: some View {
@@ -199,8 +198,24 @@ struct PendingAttachmentChip: View {
         )
     }
 
-    @ViewBuilder
     private var previewSheet: some View {
+        PendingAttachmentPreviewSheet(attachment: attachment)
+    }
+
+    private var isImage: Bool {
+        attachment.mimeType.lowercased().hasPrefix("image/")
+    }
+
+    private var decodedPreviewImage: UIImage? {
+        attachment.preparedThumbnail.map { UIImage(cgImage: $0.image) }
+    }
+}
+
+struct PendingAttachmentPreviewSheet: View {
+    let attachment: PendingAttachment
+    @Environment(AppModel.self) private var model
+
+    @ViewBuilder var body: some View {
         if isImage, let thumbnail = decodedPreviewImage,
            let fullPreviewData = attachment.fullPreviewData {
             PendingAttachmentImagePreviewSheet(

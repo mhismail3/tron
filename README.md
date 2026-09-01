@@ -1,7 +1,7 @@
 # Tron
 
 Tron is a private coding agent designed around a native iPhone experience. The
-agent runs continuously on your Mac; the SwiftUI app is its primary interface.
+agent runs continuously on your Mac; the native iOS app is its primary interface.
 Accepted work continues when the phone disconnects, and reconnecting converges
 to an authoritative session snapshot.
 
@@ -14,7 +14,7 @@ second product users must configure or operate.
 ```text
 ┌──────────────────────┐      Tailscale       ┌─────────────────────────┐
 │ Tron for iPhone      │◀── authenticated ──▶│ Tron Gateway on Mac     │
-│ SwiftUI chat + tools │      WebSocket       │ sessions + files + PTY │
+│ UIKit chat + sheets  │      WebSocket       │ sessions + files + PTY │
 └──────────────────────┘                      └───────────┬─────────────┘
                                                          │ stable SDK
                                              ┌───────────▼─────────────┐

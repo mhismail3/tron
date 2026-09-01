@@ -44,9 +44,8 @@ The work spans Gateway projection and iOS transcript presentation. The relevant 
 - `packages/ios-app/Sources/UI/Chat/ChatTranscriptPresentationStore.swift`
 - `packages/ios-app/Sources/UI/Chat/ChatToolRunViews.swift`
 - `packages/ios-app/Sources/UI/Chat/ChatCompactPill.swift`
-- `packages/ios-app/Sources/UI/Chat/ChatContentTransition.swift`
-- `packages/ios-app/Sources/UI/Chat/ChatEntranceRows.swift`
-- `packages/ios-app/Sources/Support/ChatHostedProbe.swift`
+- `packages/ios-app/Sources/UI/Chat/ChatUIKitTranscriptComponents.swift`
+- `packages/ios-app/Sources/UI/Chat/ChatUIKitViewportController.swift`
 
 The implementation must preserve these invariants:
 
@@ -428,7 +427,7 @@ Adopt and test one policy:
 - Chip updates never replay row entrance.
 - Rapid pending installation-tag replacement restarts or supersedes the exact-token failsafe correctly; a stale token cannot resolve a newer pending entrance.
 
-Update `ChatView`, `ChatScrollCoordinator` documentation, hosted tests, and `PresentationStyleGuardTests` so they assert the same production policy.
+Update `ChatView`, the native viewport documentation, hosted tests, and production contract tests so they assert the same policy.
 
 ## Validation plan
 

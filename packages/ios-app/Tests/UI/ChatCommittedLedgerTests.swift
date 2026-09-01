@@ -133,16 +133,11 @@ struct ChatCommittedLedgerTests {
 
     private func committedRows(
         from installed: InstalledChatTranscript
-    ) -> [ChatTranscriptRenderRow] {
+    ) -> [ChatUIKitTranscriptRow.PresentationFacts] {
         installed.committedLedger.items.map { item in
-            ChatTranscriptRenderRow(
-                item: item,
-                preparedText: installed.preparedText(for: item),
-                installationTag: installed.tag,
-                toolPayloadRevision: installed.toolPayloadRevision(for: item),
-                resolveToolDetails: { _ in nil },
-                recordEvaluation: {},
-                recordToolChip: { _ in }
+            ChatUIKitPresentationAdapter.facts(
+                for: .transcript(item, isCommitted: true),
+                preparedText: installed.preparedText(for: item)
             )
         }
     }

@@ -190,6 +190,28 @@ struct ChatUIKitComposerTests {
 
     @Test
     @MainActor
+    func noArgumentResourceCanSendWithExactIdentity() {
+        let controller = ChatUIKitComposerController()
+        controller.loadViewIfNeeded()
+        let resource = ComposerResourceEntry(command: CommandInfo(
+            name: "extension-command", description: "Run extension", argumentHint: nil,
+            source: .extension, sourcePath: nil, resourceSource: nil,
+            resourceScope: nil, resourceOrigin: nil
+        ))
+        controller.apply(ChatUIKitComposerInput(
+            sessionID: "session", revision: 1, submissionID: "resource-1",
+            selectedResource: resource, trailingMode: .send,
+            isTranscriptReady: true, isCommandReady: true
+        ))
+        var sends = 0
+        controller.onIntent = { intent in if case .send = intent { sends += 1 } }
+        controller.view.accessibilityElements?.compactMap { $0 as? UIButton }.last?
+            .sendActions(for: .primaryActionTriggered)
+        #expect(sends == 1)
+    }
+
+    @Test
+    @MainActor
     func sendRequiresScopedIdentity() {
         let controller = ChatUIKitComposerController()
         controller.loadViewIfNeeded()

@@ -16,7 +16,7 @@ struct ChatUIKitComposerSendIdentity: Equatable, Sendable {
     }
 }
 
-struct ChatUIKitComposerInput {
+struct ChatUIKitComposerInput: Equatable {
     let sessionID: String?
     let text: String
     let selection: NSRange
@@ -34,7 +34,7 @@ struct ChatUIKitComposerInput {
     let resourceResults: [ComposerResourceEntry]
     let reduceMotion: Bool
     let keyboardVisible: Bool
-    let showsCatchUp: Bool
+    private(set) var showsCatchUp: Bool
     let showsAmbientWorkingBlur: Bool
     let processOverview: SessionProcessOverview?
     let hasSubagent: Bool
@@ -123,6 +123,12 @@ struct ChatUIKitComposerInput {
         self.isEditable = isEditable
         self.keyboardAppearance = keyboardAppearance
         self.focus = focus
+    }
+
+    func replacingShowsCatchUp(_ visible: Bool) -> Self {
+        var copy = self
+        copy.showsCatchUp = visible
+        return copy
     }
 }
 

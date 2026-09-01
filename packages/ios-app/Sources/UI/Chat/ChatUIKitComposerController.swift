@@ -19,6 +19,7 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     private(set) var input: ChatUIKitComposerInput?
     private(set) var appliedRevision: Int?
     var onIntent: IntentHandler?
+    var onPreferredHeightChange: (() -> Void)?
 
     private let rootStack = UIStackView()
     private let attachmentScroll = UIScrollView()
@@ -41,6 +42,7 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     private var sendHandoffIdentity: ChatUIKitComposerSendIdentity?
     private var sendHandoffAccepted = false
     private var applyingAuthoritativeInput = false
+    private var nativeKeyboardVisible = false
     nonisolated(unsafe) private var keyboardObservers: [NSObjectProtocol] = []
     private var attachmentChips: [String: ChatUIKitComposerAttachmentChip] = [:]
 
@@ -88,6 +90,7 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         if let appliedRevision, next.revision < appliedRevision {
             return false
         }
+        if input == next, focusIsSatisfied(next.focus) { return true }
         // Revisions refresh the projection but do not own admission. Keep a
         // handoff alive across every revision while its exact identity remains
         // authoritative; replacing the session/submission identity retires it.
@@ -302,11 +305,11 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         guard keyboardObservers.isEmpty, viewIfLoaded?.window != nil else { return }
         let center = NotificationCenter.default
         for name in [UIResponder.keyboardWillChangeFrameNotification, UIResponder.keyboardWillHideNotification] {
-            keyboardObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            keyboardObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                let notificationName = note.name
+                let frame = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
                 Task { @MainActor [weak self] in
-                    guard let self, self.viewIfLoaded?.window != nil else { return }
-                    self.view.setNeedsLayout()
-                    self.view.layoutIfNeeded()
+                    self?.keyboardFrameChanged(name: notificationName, frame: frame)
                 }
             })
         }
@@ -316,6 +319,27 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         let center = NotificationCenter.default
         keyboardObservers.forEach { center.removeObserver($0) }
         keyboardObservers.removeAll()
+        nativeKeyboardVisible = false
+    }
+
+    private func keyboardFrameChanged(name: Notification.Name, frame: CGRect?) {
+        guard let window = viewIfLoaded?.window else { return }
+        let visible: Bool
+        if name == UIResponder.keyboardWillHideNotification {
+            visible = false
+        } else if let frame {
+            let localFrame = window.convert(frame, from: nil)
+            visible = localFrame.intersects(window.bounds)
+                && localFrame.minY < window.bounds.maxY - 0.5
+        } else {
+            return
+        }
+        guard visible != nativeKeyboardVisible else { return }
+        nativeKeyboardVisible = visible
+        if let input { configureResource(input) }
+        updateEditorHeight()
+        view.setNeedsLayout()
+        onPreferredHeightChange?()
     }
 
     deinit {
@@ -340,6 +364,13 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     private func clearSendHandoff() {
         sendHandoffIdentity = nil
         sendHandoffAccepted = false
+    }
+
+    private func focusIsSatisfied(_ focus: ChatUIKitComposerFocus) -> Bool {
+        switch focus {
+        case .focused: editor.isFirstResponder
+        case .resigned: !editor.isFirstResponder
+        }
     }
 
     private func configureEditorFromInput(_ next: ChatUIKitComposerInput) {
@@ -390,7 +421,7 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
             kind: next.resourcePicker?.kind,
             query: next.resourcePicker?.query ?? "",
             entries: next.resourceResults,
-            keyboardVisible: next.keyboardVisible,
+            keyboardVisible: next.keyboardVisible || nativeKeyboardVisible,
             reduceMotion: next.reduceMotion
         )
         if next.resourcePicker == nil {
@@ -476,18 +507,19 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         guard editor.bounds.width > 0, let font = editor.font else { return }
         let fitting = editor.sizeThatFits(CGSize(width: editor.bounds.width, height: .greatestFiniteMagnitude)).height
         let panelPresented = input?.resourcePicker != nil
+        let keyboardVisible = input?.keyboardVisible == true || nativeKeyboardVisible
         let maximum = ChatUIKitComposerLayoutPolicy.editorHeight(
             fittingHeight: .greatestFiniteMagnitude,
             lineHeight: font.lineHeight,
             panelPresented: panelPresented,
-            keyboardVisible: input?.keyboardVisible == true
+            keyboardVisible: keyboardVisible
         )
         editor.isScrollEnabled = fitting > maximum + 0.5
         editorHeight?.constant = ChatUIKitComposerLayoutPolicy.editorHeight(
             fittingHeight: fitting,
             lineHeight: font.lineHeight,
             panelPresented: panelPresented,
-            keyboardVisible: input?.keyboardVisible == true
+            keyboardVisible: keyboardVisible
         )
     }
 
@@ -496,10 +528,12 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         if !attachmentScroll.isHidden { elements.append(contentsOf: attachmentStack.arrangedSubviews) }
         if !resourceScroll.isHidden { elements.append(contentsOf: resourceStack.arrangedSubviews) }
         if resourcePickerView.superview != nil { elements.append(resourcePickerView) }
+        if !processButton.isHidden { elements.append(processButton) }
         if !attachmentButton.isHidden { elements.append(attachmentButton) }
         if !editor.isHidden { elements.append(editor) }
         if !contextButton.isHidden { elements.append(contextButton) }
         if !trailingButton.isHidden { elements.append(trailingButton) }
+        if !catchUpButton.isHidden { elements.append(catchUpButton) }
         view.accessibilityElements = elements
     }
 
@@ -548,7 +582,7 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         guard let next = input, let identity = next.sendIdentity else { return }
         let text = next.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard next.trailingMode == .send,
-              (!text.isEmpty || !next.attachments.isEmpty),
+              (!text.isEmpty || !next.attachments.isEmpty || next.selectedResource != nil),
               !next.isSending, !next.submissionPending, !next.hasActiveUploads,
               next.isCommandReady,
               !(sendHandoffIdentity == identity && sendHandoffAccepted) else { return }

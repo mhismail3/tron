@@ -500,7 +500,7 @@ final class ComposerDraftCoordinator {
     private var submissionByScope: [ComposerDraftScope: SubmissionAdmission] = [:]
     /// Reserves the exact local nonce used by the next beginSubmission call.
     /// This is admission authority, not a second receipt or presentation store.
-    private var submissionPreflights: [SessionPresentationIdentity: SubmissionPreflight] = [:]
+    @ObservationIgnored private var submissionPreflights: [SessionPresentationIdentity: SubmissionPreflight] = [:]
     /// Only the newest exact canonical handoff for the mounted presentation is
     /// retained. This bounds rich thumbnail payloads to one prompt lifecycle.
     private var canonicalHandoffReceipts: [SessionPresentationIdentity: CanonicalSubmissionHandoffReceipt] = [:]
@@ -519,7 +519,7 @@ final class ComposerDraftCoordinator {
     @ObservationIgnored private var dirtyScopes: Set<ComposerDraftScope> = []
     @ObservationIgnored private var storageGenerationByScope: [ComposerDraftScope: UInt64] = [:]
     @ObservationIgnored private var persistenceTask: Task<Void, Never>?
-    private var sequence: UInt64 = 0
+    @ObservationIgnored private var sequence: UInt64 = 0
 
     init(
         upload: @escaping ComposerUploadOperation,
@@ -2254,6 +2254,7 @@ final class ComposerDraftCoordinator {
             schedulePersistence(for: lease.scope)
         }
         editorRequestByTarget[lease.target] = nil
+        submissionPreflights[lease.target] = nil
         // Transport ownership follows durable scope. Presentation revocation
         // clears only target-routed receipts; sending and accepted admissions
         // remain bounded local projections and are never replayed.

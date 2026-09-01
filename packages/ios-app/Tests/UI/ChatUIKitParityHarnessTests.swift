@@ -219,6 +219,16 @@ struct ChatUIKitParityHarnessTests {
             isTranscriptReady: true, isCommandReady: true
         ))
         #expect(harness.shell.hostedComposerHeight == compactHeight)
+
+        let rowID = try #require(harness.input.rows.first?.id)
+        harness.transcript.setIntent(.preserve(.init(rowID: rowID, topOffset: 0)))
+        #expect(harness.composer.view.accessibilityElements?.contains { element in
+            (element as? UIView)?.accessibilityLabel == "Catch up"
+        } == true)
+        harness.transcript.setIntent(.followTail)
+        #expect(harness.composer.view.accessibilityElements?.contains { element in
+            (element as? UIView)?.accessibilityLabel == "Catch up"
+        } == false)
     }
 
     @Test("canonical Markdown, media, lifecycle, tool, queue, traits and accessibility mount together")

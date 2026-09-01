@@ -1430,10 +1430,6 @@ struct ChatTranscriptPresentationStoreTests {
                 from: pendingPhysical,
                 to: resolvedPhysical
             ) == .notification)
-            #expect(ChatContentTransitionPolicy.notificationReplacementAnimation(
-                reduceMotion: false
-            ) != nil)
-
             snapshot.phase = .idle
             snapshot.extensionPresentation.semanticState.working.visible = false
             snapshot.revision += 1
@@ -1525,9 +1521,6 @@ struct ChatTranscriptPresentationStoreTests {
                 from: outgoingPhysical,
                 to: replacement
             ) == .prompt)
-            #expect(ChatPromptReplacementAnimationPolicy.animates(reduceMotion: false))
-            #expect(!ChatPromptReplacementAnimationPolicy.animates(reduceMotion: true))
-
             let existingPhysicalID = try #require(
                 settled.committedLedger.items.first { $0.id != canonicalID }?.id
             )

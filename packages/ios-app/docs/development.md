@@ -241,7 +241,7 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Dev
   -only-testing:TronMobileTests/ComposerDraftCoordinatorTests \
   -only-testing:TronMobileTests/ComposerDraftAppLifecycleTests \
   -only-testing:TronMobileTests/SessionShellProfileRouteOwnerTests \
-  -only-testing:TronMobileTests/MultilineComposerTextViewTests
+  -only-testing:TronMobileTests/ChatUIKitComposerTests
 ```
 
 `SessionEventSynchronizerTests` own the composed intent-keyed shared outcome and
@@ -486,39 +486,39 @@ transcript projection and composer through `SessionPresentationStore` authority,
 `ChatTranscriptPresentationStore` frame-gated installation, the physical-row adapter, and a
 recording command boundary. It checks bounded tails, pinned sends, detached deceleration and
 prepend, generation replacement, exact send settlement, canonical content/traits/accessibility,
-and keyboard/activity lifecycle behavior. It is intentionally not a production feature flag or a
-replacement for final device/pixel parity; physical-device differential parity and production
-cutover remain separate gates.
+and keyboard/activity lifecycle behavior. The same native parent is mounted in production; the
+recording command boundary and hosted authority setup remain test-only.
 
-`ChatView` is the lifecycle/composition root. `ChatTranscriptScrollView` owns one bounded `LazyVStack`, one mode-qualified native size-change anchor, semantic frames, and hosted evidence. Its one physical `ForEach` spans committed, live/runtime, local lifecycle, and authoritative queue rows while `ChatCommittedLedger` and equatable row payloads preserve frozen-history performance. Native anchoring owns routine size and payload changes. A genuinely new lazy physical row may receive one disabled command targeting the stable tail sentinel; the token-owned target is retained until fresh layout-epoch semantic geometry proves that exact row mounted and a newer aligned physical marker proves the viewport, rather than being released by a one-frame timer. Rows inserted before an authoritative queue tail, runtime notifications, and local lifecycle rows use the same bounded physical-spine search. Explicit retained pinned resume re-enters the marker positioning gate; retained detached readers remain anchored and are never repinned. Every installed projection, including lifecycle-only and compaction/tool settlement changes, advances the layout epoch so delayed marker callbacks cannot prove a replacement tree. Impossible underflow offsets are rejected, and forced underflow height alone cannot certify opening without a visible current-layout marker. Neither path targets a changing row ID, eagerly realizes transcript history, or creates a recurring follow loop. Prompt aliases are exact-causal, one-to-one, and fail closed; tool rows may additionally retain one unambiguous prior physical host across late finalized-group metadata while canonical semantic IDs continue to own geometry, anchoring, entrance evidence, and hosted frame samples. The row spine is a zero-copy random-access adapter with an O(1) no-alias admission path. Its native geometry feeds the coordinator directly instead of invalidating root view state; `ChatComposerView` is value/intent driven inside the root's single bottom inset; `ChatRoutes` owns modal modifiers; and `ChatSessionPresentation` groups disposable opening, import, queue-deferral, route, and handoff-ledger state without copying canonical session facts. `ChatSessionPresentationTests` require cold reopen to discard those local receipts/routes, require suspension to cancel import/picker targets while retaining compatible presentation authority, and pin exact-generation opening deadlines plus one-shot post-dismiss fork navigation. The complete open/synchronize/projection/ready transaction has a 30-second outer deadline; timeout cancels owned transcript and scroll work and presents an explicit retry state instead of leaving an ownerless opening surface. Its canceled task lease remains installed until the operation actually drains, so retry and foreground resume can join it but can never overlap another `session.open`. `ChatViewScrollHarnessTests` mount the actual `ChatView`, bounded lazy transcript stack, composer inset, and native `UIScrollView` in a fixed hosted window. The aggregate composer host stays mounted inside that one inset and measures natural content before its bottom-aligned frame. Editor-only height changes install atomically for TextKit caret ownership; attachment, selected-skill, and command/skill-result identity changes receive one value-scoped smooth host-height transition. Pending attachment chips use a presentation-owned ordered projection: batch additions reveal in selection order with a 40 ms stagger and a centered 50-to-100 percent scale/fade, removal reverses that same transform, retained siblings reflow on the same smooth transaction, and the final removal still collapses the bottom-aligned host so content reclaims the strip height. Submission transport is scope-owned across route generations and is projected, never replayed, on remount. Submission and morph motion retain their explicit layout generation. The waiting flight paints the measured composer source immediately, waits for exact destination geometry without a wall-clock race, valid keyboard-settling endpoint changes retarget in place, and a 260 ms smooth curve carries ordinary, steering/follow-up, photo, and file sends without a blank frame or spring tail. Lifecycle-to-canonical header/container collapse and active-to-completed compaction are the only replacement animations admitted through the stable transcript boundary. The physical row host has no container-level content transition; tool capsules animate only their own shallow value state so rapid parallel groups cannot leave overlapping snapshot copies. Newly admitted rows use one measured-height reveal so existing content moves continuously; its vertical admission clip expands inside a layout-neutral effect gutter and is removed after admission, preserving prompt shadows and giving settled transcript tool chips an unconstrained native press-and-drag region. All three paths respect Reduce Motion and add no second inset, root geometry loop, or scroll command. The multiline composer uses pure synchronous capped representable fitting plus post-layout TextKit overflow/caret reconciliation. Nil, nonfinite, and nonpositive proposed or resolved widths fail closed; internal scrolling enters only above the cap plus 0.5 point and remains owned until below the cap minus 0.5 point. Focused tests pin speculative infinity-to-finite measurement, wrapped cap stability, trailing-newline caret visibility, manual-scroll-then-type direction, 9→8 collapse, and inset ownership. Active-turn admission opens one layout generation before grafting one immutable lifecycle row into the current complete installed projection. Viewport submission intent preserves `.pinned` or `.anchored`; focused coordinator/composer/store tests pin native bottom size-change anchoring across streaming, discrete growth, keyboard/composer contraction, retained resume, and manual tail return. Opening, catch-up, semantic restore, and prepend leases remain stronger; direct interaction leaves anchored mode physically unpositioned. Tests also cover detached semantic preservation, direct-interaction cancellation, active-upload rejection/retry, immediate collapse, metadata-only reuse, stale-worker rejection, and snapshot-before-response provisional queue identity without granting canonical settlement. `ChatMorphFlightTests` exercise bounded global-frame admission, lifecycle-derived endpoint uniqueness, missing-frame and Reduce Motion suppression, and idempotent reconciliation/background retirement. `ChatLayoutTransactionTests` distinguish successful settlement from watchdog/background abandonment; abandoned generations cannot release scroll leases, and bounded settlement events preserve every consecutive completed generation when SwiftUI coalesces updates. Device checks must additionally send with text, photos, and files while streaming, then background/foreground and relaunch both active and passive sessions: current canonical rows must appear immediately and no pre-suspension flight may replay. Test-only authority
-admission bypasses network I/O without bypassing `AppModel`'s authoritative read
-gate. Raw geometry, visible semantic IDs, and row frames are reduced to one latest
-sample on each `CADisplayLink` tick; added evidence is aggregate command/frame/count
-data only. A maximum-512-row opening case requires the very first ready sample to contain
-the exact physical tail marker and latest message in the same plausible native bottom
-viewport, so an eventual manual/lazy correction cannot make the test pass. The production
-`DisplayFrameScheduler` is a one-shot, cancellation-aware display-link boundary used by
-first-ready, frame-gated unrealized-tail correction, and long-distance
-catch-up staging. Semantic prepend settlement instead waits passively
-for exact epoch-qualified row callbacks and requires a strictly newer callback after
-each correction. First-ready timing cannot end before the exact initial transcript
-projection installs and its frame resumes. `ChatTranscriptPresentationStoreTests` use a
-watchdog-bounded synchronous `HOSTED_TEST`-only work gate immediately before the real production
-kernel to prove serial off-main work, same-tag coalescing, newest-wins and A→B→A admission,
-paging-tag distinction, monotonic reset retirement, session/runtime scope rejection, MainActor
-responsiveness, and deterministic completed-before-frame replacement/reset races without sleeps or
-polling. They also cover atomic installation, runtime-only exact-key reuse, 512-item FIFO bounds for
-both pending and admitted geometry-owned entrances across more than 512 accumulated rows, and isolated
-suffix work across thirty updates of a 10,000-entry text stream. `ChatCommittedLedgerTests` require
-streaming and compatible foreground replacement to retain both the committed revision and every
-committed row's equatable render identity; the hosted streaming-burst journey also requires the aggregate
-committed-history body-evaluation counter to remain unchanged. Canonical append/prepend advance once, while a fresh store
-rebuilds identical canonical rows deterministically at revision one. The same suite checks that
-foreground entrance suppression remains empty on both retained and cold owners and that hidden thinking
-labels appear only on thinking-row preparation slices. This is the active/passive resume contract: both
-modes install one complete authoritative commit, live-region replacement never mutates history lineage,
-and relaunch has no local entrance or morph receipt to replay. The
-gate can delay work but cannot manufacture output or disable production projection semantics.
+`ChatView` is the lifecycle/composition root. It submits immutable transcript cuts, routes native
+composer and detail intents to existing authorities, and owns independent navigation and sheets.
+`ChatUIKitSessionSurfaceHost` is its only interactive chat child. The host admits each exact
+`ChatTranscriptPresentationStore.installedVersion` once; ordinary SwiftUI invalidation does not copy
+rows or trigger another viewport transaction.
+
+`ChatUIKitSessionSurfaceController` owns transcript/composer vertical geometry and the keyboard layout
+guide. `ChatUIKitChatViewController` owns the only collection view and physical offset writer.
+`ChatUIKitComposerController` owns TextKit sizing, native keyboard visibility, attachments, resources,
+focus, controls, and accessibility order. `ComposerDraftCoordinator` reserves the exact preflight
+identity shown to the send control and consumes that identity atomically during submission. History
+starts from installed authority alone, never geometry. Catch Up changes native intent to follow-tail;
+detached streaming, prepend, shrink, and generation replacement preserve a measured semantic anchor.
+
+`ChatUIKitParityHarnessTests` mount the production parent in a real scene and cover maximum bounded
+opening, detached streaming growth/shrink, exact prepend, generation replacement, duplicate send
+suppression and rejection retry, native composer fitting, canonical rich rows, Dynamic Type,
+accessibility, keyboard ownership, and activity retirement. `ChatArchitectureContractTests`,
+`ChatUIKitComposerTests`, and `ChatUIKitTranscriptParityTests` own source admission, exact identity,
+renderer, Markdown, media, lifecycle, and legal-viewport contracts. `ChatTranscriptPresentationStoreTests`
+continue to prove serial off-main projection, newest-wins admission, reset retirement, frame-gated
+installation, paging-tag distinction, memory-pressure eviction, and atomic immutable commits.
+`ChatCommittedLedgerTests` compare committed native presentation facts so streaming cannot reevaluate
+or replace frozen history.
+
+The removed SwiftUI transcript/composer, scroll coordinator, sentinel geometry, layout transaction,
+morph flight, and callback-order harnesses have no compatibility path. Device acceptance is manual:
+exercise text/photo/file sends, streaming while detached, earlier history, keyboard contraction,
+background/foreground, route replacement, tool/attachment details, and relaunch before release.
+
 `ChatTranscriptProjectionKernelTests` characterize raw atoms and the sole global assembler across
 barriers, assistant-message tool-run boundaries, canonical call/result joins, orphan results, bootstrap configuration, exact compaction
 ordinals, semantic maps, and visible history beyond one 512-item page. Sparse cases cover exact
@@ -534,34 +534,12 @@ exposes only the closed `cold`, `fragmentReuse`, `toolPayloadPatch`, and `isolat
 modes plus numeric entry/fragment/tool/atom/rendered counts; a pure patch must report zero source
 entries and atoms, inspect the complete unique runtime membership, and count only distinct patched tools. `SessionPresentationStoreTests` also
 prove exact page `start`/`end`/count admission and that return-to-latest compacts loaded
-history back to the retained authoritative tail. Opening ownership is one mutually exclusive
-`OpeningTailPhase` (`idle`, `positioning`, `positioned`, or `postReveal`). `ChatViewportModeTests`
-prove that only explicit takeover, return, catch-up, opening, submission, prepend, and presentation
-intents can change durable viewport authority. `ChatScrollCoordinatorTests` assert observable outcomes:
-the native bottom size-change anchor absorbs pinned continuous stream/composer/keyboard and existing-row growth with zero app offset writes; a genuinely new lazy physical row owns at most one stable-sentinel materialization lease until fresh current-layout semantic geometry, row-frame-before-request and request-before-row-frame ordering both settle, and burst requests are retained/coalesced, while detached growth remains target-free;
-direct return clears catch-up and unread; a foreground topmost chat publishes its exact synchronized
-subscription visibility lease before scroll positioning finishes, renews it before expiry, retires it on covering sheets/inactivity/navigation/connection
-replacement, and acknowledges later unread summary revisions through the same token-gated absolute read;
-bottom rubber-band callbacks remain pinned and keep catch-up
-hidden in both geometry/ownership orders, while the same gesture detaches as soon as valid geometry moves
-beyond the tail boundary; composer reflow in empty, short, or overflowing pinned content cannot impersonate
-the offset-only status-bar retreat; catch-up emits one explicit tail intent, restores unread if interrupted,
-and rechecks geometry-first physical settlement when command application arrives so draft authority cannot
-remain stranded; retained resets preserve anchoring; opening targets only the exact physical tail; semantic
-frames remain bounded; and anchor correction preserves the captured offset. Exact layout-epoch restore
-and prepend transactions still require newer semantic and geometry evidence, remain bounded to two
-corrections, and retire missing restore evidence after one second. Explicit paging supersedes a stale
-semantic-restore command while active opening/catch-up rejects paging; anchorless page work is
-session-owned and cancels on suspension. Hosted controls drive the production coordinator/executor and record bounded aggregate
-callback, command, frame, and maximum-excursion evidence.
-Hosted streaming bursts must install only their newest exact source while detached composer/viewport work
-remains writable and creates no projection work. Canonical/live tool handoff tests also assert that adjacent equal nonempty producer segments compose into one display-only row with the first physical ID, canonical payload precedence, incremented membership, and any-member-running state; barriers or missing/conflicting segments remain separate. `ChatCompactPillTests` own intrinsic-width trailing placement for short prompts, the 364-point
-long-prompt bound, intrinsic-width glass selection, equal user-prompt vertical padding, logical-leading
-line alignment, agent-matched Dynamic Type body sizing, shared prompt/queue Liquid Glass geometry, and
-flat/detail material policy. `ChatContentTransitionTests` own role
-classification, trailing composer-edge prompt/queue motion, aligned activity motion, and the
-identity transform required by Reduce Motion. Hosted scroll tests remain the authority that these
-visual transforms do not grant detached readers automatic writes or replay same-ID entrances. Lifecycle entrance receipts live in the projection owner rather than lazy row state, survive memory-pressure text eviction, and are pruned with their installed outgoing/pending/queue identities.
+history back to the retained authoritative tail. Opening uses one cancellation-owned task and the native parent’s synchronous installation boundary.
+The first ready frame cannot publish until the exact installed commit has crossed a display boundary.
+Same-session resume keeps the last complete commit and native intent; cold opening follows the tail.
+`SessionPresentationStoreTests` prove exact page admission and bounded retained-history compaction.
+Lifecycle entrance identity remains in the immutable projection and is pruned with installed
+outgoing, pending, and queue identities.
 `GatewayProtocolContractTests`, `SharedProtocolFixtureTests`, and
 `SessionMutationServiceTests` cover revisioned queue projection and replacement commands.
 `QueuedMessagePresentationTests` own capability/field admission for editing, prove that advancing
@@ -572,59 +550,16 @@ build lag. The earlier pill remains loading from explicit admission through pagi
 and anchored (or unanchored) settlement; presentation retirement cancels its local owner. Presentation guards
 retain intrinsic cards capped at the user-prompt bound, full-shape whole-card interactive Liquid Glass,
 leading-toolbar removal, an explicit legacy lock, and Tron surfaces instead of stock forms.
-Native bottom evidence compares `ScrollGeometry.visibleRect.maxY` with the physical
-content edge (`contentSize.height + contentInsets.bottom`); the hosted native helper retains signed
-UIKit offset evidence so past-bottom overshoot cannot pass as zero distance. Pinned structural shrink
-and viewport expansion are handled by the one native bottom size-change anchor; ordinary pinned mode
-keeps `ScrollPosition` target-free, while anchored readers select top retention and remain native-owned.
-Explicit command targets remain installed until exact opening/catch-up/semantic settlement and are
-released on the next frame only by the applied token; no deferred unqualified ScrollPosition reset may
-run across a send or keyboard transaction. A send retires a still-applied app target before its first
-layout mutation. Short-content alignment is always bottom-owned by the native anchor; blank space remains above the physical tail.
-Editor-only composer height changes install atomically. Attachment, selected-skill, and
-resource-result identity changes use one value-scoped 240 ms smooth host-height transition with no
-root geometry feedback or scroll command; Reduce Motion makes that transition atomic. With the
-keyboard visible, the panel list caps at three
-internally scrolling rows and the native editor at four visible lines. Spatial prompt morphs are clipped and admitted
-only for compact measured prompts; long prompts use the bounded outgoing-row entrance.
-A mounted retained snapshot remains readable during reconnect, but command
-admission requires the exact live subscription; queue command confirmations trigger
-mounted synchronization before queue controls retire.
-The obsolete visibility modifier is removed; the native SwiftUI geometry modifier still
-reports a multiple-update-per-frame diagnostic in hosted runs and remains a physical checkpoint.
-
-### Viewport test migration matrix
-
-The pre-pinning coordinator suite contained 81 cases. The 50 observable Group A cases keep
-their original function names and now assert outcomes against native pinning: detached semantic
-restore (12); shrink/overshoot ownership (23–25); detached composer and direct-return behavior
-(32–34, 36, 38–40, 42–44); catch-up (46–49); opening (50–63); Reduce Motion and prepend
-(64–77); and growth/row motion (78–81). The 31 deleted command-arbitration mechanism cases
-have these explicit observable replacements:
-
-| Retired tests | Observable replacement |
-|---|---|
-| `pinnedGrowthCoalesces` through `pinnedProjectionShorteningCorrectsPhysicalTail` (1–7), `appliedAutomaticTailDoesNotBlockShrinkCorrection` through `lifecycleGraftPreservesAuthoritativeMutation` (9–11) | `pinnedNativeEdgeEliminatesFollowCommandStream`, `stickyModeHasNoOffsetCommandDestination` — native bottom size-change anchoring owns continuous and discrete pinned growth with no app offset write. |
-| `projectionShorteningDefersToDirectTakeover` (8) | `directTakeoverCancelsPendingSemanticRestore` — direct authority leaves anchored mode and no command. |
-| `layoutCorrectionGeometryFirstSettlement` (13) | `anchoredRestoreRequiresFreshEvidence` — one semantic correction appears only after both newer semantic and geometry evidence. |
-| `interactionCancelsProjectionMutation` through `catchUpCancelsAppliedLayoutBinding` (14–17) | `directTakeoverCancelsPendingSemanticRestore`, `stickyModeHasNoOffsetCommandDestination`, `nativeEdgeStateFollowsModeWithoutOffsetCommand` — takeover/catch-up replace mode; no release-binding command exists. |
-| `installedRemovalPreservesContinuousFollow` (18), `continuousGrowthWhileSettling` through `noWriteInsideTolerance` (20–22) | `pinnedNativeBindingEliminatesFollowCommandStream` — native edge retention removes pending-follow arbitration and all ordinary writes. |
-| `detachedDiscreteInsertionIsInert` (19) | `stickyModeHasNoOffsetCommandDestination`, `detachedGrowthIsInert` — anchored insertion remains anchored with zero writes. |
-| `composerPreservesFreshNativeAuthority` through `geometryFirstComposerTransitionPreservesLocus` (26–31) | `composerMutationsDoNotOwnScrollCommands` — submission/composer/keyboard geometry preserves explicit mode and emits no command. |
-| `geometryFirstDetachmentConsumesDirectReturn` (35) | `geometryCannotConsumeExplicitReturn` — only the explicit return intent pins. |
-| `nativeVisibleEdgeAdmitsManualTail` (37) | `explicitReturnPinsDespiteStaleGeometry` — return intent wins independently of stale inset arithmetic. |
-| `nativePositioningRetainsExplicitEdgeAuthority` (41) | `nativeEdgeStateFollowsModeWithoutOffsetCommand` — mode directly selects native edge authority without an offset command. |
-| `interactionCancelsPendingFollow` (45) | `directTakeoverCancelsPendingAutomaticWork` plus the coordinator opening/catch-up/restore interruption cases — direct takeover wins synchronously and leaves no write. |
+The focused native checkpoint is:
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/ChatScrollCoordinatorTests \
-  -only-testing:TronMobileTests/ChatTranscriptPresentationStoreTests \
-  -only-testing:TronMobileTests/ChatTranscriptPresentationTests \
-  -only-testing:TronMobileTests/ChatCompactPillTests \
-  -only-testing:TronMobileTests/ChatViewScrollHarnessTests \
-  -only-testing:TronMobileTests/ChatPerformanceTrackerTests
+  -only-testing:TronMobileTests/ChatUIKitParityHarnessTests \
+  -only-testing:TronMobileTests/ChatArchitectureContractTests \
+  -only-testing:TronMobileTests/ChatUIKitComposerTests \
+  -only-testing:TronMobileTests/ChatUIKitTranscriptParityTests \
+  -only-testing:TronMobileTests/ChatTranscriptPresentationStoreTests
 ```
 
 `ChatPerformanceBaselineTests` is opt-in and records five post-warm-up timing,
