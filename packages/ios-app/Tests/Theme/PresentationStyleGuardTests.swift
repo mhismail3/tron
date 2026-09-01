@@ -947,6 +947,14 @@ struct PresentationStyleGuardTests {
         #expect(shell.contains("rowContainerHorizontalInset + rowContentHorizontalPadding"))
         #expect(shell.contains(".padding(.leading, SessionDashboardLayout.headerLeadingPadding)"))
         #expect(shell.contains(".padding(.horizontal, SessionDashboardLayout.rowContentHorizontalPadding)"))
+
+        let rowStart = try #require(shell.range(of: "private struct HistoricalSessionRow"))
+        let row = String(shell[rowStart.lowerBound...])
+        let title = try #require(row.range(of: "Text(session.title)")?.lowerBound)
+        let fork = try #require(row.range(of: "Image(systemName: \"arrow.triangle.branch\")")?.lowerBound)
+        let elapsed = try #require(row.range(of: "Text(trailingStatus)")?.lowerBound)
+        #expect(title < fork)
+        #expect(fork < elapsed)
     }
 
     @Test("dashboard navigation and search require explicit user intent")

@@ -1115,19 +1115,11 @@ private struct HistoricalSessionRow: View {
             .animation(indicatorAnimation, value: indicatorState)
 
             VStack(alignment: .leading, spacing: showsContext ? 2 : 0) {
-                HStack(spacing: 5) {
-                    if session.isFork {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                            .foregroundStyle(Color.tronEmerald)
-                            .accessibilityHidden(true)
-                    }
-                    Text(session.title)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
+                Text(session.title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 if showsContext {
                     Text(projectServerContext)
                         .font(TronTypography.code(size: TronTypography.sizeCaption))
@@ -1140,10 +1132,18 @@ private struct HistoricalSessionRow: View {
 
             Spacer(minLength: 10)
 
-            Text(trailingStatus)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                .foregroundStyle(activity == .waitingForUser ? Color.tronAmber : Color.tronTextMuted)
-                .lineLimit(1)
+            HStack(spacing: 5) {
+                if session.isFork {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(Color.tronEmerald)
+                        .accessibilityHidden(true)
+                }
+                Text(trailingStatus)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                    .foregroundStyle(activity == .waitingForUser ? Color.tronAmber : Color.tronTextMuted)
+                    .lineLimit(1)
+            }
         }
         .padding(.horizontal, SessionDashboardLayout.rowContentHorizontalPadding)
         .padding(.vertical, 5)

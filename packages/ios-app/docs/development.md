@@ -260,9 +260,10 @@ and context dismissal owners each retire their presentation lease. The dashboard
 non-`nil` NavigationStack item with another: it clears the source destination without animation, waits for that
 exact chat surface token to retire, and only then mounts the fork. This guarantees a fresh chat task identity and
 reactivates dashboard catalog publication during the handoff; authoritative catalog convergence runs independently.
-Fork confirmation
-preserves the selected entry by default, while the explicit edit-prompt choice excludes that prompt and
-restores its text to the composer. Create additionally returns before any dashboard catalog read; the
+Fork confirmation preserves the selected entry by default, while the explicit edit-prompt choice excludes
+that prompt and restores its text to the composer. Dashboard fork markers live in the trailing status cluster,
+immediately before elapsed activity, so the title column remains aligned across ordinary and forked rows.
+Create additionally returns before any dashboard catalog read; the
 Gateway-owned empty runtime row and `session.listChanged` own projection convergence. The row may disappear after idle retirement or
 Gateway restart when Pi never persisted content. `DashboardStateOwnerTests` prove typed latest-load and
 navigation admission, monotonic live-summary overlays, unknown-row discovery, bounded dirty coalescing,
