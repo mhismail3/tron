@@ -73,12 +73,42 @@ enum ChatThinkingTraceLayoutPolicy {
     static func showsEarlierContent(contentHeight: CGFloat, maximumHeight: CGFloat) -> Bool {
         isOverflowing(contentHeight: contentHeight, maximumHeight: maximumHeight)
     }
+
+    static func admitsMeasurement(current: CGFloat, candidate: CGFloat) -> Bool {
+        candidate.isFinite && candidate > 0 && abs(candidate - current) > 0.5
+    }
 }
 
 private struct ChatStreamingTextToken: Identifiable {
     let id: String
     let value: AttributedString
     let isWord: Bool
+}
+
+/// One mounted inline owns one bounded tokenization cache. Animation ticks read
+/// immutable slices instead of repeatedly splitting and rebuilding token IDs.
+private final class ChatStreamingTextTokenCache {
+    private var source: String?
+    private var hasPreparedAttributes = false
+    private var identity: String?
+    private var value: [ChatStreamingTextToken] = []
+
+    func resolve(
+        inline: MarkdownPresentation.Inline,
+        identity: String,
+        build: () -> [ChatStreamingTextToken]
+    ) -> [ChatStreamingTextToken] {
+        let hasPreparedAttributes = inline.attributedString != nil
+        if source != inline.source
+            || self.hasPreparedAttributes != hasPreparedAttributes
+            || self.identity != identity {
+            source = inline.source
+            self.hasPreparedAttributes = hasPreparedAttributes
+            self.identity = identity
+            value = build()
+        }
+        return value
+    }
 }
 
 /// Reveals newly admitted words without changing the authoritative text,
@@ -97,45 +127,40 @@ struct ChatStreamingInlineText: View {
     @State private var revealStarts: [String: Date] = [:]
     @State private var animationTick = 0
     @State private var hasAdmittedInitialContent = false
+    @State private var tokenCache = ChatStreamingTextTokenCache()
 
-    private var attributed: AttributedString {
-        inline.attributedString ?? AttributedString(inline.source)
-    }
-
-    private var tokens: [ChatStreamingTextToken] {
-        let value = attributed
-        guard ChatStreamingTextRevealPolicy.permitsAnimation(
-            renderedUTF16Length: inline.source.utf16.count
-        ) else {
-            return [ChatStreamingTextToken(
-                id: "\(identity):authoritative",
-                value: value,
-                isWord: false
-            )]
+    var body: some View {
+        let _ = animationTick
+        let tokens = tokenCache.resolve(inline: inline, identity: identity) {
+            let value = inline.attributedString ?? AttributedString(inline.source)
+            guard ChatStreamingTextRevealPolicy.permitsAnimation(
+                renderedUTF16Length: inline.source.utf16.count
+            ) else {
+                return [ChatStreamingTextToken(
+                    id: "\(identity):authoritative",
+                    value: value,
+                    isWord: false
+                )]
+            }
+            return Self.tokens(in: value, identity: identity)
         }
-        return Self.tokens(in: value, identity: identity)
-    }
-
-    private var taskKey: TaskKey {
-        TaskKey(
-            tokenIDs: tokens.map(\.id),
+        let taskKey = TaskKey(
+            source: inline.source,
+            hasPreparedAttributes: inline.attributedString != nil,
+            identity: identity,
             streaming: streaming,
             reduceMotion: reduceMotion,
             surfaceActive: presentationActivity.allowsContinuousAnimation
         )
-    }
-
-    var body: some View {
-        let _ = animationTick
-        return renderedText
+        return renderedText(tokens: tokens)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(inline.source)
             // The task is presentation bookkeeping only. The full source is
             // already rendered in layout before this task admits any fade.
-            .task(id: taskKey) { await reconcile() }
+            .task(id: taskKey) { await reconcile(tokens: tokens) }
     }
 
-    private var renderedText: Text {
+    private func renderedText(tokens: [ChatStreamingTextToken]) -> Text {
         var result = AttributedString()
         let now = Date.now
         for token in tokens {
@@ -173,7 +198,7 @@ struct ChatStreamingInlineText: View {
     }
 
     @MainActor
-    private func reconcile() async {
+    private func reconcile(tokens: [ChatStreamingTextToken]) async {
         let currentIDs = Set(tokens.filter(\.isWord).map(\.id))
         guard presentationActivity.allowsContinuousAnimation else {
             // Covered content must never replay a reveal backlog when it is
@@ -245,7 +270,9 @@ struct ChatStreamingInlineText: View {
     }
 
     private struct TaskKey: Equatable {
-        let tokenIDs: [String]
+        let source: String
+        let hasPreparedAttributes: Bool
+        let identity: String
         let streaming: Bool
         let reduceMotion: Bool
         let surfaceActive: Bool

@@ -83,6 +83,7 @@ enum ChatCompactPillLayoutPolicy {
     static let standardIconSize: CGFloat = 13
     static let toolIconSize: CGFloat = 13
     static let progressIconSize: CGFloat = 13
+    static let runningToolPulseOffsetX: CGFloat = -1
     static let errorCornerRadius: CGFloat = 18
     static let capsuleCornerRadius: CGFloat = 999
 
@@ -255,17 +256,20 @@ struct ChatCompactPillLeadingIcon: View {
     let accent: Color
     let showsProgress: Bool
     let iconSize: CGFloat
+    let progressOffsetX: CGFloat
 
     init(
         icon: String,
         accent: Color,
         showsProgress: Bool = false,
-        iconSize: CGFloat = ChatCompactPillLayoutPolicy.standardIconSize
+        iconSize: CGFloat = ChatCompactPillLayoutPolicy.standardIconSize,
+        progressOffsetX: CGFloat = 0
     ) {
         self.icon = icon
         self.accent = accent
         self.showsProgress = showsProgress
         self.iconSize = iconSize
+        self.progressOffsetX = progressOffsetX
     }
 
     var body: some View {
@@ -275,6 +279,7 @@ struct ChatCompactPillLeadingIcon: View {
                     accent: accent,
                     size: ChatCompactPillLayoutPolicy.progressIconSize
                 )
+                .offset(x: progressOffsetX)
                 .transition(.opacity.combined(with: .scale(scale: 0.82)))
             } else {
                 Image(systemName: icon)
@@ -297,6 +302,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
     let tone: ChatNotificationTone
     let showsProgress: Bool
     let iconSize: CGFloat
+    let progressOffsetX: CGFloat
     let titleWeight: Font.Weight
     let detailStyle: ChatCompactPillDetailStyle
     @ViewBuilder let trailing: Trailing
@@ -308,6 +314,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
         tone: ChatNotificationTone,
         showsProgress: Bool = false,
         iconSize: CGFloat = ChatCompactPillLayoutPolicy.standardIconSize,
+        progressOffsetX: CGFloat = 0,
         titleWeight: Font.Weight = .bold,
         detailStyle: ChatCompactPillDetailStyle = .status,
         @ViewBuilder trailing: () -> Trailing
@@ -318,6 +325,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
         self.tone = tone
         self.showsProgress = showsProgress
         self.iconSize = iconSize
+        self.progressOffsetX = progressOffsetX
         self.titleWeight = titleWeight
         self.detailStyle = detailStyle
         self.trailing = trailing()
@@ -329,7 +337,8 @@ struct ChatCompactPillLabel<Trailing: View>: View {
                 icon: icon,
                 accent: tone.primaryColor,
                 showsProgress: showsProgress,
-                iconSize: iconSize
+                iconSize: iconSize,
+                progressOffsetX: progressOffsetX
             )
             Text(title)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: titleWeight))
@@ -361,6 +370,7 @@ extension ChatCompactPillLabel where Trailing == EmptyView {
         tone: ChatNotificationTone,
         showsProgress: Bool = false,
         iconSize: CGFloat = ChatCompactPillLayoutPolicy.standardIconSize,
+        progressOffsetX: CGFloat = 0,
         titleWeight: Font.Weight = .bold,
         detailStyle: ChatCompactPillDetailStyle = .status
     ) {
@@ -371,6 +381,7 @@ extension ChatCompactPillLabel where Trailing == EmptyView {
             tone: tone,
             showsProgress: showsProgress,
             iconSize: iconSize,
+            progressOffsetX: progressOffsetX,
             titleWeight: titleWeight,
             detailStyle: detailStyle,
             trailing: { EmptyView() }

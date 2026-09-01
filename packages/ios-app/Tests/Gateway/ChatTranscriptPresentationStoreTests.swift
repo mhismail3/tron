@@ -82,6 +82,8 @@ struct ChatTranscriptPresentationStoreTests {
     func openingProjectionAdmissionIsBounded() throws {
         var snapshot = try SessionScenarioBuilder(seed: 1_203)
             .openingTail(targetEncodedBytes: 8_000)
+        snapshot.transcriptStart = 0
+        snapshot.transcriptTotal = snapshot.transcript.count
         let installed = ChatTranscriptProjectionTag(
             snapshot: snapshot,
             presentationGeneration: 7
@@ -95,7 +97,7 @@ struct ChatTranscriptPresentationStoreTests {
         let advancedTranscript = snapshot.transcript
         var appendedSnapshot = snapshot
         let appendedItem = try #require(SessionScenarioBuilder(seed: 1_204)
-            .openingTail(targetEncodedBytes: 1_000).transcript.last)
+            .openingTail(targetEncodedBytes: 8_000).transcript.last)
         appendedSnapshot.transcript.append(appendedItem)
         appendedSnapshot.transcriptTotal = (appendedSnapshot.transcriptTotal ?? 0) + 1
         let appended = ChatTranscriptProjectionTag(

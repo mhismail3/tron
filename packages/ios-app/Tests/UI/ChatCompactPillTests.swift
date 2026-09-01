@@ -316,6 +316,7 @@ struct ChatCompactPillTests {
         #expect(ChatCompactPillLayoutPolicy.standardIconSize == 13)
         #expect(ChatCompactPillLayoutPolicy.toolIconSize == 13)
         #expect(ChatCompactPillLayoutPolicy.progressIconSize == 13)
+        #expect(ChatCompactPillLayoutPolicy.runningToolPulseOffsetX == -1)
     }
 
     @Test("tool chip visual state excludes timing and provenance payload churn")
@@ -352,6 +353,31 @@ struct ChatCompactPillTests {
         #expect(failed.tone == .error)
         #expect(first.title == "subagent")
         #expect(!first.title.contains("Extension activity"))
+    }
+
+    @Test("a completed single tool transitions in place to an aggregated running chip")
+    func completedToolExpandsIntoRunningRun() throws {
+        func tool(_ id: String, subtitle: String) -> ChatToolPresentation {
+            ChatToolPresentation(
+                id: id, title: "Edit file", toolName: "edit", subtitle: subtitle,
+                request: nil, response: nil, content: "", fallbackContent: nil,
+                error: false, startedAt: nil, completedAt: subtitle == "Completed" ? "done" : nil,
+                durationMs: 1, lastProgressAt: nil, progressSequence: 1,
+                toolSegmentId: "tool-segment:turn",
+                groupId: "group-\(id)", groupIndex: 0, groupCount: 1, groupFinalized: true
+            )
+        }
+        let completed = ChatToolRunPresentation(tools: [tool("one", subtitle: "Completed")])
+        let running = ChatToolRunPresentation(tools: [tool("two", subtitle: "Running")])
+        let fusion = try #require(ChatPhysicalToolRunFusion(canonical: completed, live: running))
+        let visual = ChatCompactPillVisualState.toolRun(fusion.run)
+
+        #expect(fusion.run.id == completed.id)
+        #expect(fusion.run.tools.map(\.id) == ["one", "two"])
+        #expect(visual.title == "2 tools")
+        #expect(visual.detail == "In progress")
+        #expect(visual.showsProgress)
+        #expect(visual.count == 2)
     }
 
     @Test("extension tool pills expose producer tool and status only")

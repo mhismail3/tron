@@ -62,5 +62,9 @@ struct StreamingTextRevealTests {
         #expect(ChatThinkingTraceLayoutPolicy.tailOffset(contentHeight: 48, viewportHeight: 64) == 0)
         #expect(ChatThinkingTraceLayoutPolicy.showsEarlierContent(contentHeight: 96, maximumHeight: 64))
         #expect(!ChatThinkingTraceLayoutPolicy.showsEarlierContent(contentHeight: 48, maximumHeight: 64))
+        #expect(!ChatThinkingTraceLayoutPolicy.admitsMeasurement(current: 64, candidate: 64.4))
+        #expect(ChatThinkingTraceLayoutPolicy.admitsMeasurement(current: 64, candidate: 64.6))
+        #expect(!ChatThinkingTraceLayoutPolicy.admitsMeasurement(current: 64, candidate: .infinity))
+        #expect(!ChatThinkingTraceLayoutPolicy.admitsMeasurement(current: 64, candidate: 0))
     }
 }

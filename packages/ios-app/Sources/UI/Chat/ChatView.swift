@@ -32,7 +32,7 @@ struct ChatView: View {
     // placeholder and scroll presentation.
     @State private var composerFocused = false
     @State private var composerSelection = NSRange(location: 0, length: 0)
-    @State private var composerMeasuredHeight: CGFloat = 0
+    @State private var composerHeightLedger = ChatComposerHeightLedger()
     @State private var composerResponder = ChatComposerResponder()
     @State private var keyboardObserver = ChatKeyboardObserver()
     @State private var layoutTransaction = ChatLayoutTransaction()
@@ -500,17 +500,17 @@ struct ChatView: View {
         let projectionLayoutChanged = previousTag.map { previousTag in
             installed.map { !previousTag.matchesProjectionPayload(of: $0.tag) } ?? true
         } ?? true
-        let physicalProjectionChanged = previousTag.map { previous in
+        let physicalProjectionChanged = projectionLayoutChanged || (previousTag.map { previous in
             guard let installed else { return true }
-            return previous.layoutIdentity != installed.tag.layoutIdentity
-                || previous.handoffIdentity != installed.tag.handoffIdentity
-        } ?? true
+            return previous.handoffIdentity != installed.tag.handoffIdentity
+        } ?? true)
         if physicalProjectionChanged {
-            // Every mounted tag change that can alter row heights, including a
-            // lifecycle-only or compaction/tool settlement replacement,
-            // invalidates delayed marker callbacks before they can prove the
-            // new physical layout. Authority-only tag changes stay inert.
-            scrollCoordinator.projectionInstalled()
+            // The coordinator advances its semantic epoch only when this
+            // installed commit changes the physical row spine. Streaming text
+            // and shallow tool-state updates keep current hosts and evidence.
+            scrollCoordinator.projectionInstalled(
+                structure: installed?.physicalRowSpineIdentity
+            )
         }
         if projectionLayoutChanged {
             scrollCoordinator.installedTranscriptChanged(installed)
@@ -526,7 +526,10 @@ struct ChatView: View {
 
     private func composerHeightChanged(_ height: CGFloat) {
         guard height.isFinite, height >= 0 else { return }
-        composerMeasuredHeight = height
+        // Live structural animation samples must not invalidate the entire
+        // transcript tree. The non-observable ledger is read only by bounded
+        // layout settlement and submission admission callbacks.
+        composerHeightLedger.install(height)
         #if HOSTED_TEST
         hostedProbe?.recordComposerHeight(height)
         #endif
@@ -539,7 +542,7 @@ struct ChatView: View {
             do { try await displayFrameScheduler.nextFrame() }
             catch { return }
             guard layoutTransaction.generation?.id == generation,
-                  abs(composerMeasuredHeight - height)
+                  abs(composerHeightLedger.current - height)
                     <= ChatComposerStructuralTransitionPolicy.heightEpsilon else { return }
             layoutTransaction.settle(generation, source: .submission)
         }
@@ -557,7 +560,7 @@ struct ChatView: View {
                 try Task.checkCancellation()
             } catch { return }
             guard layoutTransaction.generation?.id == generation,
-                  abs(composerMeasuredHeight - baselineHeight)
+                  abs(composerHeightLedger.current - baselineHeight)
                     <= ChatComposerStructuralTransitionPolicy.heightEpsilon else { return }
             layoutTransaction.settle(generation, source: .submission)
         }
@@ -2561,7 +2564,7 @@ struct ChatView: View {
         // join one settlement generation.
         let layoutGeneration = layoutTransaction.join(.submission)
         _ = layoutTransaction.join(.transcriptGrowth)
-        let composerHeightBeforeSubmission = composerMeasuredHeight
+        let composerHeightBeforeSubmission = composerHeightLedger.current
         let keyboardRevision = keyboardObserver.revision
         composerFocused = false
         _ = composerResponder.resignFirstResponder()

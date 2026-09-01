@@ -226,6 +226,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
     let reduceMotion: Bool
     let animatesEntrance: Bool
     let morphOwnership: ChatMorphFrameRegistry.EntranceOwnership
+    let morphFlightPhase: ChatMorphFrameRegistry.FlightPhase?
     let kind: ChatContentEntranceKind
     let onEntranceConsumed: () -> Void
     let onEntranceSettled: () -> Void
@@ -237,6 +238,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
         reduceMotion: Bool,
         animatesEntrance: Bool = true,
         morphOwnership: ChatMorphFrameRegistry.EntranceOwnership = .ordinary,
+        morphFlightPhase: ChatMorphFrameRegistry.FlightPhase? = nil,
         kind: ChatContentEntranceKind = .userPrompt,
         onEntranceConsumed: @escaping () -> Void = {},
         onEntranceSettled: @escaping () -> Void = {},
@@ -245,6 +247,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
         self.reduceMotion = reduceMotion
         self.animatesEntrance = animatesEntrance
         self.morphOwnership = morphOwnership
+        self.morphFlightPhase = morphFlightPhase
         self.kind = kind
         self.onEntranceConsumed = onEntranceConsumed
         self.onEntranceSettled = onEntranceSettled
@@ -268,9 +271,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
                 for: kind,
                 reduceMotion: reduceMotion
             )
-        let progress: CGFloat = morphOwnership == .flight || morphOwnership == .completed
-            ? 1
-            : (revealed || reduceMotion ? 1 : 0)
+        let progress: CGFloat = morphOwnership == .completed || revealed || reduceMotion ? 1 : 0
         ChatEntranceGrowthLayout(progress: progress) {
             content
                 .opacity(revealed ? 1 : 0)
@@ -297,6 +298,10 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
                 reportSettlementOnce()
             }
         }
+        .onChange(of: morphFlightPhase, initial: true) { _, phase in
+            guard morphOwnership == .flight, phase == .animating else { return }
+            revealFlightEntranceIfNeeded()
+        }
         .onChange(of: morphOwnership) { previous, current in
             switch current {
             case .flight:
@@ -319,6 +324,19 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
             withTransaction(transaction) { revealed = true }
             reportSettlementOnce()
         }
+    }
+
+    private func revealFlightEntranceIfNeeded() {
+        guard !revealed else { return }
+        guard let animation = ChatContentTransitionPolicy.promptFlightAnimation(
+            reduceMotion: reduceMotion
+        ) else {
+            revealed = true
+            return
+        }
+        var transaction = Transaction(animation: animation)
+        transaction.admitsChatEntranceAnimation = true
+        withTransaction(transaction) { revealed = true }
     }
 
     private func revealOrdinaryEntranceIfNeeded() {

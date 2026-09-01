@@ -219,6 +219,11 @@ final class ChatMorphFrameRegistry {
         return .ordinary
     }
 
+    func flightPhase(for lifecycleID: String) -> FlightPhase? {
+        guard flight?.lifecycleID == lifecycleID else { return nil }
+        return flight?.phase
+    }
+
     @discardableResult
     func completeAnimation(lifecycleID: String) -> Int? {
         guard let flight, flight.lifecycleID == lifecycleID,

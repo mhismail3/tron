@@ -612,7 +612,11 @@ active compaction becomes canonical compaction; progress, icon, title, and tone 
 inside that shell without animating unrelated projection updates.
 Attachment, skill, and resource accessories animate through one
 value-scoped composer-height transition, while editor-only height changes remain atomic
-for UIKit caret ownership. A mounted
+for UIKit caret ownership. Live composer-height samples stay in a non-observable settlement ledger,
+so a structural animation does not invalidate the transcript tree on every display frame. Prompt morph
+flights and their destination rows grow on the same monotonic clock instead of inserting full row height
+before the flight begins. Transcript row spacing participates inside that growth owner, so an otherwise hidden
+new row cannot move the existing conversation by an unanimated gap. A mounted
 reconnect is live only after its exact authoritative subscription is restored; retained snapshots stay
 readable during retry but never authorize prompt, upload, abort, or queue mutations. Foreground entrance
 suppression advances only after the mounted aggregate succeeds, so a failed reconciliation cannot consume
@@ -621,9 +625,10 @@ mounted synchronization path must observe the newer queue revision before local 
 state retires. Producer-triggered extension/session-input messages occupy one compact
 status row in the transcript and retain their full message, origin, canonical identity, and
 JSON payloads in the existing detail sheet. Tool calls, progress, and results join by `toolCallId`.
-The Gateway stamps every live and canonical declaration with a producer-owned `toolSegmentId` for one exact
-conversation turn. Only equal nonempty segment IDs authorize distinct finalized groups to share one consecutive
-tool-only display run; missing or conflicting identity fails closed to separate rows. At the canonical/live
+The Gateway stamps every live and canonical declaration with a producer-owned `toolSegmentId` for one visible
+conversation segment. The segment survives lifecycle-operation rotation across tool-only continuations and retires
+at user or visible assistant barriers. Only equal nonempty segment IDs authorize distinct finalized groups to share
+one consecutive tool-only display run; missing or conflicting identity fails closed to separate rows. At the canonical/live
 boundary, a bounded display-only composition may fuse directly adjacent runs with one equal segment, preserving
 the first run's physical host while canonical and live authority remain separate. Canonical descriptors win
 handoff duplicates, and any member running keeps the aggregate spinner/count live until the same host settles.
@@ -633,7 +638,12 @@ projection derives segment boundaries from authoritative conversation input, so 
 delivery reduce identically without speculative adjacency. A bounded previous-install call/group lineage aliases
 only the physical SwiftUI host when finalized grouping arrives after execution starts or a bounded page boundary
 changes the first visible group; semantic run IDs remain producer-owned. Running/completed status changes keep one capsule and one
-stable glass surface while shallow icon, text, and timing slots animate in place. Collapsed rows retain structured
+stable glass surface while shallow icon, text, and timing slots animate in place. Shallow streaming and tool-state
+installs with an unchanged physical row spine retain their semantic layout epoch; only structural row changes clear
+geometry evidence. Streaming inline tokenization is cached per mounted source, and thinking measurements ignore
+subpixel feedback, avoiding full visible-tree geometry churn during each fade tick. The projection worker also
+constructs and validates the immutable installed indexes off MainActor; publication is a shallow complete-value swap.
+Collapsed rows retain structured
 request/response values without eagerly formatting JSON strings. Opening a detail sheet derives a
 bounded semantic presentation only for that selected tool: exact lowercase built-ins foreground their file,
 command, query, diff, and readable result. Extension-authored Pi tool labels are projected separately from canonical

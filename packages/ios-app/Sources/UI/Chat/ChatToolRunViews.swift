@@ -81,7 +81,8 @@ struct ToolCard: View {
                 detail: ComposerResourceNameFormatter.friendly(subtitle),
                 tone: tone,
                 showsProgress: isRunning,
-                iconSize: ChatCompactPillLayoutPolicy.toolIconSize
+                iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
+                progressOffsetX: ChatCompactPillLayoutPolicy.runningToolPulseOffsetX
             ) {
                 if let timing {
                     ToolElapsedText(tool: timing, color: tone.secondaryColor)
@@ -371,7 +372,8 @@ private struct ToolActivityChip: View {
                 detail: visual.detail,
                 tone: visual.tone,
                 showsProgress: visual.showsProgress,
-                iconSize: ChatCompactPillLayoutPolicy.toolIconSize
+                iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
+                progressOffsetX: ChatCompactPillLayoutPolicy.runningToolPulseOffsetX
             ) {
                 ToolRunElapsedText(run: run, color: visual.tone.secondaryColor)
             }

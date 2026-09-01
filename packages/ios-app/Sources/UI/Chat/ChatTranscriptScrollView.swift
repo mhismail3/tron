@@ -406,6 +406,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                                 entranceState: .none
                             ) {
                                 earlierRow(installed)
+                                    .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
                             }
                         }
                         ForEach(ChatPhysicalTranscriptRowPolicy.rows(
@@ -586,7 +587,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     onEntranceConsumed: {
                         transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
                     }
-                ) { ChatPendingPromptRow(presentation: pending) }
+                ) {
+                    ChatPendingPromptRow(presentation: pending)
+                        .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
+                }
             } else {
                 ChatOutgoingSubmissionEntranceRow(
                     reduceMotion: reduceMotion,
@@ -598,7 +602,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
                     },
                     onEntranceSettled: { onEntranceSettled(renderedID) }
-                ) { ChatPendingPromptRow(presentation: pending) }
+                ) {
+                    ChatPendingPromptRow(presentation: pending)
+                        .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
+                }
             }
         }
     }
@@ -630,6 +637,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         entranceSuppressed: entranceSuppressed
                     )) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
                 morphOwnership: morphRegistry.entranceOwnership(for: outgoing.id),
+                morphFlightPhase: morphRegistry.flightPhase(for: outgoing.id),
                 kind: ChatPromptLifecycleTransitionPolicy.entranceKind(for: outgoing.promptBehavior),
                 onEntranceConsumed: {
                     transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
@@ -641,6 +649,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     attachments: attachments,
                     morphRegistry: morphRegistry
                 )
+                .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
             }
         }
     }
@@ -692,6 +701,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         && messages[index + 1].behavior == message.behavior,
                     onMove: { onMoveQueuedMessage(message.id, $0) }
                 )
+                .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
             }
         }
     }
@@ -717,13 +727,17 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         ) {
             if canonicalSubmissionIDs.contains(semanticID) {
                 renderRow(item, installed: installed, isCommitted: isCommitted)
+                    .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
             } else {
                 ChatTranscriptEntranceRow(
                     state: state,
                     admissionTag: installed.tag,
                     kind: kind,
                     reduceMotion: reduceMotion
-                ) { renderRow(item, installed: installed, isCommitted: isCommitted) }
+                ) {
+                    renderRow(item, installed: installed, isCommitted: isCommitted)
+                        .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
+                }
             }
         }
     }
@@ -797,7 +811,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         return content()
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
             .id(physicalID)
             .onGeometryChange(for: ChatSemanticFrameObservation.self) { value in
                 ChatSemanticFrameObservation(

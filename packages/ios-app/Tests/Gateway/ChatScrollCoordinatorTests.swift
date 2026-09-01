@@ -172,6 +172,40 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.viewportMode == .pinned)
     }
 
+    @Test("shallow projection churn preserves physical evidence until the row spine changes")
+    func physicalRowSpineScopesLayoutEpoch() {
+        func spine(_ ids: [String]) -> ChatPhysicalRowSpineIdentity {
+            ChatPhysicalRowSpineIdentity(
+                timelineIDs: ChatTranscriptIDs(canonical: ids, live: []),
+                runtimeIDs: [],
+                lifecycleID: nil,
+                queueIDs: [],
+                aliases: [],
+                fusion: nil,
+                hasEarlierMessages: false
+            )
+        }
+
+        let coordinator = ChatScrollCoordinator()
+        coordinator.projectionInstalled(structure: spine(["message"]))
+        let installedEpoch = coordinator.layoutEpoch
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        coordinator.semanticFrameChanged(
+            renderedID: "transcript-bottom",
+            layoutEpoch: installedEpoch,
+            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+        )
+        #expect(coordinator.physicalTailEvidence?.classification == .aligned)
+
+        coordinator.projectionInstalled(structure: spine(["message"]))
+        #expect(coordinator.layoutEpoch == installedEpoch)
+        #expect(coordinator.physicalTailEvidence?.classification == .aligned)
+
+        coordinator.projectionInstalled(structure: spine(["message", "tool-run"]))
+        #expect(coordinator.layoutEpoch == installedEpoch + 1)
+        #expect(coordinator.physicalTailEvidence == nil)
+    }
+
     @Test("native pinned size anchoring absorbs discrete and streaming growth without commands")
     func pinnedNativeEdgeEliminatesFollowCommandStream() throws {
         let coordinator = ChatScrollCoordinator()

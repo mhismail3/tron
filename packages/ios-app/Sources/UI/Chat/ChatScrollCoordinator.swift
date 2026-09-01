@@ -181,6 +181,7 @@ final class ChatScrollCoordinator {
     private var sequence = 0
     private var geometry = ChatTranscriptGeometry.zero
     private var geometryRevision = 0
+    private var installedPhysicalRowSpine: ChatPhysicalRowSpineIdentity?
     private var retainedViewportReconciliationPending = false
     private var semanticFrames: [String: SemanticFrameSample] = [:]
     private var semanticFrameRevision = 0
@@ -289,6 +290,7 @@ final class ChatScrollCoordinator {
         physicalTailRepairFailedDisplacement = nil
         physicalTailRepairBlockedUntilEvidenceRevision = nil
         physicalTailRepairAttempts = 0
+        installedPhysicalRowSpine = nil
         self.presentation = presentation ?? (self.presentation &+ 1)
         viewportMode.reduce(.presentationReset(retainingViewport: retainingVisibleViewport))
         retainedViewportReconciliationPending = retainingVisibleViewport
@@ -391,11 +393,32 @@ final class ChatScrollCoordinator {
         directPositionOwnership = false
     }
 
-    /// A mounted projection can change row heights without changing canonical
-    /// identity (for example lifecycle-only, tool, or compaction settlement).
-    /// Rebase all semantic and physical evidence before delayed callbacks from
-    /// the previous tree are allowed to settle a lease.
+    /// Tests and explicit opaque tree replacement use the unconditional epoch
+    /// boundary. Mounted chat updates use the physical-spine overload below.
     func projectionInstalled() {
+        advanceLayoutEpoch()
+        geometryRevision &+= 1
+        evaluateLayoutRestoreIfReady()
+        evaluatePrependIfReady()
+    }
+
+    func projectionInstalled(structure: ChatPhysicalRowSpineIdentity?) {
+        guard let structure else {
+            installedPhysicalRowSpine = nil
+            projectionInstalled()
+            return
+        }
+        guard structure != installedPhysicalRowSpine else {
+            // Streaming text and shallow tool status changes keep the same
+            // physical hosts. Their geometry callbacks update in place;
+            // clearing every semantic frame on each token creates a costly
+            // full-tree feedback loop and is not stale-tree protection.
+            geometryRevision &+= 1
+            evaluateLayoutRestoreIfReady()
+            evaluatePrependIfReady()
+            return
+        }
+        installedPhysicalRowSpine = structure
         advanceLayoutEpoch()
         geometryRevision &+= 1
         evaluateLayoutRestoreIfReady()

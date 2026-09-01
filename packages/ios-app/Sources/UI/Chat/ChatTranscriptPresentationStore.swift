@@ -314,6 +314,26 @@ struct ChatDisplayedTranscriptItems: RandomAccessCollection {
     }
 }
 
+struct ChatPhysicalRowSpineIdentity: Hashable, Sendable {
+    struct Alias: Hashable, Sendable {
+        let renderedID: String
+        let physicalID: String
+    }
+
+    struct Fusion: Hashable, Sendable {
+        let canonicalRenderedID: String
+        let liveRenderedID: String
+    }
+
+    let timelineIDs: ChatTranscriptIDs
+    let runtimeIDs: [String]
+    let lifecycleID: String?
+    let queueIDs: [String]
+    let aliases: [Alias]
+    let fusion: Fusion?
+    let hasEarlierMessages: Bool
+}
+
 struct InstalledChatTranscript: Hashable, Sendable {
     struct SourceWindow: Hashable, Sendable {
         let originalStart: Int?
@@ -365,6 +385,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
     let queueRevision: Int?
     let supportsQueueManagement: Bool
     let sourceWindow: SourceWindow
+    let physicalRowSpineIdentity: ChatPhysicalRowSpineIdentity
     private let toolPhysicalIDByRenderedID: [String: String]
     private let runtimeIDSet: Set<String>
     private let queueIDSet: Set<String>
@@ -418,6 +439,32 @@ struct InstalledChatTranscript: Hashable, Sendable {
         self.queueRevision = queueRevision
         self.supportsQueueManagement = supportsQueueManagement
         self.sourceWindow = sourceWindow
+        let lifecycleID: String? = switch frozenHandoff {
+        case .none: nil
+        case .pending(let pending): "pending-prompt-\(pending.id)"
+        case .outgoing(let outgoing, _): outgoing.id
+        }
+        let queueIDs = queuedMessages.map { message in
+            queuePresentationIDByOperationID[message.id] ?? "queued-message-\(message.id)"
+        }
+        let aliases = toolPhysicalIDByRenderedID
+            .map { ChatPhysicalRowSpineIdentity.Alias(renderedID: $0.key, physicalID: $0.value) }
+            .sorted { lhs, rhs in lhs.renderedID < rhs.renderedID }
+        let fusionIdentity = toolBoundaryFusion.map {
+            ChatPhysicalRowSpineIdentity.Fusion(
+                canonicalRenderedID: $0.canonicalRenderedID,
+                liveRenderedID: $0.liveRenderedID
+            )
+        }
+        physicalRowSpineIdentity = ChatPhysicalRowSpineIdentity(
+            timelineIDs: timeline.ids,
+            runtimeIDs: runtimeItems.map(\.id),
+            lifecycleID: lifecycleID,
+            queueIDs: queueIDs,
+            aliases: aliases,
+            fusion: fusionIdentity,
+            hasEarlierMessages: (sourceWindow.originalStart ?? 0) > 0
+        )
         self.toolPhysicalIDByRenderedID = toolPhysicalIDByRenderedID
         runtimeIDSet = Set(runtimeItems.map(\.id))
         queueIDSet = Set(queuedMessages.map(\.id))
@@ -869,11 +916,13 @@ typealias ChatTranscriptProjectionWorkGate = @Sendable (ChatTranscriptProjection
 #endif
 
 private struct BuiltChatTranscript: Sendable {
-    let handoff: ChatTranscriptHandoffCommit
-    let timeline: ChatTranscriptTimeline
-    let toolPayloads: ChatToolPayloadIndex
-    let preparedTextByRenderedID: [String: ChatTextPreparationSnapshot]
+    let installed: InstalledChatTranscript
     let isInternallyConsistent: Bool
+
+    init(installed: InstalledChatTranscript, kernelIsConsistent: Bool) {
+        self.installed = installed
+        isInternallyConsistent = kernelIsConsistent && installed.hasUniqueDisplayedIDs
+    }
 }
 
 private actor ChatTranscriptProjectionWorker {
@@ -1008,6 +1057,7 @@ private actor ChatTranscriptProjectionWorker {
     func build(
         snapshot: SessionSnapshot,
         handoff: ChatTranscriptHandoffCommit,
+        queuePresentationIDByOperationID: [String: String],
         tag: ChatTranscriptProjectionTag,
         cacheEpoch: Int
     ) async -> BuiltChatTranscript? {
@@ -1029,11 +1079,16 @@ private actor ChatTranscriptProjectionWorker {
         let canonicalKey = CanonicalKey(tag: tag)
         if let basis, basis.scope == scope, basis.projectionKey == projectionKey {
             return BuiltChatTranscript(
-                handoff: handoff,
-                timeline: basis.candidate.timeline,
-                toolPayloads: basis.candidate.toolPayloads,
-                preparedTextByRenderedID: basis.preparedTextByRenderedID,
-                isInternallyConsistent: basis.candidate.isValid
+                installed: installedTranscript(
+                    snapshot: snapshot,
+                    handoff: handoff,
+                    queuePresentationIDByOperationID: queuePresentationIDByOperationID,
+                    tag: tag,
+                    timeline: basis.candidate.timeline,
+                    toolPayloads: basis.candidate.toolPayloads,
+                    preparedTextByRenderedID: basis.preparedTextByRenderedID
+                ),
+                kernelIsConsistent: basis.candidate.isValid
             )
         }
 
@@ -1066,11 +1121,16 @@ private actor ChatTranscriptProjectionWorker {
         // before the owner can reject the projection safely.
         guard candidate.isValid else {
             return BuiltChatTranscript(
-                handoff: handoff,
-                timeline: candidate.timeline,
-                toolPayloads: candidate.toolPayloads,
-                preparedTextByRenderedID: [:],
-                isInternallyConsistent: false
+                installed: installedTranscript(
+                    snapshot: snapshot,
+                    handoff: handoff,
+                    queuePresentationIDByOperationID: queuePresentationIDByOperationID,
+                    tag: tag,
+                    timeline: candidate.timeline,
+                    toolPayloads: candidate.toolPayloads,
+                    preparedTextByRenderedID: [:]
+                ),
+                kernelIsConsistent: false
             )
         }
         let admittedTextPreparationGeneration = textPreparationGeneration
@@ -1103,11 +1163,40 @@ private actor ChatTranscriptProjectionWorker {
             )
         }
         return BuiltChatTranscript(
+            installed: installedTranscript(
+                snapshot: snapshot,
+                handoff: handoff,
+                queuePresentationIDByOperationID: queuePresentationIDByOperationID,
+                tag: tag,
+                timeline: candidate.timeline,
+                toolPayloads: candidate.toolPayloads,
+                preparedTextByRenderedID: slices
+            ),
+            kernelIsConsistent: candidate.isValid
+        )
+    }
+
+    private func installedTranscript(
+        snapshot: SessionSnapshot,
+        handoff: ChatTranscriptHandoffCommit,
+        queuePresentationIDByOperationID: [String: String],
+        tag: ChatTranscriptProjectionTag,
+        timeline: ChatTranscriptTimeline,
+        toolPayloads: ChatToolPayloadIndex,
+        preparedTextByRenderedID: [String: ChatTextPreparationSnapshot]
+    ) -> InstalledChatTranscript {
+        InstalledChatTranscript(
+            tag: tag,
             handoff: handoff,
-            timeline: candidate.timeline,
-            toolPayloads: candidate.toolPayloads,
-            preparedTextByRenderedID: slices,
-            isInternallyConsistent: candidate.isValid
+            timeline: timeline,
+            toolPayloads: toolPayloads,
+            runtimeItems: ChatTranscriptProjectionKernel.runtimeItems(in: snapshot),
+            preparedTextByRenderedID: preparedTextByRenderedID,
+            queuedMessages: snapshot.displayedQueuedMessages,
+            queuePresentationIDByOperationID: queuePresentationIDByOperationID,
+            queueRevision: snapshot.queueRevision,
+            supportsQueueManagement: tag.queueManagementCapability,
+            sourceWindow: .init(snapshot: snapshot)
         )
     }
 }
@@ -1538,28 +1627,15 @@ final class ChatTranscriptPresentationStore {
                 guard let built = await self.projectionWorker.build(
                     snapshot: next.snapshot,
                     handoff: next.handoff,
+                    queuePresentationIDByOperationID: next.queuePresentationIDByOperationID,
                     tag: next.tag,
                     cacheEpoch: next.generation
                 ), !Task.isCancelled else { break }
                 self.buildingTag = nil
                 guard self.generation == next.generation else { continue }
 
-                let runtimeItems = ChatTranscriptProjectionKernel.runtimeItems(in: next.snapshot)
-                let output = InstalledChatTranscript(
-                    tag: next.tag,
-                    handoff: built.handoff,
-                    timeline: built.timeline,
-                    toolPayloads: built.toolPayloads,
-                    runtimeItems: runtimeItems,
-                    preparedTextByRenderedID: built.preparedTextByRenderedID,
-                    queuedMessages: next.snapshot.displayedQueuedMessages,
-                    queuePresentationIDByOperationID: next.queuePresentationIDByOperationID,
-                    queueRevision: next.snapshot.queueRevision,
-                    supportsQueueManagement: next.tag.queueManagementCapability,
-                    sourceWindow: .init(snapshot: next.snapshot)
-                )
-                guard built.isInternallyConsistent,
-                      output.hasUniqueDisplayedIDs else {
+                let output = built.installed
+                guard built.isInternallyConsistent else {
                     if self.desiredTag == next.tag {
                         self.desiredTag = nil
                         self.failWaiters(for: next.tag, error: .invalidProjection)

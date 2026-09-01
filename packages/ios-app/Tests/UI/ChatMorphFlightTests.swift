@@ -36,6 +36,7 @@ struct ChatMorphFlightTests {
         #expect(flight.elements.last?.id.element == .attachment("upload"))
         #expect(flight.elements.last?.attachment?.transportBlobID == "upload:gateway-upload")
         #expect(!flight.isReady)
+        #expect(registry.flightPhase(for: flight.lifecycleID) == .waitingForDestination)
 
         for element in flight.elements {
             registry.recordDestination(
@@ -48,6 +49,7 @@ struct ChatMorphFlightTests {
         let ready = try #require(registry.flight)
         #expect(ready.isReady)
         #expect(registry.beginAnimation(lifecycleID: ready.lifecycleID) != nil)
+        #expect(registry.flightPhase(for: ready.lifecycleID) == .animating)
         #expect(ready.elements.allSatisfy { registry.hidesDestination($0.id) })
     }
 
