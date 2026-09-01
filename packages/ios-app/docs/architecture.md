@@ -44,15 +44,21 @@ handoff only when exactly one successor is provable, so row identity cannot be i
 
 The interactive chat replacement is intentionally UIKit-only at its viewport boundary.
 `ChatUIKitChatViewController` is the isolated foundation for the future cutover: it owns one native
-collection view, semantic-anchor restoration, physical-tail following, legal-offset clamping, and
-its composer. It is not mounted in production during this phase. The eventual cutover must delete
+collection view, semantic-anchor restoration, physical-tail following, and legal-offset clamping.
+`ChatUIKitComposerController` is its separately testable UIKit composer surface. It consumes the
+immutable `ChatUIKitComposerInput` projection and emits `ChatUIKitComposerIntent` values; draft,
+submission, resource, attachment, and viewport authorities remain outside the surface. The
+composer never writes collection-view offsets. Neither controller is mounted in production during
+this phase. The eventual cutover must delete
 the SwiftUI transcript scroll surface, sentinel/materialization control path, and competing
 `ScrollPosition`/geometry ownership rather than retain a hybrid second owner. UIKit rows remain
 presentation consumers; they do not admit snapshots or mutate canonical state. This phase is not a
 production cutover: the foundation has not yet been proven pixel-equivalent to the existing Tron
 surface. The parity gate still requires mapping every installed row kind and existing Markdown,
 tool, attachment, selection, link, accessibility, Dynamic Type, animation, keyboard, and composer
-behavior before the SwiftUI path can be deleted. `ChatUIKitPresentationAdapter` carries complete installed physical-row content and prepared-text
+behavior before the SwiftUI path can be deleted. The UIKit composer now covers the native editor,
+chips, resource panel, attachment menu intents, model/process controls, queue choices, send/stop
+state, and accessibility ordering in isolation. `ChatUIKitPresentationAdapter` carries complete installed physical-row content and prepared-text
 facts into the isolated surface. The UIKit renderer maps the shared `MarkdownPresentation.Document`
 and `Inline` values to native TextKit, code, table, quote, list, rule, thinking-tail, and streaming
 views; its fallback label is not an authority model. The implementation is split into
