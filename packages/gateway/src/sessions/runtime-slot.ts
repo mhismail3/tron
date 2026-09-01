@@ -3037,6 +3037,16 @@ export class RuntimeSlot {
     return installedOwner !== undefined && installedOwner.id === origin.owner.id;
   }
 
+  /** Return only the exact installed controller already admitted for subagent
+   * projection. Pi can reload an npm package through its resolved local path,
+   * so the opaque installed-owner identity—not the mutable source label—is the
+   * authority boundary. */
+  private trustedSubagentController() {
+    const origin = this.extensionToolOrigin("subagent");
+    if (!this.isForegroundSubagentTool("subagent", origin)) return undefined;
+    return this.runtime.session.extensionRunner.getToolDefinition("subagent");
+  }
+
   private async openOwnedExtensionArtifact(
     asyncDir: string,
     name: "status.json" | "events.jsonl" | "recovery-descriptor.json",
@@ -4831,8 +4841,7 @@ export class RuntimeSlot {
     expectedRunId: string,
   ): { expectedOperationId?: string } | undefined {
     this.assertNoTrustReload();
-    const origin = this.extensionToolOrigin("subagent");
-    const tool = this.runtime.session.extensionRunner.getToolDefinition("subagent");
+    const tool = this.trustedSubagentController();
     const capturedOperationId = this.processOperationIDs.get(processId);
     const currentOperationId = capturedOperationId === this.operation?.id
       ? capturedOperationId
@@ -4842,9 +4851,7 @@ export class RuntimeSlot {
       this.processChildSessionBinding(processId),
       expectedRunId,
       currentOperationId,
-      origin?.owner !== undefined
-        && trustedExtensionOriginKind(origin.owner) === "subagent"
-        && tool !== undefined,
+      tool !== undefined,
     );
     return route?.kind === "foreground"
       ? { expectedOperationId: route.expectedOperationId }
@@ -4856,8 +4863,7 @@ export class RuntimeSlot {
     expectedRunId: string,
     expectedOperationId?: string,
   ): Promise<void> {
-    const origin = this.extensionToolOrigin("subagent");
-    const tool = this.runtime.session.extensionRunner.getToolDefinition("subagent");
+    const tool = this.trustedSubagentController();
     const capturedOperationId = this.processOperationIDs.get(processId);
     const currentOperationId = capturedOperationId === this.operation?.id
       ? capturedOperationId
@@ -4867,9 +4873,7 @@ export class RuntimeSlot {
       this.processChildSessionBinding(processId),
       expectedRunId,
       currentOperationId,
-      origin?.owner !== undefined
-        && trustedExtensionOriginKind(origin.owner) === "subagent"
-        && tool !== undefined,
+      tool !== undefined,
     );
     if (!route) {
       throw new GatewayError("conflict", "The subagent execution changed before it could be stopped", true);

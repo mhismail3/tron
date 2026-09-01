@@ -1108,8 +1108,9 @@ The `process-transcript.v1` capability authorizes `session.processTranscript.ope
 serializes with that lease's reads, revalidates parent/process/run, path, and file identity,
 then routes stop through an idempotent command receipt. Synchronous children use the
 parent session's ordinary settled agent abort, matching the composer stop control; asynchronous
-children use only the trusted installed subagent controller with the exact root run and exact
-child producer. The open response sets `canAbort` only when that route exists; synchronous leases
+children use only the exact installed subagent controller owner with the exact root run and exact
+child producer. Authority follows the installed opaque owner identity rather than Pi's mutable
+package source label. The open response sets `canAbort` only when that route exists; synchronous leases
 also capture the exact foreground operation ID, so a stale lease cannot abort newer parent work.
 It exposes no generic child mutation or writable transcript authority. A
 connection-owned lease watches only the validated canonical child file, installs that

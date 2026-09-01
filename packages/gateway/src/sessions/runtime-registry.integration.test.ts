@@ -3102,6 +3102,34 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       lifecycle: { state: "running" },
     });
 
+    // Pi reloads configured npm packages through their resolved local path in
+    // production. Controller authority follows the exact installed owner ID,
+    // not the mutable `source` display label.
+    const localOwner = {
+      id: "extension:installed-subagent", title: "Pi Subagents", source: "local",
+    };
+    const controllerOrigin = { source: "local", owner: localOwner };
+    const controllerExecute = vi.fn(async (..._arguments: unknown[]) => ({
+      content: [{ type: "text", text: "stopped" }], details: {},
+    }));
+    const abortInternals = slot as unknown as {
+      extensionToolOrigin: (toolName: string) => ExtensionToolOrigin | undefined;
+      subagentExtensionOrigin: () => ExtensionToolOrigin;
+      runtime: { session: { extensionRunner: { getToolDefinition: (toolName: string) => unknown } } };
+    };
+    const toolOrigin = vi.spyOn(abortInternals, "extensionToolOrigin").mockReturnValue(controllerOrigin);
+    const installedOrigin = vi.spyOn(abortInternals, "subagentExtensionOrigin").mockReturnValue(controllerOrigin);
+    const toolDefinition = vi.spyOn(abortInternals.runtime.session.extensionRunner, "getToolDefinition")
+      .mockReturnValue({ execute: controllerExecute });
+    expect(slot.processSubagentAbortAuthority(activeProcess!.processId, runId)).toEqual({});
+    await slot.abortSubagentProcess(activeProcess!.processId, runId);
+    expect(controllerExecute.mock.calls[0]?.[1]).toEqual({
+      action: "stop", id: runId, childId: childProducerId,
+    });
+    toolOrigin.mockRestore();
+    installedOrigin.mockRestore();
+    toolDefinition.mockRestore();
+
     const endedAt = Date.now();
     await writeFile(join(asyncDir, "status.json"), JSON.stringify({
       runId,
