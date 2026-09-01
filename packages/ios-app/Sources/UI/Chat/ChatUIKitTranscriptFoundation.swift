@@ -379,20 +379,26 @@ private final class ChatUIKitStreamingInlineTextView: UITextView {
     private func schedule() {
         timer?.invalidate(); timer = nil
         guard streaming, !UIAccessibility.isReduceMotionEnabled else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: 0.033, repeats: true) { [weak self] timer in
-            guard let self else { timer.invalidate(); return }
-            let now = Date.now
-            if let next = self.tokens.first(where: { $0.isWord && !self.revealedIDs.contains($0.id) && self.revealStarts[$0.id] == nil }) {
-                let last = self.revealStarts.values.max() ?? now.addingTimeInterval(-Double(ChatStreamingTextRevealPolicy.wordIntervalMilliseconds) / 1_000)
-                if now.timeIntervalSince(last) * 1_000 >= Double(ChatStreamingTextRevealPolicy.wordIntervalMilliseconds) {
-                    self.revealStarts[next.id] = now
-                }
+        let nextTimer = Timer(timeInterval: 0.033, target: self, selector: #selector(revealTick(_:)), userInfo: nil, repeats: true)
+        timer = nextTimer
+        RunLoop.main.add(nextTimer, forMode: .common)
+    }
+
+    @objc private func revealTick(_ timer: Timer) {
+        let now = Date.now
+        if let next = tokens.first(where: { $0.isWord && !revealedIDs.contains($0.id) && revealStarts[$0.id] == nil }) {
+            let last = revealStarts.values.max() ?? now.addingTimeInterval(-Double(ChatStreamingTextRevealPolicy.wordIntervalMilliseconds) / 1_000)
+            if now.timeIntervalSince(last) * 1_000 >= Double(ChatStreamingTextRevealPolicy.wordIntervalMilliseconds) {
+                revealStarts[next.id] = now
             }
-            for (id, start) in self.revealStarts where now.timeIntervalSince(start) * 1_000 >= Double(ChatStreamingTextRevealPolicy.fadeMilliseconds) {
-                self.revealedIDs.insert(id); self.revealStarts.removeValue(forKey: id)
-            }
-            self.render()
-            if self.tokens.filter(\.isWord).allSatisfy({ self.revealedIDs.contains($0.id) }) { timer.invalidate(); self.timer = nil }
+        }
+        for (id, start) in revealStarts where now.timeIntervalSince(start) * 1_000 >= Double(ChatStreamingTextRevealPolicy.fadeMilliseconds) {
+            revealedIDs.insert(id); revealStarts.removeValue(forKey: id)
+        }
+        render()
+        if tokens.filter(\.isWord).allSatisfy({ revealedIDs.contains($0.id) }) {
+            timer.invalidate()
+            self.timer = nil
         }
     }
 
@@ -506,7 +512,7 @@ private final class ChatUIKitMarkdownView: UIView {
             case .rule:
                 let rule = UIView()
                 rule.backgroundColor = UIColor(hex: "#D8DEE6")
-                rule.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale).isActive = true
+                rule.heightAnchor.constraint(equalToConstant: 1 / traitCollection.displayScale).isActive = true
                 stack.addArrangedSubview(rule)
             }
         }
@@ -608,7 +614,7 @@ private final class ChatUIKitMarkdownView: UIView {
         header.addArrangedSubview(copy)
         let divider = UIView()
         divider.backgroundColor = UIColor.separator
-        divider.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale).isActive = true
+        divider.heightAnchor.constraint(equalToConstant: 1 / traitCollection.displayScale).isActive = true
         let scroll = UIScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.alwaysBounceHorizontal = true
@@ -657,7 +663,7 @@ private final class ChatUIKitMarkdownView: UIView {
                 row.addArrangedSubview(label)
             }
             table.addArrangedSubview(row)
-            if rowIndex == 0 { let divider = UIView(); divider.backgroundColor = .separator; divider.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale).isActive = true; table.addArrangedSubview(divider) }
+            if rowIndex == 0 { let divider = UIView(); divider.backgroundColor = .separator; divider.heightAnchor.constraint(equalToConstant: 1 / traitCollection.displayScale).isActive = true; table.addArrangedSubview(divider) }
         }
         table.isLayoutMarginsRelativeArrangement = true
         table.layoutMargins = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
