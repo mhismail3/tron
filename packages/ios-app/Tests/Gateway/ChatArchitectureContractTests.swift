@@ -148,6 +148,22 @@ struct ChatArchitectureContractTests {
     }
 
     @MainActor
+    @Test("UIKit presentation adaptation retains installed physical row payloads")
+    func presentationAdapterRetainsPayloads() async throws {
+        let snapshot = try SessionScenarioBuilder(seed: 9_407).openingTail(targetEncodedBytes: 8_192)
+        let tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 1)
+        let store = ChatTranscriptPresentationStore()
+        #expect(store.submit(snapshot: snapshot, tag: tag))
+        let installed = try await store.waitForInstall(of: tag)
+        let input = try #require(ChatUIKitPresentationAdapter.input(
+            from: installed,
+            version: 1
+        ))
+        #expect(input.rows.isEmpty == false)
+        #expect(input.rows.allSatisfy { $0.content != nil })
+    }
+
+    @MainActor
     @Test("blank viewport recovery terminates when the semantic anchor cannot materialize")
     func blankRecoveryIsBounded() {
         let controller = ChatUIKitChatViewController()
