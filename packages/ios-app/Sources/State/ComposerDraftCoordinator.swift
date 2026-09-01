@@ -424,6 +424,19 @@ final class ComposerDraftCoordinator {
         case rejected
     }
 
+    private struct SubmissionPreflight: Equatable {
+        let target: SessionPresentationIdentity
+        let textRevision: Int
+        let text: String
+        let attachmentIDs: [String]
+        let resourceKey: String?
+        let nonce: UInt64
+
+        var presentationID: String {
+            "outgoing-submission:\(target.sessionID):\(target.generation):\(nonce)"
+        }
+    }
+
     private struct SubmissionAdmission: Equatable {
         let id: UInt64
         let snapshot: ComposerSubmissionSnapshot
@@ -485,6 +498,9 @@ final class ComposerDraftCoordinator {
     /// snapshot retains its origin presentation only for source metadata; route
     /// replacement never changes ownership or resends the operation.
     private var submissionByScope: [ComposerDraftScope: SubmissionAdmission] = [:]
+    /// Reserves the exact local nonce used by the next beginSubmission call.
+    /// This is admission authority, not a second receipt or presentation store.
+    private var submissionPreflights: [SessionPresentationIdentity: SubmissionPreflight] = [:]
     /// Only the newest exact canonical handoff for the mounted presentation is
     /// retained. This bounds rich thumbnail payloads to one prompt lifecycle.
     private var canonicalHandoffReceipts: [SessionPresentationIdentity: CanonicalSubmissionHandoffReceipt] = [:]
@@ -794,6 +810,34 @@ final class ComposerDraftCoordinator {
     func outgoingSubmission(for target: SessionPresentationIdentity) -> ComposerSubmissionSnapshot? {
         guard let scope = scope(for: target) else { return nil }
         return submissionByScope[scope]?.snapshot
+    }
+
+    /// Returns the exact identity that the next beginSubmission will consume.
+    /// The key is the current draft/attachment state, so body refreshes reuse
+    /// one reservation while edits invalidate it without reopening admission.
+    func preflightSubmissionID(for target: SessionPresentationIdentity) -> String? {
+        guard let scope = scope(for: target), submissionByScope[scope] == nil else { return nil }
+        let draft = drafts[scope] ?? Draft(text: "", revision: 0, lastAccess: sequence)
+        let attachmentIDs = (attachmentsByScope[scope] ?? []).map(\.id)
+        let resourceKey = selectedResourceByScope[scope].map { "\($0.source):\($0.name)" }
+        if let existing = submissionPreflights[target],
+           existing.textRevision == draft.revision,
+           existing.text == draft.text,
+           existing.attachmentIDs == attachmentIDs,
+           existing.resourceKey == resourceKey {
+            return existing.presentationID
+        }
+        sequence &+= 1
+        let preflight = SubmissionPreflight(
+            target: target,
+            textRevision: draft.revision,
+            text: draft.text,
+            attachmentIDs: attachmentIDs,
+            resourceKey: resourceKey,
+            nonce: sequence
+        )
+        submissionPreflights[target] = preflight
+        return preflight.presentationID
     }
 
     /// Matches the Gateway's sole foreground pending admission to the retained
@@ -1845,7 +1889,19 @@ final class ComposerDraftCoordinator {
         guard !outgoing.isEmpty || !attachmentIDs.isEmpty || selectedResource != nil else {
             throw CancellationError()
         }
-        sequence &+= 1
+        let preflight = submissionPreflights[target]
+        let localNonce: UInt64
+        if let preflight,
+           preflight.textRevision == draft.revision,
+           preflight.text == draft.text,
+           preflight.attachmentIDs == (attachmentsByScope[scope] ?? []).map(\.id),
+           preflight.resourceKey == selectedResourceByScope[scope].map({ "\($0.source):\($0.name)" }) {
+            localNonce = preflight.nonce
+            submissionPreflights[target] = nil
+        } else {
+            sequence &+= 1
+            localNonce = sequence
+        }
         let snapshot = ComposerSubmissionSnapshot(
             target: target,
             textRevision: draft.revision,
@@ -1854,7 +1910,7 @@ final class ComposerDraftCoordinator {
             attachmentIDs: attachmentIDs,
             behavior: behavior,
             baselineQueuedMessageIDs: Set(queuedMessages.map(\.id)),
-            localNonce: sequence
+            localNonce: localNonce
         )
         let admission = SubmissionAdmission(
             id: sequence,
