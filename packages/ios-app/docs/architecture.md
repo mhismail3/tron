@@ -75,8 +75,10 @@ state, and accessibility ordering in isolation. It is the only UIKit composer si
 viewport controller is transcript-only. `ChatUIKitPresentationAdapter` carries complete installed
 physical-row content and prepared-text facts into the isolated surface. Its transcript row uses
 one canonical installed enum payload, with labels and presentation accessors derived from that
-payload rather than competing stored fields. Hosted tests may add a synthetic fixture payload, but
-that case and its fallback renderer are excluded from shipping compilation. The UIKit renderer maps the
+payload rather than competing stored fields. The hosted integration gate mounts only installed
+physical rows from the authoritative projection; its recording command boundary and UIWindow shell
+are test-only. Focused unit tests may still use a synthetic fixture payload for adapter contracts,
+but that case and its fallback renderer are excluded from shipping compilation. The UIKit renderer maps the
 shared `MarkdownPresentation.Document` and `Inline` values to native TextKit, code, table, quote,
 list, rule, thinking-tail, and streaming views; normalized attributed-string ranges are measured
 against the rendered TextKit string, and its fallback label is not an authority model. The

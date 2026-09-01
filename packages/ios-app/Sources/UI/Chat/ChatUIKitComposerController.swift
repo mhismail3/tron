@@ -34,6 +34,12 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     nonisolated(unsafe) private var keyboardObservers: [NSObjectProtocol] = []
     private var attachmentChips: [String: ChatUIKitComposerAttachmentChip] = [:]
 
+    #if HOSTED_TEST
+    /// Read-only lifecycle evidence for the hosted UIKit gate. Production has
+    /// no observer-count API and retains the normal view lifecycle owner.
+    var hostedKeyboardObserverCount: Int { keyboardObservers.count }
+    #endif
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .clear

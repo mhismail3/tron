@@ -27,6 +27,11 @@ final class ChatUIKitChatViewController: UIViewController,
     var onTransactionOutcome: ((ChatUIKitViewportTransactionOutcome) -> Void)?
     private var presentationActivity = ChatUIKitPresentationActivity.active(generation: 0)
 
+    #if HOSTED_TEST
+    /// Read-only lifecycle evidence for the hosted UIKit gate.
+    var hostedPresentationActivity: ChatUIKitPresentationActivity { presentationActivity }
+    #endif
+
     private var rows: [ChatUIKitTranscriptRow] { input?.rows ?? [] }
     private var historyOffset: Int { input?.history.isAffordanceVisible == true ? 1 : 0 }
     private let collectionView: UICollectionView
