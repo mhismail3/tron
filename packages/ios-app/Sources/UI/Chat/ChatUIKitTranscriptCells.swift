@@ -10,6 +10,7 @@ final class ChatUIKitTranscriptCell: UICollectionViewCell {
     var onAttachmentTapped: ((Int) -> Void)?
     var onToolTapped: (() -> Void)?
     var onThinkingDetails: (() -> Void)?
+    var onNotificationDetails: (() -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -54,6 +55,7 @@ final class ChatUIKitTranscriptCell: UICollectionViewCell {
     func configure(_ row: ChatUIKitTranscriptRow) {
         markdownView.render(row)
         markdownView.onThinkingDetails = onThinkingDetails ?? onToolTapped
+        markdownView.onNotificationDetails = onNotificationDetails
         markdownView.accessibilityIdentifier = "chat-row-\(row.id)"
         toolLabel.text = row.toolLabel
         toolLabel.isHidden = row.toolLabel == nil

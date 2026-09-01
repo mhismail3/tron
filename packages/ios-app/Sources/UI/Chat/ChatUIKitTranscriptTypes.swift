@@ -29,6 +29,8 @@ struct ChatUIKitTranscriptRow: Hashable {
     let thinkingSegments: [ChatThinkingSegment]
     let thinkingLabel: String?
     let streaming: Bool
+    let toolRun: ChatToolRunPresentation?
+    let notification: ChatNotificationPresentation?
     let text: String
     let kind: Kind
     let links: [ChatUIKitLink]
@@ -46,6 +48,8 @@ struct ChatUIKitTranscriptRow: Hashable {
         thinkingSegments: [ChatThinkingSegment] = [],
         thinkingLabel: String? = nil,
         streaming: Bool = false,
+        toolRun: ChatToolRunPresentation? = nil,
+        notification: ChatNotificationPresentation? = nil,
         links: [ChatUIKitLink] = [],
         attachments: [String] = [],
         toolLabel: String? = nil
@@ -61,6 +65,8 @@ struct ChatUIKitTranscriptRow: Hashable {
         self.thinkingSegments = thinkingSegments
         self.thinkingLabel = thinkingLabel
         self.streaming = streaming
+        self.toolRun = toolRun
+        self.notification = notification
         self.text = text
         self.kind = kind
         self.links = links
@@ -110,6 +116,8 @@ enum ChatUIKitPresentationAdapter {
                 thinkingSegments: thinkingSegments(for: row.content),
                 thinkingLabel: prepared?.hiddenThinkingLabel,
                 streaming: isStreaming(row.content),
+                toolRun: toolRun(for: row.content),
+                notification: notification(for: row.content),
                 attachments: attachmentNames(for: row.content),
                 toolLabel: toolLabel(for: row.content)
             )
@@ -196,6 +204,20 @@ enum ChatUIKitPresentationAdapter {
         guard case .transcript(let item, _) = content else { return false }
         if case .message(let value) = item { return value.streaming }
         return false
+    }
+
+    private static func toolRun(
+        for content: ChatPhysicalTranscriptRow.Content
+    ) -> ChatToolRunPresentation? {
+        guard case .transcript(let item, _) = content, case .toolRun(let value) = item else { return nil }
+        return value
+    }
+
+    private static func notification(
+        for content: ChatPhysicalTranscriptRow.Content
+    ) -> ChatNotificationPresentation? {
+        guard case .transcript(let item, _) = content, case .notification(let value) = item else { return nil }
+        return value
     }
 
     private static func attachmentNames(

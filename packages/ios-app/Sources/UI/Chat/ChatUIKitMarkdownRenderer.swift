@@ -164,6 +164,7 @@ final class ChatUIKitMarkdownView: UIView {
     private var thinkingButton: UIButton?
     var onCodeCopied: ((String) -> Void)?
     var onThinkingDetails: (() -> Void)?
+    var onNotificationDetails: (() -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -190,6 +191,14 @@ final class ChatUIKitMarkdownView: UIView {
         thinkingButton = nil
         activeInlineIDs.removeAll()
         let documents = row.markdownDocuments
+        if let toolRun = row.toolRun {
+            stack.addArrangedSubview(toolRunView(toolRun))
+            return
+        }
+        if let notification = row.notification {
+            stack.addArrangedSubview(notificationView(notification))
+            return
+        }
         if documents.isEmpty, row.thinkingSegments.isEmpty, !row.text.isEmpty {
             let view = inlineView(MarkdownPresentation.Inline(source: row.text), identity: "row:\(row.id):fallback", streaming: row.streaming)
             let value = NSMutableAttributedString(attributedString: view.attributedText ?? NSAttributedString(string: row.text))
@@ -211,6 +220,58 @@ final class ChatUIKitMarkdownView: UIView {
             spacer.heightAnchor.constraint(equalToConstant: 1).isActive = true
             stack.addArrangedSubview(spacer)
         }
+    }
+
+    private func toolRunView(_ presentation: ChatToolRunPresentation) -> UIView {
+        let card = UIView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.backgroundColor = UIColor { traits in traits.userInterfaceStyle == .dark ? UIColor(hex: "#14324A") : UIColor(hex: "#E0F2FE") }
+        card.layer.cornerRadius = 10
+        card.layer.borderWidth = 0.5
+        card.layer.borderColor = UIColor { traits in traits.userInterfaceStyle == .dark ? UIColor(hex: "#3B424D") : UIColor(hex: "#D8DEE6") }.cgColor
+        let stack = UIStackView(); stack.axis = .vertical; stack.spacing = 5; stack.translatesAutoresizingMaskIntoConstraints = false
+        let title = UILabel(); title.text = presentation.title; title.font = TronFontLoader.createUIFont(size: 12, weight: .semibold); title.textColor = .label
+        let status = UILabel(); status.text = [presentation.status, presentation.elapsedMilliseconds().map { ToolTiming.format(milliseconds: $0) }].compactMap { $0 }.joined(separator: " · "); status.font = TronFontLoader.createUIFont(size: 11); status.textColor = presentation.failureCount > 0 ? .systemRed : .secondaryLabel
+        stack.addArrangedSubview(title); stack.addArrangedSubview(status)
+        if presentation.isRunning { let indicator = UIActivityIndicatorView(style: .medium); indicator.startAnimating(); stack.addArrangedSubview(indicator) }
+        for descriptor in presentation.reverseChronologicalTools {
+            let line = UILabel(); line.text = "• \(descriptor.title): \(descriptor.subtitle)"; line.font = TronFontLoader.createUIFont(size: 11); line.textColor = .secondaryLabel; line.numberOfLines = 0; stack.addArrangedSubview(line)
+        }
+        card.addSubview(stack)
+        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12), stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12), stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 10), stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -10)])
+        card.isAccessibilityElement = true; card.accessibilityLabel = [presentation.title, presentation.status].compactMap { $0 }.joined(separator: ". "); card.accessibilityTraits = presentation.isRunning ? .updatesFrequently : .staticText
+        return card
+    }
+
+    private func notificationView(_ presentation: ChatNotificationPresentation) -> UIView {
+        let card = UIView(); card.translatesAutoresizingMaskIntoConstraints = false
+        card.backgroundColor = presentation.material == .glass ? UIColor { traits in traits.userInterfaceStyle == .dark ? UIColor(hex: "#252A32") : UIColor(hex: "#EEF2F6") } : .clear
+        card.layer.cornerRadius = presentation.material == .glass ? 10 : 0
+        card.layer.borderWidth = presentation.material == .glass ? 0.5 : 0
+        card.layer.borderColor = UIColor.separator.cgColor
+        let row = UIStackView(); row.axis = .horizontal; row.spacing = 8; row.alignment = .top; row.translatesAutoresizingMaskIntoConstraints = false
+        let icon = UIImageView(image: UIImage(systemName: presentation.icon)); icon.tintColor = notificationColor(presentation.tone); icon.setContentHuggingPriority(.required, for: .horizontal)
+        let text = UIStackView(); text.axis = .vertical; text.spacing = 2
+        let title = UILabel(); title.text = presentation.title; title.font = TronFontLoader.createUIFont(size: 12, weight: .semibold)
+        text.addArrangedSubview(title)
+        if let detail = presentation.detail { let label = UILabel(); label.text = detail; label.font = TronFontLoader.createUIFont(size: 11); label.textColor = .secondaryLabel; text.addArrangedSubview(label) }
+        if let body = presentation.body { let label = UILabel(); label.text = body; label.font = TronFontLoader.createUIFont(size: 12); label.numberOfLines = 0; text.addArrangedSubview(label) }
+        if presentation.hasDetailSheet {
+            let details = UIButton(type: .system)
+            details.setTitle("Details", for: .normal)
+            details.titleLabel?.font = TronFontLoader.createUIFont(size: 11, weight: .medium)
+            details.addAction(UIAction { [weak self] _ in self?.onNotificationDetails?() }, for: .primaryActionTriggered)
+            text.addArrangedSubview(details)
+        }
+        row.addArrangedSubview(icon); row.addArrangedSubview(text); card.addSubview(row)
+        NSLayoutConstraint.activate([row.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 10), row.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -10), row.topAnchor.constraint(equalTo: card.topAnchor, constant: 8), row.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -8), icon.widthAnchor.constraint(equalToConstant: 18)])
+        card.isAccessibilityElement = true; card.accessibilityLabel = [presentation.title, presentation.detail, presentation.body].compactMap { $0 }.joined(separator: ". ")
+        card.accessibilityTraits = presentation.hasDetailSheet ? .button : .staticText
+        return card
+    }
+
+    private func notificationColor(_ tone: ChatNotificationTone) -> UIColor {
+        switch tone { case .error: return .systemRed; case .warning: return .systemOrange; case .tool: return .systemBlue; case .accent, .command: return UIColor(hex: "#059669"); case .purple: return .systemPurple; case .information: return .systemBlue; case .neutral: return .secondaryLabel }
     }
 
     private func render(document: MarkdownPresentation.Document, identityPrefix: String, streaming: Bool) {

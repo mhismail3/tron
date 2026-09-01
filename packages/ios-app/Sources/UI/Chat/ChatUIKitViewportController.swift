@@ -183,6 +183,7 @@ final class ChatUIKitChatViewController: UIViewController,
         }
         cell.onToolTapped = { [weak self] in self?.onToolTapped?(row.id) }
         cell.onThinkingDetails = { [weak self] in self?.onThinkingDetails?(row.id) }
+        cell.onNotificationDetails = { [weak self] in self?.onThinkingDetails?(row.id) }
         cell.configure(row)
         return cell
     }
