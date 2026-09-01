@@ -84,10 +84,19 @@ final class ChatUIKitChatViewController: UIViewController,
     /// all recovery paths.
     @discardableResult
     func apply(_ next: ChatUIKitPresentationInput) -> ChatUIKitViewportTransactionOutcome {
-        if let appliedVersion = viewportState.appliedVersion, next.version <= appliedVersion {
-            let outcome: ChatUIKitViewportTransactionOutcome = .stale(next.version)
-            onTransactionOutcome?(outcome)
-            return outcome
+        if let appliedGeneration = viewportState.appliedGeneration {
+            if next.generation < appliedGeneration {
+                let outcome: ChatUIKitViewportTransactionOutcome = .stale(next.version)
+                onTransactionOutcome?(outcome)
+                return outcome
+            }
+            if next.generation == appliedGeneration,
+               let appliedVersion = viewportState.appliedVersion,
+               next.version <= appliedVersion {
+                let outcome: ChatUIKitViewportTransactionOutcome = .stale(next.version)
+                onTransactionOutcome?(outcome)
+                return outcome
+            }
         }
         guard viewportState.transactionID < .max else {
             let outcome: ChatUIKitViewportTransactionOutcome = .failed(
@@ -132,6 +141,11 @@ final class ChatUIKitChatViewController: UIViewController,
             collectionView.collectionViewLayout.invalidateLayout()
             collectionView.layoutIfNeeded()
         }
+        // A newer presentation generation starts a fresh version domain. The
+        // complete payload above is the only admission that can establish it;
+        // delayed completions from older generations were rejected before any
+        // collection-view mutation.
+        viewportState.appliedGeneration = next.generation
         viewportState.appliedVersion = next.version
 
         if isInteracting {

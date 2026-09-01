@@ -28,7 +28,6 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     private let trailingButton = UIButton(type: .system)
     private let trailingSpinner = ChatUIKitPulseLoadingView(accent: ChatUIKitTheme.emerald)
     private var editorHeight: NSLayoutConstraint?
-    private var sendHandoffRevision: Int?
     private var sendHandoffIdentity: ChatUIKitComposerSendIdentity?
     private var sendHandoffAccepted = false
     private var applyingAuthoritativeInput = false
@@ -63,17 +62,13 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         if let appliedRevision, next.revision < appliedRevision {
             return false
         }
-        if let prior = input, prior.revision != next.revision {
+        // Revisions refresh the projection but do not own admission. Keep a
+        // handoff alive across every revision while its exact identity remains
+        // authoritative; replacing the session/submission identity retires it.
+        if let sendHandoffIdentity, next.sendIdentity != sendHandoffIdentity {
             clearSendHandoff()
         }
-        // Revision is a UI refresh token, not an admission identity. A
-        // same-revision replacement must not inherit the prior send outcome.
-        if sendHandoffRevision == next.revision,
-           next.sendIdentity != sendHandoffIdentity {
-            clearSendHandoff()
-        }
-        if sendHandoffRevision == next.revision,
-           next.sendIdentity == sendHandoffIdentity,
+        if next.sendIdentity == sendHandoffIdentity,
            (next.isSending || next.submissionPending) {
             sendHandoffAccepted = true
         }
@@ -287,11 +282,10 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
 
     /// The host must resolve the terminal admission explicitly. Rejected sends
     /// release the exact identity for retry; accepted sends remain suppressed
-    /// until a new authoritative identity arrives. There is no wildcard
-    /// revision-only resolution.
-    func resolveSend(revision: Int, identity: ChatUIKitComposerSendIdentity, accepted: Bool) {
-        guard sendHandoffRevision == revision,
-              identity == sendHandoffIdentity else { return }
+    /// until a new authoritative identity arrives. Revisions are deliberately
+    /// absent: they are presentation refreshes, not admission identity.
+    func resolveSend(identity: ChatUIKitComposerSendIdentity, accepted: Bool) {
+        guard identity == sendHandoffIdentity else { return }
         if accepted {
             sendHandoffAccepted = true
         } else {
@@ -300,7 +294,6 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     }
 
     private func clearSendHandoff() {
-        sendHandoffRevision = nil
         sendHandoffIdentity = nil
         sendHandoffAccepted = false
     }
@@ -514,13 +507,12 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
               (!text.isEmpty || !next.attachments.isEmpty),
               !next.isSending, !next.submissionPending, !next.hasActiveUploads,
               next.isCommandReady,
-              !(sendHandoffRevision == next.revision && sendHandoffAccepted) else { return }
+              !(sendHandoffIdentity == identity && sendHandoffAccepted) else { return }
         // A pending handoff suppresses duplicate native actions until the host
-        // reports the terminal acceptance or rejection for this admission.
-        guard sendHandoffRevision == nil else { return }
+        // reports the terminal acceptance or rejection for this exact identity.
+        guard sendHandoffIdentity == nil else { return }
         // No speculative timeout: an ambiguous transport result must not
         // reopen an accepted command and emit it a second time.
-        sendHandoffRevision = next.revision
         sendHandoffIdentity = identity
         sendHandoffAccepted = false
         onIntent?(.send(behavior: behavior, identity: identity))

@@ -171,10 +171,18 @@ final class ChatUIKitTranscriptRowView: UIView {
         // in-flight presentation state survives authoritative frame updates.
         activeAttachmentIDs.removeAll()
         stack.alignment = .fill
-        switch row.content {
-        case .some(.transcript(let item, _)):
+        #if HOSTED_TEST
+        guard let content = row.content else {
+            renderFallback(row)
+            return
+        }
+        #else
+        let content = row.content
+        #endif
+        switch content {
+        case .transcript(let item, _):
             renderTranscript(item, row: row, mediaLoader: mediaLoader, mediaIdentity: mediaIdentity)
-        case .some(.pending(let pending)):
+        case .pending(let pending):
             renderPrompt(
                 title: pending.cardTitle,
                 text: pending.text,
@@ -186,7 +194,7 @@ final class ChatUIKitTranscriptRowView: UIView {
                 mediaIdentity: mediaIdentity,
                 reusableChips: mediaChips
             )
-        case .some(.outgoing(let outgoing, _)):
+        case .outgoing(let outgoing, _):
             renderPrompt(
                 title: outgoing.cardTitle,
                 text: outgoing.text,
@@ -198,7 +206,7 @@ final class ChatUIKitTranscriptRowView: UIView {
                 mediaIdentity: mediaIdentity,
                 reusableChips: mediaChips
             )
-        case .some(.queued(let entry)):
+        case .queued(let entry):
             let behavior = ChatPromptBehavior(entry.message.behavior)
             renderPrompt(
                 title: behavior.title,
@@ -211,8 +219,6 @@ final class ChatUIKitTranscriptRowView: UIView {
                 mediaIdentity: mediaIdentity,
                 reusableChips: mediaChips
             )
-        case .none:
-            renderFallback(row)
         }
         mediaChips.filter { !activeAttachmentIDs.contains($0.attachment.id) }.forEach { $0.cancelLoad() }
         mediaChips = Dictionary(grouping: mediaChips.filter { activeAttachmentIDs.contains($0.attachment.id) }, by: { $0.attachment.id }).compactMap { $0.value.first }
@@ -413,6 +419,7 @@ final class ChatUIKitTranscriptRowView: UIView {
         stack.addArrangedSubview(wrapper)
     }
 
+    #if HOSTED_TEST
     private func renderFallback(_ row: ChatUIKitTranscriptRow) {
         if let run = row.toolRun {
             let pill = ChatUIKitToolPill(run: run)
@@ -427,6 +434,7 @@ final class ChatUIKitTranscriptRowView: UIView {
             stack.addArrangedSubview(markdownView)
         }
     }
+    #endif
 
     private func attachmentStrip(
         _ attachments: [ChatUIKitTranscriptAttachment],

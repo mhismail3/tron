@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import TronMobile
+@preconcurrency import UIKit
 
 struct ChatUIKitTranscriptParityTests {
     @Test("UIKit row preserves ordered attachment facts and resource metadata")
@@ -36,6 +37,54 @@ struct ChatUIKitTranscriptParityTests {
         #expect(ChatUIKitTheme.codeLineSpacing == 3)
         #expect(ChatUIKitTheme.elevatedSurface.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light)) != ChatUIKitTheme.elevatedSurface.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark)))
         #expect(!ChatUIKitPulseLoadingView(accent: ChatUIKitTheme.emerald).isAccessibilityElement)
+    }
+
+    @Test("UIKit code blocks measure every line while the outer viewport stays horizontal")
+    @MainActor
+    func multilineCodeLayoutUsesNaturalHeight() throws {
+        let source = "```swift\nlet first = 1\nlet second = 2\nlet third = 3\n```"
+        let document = MarkdownPresentation.Document(source: source)
+        let row = try #require(ChatUIKitTranscriptRow(
+            id: "code-row", text: source, markdownDocuments: [document]
+        ))
+        let view = ChatUIKitMarkdownView()
+        view.render(row)
+        let fitting = view.systemLayoutSizeFitting(
+            CGSize(width: 320, height: 0),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: fitting.height)
+        view.layoutIfNeeded()
+        let code = try #require(descendantTextView(in: view, text: "let first = 1\nlet second = 2\nlet third = 3"))
+        let scroll = try #require(code.superview as? UIScrollView)
+        #expect(code.frame.height > (code.font?.lineHeight ?? 0) * 2.5)
+        #expect(scroll.alwaysBounceVertical == false)
+        #expect(scroll.showsVerticalScrollIndicator == false)
+        #expect(scroll.contentSize.height <= scroll.bounds.height + 1)
+    }
+
+    @Test("UIKit tables measure multiple rows instead of clipping to one viewport height")
+    @MainActor
+    func multilineTableLayoutUsesNaturalHeight() throws {
+        let source = "| Name | Value |\n| --- | --- |\n| first | one |\n| second | two |\n| third | three |"
+        let document = MarkdownPresentation.Document(source: source)
+        let row = try #require(ChatUIKitTranscriptRow(
+            id: "table-row", text: source, markdownDocuments: [document]
+        ))
+        let view = ChatUIKitMarkdownView()
+        view.render(row)
+        let fitting = view.systemLayoutSizeFitting(
+            CGSize(width: 320, height: 0),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        view.frame = CGRect(x: 0, y: 0, width: 320, height: fitting.height)
+        view.layoutIfNeeded()
+        let table = try #require(descendantScrollView(in: view))
+        #expect(table.frame.height > 40)
+        #expect(table.contentSize.height <= table.bounds.height + 1)
+        #expect(table.alwaysBounceVertical == false)
     }
 
     @Test("UIKit preserves links from MarkdownPresentation attributed runs")
@@ -108,5 +157,23 @@ struct ChatUIKitTranscriptParityTests {
         )
         #expect(first == second)
         #expect(first.hashValue == second.hashValue)
+    }
+
+    @MainActor
+    private func descendantTextView(in view: UIView, text: String) -> UITextView? {
+        if let textView = view as? UITextView, textView.text == text { return textView }
+        for child in view.subviews {
+            if let match = descendantTextView(in: child, text: text) { return match }
+        }
+        return nil
+    }
+
+    @MainActor
+    private func descendantScrollView(in view: UIView) -> UIScrollView? {
+        if let scroll = view as? UIScrollView, scroll.subviews.contains(where: { $0 is UIStackView }) { return scroll }
+        for child in view.subviews {
+            if let match = descendantScrollView(in: child) { return match }
+        }
+        return nil
     }
 }

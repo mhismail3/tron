@@ -103,8 +103,58 @@ struct ChatUIKitComposerTests {
         sendButton?.sendActions(for: .primaryActionTriggered)
         #expect(sends == 1)
         let identity = ChatUIKitComposerSendIdentity(sessionID: "session", submissionID: "submission-1")!
-        controller.resolveSend(revision: 1, identity: identity, accepted: false)
+        controller.resolveSend(identity: identity, accepted: false)
         sendButton?.sendActions(for: .primaryActionTriggered)
+        #expect(sends == 2)
+    }
+
+    @Test
+    @MainActor
+    func acceptedSendStaysSuppressedAcrossNewerRevisionForSameIdentity() {
+        let controller = ChatUIKitComposerController()
+        controller.loadViewIfNeeded()
+        let identity = ChatUIKitComposerSendIdentity(sessionID: "session", submissionID: "submission-1")!
+        controller.apply(ChatUIKitComposerInput(
+            sessionID: "session", text: "send", revision: 1,
+            submissionID: "submission-1", trailingMode: .send,
+            isTranscriptReady: true, isCommandReady: true
+        ))
+        var sends = 0
+        controller.onIntent = { intent in if case .send = intent { sends += 1 } }
+        let button = controller.view.accessibilityElements?.compactMap { $0 as? UIButton }.last
+        button?.sendActions(for: .primaryActionTriggered)
+        controller.resolveSend(identity: identity, accepted: true)
+        controller.apply(ChatUIKitComposerInput(
+            sessionID: "session", text: "send", revision: 2,
+            submissionID: "submission-1", trailingMode: .send,
+            isTranscriptReady: true, isCommandReady: true
+        ))
+        button?.sendActions(for: .primaryActionTriggered)
+        #expect(sends == 1)
+    }
+
+    @Test
+    @MainActor
+    func newIdentityReleasesPriorAcceptedSend() {
+        let controller = ChatUIKitComposerController()
+        controller.loadViewIfNeeded()
+        controller.apply(ChatUIKitComposerInput(
+            sessionID: "session", text: "send", revision: 1,
+            submissionID: "submission-1", trailingMode: .send,
+            isTranscriptReady: true, isCommandReady: true
+        ))
+        var sends = 0
+        controller.onIntent = { intent in if case .send = intent { sends += 1 } }
+        let button = controller.view.accessibilityElements?.compactMap { $0 as? UIButton }.last
+        button?.sendActions(for: .primaryActionTriggered)
+        let first = ChatUIKitComposerSendIdentity(sessionID: "session", submissionID: "submission-1")!
+        controller.resolveSend(identity: first, accepted: true)
+        controller.apply(ChatUIKitComposerInput(
+            sessionID: "session", text: "send", revision: 2,
+            submissionID: "submission-2", trailingMode: .send,
+            isTranscriptReady: true, isCommandReady: true
+        ))
+        button?.sendActions(for: .primaryActionTriggered)
         #expect(sends == 2)
     }
 
@@ -129,11 +179,11 @@ struct ChatUIKitComposerTests {
         let button = controller.view.accessibilityElements?.compactMap { $0 as? UIButton }.last
         button?.sendActions(for: .primaryActionTriggered)
         let wrong = ChatUIKitComposerSendIdentity(sessionID: "session", submissionID: "submission-2")!
-        controller.resolveSend(revision: 1, identity: wrong, accepted: false)
+        controller.resolveSend(identity: wrong, accepted: false)
         button?.sendActions(for: .primaryActionTriggered)
         #expect(sends == 1)
         let exact = ChatUIKitComposerSendIdentity(sessionID: "session", submissionID: "submission-1")!
-        controller.resolveSend(revision: 1, identity: exact, accepted: false)
+        controller.resolveSend(identity: exact, accepted: false)
         button?.sendActions(for: .primaryActionTriggered)
         #expect(sends == 2)
     }

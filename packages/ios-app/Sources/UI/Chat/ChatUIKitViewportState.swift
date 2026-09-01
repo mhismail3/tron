@@ -46,6 +46,7 @@ struct ChatUIKitPresentationActivity: Equatable, Sendable {
 struct ChatUIKitViewportState: Equatable, Sendable {
     var intent: ChatUIKitViewportIntent = .followTail
     var interaction: ChatUIKitInteractionPhase = .idle
+    var appliedGeneration: UInt64?
     var appliedVersion: UInt64?
     var transactionID: UInt64 = 0
 }

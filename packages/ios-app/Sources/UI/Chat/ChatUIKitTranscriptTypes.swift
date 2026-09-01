@@ -78,24 +78,36 @@ struct ChatUIKitTranscriptRow: Hashable {
         /// facts are derived from it at read time, so callers cannot pair a
         /// physical row with stale text, attachment, or tool metadata.
         case installed(content: ChatPhysicalTranscriptRow.Content, preparedText: ChatTextPreparationSnapshot?)
-        /// Synthetic payloads are explicit test/standalone rows, never a
-        /// fallback for an installed physical row.
+        #if HOSTED_TEST
+        /// Synthetic payloads exist only in the hosted test application and
+        /// are never a fallback for an installed physical row.
         case synthetic(PresentationFacts)
+        #endif
     }
 
     let id: String
     let semanticID: String
     let payload: Payload
 
+    #if HOSTED_TEST
     var content: ChatPhysicalTranscriptRow.Content? {
         if case .installed(let content, _) = payload { return content }
         return nil
     }
+    #else
+    var content: ChatPhysicalTranscriptRow.Content {
+        switch payload {
+        case .installed(let content, _): return content
+        }
+    }
+    #endif
     private var facts: PresentationFacts {
         switch payload {
         case .installed(let content, let preparedText):
             return ChatUIKitPresentationAdapter.facts(for: content, preparedText: preparedText)
+        #if HOSTED_TEST
         case .synthetic(let facts): return facts
+        #endif
         }
     }
     var preparedText: ChatTextPreparationSnapshot? { facts.preparedText }
@@ -182,6 +194,10 @@ enum ChatUIKitHistoryState: Equatable, Sendable {
 }
 
 struct ChatUIKitPresentationInput: Equatable {
+    /// Presentation generations own the version domain. A replacement may
+    /// restart versions, while delayed payloads from an older generation are
+    /// never admitted.
+    let generation: UInt64
     let version: UInt64
     let rows: [ChatUIKitTranscriptRow]
     /// A projection of the installed source window. Loading and failure are
@@ -189,11 +205,13 @@ struct ChatUIKitPresentationInput: Equatable {
     let history: ChatUIKitHistoryState
 
     init?(
+        generation: UInt64 = 0,
         version: UInt64,
         rows: [ChatUIKitTranscriptRow],
         history: ChatUIKitHistoryState = .hidden
     ) {
         guard Set(rows.map(\.id)).count == rows.count else { return nil }
+        self.generation = generation
         self.version = version
         self.rows = rows
         self.history = history
@@ -238,6 +256,7 @@ enum ChatUIKitPresentationAdapter {
     static func input(
         from installed: InstalledChatTranscript,
         canonicalAliases: [String: String] = [:],
+        generation: UInt64 = 0,
         version: UInt64,
         historyState: ChatUIKitHistoryState? = nil
     ) -> ChatUIKitPresentationInput? {
@@ -257,7 +276,7 @@ enum ChatUIKitPresentationAdapter {
         let history = historyState ?? ((installed.sourceWindow.originalStart ?? 0) > 0
             ? .available
             : .hidden)
-        return ChatUIKitPresentationInput(version: version, rows: rows, history: history)
+        return ChatUIKitPresentationInput(generation: generation, version: version, rows: rows, history: history)
     }
 
     private static func transcriptItem(

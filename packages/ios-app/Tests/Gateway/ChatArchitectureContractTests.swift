@@ -202,6 +202,32 @@ struct ChatArchitectureContractTests {
         #expect(controller.viewportState.appliedVersion == 4)
     }
 
+    @MainActor
+    @Test("UIKit generation replacement adopts a lower version and rejects old completions")
+    func uikitGenerationScopesVersionAdmission() throws {
+        let controller = ChatUIKitChatViewController()
+        controller.loadViewIfNeeded()
+        let row = ChatUIKitTranscriptRow(id: "one", text: "one")!
+        #expect(controller.apply(.init(generation: 4, version: 20, rows: [row])!) == .applied(1))
+        #expect(controller.apply(.init(generation: 5, version: 1, rows: [row])!) == .applied(2))
+        #expect(controller.viewportState.appliedGeneration == 5)
+        #expect(controller.viewportState.appliedVersion == 1)
+        #expect(controller.apply(.init(generation: 4, version: 21, rows: [row])!) == .stale(21))
+        #expect(controller.viewportState.appliedGeneration == 5)
+        #expect(controller.viewportState.appliedVersion == 1)
+    }
+
+    @Test("UIKit presentation versions remain stale within one generation")
+    @MainActor
+    func uikitSameGenerationVersionAdmission() throws {
+        let controller = ChatUIKitChatViewController()
+        controller.loadViewIfNeeded()
+        let row = ChatUIKitTranscriptRow(id: "one", text: "one")!
+        #expect(controller.apply(.init(generation: 2, version: 8, rows: [row])!) == .applied(1))
+        #expect(controller.apply(.init(generation: 2, version: 7, rows: [row])!) == .stale(7))
+        #expect(controller.apply(.init(generation: 2, version: 8, rows: [row])!) == .stale(8))
+    }
+
     @Test("UIKit history is a projection affordance with one semantic action")
     func uikitHistoryProjection() {
         #expect(ChatUIKitHistoryState.available.isAffordanceVisible)

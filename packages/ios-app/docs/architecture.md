@@ -45,8 +45,9 @@ handoff only when exactly one successor is provable, so row identity cannot be i
 The interactive chat replacement is intentionally UIKit-only at its viewport boundary.
 `ChatUIKitChatViewController` is the isolated foundation for the future cutover: it owns one native
 collection view, semantic-anchor restoration, physical-tail following, and legal-offset clamping.
-Admission is strictly monotonic (`version <= appliedVersion` is stale), and every transaction
-has an overflow-safe sequence with explicit applied, stale, recovered, and failed outcomes.
+Admission is monotonic within one presentation generation (`version <= appliedVersion` is stale);
+a newer generation adopts a fresh version domain, while delayed older-generation payloads remain stale.
+Every transaction has an overflow-safe sequence with explicit applied, stale, recovered, and failed outcomes.
 The installed source-window projection supplies the single earlier-history affordance and one
 load-earlier intent; UIKit owns no paging cursor or loading state. During native tracking and
 deceleration, measured semantic row attributes retain both row identity and pixel offset across
@@ -56,8 +57,9 @@ and reset on reuse/generation replacement. The composer uses authoritative focus
 an explicit bounded send handoff, so rejected sends can retry without duplicate accepted sends.
 `ChatUIKitComposerController` is its separately testable UIKit composer surface. It consumes the
 immutable `ChatUIKitComposerInput` projection and emits `ChatUIKitComposerIntent` values; every send
-intent and terminal resolution carries the exact nonempty scoped submission identity, while accepted
-handoffs remain suppressed until a newer identity arrives. Draft, submission, resource, attachment,
+intent and terminal resolution carries the exact nonempty scoped submission identity. Handoff
+suppression is keyed only by that identity: revision refreshes cannot release an accepted send, and
+only exact terminal rejection or identity replacement releases it. Draft, submission, resource, attachment,
 and viewport authorities remain outside the surface. The
 composer never writes collection-view offsets. Neither controller is mounted in production during
 this phase. The eventual cutover must delete
@@ -72,8 +74,9 @@ chips, resource panel, attachment menu intents, model/process controls, queue ch
 state, and accessibility ordering in isolation. It is the only UIKit composer sizing owner; the
 viewport controller is transcript-only. `ChatUIKitPresentationAdapter` carries complete installed
 physical-row content and prepared-text facts into the isolated surface. Its transcript row uses
-one canonical enum payload (installed or explicitly synthetic), with labels and presentation
-accessors derived from that payload rather than competing stored fields. The UIKit renderer maps the
+one canonical installed enum payload, with labels and presentation accessors derived from that
+payload rather than competing stored fields. Hosted tests may add a synthetic fixture payload, but
+that case and its fallback renderer are excluded from shipping compilation. The UIKit renderer maps the
 shared `MarkdownPresentation.Document` and `Inline` values to native TextKit, code, table, quote,
 list, rule, thinking-tail, and streaming views; normalized attributed-string ranges are measured
 against the rendered TextKit string, and its fallback label is not an authority model. The

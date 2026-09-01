@@ -223,6 +223,18 @@ private final class ChatUIKitStreamingInlineTextView: UITextView {
     }
 }
 
+private final class ChatUIKitHorizontalScrollView: UIScrollView {
+    weak var measuredContent: UIView?
+
+    override var intrinsicContentSize: CGSize {
+        guard let content = measuredContent else {
+            return CGSize(width: UIView.noIntrinsicMetric, height: 0)
+        }
+        let measured = content.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        return CGSize(width: UIView.noIntrinsicMetric, height: ceil(max(0, measured.height)))
+    }
+}
+
 private final class ChatUIKitCodeTextView: UITextView {
     var lineSpacing: CGFloat = 0 { didSet { applyParagraphStyle() } }
 
@@ -528,10 +540,12 @@ final class ChatUIKitMarkdownView: UIView {
         let divider = UIView()
         divider.backgroundColor = ChatUIKitTheme.border
         divider.heightAnchor.constraint(equalToConstant: 1 / traitCollection.displayScale).isActive = true
-        let scroll = UIScrollView()
+        let scroll = ChatUIKitHorizontalScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.alwaysBounceHorizontal = true
+        scroll.alwaysBounceVertical = false
         scroll.showsHorizontalScrollIndicator = false
+        scroll.showsVerticalScrollIndicator = false
         let text = ChatUIKitCodeTextView()
         text.isEditable = false
         text.isSelectable = true
@@ -544,26 +558,32 @@ final class ChatUIKitMarkdownView: UIView {
         text.textContainerInset = ChatUIKitTheme.codeTextInsets
         text.textContainer.lineFragmentPadding = 0
         scroll.addSubview(text)
+        scroll.measuredContent = text
+        container.addSubview(header)
+        container.addSubview(divider)
+        container.addSubview(scroll)
         NSLayoutConstraint.activate([
             header.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12), header.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12), header.topAnchor.constraint(equalTo: container.topAnchor, constant: 7),
             divider.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 7), divider.leadingAnchor.constraint(equalTo: container.leadingAnchor), divider.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scroll.topAnchor.constraint(equalTo: divider.bottomAnchor), scroll.leadingAnchor.constraint(equalTo: container.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: container.trailingAnchor), scroll.bottomAnchor.constraint(equalTo: container.bottomAnchor), scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 40),
-            text.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor), text.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor), text.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor), text.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor), text.widthAnchor.constraint(greaterThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor), text.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor)
+            text.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor), text.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor), text.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor), text.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor), text.widthAnchor.constraint(greaterThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor)
         ])
-        container.addSubview(header); container.addSubview(divider); container.addSubview(scroll)
         return container
     }
 
     private func tableView(_ rows: [[String]]) -> UIView {
-        let scroll = UIScrollView()
+        let scroll = ChatUIKitHorizontalScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.alwaysBounceHorizontal = true
+        scroll.alwaysBounceVertical = false
         scroll.showsHorizontalScrollIndicator = true
+        scroll.showsVerticalScrollIndicator = false
         let table = UIStackView()
         table.axis = .vertical
         table.spacing = 7
         table.translatesAutoresizingMaskIntoConstraints = false
         scroll.addSubview(table)
+        scroll.measuredContent = table
         for (rowIndex, values) in rows.enumerated() {
             let row = UIStackView()
             row.axis = .horizontal
@@ -583,7 +603,7 @@ final class ChatUIKitMarkdownView: UIView {
         table.isLayoutMarginsRelativeArrangement = true
         table.layoutMargins = UIEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
         NSLayoutConstraint.activate([
-            table.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor), table.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor), table.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor), table.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor), table.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor)
+            table.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor), table.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor), table.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor), table.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor), table.widthAnchor.constraint(greaterThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor)
         ])
         scroll.backgroundColor = ChatUIKitTheme.elevatedSurface
         scroll.layer.cornerRadius = 9
