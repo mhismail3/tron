@@ -309,7 +309,9 @@ struct ChatView: View {
             case .begin:
                 await beginOpeningPresentation()
             case .waitForCurrentThenBeginIfNeeded:
-                await sessionPresentation.openingTask?.value
+                guard let active = sessionPresentation.activeOpeningTaskLease else { return }
+                await active.task.value
+                _ = sessionPresentation.finishOpeningTask(active.generation)
                 guard !Task.isCancelled,
                       presentationActivity.allowsPresentationPublication,
                       sessionPresentation.needsOpeningResume else { return }
@@ -1191,15 +1193,24 @@ struct ChatView: View {
         guard scenePhase == .active,
               presentationActivity.allowsPresentationPublication,
               !model.isReconcilingForeground,
-              model.admitsSessionPresentationOpen,
-              sessionPresentation.openingTask == nil else { return }
+              model.admitsSessionPresentationOpen else { return }
         Task { await beginOpeningPresentation() }
     }
 
     @MainActor
     private func beginOpeningPresentation() async {
-        if let active = sessionPresentation.openingTask {
-            await active.value
+        if let active = sessionPresentation.activeOpeningTaskLease {
+            await active.task.value
+            _ = sessionPresentation.finishOpeningTask(active.generation)
+            guard !Task.isCancelled,
+                  scenePhase == .active,
+                  presentationActivity.allowsPresentationPublication,
+                  model.admitsSessionPresentationOpen,
+                  sessionPresentation.needsOpeningResume else { return }
+            // Retry and foreground resume serialize behind the exact drained
+            // lease. Re-entering also coalesces multiple waiters on any newer
+            // task installed by an earlier waiter.
+            await beginOpeningPresentation()
             return
         }
         let task = Task { @MainActor in
@@ -1207,11 +1218,37 @@ struct ChatView: View {
         }
         guard let generation = sessionPresentation.installOpeningTask(task) else {
             task.cancel()
-            await sessionPresentation.openingTask?.value
+            await beginOpeningPresentation()
             return
         }
+        let deadlineTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: ChatOpeningAttemptPolicy.deadline)
+                try Task.checkCancellation()
+            } catch { return }
+            guard sessionPresentation.expireOpeningTask(generation) else { return }
+            transcriptPresentation.suspendPendingWork()
+            scrollCoordinator.cancel()
+            _ = sessionPresentation.open.fail(
+                sessionID: sessionID,
+                epoch: sessionPresentation.open.epoch,
+                message: ChatOpeningAttemptPolicy.timeoutMessage
+            )
+        }
         await task.value
-        sessionPresentation.finishOpeningTask(generation)
+        let completedOwnedTask = sessionPresentation.finishOpeningTask(generation)
+        deadlineTask.cancel()
+        guard completedOwnedTask,
+              ChatOpeningAttemptPolicy.isUnsettled(sessionPresentation.open.phase) else { return }
+        // Every current foreground attempt must settle. Background/route
+        // retirement invalidates the task generation above and remains silently
+        // resumable; an exact task that simply returned cannot leave an opaque
+        // opening surface with no owner.
+        _ = sessionPresentation.open.fail(
+            sessionID: sessionID,
+            epoch: sessionPresentation.open.epoch,
+            message: ChatOpeningAttemptPolicy.unsettledMessage
+        )
     }
 
     @MainActor

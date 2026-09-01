@@ -1252,6 +1252,24 @@ struct SessionPresentationStoreTests {
         #expect(!store.prepareSecondaryProjectionForRuntimeInstallation(current))
     }
 
+    @Test("fork completion cannot revoke a same-session replacement generation")
+    func forkFenceIsExactGenerationOwned() throws {
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        let source = SessionPresentationIdentity(sessionID: "session", generation: 1)
+        let replacement = SessionPresentationIdentity(sessionID: "session", generation: 2)
+        store.mountHostedPresentationForTesting(source)
+        #expect(store.beginForkTransition(source))
+
+        store.mountHostedPresentationForTesting(replacement)
+        store.commitForkTransition(source)
+
+        #expect(store.mountedTarget == replacement)
+        #expect(store.owns(replacement))
+    }
+
     @Test("a secondary response cannot publish after exact token replacement")
     func staleSecondaryResponse() async throws {
         try await withTestWatchdog {
@@ -1328,17 +1346,27 @@ struct SessionPresentationStoreTests {
             let revokedFrame = await socket.sentFrames()[3]
             let revokedRequest = try JSONDecoder.gateway.decode(JSONValue.self, from: revokedFrame)
             let revokedRequestID = try #require(revokedRequest.objectValue?["id"]?.stringValue)
-            await MainActor.run {
-                if let target = store.mountedTarget { store.revokeIntake(target) }
+            let forkTarget = try await MainActor.run {
+                let target = try #require(store.mountedTarget)
+                #expect(store.beginForkTransition(target))
+                #expect(!store.beginForkTransition(target))
+                #expect(store.mountedTarget == target)
+                return target
             }
             await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("response"),
                 "id": .string(revokedRequestID),
-                "ok": .bool(true),
-                "result": .object(["revoked": .bool(true)]),
+                "ok": .bool(false),
+                "error": .object([
+                    "code": .string("conflict"),
+                    "message": .string("Open the session before reading its live runtime projection"),
+                    "retryable": .bool(false),
+                ]),
             ])))
             await revokedLoading.value
             #expect(await MainActor.run { store.context } == nil)
+            #expect(await MainActor.run { errorProbe.errors.isEmpty })
+            await MainActor.run { store.cancelForkTransition(forkTarget) }
 
             await MainActor.run {
                 store.installHostedSubscription(snapshot: snapshot, token: "command-old")
@@ -1515,22 +1543,26 @@ struct SessionPresentationStoreTests {
             )
             store.installHostedSubscription(snapshot: oldSnapshot, token: "old-token")
             let oldTarget = try #require(store.mountedTarget)
-            let opening = Task { try await store.open(newSnapshot.sessionId) }
+            let closing = Task { await store.close(oldTarget) }
 
             try await socket.waitUntilSent(count: 2)
             var frame = await socket.sentFrames()[1]
             var request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
             var id = try #require(request.objectValue?["id"]?.stringValue)
+            #expect(request.objectValue?["method"] == .string("session.close"))
+            let opening = Task { try await store.open(newSnapshot.sessionId) }
+            for _ in 0..<100 where store.selectedSessionID != newSnapshot.sessionId {
+                await Task.yield()
+            }
+            #expect(store.selectedSessionID == newSnapshot.sessionId)
+            #expect(await socket.sentFrames().count == 2)
             await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("response"), "id": .string(id), "ok": .bool(true),
                 "result": .object(["closed": .bool(true)]),
             ])))
+            await closing.value
 
             try await socket.waitUntilSent(count: 3)
-            store.revokeIntake(oldTarget)
-            await store.close(oldTarget)
-            // The close belongs to the superseded owner and must not release
-            // its revocation while the replacement remains pending.
             #expect(!store.owns(oldTarget))
             frame = await socket.sentFrames()[2]
             request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)

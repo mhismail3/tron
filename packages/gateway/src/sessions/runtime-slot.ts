@@ -303,6 +303,8 @@ export class RuntimeSlot {
   private readonly runtimeGeneration = randomUUID();
   /** Stable runtime-only catalog identity for a new session before Pi creates JSONL. */
   private readonly createdAt = new Date().toISOString();
+  /** Canonical parent identity retained while a fresh fork has no JSONL yet. */
+  private liveForkParentSessionId: string | undefined;
   private revision = 0;
   private eventSequence = 0;
   private phase: SessionPhase;
@@ -1007,6 +1009,9 @@ export class RuntimeSlot {
     return this.runtime.session.sessionFile;
   }
 
+  /** Canonical parent identity retained while Pi has only reserved the fork path. */
+  get catalogParentSessionId(): string | undefined { return this.liveForkParentSessionId; }
+
   /** Pi may reserve a future JSONL path before writing its first canonical
    * entry. Catalog membership treats only an existing file as persisted. */
   get persistedSessionFile(): string | undefined {
@@ -1194,7 +1199,21 @@ export class RuntimeSlot {
       }
     } catch (error) {
       nextUnsubscribe();
+      let rollbackError: unknown;
+      try { await this.removeUncommittedForkArtifacts(this.sessionManager, nextManager); }
+      catch (cleanupError) { rollbackError = cleanupError; }
       await this.restorePreviousRuntime(this.sessionManager);
+      if (rollbackError) {
+        throw new GatewayError(
+          "internal",
+          "Session replacement failed and its fork artifacts could not be rolled back",
+          false,
+          {
+            failure: error instanceof Error ? error.message : "Unknown replacement failure",
+            rollback: rollbackError instanceof Error ? rollbackError.message : "Unknown rollback failure",
+          },
+        );
+      }
       throw error;
     }
     previousUnsubscribe?.();
@@ -1202,6 +1221,22 @@ export class RuntimeSlot {
     this.hydrateCanonicalExtensionActivities();
     this.revision += 1;
     this.publishSnapshot();
+  }
+
+  private async removeUncommittedForkArtifacts(
+    previousManager: SessionManager,
+    nextManager: SessionManager,
+  ): Promise<void> {
+    if (this.rebindAttentionDisposition !== "reset") return;
+    const previousFile = previousManager.getSessionFile();
+    const nextFile = nextManager.getSessionFile();
+    const parentFile = nextManager.getHeader()?.parentSession;
+    if (!previousFile || !nextFile || !parentFile || resolve(nextFile) === resolve(previousFile)) return;
+    const canonicalPrevious = realpathSync(previousFile);
+    const canonicalParent = realpathSync(parentFile);
+    if (canonicalPrevious !== canonicalParent) return;
+    await rm(nextFile, { force: true });
+    await rm(join(dirname(nextFile), basename(nextFile, ".jsonl")), { recursive: true, force: true });
   }
 
   private async restorePreviousRuntime(previousManager: SessionManager): Promise<void> {
@@ -5694,9 +5729,11 @@ export class RuntimeSlot {
   async fork(entryId: string, position: "before" | "at" = "at"): Promise<{ sessionId: string; selectedText?: string }> {
     return this.lane.run(async () => {
       this.assertIdle();
+      const parentSessionId = this.id;
       const result = await this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, { position }));
       if (result.cancelled) throw new GatewayError("cancelled", "Fork was cancelled by an extension");
       const next = this.id;
+      this.liveForkParentSessionId = parentSessionId;
       this.summaryContentDirty = true;
       this.revision += 1;
       this.emit("session.structureChanged", { branchChanged: true });

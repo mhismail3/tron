@@ -21,6 +21,19 @@ enum ChatOpeningSurfacePolicy {
     }
 }
 
+enum ChatOpeningAttemptPolicy {
+    /// Bounds the complete open → synchronize → local projection → ready-frame
+    /// transaction. Inner Gateway and physical-tail operations retain their
+    /// narrower deadlines; this is the final fail-closed presentation boundary.
+    static let deadline: Duration = .seconds(30)
+    static let timeoutMessage = "Opening took too long. The session is safe; retry this conversation."
+    static let unsettledMessage = "The conversation changed while opening. Please retry."
+
+    static func isUnsettled(_ phase: ChatOpenPresentationPhase) -> Bool {
+        phase == .opening || phase == .positioning
+    }
+}
+
 enum ChatSessionVisibilityPolicy {
     static func isVisible(
         sceneActive: Bool,
@@ -102,6 +115,15 @@ final class ChatSessionPresentation {
             && openingTask == nil
     }
 
+    struct OpeningTaskLease {
+        let task: Task<Void, Never>
+        let generation: Int
+    }
+
+    var activeOpeningTaskLease: OpeningTaskLease? {
+        openingTask.map { OpeningTaskLease(task: $0, generation: openingTaskGeneration) }
+    }
+
     func installOpeningTask(_ task: Task<Void, Never>) -> Int? {
         guard openingTask == nil else { return nil }
         openingTaskGeneration &+= 1
@@ -109,15 +131,25 @@ final class ChatSessionPresentation {
         return openingTaskGeneration
     }
 
-    func finishOpeningTask(_ generation: Int) {
-        guard openingTaskGeneration == generation else { return }
+    @discardableResult
+    func finishOpeningTask(_ generation: Int) -> Bool {
+        guard openingTaskGeneration == generation, openingTask != nil else { return false }
         openingTask = nil
+        return true
+    }
+
+    /// Cancels only the exact task that installed the deadline, but retains its
+    /// lease until the task has actually drained. Retry/foreground resume joins
+    /// that lease instead of overlapping a second session.open.
+    @discardableResult
+    func expireOpeningTask(_ generation: Int) -> Bool {
+        guard openingTaskGeneration == generation, let openingTask else { return false }
+        openingTask.cancel()
+        return true
     }
 
     func cancelOpeningTask() {
-        openingTaskGeneration &+= 1
         openingTask?.cancel()
-        openingTask = nil
     }
 
     func requestInteractionPresentation(_ interaction: ExtensionInteraction) {

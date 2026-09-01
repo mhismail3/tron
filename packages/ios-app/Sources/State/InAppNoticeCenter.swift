@@ -5,6 +5,7 @@ enum InAppNoticeKey: String, Hashable, Sendable {
     case gatewayRestart
     case packageProgress
     case sessionCatchUp
+    case sessionForked
     case onboardingError
 }
 

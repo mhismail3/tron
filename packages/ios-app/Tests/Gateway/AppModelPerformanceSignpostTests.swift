@@ -612,15 +612,14 @@ struct AppModelPerformanceSignpostTests {
         }
     }
 
-    @Test("fork returns navigation identity without replacing dashboard selection")
+    @Test("fork returns its owned route immediately and converges the dashboard independently")
     func forkRouteIdentity() async throws {
         try await withTestWatchdog {
             let harness = try await makeHarness()
             let forking = Task {
                 try await harness.model.fork(
                     sessionID: "mounted-route",
-                    entryID: "entry",
-                    position: "before"
+                    entryID: "entry"
                 )
             }
             defer { forking.cancel() }
@@ -628,6 +627,7 @@ struct AppModelPerformanceSignpostTests {
             let mutation = try await request(in: harness.socket, frameIndex: 1)
             #expect(mutation.method == "session.fork")
             #expect(mutation.params?.objectValue?["sessionId"] == .string("mounted-route"))
+            #expect(mutation.params?.objectValue?["position"] == .string("at"))
             await harness.socket.enqueue(successResponse(
                 id: mutation.id,
                 result: .object([
@@ -635,19 +635,45 @@ struct AppModelPerformanceSignpostTests {
                     "selectedText": .string("restored draft"),
                 ])
             ))
-            let refresh = try await request(in: harness.socket, frameIndex: 2)
-            #expect(refresh.method == "session.list")
-            await harness.socket.enqueue(errorResponse(
-                id: refresh.id,
-                code: "synthetic_refresh_failure",
-                retryable: false
-            ))
 
             let route = try await valueOfOwnedTask(forking)
             #expect(route.sessionID == "forked-route")
             #expect(route.editorText == "restored draft")
+            #expect(route.id != route.sessionID)
+            #expect(await MainActor.run { harness.model.ownsNavigationRoute(route) })
+            #expect(await MainActor.run {
+                harness.model.visibleNotices.contains {
+                    $0.title == "Session forked" && $0.role == .success && $0.scope == .app
+                }
+            })
             let selectedAfterFork = await MainActor.run { harness.model.selectedSessionID }
             #expect(selectedAfterFork == nil)
+
+            // Fork creation starts one shared authoritative catalog traversal,
+            // but neither its latency nor a transient failure delays navigation.
+            let convergence = Task { await harness.model.refreshSessions() }
+            let refresh = try await request(in: harness.socket, frameIndex: 2)
+            #expect(refresh.method == "session.list")
+            await harness.socket.enqueue(successResponse(
+                id: refresh.id,
+                result: .object([
+                    "sessions": .array([.object([
+                        "id": .string("forked-route"),
+                        "cwd": .string("/workspace"),
+                        "kind": .string("user"),
+                        "parentSessionId": .string("mounted-route"),
+                        "createdAt": .string("2026-01-01T00:00:00Z"),
+                        "updatedAt": .string("2026-01-01T00:00:00Z"),
+                        "messageCount": .number(1),
+                        "firstMessage": .string("retained prompt"),
+                        "phase": .string("idle"),
+                    ])]),
+                    "nextCursor": .null,
+                    "listRevision": .number(2),
+                ])
+            ))
+            #expect(await convergence.value == .published)
+            #expect(await MainActor.run { harness.model.visibleSessions.map(\.id) } == ["forked-route"])
             await harness.client.close()
         }
     }

@@ -1,5 +1,65 @@
 import Foundation
 
+/// Requires the mounted chat generation to retire before a different route mounts.
+struct SessionRouteReplacementOwner: Equatable {
+    private struct Pending: Equatable {
+        let retiringRouteID: String
+        let retiringToken: PresentationSurfaceToken?
+        let replacement: AppModel.SessionNavigationRoute
+    }
+
+    enum RequestAction: Equatable {
+        case present(AppModel.SessionNavigationRoute)
+        case dismissCurrent
+        case waitForRetirement
+    }
+
+    private var pending: Pending?
+
+    mutating func request(
+        current: AppModel.SessionNavigationRoute?,
+        currentToken: PresentationSurfaceToken?,
+        replacement: AppModel.SessionNavigationRoute
+    ) -> RequestAction {
+        guard let current else {
+            if let pending {
+                self.pending = Pending(
+                    retiringRouteID: pending.retiringRouteID,
+                    retiringToken: pending.retiringToken,
+                    replacement: replacement
+                )
+                return .waitForRetirement
+            }
+            return .present(replacement)
+        }
+        guard current.id != replacement.id else {
+            pending = nil
+            return .present(replacement)
+        }
+        pending = Pending(
+            retiringRouteID: current.id,
+            retiringToken: currentToken,
+            replacement: replacement
+        )
+        return .dismissCurrent
+    }
+
+    mutating func completeRetirement(
+        routeID: String,
+        token: PresentationSurfaceToken
+    ) -> AppModel.SessionNavigationRoute? {
+        guard let pending,
+              pending.retiringRouteID == routeID,
+              pending.retiringToken == nil || pending.retiringToken == token else { return nil }
+        self.pending = nil
+        return pending.replacement
+    }
+
+    mutating func invalidate() {
+        pending = nil
+    }
+}
+
 /// Admits only the latest asynchronous dashboard navigation intent.
 struct DashboardNavigationOwner: Equatable {
     private var generation = 0

@@ -617,6 +617,24 @@ describe("connection-wide synchronization ownership", () => {
     expect(frames.slice(afterEvents).filter((frame) => frame.topic === "session.progress").map((frame) => frame.sessionId)).toEqual(["after"]);
     expect(frames.slice(afterEvents).some((frame) => frame.topic === "terminal.output")).toBe(false);
 
+    // A replacement open rotates the carried fork token. A late close from the
+    // retired parent view resolves through the alias but cannot revoke the
+    // child's newer exact token.
+    const staleSource = await request("open-stale-source", "session.open", "stale-source");
+    await request("sync-stale-source", "session.sync", "stale-source", { syncToken: staleSource.result.syncToken });
+    const staleFork = await request("fork-stale-source", "session.fork", "stale-source", { commandId: "command-fork-stale-source" });
+    const staleChildID = staleFork.result.sessionId;
+    const staleChild = await request("open-stale-child", "session.open", staleChildID);
+    await request("sync-stale-child", "session.sync", staleChildID, { syncToken: staleChild.result.syncToken });
+    const staleClose = await request("close-stale-parent", "session.close", "stale-source", {
+      subscriptionToken: staleSource.result.subscriptionToken,
+    });
+    expect(staleClose.result).toEqual({ closed: false });
+    const staleCloseEvents = frames.length;
+    gateway.broadcastSession(staleChildID, "session.progress", event(staleChildID, 2) as any);
+    await waitFor(() => frames.slice(staleCloseEvents).some((frame) =>
+      frame.topic === "session.progress" && frame.sessionId === staleChildID));
+
     // Repeated forks retain only a bounded recent alias window. The immediate
     // predecessor must still route close controls to the current runtime.
     let currentSessionId = "after";

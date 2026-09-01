@@ -145,6 +145,8 @@ struct SessionSummaryPresentationTests {
         let parent = session("parent")
         let fork = session("fork", parent: "parent")
         let child = session("child", kind: .subagent, parent: "parent")
+        #expect(!parent.isFork)
+        #expect(fork.isFork)
         #expect(SessionSummary.dashboardSessions([parent, fork, child]).map(\.id) == ["parent", "fork"])
     }
 }

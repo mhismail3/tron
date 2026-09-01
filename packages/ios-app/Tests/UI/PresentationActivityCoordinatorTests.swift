@@ -104,6 +104,34 @@ struct PresentationActivityCoordinatorTests {
         #expect(coordinator.activity(for: grandchild) == .covered)
     }
 
+    @Test("fork handoff reaches the chat only after every nested surface retires")
+    func forkHandoffRetiresEverySurface() throws {
+        let coordinator = PresentationActivityCoordinator()
+        let chat = PresentationSurfaceToken(id: "chat", generation: UUID())
+        let context = PresentationSurfaceToken(id: "context", generation: UUID())
+        let history = PresentationSurfaceToken(id: "history", generation: UUID())
+        let selection = PresentationSurfaceToken(id: "selection", generation: UUID())
+        let confirmation = PresentationSurfaceToken(id: "confirmation", generation: UUID())
+        coordinator.register(chat, parent: nil)
+        coordinator.register(context, parent: chat)
+        coordinator.register(history, parent: context)
+        coordinator.register(selection, parent: history)
+        coordinator.register(confirmation, parent: selection)
+
+        var owners = Array(repeating: ChatForkNavigationOwner(), count: 4)
+        let route = AppModel.SessionNavigationRoute(sessionID: "fork", editorText: nil)
+        owners[0].stage(route)
+        for index in 0..<owners.count {
+            let surface = [confirmation, selection, history, context][index]
+            coordinator.retire(surface)
+            let consumed = owners[index].consume()
+            let forwarded = try #require(consumed)
+            if index + 1 < owners.count { owners[index + 1].stage(forwarded) }
+            #expect(coordinator.activity(for: chat) == (index == owners.count - 1 ? .active : .covered))
+        }
+        #expect(coordinator.mountedSurfaceCount == 1)
+    }
+
     @Test("a stale generation cannot retire a replacement")
     func generationsAreIndependent() {
         let coordinator = PresentationActivityCoordinator()

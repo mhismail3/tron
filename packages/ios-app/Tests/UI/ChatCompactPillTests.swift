@@ -241,6 +241,16 @@ struct ChatCompactPillTests {
         #expect(SessionHistoryPreview.plain("# **Hello**\n> [world](https://example.test)\n- ~~again~~\n```swift") == "Hello world again swift")
     }
 
+    @Test("fork-before is offered only for user prompts accepted by the runtime")
+    func forkChoicePolicy() {
+        #expect(SessionForkChoicePolicy.initialPosition(for: .user) == .at)
+        #expect(SessionForkChoicePolicy.supportsBefore(.user))
+        for role: TranscriptItem.Role? in [.assistant, .toolResult, nil] {
+            #expect(SessionForkChoicePolicy.initialPosition(for: role) == .at)
+            #expect(!SessionForkChoicePolicy.supportsBefore(role))
+        }
+    }
+
     @Test("compact transcript pills share metadata-level leading icon rhythm")
     func compactPillGeometry() {
         #expect(ChatCompactPillLayoutPolicy.horizontalPadding == 10)

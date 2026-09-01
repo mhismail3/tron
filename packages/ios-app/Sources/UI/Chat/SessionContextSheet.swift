@@ -186,6 +186,7 @@ struct SessionContextSheet: View {
     @State private var capturedNoticeScope: InAppNoticeScope?
     @State private var fallbackNoticeScope = InAppNoticeScope.presentation(UUID())
     @State private var presentation: SessionContextPresentation?
+    @State private var forkNavigation = ChatForkNavigationOwner()
 
     private var presentationSource: SessionContextPresentation? {
         model.sessionContextPresentation(for: sessionID)
@@ -265,7 +266,8 @@ struct SessionContextSheet: View {
             }
             .tronManagedSheet(
                 item: $destination,
-                identity: { "session.\(sessionID).manage.\($0.id)" }
+                identity: { "session.\(sessionID).manage.\($0.id)" },
+                onDismiss: completeForkNavigationAfterHistoryDismissal
             ) { route in
                 switch route {
                 case .agentContext:
@@ -747,7 +749,12 @@ struct SessionContextSheet: View {
     }
 
     private func handleForkCreated(_ route: AppModel.SessionNavigationRoute) {
-        dismiss()
+        forkNavigation.stage(route)
+        destination = nil
+    }
+
+    private func completeForkNavigationAfterHistoryDismissal() {
+        guard let route = forkNavigation.consume() else { return }
         onForkCreated(route)
     }
 

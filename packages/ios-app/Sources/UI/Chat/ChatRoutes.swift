@@ -2,8 +2,26 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
+struct ChatForkNavigationOwner {
+    private var pendingRoute: AppModel.SessionNavigationRoute?
+
+    var hasPendingRoute: Bool { pendingRoute != nil }
+
+    mutating func stage(_ route: AppModel.SessionNavigationRoute) {
+        pendingRoute = route
+    }
+
+    mutating func consume() -> AppModel.SessionNavigationRoute? {
+        defer { pendingRoute = nil }
+        return pendingRoute
+    }
+
+    mutating func cancel() { pendingRoute = nil }
+}
+
 /// Route-only presentation shell. All authority and task admission remain in
-/// ChatView/ChatSessionPresentation; this modifier owns no mirrored state.
+/// ChatView/ChatSessionPresentation. The sole transient state below sequences a
+/// confirmed fork route after the complete outer context-sheet dismissal.
 struct ChatRoutes: ViewModifier {
     let sessionID: String
     let projectCWD: String?
@@ -31,14 +49,20 @@ struct ChatRoutes: ViewModifier {
     @Binding var editorRequest: ComposerEditorRequest?
     let onUseEditorRequest: (ComposerEditorRequest) -> Void
     let onKeepEditorRequest: (ComposerEditorRequest) -> Void
+    @Environment(AppModel.self) private var model
+    @State private var forkNavigation = ChatForkNavigationOwner()
 
     func body(content: Content) -> some View {
         content
             .tronManagedSheet(
                 isPresented: $showContext,
-                identity: "chat.\(sessionID).context"
+                identity: "chat.\(sessionID).context",
+                onDismiss: completeForkNavigationAfterContextDismissal
             ) {
-                SessionContextSheet(sessionID: sessionID, onForkCreated: onForkCreated)
+                SessionContextSheet(sessionID: sessionID) { route in
+                    forkNavigation.stage(route)
+                    showContext = false
+                }
             }
             .tronManagedSheet(
                 isPresented: $showSettings,
@@ -139,6 +163,12 @@ struct ChatRoutes: ViewModifier {
                     onSecondary: { onKeepEditorRequest(request) }
                 )
             }
+    }
+
+    private func completeForkNavigationAfterContextDismissal() {
+        guard let route = forkNavigation.consume(),
+              model.ownsNavigationRoute(route) else { return }
+        onForkCreated(route)
     }
 }
 

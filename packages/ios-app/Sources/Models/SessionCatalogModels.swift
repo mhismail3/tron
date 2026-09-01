@@ -136,6 +136,8 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         phase.isActive && hasActiveSubagents && foregroundPhase == .idle
     }
 
+    var isFork: Bool { parentSessionId != nil }
+
     var title: String {
         if let name, !name.isEmpty { return name }
         let first = firstMessage.trimmingCharacters(in: .whitespacesAndNewlines)

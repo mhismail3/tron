@@ -1969,6 +1969,7 @@ export class RuntimeRegistry {
     ambiguousIDs: ReadonlySet<string>,
   ): CatalogPageSeed[] {
     const pathToId = new Map(sessions.map((session) => [resolve(session.path), session.id]));
+    const pathById = new Map(sessions.map((session) => [session.id, session.path]));
     const delegated = this.delegatedSessionTopologies(sessions);
     const persistedIDs = new Set(sessions.map((session) => session.id));
     const seeds: CatalogPageSeed[] = [];
@@ -1978,9 +1979,24 @@ export class RuntimeRegistry {
       const kind: SessionSummary["kind"] = topology ? "subagent" : "user";
       if (scope === "user" && kind === "subagent") continue;
       const headerParentSessionId = session.parentSessionPath ? pathToId.get(resolve(session.parentSessionPath)) : undefined;
-      const parentSessionId = topology?.parentSessionId ?? headerParentSessionId;
-      const latest = this.latestSummaries.get(session.id);
       const slot = this.slots.get(session.id);
+      // During the exact live→persisted boundary, a warmed structural index can
+      // observe the new child file before its canonical parent header alias has
+      // joined the same normalized cut. The mutation-owned parent ID is the same
+      // canonical relationship and closes that one-cut gap; cold catalogs still
+      // derive it exclusively from JSONL topology/header evidence.
+      const liveParentSessionId = slot?.catalogParentSessionId;
+      const liveParentPath = liveParentSessionId ? pathById.get(liveParentSessionId) : undefined;
+      const headerMatchesLiveParent = session.parentSessionPath === undefined
+        || (liveParentPath !== undefined
+          && basename(session.parentSessionPath) === basename(liveParentPath));
+      const liveTransitionParentSessionId = headerMatchesLiveParent
+        ? liveParentSessionId
+        : undefined;
+      const parentSessionId = topology?.parentSessionId
+        ?? headerParentSessionId
+        ?? liveTransitionParentSessionId;
+      const latest = this.latestSummaries.get(session.id);
       const name = latest?.name ?? session.name;
       seeds.push({
         id: session.id,
@@ -2011,11 +2027,13 @@ export class RuntimeRegistry {
       for (const [id, slot] of this.slots) {
         if (slot.isDisposed || persistedIDs.has(id) || ambiguousIDs.has(id)) continue;
         const latest = this.latestSummaries.get(id);
+        const parentSessionId = slot.catalogParentSessionId;
         seeds.push({
           id,
           ...(latest?.name ? { name: latest.name } : {}),
           cwd: slot.cwd,
           kind: "user",
+          ...(parentSessionId ? { parentSessionId } : {}),
           createdAt: slot.catalogCreatedAt,
           updatedAt: latest?.updatedAt ?? slot.catalogCreatedAt,
           ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),

@@ -1399,12 +1399,15 @@ final class ComposerDraftCoordinator {
         // Route remounts preserve the admission, but a profile/lifecycle
         // replacement must stop it before any mutation can enter the new
         // Gateway connection.
-        // Lifecycle replacement must stop transport before its first
-        // suspension. Once transport is in flight, outcome-only admission
-        // intentionally lets accepted work survive a route remount.
-        try require(admission)
+        // Lifecycle replacement or task cancellation must stop transport before
+        // its first suspension. That boundary is provably not sent, so it must
+        // also reject the local admission and restore the captured draft instead
+        // of leaving a scope-owned `.sending` row with no transport owner.
+        // Once transport is in flight, outcome-only admission intentionally lets
+        // accepted work survive a route remount.
         let operationID: String
         do {
+            try require(admission)
             operationID = try await sendOperation(
                 admission.snapshot.outgoingText,
                 submission.target.sessionID,
@@ -1882,6 +1885,7 @@ final class ComposerDraftCoordinator {
     }
 
     private func require(_ admission: SubmissionAdmission) throws {
+        try Task.checkCancellation()
         guard submissionByScope[admission.scope]?.id == admission.id,
               admitsLifecycleGeneration(admission.lifecycleGeneration) else {
             throw CancellationError()

@@ -1807,10 +1807,17 @@ final class AppModel {
     }
 
     func ownsNavigationRoute(_ route: SessionNavigationRoute) -> Bool {
-        guard let gatewayProfileID = route.gatewayProfileID else { return true }
-        guard profiles.selected?.id == gatewayProfileID,
-              let generation = route.gatewayLifecycleGeneration else { return false }
-        return lifecycle.admits(.init(generation: generation, connectionID: nil))
+        switch (route.gatewayProfileID, route.gatewayLifecycleGeneration) {
+        case (nil, nil):
+            // Bounded hosted/local routes have no transport owner.
+            return true
+        case let (gatewayProfileID?, generation?):
+            return profiles.selected?.id == gatewayProfileID
+                && lifecycle.admits(.init(generation: generation, connectionID: nil))
+        default:
+            // Partial ownership metadata is never a valid navigation grant.
+            return false
+        }
     }
 
     func requestPushNavigation(_ tap: PushNotificationTap) {
@@ -2368,17 +2375,50 @@ final class AppModel {
     func fork(
         sessionID: String,
         entryID: String,
-        position: String = "before"
+        position: String = "at"
     ) async throws -> SessionNavigationRoute {
-        let outcome = try await sessionMutations.fork(
-            sessionID: sessionID,
-            entryID: entryID,
-            position: position
-        )
-        await refreshSessions()
+        guard let admission = lifecycle.generationAdmission,
+              let profileID = lifecycle.selectedProfileID else { throw CancellationError() }
+        // Fence the exact source before transport. Pi rekeys during the mutation,
+        // so waiting for the response is too late to stop a structure event from
+        // launching an obsolete tree/context read.
+        let sourceTarget = sessionPresentation.presentationTarget(for: sessionID)
+        if let sourceTarget,
+           !sessionPresentation.beginForkTransition(sourceTarget) {
+            throw CancellationError()
+        }
+        let outcome: SessionForkOutcome
+        do {
+            outcome = try await sessionMutations.fork(
+                sessionID: sessionID,
+                entryID: entryID,
+                position: position
+            )
+        } catch {
+            if let sourceTarget { sessionPresentation.cancelForkTransition(sourceTarget) }
+            throw error
+        }
+        // Canonical success permanently retires only the captured source target;
+        // a same-session remount that raced the request has a different generation
+        // and must not be revoked by this completion.
+        if let sourceTarget {
+            sessionPresentation.commitForkTransition(sourceTarget)
+            cancelExtensionEditorSynchronization(for: sourceTarget)
+            composerDrafts.revoke(sourceTarget)
+        }
+        // Catalog convergence is authoritative but independent. Retain the
+        // invalidation even if lifecycle replacement makes this route stale.
+        scheduleSessionListRefresh()
+        // The command receipt proves canonical creation, but it cannot authorize
+        // navigation through a replacement connection or selected Gateway.
+        try requireLifecycle(admission)
+        guard lifecycle.selectedProfileID == profileID else { throw CancellationError() }
+        postNotice("Session forked", replacing: .sessionForked, role: .success)
         return SessionNavigationRoute(
             sessionID: outcome.sessionID,
-            editorText: outcome.selectedText
+            editorText: outcome.selectedText,
+            gatewayProfileID: profileID,
+            gatewayLifecycleGeneration: admission.generation
         )
     }
 

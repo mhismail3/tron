@@ -83,14 +83,45 @@ struct ChatSessionPresentationTests {
         #expect(owner.openingTask != nil)
         #expect(owner.installOpeningTask(Task<Void, Never> {}) == nil)
 
-        owner.finishOpeningTask(generation &+ 1)
+        #expect(!owner.finishOpeningTask(generation &+ 1))
         #expect(owner.openingTask != nil)
         owner.cancelOpeningTask()
+        #expect(owner.installOpeningTask(Task<Void, Never> {}) == nil)
+        #expect(owner.activeOpeningTaskLease?.generation == generation)
+        #expect(owner.finishOpeningTask(generation))
         let replacement = try #require(owner.installOpeningTask(Task<Void, Never> {}))
-        owner.finishOpeningTask(generation)
-        #expect(owner.openingTask != nil)
-        owner.finishOpeningTask(replacement)
+        #expect(owner.finishOpeningTask(replacement))
         #expect(owner.openingTask == nil)
+    }
+
+    @Test("opening deadline expires only its exact task generation")
+    func openingDeadlineOwnership() throws {
+        let owner = ChatSessionPresentation(sessionID: "session-a")
+        let first = Task<Void, Never> { try? await Task.sleep(for: .seconds(30)) }
+        let firstGeneration = try #require(owner.installOpeningTask(first))
+
+        #expect(!owner.expireOpeningTask(firstGeneration &+ 1))
+        #expect(owner.openingTask != nil)
+        #expect(owner.expireOpeningTask(firstGeneration))
+        #expect(owner.openingTask != nil)
+        #expect(owner.installOpeningTask(Task<Void, Never> {}) == nil)
+        #expect(owner.finishOpeningTask(firstGeneration))
+
+        let replacement = Task<Void, Never> { try? await Task.sleep(for: .seconds(30)) }
+        let replacementGeneration = try #require(owner.installOpeningTask(replacement))
+        #expect(!owner.expireOpeningTask(firstGeneration))
+        #expect(owner.openingTask != nil)
+        owner.cancelOpeningTask()
+        #expect(owner.finishOpeningTask(replacementGeneration))
+    }
+
+    @Test("opening attempts fail closed only while unsettled")
+    func openingAttemptSettlementPolicy() {
+        #expect(ChatOpeningAttemptPolicy.deadline == .seconds(30))
+        #expect(ChatOpeningAttemptPolicy.isUnsettled(.opening))
+        #expect(ChatOpeningAttemptPolicy.isUnsettled(.positioning))
+        #expect(!ChatOpeningAttemptPolicy.isUnsettled(.ready))
+        #expect(!ChatOpeningAttemptPolicy.isUnsettled(.failed("retry")))
     }
 
     @Test("foreground resumes an interrupted opening but not a passive ready session")
@@ -134,6 +165,28 @@ struct ChatSessionPresentationTests {
             hasOpeningTask: false,
             needsOpeningResume: false
         ) == .none)
+    }
+
+    @Test("fork navigation advances once through every nested dismissal owner")
+    func forkNavigationOwnership() throws {
+        var confirmation = ChatForkNavigationOwner()
+        var historySelection = ChatForkNavigationOwner()
+        var historySheet = ChatForkNavigationOwner()
+        var contextSheet = ChatForkNavigationOwner()
+        let route = AppModel.SessionNavigationRoute(sessionID: "fork", editorText: "draft")
+
+        confirmation.stage(route)
+        #expect(!contextSheet.hasPendingRoute)
+        let afterConfirmation = confirmation.consume()
+        historySelection.stage(try #require(afterConfirmation))
+        #expect(confirmation.consume() == nil)
+        let afterSelection = historySelection.consume()
+        historySheet.stage(try #require(afterSelection))
+        #expect(!contextSheet.hasPendingRoute)
+        let afterHistory = historySheet.consume()
+        contextSheet.stage(try #require(afterHistory))
+        #expect(contextSheet.consume() == route)
+        #expect(contextSheet.consume() == nil)
     }
 
     @Test("session visibility follows synchronized topmost foreground authority, not ready-frame timing")

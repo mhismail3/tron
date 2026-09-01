@@ -646,11 +646,17 @@ rename, delete, or otherwise mutate `~/.pi` as part of that disposition. If more
 one canonical file claims the same embedded session ID, the Gateway omits every ambiguous copy
 and rejects open/delete by that ID until the duplicate is repaired; traversal order never chooses
 canonical ownership. A newly created session has no canonical Pi JSONL until Pi records its first
-content. While the Gateway owns that bounded live runtime slot, `session.list` projects one runtime-only
-empty user row with its stable slot-creation time, cwd, phase, and revisioned summary fields. That row is
-visible to every connected dashboard and remains directly openable/deletable, but it is not a second
-session store: idle slot retirement or Gateway restart removes it if Pi never persisted content. Once Pi
-creates JSONL, the canonical row replaces the runtime-only projection under the same ID without duplication.
+assistant content; a retained user-only fork is deferred by the same pinned persistence policy. While the
+Gateway owns that bounded live runtime slot, `session.list` projects one runtime-only empty user row with
+its stable slot-creation time, cwd, phase, and revisioned summary fields. A fresh fork whose retained branch
+has not produced an assistant entry additionally projects the exact pre-fork
+session ID as `parentSessionId`, so dashboards classify it immediately without inferring from paths or
+fabricating a row. If the new JSONL joins a warmed structural cut before its normalized parent alias, that
+same mutation-owned ID bridges only the live transition; cold catalogs derive the relationship from canonical
+header/path evidence. That row is visible to every connected dashboard and remains directly openable/deletable,
+but it is not a second session store: idle slot retirement or Gateway restart removes it if Pi never persisted
+content. Once Pi creates JSONL, the canonical row replaces the runtime-only projection under the same ID
+without duplication.
 Before materialization, recursive discovery streams at most 50,001 directory entries,
 retains at most 25,001 canonical directories/8 MiB of traversal paths, and admits at most 25,000 session
 records/8 MiB of retained metadata; overflow fails retryably without publishing a partial catalog. The pinned
@@ -765,8 +771,10 @@ current-path metadata; it never recursively serializes an unbounded canonical tr
 Every source node, parent link, timestamp, label, child list, and canonical entry ID is
 validated before selection. Content and image blobs are projected only for admitted newest
 candidates, so omitted images do not consume BlobStore capacity. The projection rejects
-duplicate or malformed canonical entries and oversized retained strings; omitted older parents
-are valid because the bounded outline is not a canonical mirror.
+duplicate or malformed canonical entries and oversized retained metadata strings. Producer-authored
+compaction and branch summaries may exceed one tree field because Pi owns their canonical context;
+`session.tree` validates their shape and emits only the existing 240-character bounded preview.
+Omitted older parents are valid because the bounded outline is not a canonical mirror.
 `session.commands` preserves runtime sort order and rejects catalogs above 1,000 rows
 or 700 KiB, duplicate full `source:name` identities, empty names, invalid resource scope/origin,
 names above 512 UTF-8 bytes, or other command metadata strings above 8 KiB before generic JSON projection can truncate the response.
@@ -931,7 +939,7 @@ and is never automatically replayed.
 7. A foreground snapshot cannot be idle while the embedded runtime is streaming,
    and an idle snapshot cannot retain a running foreground-tool overlay. Detached
    extension work is represented separately by extension UI state.
-8. Fork/session replacement rekeys the same owning slot and subscription-token map entry.
+8. Fork/session replacement rekeys the same owning slot and subscription-token map entry. An open that overlaps rekey uses the slot's post-acquire canonical ID for synchronization, snapshot, and attention. A replacement open rotates the carried token; an old-ID close may resolve through the bounded alias but cannot revoke that newer token. Pre-commit rekey failure restores the source runtime and removes any uniquely created fork JSONL/artifact directory before reporting failure.
 9. Idle runtimes may be evicted only while not busy and unsubscribed.
 10. Administrative restart waits for admitted agent runs to settle and requires an
     external supervisor; it never claims that in-process runtime memory survives replacement.

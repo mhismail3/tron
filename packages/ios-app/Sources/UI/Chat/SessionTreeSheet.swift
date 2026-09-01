@@ -27,6 +27,24 @@ enum SessionHistoryMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum SessionForkPosition: String, Equatable, Sendable {
+    case before
+    case at
+}
+
+enum SessionForkChoicePolicy {
+    static func initialPosition(for _: TranscriptItem.Role?) -> SessionForkPosition {
+        // Preserve the selected canonical entry by default. Editing a user
+        // prompt remains explicit because "before" can produce an empty fork
+        // at the first prompt and intentionally excludes that prompt.
+        .at
+    }
+
+    static func supportsBefore(_ role: TranscriptItem.Role?) -> Bool {
+        role == .user
+    }
+}
+
 enum SessionHistoryPolicy {
     static func nodes(_ nodes: [SessionTreeNode], mode: SessionHistoryMode) -> [SessionTreeNode] {
         nodes.filter { node in
@@ -168,6 +186,7 @@ struct SessionTreeSheet: View {
     @State private var visibleRows: [SessionHistoryRowPresentation] = []
     @State private var rowPreparationGeneration = 0
     @State private var rowPreparationTask: Task<[SessionHistoryRowPresentation], Never>?
+    @State private var forkNavigation = ChatForkNavigationOwner()
 
     var body: some View {
         NavigationStack {
@@ -250,21 +269,22 @@ struct SessionTreeSheet: View {
             }
             .tronManagedSheet(
                 item: $selection,
-                identity: { "history.\(sessionID).\($0.id)" }
+                identity: { "history.\(sessionID).\($0.id)" },
+                onDismiss: completeForkNavigationAfterSelectionDismissal
             ) { selection in
                 switch selection.action {
                 case .details:
                     HistoryEntryDetailsSheet(
                         sessionID: sessionID,
                         node: selection.node,
-                        onForkCreated: onForkCreated,
+                        onForkCreated: stageForkNavigation,
                         onNavigated: onNavigated
                     )
                 case .fork:
                     ForkConfirmationSheet(
                         sessionID: sessionID,
                         node: selection.node,
-                        onCreated: onForkCreated
+                        onCreated: stageForkNavigation
                     )
                 }
             }
@@ -469,6 +489,16 @@ struct SessionTreeSheet: View {
         labelNode = nil
     }
 
+    private func stageForkNavigation(_ route: AppModel.SessionNavigationRoute) {
+        forkNavigation.stage(route)
+        selection = nil
+    }
+
+    private func completeForkNavigationAfterSelectionDismissal() {
+        guard let route = forkNavigation.consume() else { return }
+        onForkCreated(route)
+    }
+
     private func removeBookmark() {
         guard let node = labelNode else { return }
         Task {
@@ -561,6 +591,7 @@ private struct HistoryEntryDetailsSheet: View {
     @State private var showFork = false
     @State private var showBookmark = false
     @State private var label = ""
+    @State private var forkNavigation = ChatForkNavigationOwner()
 
     private var leafID: String? { model.authoritativeSnapshot(for: sessionID)?.leafEntryId }
 
@@ -640,9 +671,10 @@ private struct HistoryEntryDetailsSheet: View {
             }
             .tronManagedSheet(
                 isPresented: $showFork,
-                identity: "history.fork.\(sessionID)"
+                identity: "history.fork.\(sessionID)",
+                onDismiss: completeForkNavigationAfterConfirmationDismissal
             ) {
-                ForkConfirmationSheet(sessionID: sessionID, node: node, onCreated: onForkCreated)
+                ForkConfirmationSheet(sessionID: sessionID, node: node, onCreated: stageForkNavigation)
             }
             .alert("Bookmark", isPresented: $showBookmark) {
                 TextField("Label", text: $label)
@@ -658,6 +690,16 @@ private struct HistoryEntryDetailsSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+    }
+
+    private func stageForkNavigation(_ route: AppModel.SessionNavigationRoute) {
+        forkNavigation.stage(route)
+        showFork = false
+    }
+
+    private func completeForkNavigationAfterConfirmationDismissal() {
+        guard let route = forkNavigation.consume() else { return }
+        onForkCreated(route)
     }
 
     private func actionRow(icon: String, title: String, subtitle: String, accent: Color, action: @escaping () -> Void) -> some View {
@@ -800,8 +842,19 @@ struct ForkConfirmationSheet: View {
     let sessionID: String
     let node: SessionTreeNode
     let onCreated: (AppModel.SessionNavigationRoute) -> Void
-    @State private var position = "before"
+    @State private var position: SessionForkPosition
     @State private var working = false
+
+    init(
+        sessionID: String,
+        node: SessionTreeNode,
+        onCreated: @escaping (AppModel.SessionNavigationRoute) -> Void
+    ) {
+        self.sessionID = sessionID
+        self.node = node
+        self.onCreated = onCreated
+        _position = State(initialValue: SessionForkChoicePolicy.initialPosition(for: node.role))
+    }
 
     var body: some View {
         NavigationStack {
@@ -817,20 +870,20 @@ struct ForkConfirmationSheet: View {
                     }
                     TronSettingsGroup("New Session", accent: .tronPurple) {
                         VStack(spacing: 0) {
-                            choice(
-                                node.role == .user ? "Fork and edit prompt" : "Fork before this entry",
-                                detail: node.role == .user
-                                    ? "Branch before this prompt and restore it to the composer."
-                                    : "Create the new session from the canonical position before this entry.",
-                                value: "before"
-                            )
-                            TronSettingsDivider(accent: .tronPurple)
+                            if SessionForkChoicePolicy.supportsBefore(node.role) {
+                                choice(
+                                    "Fork and edit prompt",
+                                    detail: "Exclude this prompt from history and restore it to the composer.",
+                                    value: .before
+                                )
+                                TronSettingsDivider(accent: .tronPurple)
+                            }
                             choice(
                                 node.role == .user ? "Clone after prompt" : "Clone through this entry",
                                 detail: node.role == .user
                                     ? "Include this prompt in the new branch."
                                     : "Include this entry in the new session's canonical history.",
-                                value: "at"
+                                value: .at
                             )
                         }
                     }
@@ -848,22 +901,31 @@ struct ForkConfirmationSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: { Image(systemName: "xmark").foregroundStyle(Color.tronEmerald) }
                         .accessibilityLabel("Close")
+                        .disabled(working)
                 }
             }
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+        .interactiveDismissDisabled(working)
     }
 
-    private func choice(_ title: String, detail: String, value: String) -> some View {
+    private func choice(
+        _ title: String,
+        detail: String,
+        value: SessionForkPosition
+    ) -> some View {
         Button { position = value } label: {
             TronSettingsRow(icon: position == value ? "checkmark.circle.fill" : "circle", title: title, subtitle: detail, accent: .tronPurple)
         }
         .buttonStyle(.plain)
+        .disabled(working)
     }
 
     private func createFork() {
+        guard !working else { return }
+        let requestedPosition = position
         working = true
         Task {
             defer { working = false }
@@ -871,11 +933,17 @@ struct ForkConfirmationSheet: View {
                 let route = try await model.fork(
                     sessionID: sessionID,
                     entryID: node.id,
-                    position: position
+                    position: requestedPosition.rawValue
                 )
-                dismiss()
+                // Each parent stages this route through its own completed
+                // dismissal before the root navigation owner can consume it.
                 onCreated(route)
-            } catch { model.presentError(error) }
+            } catch is CancellationError {
+                // Lifecycle/profile retirement owns the route transition. It is
+                // not a user-visible fork failure and must not leak a stale toast.
+            } catch {
+                model.presentError(error)
+            }
         }
     }
 }

@@ -535,9 +535,16 @@ export class GatewayService {
         // response and completionRevision therefore describe one admitted cut.
         await slot.reconcileAttention();
         const acquiredAt = performance.now();
-        const syncToken = client.beginSynchronization(sessionId);
+        // Acquire can overlap a canonical fork rekey. From this synchronous
+        // boundary onward, use the slot's admitted identity for subscription,
+        // snapshot, and attention so one response cannot mix parent and child.
+        const canonicalSessionId = slot.id;
+        const syncToken = client.beginSynchronization(canonicalSessionId);
         const snapshot = slot.snapshot();
-        client.establishSynchronization(sessionId, snapshot);
+        if (snapshot.sessionId !== canonicalSessionId) {
+          throw new GatewayError("conflict", "Session identity changed while opening", true);
+        }
+        client.establishSynchronization(canonicalSessionId, snapshot);
         const completedAt = performance.now();
         this.dependencies.logger.log(
           completedAt - startedAt >= 1_000 ? "warning" : "info",
@@ -548,7 +555,7 @@ export class GatewayService {
           session: snapshot,
           syncToken,
           subscriptionToken: syncToken,
-          completionRevision: this.dependencies.sessions.attentionProjection(sessionId).completionRevision,
+          completionRevision: this.dependencies.sessions.attentionProjection(canonicalSessionId).completionRevision,
         });
       }
       case "session.presentation.set": {

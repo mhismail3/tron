@@ -765,6 +765,20 @@ describe("transcript projection", () => {
     expect(() => projectTree(manager, new BlobStore())).toThrow(/invalid canonical entry payload/);
   });
 
+  it("bounds producer-authored compaction and branch summaries as tree previews", () => {
+    const manager = SessionManager.inMemory("/tmp/large-tree-summaries");
+    const first = manager.appendMessage({ role: "user", content: "first", timestamp: 1 });
+    const summary = "summary ".repeat(1_500);
+    manager.appendCompaction(summary, first, 12_000);
+    manager.branchWithSummary(first, summary);
+
+    const tree = projectTree(manager, new BlobStore());
+    const summaries = tree.filter((node) => node.kind === "compaction" || node.kind === "branchSummary");
+    expect(summaries).toHaveLength(2);
+    expect(summaries.every((node) => node.preview.length === 240)).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(tree))).toBeLessThanOrEqual(TREE_PROJECTION_BYTES);
+  });
+
   it("rejects duplicate canonical tree IDs and oversized retained strings", () => {
     const duplicate = SessionManager.inMemory("/tmp/duplicate-tree-id");
     duplicate.appendMessage({ role: "user", content: "one", timestamp: 1 });

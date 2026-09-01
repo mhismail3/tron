@@ -1336,6 +1336,13 @@ function validTreeString(value: unknown, optional = false): boolean {
     || typeof value === "string" && value.length > 0 && Buffer.byteLength(value) <= TREE_PROJECTION_STRING_BYTES;
 }
 
+/** Canonical summaries are producer-owned context and may legitimately exceed
+ * one tree field. They are admitted by shape here and reduced to a 240-character
+ * preview before the bounded tree response is encoded. */
+function validCanonicalSummary(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
 function validContentPart(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const part = value as Record<string, unknown>;
@@ -1408,10 +1415,10 @@ function validateCanonicalEntry(value: unknown): void {
     case "thinking_level_change": valid = validTreeString(entry.thinkingLevel); break;
     case "model_change": valid = validTreeString(entry.provider) && validTreeString(entry.modelId); break;
     case "compaction":
-      valid = validTreeString(entry.summary) && validTreeString(entry.firstKeptEntryId)
+      valid = validCanonicalSummary(entry.summary) && validTreeString(entry.firstKeptEntryId)
         && Number.isSafeInteger(entry.tokensBefore); break;
     case "branch_summary":
-      valid = validTreeString(entry.fromId) && validTreeString(entry.summary); break;
+      valid = validTreeString(entry.fromId) && validCanonicalSummary(entry.summary); break;
     case "custom": valid = validTreeString(entry.customType); break;
     case "custom_message":
       valid = validTreeString(entry.customType)

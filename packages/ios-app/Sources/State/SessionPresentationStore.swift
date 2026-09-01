@@ -197,10 +197,20 @@ final class SessionPresentationStore {
     // At most one target can be mounted or in replacement intake. Keeping the
     // revoked marker exact avoids retaining every historical presentation.
     private var revokedTarget: SessionPresentationIdentity?
+    /// Exact source presentation fenced while a fork mutation is in flight.
+    /// Composer ownership remains valid until canonical success, but secondary
+    /// runtime reads stop before Pi can rekey the underlying session.
+    private var forkTransitionTarget: SessionPresentationIdentity?
     private var nextPresentationGeneration = 0
     // Every Gateway connection owns a distinct token namespace. Responses and
     // close completions from an older connection must not mutate new ownership.
     private var connectionGeneration = 0
+    private struct SubscriptionCloseLease: Hashable {
+        let sessionID: String
+        let subscriptionToken: String
+        let connectionGeneration: Int
+    }
+    @ObservationIgnored private var subscriptionCloseTasks: [SubscriptionCloseLease: Task<Bool, Never>] = [:]
     private var subscribedSessionID: String?
     private var subscriptionToken: String?
     private var subscriptionTarget: SessionPresentationIdentity?
@@ -380,9 +390,34 @@ final class SessionPresentationStore {
         scheduleObservedAttentionReadIfNeeded()
     }
 
+    @discardableResult
+    func beginForkTransition(_ requested: SessionPresentationIdentity) -> Bool {
+        guard owns(requested), forkTransitionTarget == nil else { return false }
+        forkTransitionTarget = requested
+        clearSecondaryProjection()
+        return true
+    }
+
+    func cancelForkTransition(_ requested: SessionPresentationIdentity) {
+        guard forkTransitionTarget == requested else { return }
+        forkTransitionTarget = nil
+    }
+
+    func commitForkTransition(_ requested: SessionPresentationIdentity) {
+        guard forkTransitionTarget == requested else { return }
+        forkTransitionTarget = nil
+        revokeIntake(requested)
+    }
+
     func revokeIntake(_ requested: SessionPresentationIdentity) {
         guard target == requested else { return }
+        if forkTransitionTarget == requested { forkTransitionTarget = nil }
         revokedTarget = requested
+        // Route replacement retires every secondary read with the same exact
+        // authority. A fork rekeys the Gateway runtime before the old sheets
+        // finish dismissing; their late tree/context failures are obsolete and
+        // must not surface through the replacement route.
+        clearSecondaryProjection()
     }
 
     func hasInstalledSubscription(for sessionID: String) -> Bool {
@@ -397,6 +432,11 @@ final class SessionPresentationStore {
     func installedSubscriptionToken(for sessionID: String) -> String? {
         guard hasInstalledSubscription(for: sessionID) else { return nil }
         return subscriptionToken
+    }
+
+    private func secondaryReadSubscriptionToken(for sessionID: String) -> String? {
+        guard subscriptionTarget != forkTransitionTarget else { return nil }
+        return installedSubscriptionToken(for: sessionID)
     }
 
     func ownsInstalledSubscription(sessionID: String, token: String) -> Bool {
@@ -495,6 +535,7 @@ final class SessionPresentationStore {
         let oldPendingTarget = pendingTarget
         setPresentationVisible(requested, visible: false)
         if revokedTarget == requested { revokedTarget = nil }
+        if forkTransitionTarget == requested { forkTransitionTarget = nil }
         deferredEffectsByTarget[requested] = nil
         retireNoticeScopes([oldTarget, oldPendingTarget])
         target = nil
@@ -933,6 +974,7 @@ final class SessionPresentationStore {
         advanceChatProjection(canonical: true)
         isAuthoritative = false
         revokedTarget = nil
+        forkTransitionTarget = nil
         retireConnection()
         clearSecondaryProjection()
     }
@@ -954,6 +996,7 @@ final class SessionPresentationStore {
         advanceChatProjection(canonical: true)
         isAuthoritative = false
         if revokedTarget?.sessionID == sessionID { revokedTarget = nil }
+        if forkTransitionTarget?.sessionID == sessionID { forkTransitionTarget = nil }
         deferredEffectsByTarget = deferredEffectsByTarget.filter { $0.key.sessionID != sessionID }
         retireConnection()
         clearSecondaryProjection()
@@ -1041,7 +1084,7 @@ final class SessionPresentationStore {
     }
 
     func loadContext(sessionID: String) async {
-        guard let token = installedSubscriptionToken(for: sessionID) else { return }
+        guard let token = secondaryReadSubscriptionToken(for: sessionID) else { return }
         contextLoadGeneration &+= 1
         let generation = contextLoadGeneration
         struct Params: Codable { let sessionId: String }
@@ -1059,7 +1102,7 @@ final class SessionPresentationStore {
     }
 
     func loadTree(sessionID: String) async {
-        guard let token = installedSubscriptionToken(for: sessionID) else { return }
+        guard let token = secondaryReadSubscriptionToken(for: sessionID) else { return }
         treeLoadGeneration &+= 1
         let generation = treeLoadGeneration
         struct Params: Codable { let sessionId: String }
@@ -1078,7 +1121,7 @@ final class SessionPresentationStore {
     }
 
     func loadCommands(sessionID: String) async {
-        guard let token = installedSubscriptionToken(for: sessionID),
+        guard let token = secondaryReadSubscriptionToken(for: sessionID),
               let requestedTarget = subscriptionTarget,
               requestedTarget.sessionID == sessionID else { return }
         commandLoadGeneration &+= 1
@@ -1103,7 +1146,7 @@ final class SessionPresentationStore {
     }
 
     func loadResources(sessionID: String) async {
-        guard let token = installedSubscriptionToken(for: sessionID) else { return }
+        guard let token = secondaryReadSubscriptionToken(for: sessionID) else { return }
         resourceLoadGeneration &+= 1
         let generation = resourceLoadGeneration
         struct Params: Codable { let sessionId: String }
@@ -1199,6 +1242,26 @@ final class SessionPresentationStore {
     private func closeSubscription(_ sessionID: String, expectedTarget: SessionPresentationIdentity?) async -> Bool {
         if let expectedTarget, subscriptionTarget != expectedTarget { return false }
         guard subscribedSessionID == sessionID, let token = subscriptionToken else { return true }
+        let lease = SubscriptionCloseLease(
+            sessionID: sessionID,
+            subscriptionToken: token,
+            connectionGeneration: connectionGeneration
+        )
+        if let existing = subscriptionCloseTasks[lease] { return await existing.value }
+        let task = Task<Bool, Never> { @MainActor [weak self] in
+            guard let self else { return false }
+            return await self.performCloseSubscription(lease)
+        }
+        subscriptionCloseTasks[lease] = task
+        let result = await task.value
+        subscriptionCloseTasks[lease] = nil
+        return result
+    }
+
+    private func performCloseSubscription(_ lease: SubscriptionCloseLease) async -> Bool {
+        guard connectionGeneration == lease.connectionGeneration,
+              subscribedSessionID == lease.sessionID,
+              subscriptionToken == lease.subscriptionToken else { return false }
         attentionReadTask?.cancel()
         attentionReadTask = nil
         pendingAttentionRead = nil
@@ -1207,21 +1270,21 @@ final class SessionPresentationStore {
         attentionReadRequiresVisibility = false
         observedAttentionSummary = nil
         retirePresentationVisibilityLocally()
-        let expectedConnectionGeneration = connectionGeneration
         let expectedSubscriptionTarget = subscriptionTarget
         struct Params: Codable { let sessionId, subscriptionToken: String }
         struct Response: Decodable { let closed: Bool }
         let response: Response? = try? await client.request(
             "session.close",
-            Params(sessionId: sessionID, subscriptionToken: token),
+            Params(sessionId: lease.sessionID, subscriptionToken: lease.subscriptionToken),
             timeout: .seconds(5)
         )
-        guard connectionGeneration == expectedConnectionGeneration,
-              subscribedSessionID == sessionID,
+        guard connectionGeneration == lease.connectionGeneration,
+              subscribedSessionID == lease.sessionID,
+              subscriptionToken == lease.subscriptionToken,
               subscriptionTarget == expectedSubscriptionTarget else { return false }
-        // A decoded `closed:false` is authoritative evidence that the Gateway
-        // no longer owns this token. Only an interrupted/undecodable request
-        // retains local ownership for retry; never overwrite a newer owner.
+        // A decoded `closed:false` is authoritative evidence that this exact
+        // token is already retired. Only an interrupted request retains local
+        // ownership for retry; a newer token is never overwritten.
         guard response != nil else { return false }
         subscriptionToken = nil
         subscribedSessionID = nil

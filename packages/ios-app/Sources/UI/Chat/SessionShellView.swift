@@ -52,6 +52,8 @@ struct SessionShellView: View {
     @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
     @State private var sessionExpansion = SessionListSessionExpansion()
     @State private var navigationOwner = DashboardNavigationOwner()
+    @State private var routeReplacementOwner = SessionRouteReplacementOwner()
+    @State private var mountedSessionRouteToken: PresentationSurfaceToken?
     @State private var profileRouteOwner = SessionShellProfileRouteOwner()
     @State private var serverFilter = DashboardServerFilterState()
     @State private var showingServerFilter = false
@@ -128,7 +130,8 @@ struct SessionShellView: View {
                 isPresented: renameConfirmationPresented,
                 identity: "dashboard.rename-confirmation"
             )
-            .onChange(of: model.profiles.selected?.id, initial: true) { _, profileID in
+            .onChange(of: model.profiles.selected?.id, initial: true) { previousProfileID, profileID in
+                if previousProfileID != profileID { routeReplacementOwner.invalidate() }
                 var route = presentedSession
                 profileRouteOwner.reconcile(
                     profileID: profileID,
@@ -138,6 +141,7 @@ struct SessionShellView: View {
                 )
                 if presentedSession != route {
                     navigationOwner.invalidate()
+                    routeReplacementOwner.invalidate()
                     presentedSession = route
                 }
                 if activity.allowsPresentationPublication { scheduleDashboardReconciliation() }
@@ -209,7 +213,17 @@ struct SessionShellView: View {
                 onForkCreated: present
             )
             .id(route.id)
-            .tronPresentationSurface(id: "chat.\(route.id)")
+            .tronPresentationSurface(
+                id: "chat.\(route.id)",
+                onMount: { token in
+                    guard presentedSession?.id == route.id else { return }
+                    mountedSessionRouteToken = token
+                },
+                onRetire: { token in
+                    if mountedSessionRouteToken == token { mountedSessionRouteToken = nil }
+                    completeRouteReplacement(afterRetiring: route.id, token: token)
+                }
+            )
         }
     }
 
@@ -236,17 +250,51 @@ struct SessionShellView: View {
     }
 
     private func present(_ route: AppModel.SessionNavigationRoute) {
+        guard model.ownsNavigationRoute(route) else { return }
         navigationOwner.invalidate()
-        if let current = presentedSession,
+        let current = presentedSession
+        if let current,
            let target = model.presentationTarget(for: current.sessionID) {
             model.revokePresentationIntake(target)
         }
-        presentedSession = route
+        switch routeReplacementOwner.request(
+            current: current,
+            currentToken: mountedSessionRouteToken,
+            replacement: route
+        ) {
+        case .present(let admitted):
+            presentedSession = admitted
+        case .dismissCurrent:
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { presentedSession = nil }
+        case .waitForRetirement:
+            break
+        }
+    }
+
+    private func completeRouteReplacement(
+        afterRetiring routeID: String,
+        token: PresentationSurfaceToken
+    ) {
+        guard let replacement = routeReplacementOwner.completeRetirement(
+            routeID: routeID,
+            token: token
+        ) else { return }
+        Task { @MainActor in
+            await Task.yield()
+            guard presentedSession == nil,
+                  model.ownsNavigationRoute(replacement) else { return }
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { presentedSession = replacement }
+        }
     }
 
     @MainActor
     private func presentPushNavigation(_ request: AppModel.PushNavigationRequest) async {
         navigationOwner.invalidate()
+        routeReplacementOwner.invalidate()
         showNewSession = false
         showSettings = false
         showingServerFilter = false
@@ -1067,11 +1115,19 @@ private struct HistoricalSessionRow: View {
             .animation(indicatorAnimation, value: indicatorState)
 
             VStack(alignment: .leading, spacing: showsContext ? 2 : 0) {
-                Text(session.title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                HStack(spacing: 5) {
+                    if session.isFork {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                            .foregroundStyle(Color.tronEmerald)
+                            .accessibilityHidden(true)
+                    }
+                    Text(session.title)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
                 if showsContext {
                     Text(projectServerContext)
                         .font(TronTypography.code(size: TronTypography.sizeCaption))
@@ -1099,7 +1155,7 @@ private struct HistoricalSessionRow: View {
             interactive: true
         )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(session.title), \(activity.accessibilityDescription)\(session.isUnread ? ", unread" : ""), \(relativeActivity)")
+        .accessibilityLabel("\(session.title)\(session.isFork ? ", forked session" : ""), \(activity.accessibilityDescription)\(session.isUnread ? ", unread" : ""), \(relativeActivity)")
     }
 
     private var indicatorState: DashboardSessionIndicatorState {

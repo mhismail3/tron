@@ -2305,24 +2305,45 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
-    @Test("lifecycle replacement prevents admitted transport from entering a new Gateway")
+    @Test("lifecycle replacement before transport restores the definitely-unsent submission")
     func lifecycleReplacementStopsTransportBeforeSend() async throws {
         try await withTestWatchdog { @MainActor in
             let harness = ComposerHarness()
             let target = SessionPresentationIdentity(sessionID: "replaced-lifecycle", generation: 74)
-            _ = harness.coordinator.installHostedPresentation(
+            let scope = harness.coordinator.installHostedPresentation(
                 profileID: "profile-a",
                 target: target,
                 lifecycleGeneration: 1,
                 initialText: "must stay on profile a"
             )
-            let submission = try harness.coordinator.beginSubmission(target: target, behavior: nil)
+            let submission = try harness.coordinator.beginSubmission(
+                target: target,
+                behavior: "steer"
+            )
 
+            // Background/profile retirement can invalidate lifecycle admission
+            // after ChatView installs the optimistic row but before its
+            // unstructured transport task first runs. No request crossed the
+            // transport boundary, so cancellation must restore and unlock the
+            // durable composer scope.
             harness.admission.generation = 2
             await #expect(throws: CancellationError.self) {
                 try await harness.coordinator.transmitSubmission(submission)
             }
             #expect(harness.sendCalls.isEmpty)
+
+            harness.admission.generation = 1
+            #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+            #expect(!harness.coordinator.isSending(target: target))
+            #expect(harness.coordinator.text(for: scope) == "must stay on profile a")
+
+            let retry = Task {
+                try await harness.coordinator.send(target: target, behavior: "steer")
+            }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(retry)
+            #expect(harness.sendCalls.count == 1)
         }
     }
 

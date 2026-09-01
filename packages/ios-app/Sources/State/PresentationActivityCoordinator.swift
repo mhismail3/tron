@@ -146,16 +146,25 @@ struct TronPresentationSurface<Content: View>: View {
     private let id: String
     private let suppliedToken: PresentationSurfaceToken?
     private let registersLifecycle: Bool
+    private let onMount: ((PresentationSurfaceToken) -> Void)?
+    private let onRetire: ((PresentationSurfaceToken) -> Void)?
     @ViewBuilder private let content: () -> Content
     @Environment(\.tronPresentationActivityCoordinator) private var coordinator
     @Environment(\.tronPresentationSurfaceToken) private var inheritedParent
     private let explicitParent: PresentationSurfaceToken?
     @State private var generation = UUID()
 
-    init(id: String, @ViewBuilder content: @escaping () -> Content) {
+    init(
+        id: String,
+        onMount: ((PresentationSurfaceToken) -> Void)? = nil,
+        onRetire: ((PresentationSurfaceToken) -> Void)? = nil,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
         self.id = id
         suppliedToken = nil
         registersLifecycle = true
+        self.onMount = onMount
+        self.onRetire = onRetire
         explicitParent = nil
         self.content = content
     }
@@ -168,6 +177,8 @@ struct TronPresentationSurface<Content: View>: View {
         id = token.id
         suppliedToken = token
         registersLifecycle = false
+        onMount = nil
+        onRetire = nil
         explicitParent = parent
         self.content = content
     }
@@ -185,9 +196,13 @@ struct TronPresentationSurface<Content: View>: View {
             )
             .onAppear {
                 coordinator?.register(token, parent: explicitParent ?? inheritedParent)
+                if registersLifecycle { onMount?(token) }
             }
             .onDisappear {
-                if registersLifecycle { coordinator?.retire(token) }
+                if registersLifecycle {
+                    coordinator?.retire(token)
+                    onRetire?(token)
+                }
             }
     }
 }
@@ -428,7 +443,11 @@ extension View {
         ))
     }
 
-    func tronPresentationSurface(id: String) -> some View {
-        TronPresentationSurface(id: id) { self }
+    func tronPresentationSurface(
+        id: String,
+        onMount: ((PresentationSurfaceToken) -> Void)? = nil,
+        onRetire: ((PresentationSurfaceToken) -> Void)? = nil
+    ) -> some View {
+        TronPresentationSurface(id: id, onMount: onMount, onRetire: onRetire) { self }
     }
 }

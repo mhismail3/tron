@@ -20,6 +20,52 @@ struct DashboardStateOwnerTests {
         #expect(!admittedDuplicate)
     }
 
+    @MainActor
+    @Test("session replacement pops the mounted route before admitting the fork")
+    func sessionRouteReplacementWaitsForExactRetirement() throws {
+        var owner = SessionRouteReplacementOwner()
+        let source = AppModel.SessionNavigationRoute(sessionID: "source", editorText: nil)
+        let fork = AppModel.SessionNavigationRoute(sessionID: "fork", editorText: "retained")
+        let sourceToken = PresentationSurfaceToken(id: "chat.source", generation: UUID())
+        let staleToken = PresentationSurfaceToken(id: "chat.source", generation: UUID())
+
+        #expect(owner.request(
+            current: source,
+            currentToken: sourceToken,
+            replacement: fork
+        ) == .dismissCurrent)
+        #expect(owner.completeRetirement(routeID: "stale", token: sourceToken) == nil)
+        #expect(owner.completeRetirement(routeID: source.id, token: staleToken) == nil)
+        let completed = owner.completeRetirement(routeID: source.id, token: sourceToken)
+        let replacement = try #require(completed)
+        #expect(replacement == fork)
+        #expect(owner.completeRetirement(routeID: source.id, token: sourceToken) == nil)
+    }
+
+    @MainActor
+    @Test("a newer replacement updates the pending fork without bypassing retirement")
+    func sessionRouteReplacementCoalescesWhilePopping() throws {
+        var owner = SessionRouteReplacementOwner()
+        let source = AppModel.SessionNavigationRoute(sessionID: "source", editorText: nil)
+        let first = AppModel.SessionNavigationRoute(sessionID: "first", editorText: nil)
+        let newer = AppModel.SessionNavigationRoute(sessionID: "newer", editorText: nil)
+        let sourceToken = PresentationSurfaceToken(id: "chat.source", generation: UUID())
+
+        #expect(owner.request(
+            current: source,
+            currentToken: sourceToken,
+            replacement: first
+        ) == .dismissCurrent)
+        #expect(owner.request(
+            current: nil,
+            currentToken: nil,
+            replacement: newer
+        ) == .waitForRetirement)
+        let completed = owner.completeRetirement(routeID: source.id, token: sourceToken)
+        let replacement = try #require(completed)
+        #expect(replacement == newer)
+    }
+
     @Test("dirty catalog retries are attempt-unbounded and stop only when satisfied or retired")
     func catalogDirtyRetryPolicy() {
         for _ in 0..<12 {

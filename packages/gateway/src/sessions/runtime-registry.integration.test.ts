@@ -7343,7 +7343,9 @@ export default function (pi) {
     const original = slot.id;
     expect(registry.attentionProjection(original).isUnread).toBe(true);
     const userEntry = slot.snapshot().transcript.find((item) => item.role === "user");
+    const assistantEntry = slot.snapshot().transcript.find((item) => item.role === "assistant");
     expect(userEntry).toBeDefined();
+    expect(assistantEntry).toBeDefined();
     registry.subscribe("fork-subscriber", original);
     const internals = registry as unknown as {
       attention: { assertAbsent: (sessionId: string) => Promise<void> };
@@ -7352,8 +7354,12 @@ export default function (pi) {
     };
     const assertAbsent = vi.spyOn(internals.attention, "assertAbsent")
       .mockRejectedValueOnce(new Error("injected attention prepare failure"));
-    await expect(slot.fork(userEntry!.id, "at")).rejects.toThrow("injected attention prepare failure");
+    // Retaining the assistant makes Pi materialize the candidate fork before
+    // registry rekey admission. A rejected pre-commit hook must roll that file
+    // back rather than leaking an orphan catalog row.
+    await expect(slot.fork(assistantEntry!.id, "at")).rejects.toThrow("injected attention prepare failure");
     expect(slot.id).toBe(original);
+    expect((await registry.list()).map((session) => session.id)).toEqual([original]);
     expect(internals.slots.get(original)).toBe(slot);
     expect([...internals.slots.values()].filter((candidate) => candidate === slot)).toHaveLength(1);
     expect(registry.isSubscribed("fork-subscriber", original)).toBe(true);
@@ -7371,6 +7377,53 @@ export default function (pi) {
       isUnread: false,
     });
     expect((await registry.acquire(fork.sessionId)).id).toBe(fork.sessionId);
+
+    // This fork retains only the user entry, so Pi has reserved but not yet
+    // materialized its JSONL. The live canonical mutation owner must still
+    // project the parent identity; otherwise iOS cannot distinguish the fork
+    // until after its first assistant response.
+    expect(slot.persistedSessionFile).toBeUndefined();
+    expect(slot.snapshot().transcript.filter((item) => item.role === "user")).toEqual([
+      expect.objectContaining({
+        kind: "message",
+        role: "user",
+        content: [expect.objectContaining({ type: "text", text: "fork this" })],
+      }),
+    ]);
+    const catalog = await registry.list();
+    expect(catalog.find((session) => session.id === original)).toMatchObject({ kind: "user" });
+    expect(catalog.find((session) => session.id === fork.sessionId)).toMatchObject({
+      kind: "user",
+      parentSessionId: original,
+      firstMessage: "fork this",
+      messageCount: 1,
+    });
+
+    // The first child completion materializes Pi's reserved JSONL. Catalog
+    // authority must cross from the live parent ID to the canonical header/path
+    // without losing identity, classification, or retained history.
+    faux.setResponses([fauxAssistantMessage("continued")]);
+    await slot.prompt("continue here");
+    await waitUntil(() => !slot.isBusy);
+    expect(slot.persistedSessionFile).toBeDefined();
+    expect(slot.snapshot().transcript.filter((item) => item.role === "user" || item.role === "assistant")).toEqual([
+      expect.objectContaining({ role: "user", content: [expect.objectContaining({ text: "fork this" })] }),
+      expect.objectContaining({ role: "user", content: [expect.objectContaining({ text: "continue here" })] }),
+      expect.objectContaining({ role: "assistant", content: [expect.objectContaining({ text: "continued" })] }),
+    ]);
+    expect((await registry.list()).find((session) => session.id === fork.sessionId)).toMatchObject({
+      kind: "user",
+      parentSessionId: original,
+      firstMessage: "fork this",
+      messageCount: 3,
+    });
+    await slot.dispose();
+    expect((await registry.list()).find((session) => session.id === fork.sessionId)).toMatchObject({
+      kind: "user",
+      parentSessionId: original,
+      firstMessage: "fork this",
+      messageCount: 3,
+    });
   });
 
   it("rejects imports when live runtime capacity is full", async () => {
