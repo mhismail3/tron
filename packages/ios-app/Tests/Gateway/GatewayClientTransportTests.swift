@@ -598,49 +598,39 @@ struct GatewayClientTransportTests {
         }
     }
 
-    @Test("idle liveness probes precede the Gateway heartbeat and enforce an 8-second deadline")
+    @Test("transport pings precede the Gateway heartbeat and an enqueue failure retires the epoch")
     func deterministicLivenessTiming() async throws {
         try await withTestWatchdog {
             let clock = ManualClock()
             let socket = ScriptedGatewaySocket()
+            await socket.failNextPing(GatewayFailure(
+                code: "disconnected", message: "ping failed", retryable: true, details: nil
+            ))
             let client = GatewayClient(
                 socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
                 clock: clock.clock,
                 uuidSource: SequenceUUIDSource([
                     UUID(uuidString: "00000000-0000-0000-0000-000000000025")!,
-                    UUID(uuidString: "00000000-0000-0000-0000-000000000026")!,
                 ]).source
             )
             await socket.enqueue(helloFrame())
             _ = try await client.connect(profile: profile, token: "token")
             try await clock.waitUntilSleeping(count: 1)
 
-            clock.advance(by: .seconds(10))
-            try await socket.waitUntilSent(count: 2)
-            #expect(try await decodedValue(in: socket, index: 1) == .object([
-                "type": .string("request"),
-                "id": .string("00000000-0000-0000-0000-000000000026"),
-                "method": .string("system.info"),
-                "params": .object([:]),
-            ]))
-            try await clock.waitUntilSleeping(count: 1)
-
-            clock.advance(by: .seconds(7))
-            #expect(await socket.closeInvocationCount() == 0)
-            #expect(await client.info?.machineId == "machine")
-
             var eventIterator = client.events.makeAsyncIterator()
-            clock.advance(by: .seconds(1))
+            clock.advance(by: .seconds(10))
+            try await socket.waitUntilPingInvoked(count: 1)
             try await socket.waitUntilClosed()
             let event = await eventIterator.next()
             #expect(event?.event.topic == "transport.disconnected")
+            #expect(await socket.sentFrames().count == 1)
             #expect(await socket.closeInvocationCount() == 1)
             #expect(await socket.closeTransitionCount() == 1)
             #expect(await client.info == nil)
         }
     }
 
-    @Test("server traffic cannot suppress the client heartbeat proof")
+    @Test("server traffic cannot suppress the transport heartbeat proof")
     func inboundTrafficDoesNotSuppressLivenessProbe() async throws {
         try await withTestWatchdog {
             let clock = ManualClock()
@@ -650,7 +640,6 @@ struct GatewayClientTransportTests {
                 clock: clock.clock,
                 uuidSource: SequenceUUIDSource([
                     UUID(uuidString: "00000000-0000-0000-0000-000000000031")!,
-                    UUID(uuidString: "00000000-0000-0000-0000-000000000032")!,
                 ]).source
             )
             await socket.enqueue(helloFrame())
@@ -663,8 +652,12 @@ struct GatewayClientTransportTests {
             #expect(await eventIterator.next()?.event.topic == "session.summary")
 
             clock.advance(by: .seconds(5))
-            try await socket.waitUntilSent(count: 2)
-            #expect(try await decodedValue(in: socket, index: 1).objectValue?["method"] == .string("system.info"))
+            try await socket.waitUntilPingInvoked(count: 1)
+            #expect(await socket.sentFrames().count == 1)
+            try await clock.waitUntilSleeping(count: 1)
+            clock.advance(by: .seconds(10))
+            try await socket.waitUntilPingInvoked(count: 2)
+            #expect(await client.info?.machineId == "machine")
             await client.close()
         }
     }

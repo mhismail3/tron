@@ -23,13 +23,16 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
     private var sendInvocations = 0
     private var sendFailures: [Error] = []
     private var sendInvocationWaiters: [Waiter] = []
+    private var pingInvocations = 0
+    private var pingFailures: [Error] = []
+    private var pingWaiters: [Waiter] = []
     private var sendBarrierWaiters: [Int: CheckedContinuation<Void, Error>] = [:]
     private var closeInvocations = 0
     private var closeTransitions = 0
     private var closeInvocationWaiters: [Waiter] = []
     private var closeWaiters: [Waiter] = []
     private var nextWaiterToken = 0
-    private enum WaiterKind { case sent, sendInvocation, closeInvocation, closeTransition }
+    private enum WaiterKind { case sent, sendInvocation, pingInvocation, closeInvocation, closeTransition }
 
     private var isClosed = false
     private var suspendsSend: Bool
@@ -76,6 +79,15 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
         guard !isClosed else { throw CancellationError() }
         sent.append(data)
         resumeSatisfiedWaiters(&sentWaiters, observedCount: sent.count)
+    }
+
+    func ping() async throws {
+        guard !isClosed else { throw CancellationError() }
+        pingInvocations += 1
+        resumeSatisfiedWaiters(&pingWaiters, observedCount: pingInvocations)
+        if !pingFailures.isEmpty { throw pingFailures.removeFirst() }
+        try Task.checkCancellation()
+        guard !isClosed else { throw CancellationError() }
     }
 
     func receive() async throws -> Data {
@@ -131,6 +143,10 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
         sendFailures.append(error)
     }
 
+    func failNextPing(_ error: Error) {
+        pingFailures.append(error)
+    }
+
     func suspendSends() {
         suspendsSend = true
     }
@@ -170,6 +186,7 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
 
     func sentFrames() -> [Data] { sent }
     func sendInvocationCount() -> Int { sendInvocations }
+    func pingInvocationCount() -> Int { pingInvocations }
     func pendingReceiverCount() -> Int { receivers.count }
     func closeInvocationCount() -> Int { closeInvocations }
     func closeTransitionCount() -> Int { closeTransitions }
@@ -181,6 +198,10 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
 
     func waitUntilSendInvoked(count: Int) async throws {
         try await wait(until: count, observedCount: sendInvocations, kind: .sendInvocation)
+    }
+
+    func waitUntilPingInvoked(count: Int) async throws {
+        try await wait(until: count, observedCount: pingInvocations, kind: .pingInvocation)
     }
 
     func waitUntilCloseInvoked(count: Int = 1) async throws {
@@ -204,6 +225,7 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
                     switch kind {
                     case .sent: sentWaiters.append(waiter)
                     case .sendInvocation: sendInvocationWaiters.append(waiter)
+                    case .pingInvocation: pingWaiters.append(waiter)
                     case .closeInvocation: closeInvocationWaiters.append(waiter)
                     case .closeTransition: closeWaiters.append(waiter)
                     }
@@ -225,6 +247,8 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
             sentWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
         } else if let index = sendInvocationWaiters.firstIndex(where: { $0.token == token }) {
             sendInvocationWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
+        } else if let index = pingWaiters.firstIndex(where: { $0.token == token }) {
+            pingWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
         } else if let index = closeInvocationWaiters.firstIndex(where: { $0.token == token }) {
             closeInvocationWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
         } else if let index = closeWaiters.firstIndex(where: { $0.token == token }) {

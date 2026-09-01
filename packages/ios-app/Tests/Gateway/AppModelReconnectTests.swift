@@ -128,8 +128,8 @@ struct AppModelReconnectTests {
         }
     }
 
-    @Test("mounted restore failure keeps lifecycle in recovery until exact restore succeeds")
-    func mountedRestoreFailureReconnects() async throws {
+    @Test("mounted restore failure leaves the responsive replacement transport usable")
+    func mountedRestoreFailureKeepsTransport() async throws {
         try await withTestWatchdog { @MainActor in
             let suiteName = "GatewayMountedRestoreTests.\(UUID().uuidString)"
             let defaults = UserDefaults(suiteName: suiteName)!
@@ -169,19 +169,14 @@ struct AppModelReconnectTests {
             coordinator.requestReconnect(immediate: true)
             try await sockets[1].waitUntilSent(count: 1)
             await sockets[1].enqueue(helloFrame())
-            try await sockets[2].waitUntilSent(count: 1)
-            #expect(coordinator.connectionState == .reconnecting)
-            await sockets[2].enqueue(helloFrame())
-            for _ in 0..<50 where coordinator.connectionState != .connected {
+            for _ in 0..<50 where projection.aggregateCompletions.isEmpty {
                 await Task.yield()
             }
-            #expect(projection.restoreCount == 2)
-            for _ in 0..<50 where projection.aggregateCompletions.count < 2 {
-                await Task.yield()
-            }
-            #expect(projection.aggregateCompletions == [false, true])
+            #expect(projection.restoreCount == 1)
+            #expect(projection.aggregateCompletions == [false])
             #expect(coordinator.connectionState == .connected)
-            #expect(factory.requests.count == 3)
+            #expect(factory.requests.count == 2)
+            #expect(!(await sockets[1].closed()))
 
             await coordinator.teardown()
             await client.close()
@@ -361,6 +356,11 @@ struct AppModelReconnectTests {
         await socket.enqueue(helloFrame())
         try await model.connectHostedGateway(profile: profile, token: "token")
         #expect(model.admitsSessionPresentationOpen)
+        model.beginHostedReconciliationAggregate()
+        #expect(model.isReconcilingForeground)
+        #expect(model.admitsSessionPresentationOpen)
+        model.completeHostedReconciliationAggregate(succeeded: true)
+        #expect(!model.isReconcilingForeground)
 
         model.enteredBackground()
         _ = model.becameActive()

@@ -14,13 +14,9 @@ enum GatewayUploadPolicy {
 }
 
 enum GatewayLivenessPolicy {
-    /// Must remain comfortably below the Gateway's 25-second heartbeat. A
-    /// request frame refreshes old Gateway versions even when their WebSocket
-    /// stack does not surface an automatic pong from URLSession. Server-to-client
-    /// traffic must not suppress this client-activity proof.
+    /// Transport pings run independently of GatewayClient actor/event work so a
+    /// busy live stream cannot starve the proof required by the server heartbeat.
     static let probeInterval: Duration = .seconds(10)
-    static let probeAfterClientSilence: Duration = .seconds(10)
-    static let probeTimeout: Duration = .seconds(8)
 }
 
 struct GatewayEventBufferPolicy: Sendable {
@@ -233,7 +229,6 @@ actor GatewayClient {
         var eventsActivated = false
         var pending: [String: PendingRequest] = [:]
         var lastInboundAt: ContinuousClock.Instant?
-        var lastClientFrameAt: ContinuousClock.Instant?
         var overflowResyncSignaled = false
         var info: GatewayInfo?
     }
@@ -357,9 +352,6 @@ actor GatewayClient {
             ])
             try await socket.send(JSONEncoder.gateway.encode(hello))
             try requireEpoch(epochID)
-            guard var sentEpoch = connection, sentEpoch.id == epochID else { throw CancellationError() }
-            sentEpoch.lastClientFrameAt = clock.now()
-            connection = sentEpoch
             let data = try await withTimeout(duration: handshakeTimeout) { try await socket.receive() }
             try requireEpoch(epochID)
             try GatewayFramePolicy.validateInboundBytes(data)
@@ -580,7 +572,6 @@ actor GatewayClient {
         case .success:
             request.transmission = .sent
             epoch.pending[id] = request
-            epoch.lastClientFrameAt = clock.now()
             connection = epoch
         case .failure(let error):
             fail(
@@ -886,35 +877,27 @@ actor GatewayClient {
         guard var epoch = connection, epoch.id == epochID,
               epoch.livenessTask == nil else { return }
         let clock = self.clock
-        epoch.livenessTask = Task { [weak self, clock] in
-            do { try await clock.sleep(GatewayLivenessPolicy.probeInterval) }
-            catch { return }
-            guard !Task.isCancelled else { return }
-            await self?.livenessWaitCompleted(epochID: epochID)
+        let socket = epoch.socket
+        epoch.livenessTask = Task { [weak self, clock, socket] in
+            while !Task.isCancelled {
+                do {
+                    try await clock.sleep(GatewayLivenessPolicy.probeInterval)
+                    try Task.checkCancellation()
+                    try await socket.ping()
+                } catch is CancellationError {
+                    return
+                } catch {
+                    await self?.livenessFailed(error, epochID: epochID)
+                    return
+                }
+            }
         }
         connection = epoch
     }
 
-    private func livenessWaitCompleted(epochID: Int) async {
-        guard var completedEpoch = connection, completedEpoch.id == epochID else { return }
-        completedEpoch.livenessTask = nil
-        connection = completedEpoch
-        do {
-            guard let lastClientFrameAt = connection?.lastClientFrameAt else { return }
-            if clock.now() - lastClientFrameAt >= GatewayLivenessPolicy.probeAfterClientSilence {
-                struct Response: Decodable { let protocolVersion: Int }
-                let _: Response = try await request(
-                    "system.info",
-                    EmptyParams(),
-                    timeout: GatewayLivenessPolicy.probeTimeout,
-                    expectedEpochID: epochID
-                )
-            }
-            if ownsEpoch(epochID) { startLivenessWait(epochID: epochID) }
-        } catch {
-            guard ownsEpoch(epochID) else { return }
-            await disconnectEpoch(epochID: epochID, failure: Self.transportFailure(error))
-        }
+    private func livenessFailed(_ error: Error, epochID: Int) async {
+        guard ownsEpoch(epochID) else { return }
+        await disconnectEpoch(epochID: epochID, failure: Self.transportFailure(error))
     }
 
     private func disconnectEpoch(epochID: Int, failure: GatewayFailure) async {

@@ -67,6 +67,25 @@ describe("session process projection", () => {
     expect(rows[0]?.lifecycle.recentUntil).toBe("2026-01-01T00:05:02.000Z");
   });
 
+  it("does not keep a child active after its exact parent lifecycle becomes unknown", () => {
+    const rows = subagentProcessesFromActivity("session-1", {
+      ...subagent,
+      status: "running",
+      completedAt: undefined,
+      children: [{
+        ...subagent.children[0]!, status: "running", lifecycle: "running",
+      }],
+      lifecycle: {
+        version: 1, state: "unknown", attention: "none", sequence: 5,
+        observedAt: "2026-01-01T00:00:04.000Z",
+      },
+    });
+    expect(rows).toEqual([expect.objectContaining({
+      visibility: "unknown",
+      lifecycle: expect.objectContaining({ state: "unknown" }),
+    })]);
+  });
+
   it("keeps foreground parallel and chain children synchronous", () => {
     for (const mode of ["parallel", "chain"]) {
       const rows = subagentProcessesFromActivity("session-1", { ...subagent, mode });

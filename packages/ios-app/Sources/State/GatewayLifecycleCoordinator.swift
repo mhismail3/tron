@@ -877,18 +877,32 @@ final class GatewayLifecycleCoordinator {
                             connectionID: connection.id
                         )
                         self.gatewayInfo = connection.info
+                        // Transport readiness is authoritative at handshake +
+                        // event activation. Projection owners reconcile beneath
+                        // this usable socket and must not block opening another
+                        // session or make a healthy epoch look disconnected.
+                        if !self.restartRequested { self.connectionState = .connected }
                         reconciliationAggregateAdmission = admission
                         self.delegate?.lifecycleBeginReconciliationAggregate(admission: admission)
                         self.delegate?.lifecycleInvalidateSessionConnectionOwnership()
                         async let refresh: Void = self.delegate?.lifecycleRefreshAll(admission: admission) ?? ()
                         let restored = await self.delegate?.lifecycleRestoreMountedPresentation(admission: admission) ?? true
                         guard restored else {
-                            throw GatewayFailure(
-                                code: "projection_unavailable",
-                                message: "The mounted conversation could not be restored after reconnect.",
-                                retryable: true,
-                                details: nil
+                            _ = await refresh
+                            self.delegate?.lifecycleCompleteReconciliationAggregate(
+                                admission: admission,
+                                succeeded: false
                             )
+                            reconciliationAggregateAdmission = nil
+                            self.restartWatchdogTask?.cancel()
+                            self.restartWatchdogTask = nil
+                            self.restartRequested = false
+                            self.connectionState = .connected
+                            self.finishReconnect(
+                                lifecycleGeneration: lifecycleGeneration,
+                                attemptGeneration: attemptGeneration
+                            )
+                            return
                         }
                         await self.delegate?.lifecycleReattachTerminals(admission: admission)
                         _ = await refresh
@@ -911,12 +925,14 @@ final class GatewayLifecycleCoordinator {
                             )
                             reconciliationAggregateAdmission = nil
                             self.projectionFailureGeneration = nil
-                            self.connectionState = self.restartRequested ? .restarting : .offline("Gateway projection refresh failed")
+                            self.restartWatchdogTask?.cancel()
+                            self.restartWatchdogTask = nil
+                            self.restartRequested = false
+                            self.connectionState = .connected
                             self.finishReconnect(
                                 lifecycleGeneration: lifecycleGeneration,
                                 attemptGeneration: attemptGeneration
                             )
-                            self.scheduleReconnect(immediate: true)
                             return
                         }
                         self.restartWatchdogTask?.cancel()

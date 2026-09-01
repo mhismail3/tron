@@ -178,6 +178,7 @@ const MAX_COMPLETION_DISPOSITIONS = 16;
 const MAX_VALIDATED_CHILD_SESSION_PATHS = 2_048;
 const RECOVERY_SESSION_OWNER = Symbol("recovery-session-owner");
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
+const EXTENSION_ARTIFACT_MISSING_GRACE_MS = 30_000;
 const MAX_EXTENSION_EVENT_TAIL_BYTES = 64 * 1_024;
 const MAX_EXTENSION_EVENT_LINES = 256;
 
@@ -401,6 +402,7 @@ export class RuntimeSlot {
     bindingRetries: number;
   }>();
   private readonly extensionActivityReadGenerations = new Map<string, number>();
+  private readonly extensionArtifactMissingSince = new Map<string, number>();
   private readonly extensionArtifactWarnings = new Map<string, number>();
   /** Receipt persistence is runtime work: eviction and restart drain wait for
    * this bounded barrier rather than disposing the Pi manager underneath it. */
@@ -1494,6 +1496,13 @@ export class RuntimeSlot {
       this.processRevision += 1;
     }
     for (const projectedCandidate of projected) {
+      if (projectedCandidate.lifecycle.state === "unknown"
+        || projectedCandidate.visibility === "unknown") {
+        if (this.processActivities.delete(projectedCandidate.processId)) removed.add(projectedCandidate.processId);
+        this.dependencies.processActivityRecency.remove(projectedCandidate.processId);
+        this.processRevision += 1;
+        continue;
+      }
       const previous = this.processActivities.get(projectedCandidate.processId);
       const previousTerminal = previous && ["completed", "failed", "stopped", "rejected", "interrupted"].includes(previous.lifecycle.state);
       const candidateTerminal = ["completed", "failed", "stopped", "rejected", "interrupted"].includes(projectedCandidate.lifecycle.state);
@@ -1650,6 +1659,8 @@ export class RuntimeSlot {
       if (!oldest) break;
       this.stopExtensionActivityWatcher(oldest);
       this.extensionActivities.delete(oldest);
+      this.extensionArtifactMissingSince.delete(oldest);
+      this.replaceProcessesForToolCall(oldest, []);
       for (const [runId, binding] of this.extensionRunOwnership) {
         if (binding.toolCallId === oldest) this.extensionRunOwnership.delete(runId);
       }
@@ -3020,7 +3031,16 @@ export class RuntimeSlot {
     if (!directory.isDirectory()
       || expectedDirectory && (directory.dev !== expectedDirectory.dev || directory.ino !== expectedDirectory.ino)) return undefined;
     const lexicalPath = join(canonicalAsyncDir, name);
-    const canonicalPath = realpathSync(lexicalPath);
+    let canonicalPath: string;
+    try {
+      canonicalPath = realpathSync(lexicalPath);
+    } catch (error) {
+      // Status artifacts are atomically replaced. A bounded watcher retry owns
+      // the brief unlink/rename window; do not turn it into an unretried read
+      // failure that can strand the previous running projection.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
     if (dirname(canonicalPath) !== canonicalAsyncDir || !this.extensionArtifactPathAllowed(canonicalPath)) return undefined;
     const handle = await open(lexicalPath, "r");
     try {
@@ -3190,7 +3210,8 @@ export class RuntimeSlot {
       if (binding.terminal || !binding.asyncDir) continue;
       const activity = this.extensionActivities.get(binding.toolCallId);
       if (activity?.lifecycle && terminalStates.has(activity.lifecycle.state)) continue;
-      const directory = this.canonicalExtensionArtifactDirectory(binding.asyncDir);
+      const directory = this.canonicalExtensionArtifactDirectory(binding.asyncDir)
+        ?? (this.extensionArtifactPathAllowed(resolve(binding.asyncDir)) ? resolve(binding.asyncDir) : undefined);
       if (directory) candidates.push({ directory, updatedAt: activity?.updatedAt ?? "" });
     }
     candidates.sort((left, right) => left.updatedAt.localeCompare(right.updatedAt)
@@ -3222,6 +3243,40 @@ export class RuntimeSlot {
       this.extensionArtifactWarnings.delete(oldest);
     }
     this.dependencies.extensionArtifactWarning({ reason, owner: opaqueOwner });
+  }
+
+  private observeMissingExtensionArtifact(toolCallId: string): void {
+    const now = Date.now();
+    const missingSince = this.extensionArtifactMissingSince.get(toolCallId);
+    if (missingSince === undefined) {
+      this.extensionArtifactMissingSince.set(toolCallId, now);
+      return;
+    }
+    if (now - missingSince < EXTENSION_ARTIFACT_MISSING_GRACE_MS) return;
+    const previous = this.extensionActivities.get(toolCallId);
+    if (!previous || previous.lifecycle && terminalLifecycleStates.has(previous.lifecycle.state)
+      || previous.lifecycle?.state === "unknown") return;
+    const activityKey = previous.activityId
+      ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
+    const sequence = (this.extensionActivitySequences.get(activityKey)
+      ?? previous.lifecycle?.sequence ?? 0) + 1;
+    this.extensionActivitySequences.set(activityKey, sequence);
+    const observedAt = new Date().toISOString();
+    const unavailable: ExtensionRunActivity = {
+      ...previous,
+      updatedAt: observedAt,
+      lifecycle: {
+        version: 1,
+        state: "unknown",
+        attention: "none",
+        sequence,
+        observedAt,
+      },
+    };
+    this.extensionActivities.set(toolCallId, unavailable);
+    this.upsertExtensionActivity(unavailable);
+    this.publishExtensionActivity(unavailable);
+    this.stopExtensionActivityWatcher(toolCallId);
   }
 
   /** Called only by the Gateway-scoped bounded artifact discovery owner or by
@@ -3256,14 +3311,22 @@ export class RuntimeSlot {
     let diagnosticOwner: string | undefined;
     let claimedReceipt: { activityId: string; owner: GatewayWorkHandle } | undefined;
     try {
+      const lexicalDirectory = resolve(asyncDir);
+      const bound = [...this.extensionRunOwnership.entries()].find(([, binding]) =>
+        binding.asyncDir !== undefined && resolve(binding.asyncDir) === lexicalDirectory);
       const realAsyncDir = this.canonicalExtensionArtifactDirectory(asyncDir);
-      if (!realAsyncDir) return;
+      if (!realAsyncDir) {
+        if (bound) this.observeMissingExtensionArtifact(bound[1].toolCallId);
+        return;
+      }
       diagnosticOwner = this.extensionArtifactOwnerForDirectory(realAsyncDir);
       const rawValue = await this.readExtensionStatusArtifact(realAsyncDir);
       if (rawValue === undefined) {
+        if (bound) this.observeMissingExtensionArtifact(bound[1].toolCallId);
         if (diagnosticOwner) this.warnExtensionArtifact("artifact-replacement-in-progress", diagnosticOwner);
         return;
       }
+      if (bound) this.extensionArtifactMissingSince.delete(bound[1].toolCallId);
       // Registry discovery is bounded but grants no ownership. Historical
       // artifacts become admissible only here, where the canonical tool result
       // or an exact live asyncDir binding proves the owning session/tool call.
@@ -3564,9 +3627,11 @@ export class RuntimeSlot {
           tracked.timer.unref();
           return;
         }
+        this.observeMissingExtensionArtifact(toolCallId);
         this.warnExtensionArtifact("artifact-replacement-in-progress", `${previous.runId ?? "run"}\0${toolCallId}`);
         return;
       }
+      this.extensionArtifactMissingSince.delete(toolCallId);
       const tracked = this.extensionActivityWatchers.get(toolCallId);
       if (tracked?.asyncDir === realAsyncDir) tracked.readRetries = 0;
       const admission = inspectExtensionLifecycleArtifact(rawValue, { exactOwnedLegacy: true });
@@ -6238,6 +6303,7 @@ export class RuntimeSlot {
     this.stopActivityHeartbeat();
     this.clearToolProgressTimers();
     this.clearExtensionActivityWatchers();
+    this.extensionArtifactMissingSince.clear();
     this.extensionRunOwnership.clear();
     this.unsubscribe?.();
     this.ui.cancelAll();

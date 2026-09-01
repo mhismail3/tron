@@ -2906,16 +2906,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
     await mkdir(asyncDir, { recursive: true });
     const startedAt = new Date(Date.now() - 1_000).toISOString();
-    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
-      runId,
-      state: "running",
-      startedAt: Date.parse(startedAt),
-      lastUpdate: Date.now(),
-      mode: "workflow",
-      // The artifact itself is authoritative running evidence even before a
-      // workflow publishes its first child step.
-      steps: [],
-    }));
     const internal = slot as unknown as {
       extensionActivities: Map<string, ExtensionRunActivity>;
       extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
@@ -2933,9 +2923,21 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     let reads = 0;
     internal.readExtensionStatusArtifact = async (directory) => {
       reads += 1;
-      return reads === 1 ? undefined : originalRead(directory);
+      return originalRead(directory);
     };
     internal.startExtensionActivityWatcher(toolCallId, asyncDir);
+    await waitUntil(() => reads >= 1);
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3,
+      runId,
+      state: "running",
+      startedAt: Date.parse(startedAt),
+      lastUpdate: Date.now(),
+      mode: "workflow",
+      // The artifact itself is authoritative running evidence even before a
+      // workflow publishes its first child step.
+      steps: [],
+    }));
     await waitUntil(() => reads >= 2 && (slot.snapshot().processActivities?.length ?? 0) === 1);
     expect(slot.snapshot().processActivities?.[0]).toMatchObject({
       kind: "subagent",
@@ -2944,6 +2946,43 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       visibility: "active",
     });
     expect(slot.snapshot().processOverview).toMatchObject({ visibility: "active", activeCount: 1 });
+  });
+
+  it("retires a stale active process when its exact status artifact stays missing", async () => {
+    const fixture = await coldFixture("async-status-permanently-missing");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const runId = "missing-run";
+    const toolCallId = "missing-tool";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
+    await mkdir(asyncDir, { recursive: true });
+    const startedAt = new Date(Date.now() - 60_000).toISOString();
+    const activity: ExtensionRunActivity = {
+      id: toolCallId, activityId: "missing-activity", runId, toolCallId,
+      source: { source: "pi-subagents" }, title: "Subagents", mode: "asynchronous", status: "running",
+      startedAt, updatedAt: startedAt,
+      children: [{ id: "child", producerId: "child", label: "worker", status: "running", lifecycle: "running" }],
+      lifecycle: { version: 1, state: "running", attention: "none", sequence: 1, observedAt: startedAt },
+    };
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
+      extensionArtifactMissingSince: Map<string, number>;
+      syncSubagentProcesses: (activity: ExtensionRunActivity) => void;
+      ownedExtensionArtifactDirectories: () => string[];
+      observeMissingExtensionArtifact: (toolCallId: string) => void;
+    };
+    internal.extensionActivities.set(toolCallId, activity);
+    internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    internal.extensionArtifactMissingSince.set(toolCallId, Date.now() - 31_000);
+    internal.syncSubagentProcesses(activity);
+    expect(slot.snapshot().processOverview).toMatchObject({ visibility: "active", activeCount: 1 });
+    expect(internal.ownedExtensionArtifactDirectories()).toContain(resolve(asyncDir));
+
+    internal.observeMissingExtensionArtifact(toolCallId);
+
+    expect(slot.snapshot().processActivities ?? []).toEqual([]);
+    expect(slot.snapshot().processOverview).toMatchObject({ visibility: "hidden", activeCount: 0 });
+    expect(internal.extensionActivities.get(toolCallId)?.lifecycle?.state).toBe("unknown");
   });
 
   it("retries a live child binding when the canonical session appears after status publication", async () => {

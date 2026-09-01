@@ -25,10 +25,11 @@ function pageSource(sessions: SessionSummary[], listRevision: number, generation
   };
 }
 
-const client = (id: string): ClientContext => ({
+const client = (id: string, signal?: AbortSignal): ClientContext => ({
   id,
   identity: `device:${id}`,
   isLocal: false,
+  ...(signal ? { signal } : {}),
   beginSynchronization: () => "sync",
   establishSynchronization: () => {},
   completeSynchronization: () => {},
@@ -211,6 +212,20 @@ describe("session.list stable traversal", () => {
     expect(second.sessions).toHaveLength(100);
     expect(hydrated).toBe(200);
     expect(page).toHaveBeenCalledTimes(2);
+  });
+
+  it("releases a disconnected client's wait without cancelling shared catalog materialization", async () => {
+    let resolveSource!: (value: ReturnType<typeof pageSource>) => void;
+    const materialization = new Promise<ReturnType<typeof pageSource>>((resolve) => { resolveSource = resolve; });
+    const pageSourceRead = vi.fn(() => materialization);
+    const service = new GatewayService({ sessions: { pageSource: pageSourceRead } } as unknown as GatewayServiceDependencies);
+    const controller = new AbortController();
+    const listing = service.invoke(client("phone", controller.signal), "session.list", { scope: "user", limit: 100 });
+    controller.abort();
+    await expect(listing).rejects.toMatchObject({ code: "busy", retryable: true });
+    resolveSource(pageSource([summary(1)], 1));
+    await expect(materialization).resolves.toMatchObject({ listRevision: 1 });
+    expect(pageSourceRead).toHaveBeenCalledTimes(1);
   });
 
   it("materializes the catalog once per traversal and uses a later traversal for new truth", async () => {

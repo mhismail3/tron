@@ -2,13 +2,14 @@ import Foundation
 
 protocol GatewaySocketConnection: Sendable {
     func send(_ data: Data) async throws
+    func ping() async throws
     func receive() async throws -> Data
     func close() async
 }
 
 enum GatewaySocketPolicy {
-    // Application-owned handshake and liveness deadlines are shorter and
-    // monotonic. CFNetwork's inactivity timeout must not retire a healthy
+    // Application-owned handshake deadlines and transport-ping cadence are
+    // shorter and monotonic. CFNetwork's inactivity timeout must not retire a healthy
     // long-lived WebSocket before those owners can make a decision.
     static let requestTimeout: TimeInterval = 60
     // A graceful close is best effort. A dead path must not retain an invalid
@@ -44,6 +45,15 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
 
     func send(_ data: Data) async throws {
         try await task.send(.data(data))
+    }
+
+    func ping() async throws {
+        guard !closed else { throw URLError(.cancelled) }
+        // Enqueue the control frame without awaiting CFNetwork's callback.
+        // URLSession does not guarantee that callback after cancellation, so
+        // awaiting it would let one dead path retain the liveness task forever.
+        // Server-side consecutive-miss policy owns pong timeout/retirement.
+        task.sendPing { _ in }
     }
 
     func receive() async throws -> Data {

@@ -53,6 +53,19 @@ interface MobileIdentityLane {
   users: number;
 }
 
+async function awaitWhileClientConnected<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return operation;
+  if (signal.aborted) throw new GatewayError("busy", "Client disconnected", true);
+  return new Promise<T>((resolve, reject) => {
+    const aborted = () => reject(new GatewayError("busy", "Client disconnected", true));
+    signal.addEventListener("abort", aborted, { once: true });
+    void operation.then(
+      (value) => { signal.removeEventListener("abort", aborted); resolve(value); },
+      (error) => { signal.removeEventListener("abort", aborted); reject(error); },
+    );
+  });
+}
+
 function parseSessionSourceControl(value: unknown): SessionSourceControlRequest | undefined {
   if (value === undefined || value === null) return undefined;
   const source = object(value, "sourceControl");
@@ -95,6 +108,9 @@ export interface ClientContext {
   id: string;
   identity: string;
   isLocal: boolean;
+  /** Aborts disposable reads when this exact socket disconnects. Accepted
+   * mutations retain their existing durable ownership and do not consume it. */
+  signal?: AbortSignal;
   beginSynchronization(sessionId: string): string;
   establishSynchronization(sessionId: string, snapshot: import("../protocol/types.js").SessionSnapshot): void;
   completeSynchronization(sessionId: string, syncToken: string): void;
@@ -476,7 +492,10 @@ export class GatewayService {
         if (cursor !== undefined) {
           return safeJson(await this.sessionListPages.nextPage(client.id, scope, cursor, limit));
         }
-        const source = await this.dependencies.sessions.pageSource(scope);
+        const source = await awaitWhileClientConnected(
+          this.dependencies.sessions.pageSource(scope),
+          client.signal,
+        );
         return safeJson(await this.sessionListPages.firstPage(client.id, scope, source, limit));
       }
       case "session.create": {

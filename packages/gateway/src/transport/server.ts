@@ -19,6 +19,15 @@ import { SessionSyncBarrier, type BufferedSessionEvent } from "./session-sync.js
 // Retain only recent former IDs while an active subscription is rekeyed. Older
 // IDs are stale control paths and may safely require a fresh session.open.
 export const MAXIMUM_REKEYED_SESSION_IDS = 64;
+export const MAXIMUM_UNANSWERED_HEARTBEATS = 3;
+
+export function shouldTerminateHeartbeat(unansweredHeartbeats: number): boolean {
+  return unansweredHeartbeats >= MAXIMUM_UNANSWERED_HEARTBEATS;
+}
+
+export function heartbeatTimerDelay(elapsedMs: number, intervalMs = 25_000): number {
+  return Math.max(0, Math.round(elapsedMs - intervalMs));
+}
 
 export function parseBlobByteRange(value: string | string[] | undefined): BlobByteRange | undefined {
   if (value === undefined) return undefined;
@@ -239,11 +248,12 @@ interface Connection {
   identity: string;
   isLocal: boolean;
   socket: WebSocket;
-  alive: boolean;
+  unansweredHeartbeats: number;
   ready: boolean;
   presentationOnly: boolean;
   terminals: Set<string>;
   inFlight: Set<string>;
+  requestControllers: Map<string, AbortController>;
   synchronizations: Map<string, ActiveSessionSynchronization>;
   subscriptionTokens: Map<string, string>;
   // A fork may occur after session.open but before session.sync. Retain the
@@ -338,6 +348,7 @@ export class GatewayServer {
   private readonly clients = new Map<string, Connection>();
   private readonly pairingLimiter = new RateLimiter(10, 10 * 60_000);
   private readonly heartbeat: NodeJS.Timeout;
+  private lastHeartbeatAt = performance.now();
   private ready = false;
   private shuttingDown = false;
   private startupPhase: "starting" | "catalog-warming" | "attention-recovery" | "storage-warming" = "starting";
@@ -365,17 +376,29 @@ export class GatewayServer {
     this.sockets = new WebSocketServer({ noServer: true, maxPayload: options.maxFrameBytes, perMessageDeflate: false });
     this.server.on("upgrade", (request, socket, head) => void this.handleUpgrade(request, socket, head));
     this.heartbeat = setInterval(() => {
+      const heartbeatAt = performance.now();
+      const timerDelayMs = heartbeatTimerDelay(heartbeatAt - this.lastHeartbeatAt);
+      this.lastHeartbeatAt = heartbeatAt;
+      if (timerDelayMs >= 25_000) {
+        this.options.logger.log("warning", `Gateway event loop delayed heartbeat by ${timerDelayMs}ms`, {
+          event: "gateway.event-loop-delay",
+          source: "transport",
+        });
+      }
       for (const connection of this.clients.values()) {
         if (connection.socket.readyState !== WebSocket.OPEN) continue;
-        if (!connection.alive) {
-          this.options.logger.log("warning", "Closing an unresponsive client after a missed heartbeat", {
+        // Retire only after three complete ping intervals received no response.
+        // One delayed timer or transiently starved callback cannot destroy a
+        // healthy epoch; the fourth tick observes and retires the three misses.
+        if (shouldTerminateHeartbeat(connection.unansweredHeartbeats)) {
+          this.options.logger.log("warning", `Closing unresponsive client ${connection.id} after ${connection.unansweredHeartbeats} unanswered heartbeats`, {
             event: "connection.heartbeat-timeout",
             source: "transport",
           });
           connection.socket.terminate();
           continue;
         }
-        connection.alive = false;
+        connection.unansweredHeartbeats += 1;
         connection.socket.ping();
       }
     }, 25_000);
@@ -707,11 +730,12 @@ export class GatewayServer {
       identity,
       isLocal,
       socket,
-      alive: true,
+      unansweredHeartbeats: 0,
       ready: false,
       presentationOnly: false,
       terminals: new Set(),
       inFlight: new Set(),
+      requestControllers: new Map(),
       synchronizations: new Map(),
       subscriptionTokens: new Map(),
       rekeyedSessionIds: new Map(),
@@ -725,11 +749,11 @@ export class GatewayServer {
     this.clients.set(connection.id, connection);
     this.options.logger.log("info", `Client ${connection.id} connection admitted (${isLocal ? "local" : "paired"})`, { event: "connection.admitted", source: "transport" });
     socket.on("message", (data, binary) => {
-      connection.alive = true;
+      connection.unansweredHeartbeats = 0;
       void this.onMessage(connection, binary ? data : data.toString());
     });
-    socket.on("ping", () => { connection.alive = true; });
-    socket.on("pong", () => { connection.alive = true; });
+    socket.on("ping", () => { connection.unansweredHeartbeats = 0; });
+    socket.on("pong", () => { connection.unansweredHeartbeats = 0; });
     socket.on("close", (code, reason) => {
       const suffix = reason.length > 0 ? `: ${reason.toString("utf8")}` : "";
       this.disconnect(connection, `WebSocket close ${code}${suffix}`);
@@ -796,7 +820,9 @@ export class GatewayServer {
       connection.pendingSessionOpens.set(sessionOpenID, frame.id);
     }
     connection.inFlight.add(frame.id);
-    this.options.logger.log("info", `RPC request ${frame.method}`, { event: "rpc.request", source: "transport" });
+    const requestController = new AbortController();
+    connection.requestControllers.set(frame.id, requestController);
+    this.options.logger.log("info", `RPC request ${frame.method} from client ${connection.id}`, { event: "rpc.request", source: "transport" });
     const rpcStartedAt = performance.now();
     let rpcOutcome: "success" | "failure" = "failure";
     const requestId = frame.id;
@@ -889,6 +915,7 @@ export class GatewayServer {
         id: connection.id,
         identity: connection.identity,
         isLocal: connection.isLocal,
+        signal: requestController.signal,
         beginSynchronization: (sessionId) => {
           // Runtime acquire may yield to a fork before this call. Resolve the
           // request's ID before installing the subscription and barrier so
@@ -1155,7 +1182,9 @@ export class GatewayServer {
         }
       }
     } catch (error) {
-      this.options.logger.log("error", `RPC ${frame.method} failed: ${error instanceof Error ? error.message : String(error)}`, { event: "rpc.error", source: "transport" });
+      if (!requestController.signal.aborted) {
+        this.options.logger.log("error", `RPC ${frame.method} for client ${connection.id} failed: ${error instanceof Error ? error.message : String(error)}`, { event: "rpc.error", source: "transport" });
+      }
       const ownerRequestIDs = new Set([
         requestId,
         ...synchronizationCompletions.map((completion) => completion.requestId),
@@ -1183,10 +1212,11 @@ export class GatewayServer {
         }
       }
       connection.inFlight.delete(frame.id);
+      connection.requestControllers.delete(frame.id);
       const durationMs = Math.max(0, Math.round(performance.now() - rpcStartedAt));
       this.options.logger.log(
         durationMs >= 1_000 ? "warning" : "info",
-        `RPC ${frame.method} completed in ${durationMs}ms (${rpcOutcome})`,
+        `RPC ${frame.method} for client ${connection.id} completed in ${durationMs}ms (${rpcOutcome})`,
         { event: "rpc.completed", source: "transport" },
       );
     }
@@ -1235,6 +1265,8 @@ export class GatewayServer {
     }
     connection.synchronizations.clear();
     connection.subscriptionTokens.clear();
+    for (const controller of connection.requestControllers.values()) controller.abort();
+    connection.requestControllers.clear();
     this.options.sessions.unsubscribeClient(connection.id);
     this.options.service.releaseClient(connection.id);
     // The authenticated device identity owns provider login. A socket close

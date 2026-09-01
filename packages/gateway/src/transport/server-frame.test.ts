@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { canAttachTerminal, clearRequestSynchronizations, encodeOutboundFrame, existingSessionOpenOwner, releaseOwnedSubscription, releaseSessionTerminals } from "./server.js";
+import { canAttachTerminal, clearRequestSynchronizations, encodeOutboundFrame, existingSessionOpenOwner, heartbeatTimerDelay, releaseOwnedSubscription, releaseSessionTerminals, shouldTerminateHeartbeat } from "./server.js";
 import { SessionSyncBarrier } from "./session-sync.js";
 
 describe("bounded outbound gateway frames", () => {
+  it("tolerates two unanswered heartbeat rounds before retiring a client", () => {
+    expect(shouldTerminateHeartbeat(0)).toBe(false);
+    expect(shouldTerminateHeartbeat(1)).toBe(false);
+    expect(shouldTerminateHeartbeat(2)).toBe(false);
+    expect(shouldTerminateHeartbeat(3)).toBe(true);
+    expect(heartbeatTimerDelay(25_000)).toBe(0);
+    expect(heartbeatTimerDelay(61_250)).toBe(36_250);
+  });
+
   it("rejects an overlapping open without replacing the current owner", () => {
     const pending = new Map([["session", "open-1"]]);
     const synchronizations = new Map<string, any>();

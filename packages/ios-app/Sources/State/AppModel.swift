@@ -554,6 +554,16 @@ final class AppModel {
         try await lifecycle.connectHosted(profile: profile, token: token)
     }
 
+    func beginHostedReconciliationAggregate() {
+        guard let admission = lifecycle.admission else { return }
+        lifecycleBeginReconciliationAggregate(admission: admission)
+    }
+
+    func completeHostedReconciliationAggregate(succeeded: Bool) {
+        guard let admission = reconciliationAggregateAdmission else { return }
+        lifecycleCompleteReconciliationAggregate(admission: admission, succeeded: succeeded)
+    }
+
     func installHostedSettings(_ value: JSONValue?, for target: SettingsTarget) {
         settingsTrust.installHostedSettings(value, for: target)
     }
@@ -682,8 +692,10 @@ final class AppModel {
     }
 
     var admitsSessionPresentationOpen: Bool {
+        // A new authoritative open is itself a projection-recovery operation.
+        // Once the replacement transport is active it must not wait behind
+        // unrelated mounted/catalog reconciliation from the prior epoch.
         connectionState == .connected
-            && !isReconcilingForeground
             && lifecycle.admission?.connectionID != nil
     }
 

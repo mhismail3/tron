@@ -1192,7 +1192,6 @@ struct ChatView: View {
     private func beginOpeningAfterForegroundWhenConnected() {
         guard scenePhase == .active,
               presentationActivity.allowsPresentationPublication,
-              !model.isReconcilingForeground,
               model.admitsSessionPresentationOpen else { return }
         Task { await beginOpeningPresentation() }
     }

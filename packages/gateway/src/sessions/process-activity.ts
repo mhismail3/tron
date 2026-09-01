@@ -133,7 +133,9 @@ function childRows(
     // A terminal receipt cannot author an active historical child. Conversely,
     // a child may finish while its workflow parent remains active; Gateway
     // observation time then owns that child's terminal admission.
-    const state = parentIsTerminal && !terminalStates.has(reportedState) ? parentState : reportedState;
+    const state = parentState === "unknown"
+      ? "unknown"
+      : parentIsTerminal && !terminalStates.has(reportedState) ? parentState : reportedState;
     const terminalAt = terminalStates.has(state)
       ? parentIsTerminal
         ? activity.lifecycle?.terminalAt ?? activity.completedAt
