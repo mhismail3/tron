@@ -59,6 +59,7 @@ enum SessionTranscriptWindowAdmissionPolicy {
         let overlapStart = max(oldWindow.start, newWindow.start)
         let overlapEnd = min(oldWindow.end, newWindow.end)
         let adjacentAppend = newWindow.start == oldWindow.end
+            && (newWindow.total > oldWindow.total || oldWindow.ids.isEmpty)
         guard adjacentAppend || (overlapStart < overlapEnd) else {
             return .rejected(.gap)
         }

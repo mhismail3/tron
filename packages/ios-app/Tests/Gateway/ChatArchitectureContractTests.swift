@@ -45,6 +45,15 @@ struct ChatArchitectureContractTests {
             SessionTranscriptWindowAdmissionPolicy.evaluate(current: current, incoming: conflict)
                 == .rejected(.conflictingOverlap)
         )
+
+        var sparse = current
+        sparse.transcript = []
+        sparse.transcriptStart = current.transcript.count
+        sparse.transcriptTotal = current.transcriptTotal
+        #expect(
+            SessionTranscriptWindowAdmissionPolicy.evaluate(current: current, incoming: sparse)
+                == .rejected(.gap)
+        )
     }
 
     @Test("partially bounded or duplicate windows fail closed")
