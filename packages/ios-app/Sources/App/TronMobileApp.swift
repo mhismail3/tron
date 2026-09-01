@@ -5,7 +5,7 @@ struct TronMobileApp: App {
     #if HOSTED_TEST
     var body: some Scene {
         WindowGroup {
-            HostedTestRootView()
+            Color.clear
         }
     }
     #else
@@ -109,15 +109,6 @@ struct TronMobileApp: App {
     }
     #endif
 }
-
-#if HOSTED_TEST
-private struct HostedTestRootView: View {
-    var body: some View {
-        Color.clear
-            .accessibilityIdentifier("tron.hosted-test-root")
-    }
-}
-#endif
 
 private struct SceneRootView: View {
     let model: AppModel

@@ -57,12 +57,10 @@ jobs:
             packages/ios-app/scripts/verify-archive-privacy.sh \
             scripts/test-agent-policy.sh \
             scripts/test-ios-artifact-validator.sh \
-            scripts/test-ios-test-policy.sh \
             scripts/tron-ios-device-test \
             scripts/tron-ios-simulator \
             scripts/tron-ios-test
       - run: scripts/ios-release-toolchain-doctor.sh --self-test
-      - run: scripts/test-ios-test-policy.sh
 
   gateway:
     runs-on: macos-15

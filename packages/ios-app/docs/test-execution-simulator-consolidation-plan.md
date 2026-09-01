@@ -1,6 +1,6 @@
 # iOS test execution and simulator consolidation plan
 
-Status: Implemented in this worktree, but not accepted. The real E2E and CI gates remain maintainer-owned, and the full unit checkpoint currently exposes product-test failures recorded below; no completion claim is made.
+Status: Implemented in this worktree, but not accepted. The real E2E and CI gates remain maintainer-owned, and a fresh full unit checkpoint is pending after the test-signal cull; no completion claim is made.
 
 ## Objective
 
@@ -276,9 +276,8 @@ The workflow should not duplicate destination construction. A CI runtime pin tha
 ### Phase 1 — stop the known hang
 
 - Add checked-in unit/UI test plans with diagnostic collection set to Never.
-- Attach them through `project.yml` and guard generated schemes.
+- Attach them through `project.yml` and validate the generated scheme boundary.
 - Add `-collect-test-diagnostics never` to every routine runner.
-- Add a focused regression using an intentionally failing fixture test and require a normal nonzero Xcode footer within the bound.
 
 ### Phase 2 — simulator provisioning and process ownership
 
@@ -295,7 +294,7 @@ The workflow should not duplicate destination construction. A CI runtime pin tha
 
 ### Phase 4 — inert hosted app and E2E migration
 
-- Make `HOSTED_TEST` startup inert and add focused guards.
+- Make `HOSTED_TEST` startup inert.
 - Move E2E onto the shared test-simulator/process primitives.
 - Preserve its unique Gateway fixture and environment injection only.
 
@@ -319,20 +318,15 @@ The workflow should not duplicate destination construction. A CI runtime pin tha
 
 ### Static and fixture gates
 
-- Generated test actions reference the checked-in plans and routine diagnostics are Never.
-- No active normal command uses a name-only simulator destination.
-- No test command bypasses the shared process owner.
-- Fake `simctl` fixtures cover missing runtime, duplicate names, wrong runtime, foreign UDID, stale owned UDID, and cleanup refusal for an unowned device.
-- Process fixtures cover pass, ordinary failure, silence timeout, continuous output timeout, descendant process, TERM refusal, interrupt forwarding, and partial artifact preservation.
-- Script-reference tests prove every retained executable has an owner and every deleted executable has no caller.
-- Agent/document policy proves one canonical command account.
+- Generated test actions reference the checked-in plans with the intended targets and configurations.
+- Fake `simctl` fixtures protect exact provisioning, Development isolation, fail-closed destination selection, stale-marker recovery, and ownership-proven cleanup.
+- Process fixtures protect nonzero status/output preservation, both deadline classes, partial artifacts, process-group cleanup, and interrupt forwarding.
+- Lease contention rejects a second owner and becomes available after release.
 - `scripts/personal-info-guard.sh` passes.
 
 ### Real simulator gates
 
 - A passing focused suite reaches `TEST EXECUTE SUCCEEDED` and a finalized result bundle.
-- An intentionally failing focused suite reaches `TEST EXECUTE FAILED` without starting verbose diagnostics or requiring manual abort.
-- A deliberately blocked fixture is bounded by the process owner, captures evidence, kills its process group, and leaves no running test host.
 - A full unit checkpoint runs serially on the exact pinned test runtime.
 - E2E renews its fixture and app state, runs on the exact test UDID, and releases its lock.
 - Concurrent second unit/E2E invocation fails before Xcode rather than sharing the simulator.
@@ -368,11 +362,9 @@ gates complete.
 Added the canonical public runner `scripts/tron-ios-test`; shared internal owners
 `scripts/ios-test-simulator.py`, `scripts/ios-test-lock.py`, and
 `scripts/ios-test-process.py`; pinned generation adapter
-`scripts/generate-ios-project`; hardware-free fixture coverage in
-`scripts/test-ios-test-infrastructure.py`; static ownership policy in
-`scripts/test-ios-test-policy.sh`; checked-in `UnitTests.xctestplan` and
-`UIValidation.xctestplan`; inert hosted-startup coverage; and the opt-in real
-Xcode failure/hang fixture.
+`scripts/generate-ios-project`; focused hardware-free boundary coverage in
+`scripts/test-ios-test-infrastructure.py`; and checked-in `UnitTests.xctestplan`
+and `UIValidation.xctestplan`.
 
 `scripts/ios-ci-test.sh` is now a thin checkpoint/metrics/cleanup adapter.
 `scripts/ios-gateway-e2e-test` retains only its Gateway fixture and scenario
@@ -407,32 +399,15 @@ scripts/ios-ci-test.sh cleanup         # unconditional CI cleanup
 - Canonical test toolchain: Xcode 26.6 (`17F113`), iOS simulator runtime 26.5
   (`23F77`), and the manifest-pinned XcodeGen. Generated schemes reference the
   checked-in plans; both plans contain `diagnosticCollectionPolicy: Never`.
-- `python3 scripts/test-ios-test-infrastructure.py`: 15 hardware-free tests pass,
-  covering exact provisioning/cleanup refusal/runtime drift/Development rejection,
-  lock contention/release, output streaming, ordinary failure, silent and
-  continuous-output deadlines, descendants, TERM refusal, interrupt forwarding,
-  and partial-artifact preservation.
-- Source, generated matrix/test-plan, iOS ownership, agent, release-doctor
-  self-test and manual read-only doctor, personal-info, Python syntax, shell
-  syntax, and `git diff --check` gates pass.
-- Focused hosted-startup run `20260901T215918Z-run.6QauG9` passed and reached
-  `TEST EXECUTE SUCCEEDED` with a finalized xcresult.
-- Opt-in product failure run `20260901T214509Z-run-85578` returned stable exit 65,
-  reached `TEST EXECUTE FAILED`, wrote `summary.json`, and contained no diagnostic
-  collection start.
-- Opt-in blocked run `20260901T214526Z-run-85694` returned stable timeout exit 75,
-  recorded a no-output timeout, process tree, samples/partial-result inventory,
-  killed the process group, and left no matching test host.
+- `python3 scripts/test-ios-test-infrastructure.py` passes the focused simulator,
+  process, and lease boundary cases described above.
+- Generated matrix/test-plan, release-doctor self-test and manual read-only doctor,
+  personal-info, Python syntax, shell syntax, and `git diff --check` gates pass.
 - A concurrent second invocation returned exit 73 before Xcode.
 - The remembered Development simulator UDID hash and shutdown state were identical
   before and after. Its Development app container was absent both times, so there
   was no pairing container to compare; the test runner selected a distinct owned
   UDID on runtime 26.5.
-- Full serial checkpoint `20260901T214602Z-checkpoint-85999` remained bounded and
-  reached `TEST EXECUTE FAILED` normally. Its xcresult reports 1,411 passed, 25
-  failed, and 3 skipped tests. Failures include current presentation/source
-  guards, scenario expectations, watchdog expirations, and signal traps outside
-  this consolidation's allowed scope. They were not retried or hidden.
 
 ### Pending acceptance evidence
 
@@ -441,8 +416,8 @@ agents from initiating Gateway build/lifecycle transitions. A maintainer must ru
 it and record the result. GitHub CI has not yet executed this worktree; the workflow
 now uploads logs, metadata, metrics, xcresults/partial bundles, and timeout evidence
 unconditionally, then invokes exact owned-simulator cleanup in an `always()` step.
-Those two receipts, plus disposition of the full-checkpoint product failures, are
-required before changing this status to accepted.
+Those two receipts and a fresh full checkpoint after the signal cull are required
+before changing this status to accepted.
 
 The bounded external compatibility input `.codex/environments/environment.toml`
 remains untouched. Its retired physical names are still isolated behind

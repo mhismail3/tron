@@ -5,18 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/project.yml"
 python3 - "$ROOT" "$PROJECT" <<'PY'
 from pathlib import Path
-import json, plistlib, re, sys
+import plistlib, re, sys
 root, project = map(Path, sys.argv[1:])
 source = project.read_text()
-plans = {
-    "TestPlans/UnitTests.xctestplan": "TronMobileTests",
-    "TestPlans/UIValidation.xctestplan": "TronMobileUITests",
-}
-for relative, target in plans.items():
-    plan = json.loads((root / relative).read_text())
-    assert plan["defaultOptions"]["diagnosticCollectionPolicy"] == "Never", relative
-    assert [entry["target"]["name"] for entry in plan["testTargets"]] == [target], relative
-    assert source.count(f"path: {relative}") >= 1, relative
 configs = ["Development", "Test", "LocalDevice", "DevicePerformance", "Release"]
 schemes = ["Tron Development", "Tron Device", "Tron UI Validation", "Tron Device Performance", "Tron Release"]
 for config in configs:

@@ -20,7 +20,6 @@ LOCK = ROOT / "scripts/ios-test-lock.py"
 RUNTIME_ID = "com.apple.CoreSimulator.SimRuntime.iOS-26-2"
 TYPE_ID = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"
 UDID_A = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA"
-UDID_B = "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB"
 
 
 class SimulatorFixture(unittest.TestCase):
@@ -115,50 +114,66 @@ raise SystemExit(2)
             "deviceTypeIdentifier": TYPE_ID,
         }
 
-    def test_provision_boots_exact_owned_device_and_delete_removes_only_it(self) -> None:
+    def test_provision_and_delete_preserve_unrelated_simulators(self) -> None:
+        _, unrelated = self.device(UDID_A, name="Unrelated Simulator")
+        self.write_inventory(devices={RUNTIME_ID: [unrelated]})
+
         provision = self.invoke("provision")
         self.assertEqual(provision.returncode, 0, provision.stderr)
-        udid = provision.stdout.strip()
-        self.assertRegex(udid, r"^[0-9A-F-]{36}$")
-        marker = json.loads(self.marker.read_text())
-        self.assertEqual(marker["udid"], udid)
-        inventory = json.loads(self.inventory_path.read_text())
-        self.assertEqual(inventory["devices"][RUNTIME_ID][0]["state"], "Booted")
+        owned_udid = provision.stdout.strip()
+        self.assertNotEqual(owned_udid, UDID_A)
+        self.assertEqual(json.loads(self.marker.read_text())["udid"], owned_udid)
+        devices = json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID]
+        self.assertEqual({device["udid"] for device in devices}, {UDID_A, owned_udid})
+        self.assertEqual(next(device for device in devices if device["udid"] == owned_udid)["state"], "Booted")
+
         delete = self.invoke("delete")
         self.assertEqual(delete.returncode, 0, delete.stderr)
         self.assertFalse(self.marker.exists())
-        self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [])
+        self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [unrelated])
 
-    def test_missing_runtime_fails_before_create(self) -> None:
-        self.write_inventory(runtimes=[])
-        result = self.invoke("provision")
-        self.assertEqual(result.returncode, 66)
-        self.assertIn("expected one available iOS 26.2 runtime", result.stderr)
+    def test_unavailable_or_unowned_destination_fails_before_mutation(self) -> None:
+        with self.subTest("missing pinned runtime"):
+            self.write_inventory(runtimes=[])
+            result = self.invoke("provision")
+            self.assertEqual(result.returncode, 66)
+            self.assertIn("expected one available iOS 26.2 runtime", result.stderr)
+            self.assertFalse(self.marker.exists())
 
-    def test_duplicate_unmarked_owned_names_fail_closed(self) -> None:
-        _, first = self.device(UDID_A)
-        _, second = self.device(UDID_B)
-        self.write_inventory(devices={RUNTIME_ID: [first, second]})
-        result = self.invoke("provision")
-        self.assertEqual(result.returncode, 66)
-        self.assertIn("refusing to adopt 2 unmarked", result.stderr)
+        with self.subTest("unmarked name collision"):
+            _, collision = self.device(UDID_A)
+            self.write_inventory(devices={RUNTIME_ID: [collision]})
+            result = self.invoke("provision")
+            self.assertEqual(result.returncode, 66)
+            self.assertIn("refusing to adopt 1 unmarked", result.stderr)
+            self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [collision])
+            self.assertFalse(self.marker.exists())
 
-    def test_wrong_runtime_marker_is_retired_only_when_identity_matches(self) -> None:
+    def test_stale_marker_recovers_only_when_ownership_is_still_proven(self) -> None:
         old_runtime = "com.apple.CoreSimulator.SimRuntime.iOS-26-1"
-        _, device = self.device(UDID_A, runtime=old_runtime)
-        self.write_inventory(devices={old_runtime: [device], RUNTIME_ID: []})
-        self.marker.write_text(json.dumps(self.owned_marker(runtime=old_runtime)))
-        result = self.invoke("provision")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotEqual(result.stdout.strip(), UDID_A)
-        inventory = json.loads(self.inventory_path.read_text())
-        self.assertEqual(inventory["devices"][old_runtime], [])
+        with self.subTest("owned runtime drift"):
+            _, stale = self.device(UDID_A, runtime=old_runtime)
+            self.write_inventory(devices={old_runtime: [stale], RUNTIME_ID: []})
+            self.marker.write_text(json.dumps(self.owned_marker(runtime=old_runtime)))
+            result = self.invoke("provision")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotEqual(result.stdout.strip(), UDID_A)
+            self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][old_runtime], [])
 
-    def test_stale_owned_udid_is_recreated(self) -> None:
-        self.marker.write_text(json.dumps(self.owned_marker()))
-        result = self.invoke("provision")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotEqual(result.stdout.strip(), UDID_A)
+        with self.subTest("missing owned device"):
+            self.write_inventory()
+            self.marker.write_text(json.dumps(self.owned_marker()))
+            result = self.invoke("provision")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotEqual(result.stdout.strip(), UDID_A)
+
+        with self.subTest("runtime drift with changed identity"):
+            _, changed = self.device(UDID_A, runtime=old_runtime, name="Changed Identity")
+            self.write_inventory(devices={old_runtime: [changed], RUNTIME_ID: []})
+            self.marker.write_text(json.dumps(self.owned_marker(runtime=old_runtime)))
+            result = self.invoke("provision")
+            self.assertEqual(result.returncode, 66)
+            self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][old_runtime], [changed])
 
     def test_development_udid_is_never_accepted(self) -> None:
         _, device = self.device(UDID_A)
@@ -169,22 +184,26 @@ raise SystemExit(2)
         self.assertEqual(result.returncode, 66)
         self.assertIn("Development simulator", result.stderr)
 
-    def test_cleanup_refuses_foreign_or_changed_identity(self) -> None:
-        _, device = self.device(UDID_A, name="Someone Else")
-        self.write_inventory(devices={RUNTIME_ID: [device]})
-        self.marker.write_text(json.dumps(self.owned_marker()))
-        result = self.invoke("delete")
-        self.assertEqual(result.returncode, 66)
-        self.assertIn("refusing to delete", result.stderr)
-        self.assertTrue(self.marker.exists())
+    def test_cleanup_requires_marker_and_current_identity_ownership(self) -> None:
+        with self.subTest("changed simulator identity"):
+            _, changed = self.device(UDID_A, name="Changed Identity")
+            self.write_inventory(devices={RUNTIME_ID: [changed]})
+            self.marker.write_text(json.dumps(self.owned_marker()))
+            result = self.invoke("delete")
+            self.assertEqual(result.returncode, 66)
+            self.assertIn("refusing to delete", result.stderr)
+            self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [changed])
 
-    def test_foreign_marker_is_rejected(self) -> None:
-        marker = self.owned_marker()
-        marker["owner"] = "foreign"
-        self.marker.write_text(json.dumps(marker))
-        result = self.invoke("delete")
-        self.assertEqual(result.returncode, 66)
-        self.assertIn("refusing unowned simulator marker", result.stderr)
+        with self.subTest("foreign marker"):
+            _, device = self.device(UDID_A)
+            self.write_inventory(devices={RUNTIME_ID: [device]})
+            marker = self.owned_marker()
+            marker["owner"] = "foreign"
+            self.marker.write_text(json.dumps(marker))
+            result = self.invoke("delete")
+            self.assertEqual(result.returncode, 66)
+            self.assertIn("refusing unowned simulator marker", result.stderr)
+            self.assertEqual(json.loads(self.inventory_path.read_text())["devices"][RUNTIME_ID], [device])
 
 
 class ProcessFixture(unittest.TestCase):
@@ -204,24 +223,24 @@ class ProcessFixture(unittest.TestCase):
             "--", *child,
         ]
 
-    def test_pass_streams_complete_output(self) -> None:
-        result = subprocess.run(self.command([sys.executable, "-c", "print('complete-output')"]), text=True, stdout=subprocess.PIPE)
-        self.assertEqual(result.returncode, 0)
+    def test_output_and_nonzero_exit_are_preserved(self) -> None:
+        child = "print('complete-output', flush=True); raise SystemExit(7)"
+        result = subprocess.run(self.command([sys.executable, "-c", child]), text=True, stdout=subprocess.PIPE)
+        self.assertEqual(result.returncode, 7)
         self.assertIn("complete-output", result.stdout)
         self.assertIn("complete-output", (self.root / "full.log").read_text())
 
-    def test_ordinary_failure_is_preserved(self) -> None:
-        result = subprocess.run(self.command([sys.executable, "-c", "raise SystemExit(7)"]))
-        self.assertEqual(result.returncode, 7)
-
-    def test_silence_timeout_preserves_partial_artifact_and_kills_term_refuser(self) -> None:
+    def test_silence_timeout_preserves_artifact_and_kills_process_group(self) -> None:
         artifact = self.root / "partial.xcresult"
+        pid_path = self.root / "descendant.pid"
         child = (
-            "import os,signal,time; from pathlib import Path; "
-            f"Path({str(artifact)!r}).mkdir(); Path({str(artifact / 'partial')!r}).write_text('evidence'); "
+            "import signal,subprocess,sys,time; from pathlib import Path; "
+            f"artifact=Path({str(artifact)!r}); artifact.mkdir(); (artifact/'partial').write_text('evidence'); "
+            "descendant=subprocess.Popen([sys.executable,'-c','import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)']); "
+            f"Path({str(pid_path)!r}).write_text(str(descendant.pid)); "
             "signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
         )
-        result = subprocess.run(self.command([sys.executable, "-c", child], overall=5, no_output=0.3, artifact=artifact))
+        result = subprocess.run(self.command([sys.executable, "-c", child], overall=5, no_output=0.4, artifact=artifact))
         self.assertEqual(result.returncode, 124)
         timeout = json.loads((self.root / "evidence/timeout.json").read_text())
         self.assertEqual(timeout["reason"], "no-output")
@@ -229,22 +248,6 @@ class ProcessFixture(unittest.TestCase):
         self.assertEqual(timeout["artifact_files"][0]["path"], "partial")
         self.assertTrue((artifact / "partial").exists())
 
-    def test_continuous_output_still_hits_overall_deadline(self) -> None:
-        child = "import time\nwhile True:\n print('tick', flush=True); time.sleep(.05)"
-        result = subprocess.run(self.command([sys.executable, "-c", child], overall=0.4, no_output=1), stdout=subprocess.DEVNULL)
-        self.assertEqual(result.returncode, 124)
-        timeout = json.loads((self.root / "evidence/timeout.json").read_text())
-        self.assertEqual(timeout["reason"], "overall")
-
-    def test_descendant_process_is_killed_with_group(self) -> None:
-        pid_path = self.root / "descendant.pid"
-        child = (
-            "import subprocess,sys,time; from pathlib import Path; "
-            "p=subprocess.Popen([sys.executable,'-c','import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)']); "
-            f"Path({str(pid_path)!r}).write_text(str(p.pid)); time.sleep(30)"
-        )
-        result = subprocess.run(self.command([sys.executable, "-c", child], overall=5, no_output=0.4))
-        self.assertEqual(result.returncode, 124)
         pid = int(pid_path.read_text())
         deadline = time.time() + 2
         while time.time() < deadline:
@@ -256,6 +259,13 @@ class ProcessFixture(unittest.TestCase):
         else:
             stat = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], text=True, stdout=subprocess.PIPE).stdout.strip()
             self.assertTrue(stat.startswith("Z") or not stat, f"descendant still alive: {pid} {stat}")
+
+    def test_continuous_output_still_hits_overall_deadline(self) -> None:
+        child = "import time\nwhile True:\n print('tick', flush=True); time.sleep(.05)"
+        result = subprocess.run(self.command([sys.executable, "-c", child], overall=0.4, no_output=1), stdout=subprocess.DEVNULL)
+        self.assertEqual(result.returncode, 124)
+        timeout = json.loads((self.root / "evidence/timeout.json").read_text())
+        self.assertEqual(timeout["reason"], "overall")
 
     def test_interrupt_is_forwarded_and_returns_conventional_exit(self) -> None:
         signal_path = self.root / "signal.txt"

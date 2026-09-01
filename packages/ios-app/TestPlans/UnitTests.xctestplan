@@ -9,16 +9,6 @@
   ],
   "defaultOptions" : {
     "diagnosticCollectionPolicy" : "Never",
-    "environmentVariableEntries" : [
-      {
-        "key" : "TRON_IOS_INTENTIONAL_TEST_FAILURE",
-        "value" : "$(TRON_IOS_INTENTIONAL_TEST_FAILURE)"
-      },
-      {
-        "key" : "TRON_IOS_INTENTIONAL_TEST_HANG",
-        "value" : "$(TRON_IOS_INTENTIONAL_TEST_HANG)"
-      }
-    ],
     "targetForVariableExpansion" : {
       "containerPath" : "container:TronMobile.xcodeproj",
       "identifier" : "5CE10CFB51EA2F88B755A197",

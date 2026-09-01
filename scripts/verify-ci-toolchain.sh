@@ -9,6 +9,7 @@ NODE_VERSION_FILE="$ROOT/.node-version"
 TRON_NODE_VERSION="$(<"$NODE_VERSION_FILE")"
 CHECKOUT_PIN='11d5960a326750d5838078e36cf38b85af677262'
 SETUP_NODE_PIN='49933ea5288caeca8642d1e84afbd3f7d6820020'
+UPLOAD_ARTIFACT_PIN='ea165f8d65b6e75b540449e92b4886f43607fa02'
 node_version_lines="$(awk 'END { print NR }' "$NODE_VERSION_FILE")"
 [[ "$node_version_lines" == 1 && "$TRON_NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
   || { echo "canonical Node version must be one strict x.y.z line (found $TRON_NODE_VERSION)" >&2; exit 1; }
@@ -23,6 +24,7 @@ workflow_action_count() {
 }
 workflow_action_count checkout "$CHECKOUT_PIN"
 workflow_action_count setup-node "$SETUP_NODE_PIN"
+workflow_action_count upload-artifact "$UPLOAD_ARTIFACT_PIN"
 
 for tool in "$@"; do
   case "$tool" in
