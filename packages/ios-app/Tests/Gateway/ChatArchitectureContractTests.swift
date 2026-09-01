@@ -72,6 +72,39 @@ struct ChatArchitectureContractTests {
         )
     }
 
+    @Test("bounded and unbounded transitions fail closed, including empty preceding pages")
+    func rejectsAmbiguousWindowTransitions() throws {
+        var bounded = try SessionScenarioBuilder(seed: 9_407).openingTail(targetEncodedBytes: 8_192)
+        bounded.transcriptStart = 0
+        bounded.transcriptTotal = bounded.transcript.count
+        var unbounded = bounded
+        unbounded.transcriptStart = nil
+        unbounded.transcriptTotal = nil
+        #expect(
+            SessionTranscriptWindowAdmissionPolicy.evaluate(current: bounded, incoming: unbounded)
+                == .rejected(.gap)
+        )
+        #expect(
+            SessionTranscriptWindowAdmissionPolicy.evaluate(current: unbounded, incoming: bounded)
+                == .rejected(.gap)
+        )
+        #expect(
+            SessionTranscriptWindowAdmissionPolicy.evaluate(
+                current: bounded,
+                incoming: unbounded,
+                allowsValidatedRebaseline: true
+            ) == .accepted
+        )
+
+        var emptyPreceding = bounded
+        emptyPreceding.transcript = []
+        emptyPreceding.transcriptStart = 0
+        #expect(
+            SessionTranscriptWindowAdmissionPolicy.evaluate(current: bounded, incoming: emptyPreceding)
+                == .rejected(.gap)
+        )
+    }
+
     @Test("partially bounded or duplicate windows fail closed")
     func rejectsMalformedWindow() throws {
         var partial = try SessionScenarioBuilder(seed: 9_405).openingTail(targetEncodedBytes: 8_192)
@@ -89,42 +122,6 @@ struct ChatArchitectureContractTests {
             SessionTranscriptWindowAdmissionPolicy.evaluate(current: nil, incoming: duplicate)
                 == .rejected(.duplicateOrEmptyID)
         )
-    }
-
-    @Test("presentation transition classification is deterministic and identity-scoped")
-    func transitionClassification() throws {
-        let snapshot = try SessionScenarioBuilder(seed: 9_406).openingTail(targetEncodedBytes: 8_192)
-        let tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 1)
-        let initial = ChatTranscriptPresentationTransition(
-            previousTag: nil,
-            nextTag: tag,
-            previousRowIDs: [],
-            nextRowIDs: ["one"]
-        )
-        #expect(initial.kind == .initial)
-
-        let appended = ChatTranscriptPresentationTransition(
-            previousTag: tag,
-            nextTag: tag,
-            previousRowIDs: ["one"],
-            nextRowIDs: ["one", "two"]
-        )
-        #expect(appended.kind == .append)
-        #expect(appended.retainedRowIDs == ["one"])
-
-        var replacementSnapshot = snapshot
-        replacementSnapshot.runtimeGeneration = "new-runtime"
-        let replacementTag = ChatTranscriptProjectionTag(
-            snapshot: replacementSnapshot,
-            presentationGeneration: 1
-        )
-        let replacement = ChatTranscriptPresentationTransition(
-            previousTag: tag,
-            nextTag: replacementTag,
-            previousRowIDs: ["one"],
-            nextRowIDs: ["one"]
-        )
-        #expect(replacement.kind == .replacement)
     }
 
     @Test("missing presentation IDs never establish a live canonical successor")

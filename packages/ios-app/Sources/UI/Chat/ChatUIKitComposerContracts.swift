@@ -4,6 +4,18 @@ import Foundation
 /// The complete immutable projection needed by the UIKit composer. It contains
 /// presentation facts only; draft and submission ownership remains with
 /// ComposerDraftCoordinator/AppModel.
+struct ChatUIKitComposerSendIdentity: Equatable, Sendable {
+    let sessionID: String
+    let submissionID: String
+
+    init?(sessionID: String?, submissionID: String?) {
+        guard let sessionID, !sessionID.isEmpty,
+              let submissionID, !submissionID.isEmpty else { return nil }
+        self.sessionID = sessionID
+        self.submissionID = submissionID
+    }
+}
+
 struct ChatUIKitComposerInput {
     let sessionID: String?
     let text: String
@@ -13,6 +25,9 @@ struct ChatUIKitComposerInput {
     /// to correlate same-revision authoritative terminal state; it is not a
     /// second receipt store.
     let submissionID: String?
+    var sendIdentity: ChatUIKitComposerSendIdentity? {
+        ChatUIKitComposerSendIdentity(sessionID: sessionID, submissionID: submissionID)
+    }
     let attachments: [PendingAttachment]
     let selectedResource: ComposerResourceEntry?
     let resourcePicker: ComposerResourcePickerSource?
@@ -122,7 +137,7 @@ enum ChatUIKitComposerFocus: Equatable, Sendable {
 enum ChatUIKitComposerIntent: Equatable {
     case textChanged(text: String, selection: NSRange)
     case focusChanged(Bool)
-    case send(behavior: String?)
+    case send(behavior: String?, identity: ChatUIKitComposerSendIdentity)
     case abort
     case selectAttachmentDestination(ChatAttachmentDestination)
     case previewAttachment(id: String)

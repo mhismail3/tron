@@ -113,6 +113,9 @@ struct ChatUIKitTranscriptRow: Hashable {
     var resourceInvocation: ComposerResourceInvocation? { facts.resourceInvocation }
     var toolLabel: String? { facts.toolLabel }
 
+    #if HOSTED_TEST
+    /// Synthetic rows are test fixtures only. Shipping code must construct a
+    /// row from the canonical physical content factory below.
     init?(
         id: String,
         text: String,
@@ -150,6 +153,7 @@ struct ChatUIKitTranscriptRow: Hashable {
         // their canonical payload.
         self.payload = .synthetic(facts)
     }
+    #endif
 
     /// Factory for physical rows. Unlike the compatibility initializer above,
     /// this has no independent presentation fields to disagree with content.

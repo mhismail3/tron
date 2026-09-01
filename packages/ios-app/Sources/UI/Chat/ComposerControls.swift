@@ -6,16 +6,26 @@ import UIKit
 @Observable
 final class ChatComposerResponder {
     @ObservationIgnored private weak var textView: UITextView?
-
-    var window: UIWindow? { textView?.window }
+    private(set) var window: UIWindow?
+    /// Changes when UIKit moves the attached responder between windows. ChatView
+    /// observes this rather than relying on the representable's initial render.
+    private(set) var windowRevision = 0
 
     func attach(_ textView: UITextView) {
         self.textView = textView
+        updateWindow(textView.window)
+    }
+
+    func updateWindow(_ window: UIWindow?) {
+        guard self.window !== window else { return }
+        self.window = window
+        windowRevision &+= 1
     }
 
     func detach(_ textView: UITextView) {
         guard self.textView === textView else { return }
         self.textView = nil
+        updateWindow(nil)
     }
 
     @discardableResult
@@ -38,6 +48,12 @@ struct MultilineComposerTextView: UIViewRepresentable {
 
     final class LayoutAwareTextView: UITextView {
         var didLayout: ((LayoutAwareTextView) -> Void)?
+        var didMoveToWindowCallback: ((LayoutAwareTextView) -> Void)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            didMoveToWindowCallback?(self)
+        }
         private var isReportingLayout = false
 
         override func layoutSubviews() {
@@ -56,6 +72,9 @@ struct MultilineComposerTextView: UIViewRepresentable {
         view.delegate = context.coordinator
         view.didLayout = { [weak coordinator = context.coordinator] view in
             coordinator?.textViewDidLayout(view)
+        }
+        view.didMoveToWindowCallback = { [weak coordinator = context.coordinator] view in
+            coordinator?.parent.responder?.updateWindow(view.window)
         }
         view.backgroundColor = .clear
         view.textColor = UIColor(Color.tronEmerald)
@@ -105,6 +124,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
         view.resignFirstResponder()
         coordinator.parent.responder?.detach(view)
         view.didLayout = nil
+        view.didMoveToWindowCallback = nil
         view.delegate = nil
     }
 

@@ -74,6 +74,13 @@ final class ChatUIKitComposerAttachmentChip: UIView {
         addSubview(remove)
         NSLayoutConstraint.activate([remove.widthAnchor.constraint(equalToConstant: 22), remove.heightAnchor.constraint(equalToConstant: 22), remove.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 7), remove.topAnchor.constraint(equalTo: topAnchor, constant: -7)])
     }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle else { return }
+        preview.tintColor = ChatUIKitComposerColors.blue
+        preview.backgroundColor = ChatUIKitComposerColors.blue.withAlphaComponent(0.10)
+    }
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     @objc private func previewPressed() { onPreview?() }
     @objc private func removePressed() { onRemove?() }
@@ -114,6 +121,7 @@ final class ChatUIKitComposerResourceChip: UIView {
 @MainActor
 final class ChatUIKitComposerContextButton: UIButton {
     private var presentation = SessionContextProgressPresentation(contextPercentage: 0, modelName: nil, isCompacting: false, isEnabled: false)
+    private var reduceMotion = false
     private let track = CAShapeLayer()
     private let progress = CAShapeLayer()
 
@@ -142,25 +150,36 @@ final class ChatUIKitComposerContextButton: UIButton {
 
     func apply(_ value: SessionContextProgressPresentation, reduceMotion: Bool) {
         presentation = value
-        let bounded = min(max(value.contextPercentage, 0), 100)
-        let accent = value.isEnabled
-            ? (bounded >= 95 ? ChatUIKitComposerColors.error : bounded >= 80 ? ChatUIKitComposerColors.amber : ChatUIKitComposerColors.emerald)
-            : ChatUIKitComposerColors.muted
-        track.strokeColor = ChatUIKitComposerColors.muted.withAlphaComponent(0.34).cgColor
-        progress.strokeColor = accent.cgColor
-        progress.strokeEnd = CGFloat(bounded) / 100
-        isEnabled = value.isEnabled; alpha = value.isEnabled ? 1 : 0.56
+        self.reduceMotion = reduceMotion
+        refreshTheme()
         accessibilityLabel = "Manage Session"
+        let bounded = min(max(value.contextPercentage, 0), 100)
         var parts = value.modelName.map { [$0] } ?? []
         parts.append(value.isEnabled ? "\(bounded)% context used" : "Session context loading")
         if value.isCompacting { parts.append("compacting") }
         accessibilityValue = parts.joined(separator: ", ")
         accessibilityHint = "Shows context usage, model selection, and session actions"
-        if !reduceMotion {
-            CATransaction.begin(); CATransaction.setAnimationDuration(0.2)
-            progress.strokeEnd = CGFloat(bounded) / 100
-            CATransaction.commit()
-        }
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle else { return }
+        refreshTheme()
+    }
+
+    private func refreshTheme() {
+        let bounded = min(max(presentation.contextPercentage, 0), 100)
+        let accent = presentation.isEnabled
+            ? (bounded >= 95 ? ChatUIKitComposerColors.error : bounded >= 80 ? ChatUIKitComposerColors.amber : ChatUIKitComposerColors.emerald)
+            : ChatUIKitComposerColors.muted
+        track.strokeColor = ChatUIKitComposerColors.muted.withAlphaComponent(0.34).cgColor
+        progress.strokeColor = accent.cgColor
+        CATransaction.begin()
+        CATransaction.setDisableActions(reduceMotion)
+        progress.strokeEnd = CGFloat(bounded) / 100
+        CATransaction.commit()
+        isEnabled = presentation.isEnabled
+        alpha = presentation.isEnabled ? 1 : 0.56
     }
 }
 

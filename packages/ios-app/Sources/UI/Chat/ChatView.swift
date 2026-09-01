@@ -233,6 +233,12 @@ struct ChatView: View {
         .onChange(of: composerFocused) { _, _ in
             keyboardObserver.setOwnerWindow(composerResponder.window)
         }
+        .onChange(of: composerResponder.windowRevision) { _, _ in
+            // UIViewRepresentable can attach or detach after ChatView's
+            // onAppear. Follow the responder's actual window, not the stale
+            // first-render value.
+            keyboardObserver.setOwnerWindow(composerResponder.window)
+        }
         .environment(\.pendingExtensionInteractionPresenter) { interaction in
             guard selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions
                 .contains(where: { ExtensionInteractionScope($0) == ExtensionInteractionScope(interaction) }) == true else { return }

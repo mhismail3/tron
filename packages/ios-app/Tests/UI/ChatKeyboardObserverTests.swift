@@ -19,6 +19,22 @@ struct ChatKeyboardObserverTests {
         ) == 0)
     }
 
+    @Test("responder publishes a window attachment after the initial render")
+    func responderWindowAttachmentIsObservable() {
+        let responder = ChatComposerResponder()
+        let textView = UITextView()
+        responder.attach(textView)
+        #expect(responder.window == nil)
+        let initialRevision = responder.windowRevision
+        let window = UIWindow()
+        responder.updateWindow(window)
+        #expect(responder.window === window)
+        #expect(responder.windowRevision == initialRevision + 1)
+        responder.detach(textView)
+        #expect(responder.window == nil)
+        #expect(responder.windowRevision == initialRevision + 2)
+    }
+
     @Test("notifications are ignored until an attached owner window exists")
     func requiresOwnerWindow() throws {
         let center = NotificationCenter()

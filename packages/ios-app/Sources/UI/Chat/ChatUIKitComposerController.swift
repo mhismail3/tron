@@ -29,7 +29,7 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     private let trailingSpinner = ChatUIKitPulseLoadingView(accent: ChatUIKitTheme.emerald)
     private var editorHeight: NSLayoutConstraint?
     private var sendHandoffRevision: Int?
-    private var sendHandoffID: String?
+    private var sendHandoffIdentity: ChatUIKitComposerSendIdentity?
     private var sendHandoffAccepted = false
     private var applyingAuthoritativeInput = false
     nonisolated(unsafe) private var keyboardObservers: [NSObjectProtocol] = []
@@ -66,8 +66,14 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         if let prior = input, prior.revision != next.revision {
             clearSendHandoff()
         }
+        // Revision is a UI refresh token, not an admission identity. A
+        // same-revision replacement must not inherit the prior send outcome.
         if sendHandoffRevision == next.revision,
-           (next.submissionID == nil || next.submissionID == sendHandoffID),
+           next.sendIdentity != sendHandoffIdentity {
+            clearSendHandoff()
+        }
+        if sendHandoffRevision == next.revision,
+           next.sendIdentity == sendHandoffIdentity,
            (next.isSending || next.submissionPending) {
             sendHandoffAccepted = true
         }
@@ -98,6 +104,7 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         placeholder.font = ChatUIKitComposerFonts.input
         view.backgroundColor = .clear
         configureEditorFromInput(input ?? ChatUIKitComposerInput())
+        if let input { configureButtonsFromInput(input) }
         updateEditorHeight()
         updateAccessibilityOrder()
     }
@@ -279,11 +286,12 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     }
 
     /// The host must resolve the terminal admission explicitly. Rejected sends
-    /// release the same revision for retry; accepted sends remain suppressed
-    /// until a new authoritative revision arrives.
-    func resolveSend(revision: Int, submissionID: String? = nil, accepted: Bool) {
+    /// release the exact identity for retry; accepted sends remain suppressed
+    /// until a new authoritative identity arrives. There is no wildcard
+    /// revision-only resolution.
+    func resolveSend(revision: Int, identity: ChatUIKitComposerSendIdentity, accepted: Bool) {
         guard sendHandoffRevision == revision,
-              submissionID == nil || submissionID == sendHandoffID else { return }
+              identity == sendHandoffIdentity else { return }
         if accepted {
             sendHandoffAccepted = true
         } else {
@@ -293,7 +301,7 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
 
     private func clearSendHandoff() {
         sendHandoffRevision = nil
-        sendHandoffID = nil
+        sendHandoffIdentity = nil
         sendHandoffAccepted = false
     }
 
@@ -500,7 +508,7 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     }
 
     private func emitSend(behavior: String?) {
-        guard let next = input else { return }
+        guard let next = input, let identity = next.sendIdentity else { return }
         let text = next.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard next.trailingMode == .send,
               (!text.isEmpty || !next.attachments.isEmpty),
@@ -513,9 +521,9 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         // No speculative timeout: an ambiguous transport result must not
         // reopen an accepted command and emit it a second time.
         sendHandoffRevision = next.revision
-        sendHandoffID = next.submissionID
+        sendHandoffIdentity = identity
         sendHandoffAccepted = false
-        onIntent?(.send(behavior: behavior))
+        onIntent?(.send(behavior: behavior, identity: identity))
     }
 
     func contextMenuInteraction(_ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {

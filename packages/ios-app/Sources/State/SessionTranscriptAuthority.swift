@@ -31,7 +31,8 @@ enum SessionTranscriptWindowAdmissionPolicy {
     /// snapshots are rejected because their ordinals cannot be trusted.
     static func evaluate(
         current: SessionSnapshot?,
-        incoming: SessionSnapshot
+        incoming: SessionSnapshot,
+        allowsValidatedRebaseline: Bool = false
     ) -> SessionTranscriptWindowAdmission {
         guard admitsShape(incoming) else {
             return .rejected(shapeReason(for: incoming))
@@ -48,14 +49,22 @@ enum SessionTranscriptWindowAdmissionPolicy {
         }
         guard let oldWindow = window(for: current),
               let newWindow = window(for: incoming) else {
-            // Both snapshots are legacy/unbounded. There is no ordinal claim
-            // to compare, so cursor admission remains the authority fence.
+            // A bounded/unbounded transition discards ordinal identity and is
+            // not an ordinary live update. Only an explicitly validated
+            // rebaseline may replace that source window. Fresh open remains
+            // admitted above when there is no current frame.
+            if window(for: current) != nil || window(for: incoming) != nil {
+                return allowsValidatedRebaseline ? .accepted : .rejected(.gap)
+            }
             return .accepted
         }
         guard newWindow.total >= oldWindow.total else {
             return .rejected(.nonMonotonicTotal)
         }
 
+        // An empty exact-preceding page carries no evidence of continuity and
+        // must not be admitted as a prepend.
+        guard !newWindow.ids.isEmpty else { return .rejected(.gap) }
         let overlapStart = max(oldWindow.start, newWindow.start)
         let overlapEnd = min(oldWindow.end, newWindow.end)
         let adjacentAppend = newWindow.start == oldWindow.end

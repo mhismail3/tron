@@ -38,8 +38,8 @@ The transcript authority boundary is explicit: `SessionTranscriptWindowAdmission
 bounded window shape and same-runtime ordinal continuity before a live snapshot can replace the
 current commit. Its rejected outcome requests rebaseline while preserving the last valid visible
 commit; a failed prefix reconciliation is never treated as an empty transcript. Presentation uses
-`InstalledChatTranscript` as an immutable commit and emits one `ChatTranscriptPresentationTransition`
-for its eventual viewport owner. `ChatLiveCanonicalIdentityPolicy` permits a live-to-canonical
+`InstalledChatTranscript` as an immutable commit; its immutable tag and row IDs are consumed directly
+by the viewport owner for one atomic apply. `ChatLiveCanonicalIdentityPolicy` permits a live-to-canonical
 handoff only when exactly one successor is provable, so row identity cannot be inferred from timing.
 
 The interactive chat replacement is intentionally UIKit-only at its viewport boundary.
@@ -55,8 +55,10 @@ streaming, media, tool, and indicator work is leased to one explicit presentatio
 and reset on reuse/generation replacement. The composer uses authoritative focus/resign input and
 an explicit bounded send handoff, so rejected sends can retry without duplicate accepted sends.
 `ChatUIKitComposerController` is its separately testable UIKit composer surface. It consumes the
-immutable `ChatUIKitComposerInput` projection and emits `ChatUIKitComposerIntent` values; draft,
-submission, resource, attachment, and viewport authorities remain outside the surface. The
+immutable `ChatUIKitComposerInput` projection and emits `ChatUIKitComposerIntent` values; every send
+intent and terminal resolution carries the exact nonempty scoped submission identity, while accepted
+handoffs remain suppressed until a newer identity arrives. Draft, submission, resource, attachment,
+and viewport authorities remain outside the surface. The
 composer never writes collection-view offsets. Neither controller is mounted in production during
 this phase. The eventual cutover must delete
 the SwiftUI transcript scroll surface, sentinel/materialization control path, and competing

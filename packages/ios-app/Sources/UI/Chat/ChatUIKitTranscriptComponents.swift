@@ -59,6 +59,7 @@ final class ChatUIKitToolPill: UIControl {
     private var elapsedTimer: Timer?
     private var presentationActive = true
     private var activityGeneration: UInt64 = 0
+    private var hasConfiguredActivity = false
 
     init(run: ChatToolRunPresentation) {
         self.run = run
@@ -111,11 +112,20 @@ final class ChatUIKitToolPill: UIControl {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
-        if activityGeneration != activity.generation {
+        let generationChanged = hasConfiguredActivity && activityGeneration != activity.generation
+        if generationChanged {
             elapsedTimer?.invalidate()
             elapsedTimer = nil
+            self.activity.stopAnimating()
+            activityGeneration = activity.generation
+            presentationActive = activity.isActive
+            // Generation replacement requires a fresh payload/configuration;
+            // do not revive the old tool run merely because the new lease is
+            // active.
+            return
         }
         activityGeneration = activity.generation
+        hasConfiguredActivity = true
         presentationActive = activity.isActive
         if presentationActive, run?.isRunning == true {
             self.activity.startAnimating()
@@ -131,7 +141,7 @@ final class ChatUIKitToolPill: UIControl {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { setPresentationActivity(.inactive(generation: 0)) }
+        if window == nil { setPresentationActivity(.inactive(generation: activityGeneration)) }
     }
     @objc private func elapsedTick(_ timer: Timer) {
         guard let run else { return }
@@ -147,6 +157,7 @@ final class ChatUIKitNotificationPill: UIControl {
     private var activityIndicator: ChatUIKitPulseLoadingView?
     private var presentationActive = true
     private var activityGeneration: UInt64 = 0
+    private var hasConfiguredActivity = false
     init(presentation: ChatNotificationPresentation) {
         super.init(frame: .zero)
         let accent = ChatUIKitTheme.notificationColor(presentation.tone)
@@ -182,13 +193,21 @@ final class ChatUIKitNotificationPill: UIControl {
     }
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
+        let generationChanged = hasConfiguredActivity && activityGeneration != activity.generation
         activityGeneration = activity.generation
+        hasConfiguredActivity = true
         presentationActive = activity.isActive
+        if generationChanged {
+            activityIndicator?.stopAnimating()
+            // The indicator is tied to the old notification payload. A fresh
+            // render creates the new indicator for this generation.
+            return
+        }
         if presentationActive { activityIndicator?.startAnimating() } else { activityIndicator?.stopAnimating() }
     }
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { setPresentationActivity(.inactive(generation: 0)) }
+        if window == nil { setPresentationActivity(.inactive(generation: activityGeneration)) }
     }
     @objc private func activate() { onActivate?() }
 }
@@ -351,6 +370,7 @@ final class ChatUIKitMediaChip: UIControl {
     private var failed = false
     private var presentationActive = true
     private var activityGeneration: UInt64 = 0
+    private var hasConfiguredActivity = false
     private(set) var loadState: ChatMediaLoadState = .idle
     private var normalAccessibilityLabel: String
 
@@ -371,6 +391,13 @@ final class ChatUIKitMediaChip: UIControl {
         if let image = attachment.preparedThumbnail { imageView.image = image }
     }
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle else { return }
+        layer.borderColor = ChatUIKitTheme.border.resolvedColor(with: traitCollection).cgColor
+        if loadState != .succeeded { showPlaceholder() }
+    }
 
     /// Metadata is mutable even when the chip's stable ID is retained. A
     /// replacement retires the previous request and clears its accessibility
@@ -452,9 +479,16 @@ final class ChatUIKitMediaChip: UIControl {
         }
     }
     func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
-        let generationChanged = activityGeneration != activity.generation
+        let generationChanged = hasConfiguredActivity && activityGeneration != activity.generation
         activityGeneration = activity.generation
-        if generationChanged { cancelLoad() }
+        hasConfiguredActivity = true
+        if generationChanged {
+            cancelLoad()
+            presentationActive = activity.isActive
+            // Do not restart a request for the stale attachment. A fresh
+            // payload/configuration admits the request for this generation.
+            return
+        }
         let wasActive = presentationActive
         presentationActive = activity.isActive
         if presentationActive {
@@ -476,7 +510,7 @@ final class ChatUIKitMediaChip: UIControl {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { setPresentationActivity(.inactive(generation: 0)) }
+        if window == nil { setPresentationActivity(.inactive(generation: activityGeneration)) }
     }
     private func showPlaceholder() { imageView.image = UIImage(systemName: attachment.mimeType.hasPrefix("image/") ? "photo" : "doc.text"); imageView.tintColor = ChatUIKitTheme.blue; imageView.backgroundColor = ChatUIKitTheme.blue.withAlphaComponent(0.10); accessibilityValue = attachmentFacts }
     private func showFailure() { imageView.image = UIImage(systemName: "arrow.clockwise"); imageView.tintColor = ChatUIKitTheme.blue; accessibilityValue = "Preview unavailable; activate to retry" }

@@ -131,7 +131,14 @@ final class ChatUIKitTranscriptRowView: UIView {
             && configuredActivityGeneration != activity.generation
         configuredActivityGeneration = activity.generation
         presentationActivity = activity
-        if generationChanged { mediaChips.forEach { $0.cancelLoad() } }
+        if generationChanged {
+            // A presentation replacement retires the old row-local work. The
+            // next payload must be configured explicitly for this generation;
+            // never restart stale streaming/media content from the lease alone.
+            mediaChips.forEach { $0.cancelLoad() }
+            markdownView.reset()
+            lastConfiguredRow = nil
+        }
         markdownView.setPresentationActivity(activity)
         mediaChips.forEach { $0.setPresentationActivity(activity) }
         stack.arrangedSubviews.compactMap { $0 as? ChatUIKitToolPill }.forEach {

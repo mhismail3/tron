@@ -44,7 +44,8 @@ enum SessionRebaselineAdmission: Equatable, Sendable {
         guard SessionSnapshotQueueAdmissionPolicy.admit(incoming),
               SessionTranscriptWindowAdmissionPolicy.evaluate(
                   current: current,
-                  incoming: incoming
+                  incoming: incoming,
+                  allowsValidatedRebaseline: true
               ).isAccepted else { return .resynchronize }
         guard let current, current.sessionId == incoming.sessionId else { return .install }
         guard current.runtimeGeneration == incoming.runtimeGeneration else { return .install }
