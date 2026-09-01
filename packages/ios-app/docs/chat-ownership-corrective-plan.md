@@ -129,7 +129,7 @@ Exit: every transcript item is stored once in the mounted reducer, visible cover
 ### 4 — Bound projection and scroll transactions
 
 - Complete for the current boundary: layout transactions publish bounded settled/abandoned terminal events, overflow cancels transient leases, watchdog abandonment releases only its exact materialization lease, pending work is promoted safely, repeating participants use exact revision tickets, and entrance completion is order-independent with local lifecycle admission.
-- Complete for the current boundary: anchored and anchorless history share one coordinator-owned operation and deadline, background cancellation retires both, and the retired view-owned fallback task and production compatibility API are removed.
+- Complete for the current boundary: anchored and anchorless history share one coordinator-owned operation and deadline, background cancellation retires both, and the retired view-owned fallback task and production compatibility API are removed. Disposable source churn is coalesced during the exact page transaction; an exact prior window, including a monotonic canonical suffix append, may restore, then newest authority installs immediately after settlement.
 - Complete for opening churn: automatic intake pauses behind the opaque surface, the first complete same-runtime commit may reveal, and the newest desired source is coalesced immediately after the first ready frame.
 - Projection intake never stops during prepend; newer desired commits coalesce and install immediately after the exact prepend transaction.
 - Every prepend, automatic-tail command, opening settlement, and layout mutation ends by physical acknowledgement, supersession, direct interaction, cancellation, or deadline.

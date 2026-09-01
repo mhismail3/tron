@@ -1550,13 +1550,17 @@ struct ChatScrollCoordinatorTests {
             let clock = ManualClock()
             let recorder = ResultRecorder()
             let coordinator = ChatScrollCoordinator(clock: clock.clock)
+            var completionObservedActivePrepend: Bool?
             let began = coordinator.beginHistoryPageLoad(
                 anchor: nil,
                 load: { _ in
                     try? await clock.clock.sleep(.seconds(30))
                     return .failed
                 },
-                completion: recorder.record
+                completion: { result in
+                    completionObservedActivePrepend = coordinator.isPrependingHistory
+                    recorder.record(result)
+                }
             )
             #expect(began)
             try await clock.waitUntilSleeping(count: 2)
@@ -1567,6 +1571,7 @@ struct ChatScrollCoordinatorTests {
             }
 
             #expect(recorder.values == [.cancelled])
+            #expect(completionObservedActivePrepend == false)
             #expect(clock.activeSleeperCount() == 0)
             #expect(!coordinator.isPrependingHistory)
         }

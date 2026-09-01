@@ -226,8 +226,15 @@ independent process projection remain with their canonical owners. Queue managem
 installed queue revision/items and the exact Gateway capability authority; generic transcript
 build lag never locks a stable queue card. An admitted Load-earlier page owns one exact token in
 `ChatScrollCoordinator` from click through Gateway paging, projection installation, and anchored
-restore or geometry-free completion; there is no parallel unanchored task. Ordinary projection
-updates do not relabel or disable the pill. It installs only an exact tag
+restore or geometry-free completion; there is no parallel unanchored task. While that transaction
+is active, disposable streaming/tool churn remains in canonical authority rather than superseding
+the exact page build. A complete same-runtime commit with the same mounted start and exact prior
+edge IDs at their original ordinals may restore the anchor even if a canonical suffix appended;
+branch replacement and window movement fail closed. The newest desired source is submitted
+immediately on settlement. Background cancellation clears prepend ownership before its terminal
+callback; projection work stays suspended, and active foreground reconciliation submits the latest
+coalesced source before viewport revalidation.
+Ordinary projection updates do not relabel or disable the pill. It installs only an exact tag
 containing session, mounted presentation, runtime, canonical/timeline generations, and paging
 bounds/edge identity. It retains at most one installed, one building, and one pending immutable
 snapshot/timeline; it is disposable projection state, not a session mirror or event journal.

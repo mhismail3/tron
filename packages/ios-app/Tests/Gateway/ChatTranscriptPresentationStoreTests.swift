@@ -92,6 +92,22 @@ struct ChatTranscriptPresentationStoreTests {
             snapshot: snapshot,
             presentationGeneration: 7
         )
+        let advancedTranscript = snapshot.transcript
+        var appendedSnapshot = snapshot
+        let appendedItem = try #require(SessionScenarioBuilder(seed: 1_204)
+            .openingTail(targetEncodedBytes: 1_000).transcript.last)
+        appendedSnapshot.transcript.append(appendedItem)
+        appendedSnapshot.transcriptTotal = (appendedSnapshot.transcriptTotal ?? 0) + 1
+        let appended = ChatTranscriptProjectionTag(
+            snapshot: appendedSnapshot,
+            presentationGeneration: 7
+        )
+        var changedWindowSnapshot = snapshot
+        changedWindowSnapshot.transcript[0] = appendedItem
+        let changedWindow = ChatTranscriptProjectionTag(
+            snapshot: changedWindowSnapshot,
+            presentationGeneration: 7
+        )
         snapshot.runtimeGeneration = "replacement-runtime"
         let replacementRuntime = ChatTranscriptProjectionTag(
             snapshot: snapshot,
@@ -102,19 +118,34 @@ struct ChatTranscriptPresentationStoreTests {
             presentationGeneration: 8
         )
 
-        #expect(ChatOpeningProjectionAdmissionPolicy.admits(
+        #expect(ChatProjectionTransactionAdmissionPolicy.admitsOpening(
             installed: installed,
             desired: advanced
         ))
-        #expect(!ChatOpeningProjectionAdmissionPolicy.admits(
+        #expect(ChatProjectionTransactionAdmissionPolicy.admitsTranscriptWindow(
+            installed: installed,
+            desired: advanced,
+            desiredTranscript: advancedTranscript
+        ))
+        #expect(ChatProjectionTransactionAdmissionPolicy.admitsTranscriptWindow(
+            installed: advanced,
+            desired: appended,
+            desiredTranscript: appendedSnapshot.transcript
+        ))
+        #expect(!ChatProjectionTransactionAdmissionPolicy.admitsTranscriptWindow(
+            installed: installed,
+            desired: changedWindow,
+            desiredTranscript: changedWindowSnapshot.transcript
+        ))
+        #expect(!ChatProjectionTransactionAdmissionPolicy.admitsOpening(
             installed: installed,
             desired: replacementRuntime
         ))
-        #expect(!ChatOpeningProjectionAdmissionPolicy.admits(
+        #expect(!ChatProjectionTransactionAdmissionPolicy.admitsOpening(
             installed: installed,
             desired: replacementPresentation
         ))
-        #expect(!ChatOpeningProjectionAdmissionPolicy.admits(
+        #expect(!ChatProjectionTransactionAdmissionPolicy.admitsOpening(
             installed: installed,
             desired: nil
         ))

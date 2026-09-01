@@ -1558,10 +1558,11 @@ final class ChatScrollCoordinator {
         cancelCatchUp(restoringAnchored: false)
         prependTask?.cancel()
         prependTimeoutTask?.cancel()
-        if let completion = prepend?.completion { completion(result) }
+        let prependCompletion = prepend?.completion
+        prepend = nil
+        prependCompletion?(result)
         prependTask = nil
         prependTimeoutTask = nil
-        prepend = nil
         #if HOSTED_TEST
         cancelHostedPrependSampleWaiters()
         #endif

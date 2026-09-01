@@ -247,16 +247,48 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     }
 }
 
-enum ChatOpeningProjectionAdmissionPolicy {
+enum ChatProjectionTransactionAdmissionPolicy {
     /// Opening may reveal one complete commit while same-runtime streaming or
     /// canonical append facts advance. Session, mounted presentation, and
     /// runtime replacement remain hard boundaries.
-    static func admits(
+    static func admitsOpening(
         installed: ChatTranscriptProjectionTag,
         desired: ChatTranscriptProjectionTag?
     ) -> Bool {
         guard let desired else { return false }
         return desired.matchesIdentity(of: installed)
+    }
+
+    /// An exact history page may finish while live facts or a canonical suffix
+    /// advance. Its first/last IDs must still bound an unchanged prefix at the
+    /// same ordinals; branch replacement and window movement fail closed.
+    static func admitsTranscriptWindow(
+        installed: ChatTranscriptProjectionTag,
+        desired: ChatTranscriptProjectionTag?,
+        desiredTranscript: [TranscriptItem]?
+    ) -> Bool {
+        guard admitsOpening(installed: installed, desired: desired),
+              let desired, let desiredTranscript else { return false }
+        let totalsAreMonotonic: Bool
+        if let installedTotal = installed.transcriptTotal {
+            totalsAreMonotonic = desired.transcriptTotal.map { $0 >= installedTotal } ?? false
+        } else {
+            totalsAreMonotonic = desired.transcriptTotal == nil
+        }
+        guard totalsAreMonotonic,
+              desiredTranscript.count == desired.transcriptCount,
+              installed.transcriptStart == desired.transcriptStart,
+              let installedEnd = installed.visibleTranscriptEnd,
+              let desiredEnd = desired.visibleTranscriptEnd,
+              desiredEnd >= installedEnd,
+              desired.transcriptCount >= installed.transcriptCount else { return false }
+        guard installed.transcriptCount > 0 else {
+            return installed.firstTranscriptID == nil && installed.lastTranscriptID == nil
+        }
+        let installedLastIndex = installed.transcriptCount - 1
+        guard desiredTranscript.indices.contains(installedLastIndex) else { return false }
+        return desiredTranscript.first?.id == installed.firstTranscriptID
+            && desiredTranscript[installedLastIndex].id == installed.lastTranscriptID
     }
 }
 

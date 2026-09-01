@@ -418,6 +418,7 @@ struct ChatView: View {
                   presentationActivity.allowsPresentationPublication,
                   !sessionPresentation.needsOpeningResume,
                   transcriptPresentation.installed != nil {
+            intakeLatestTranscriptProjectionIfNeeded()
             scrollCoordinator.foregroundViewportBecameActive()
         }
     }
@@ -658,6 +659,7 @@ struct ChatView: View {
         permitsQueueMutationDeferral: Bool = true
     ) {
         guard presentationActivity.allowsDataPublication,
+              !scrollCoordinator.isPrependingHistory,
               capture.tag.presentationGeneration == sessionPresentation.modelPresentationGeneration,
               transcriptProjectionSource == capture.tag else { return }
         if permitsQueueMutationDeferral,
@@ -873,6 +875,12 @@ struct ChatView: View {
                             // of repeatedly superseding the opaque opening build.
                             return
                         }
+                        guard !scrollCoordinator.isPrependingHistory else {
+                            // The exact page window owns this projection transaction.
+                            // Current authority remains available and is coalesced
+                            // immediately when semantic restoration terminates.
+                            return
+                        }
                         guard let capture = transcriptProjectionCapture else {
                             // A recycled same-session owner can briefly have no exact
                             // generation while the retained canonical snapshot is still
@@ -978,6 +986,7 @@ struct ChatView: View {
     private enum TranscriptInstallConsistency {
         case exactCurrentSource
         case firstCompletePresentationCommit
+        case firstCompleteTranscriptWindow
     }
 
     @MainActor
@@ -1016,18 +1025,27 @@ struct ChatView: View {
                       sessionPresentation.modelPresentationGeneration == presentationGeneration else {
                     throw CancellationError()
                 }
-                if transcriptProjectionSource == tag,
-                   transcriptProjectionCapture?.handoff == capture.handoff {
+                let desiredCapture = transcriptProjectionCapture
+                if desiredCapture?.tag == tag,
+                   desiredCapture?.handoff == capture.handoff {
                     return installed
                 }
                 if consistency == .firstCompletePresentationCommit,
-                   ChatOpeningProjectionAdmissionPolicy.admits(
+                   ChatProjectionTransactionAdmissionPolicy.admitsOpening(
                        installed: tag,
-                       desired: transcriptProjectionSource
+                       desired: desiredCapture?.tag
                    ) {
                     // Authority may stream while opening. The first complete
                     // same-presentation/runtime commit is safe to reveal; the
                     // newest source is submitted after the first ready frame.
+                    return installed
+                }
+                if consistency == .firstCompleteTranscriptWindow,
+                   ChatProjectionTransactionAdmissionPolicy.admitsTranscriptWindow(
+                       installed: tag,
+                       desired: desiredCapture?.tag,
+                       desiredTranscript: desiredCapture?.snapshot.transcript
+                   ) {
                     return installed
                 }
             } catch ChatTranscriptPresentationStoreError.superseded {
@@ -1052,7 +1070,7 @@ struct ChatView: View {
     ) -> Bool {
         guard installed.tag.sessionID == sessionID,
               installed.tag.presentationGeneration == generation else { return false }
-        return ChatOpeningProjectionAdmissionPolicy.admits(
+        return ChatProjectionTransactionAdmissionPolicy.admitsOpening(
             installed: installed.tag,
             desired: transcriptProjectionSource
         )
@@ -1704,6 +1722,7 @@ struct ChatView: View {
                     completion: { result in
                         probe.recordPrependCompletion(result)
                         self.settleEarlierMessagesOperation(operationToken)
+                        self.intakeLatestTranscriptProjectionIfNeeded()
                     }
                 )
             },
@@ -1777,12 +1796,7 @@ struct ChatView: View {
             // has crossed a real ready frame. Otherwise their sheet can cover
             // the parent, cancel opening, and create a present/dismiss loop.
             sessionPresentation.permitsExtensionInteractionPresentation = true
-            if let capture = transcriptProjectionCapture,
-               transcriptPresentation.installed?.tag != capture.tag {
-                // Coalesce all authority churn that occurred behind the opaque
-                // opening surface into the ordinary newest-source worker.
-                intakeTranscriptProjection(capture)
-            }
+            intakeLatestTranscriptProjectionIfNeeded()
             return true
         } catch {
             performanceSignposts.end(
@@ -1792,6 +1806,15 @@ struct ChatView: View {
             )
             return false
         }
+    }
+
+    private func intakeLatestTranscriptProjectionIfNeeded() {
+        guard scenePhase != .background,
+              sessionPresentation.permitsExtensionInteractionPresentation,
+              !scrollCoordinator.isPrependingHistory,
+              let capture = transcriptProjectionCapture,
+              transcriptPresentation.installed?.tag != capture.tag else { return }
+        intakeTranscriptProjection(capture)
     }
 
     private func physicalOpeningTailID(for installed: InstalledChatTranscript) -> String? {
@@ -1922,7 +1945,8 @@ struct ChatView: View {
                     guard result == .installed,
                           sessionPresentation.modelPresentationGeneration == presentationGeneration,
                           let installed = try? await installCurrentTranscriptProjection(
-                              presentationGeneration: presentationGeneration
+                              presentationGeneration: presentationGeneration,
+                              consistency: .firstCompleteTranscriptWindow
                           ) else { return .failed }
                     guard let admittedAnchor,
                           let renderedID = installed.timeline
@@ -1937,6 +1961,7 @@ struct ChatView: View {
                 },
                 completion: { _ in
                     self.settleEarlierMessagesOperation(operationToken)
+                    self.intakeLatestTranscriptProjectionIfNeeded()
                 }
             )
         } label: {
