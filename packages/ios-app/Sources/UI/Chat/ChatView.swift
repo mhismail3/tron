@@ -259,16 +259,16 @@ struct ChatView: View {
         .onChange(of: keyboardObserver.transition) { _, transition in
             layoutTransaction.configure(keyboard: transition, reduceMotion: reduceMotion)
             guard layoutTransaction.generation != nil else { return }
-            let generation = layoutTransaction.join(.keyboard)
+            let participant = layoutTransaction.joinParticipant(.keyboard)
             guard let animation = layoutTransaction.animation else {
-                layoutTransaction.settle(generation, source: .keyboard)
+                layoutTransaction.settle(participant)
                 return
             }
             withAnimation(animation, completionCriteria: .logicallyComplete) {
                 // UIKit owns the inset interpolation. This participant keeps its
                 // settlement on the same resolved generation clock.
             } completion: {
-                layoutTransaction.settle(generation, source: .keyboard)
+                layoutTransaction.settle(participant)
             }
         }
         .onChange(of: reduceMotion) { _, enabled in
@@ -281,6 +281,8 @@ struct ChatView: View {
                     scrollCoordinator.layoutTransactionSettled(generationID)
                 case .abandoned(let generationID):
                     scrollCoordinator.layoutTransactionAbandoned(generationID)
+                case .overflow:
+                    scrollCoordinator.cancel()
                 }
             }
         }
@@ -406,6 +408,9 @@ struct ChatView: View {
         reconcileSessionPresentationVisibility(sceneActive: current == .active)
         if current == .background {
             abandonLayoutTransaction()
+            // Retire page/opening/correction tasks and native target leases;
+            // durable pinned/detached intent remains in the coordinator.
+            scrollCoordinator.cancel()
             // Background suspension retires disposable presentation work while
             // AppModel retains accepted uploads and submissions.
             sessionPresentation.suspendForBackground()
@@ -862,6 +867,12 @@ struct ChatView: View {
             if presentationActivity.allowsDataPublication {
                 Color.clear
                     .onChange(of: transcriptProjectionSource, initial: true) { _, source in
+                        guard sessionPresentation.permitsExtensionInteractionPresentation else {
+                            // Opening installs one complete captured source directly.
+                            // Churn is coalesced after the first ready frame instead
+                            // of repeatedly superseding the opaque opening build.
+                            return
+                        }
                         guard let capture = transcriptProjectionCapture else {
                             // A recycled same-session owner can briefly have no exact
                             // generation while the retained canonical snapshot is still
@@ -964,9 +975,15 @@ struct ChatView: View {
         transcriptProjectionCapture?.tag
     }
 
+    private enum TranscriptInstallConsistency {
+        case exactCurrentSource
+        case firstCompletePresentationCommit
+    }
+
     @MainActor
     private func installCurrentTranscriptProjection(
-        presentationGeneration: Int
+        presentationGeneration: Int,
+        consistency: TranscriptInstallConsistency = .exactCurrentSource
     ) async throws -> InstalledChatTranscript {
         var attemptedInvalidProjectionRecovery = false
         while true {
@@ -1003,6 +1020,16 @@ struct ChatView: View {
                    transcriptProjectionCapture?.handoff == capture.handoff {
                     return installed
                 }
+                if consistency == .firstCompletePresentationCommit,
+                   ChatOpeningProjectionAdmissionPolicy.admits(
+                       installed: tag,
+                       desired: transcriptProjectionSource
+                   ) {
+                    // Authority may stream while opening. The first complete
+                    // same-presentation/runtime commit is safe to reveal; the
+                    // newest source is submitted after the first ready frame.
+                    return installed
+                }
             } catch ChatTranscriptPresentationStoreError.superseded {
                 continue
             } catch ChatTranscriptPresentationStoreError.invalidProjection {
@@ -1017,6 +1044,18 @@ struct ChatView: View {
                 continue
             }
         }
+    }
+
+    private func installedCommitBelongsToCurrentPresentation(
+        _ installed: InstalledChatTranscript,
+        generation: Int
+    ) -> Bool {
+        guard installed.tag.sessionID == sessionID,
+              installed.tag.presentationGeneration == generation else { return false }
+        return ChatOpeningProjectionAdmissionPolicy.admits(
+            installed: installed.tag,
+            desired: transcriptProjectionSource
+        )
     }
 
     private var composerText: String {
@@ -1404,11 +1443,15 @@ struct ChatView: View {
             // transcript reaches its first ready frame.
             reconcileSessionPresentationVisibility()
             let installed = try await installCurrentTranscriptProjection(
-                presentationGeneration: generation
+                presentationGeneration: generation,
+                consistency: .firstCompletePresentationCommit
             )
             if retainsVisiblePresentation && !retainedPinnedRevalidation {
                 guard !Task.isCancelled,
-                      transcriptProjectionSource == installed.tag,
+                      installedCommitBelongsToCurrentPresentation(
+                          installed,
+                          generation: generation
+                      ),
                       sessionPresentation.open.epoch == epoch,
                       sessionPresentation.open.phase == .ready else {
                     performanceSignposts.end(interval, result: .discarded, metrics: .none)
@@ -1424,7 +1467,10 @@ struct ChatView: View {
             }
             if retainedPinnedRevalidation {
                 guard !Task.isCancelled,
-                      transcriptProjectionSource == installed.tag,
+                      installedCommitBelongsToCurrentPresentation(
+                          installed,
+                          generation: generation
+                      ),
                       sessionPresentation.open.installAuthoritativeBaseline(
                           sessionID: sessionID,
                           epoch: epoch
@@ -1454,7 +1500,10 @@ struct ChatView: View {
                 return
             }
             guard !Task.isCancelled,
-                  transcriptProjectionSource == installed.tag,
+                  installedCommitBelongsToCurrentPresentation(
+                      installed,
+                      generation: generation
+                  ),
                   sessionPresentation.open.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
                 performanceSignposts.end(interval, result: .discarded, metrics: .none)
                 await retireOpeningGeneration(
@@ -1566,7 +1615,8 @@ struct ChatView: View {
         let installed: InstalledChatTranscript
         do {
             installed = try await installCurrentTranscriptProjection(
-                presentationGeneration: presentationGeneration
+                presentationGeneration: presentationGeneration,
+                consistency: .firstCompletePresentationCommit
             )
         } catch {
             performanceSignposts.end(interval, result: PerformanceResult.forFailure(error), metrics: .none)
@@ -1727,6 +1777,12 @@ struct ChatView: View {
             // has crossed a real ready frame. Otherwise their sheet can cover
             // the parent, cancel opening, and create a present/dismiss loop.
             sessionPresentation.permitsExtensionInteractionPresentation = true
+            if let capture = transcriptProjectionCapture,
+               transcriptPresentation.installed?.tag != capture.tag {
+                // Coalesce all authority churn that occurred behind the opaque
+                // opening surface into the ordinary newest-source worker.
+                intakeTranscriptProjection(capture)
+            }
             return true
         } catch {
             performanceSignposts.end(

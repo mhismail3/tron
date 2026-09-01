@@ -829,6 +829,7 @@ final class ChatScrollCoordinator {
         guard tailMaterialization?.layoutTransactionID == id else { return }
         if command?.origin == .tailMaterialization {
             clearCommand()
+            promotePendingTailMaterializationIfPossible()
             return
         }
         if appliedTargetOrigin == .tailMaterialization {
@@ -877,6 +878,23 @@ final class ChatScrollCoordinator {
         return true
     }
 
+    private func promotePendingTailMaterializationIfPossible() {
+        guard command == nil,
+              appliedTargetCommandToken == nil,
+              targetReleaseToken == nil,
+              physicalTailRepairCommandToken == nil,
+              canAutomaticallyFollow,
+              let pending = pendingTailMaterialization else { return }
+        pendingTailMaterialization = nil
+        prepareTailMaterialization(
+            renderedID: pending.renderedID,
+            layoutOwnerRenderedID: pending.layoutOwnerRenderedID,
+            layoutTransactionID: pending.layoutTransactionID,
+            layoutSettled: pending.layoutSettled
+        )
+        publish(.tail, animation: .disabled, origin: .tailMaterialization)
+    }
+
     private func beginTailMaterialization(
         renderedID: String,
         layoutTransactionID: Int?
@@ -916,35 +934,6 @@ final class ChatScrollCoordinator {
 
     func semanticResponseArrived() {
         if shouldTrackUnreadResponse { hasUnreadContent = true }
-    }
-
-    /// Compatibility entry point for existing anchored owner tests. Production
-    /// paging uses `beginHistoryPageLoad`, whose optional admitted anchor keeps
-    /// canonical loading independent from transient geometry.
-    @discardableResult
-    func beginPrepend(
-        anchor: ChatSemanticAnchor?,
-        load: @escaping @MainActor @Sendable () async -> ChatPrependPage?,
-        completion: @escaping @MainActor (PerformanceResult) -> Void
-    ) -> Bool {
-        guard canRequestHistoryPage else {
-            completion(.discarded)
-            return false
-        }
-        cancelLayoutRestore()
-        clearCommand()
-        guard let anchor, admittedPrependAnchor(anchor) != nil else {
-            completion(.discarded)
-            return false
-        }
-        return beginHistoryPageLoad(
-            anchor: anchor,
-            load: { _ in
-                guard let page = await load() else { return .failed }
-                return .installed(page)
-            },
-            completion: completion
-        )
     }
 
     /// Owns the complete canonical history operation. Geometry is optional

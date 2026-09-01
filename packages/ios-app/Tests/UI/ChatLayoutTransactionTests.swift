@@ -49,14 +49,16 @@ struct ChatLayoutTransactionTests {
     func repeatedParticipantReopens() throws {
         let transaction = ChatLayoutTransaction()
         let generation = transaction.join(.submission)
-        _ = transaction.join(.keyboard)
-        transaction.settle(generation, source: .keyboard)
+        let firstKeyboard = transaction.joinParticipant(.keyboard)
+        transaction.settle(firstKeyboard)
 
-        #expect(transaction.join(.keyboard) == generation)
+        let secondKeyboard = transaction.joinParticipant(.keyboard)
+        #expect(secondKeyboard.generationID == generation)
         transaction.settle(generation, source: .submission)
+        transaction.settle(firstKeyboard)
         #expect(transaction.generation != nil)
 
-        transaction.settle(generation, source: .keyboard)
+        transaction.settle(secondKeyboard)
         #expect(transaction.generation == nil)
         #expect(transaction.consumeTerminalEvents() == [.settled(generation)])
     }
@@ -138,6 +140,17 @@ struct ChatLayoutTransactionTests {
 
         #expect(transaction.terminalEventRevision == 2)
         #expect(transaction.consumeTerminalEvents() == [.abandoned(first), .settled(second)])
+    }
+
+    @Test("terminal overflow fails closed instead of dropping an exact lease event")
+    func terminalOverflowPublishesRecovery() {
+        let transaction = ChatLayoutTransaction()
+        for _ in 0..<33 {
+            let generation = transaction.join(.submission)
+            transaction.settle(generation, source: .submission)
+        }
+
+        #expect(transaction.consumeTerminalEvents() == [.overflow])
     }
 
     @Test("Reduce Motion is instant")

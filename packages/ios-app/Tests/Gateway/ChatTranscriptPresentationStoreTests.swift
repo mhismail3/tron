@@ -78,6 +78,48 @@ struct ChatTranscriptPresentationStoreTests {
         #expect(replacement.responseState == ChatResponseState(snapshot: snapshot))
     }
 
+    @Test("opening admits complete same-runtime churn but rejects replacement authority")
+    func openingProjectionAdmissionIsBounded() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 1_203)
+            .openingTail(targetEncodedBytes: 8_000)
+        let installed = ChatTranscriptProjectionTag(
+            snapshot: snapshot,
+            presentationGeneration: 7
+        )
+        snapshot.phase = snapshot.phase == .running ? .idle : .running
+        snapshot.revision &+= 1
+        let advanced = ChatTranscriptProjectionTag(
+            snapshot: snapshot,
+            presentationGeneration: 7
+        )
+        snapshot.runtimeGeneration = "replacement-runtime"
+        let replacementRuntime = ChatTranscriptProjectionTag(
+            snapshot: snapshot,
+            presentationGeneration: 7
+        )
+        let replacementPresentation = ChatTranscriptProjectionTag(
+            snapshot: snapshot,
+            presentationGeneration: 8
+        )
+
+        #expect(ChatOpeningProjectionAdmissionPolicy.admits(
+            installed: installed,
+            desired: advanced
+        ))
+        #expect(!ChatOpeningProjectionAdmissionPolicy.admits(
+            installed: installed,
+            desired: replacementRuntime
+        ))
+        #expect(!ChatOpeningProjectionAdmissionPolicy.admits(
+            installed: installed,
+            desired: replacementPresentation
+        ))
+        #expect(!ChatOpeningProjectionAdmissionPolicy.admits(
+            installed: installed,
+            desired: nil
+        ))
+    }
+
     @Test("handoff identity freezes outgoing text and attachment preview facts")
     func handoffIdentityFreezesOutgoingFacts() throws {
         let target = SessionPresentationIdentity(sessionID: "session", generation: 3)

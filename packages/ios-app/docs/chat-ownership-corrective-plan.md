@@ -1,6 +1,6 @@
 # Chat ownership corrective plan
 
-Status: active SwiftUI-preserving hardening. Milestone 3 transcript ownership remains implemented: the session snapshot is the sole whole-session authority and the mounted transcript window retains only an exact prefix before the Gateway tail. The first new slice now gives anchored and anchorless paging one coordinator-owned operation, propagates layout settlement and abandonment to the sole viewport command owner, closes the pre-admission entrance race, and freezes layout-affecting composer chrome with the installed transcript commit. The existing SwiftUI hierarchy, renderer, composer, animation constants, and visual styling are unchanged. Recent-tail compatibility backfill, further coordinator reduction, integrated reconnect coverage, and physical flow acceptance remain open; this status makes no physical acceptance claim.
+Status: active SwiftUI-preserving hardening. Milestone 3 transcript ownership remains implemented: the session snapshot is the sole whole-session authority and the mounted transcript window retains only an exact prefix before the Gateway tail. The completed first slices give anchored and anchorless paging one coordinator-owned operation, cancel it on background, propagate layout settlement/abandonment/overflow to the sole viewport command owner, revision-scope repeating participants, close the pre-admission entrance race, promote pending insertions after abandonment, freeze transcript-coupled composer chrome with the installed commit, and prevent opening starvation by revealing one complete same-runtime commit before coalescing to newest. The existing SwiftUI hierarchy, renderer, composer, animation constants, and visual styling are unchanged. Recent-tail compatibility backfill, further coordinator reduction, integrated reconnect coverage, and physical flow acceptance remain open; this status makes no physical acceptance claim.
 
 ## Goal
 
@@ -128,8 +128,9 @@ Exit: every transcript item is stored once in the mounted reducer, visible cover
 
 ### 4 — Bound projection and scroll transactions
 
-- In progress: layout transactions now publish bounded settled/abandoned terminal events, watchdog abandonment releases only its exact materialization lease, repeated participants reopen correctly, and entrance completion is order-independent with local lifecycle admission.
-- In progress: anchored and anchorless history now share one coordinator-owned operation and deadline; the retired view-owned fallback task has been removed.
+- Complete for the current boundary: layout transactions publish bounded settled/abandoned terminal events, overflow cancels transient leases, watchdog abandonment releases only its exact materialization lease, pending work is promoted safely, repeating participants use exact revision tickets, and entrance completion is order-independent with local lifecycle admission.
+- Complete for the current boundary: anchored and anchorless history share one coordinator-owned operation and deadline, background cancellation retires both, and the retired view-owned fallback task and production compatibility API are removed.
+- Complete for opening churn: automatic intake pauses behind the opaque surface, the first complete same-runtime commit may reveal, and the newest desired source is coalesced immediately after the first ready frame.
 - Projection intake never stops during prepend; newer desired commits coalesce and install immediately after the exact prepend transaction.
 - Every prepend, automatic-tail command, opening settlement, and layout mutation ends by physical acknowledgement, supersession, direct interaction, cancellation, or deadline.
 - Projection installation emits an explicit receipt with transition classification and semantic mapping; scroll does not observe its own epoch through SwiftUI to manufacture acknowledgement.

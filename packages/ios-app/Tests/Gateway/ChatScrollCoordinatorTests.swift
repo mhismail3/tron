@@ -277,13 +277,14 @@ struct ChatScrollCoordinatorTests {
         coordinator.geometryChanged(previous: away, current: away)
         #expect(coordinator.command?.origin == .layout)
 
-        let began = coordinator.beginPrepend(
+        let began = coordinator.beginHistoryPageLoad(
             anchor: nil,
-            load: { @MainActor @Sendable in nil },
+            load: { @MainActor @Sendable _ in .installed(nil) },
             completion: { @MainActor _ in }
         )
-        #expect(!began)
+        #expect(began)
         #expect(coordinator.command == nil)
+        coordinator.cancel()
     }
 
     @Test("direct takeover cancels semantic restore without a release command")
@@ -659,7 +660,9 @@ struct ChatScrollCoordinatorTests {
         coordinator.requestOpeningTail(targetRenderedID: "old-tail")
         await frames.waitForRequest(count: 1)
         frames.releaseNext()
-        await Task.yield()
+        for _ in 0..<20 where coordinator.command == nil {
+            await Task.yield()
+        }
         #expect(coordinator.command?.presentation == 1)
         coordinator.resetForPresentation(2)
         #expect(coordinator.command == nil)
@@ -901,6 +904,27 @@ struct ChatScrollCoordinatorTests {
 
         #expect(coordinator.command == nil)
         #expect(coordinator.materializationLayoutTransactionID(for: "outgoing-row") == nil)
+    }
+
+    @Test("abandoning an unapplied owner promotes its newer pending insertion")
+    func abandonmentPromotesPendingMaterialization() throws {
+        let coordinator = ChatScrollCoordinator()
+        #expect(coordinator.discreteTailInserted(
+            renderedID: "first-row",
+            layoutTransactionID: 41
+        ))
+        #expect(coordinator.discreteTailInserted(
+            renderedID: "newest-row",
+            layoutTransactionID: 42
+        ))
+
+        coordinator.layoutTransactionAbandoned(41)
+
+        let replacement = try #require(coordinator.command)
+        #expect(replacement.origin == .tailMaterialization)
+        #expect(coordinator.materializationLayoutTransactionID(for: "first-row") == nil)
+        #expect(coordinator.materializationLayoutTransactionID(for: "newest-row") == 42)
+        coordinator.cancel()
     }
 
     @Test("a row frame before its materialization request still releases the exact lease")
@@ -1155,7 +1179,9 @@ struct ChatScrollCoordinatorTests {
             coordinator.requestOpeningTail(targetRenderedID: "transcript-bottom")
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
-            await Task.yield()
+            for _ in 0..<20 where coordinator.command == nil {
+                await Task.yield()
+            }
             #expect(coordinator.command != nil)
             try await clock.waitUntilSleeping(count: 1)
             clock.advance(by: .seconds(1))
@@ -1518,6 +1544,34 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
+    @Test("background-style cancellation retires the sole history task and deadline")
+    func historyCancellationIsTerminal() async throws {
+        try await withTestWatchdog { @MainActor in
+            let clock = ManualClock()
+            let recorder = ResultRecorder()
+            let coordinator = ChatScrollCoordinator(clock: clock.clock)
+            let began = coordinator.beginHistoryPageLoad(
+                anchor: nil,
+                load: { _ in
+                    try? await clock.clock.sleep(.seconds(30))
+                    return .failed
+                },
+                completion: recorder.record
+            )
+            #expect(began)
+            try await clock.waitUntilSleeping(count: 2)
+
+            coordinator.cancel()
+            for _ in 0..<20 where clock.activeSleeperCount() != 0 {
+                await Task.yield()
+            }
+
+            #expect(recorder.values == [.cancelled])
+            #expect(clock.activeSleeperCount() == 0)
+            #expect(!coordinator.isPrependingHistory)
+        }
+    }
+
     @Test("stale anchor degrades to canonical unanchored history")
     func staleAnchorDoesNotBlockHistoryLoad() async throws {
         try await withTestWatchdog { @MainActor in
@@ -1542,21 +1596,6 @@ struct ChatScrollCoordinatorTests {
             await recorder.waitForValue()
             #expect(recorder.values == [.success])
         }
-    }
-
-    @Test("missing measured anchor discards without starting legacy anchored load")
-    func missingAnchorDoesNotLoad() {
-        let recorder = ResultRecorder()
-        let loadCount = Counter()
-        let coordinator = ChatScrollCoordinator()
-        let began = coordinator.beginPrepend(
-            anchor: nil,
-            load: { loadCount.value += 1; return nil },
-            completion: recorder.record
-        )
-        #expect(!began)
-        #expect(loadCount.value == 0)
-        #expect(recorder.values == [.discarded])
     }
 
     @Test("prepend cannot overwrite catch-up command ownership")
@@ -1862,6 +1901,29 @@ struct ChatScrollCoordinatorTests {
         )
         coordinator.geometryChanged(previous: away, current: away)
         return (coordinator, recorder)
+    }
+}
+
+private extension ChatScrollCoordinator {
+    /// Keeps anchored correction fixtures concise while production exposes only
+    /// the geometry-optional history operation.
+    func beginPrepend(
+        anchor: ChatSemanticAnchor?,
+        load: @escaping @MainActor @Sendable () async -> ChatPrependPage?,
+        completion: @escaping @MainActor (PerformanceResult) -> Void
+    ) -> Bool {
+        guard let anchor else {
+            completion(.discarded)
+            return false
+        }
+        return beginHistoryPageLoad(
+            anchor: anchor,
+            load: { admittedAnchor in
+                guard admittedAnchor != nil, let page = await load() else { return .failed }
+                return .installed(page)
+            },
+            completion: completion
+        )
     }
 }
 

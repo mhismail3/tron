@@ -935,7 +935,7 @@ struct ChatTranscriptPageRequest: Equatable {
     }
 }
 
-struct ChatStreamingResponseSignature: Hashable {
+struct ChatStreamingResponseSignature: Equatable {
     let itemID: String
     let parts: [ChatMessagePart]
     let errorMessage: String?
@@ -954,7 +954,7 @@ struct ChatStreamingResponseSignature: Hashable {
     }
 }
 
-struct ChatResponseState: Hashable {
+struct ChatResponseState: Equatable {
     let sessionID: String
     let canonicalEntryCount: Int
     let tailEntryID: String?

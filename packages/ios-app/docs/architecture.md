@@ -214,8 +214,10 @@ anchor exists; an anchor is optional viewport-preservation evidence. Only duplic
 summary rows enter the disk cache.
 `ChatTranscriptPresentationStore` serializes snapshot-to-timeline preparation off MainActor,
 coalesces a burst to one pending newest source, and keeps the last complete installed commit
-visible while a replacement builds. Transcript rows and Load-earlier availability come from the
-installed source window. Transcript-coupled composer chrome—phase, retry presentation, and
+visible while a replacement builds. Sparse/high-frequency layout equality checks streaming, tool,
+queue, and runtime facts before the bounded canonical array, avoiding a 512-row scan for ordinary
+live churn. Transcript rows and Load-earlier availability come from the installed source window.
+Transcript-coupled composer chrome—phase, retry presentation, and
 response signature—is frozen in that same source tag, while drafts, command admission, and the
 independent process projection remain with their canonical owners. Queue management stays owned by the
 installed queue revision/items and the exact Gateway capability authority; generic transcript
@@ -260,7 +262,10 @@ after transcript and queue rows. Rows remain fully realizable beneath that opaqu
 an opacity-zero lazy stack is never used as a layout gate. Only then does the cover fade
 while the positioned transcript rises eight points (opacity only under Reduce Motion).
 The first-ready performance interval closes after the next display-link frame proves
-that ready state was presented. Opening uses one exact eager-marker `ScrollPosition`
+that ready state was presented. While the opening cover is opaque, automatic projection intake is
+coalesced: the first complete same-session/presentation/runtime commit may position and reveal even
+if streaming has advanced its payload, and the newest desired source is submitted immediately after
+the first ready frame. Runtime or presentation replacement still fails closed. Opening uses one exact eager-marker `ScrollPosition`
 command when the marker is not yet realized, rejects native overflow overshoot as a
 bottom boundary, and retains that command through animation completion plus two
 unchanged presented frames before releasing the binding. Its bounded deadline only
@@ -698,9 +703,12 @@ fresh semantic-and-geometry proof and bounded correction, while anchorless histo
 the same coordinator-owned operation and eight-second terminal deadline. Starting that explicit
 page intent supersedes a pending semantic-restore command; active catch-up or opening retains stronger ownership
 and rejects paging. Every `ChatLayoutTransaction` publishes an exact settled or abandoned terminal
-event. Watchdog abandonment retires only its matching materialization lease, and a bounded physical-ID
-handshake preserves entrance completion that arrives before local lifecycle admission. Repeated
-keyboard participants reopen their exact unsettled generation. Direct interaction
+event. Watchdog abandonment retires only its matching materialization lease and promotes a newer
+pending insertion when safe; a bounded physical-ID handshake preserves entrance completion that
+arrives before local lifecycle admission. Repeated keyboard participants use revisioned tickets, so
+an older completion cannot settle newer work. Terminal-event overflow cancels transient viewport
+leases rather than dropping unknown ownership. Background suspension cancels the same coordinator-owned
+history/deadline task while preserving pinned/detached intent. Direct interaction
 cancels either correction transaction. Progress-only tool changes and ordinary streaming never
 request a position. Keyboard and complete-composer layout therefore keep a pinned reader at the
 latest tail and leave an anchored reader at the same semantic locus without changing durable

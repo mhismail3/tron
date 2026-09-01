@@ -23,7 +23,8 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     struct LayoutIdentity: Hashable, Sendable {
         let transcriptStart: Int?
         let transcriptTotal: Int?
-        let transcript: [TranscriptItem]
+        // Put sparse/high-frequency facts before the bounded canonical array so
+        // synthesized equality rejects streaming/tool/queue churn in O(1).
         let streaming: TranscriptItem?
         let phase: SessionPhase
         let toolExecutions: [ToolExecutionState]
@@ -33,6 +34,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         let isCachedProjection: Bool
         let queueManagementCapability: Bool
         let visibleSessionFacts: ChatVisibleSessionFacts
+        let transcript: [TranscriptItem]
 
         init(
             snapshot: SessionSnapshot,
@@ -41,7 +43,6 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         ) {
             transcriptStart = snapshot.transcriptStart
             transcriptTotal = snapshot.transcriptTotal
-            transcript = Array(snapshot.transcript.suffix(ChatTranscriptPageRequest.maximumItemCount))
             streaming = snapshot.streaming
             phase = snapshot.phase
             toolExecutions = snapshot.toolExecutions
@@ -51,6 +52,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
             isCachedProjection = snapshot.isCachedProjection == true
             self.queueManagementCapability = queueManagementCapability
             visibleSessionFacts = ChatVisibleSessionFacts(snapshot: snapshot)
+            transcript = Array(snapshot.transcript.suffix(ChatTranscriptPageRequest.maximumItemCount))
         }
     }
 
@@ -242,6 +244,19 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
             queuePresentationIDByOperationID: queuePresentationIDByOperationID
         )
         return copy
+    }
+}
+
+enum ChatOpeningProjectionAdmissionPolicy {
+    /// Opening may reveal one complete commit while same-runtime streaming or
+    /// canonical append facts advance. Session, mounted presentation, and
+    /// runtime replacement remain hard boundaries.
+    static func admits(
+        installed: ChatTranscriptProjectionTag,
+        desired: ChatTranscriptProjectionTag?
+    ) -> Bool {
+        guard let desired else { return false }
+        return desired.matchesIdentity(of: installed)
     }
 }
 

@@ -76,12 +76,22 @@ final class ChatLayoutTransaction {
     enum TerminalEvent: Equatable, Sendable {
         case settled(Int)
         case abandoned(Int)
+        /// Observation stopped consuming exact outcomes. The viewport owner
+        /// must cancel transient leases rather than guess which event survived.
+        case overflow
+    }
+
+    struct ParticipantTicket: Equatable, Sendable {
+        let generationID: Int
+        let mutation: ChatLayoutMutation
+        let revision: Int
     }
 
     struct Generation: Equatable, Sendable {
         let id: Int
         fileprivate(set) var joined: Set<ChatLayoutMutation>
         fileprivate(set) var settled: Set<ChatLayoutMutation>
+        fileprivate(set) var participantRevisions: [ChatLayoutMutation: Int]
         fileprivate(set) var clock: ChatLayoutClock?
     }
 
@@ -110,26 +120,41 @@ final class ChatLayoutTransaction {
 
     @discardableResult
     func join(_ mutation: ChatLayoutMutation) -> Int {
+        joinParticipant(mutation).generationID
+    }
+
+    /// Returns an exact participant ticket for sources that can repeat within
+    /// one generation (notably keyboard transitions). An older animation
+    /// completion cannot settle a newer revision of the same participant.
+    @discardableResult
+    func joinParticipant(_ mutation: ChatLayoutMutation) -> ParticipantTicket {
         if var current = generation {
+            let revision = (current.participantRevisions[mutation] ?? 0) &+ 1
             current.joined.insert(mutation)
-            // A newer transition from an already-settled participant reopens
-            // that participant in the same atomic generation. A Set records
-            // ownership, while this removal preserves repeated keyboard or
-            // composer work without inventing a second layout clock.
             current.settled.remove(mutation)
+            current.participantRevisions[mutation] = revision
             generation = current
-            return current.id
+            return ParticipantTicket(
+                generationID: current.id,
+                mutation: mutation,
+                revision: revision
+            )
         }
         nextGenerationID &+= 1
         let opened = Generation(
             id: nextGenerationID,
             joined: [mutation],
             settled: [],
+            participantRevisions: [mutation: 1],
             clock: nil
         )
         generation = opened
         armWatchdog(for: opened.id)
-        return opened.id
+        return ParticipantTicket(
+            generationID: opened.id,
+            mutation: mutation,
+            revision: 1
+        )
     }
 
     var animation: Animation? {
@@ -143,6 +168,12 @@ final class ChatLayoutTransaction {
         }
         generation = current
         return current.clock?.animation
+    }
+
+    func settle(_ ticket: ParticipantTicket) {
+        guard generation?.id == ticket.generationID,
+              generation?.participantRevisions[ticket.mutation] == ticket.revision else { return }
+        settle(ticket.generationID, source: ticket.mutation)
     }
 
     func settle(_ id: Int, source: ChatLayoutMutation) {
@@ -171,10 +202,10 @@ final class ChatLayoutTransaction {
         publishTerminal(.abandoned(id))
     }
 
-    /// Records every terminal outcome in a bounded queue because SwiftUI may
-    /// coalesce multiple observable mutations before delivering an `onChange`
-    /// callback. Abandonment must be observable by the viewport owner so a
-    /// command lease cannot remain installed after its layout participant dies.
+    /// Records exact terminal outcomes until the bounded queue overflows, then
+    /// emits one fail-closed recovery event. SwiftUI may coalesce observable
+    /// mutations; abandonment must still reach the viewport owner so a command
+    /// lease cannot remain installed after its layout participant dies.
     func consumeTerminalEvents() -> [TerminalEvent] {
         let events = pendingTerminalEvents
         pendingTerminalEvents.removeAll(keepingCapacity: true)
@@ -191,9 +222,14 @@ final class ChatLayoutTransaction {
     }
 
     private func publishTerminal(_ event: TerminalEvent) {
-        pendingTerminalEvents.append(event)
-        if pendingTerminalEvents.count > 32 {
-            pendingTerminalEvents.removeFirst(pendingTerminalEvents.count - 32)
+        if pendingTerminalEvents.contains(.overflow) {
+            terminalEventRevision &+= 1
+            return
+        }
+        if pendingTerminalEvents.count >= 32 {
+            pendingTerminalEvents = [.overflow]
+        } else {
+            pendingTerminalEvents.append(event)
         }
         terminalEventRevision &+= 1
     }
