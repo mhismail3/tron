@@ -634,6 +634,62 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await expect(registry.acquire(slot.id)).rejects.toMatchObject({ code: "conflict" });
   });
 
+  it("publishes the first prompt as the live session title before the agent settles", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-live-session-title-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const faux = fauxProvider({ provider: "tron-live-session-title", tokensPerSecond: 10_000 });
+    let releaseResponse!: () => void;
+    const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    faux.setResponses([async () => {
+      await responseBarrier;
+      return fauxAssistantMessage("title published");
+    }]);
+    runtime.registerNativeProvider(faux.provider);
+    const summaries: SessionSummaryUpdate[] = [];
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: (summary) => summaries.push(summary),
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    await slot.prompt("Update this title immediately");
+    try {
+      await waitUntil(() => summaries.some((summary) => summary.firstMessage === "Update this title immediately"));
+
+      expect(slot.isBusy).toBe(true);
+      expect(summaries.at(-1)).toMatchObject({
+        phase: "running",
+        messageCount: 1,
+        firstMessage: "Update this title immediately",
+      });
+      expect((await registry.catalog("user")).sessions.find((summary) => summary.id === slot.id)).toMatchObject({
+        messageCount: 1,
+        firstMessage: "Update this title immediately",
+      });
+    } finally {
+      releaseResponse();
+    }
+    await waitUntil(() => !slot.isBusy);
+    expect(summaries.at(-1)).toMatchObject({
+      phase: "idle",
+      messageCount: 2,
+      firstMessage: "Update this title immediately",
+    });
+  });
+
   it("keeps row-summary revisions separate and lists phase without transcript snapshots", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-summary-revision-"));
     const agentDir = join(root, "agent");

@@ -2773,6 +2773,12 @@ export class RuntimeSlot {
         this.scheduleSnapshot();
         break;
       case "message_end":
+        // Pi emits message_end immediately before the canonical append and does
+        // not emit entry_appended for ordinary prompt/response messages. Retire
+        // the cached row facts now and publish after the append microtask so a
+        // new session's first prompt updates its title without a Gateway restart.
+        this.summaryContentDirty = true;
+        this.scheduleSnapshot();
         if (event.message.role === "toolResult") {
           // Pi 0.84.1 invokes listeners immediately before appending this exact
           // object. Verify canonical call-ID ownership in the next microtask;
