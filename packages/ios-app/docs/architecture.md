@@ -48,7 +48,12 @@ collection view, semantic-anchor restoration, physical-tail following, legal-off
 its composer. It is not mounted in production during this phase. The eventual cutover must delete
 the SwiftUI transcript scroll surface, sentinel/materialization control path, and competing
 `ScrollPosition`/geometry ownership rather than retain a hybrid second owner. UIKit rows remain
-presentation consumers; they do not admit snapshots or mutate canonical state.
+presentation consumers; they do not admit snapshots or mutate canonical state. This phase is not a
+production cutover: the foundation has not yet been proven pixel-equivalent to the existing Tron
+surface. The parity gate still requires mapping every installed row kind and existing Markdown,
+tool, attachment, selection, link, accessibility, Dynamic Type, animation, keyboard, and composer
+behavior before the SwiftUI path can be deleted. Until that evidence exists, the UIKit controller
+must remain isolated and no runtime switch may expose it to users.
 
 ## State flow
 
