@@ -473,6 +473,28 @@ struct InstalledChatTranscript: Hashable, Sendable {
     var displayedItems: ChatDisplayedTranscriptItems {
         ChatDisplayedTranscriptItems(timeline: timeline.items, runtime: runtimeItems)
     }
+
+    /// The ordered physical rows consumed by the transcript surface. This is
+    /// deliberately derived from the installed commit so a future UIKit
+    /// adapter does not reconstruct queue, handoff, or tool-boundary identity.
+    var physicalRowIDs: [String] {
+        var ids = committedLedger.items.map { physicalHostID(forDisplayedID: $0.id) }
+        let live = liveRegion.items.dropFirst(toolBoundaryFusion == nil ? 0 : 1)
+        ids.append(contentsOf: live.map { physicalHostID(forDisplayedID: $0.id) })
+        switch handoff {
+        case .none:
+            break
+        case .pending(let pending):
+            ids.append("pending-prompt-\(pending.id)")
+        case .outgoing(let outgoing, _):
+            ids.append(outgoing.id)
+        }
+        ids.append(contentsOf: queuedMessages.map { message in
+            queuePresentationIDByOperationID[message.id] ?? "queued-message-\(message.id)"
+        })
+        return ids
+    }
+
     var hasUniqueDisplayedIDs: Bool {
         guard timeline.isInternallyConsistent,
               displayedItemByID != nil,

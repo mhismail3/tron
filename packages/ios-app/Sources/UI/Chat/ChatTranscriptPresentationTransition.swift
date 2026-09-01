@@ -25,8 +25,8 @@ struct ChatTranscriptPresentationTransition: Equatable, Sendable {
         self.init(
             previousTag: previous?.tag,
             nextTag: next.tag,
-            previousRowIDs: previous?.displayedItems.map(\.id) ?? [],
-            nextRowIDs: next.displayedItems.map(\.id)
+            previousRowIDs: previous?.physicalRowIDs ?? [],
+            nextRowIDs: next.physicalRowIDs
         )
     }
 
