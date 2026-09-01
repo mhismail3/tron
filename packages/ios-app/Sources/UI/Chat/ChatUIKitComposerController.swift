@@ -32,7 +32,8 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     private var sendHandoffAccepted = false
     private var sendHandoffTimeout: Task<Void, Never>?
     private var applyingAuthoritativeInput = false
-    private var keyboardObservers: [NSObjectProtocol] = []
+    nonisolated(unsafe) private var keyboardObservers: [NSObjectProtocol] = []
+    private var attachmentChips: [String: ChatUIKitComposerAttachmentChip] = [:]
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -256,6 +257,8 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
 
     deinit {
         sendHandoffTimeout?.cancel()
+        let center = NotificationCenter.default
+        keyboardObservers.forEach { center.removeObserver($0) }
     }
 
     /// The host must resolve the terminal admission explicitly. Rejected sends
@@ -295,9 +298,14 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     }
 
     private func configureAttachments(_ next: ChatUIKitComposerInput) {
+        let retained = Dictionary(uniqueKeysWithValues: next.attachments.map { attachment in
+            (attachment.id, attachmentChips[attachment.id] ?? ChatUIKitComposerAttachmentChip(attachment: attachment))
+        })
+        attachmentChips.keys.filter { retained[$0] == nil }.forEach { attachmentChips[$0]?.removeFromSuperview() }
+        attachmentChips = retained
         clearArrangedSubviews(attachmentStack)
         for attachment in next.attachments {
-            let chip = ChatUIKitComposerAttachmentChip(attachment: attachment)
+            guard let chip = attachmentChips[attachment.id] else { continue }
             chip.onPreview = { [weak self] in self?.onIntent?(.previewAttachment(id: attachment.id)) }
             chip.onRemove = { [weak self] in self?.onIntent?(.removeAttachment(id: attachment.id)) }
             attachmentStack.addArrangedSubview(chip)

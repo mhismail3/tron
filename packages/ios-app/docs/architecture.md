@@ -1258,7 +1258,8 @@ permitted only when every runtime tool has a canonical call anchor. Consecutive
 tool-only entries with one equal nonempty Gateway-owned segment identity collapse
 into a single compact run chip whose aggregate sheet presents every invocation as a
 full-width bounded summary row; tapping a row opens its individual detail surface.
-Missing or conflicting identity remains separate. Each exact installed projection builds one
+Missing or conflicting identity remains separate. UIKit media chips use explicit idle/loading/succeeded/failed/cancelled state and a generation-owned request, so reactivation and retry start a fresh request while stale completions cannot install. Prompt attachment strips are true horizontal scroll surfaces and reconcile controls by stable attachment identity. Streaming text timers and pulse display links stop with window, scene, coverage, reuse, or generation activity; composer keyboard observers are removed at teardown. The UIKit viewport applies each input synchronously, so it has no in-flight update cancellation state or cancellation outcome. Thinking traces reserve only their bounded tail when content overflows; short traces retain their measured intrinsic height without a fade.
+Each exact installed projection builds one
 unique call-ID descriptor index, so live detail refresh resolves from bounded installed state
 without rescanning the full timeline. The run, individual tool, Changes, and
 Technical details sheets share one inline navigation-chrome policy; principal toolbar titles

@@ -54,6 +54,5 @@ enum ChatUIKitViewportTransactionOutcome: Equatable, Sendable {
     case applied(UInt64)
     case recovered(UInt64)
     case stale(UInt64)
-    case cancelled(UInt64)
     case failed(UInt64, String)
 }

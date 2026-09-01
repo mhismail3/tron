@@ -64,12 +64,19 @@ final class ChatUIKitPulseLoadingView: UIView {
     private var displayLink: CADisplayLink?
     private var startedAt = ProcessInfo.processInfo.systemUptime
     private var visible = false
-
+    nonisolated(unsafe) private var sceneObservers: [NSObjectProtocol] = []
     override init(frame: CGRect) {
         super.init(frame: frame)
         isAccessibilityElement = false
         isUserInteractionEnabled = false
         backgroundColor = .clear
+        let center = NotificationCenter.default
+        for name in [UIScene.didActivateNotification, UIScene.willDeactivateNotification,
+                     UIScene.didEnterBackgroundNotification, UIScene.willEnterForegroundNotification] {
+            sceneObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.updateDisplayLink() }
+            })
+        }
     }
 
     convenience init(accent: UIColor) {
@@ -78,6 +85,11 @@ final class ChatUIKitPulseLoadingView: UIView {
     }
 
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    deinit {
+        let center = NotificationCenter.default
+        sceneObservers.forEach { center.removeObserver($0) }
+    }
 
     func startAnimating() {
         active = true
@@ -130,7 +142,8 @@ final class ChatUIKitPulseLoadingView: UIView {
     }
 
     private func updateDisplayLink() {
-        let shouldAnimate = active && visible && !UIAccessibility.isReduceMotionEnabled
+        let sceneActive = window?.windowScene?.activationState == .foregroundActive
+        let shouldAnimate = active && visible && sceneActive && !UIAccessibility.isReduceMotionEnabled
         if shouldAnimate, displayLink == nil {
             let link = CADisplayLink(target: self, selector: #selector(tick))
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 30, preferred: 30)

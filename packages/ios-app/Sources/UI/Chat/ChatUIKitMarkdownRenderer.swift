@@ -44,18 +44,36 @@ private final class ChatUIKitThinkingTraceView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let measured = textView.sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height
-        let viewport = ChatThinkingTraceLayoutPolicy.viewportHeight(
-            contentHeight: measured,
-            maximumHeight: maximumHeight,
-            fallbackLineHeight: ChatThinkingTraceLayoutPolicy.fallbackLineHeight
-        )
+        let measured = measuredTextHeight()
         let overflow = ChatThinkingTraceLayoutPolicy.isOverflowing(contentHeight: measured, maximumHeight: maximumHeight)
-        textView.frame = CGRect(x: 0, y: -ChatThinkingTraceLayoutPolicy.tailOffset(contentHeight: measured, viewportHeight: viewport), width: bounds.width, height: measured)
+        let viewport = overflow ? maximumHeight : measured
+        // A short trace is ordinary inline content: it is neither faded nor
+        // padded to the overflow viewport. Only an overflowing trace shows the
+        // bounded tail and its details action.
+        textView.frame = CGRect(
+            x: 0,
+            y: overflow ? -ChatThinkingTraceLayoutPolicy.tailOffset(contentHeight: measured, viewportHeight: viewport) : 0,
+            width: bounds.width,
+            height: measured
+        )
         detailsButton.frame = CGRect(x: 0, y: viewport + 2, width: bounds.width, height: 24)
         detailsButton.isHidden = !overflow
-        fade.frame = CGRect(x: 0, y: max(0, measured - viewport), width: bounds.width, height: viewport)
-        textView.layer.mask = fade
+        if overflow {
+            fade.frame = CGRect(x: 0, y: max(0, measured - viewport), width: bounds.width, height: viewport)
+            textView.layer.mask = fade
+        } else {
+            textView.layer.mask = nil
+        }
+    }
+
+    private func measuredTextHeight() -> CGFloat {
+        guard bounds.width > 0 else {
+            // Auto Layout may ask for intrinsic size before assigning a width.
+            // Do not turn that provisional measurement into a four-line
+            // overflow reservation for an otherwise short trace.
+            return textView.text?.isEmpty == false ? (textView.font?.lineHeight ?? ChatThinkingTraceLayoutPolicy.fallbackLineHeight) : 0
+        }
+        return max(0, textView.sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height)
     }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
@@ -68,7 +86,12 @@ private final class ChatUIKitThinkingTraceView: UIView {
     }
 
     override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: maximumHeight + 26)
+        let measured = measuredTextHeight()
+        let overflow = ChatThinkingTraceLayoutPolicy.isOverflowing(contentHeight: measured, maximumHeight: maximumHeight)
+        return CGSize(
+            width: UIView.noIntrinsicMetric,
+            height: ceil(overflow ? maximumHeight : measured) + (overflow ? 26 : 0)
+        )
     }
 }
 
@@ -123,6 +146,16 @@ private final class ChatUIKitStreamingInlineTextView: UITextView {
         if active { schedule() } else { timer?.invalidate(); timer = nil }
     }
 
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil {
+            timer?.invalidate()
+            timer = nil
+        } else {
+            schedule()
+        }
+    }
+
     func reset() {
         timer?.invalidate(); timer = nil
         identity = ""; source = ""; baseAttributedText = nil; attributedText = nil
@@ -132,7 +165,7 @@ private final class ChatUIKitStreamingInlineTextView: UITextView {
 
     private func schedule() {
         timer?.invalidate(); timer = nil
-        guard presentationActive, streaming, !UIAccessibility.isReduceMotionEnabled else { return }
+        guard window != nil, presentationActive, streaming, !UIAccessibility.isReduceMotionEnabled else { return }
         let nextTimer = Timer(timeInterval: 0.033, target: self, selector: #selector(revealTick(_:)), userInfo: nil, repeats: true)
         timer = nextTimer
         RunLoop.main.add(nextTimer, forMode: .common)

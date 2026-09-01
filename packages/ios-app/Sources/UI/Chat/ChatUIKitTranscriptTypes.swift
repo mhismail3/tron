@@ -195,6 +195,7 @@ enum ChatUIKitPresentationAdapter {
         let rows = physical.compactMap { row -> ChatUIKitTranscriptRow? in
             let item = transcriptItem(from: row.content)
             let prepared = item.map { installed.preparedText(for: $0) }
+            let documents = markdownDocuments(for: row.content, prepared: prepared)
             return ChatUIKitTranscriptRow(
                 id: row.id,
                 text: accessibilityText(for: row.content),
@@ -202,12 +203,13 @@ enum ChatUIKitPresentationAdapter {
                 semanticID: row.semanticID,
                 content: row.content,
                 preparedText: prepared,
-                markdownDocuments: markdownDocuments(for: row.content, prepared: prepared),
+                markdownDocuments: documents,
                 thinkingSegments: thinkingSegments(for: row.content),
                 thinkingLabel: prepared?.hiddenThinkingLabel,
                 streaming: isStreaming(row.content),
                 toolRun: toolRun(for: row.content),
                 notification: notification(for: row.content),
+                links: links(in: documents),
                 attachments: attachmentFacts(for: row.content).map(\.name),
                 attachmentFacts: attachmentFacts(for: row.content),
                 resourceInvocation: resourceInvocation(for: row.content),
@@ -239,6 +241,7 @@ enum ChatUIKitPresentationAdapter {
             case .message(let message): return message.streaming ? .streaming : (message.item.role == .user ? .user : .assistant)
             case .transcript(let item):
                 if item.kind == .thinkingChange { return .thinking }
+                if item.kind == .customMessage || item.kind == .customEntry { return .status }
                 return item.role == .user ? .user : .assistant
             }
         }
@@ -248,7 +251,6 @@ enum ChatUIKitPresentationAdapter {
         for content: ChatPhysicalTranscriptRow.Content,
         prepared: ChatTextPreparationSnapshot?
     ) -> [MarkdownPresentation.Document] {
-        guard let prepared else { return [] }
         let values: [ChatMessagePart]
         switch content {
         case .transcript(let item, _):
@@ -266,11 +268,50 @@ enum ChatUIKitPresentationAdapter {
         return values.compactMap { part in
             guard case .content(let value) = part, value.type == .text,
                   value.attachment == nil, let source = value.text else { return nil }
-            return prepared.markdownDocument(
+            return prepared?.markdownDocument(
                 identity: ChatTextPreparationKey.content(value),
                 source: source
             ) ?? MarkdownPresentation.Document(source: source)
         }
+    }
+
+    /// Carries the links discovered by MarkdownPresentation across the UIKit
+    /// boundary. Ranges are measured in the same rendered, delimiter-free text
+    /// that the native TextKit views display, never synthesized from the URL.
+    private static func links(in documents: [MarkdownPresentation.Document]) -> [ChatUIKitLink] {
+        var result: [ChatUIKitLink] = []
+        var offset = 0
+        for document in documents {
+            for block in document.blocks {
+                let inlines: [MarkdownPresentation.Inline] = switch block.kind {
+                case .paragraph(let inline), .heading(_, let inline), .quote(let inline): [inline]
+                case .list(let items): items.map(\.inline)
+                case .code, .table, .rule: []
+                }
+                for inline in inlines {
+                    if let attributed = inline.attributedString {
+                        for run in attributed.runs {
+                            guard let url = run.link,
+                                  let link = ChatUIKitLink(
+                                      range: NSRange(run.range, in: attributed),
+                                      url: url
+                                  ) else { continue }
+                            result.append(ChatUIKitLink(
+                                range: NSRange(
+                                    location: link.range.location + offset,
+                                    length: link.range.length
+                                ),
+                                url: link.url
+                            )!)
+                        }
+                    }
+                    offset += ((inline.attributedString.map { (String($0.characters) as NSString).length })
+                        ?? (inline.source as NSString).length) + 1
+                }
+            }
+            offset += 1
+        }
+        return result
     }
 
     private static func thinkingSegments(

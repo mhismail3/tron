@@ -27,6 +27,17 @@ enum ChatMediaLoadError: Error, Equatable, Sendable {
     case staleIdentity
 }
 
+/// The terminal state of one identity-scoped media request. Cancellation is
+/// explicit: a cell may leave the hierarchy without allowing an old
+/// completion to masquerade as a failed request or install a stale image.
+enum ChatMediaLoadState: Equatable, Sendable {
+    case idle
+    case loading
+    case succeeded
+    case failed
+    case cancelled
+}
+
 enum ChatMediaPolicy {
     static let maximumDecodedThumbnailBytes = 4 * 1_024 * 1_024
     static let maximumThumbnailCount = 64
@@ -239,6 +250,15 @@ final class ChatMediaLoader {
     func cachedThumbnail(for identity: ChatMediaIdentity) -> UIImage? {
         guard admits(identity) else { return nil }
         return thumbnails[identity]?.image
+    }
+
+    /// Retires one presentation-owned flight. The cache remains valid, but a
+    /// detached chip's next generation must not inherit the cancelled flight.
+    /// Late completion is rejected by the flight token and cannot install.
+    func cancelThumbnail(for identity: ChatMediaIdentity) {
+        guard let flight = thumbnailFlights.removeValue(forKey: identity) else { return }
+        flight.task.cancel()
+        hostedNotifyMediaCounts()
     }
 
     func fileThumbnail(

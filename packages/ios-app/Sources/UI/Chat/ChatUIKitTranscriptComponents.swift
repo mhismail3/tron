@@ -212,6 +212,8 @@ final class ChatUIKitResourceChip: UIView {
 final class ChatUIKitPromptCard: UIView {
     private let stack = UIStackView()
     private let accent: UIColor
+    private let attachmentScroll = UIScrollView()
+    private let attachmentStack = UIStackView()
     private(set) var mediaChips: [ChatUIKitMediaChip] = []
     init(title: String, text: String, detail: String?, behavior: ChatPromptBehavior) {
         accent = behavior == .steer ? ChatUIKitTheme.emerald : behavior == .followUp ? ChatUIKitTheme.purple : ChatUIKitTheme.secondary
@@ -235,16 +237,41 @@ final class ChatUIKitPromptCard: UIView {
         isAccessibilityElement = false
         accessibilityElements = stack.arrangedSubviews
     }
-    func setAttachments(_ attachments: [ChatUIKitTranscriptAttachment], mediaLoader: ChatMediaLoader?, mediaIdentity: ((String) -> ChatMediaIdentity?)?, onTap: @escaping (Int) -> Void) {
+    func setAttachments(
+        _ attachments: [ChatUIKitTranscriptAttachment],
+        mediaLoader: ChatMediaLoader?,
+        mediaIdentity: ((String) -> ChatMediaIdentity?)?,
+        reusableChips: [ChatUIKitMediaChip] = [],
+        onTap: @escaping (Int) -> Void
+    ) {
         guard !attachments.isEmpty else { return }
-        let row = UIStackView(); row.axis = .horizontal; row.spacing = 8
+        attachmentScroll.translatesAutoresizingMaskIntoConstraints = false
+        attachmentScroll.showsHorizontalScrollIndicator = false
+        attachmentScroll.alwaysBounceHorizontal = true
+        attachmentScroll.accessibilityLabel = "Prompt attachments"
+        attachmentScroll.isAccessibilityElement = false
+        attachmentStack.axis = .horizontal
+        attachmentStack.spacing = 8
+        attachmentStack.alignment = .center
+        attachmentStack.translatesAutoresizingMaskIntoConstraints = false
+        attachmentScroll.addSubview(attachmentStack)
+        NSLayoutConstraint.activate([
+            attachmentStack.leadingAnchor.constraint(equalTo: attachmentScroll.contentLayoutGuide.leadingAnchor),
+            attachmentStack.trailingAnchor.constraint(equalTo: attachmentScroll.contentLayoutGuide.trailingAnchor),
+            attachmentStack.topAnchor.constraint(equalTo: attachmentScroll.contentLayoutGuide.topAnchor),
+            attachmentStack.bottomAnchor.constraint(equalTo: attachmentScroll.contentLayoutGuide.bottomAnchor),
+            attachmentStack.heightAnchor.constraint(equalTo: attachmentScroll.frameLayoutGuide.heightAnchor),
+            attachmentScroll.heightAnchor.constraint(equalToConstant: 70)
+        ])
+        let old = Dictionary(uniqueKeysWithValues: reusableChips.map { ($0.attachment.id, $0) })
         for (index, attachment) in attachments.enumerated() {
-            let chip = mediaChips.first(where: { $0.attachment == attachment }) ?? ChatUIKitMediaChip(attachment: attachment)
+            let chip = old[attachment.id] ?? ChatUIKitMediaChip(attachment: attachment)
             chip.onActivate = { onTap(index) }
             chip.load(using: mediaLoader, identity: attachment.blobID.flatMap { mediaIdentity?($0) })
-            row.addArrangedSubview(chip); mediaChips.append(chip)
+            attachmentStack.addArrangedSubview(chip)
+            mediaChips.append(chip)
         }
-        stack.addArrangedSubview(row)
+        stack.addArrangedSubview(attachmentScroll)
     }
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
@@ -314,6 +341,7 @@ final class ChatUIKitMediaChip: UIControl {
     private var loadGeneration: UInt64 = 0
     private var failed = false
     private var presentationActive = true
+    private(set) var loadState: ChatMediaLoadState = .idle
     private let normalAccessibilityLabel: String
 
     init(attachment: ChatUIKitTranscriptAttachment) {
@@ -337,45 +365,68 @@ final class ChatUIKitMediaChip: UIControl {
         if let prepared = attachment.preparedThumbnail {
             imageView.image = prepared
             failed = false
+            loadState = .succeeded
         }
-        if loadGeneration > 0, self.loader === loader, self.identity == identity { return }
+        let sameRequest = self.loader === loader && self.identity == identity
+        let previousLoader = self.loader
+        let previousIdentity = self.identity
+        if !sameRequest, let previousLoader, let previousIdentity {
+            previousLoader.cancelThumbnail(for: previousIdentity)
+        }
         self.loader = loader
         self.identity = identity
+        // Keep an in-flight or successful request stable across configure calls.
+        // Failed/cancelled requests intentionally fall through so retry and
+        // reactivation create a fresh generation for the same identity.
+        if sameRequest && (loadState == .loading || loadState == .succeeded) { return }
         loadTask?.cancel()
         loadTask = nil
         loadGeneration &+= 1
         let generation = loadGeneration
-        // A prepared thumbnail is already the authoritative bounded image and
-        // must not be replaced by an asynchronous fetch.
-        guard presentationActive, attachment.preparedThumbnail == nil, let loader, let identity else { return }
+        guard presentationActive, attachment.preparedThumbnail == nil, let loader, let identity else {
+            if loadState != .succeeded { loadState = .idle }
+            return
+        }
         if let cached = loader.cachedThumbnail(for: identity) {
             imageView.image = cached
             failed = false
+            loadState = .succeeded
             return
         }
         showPlaceholder()
+        failed = false
+        loadState = .loading
         accessibilityLabel = normalAccessibilityLabel
         accessibilityValue = attachmentFacts
         loadTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let image = try await loader.thumbnail(for: identity)
-                guard !Task.isCancelled, self.loadGeneration == generation else { return }
+                guard !Task.isCancelled, self.loadGeneration == generation,
+                      self.identity == identity else { return }
                 self.imageView.image = image
                 self.failed = false
+                self.loadState = .succeeded
+                self.loadTask = nil
                 self.accessibilityLabel = self.normalAccessibilityLabel
                 self.accessibilityValue = self.attachmentFacts
             } catch {
-                guard !Task.isCancelled, self.loadGeneration == generation else { return }
+                guard !Task.isCancelled, self.loadGeneration == generation,
+                      self.identity == identity else { return }
                 self.failed = true
-                self.showFailure()
+                self.loadState = error is CancellationError ? .cancelled : .failed
+                self.loadTask = nil
+                if self.loadState == .failed { self.showFailure() }
             }
         }
     }
     func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
+        let wasActive = presentationActive
         presentationActive = activity.isActive
         if presentationActive {
-            load(using: loader, identity: identity)
+            if !wasActive || loadState == .cancelled || loadState == .failed {
+                load(using: loader, identity: identity)
+            }
         } else {
             cancelLoad()
         }
@@ -385,6 +436,8 @@ final class ChatUIKitMediaChip: UIControl {
         loadGeneration &+= 1
         loadTask?.cancel()
         loadTask = nil
+        if let loader, let identity { loader.cancelThumbnail(for: identity) }
+        if loadState == .loading { loadState = .cancelled }
     }
 
     override func didMoveToWindow() {

@@ -61,6 +61,8 @@ final class ChatUIKitTranscriptRowView: UIView {
     private var mediaChips: [ChatUIKitMediaChip] = []
     private var currentID = ""
     private var activeAttachmentIDs: Set<String> = []
+    private var lastConfiguredRow: ChatUIKitTranscriptRow?
+    private weak var lastMediaLoader: ChatMediaLoader?
     var onAttachmentTapped: ((Int) -> Void)?
     var onToolTapped: (() -> Void)?
     var onThinkingDetails: (() -> Void)?
@@ -96,6 +98,8 @@ final class ChatUIKitTranscriptRowView: UIView {
         }
         markdownView.reset()
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        lastConfiguredRow = nil
+        lastMediaLoader = nil
         onAttachmentTapped = nil
         onToolTapped = nil
         onThinkingDetails = nil
@@ -123,6 +127,11 @@ final class ChatUIKitTranscriptRowView: UIView {
         // The physical ID is stable for lifecycle updates. Keep the markdown
         // and media child instances when the same row receives a new payload.
         if currentID != row.id { reset(); currentID = row.id }
+        if lastConfiguredRow == row, lastMediaLoader === mediaLoader {
+            setPresentationActivity(presentationActivity)
+            updateAccessibility(row)
+            return
+        }
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         // Preserve media controls for retained rows so failed/retrying and
         // in-flight presentation state survives authoritative frame updates.
@@ -140,7 +149,8 @@ final class ChatUIKitTranscriptRowView: UIView {
                 resource: pending.resourceInvocation,
                 attachments: row.attachmentFacts,
                 mediaLoader: mediaLoader,
-                mediaIdentity: mediaIdentity
+                mediaIdentity: mediaIdentity,
+                reusableChips: mediaChips
             )
         case .some(.outgoing(let outgoing, _)):
             renderPrompt(
@@ -151,7 +161,8 @@ final class ChatUIKitTranscriptRowView: UIView {
                 resource: outgoing.resourceInvocation,
                 attachments: row.attachmentFacts,
                 mediaLoader: mediaLoader,
-                mediaIdentity: mediaIdentity
+                mediaIdentity: mediaIdentity,
+                reusableChips: mediaChips
             )
         case .some(.queued(let entry)):
             let behavior = ChatPromptBehavior(entry.message.behavior)
@@ -163,7 +174,8 @@ final class ChatUIKitTranscriptRowView: UIView {
                 resource: entry.message.resourceInvocation,
                 attachments: row.attachmentFacts,
                 mediaLoader: mediaLoader,
-                mediaIdentity: mediaIdentity
+                mediaIdentity: mediaIdentity,
+                reusableChips: mediaChips
             )
         case .none:
             renderFallback(row)
@@ -171,6 +183,8 @@ final class ChatUIKitTranscriptRowView: UIView {
         mediaChips.filter { !activeAttachmentIDs.contains($0.attachment.id) }.forEach { $0.cancelLoad() }
         mediaChips = Dictionary(grouping: mediaChips.filter { activeAttachmentIDs.contains($0.attachment.id) }, by: { $0.attachment.id }).compactMap { $0.value.first }
         setPresentationActivity(presentationActivity)
+        lastConfiguredRow = row
+        lastMediaLoader = mediaLoader
         updateAccessibility(row)
     }
 
@@ -204,7 +218,9 @@ final class ChatUIKitTranscriptRowView: UIView {
                         icon: "arrow.down.message.fill",
                         title: InboundProducerPresentationPolicy.compactTitle(for: value.semantic?.origin),
                         detail: detail,
-                        body: nil,
+                        // Match the production inbound-context pill: its
+                        // secondary action opens the canonical detail view.
+                        body: value.text.isEmpty ? nil : value.text,
                         tone: tone,
                         material: .glass
                     )
@@ -339,7 +355,8 @@ final class ChatUIKitTranscriptRowView: UIView {
         resource: ComposerResourceInvocation?,
         attachments: [ChatUIKitTranscriptAttachment],
         mediaLoader: ChatMediaLoader?,
-        mediaIdentity: ((String) -> ChatMediaIdentity?)?
+        mediaIdentity: ((String) -> ChatMediaIdentity?)?,
+        reusableChips: [ChatUIKitMediaChip] = []
     ) {
         let wrapper = UIStackView()
         wrapper.axis = .vertical
@@ -350,7 +367,7 @@ final class ChatUIKitTranscriptRowView: UIView {
         }
         let card = ChatUIKitPromptCard(title: title, text: text, detail: detail, behavior: behavior)
         if !attachments.isEmpty {
-            card.setAttachments(attachments, mediaLoader: mediaLoader, mediaIdentity: mediaIdentity) { [weak self] index in
+            card.setAttachments(attachments, mediaLoader: mediaLoader, mediaIdentity: mediaIdentity, reusableChips: reusableChips) { [weak self] index in
                 self?.onAttachmentTapped?(index)
             }
             mediaChips.append(contentsOf: card.mediaChips)

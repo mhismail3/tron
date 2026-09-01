@@ -139,15 +139,16 @@ final class ChatUIKitChatViewController: UIViewController,
             // removed, restore the nearest retained ordinal rather than
             // jumping to an unconditional top offset.
             if let anchor {
-                _ = restore(anchor)
-                viewportState.intent = .preserve(anchor)
+                viewportState.intent = .preserve(restore(anchor) ?? anchor)
             }
         } else {
             switch intent {
             case .followTail:
                 setOffset(y: maxOffsetY)
             case .preserve(let semantic):
-                restore(semantic)
+                if let retained = restore(semantic) {
+                    viewportState.intent = .preserve(retained)
+                }
             }
         }
         let missingRequestedAnchor: Bool = switch intent {
@@ -180,7 +181,8 @@ final class ChatUIKitChatViewController: UIViewController,
         viewportState.intent = intent
         switch intent {
         case .followTail: setOffset(y: maxOffsetY)
-        case .preserve(let anchor): restore(anchor)
+        case .preserve(let anchor):
+            if let retained = restore(anchor) { viewportState.intent = .preserve(retained) }
         }
         clampOffset()
     }
@@ -265,16 +267,16 @@ final class ChatUIKitChatViewController: UIViewController,
     }
 
     @discardableResult
-    private func restore(_ anchor: ChatUIKitSemanticAnchor) -> Bool {
-        guard !rows.isEmpty else { return false }
+    private func restore(_ anchor: ChatUIKitSemanticAnchor) -> ChatUIKitSemanticAnchor? {
+        guard !rows.isEmpty else { return nil }
         let index = rows.firstIndex(where: { $0.id == anchor.rowID })
             ?? min(max(anchor.ordinal, 0), rows.count - 1)
         let path = IndexPath(item: index + historyOffset, section: 0)
         guard let attributes = collectionView.layoutAttributesForItem(at: path) else {
-            return false
+            return nil
         }
         setOffset(y: attributes.frame.minY - anchor.topOffset)
-        return true
+        return ChatUIKitSemanticAnchor(rowID: rows[index].id, ordinal: index, topOffset: anchor.topOffset)
     }
 
     private func rowIndex(for path: IndexPath) -> Int? {
@@ -289,7 +291,9 @@ final class ChatUIKitChatViewController: UIViewController,
     }
 
     private var hasVisibleRows: Bool {
-        collectionView.indexPathsForVisibleItems.contains { $0.item < rows.count }
+        collectionView.indexPathsForVisibleItems.contains {
+            $0.item >= historyOffset && $0.item < rows.count + historyOffset
+        }
     }
 
     private var hasReachedTail: Bool {
@@ -305,7 +309,7 @@ final class ChatUIKitChatViewController: UIViewController,
         case .followTail:
             setOffset(y: maxOffsetY)
         case .preserve(let anchor):
-            guard restore(anchor) else { setOffset(y: minOffsetY); return }
+            guard restore(anchor) != nil else { setOffset(y: minOffsetY); return }
         }
         clampOffset()
     }
