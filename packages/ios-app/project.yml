@@ -3,7 +3,7 @@ options:
   bundleIdPrefix: com.tron
   deploymentTarget:
     iOS: "26.0"
-  xcodeVersion: "2640"
+  xcodeVersion: "2660"
   developmentLanguage: en
   generateEmptyDirectories: false
   createIntermediateGroups: true
@@ -200,8 +200,9 @@ schemes:
       config: Development
     test:
       config: Test
-      targets:
-        - TronMobileTests
+      testPlans:
+        - path: TestPlans/UnitTests.xctestplan
+          defaultPlan: true
 
   Tron Device:
     build:
@@ -213,8 +214,9 @@ schemes:
       config: LocalDevice
     test:
       config: Test
-      targets:
-        - TronMobileTests
+      testPlans:
+        - path: TestPlans/UnitTests.xctestplan
+          defaultPlan: true
 
   Tron UI Validation:
     build:
@@ -225,13 +227,14 @@ schemes:
     run:
       config: Development
     test:
-      config: Test
+      config: Development
       environmentVariables:
         TRON_E2E_PORT: "$(TRON_E2E_PORT_VALUE)"
         TRON_E2E_CODE: "$(TRON_E2E_CODE_VALUE)"
         TRON_E2E_WORKSPACE: "$(TRON_E2E_WORKSPACE_VALUE)"
-      targets:
-        - TronMobileUITests
+      testPlans:
+        - path: TestPlans/UIValidation.xctestplan
+          defaultPlan: true
 
   Tron Device Performance:
     build:
@@ -245,8 +248,9 @@ schemes:
       config: DevicePerformance
       environmentVariables:
         TRON_PERFORMANCE_BASELINE: "$(TRON_PERFORMANCE_BASELINE_VALUE)"
-      targets:
-        - TronMobileTests
+      testPlans:
+        - path: TestPlans/UnitTests.xctestplan
+          defaultPlan: true
 
   Tron Release:
     build:

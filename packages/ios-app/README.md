@@ -12,6 +12,7 @@ See:
 - [Gateway event policy](docs/events.md)
 - [iOS hardening plan](docs/hardening-plan.md)
 
-Generate the project with `xcodegen generate`; `project.yml` is the project
-source of truth. Provider secrets remain on the Mac, mobile tokens remain in
+Generate the project with `scripts/tron ios generate` from the repository root;
+it resolves the pinned XcodeGen and keeps `project.yml` as project truth. Run
+hosted tests only through `scripts/tron-ios-test`; see the development guide. Provider secrets remain on the Mac, mobile tokens remain in
 Keychain, and local snapshots are disposable offline presentation state.

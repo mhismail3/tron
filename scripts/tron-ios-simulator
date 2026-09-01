@@ -8,9 +8,7 @@ IOS_DIR="$ROOT_DIR/packages/ios-app"
 STATE_DIR="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}"
 STATE_FILE="$STATE_DIR/ios-simulator-udid"
 SIMULATOR_ID="${TRON_IOS_SIMULATOR_ID:-}"
-SIMULATOR_NAME="${TRON_IOS_SIMULATOR_NAME:-iPhone 17 Pro}"
 DERIVED_DATA="${TRON_IOS_SIMULATOR_DERIVED_DATA:-/tmp/tron-ios-development-derived}"
-TEST_DERIVED_DATA="${TRON_IOS_TEST_DERIVED_DATA:-/tmp/tron-ios-tests-derived}"
 BUNDLE_ID="com.tron.mobile.beta"
 
 usage() {
@@ -19,31 +17,25 @@ Usage:
   scripts/tron-ios-simulator start
   scripts/tron-ios-simulator install
   scripts/tron-ios-simulator status
+  scripts/tron-ios-simulator stop
   scripts/tron-ios-simulator remember [SIMULATOR_ID]
-  scripts/tron-ios-simulator check-affected [BASE_REF]
-  scripts/tron-ios-simulator iterate [BASE_REF]
 
 Commands:
   start      Boot the remembered simulator and launch its verified Tron Development app.
   install    Build/install Tron Development without erasing its paired app container.
   status     Show the remembered simulator and validate its installed Tron Development app.
+  stop       Terminate Development and shut down only the remembered simulator.
   remember   Save an explicit simulator ID, or the Simulator app's current device.
-  check-affected  Run the conservative test selection for changes since BASE_REF.
-  iterate    Run affected tests, then rebuild/install/launch Tron Development.
 
 Environment overrides:
-  TRON_IOS_SIMULATOR_ID            Simulator UUID to use and remember
-  TRON_IOS_SIMULATOR_NAME          Default device name (iPhone 17 Pro)
+  TRON_IOS_SIMULATOR_ID            Explicit simulator UUID to use and remember
   TRON_IOS_SIMULATOR_STATE_DIR     Local state directory
   TRON_IOS_SIMULATOR_DERIVED_DATA  Stable DerivedData path
-  TRON_IOS_TEST_DERIVED_DATA       Separate stable test DerivedData path
 
-This helper intentionally uses the Development bundle ID and never uninstalls or erases
-the app. Pairing is stored in that bundle's data container on the remembered
-simulator, so changing simulator UUIDs, bundle IDs, or erasing data requires a
-new pairing. Hosted test actions use a separate app identity and must use a
-disposable simulator for isolation; the launch guard also catches older or
-manual invocations that replaced Development with a linker-signed XCTest host.
+This helper intentionally uses the Development bundle ID and never uninstalls,
+erases, or runs tests. Pairing is stored in that bundle's data container on the
+remembered simulator, so an unavailable remembered UUID fails closed instead of
+selecting another device. Use scripts/tron-ios-test for all hosted unit tests.
 USAGE
 }
 
@@ -59,18 +51,6 @@ available_device_line() {
 
 current_simulator_id() {
     defaults read com.apple.iphonesimulator CurrentDeviceUDID 2>/dev/null || true
-}
-
-latest_named_simulator_id() {
-    xcrun simctl list devices available \
-        | awk -v name="$SIMULATOR_NAME" '
-            index($0, name) && $0 !~ /unavailable/ {
-                if (match($0, /[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}/)) {
-                    id = substr($0, RSTART, RLENGTH)
-                }
-            }
-            END { print id }
-        '
 }
 
 remember_simulator_id() {
@@ -89,14 +69,11 @@ resolve_simulator_id() {
     elif [ -s "$STATE_FILE" ]; then
         candidate="$(head -1 "$STATE_FILE")"
     else
-        candidate="$(current_simulator_id)"
+        die "no Development simulator is remembered; select one in Simulator and run '$0 remember'"
     fi
 
-    if [ -z "$candidate" ] || [ -z "$(available_device_line "$candidate")" ]; then
-        candidate="$(latest_named_simulator_id)"
-    fi
-
-    [ -n "$candidate" ] || die "no available simulator matched '$SIMULATOR_NAME'"
+    [ -n "$(available_device_line "$candidate")" ] \
+        || die "remembered Development simulator is unavailable: $candidate (choose a replacement explicitly with '$0 remember SIMULATOR_ID')"
     remember_simulator_id "$candidate"
     printf '%s\n' "$candidate"
 }
@@ -138,7 +115,7 @@ install_development() {
     boot_simulator "$simulator_id"
     (
         cd "$IOS_DIR"
-        xcodegen generate
+        "$ROOT_DIR/scripts/generate-ios-project"
         xcodebuild build \
             -project TronMobile.xcodeproj \
             -scheme "Tron Development" \
@@ -154,32 +131,13 @@ install_development() {
     launch_development "$simulator_id"
 }
 
-check_affected() {
-    local simulator_id="$1"
-    local base_ref="${2:-origin/main}"
-    if git -C "$ROOT_DIR" diff --quiet "$base_ref" -- packages/ios-app scripts/tron-ios-simulator; then
-        echo "No iOS validation required: no iOS-owned changes"
-        return
+stop_development() {
+    local simulator_id="$1" line
+    line="$(available_device_line "$simulator_id")"
+    xcrun simctl terminate "$simulator_id" "$BUNDLE_ID" 2>/dev/null || true
+    if [[ "$line" == *"(Booted)"* ]]; then
+        xcrun simctl shutdown "$simulator_id"
     fi
-    echo "iOS validation mode: complete focused target"
-    boot_simulator "$simulator_id"
-    (
-        cd "$IOS_DIR"
-        xcodegen generate
-        xcodebuild build-for-testing \
-            -project TronMobile.xcodeproj \
-            -scheme "Tron Development" \
-            -configuration Test \
-            -destination "platform=iOS Simulator,id=$simulator_id" \
-            -derivedDataPath "$TEST_DERIVED_DATA"
-        xcodebuild test-without-building \
-            -project TronMobile.xcodeproj \
-            -scheme "Tron Development" \
-            -configuration Test \
-            -destination "platform=iOS Simulator,id=$simulator_id" \
-            -derivedDataPath "$TEST_DERIVED_DATA" \
-            -only-testing:TronMobileTests
-    )
 }
 
 show_status() {
@@ -220,20 +178,15 @@ case "$command" in
         simulator_id="$(resolve_simulator_id)"
         show_status "$simulator_id"
         ;;
+    stop)
+        simulator_id="$(resolve_simulator_id)"
+        stop_development "$simulator_id"
+        ;;
     remember)
         simulator_id="${2:-$(current_simulator_id)}"
         [ -n "$simulator_id" ] || die "pass a simulator ID or select one in Simulator first"
         remember_simulator_id "$simulator_id"
         show_status "$simulator_id"
-        ;;
-    check-affected)
-        simulator_id="$(resolve_simulator_id)"
-        check_affected "$simulator_id" "${2:-origin/main}"
-        ;;
-    iterate)
-        simulator_id="$(resolve_simulator_id)"
-        check_affected "$simulator_id" "${2:-origin/main}"
-        install_development "$simulator_id"
         ;;
     -h|--help|help)
         usage

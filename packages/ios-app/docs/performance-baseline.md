@@ -140,12 +140,9 @@ Generate and build before either run. The performance test skips unless the
 explicit environment value is enabled, so normal focused/full suites remain fast.
 
 ```bash
-# Simulator
-TRON_PERFORMANCE_BASELINE_VALUE=1 xcodebuild test-without-building \
-  -project TronMobile.xcodeproj -scheme 'Tron Development' -configuration Test \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/ChatPerformanceBaselineTests \
-  -resultBundlePath /tmp/tron-perf-simulator.xcresult
+# Exact repository-owned simulator; unique log/result paths are automatic.
+TRON_PERFORMANCE_BASELINE_VALUE=1 scripts/tron-ios-test run \
+  --only-testing TronMobileTests/ChatPerformanceBaselineTests
 
 # Provisioned pinned device
 TRON_PERFORMANCE_BASELINE_VALUE=1 xcodebuild test-without-building \

@@ -497,13 +497,7 @@ Extend `ChatHostedProbe` to frame-sample the tool button and assert:
 After focused tests pass:
 
 ```bash
-cd packages/ios-app
-xcodegen generate
-xcodebuild build-for-testing \
-  -project TronMobile.xcodeproj \
-  -scheme 'Tron Development' \
-  -configuration Test \
-  -destination 'generic/platform=iOS'
+scripts/tron-ios-test build
 ```
 
 Also run:

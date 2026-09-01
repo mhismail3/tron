@@ -62,7 +62,7 @@ case "$cmd" in
     ;;
   ios)
     [[ "${1:-}" == generate ]] || { usage >&2; exit 64; }
-    (cd "$ROOT/packages/ios-app" && xcodegen generate)
+    exec "$ROOT/scripts/generate-ios-project" "${@:2}"
     ;;
   mac)
     case "${1:-}" in

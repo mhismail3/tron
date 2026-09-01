@@ -102,17 +102,14 @@ iteration proceeds on `9848`.
 ### iOS
 
 ```bash
-cd packages/ios-app
-xcodegen generate
-xcodebuild build-for-testing -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/<OwningSuite>
+scripts/tron-ios-test build
+scripts/tron-ios-test run --only-testing TronMobileTests/<OwningSuite>
 ```
 
-Reuse `test-without-building` for nearby test owners. Run the complete unit target
-and smoke UI target only at a checkpoint. Development is the simulator app,
+The canonical runner reuses products for nearby owners and preserves bounded
+logs/results on its exact repository-owned test simulator. Run
+`scripts/tron-ios-test checkpoint` only after focused owners pass. See
+`packages/ios-app/docs/development.md` for status, cleanup, and diagnostics. Development is the simulator app,
 Test is the explicit `HOSTED_TEST` host, LocalDevice is the canonical physical
 device install, DevicePerformance is test-only, and Release is archive-only.
 Keep generated schemes and DerivedData out of the diff.

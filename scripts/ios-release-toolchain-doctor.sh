@@ -55,12 +55,7 @@ notice doctor_started \
     "github_actions=${GITHUB_ACTIONS:-false} runner_environment=${RUNNER_ENVIRONMENT:-unavailable} image_os=${ImageOS:-unavailable} source_sha=${GITHUB_SHA:-local}"
 
 [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]] \
-    || die "hosted release validation requires GitHub's macOS 26 ARM64 image"
-[[ "${GITHUB_ACTIONS:-}" == "true" ]] || die "hosted release validation requires GitHub Actions"
-[[ "${RUNNER_ENVIRONMENT:-}" == "github-hosted" ]] \
-    || die "hosted release validation requires an ephemeral GitHub-hosted runner"
-[[ "${ImageOS:-}" == "macos26" ]] \
-    || die "hosted release validation requires the pinned macos-26 image"
+    || die "manual release validation requires an Apple silicon Mac"
 [[ -d "${TRON_RELEASE_IOS_DEVELOPER_DIR%/Contents/Developer}" ]] \
     || die "pinned Xcode application is not installed"
 
@@ -91,5 +86,5 @@ done
 [[ -x /usr/libexec/PlistBuddy ]] || die "missing PlistBuddy"
 
 notice doctor_completed \
-    "runner_environment=$RUNNER_ENVIRONMENT image_os=$ImageOS xcode_version=$actual_xcode_version xcode_build=$actual_xcode_build ios_sdk=$actual_sdk free_kb=$free_kb"
-echo "Verified hosted release toolchain: Xcode $actual_xcode_version ($actual_xcode_build), iPhoneOS SDK $actual_sdk"
+    "runner_environment=${RUNNER_ENVIRONMENT:-local} image_os=${ImageOS:-local} xcode_version=$actual_xcode_version xcode_build=$actual_xcode_build ios_sdk=$actual_sdk free_kb=$free_kb"
+echo "Verified manual release toolchain: Xcode $actual_xcode_version ($actual_xcode_build), iPhoneOS SDK $actual_sdk"

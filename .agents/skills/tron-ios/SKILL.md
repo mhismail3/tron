@@ -31,7 +31,10 @@ before `devicectl` when their signed protocol metadata differs.
 scripts/tron-ios-simulator install
 scripts/tron-ios-simulator start
 scripts/tron-ios-simulator status
-scripts/ios-ci-test.sh
+scripts/tron-ios-simulator stop
+scripts/tron-ios-test build
+scripts/tron-ios-test run --only-testing TronMobileTests/<Suite>
+scripts/tron-ios-test checkpoint
 ```
 
 For a physical development device targeting Stable, first complete the Mac
@@ -50,8 +53,9 @@ For an explicitly source-built Debug Gateway on 9848, use
 still verifies the source and iOS artifact contract but does not claim Stable is
 ready. Never use that target to bypass a mismatched Stable installation.
 
-Generate Xcode with `xcodegen generate`; if it is not on `PATH`, install the
-pinned repository-managed tool with `scripts/install-ci-tools.sh xcodegen`.
+Generate Xcode with `scripts/tron ios generate`; it resolves the pinned
+repository-managed XcodeGen. If the tool is absent, install it with
+`scripts/install-ci-tools.sh xcodegen`.
 Use `scripts/validate-ios-artifact.py` on signed products and
 `packages/ios-app/scripts/verify-archive-privacy.sh` for a manually-created
 archive. Never install Release or DevicePerformance through the ordinary helper.

@@ -1,0 +1,298 @@
+#!/usr/bin/env bash
+# Canonical bounded owner for local and CI iOS hosted-unit-test execution.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IOS="$ROOT/packages/ios-app"
+# shellcheck disable=SC1091
+source "$ROOT/config/ci-toolchain.env"
+export PATH="$ROOT/.ci-tools/bin:/opt/homebrew/bin:$PATH"
+
+STATE_ROOT="${TRON_IOS_TEST_STATE_DIR:-$HOME/.tron/internal/ios-test}"
+MARKER="$STATE_ROOT/simulator.json"
+LOCK="$STATE_ROOT/lease.lock"
+DEVELOPMENT_STATE="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}/ios-simulator-udid"
+DERIVED_DATA="${TRON_IOS_TEST_DERIVED_DATA:-$IOS/build/test-derived-data}"
+RESULTS_ROOT="${TRON_IOS_TEST_RESULTS_DIR:-$IOS/build/test-runs}"
+DEVICE_NAME="${TRON_IOS_TEST_DEVICE_NAME:-Tron iOS Tests}"
+EPHEMERAL="${TRON_IOS_TEST_EPHEMERAL:-0}"
+PROCESS="$ROOT/scripts/ios-test-process.py"
+SIMULATOR="$ROOT/scripts/ios-test-simulator.py"
+LOCKER="$ROOT/scripts/ios-test-lock.py"
+
+EXIT_TEST_FAILURE=65
+EXIT_DESTINATION=66
+EXIT_LOCKED=73
+EXIT_RUNNER=74
+EXIT_TIMEOUT=75
+EXIT_BUILD_FAILURE=70
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/tron-ios-test COMMAND [--only-testing OWNER ...]
+
+Commands:
+  checkpoint, prepare  Provision, generate, build, and run the complete unit target.
+  build                Provision, generate, and build reusable test products.
+  run                  Run reusable products; defaults to the complete unit target.
+  diagnose             Explicit verbose-diagnostics run with a larger finite deadline.
+  status               Report toolchain, owned simulator, lease, products, and latest result.
+  clean                Delete only the owned test simulator, products, and results.
+
+Selectors:
+  --only-testing OWNER  Repeat without shell-generated command fragments, for example:
+                        --only-testing TronMobileTests/SnapshotCacheTests
+
+Stable exits: 65 test failure, 66 destination, 70 build failure, 73 busy,
+74 runner failure, 75 process timeout. Signals retain their conventional exits.
+Routine runs are serial, use an exact owned simulator UDID, disable verbose test
+diagnostics, and preserve unique complete logs plus xcresults under
+packages/ios-app/build/test-runs by default. diagnose never runs automatically.
+USAGE
+}
+
+die() { echo "error: $*" >&2; exit "$EXIT_RUNNER"; }
+
+simulator_args=(
+  --marker "$MARKER"
+  --runtime "$TRON_CI_IOS_RUNTIME_VERSION"
+  --device-type "$TRON_CI_IOS_SIMULATOR_NAME"
+  --name "$DEVICE_NAME"
+  --development-state "$DEVELOPMENT_STATE"
+)
+[[ "$EPHEMERAL" == 1 ]] && simulator_args+=(--ephemeral)
+
+command="${1:-checkpoint}"
+if [[ "$command" == -h || "$command" == --help || "$command" == help ]]; then usage; exit 0; fi
+shift || true
+case "$command" in
+  checkpoint|prepare|build|run|diagnose|status|clean) ;;
+  *) usage >&2; die "unknown command: $command" ;;
+esac
+
+selectors=()
+while (($#)); do
+  case "$1" in
+    --only-testing)
+      (($# >= 2)) || die "--only-testing requires an owner"
+      [[ -n "$2" && "$2" != -* ]] || die "invalid --only-testing owner: ${2:-missing}"
+      selectors+=("-only-testing:$2")
+      shift 2
+      ;;
+    --only-testing:*)
+      [[ "${1#--only-testing:}" != "" ]] || die "empty --only-testing owner"
+      selectors+=("-only-testing:${1#--only-testing:}")
+      shift
+      ;;
+    *) die "unsupported argument: $1" ;;
+  esac
+done
+
+if [[ "$command" == status ]]; then
+  echo "Canonical Xcode: $TRON_CI_XCODE_VERSION"
+  echo "Canonical iOS runtime: $TRON_CI_IOS_RUNTIME_VERSION"
+  echo "Canonical device type: $TRON_CI_IOS_SIMULATOR_NAME"
+  if [[ -s "$LOCK" ]]; then echo "Lease metadata: $(tr -d '\n' <"$LOCK")"; else echo "Lease: idle"; fi
+  python3 "$SIMULATOR" status "${simulator_args[@]}" || exit "$EXIT_DESTINATION"
+  [[ -d "$DERIVED_DATA/Build/Products" ]] && echo "Test products: $DERIVED_DATA/Build/Products" || echo "Test products: not built"
+  if [[ -L "$RESULTS_ROOT/latest" ]]; then echo "Latest result: $(readlink "$RESULTS_ROOT/latest")"; else echo "Latest result: none"; fi
+  exit 0
+fi
+
+mkdir -p "$STATE_ROOT"
+chmod 700 "$STATE_ROOT"
+if [[ "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
+  exec python3 "$LOCKER" --lock "$LOCK" -- "$0" "$command" "${selectors[@]/#-only-testing:/--only-testing:}"
+fi
+
+validate_owned_directory_path() {
+  local directory="$1"
+  [[ -n "$directory" && "$directory" != / && "$directory" != "$HOME" \
+      && "$directory" != "$ROOT" && "$directory" != "$IOS" ]] \
+    || die "refusing unsafe test-owned directory: $directory"
+  [[ ! -L "$directory" ]] || die "refusing symlinked test-owned directory: $directory"
+}
+
+owned_directory() {
+  local directory="$1"
+  validate_owned_directory_path "$directory"
+  mkdir -p "$directory"
+  printf 'tron.ios-test-owned.v1\n' >"$directory/.tron-ios-test-owned"
+}
+
+clean_owned_directory() {
+  local directory="$1"
+  [[ ! -e "$directory" ]] && return 0
+  validate_owned_directory_path "$directory"
+  [[ -f "$directory/.tron-ios-test-owned" && ! -L "$directory/.tron-ios-test-owned" ]] \
+    || die "refusing to remove directory without test ownership marker: $directory"
+  rm -rf -- "$directory"
+}
+
+if [[ "$command" == clean ]]; then
+  python3 "$SIMULATOR" delete "${simulator_args[@]}" || exit "$EXIT_DESTINATION"
+  if [[ "${TRON_IOS_TEST_PRESERVE_ARTIFACTS:-0}" != 1 ]]; then
+    clean_owned_directory "$DERIVED_DATA"
+    clean_owned_directory "$RESULTS_ROOT"
+    echo "Removed only repository-owned iOS test simulator state, products, and results."
+  else
+    echo "Removed only the repository-owned iOS test simulator; preserved test artifacts."
+  fi
+  exit 0
+fi
+
+command -v xcodegen >/dev/null || die "pinned XcodeGen is missing; run scripts/install-ci-tools.sh xcodegen"
+"$ROOT/scripts/verify-ci-toolchain.sh" ios xcodegen
+
+simulator_id="$(python3 "$SIMULATOR" provision "${simulator_args[@]}")" || exit "$EXIT_DESTINATION"
+[[ "$simulator_id" =~ ^[0-9A-Fa-f-]{36}$ ]] || die "provisioner returned an invalid simulator UDID"
+destination="platform=iOS Simulator,id=$simulator_id"
+
+owned_directory "$DERIVED_DATA"
+owned_directory "$RESULTS_ROOT"
+run_prefix="$(date -u '+%Y%m%dT%H%M%SZ')-$command"
+run_dir="$(mktemp -d "$RESULTS_ROOT/$run_prefix.XXXXXX")"
+run_identity="$(basename "$run_dir")"
+result_bundle="$run_dir/TestResults.xcresult"
+summary_path="$run_dir/summary.json"
+metadata_path="$run_dir/metadata.json"
+
+write_metadata() {
+  local phase="$1" status="$2"
+  TRON_METADATA_PATH="$metadata_path" \
+  TRON_PHASE="$phase" TRON_STATUS="$status" TRON_COMMAND="$command" \
+  TRON_DESTINATION="$destination" TRON_SIMULATOR_ID="$simulator_id" \
+  TRON_DERIVED_DATA="$DERIVED_DATA" TRON_RESULT_BUNDLE="$result_bundle" \
+  TRON_MARKER="$MARKER" python3 - <<'PY'
+import hashlib, json, os, platform, subprocess
+from pathlib import Path
+marker = json.loads(Path(os.environ["TRON_MARKER"]).read_text())
+try:
+    xcode = subprocess.check_output(["xcodebuild", "-version"], text=True).strip()
+except (OSError, subprocess.SubprocessError) as error:
+    xcode = f"unavailable: {type(error).__name__}"
+value = {
+    "schema": "tron.ios-test-run.v1",
+    "command": os.environ["TRON_COMMAND"],
+    "phase": os.environ["TRON_PHASE"],
+    "exit_code": int(os.environ["TRON_STATUS"]),
+    "destination": "platform=iOS Simulator,id=<owned-udid>",
+    "simulator_udid_sha256": hashlib.sha256(os.environ["TRON_SIMULATOR_ID"].encode()).hexdigest(),
+    "runtime_version": marker["runtime_version"],
+    "runtime_build": marker.get("runtime_build"),
+    "runtime_identifier": marker["runtime_identifier"],
+    "device_type": marker["device_type_name"],
+    "device_type_identifier": marker["device_type_identifier"],
+    "derived_data": os.environ["TRON_DERIVED_DATA"],
+    "result_bundle": os.environ["TRON_RESULT_BUNDLE"],
+    "runner_arch": platform.machine(),
+    "xcode": xcode,
+}
+Path(os.environ["TRON_METADATA_PATH"]).write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+PY
+}
+
+run_process() {
+  local phase="$1" overall="$2" no_output="$3" artifact="$4"; shift 4
+  local log="$run_dir/$phase.log" evidence="$run_dir/$phase-evidence" status
+  if NSUnbufferedIO=YES python3 "$PROCESS" \
+    --log "$log" \
+    --evidence-dir "$evidence" \
+    --overall-seconds "$overall" \
+    --no-output-seconds "$no_output" \
+    --artifact "$artifact" \
+    -- "$@"; then
+    status=0
+  else
+    status=$?
+  fi
+  write_metadata "$phase" "$status" || echo "warning: could not write run metadata: $metadata_path" >&2
+  if ((status == 124)); then
+    ln -sfn "$run_dir" "$RESULTS_ROOT/latest"
+    echo "error: $phase exceeded its process deadline; evidence: $evidence" >&2
+    return "$EXIT_TIMEOUT"
+  fi
+  if ((status >= 128)); then return "$status"; fi
+  if ((status != 0)); then
+    ln -sfn "$run_dir" "$RESULTS_ROOT/latest"
+    if [[ "$phase" == build ]]; then return "$EXIT_BUILD_FAILURE"; else return "$EXIT_TEST_FAILURE"; fi
+  fi
+  return 0
+}
+
+build_products() {
+  "$ROOT/scripts/generate-ios-project"
+  run_process build "${TRON_IOS_TEST_BUILD_TIMEOUT_SECONDS:-1800}" \
+    "${TRON_IOS_TEST_BUILD_NO_OUTPUT_SECONDS:-300}" "$DERIVED_DATA/Build/Products" \
+    xcodebuild build-for-testing \
+      -project "$IOS/TronMobile.xcodeproj" \
+      -scheme "Tron Development" \
+      -testPlan UnitTests \
+      -configuration Test \
+      -destination "$destination" \
+      -derivedDataPath "$DERIVED_DATA" \
+      -parallel-testing-enabled NO \
+      -showBuildTimingSummary
+}
+
+run_tests() {
+  local diagnostics="$1" overall="$2" no_output="$3"
+  [[ -d "$DERIVED_DATA/Build/Products" ]] || die "test products are missing; run '$0 build' first"
+  local test_selectors=("-only-testing:TronMobileTests")
+  if [[ -n "${selectors[0]-}" ]]; then
+    test_selectors=("${selectors[@]}")
+  fi
+  rm -rf -- "$result_bundle"
+  local test_status
+  if run_process test "$overall" "$no_output" "$result_bundle" \
+    xcodebuild test-without-building \
+      -project "$IOS/TronMobile.xcodeproj" \
+      -scheme "Tron Development" \
+      -testPlan UnitTests \
+      -configuration Test \
+      -destination "$destination" \
+      -derivedDataPath "$DERIVED_DATA" \
+      -resultBundlePath "$result_bundle" \
+      -parallel-testing-enabled NO \
+      -collect-test-diagnostics "$diagnostics" \
+      "${test_selectors[@]}" \
+      -showBuildTimingSummary; then
+    test_status=0
+  else
+    test_status=$?
+  fi
+  if [[ -d "$result_bundle" ]]; then
+    xcrun xcresulttool get test-results summary --path "$result_bundle" >"$summary_path" 2>/dev/null || printf '{}\n' >"$summary_path"
+  else
+    printf '{}\n' >"$summary_path"
+  fi
+  write_metadata complete "$test_status" || echo "warning: could not finalize run metadata: $metadata_path" >&2
+  ln -sfn "$run_dir" "$RESULTS_ROOT/latest"
+  if ((test_status == 0)); then
+    echo "iOS test run complete: $run_dir"
+  else
+    echo "iOS test run failed with status $test_status: $run_dir" >&2
+  fi
+  return "$test_status"
+}
+
+case "$command" in
+  checkpoint|prepare)
+    build_products
+    run_tests never "${TRON_IOS_TEST_FULL_TIMEOUT_SECONDS:-2700}" "${TRON_IOS_TEST_FULL_NO_OUTPUT_SECONDS:-300}"
+    ;;
+  build)
+    build_products
+    write_metadata complete 0
+    ln -sfn "$run_dir" "$RESULTS_ROOT/latest"
+    echo "Reusable iOS test products ready: $DERIVED_DATA/Build/Products"
+    ;;
+  run)
+    run_tests never "${TRON_IOS_TEST_FOCUSED_TIMEOUT_SECONDS:-1200}" "${TRON_IOS_TEST_FOCUSED_NO_OUTPUT_SECONDS:-180}"
+    ;;
+  diagnose)
+    echo "Diagnostic mode explicitly enables verbose collection; sysdiagnose and log archives may be slow."
+    run_tests always "${TRON_IOS_TEST_DIAGNOSE_TIMEOUT_SECONDS:-3600}" "${TRON_IOS_TEST_DIAGNOSE_NO_OUTPUT_SECONDS:-600}"
+    ;;
+esac

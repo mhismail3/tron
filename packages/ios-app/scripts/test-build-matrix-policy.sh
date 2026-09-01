@@ -5,9 +5,18 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/project.yml"
 python3 - "$ROOT" "$PROJECT" <<'PY'
 from pathlib import Path
-import plistlib, re, sys
+import json, plistlib, re, sys
 root, project = map(Path, sys.argv[1:])
 source = project.read_text()
+plans = {
+    "TestPlans/UnitTests.xctestplan": "TronMobileTests",
+    "TestPlans/UIValidation.xctestplan": "TronMobileUITests",
+}
+for relative, target in plans.items():
+    plan = json.loads((root / relative).read_text())
+    assert plan["defaultOptions"]["diagnosticCollectionPolicy"] == "Never", relative
+    assert [entry["target"]["name"] for entry in plan["testTargets"]] == [target], relative
+    assert source.count(f"path: {relative}") >= 1, relative
 configs = ["Development", "Test", "LocalDevice", "DevicePerformance", "Release"]
 schemes = ["Tron Development", "Tron Device", "Tron UI Validation", "Tron Device Performance", "Tron Release"]
 for config in configs:
@@ -40,7 +49,7 @@ expected = {
 expected_actions = {
     "Tron Development": ("Development", "Test"),
     "Tron Device": ("LocalDevice", "Test"),
-    "Tron UI Validation": ("Development", "Test"),
+    "Tron UI Validation": ("Development", "Development"),
     "Tron Device Performance": ("DevicePerformance", "DevicePerformance"),
 }
 for name, (bundle, route, apns, attest, blur, flags) in expected.items():
@@ -94,16 +103,25 @@ cleanup() { rm -rf "$generated_root"; }
 trap cleanup EXIT
 PATH="$ROOT/../../.ci-tools/bin:/opt/homebrew/bin:$PATH" xcodegen generate --spec "$PROJECT" \
   --project "$generated_root" --project-root "$ROOT" --quiet
-python3 - "$generated_root/TronMobile.xcodeproj/xcshareddata/xcschemes" <<'PY'
+python3 - "$generated_root/TronMobile.xcodeproj/xcshareddata/xcschemes" "$ROOT" \
+  "$generated_root/TronMobile.xcodeproj/project.pbxproj" <<'PY'
 from pathlib import Path
-import sys
+import json, sys
 import xml.etree.ElementTree as ET
 
 schemes = Path(sys.argv[1])
+source_root = Path(sys.argv[2])
+pbxproj = Path(sys.argv[3]).read_text()
+for relative in ("TestPlans/UnitTests.xctestplan", "TestPlans/UIValidation.xctestplan"):
+    plan = json.loads((source_root / relative).read_text())
+    references = [plan["defaultOptions"]["targetForVariableExpansion"], *[entry["target"] for entry in plan["testTargets"]]]
+    for reference in references:
+        assert f'{reference["identifier"]} /* {reference["name"]} */' in pbxproj, (relative, reference)
+
 expected_actions = {
     "Tron Development": ("Development", "Test"),
     "Tron Device": ("LocalDevice", "Test"),
-    "Tron UI Validation": ("Development", "Test"),
+    "Tron UI Validation": ("Development", "Development"),
     "Tron Device Performance": ("DevicePerformance", "DevicePerformance"),
 }
 paths = {path.stem: path for path in schemes.glob("*.xcscheme")}
@@ -123,5 +141,10 @@ for name, path in paths.items():
         run_config, test_config = expected_actions[name]
         assert run.get("buildConfiguration") == run_config, path
         assert test.get("buildConfiguration") == test_config, path
-print("generated iOS scheme action policy passed")
+        plan_references = test.findall("./TestPlans/TestPlanReference")
+        assert len(plan_references) == 1, path
+        expected_plan = "UIValidation.xctestplan" if name == "Tron UI Validation" else "UnitTests.xctestplan"
+        assert plan_references[0].get("reference", "").endswith(expected_plan), path
+        assert plan_references[0].get("default") == "YES", path
+print("generated iOS scheme/test-plan action policy passed")
 PY

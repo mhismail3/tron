@@ -2,14 +2,13 @@
 
 ## Fresh-clone prerequisites
 
-Use Xcode 26 with the iOS 26.2 simulator runtime and XcodeGen 2.45.3. The Xcode
-project is generated and intentionally untracked:
+Use the CI-test Xcode, iOS runtime, and XcodeGen versions pinned in
+`config/ci-toolchain.env`. The Xcode project is generated and intentionally
+untracked:
 
 ```bash
 scripts/install-ci-tools.sh xcodegen
-export PATH="$PWD/.ci-tools/bin:$PATH"
-cd packages/ios-app
-xcodegen generate
+scripts/tron ios generate
 ```
 
 ## UI motion and loading surfaces
@@ -29,11 +28,8 @@ reader ownership, so it exposes catch-up rather than reapplying the tail anchor.
 ## Generate and build
 
 ```bash
-cd packages/ios-app
-xcodegen generate
-xcodebuild build -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Development \
-  -destination 'generic/platform=iOS Simulator'
+scripts/tron-ios-simulator remember SIMULATOR_ID
+scripts/tron-ios-simulator install
 ```
 
 The generated Xcode project is not architectural truth; edit `project.yml` and
@@ -63,14 +59,8 @@ Do not rerun the full suite for each edit. Compile test products once, then run
 only the owning suite without rebuilding:
 
 ```bash
-xcodebuild build-for-testing -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
-
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/SnapshotCacheTests
+scripts/tron-ios-test build
+scripts/tron-ios-test run --only-testing TronMobileTests/SnapshotCacheTests
 ```
 
 Multiple `-only-testing:` arguments may select adjacent owners. After source
@@ -79,22 +69,32 @@ continue with `test-without-building`. Run the complete unit target only after
 focused suites pass:
 
 ```bash
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests
+scripts/tron-ios-test run
 ```
 
-`scripts/ios-ci-test.sh` is the fresh-clone unit checkpoint: it generates the
-project, builds once, and runs the complete unit target without rebuilding.
+`scripts/tron-ios-test checkpoint` is the shared local/CI unit checkpoint: it
+verifies the pinned toolchain, provisions the exact owned test simulator,
+generates, builds once, and runs the complete unit target serially. CI's
+`scripts/ios-ci-test.sh` is only a thin artifact/cleanup adapter.
 
-Swift 6 complete strict concurrency is explicit in `project.yml`. Preserve that
-baseline for focused builds that introduce or change concurrency boundaries:
+Swift 6 complete strict concurrency is explicit in `project.yml` and therefore
+applies to every canonical build without command-line overrides.
+
+The runner keeps a separate repository-owned test simulator on the exact pinned
+runtime and serializes unit/E2E access with one lease. `status` is read-only;
+`clean` deletes only state carrying the runner's ownership markers. Routine runs
+always use diagnostics `Never` plus `-collect-test-diagnostics never`. Use
+`diagnose --only-testing …` only when verbose collection is explicitly needed;
+it has a larger finite bound and never runs as an automatic retry. Every attempt
+retains a full log, metadata, process evidence, and a unique xcresult under
+`packages/ios-app/build/test-runs`, with `latest` outside the bundle. Exit 65 is
+a product-test failure, 66 a destination failure, 70 a build failure, 73 a busy
+lease, 74 a runner failure, and 75 a process timeout.
 
 ```bash
-xcodebuild build-for-testing -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  SWIFT_STRICT_CONCURRENCY=complete
+scripts/tron-ios-test status
+scripts/tron-ios-test diagnose --only-testing TronMobileTests/<Suite>
+scripts/tron-ios-test clean
 ```
 
 Gateway transport tests inject `ManualClock`, `SequenceUUIDSource`, and
@@ -143,9 +143,8 @@ cancellation and cancellation-insensitive transports; only the local `GatewayPos
 may activate mutation receipt resolution. Run the focused owner with:
 
 ```bash
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/GatewayClientTransportTests
+scripts/tron-ios-test run \
+  --only-testing TronMobileTests/GatewayClientTransportTests
 ```
 
 Performance intervals use `SystemPerformanceSignposts`; tests inject
@@ -233,15 +232,14 @@ confirmation, and direct share prompts that never inherit staged composer IDs. R
 composer owners with:
 
 ```bash
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/SessionMutationServiceTests \
-  -only-testing:TronMobileTests/SessionImportCoordinatorTests \
-  -only-testing:TronMobileTests/ComposerDraftStoreTests \
-  -only-testing:TronMobileTests/ComposerDraftCoordinatorTests \
-  -only-testing:TronMobileTests/ComposerDraftAppLifecycleTests \
-  -only-testing:TronMobileTests/SessionShellProfileRouteOwnerTests \
-  -only-testing:TronMobileTests/MultilineComposerTextViewTests
+scripts/tron-ios-test run \
+  --only-testing TronMobileTests/SessionMutationServiceTests \
+  --only-testing TronMobileTests/SessionImportCoordinatorTests \
+  --only-testing TronMobileTests/ComposerDraftStoreTests \
+  --only-testing TronMobileTests/ComposerDraftCoordinatorTests \
+  --only-testing TronMobileTests/ComposerDraftAppLifecycleTests \
+  --only-testing TronMobileTests/SessionShellProfileRouteOwnerTests \
+  --only-testing TronMobileTests/MultilineComposerTextViewTests
 ```
 
 `SessionEventSynchronizerTests` own the composed intent-keyed shared outcome and
@@ -274,10 +272,9 @@ event tests prove departing routes are excluded from share admission. Compatible
 each actual authoritative open/resync attempt retains its own interval.
 
 ```bash
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/SessionPresentationStoreTests \
-  -only-testing:TronMobileTests/AppModelPerformanceSignpostTests
+scripts/tron-ios-test run \
+  --only-testing TronMobileTests/SessionPresentationStoreTests \
+  --only-testing TronMobileTests/AppModelPerformanceSignpostTests
 ```
 
 Camera boundary tests inject authorization and capture-session providers into
@@ -289,10 +286,9 @@ must recheck cancellation before configuration. Camera setup, capture, torch, an
 permission callbacks carry lifecycle/configuration identity so dismissal cannot publish late state.
 
 ```bash
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/CameraBoundaryTests \
-  -only-testing:TronMobileTests/QRCodeScannerBoundaryTests
+scripts/tron-ios-test run \
+  --only-testing TronMobileTests/CameraBoundaryTests \
+  --only-testing TronMobileTests/QRCodeScannerBoundaryTests
 ```
 
 Share boundary tests cover provider-fragment reduction, prompt composition, and the
@@ -301,10 +297,9 @@ both source manifests and both built bundles. The separate archive check is read
 must run after a maintainer-created archive; it never archives, exports, or uploads.
 
 ```bash
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/SharedContentTests \
-  -only-testing:TronMobileTests/PrivacyManifestTests
+scripts/tron-ios-test run \
+  --only-testing TronMobileTests/SharedContentTests \
+  --only-testing TronMobileTests/PrivacyManifestTests
 packages/ios-app/scripts/test-verify-archive-privacy.sh
 packages/ios-app/scripts/verify-archive-privacy.sh <path-to-xcarchive>
 ```
@@ -387,18 +382,17 @@ provider-target load identity, stale save/scope-round-trip admission across mode
 and resource drafts, changed-field-only wire patches, and explicit redacted proxy set/clear handling.
 
 ```bash
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/SettingsTrustCoordinatorTests \
-  -only-testing:TronMobileTests/ProviderAuthCoordinatorTests \
-  -only-testing:TronMobileTests/ProviderOAuthBrowserTests \
-  -only-testing:TronMobileTests/PackageConfigurationCoordinatorTests \
-  -only-testing:TronMobileTests/CustomModelConfigurationCoordinatorTests \
-  -only-testing:TronMobileTests/AppModelInvalidationTests \
-  -only-testing:TronMobileTests/AppModelEventTests/globalConfigurationInvalidations \
-  -only-testing:TronMobileTests/NewSessionConfigurationOwnerTests \
-  -only-testing:TronMobileTests/SettingsRouteIdentityTests \
-  -only-testing:TronMobileTests/SettingsDraftStoreTests
+scripts/tron-ios-test run \
+  --only-testing TronMobileTests/SettingsTrustCoordinatorTests \
+  --only-testing TronMobileTests/ProviderAuthCoordinatorTests \
+  --only-testing TronMobileTests/ProviderOAuthBrowserTests \
+  --only-testing TronMobileTests/PackageConfigurationCoordinatorTests \
+  --only-testing TronMobileTests/CustomModelConfigurationCoordinatorTests \
+  --only-testing TronMobileTests/AppModelInvalidationTests \
+  --only-testing TronMobileTests/AppModelEventTests/globalConfigurationInvalidations \
+  --only-testing TronMobileTests/NewSessionConfigurationOwnerTests \
+  --only-testing TronMobileTests/SettingsRouteIdentityTests \
+  --only-testing TronMobileTests/SettingsDraftStoreTests
 ```
 
 Pairing tests keep policy above byte transport. `GatewayPairingTransportTests`
@@ -410,11 +404,10 @@ ownership checks:
 
 ```bash
 for run in 1 2 3; do
-  xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-    -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-    -only-testing:TronMobileTests/GatewayPairingTransportTests \
-    -only-testing:TronMobileTests/AppModelPairingAttemptTests \
-    -only-testing:TronMobileTests/PairingInvitationParserTests || exit 1
+  scripts/tron-ios-test run \
+    --only-testing TronMobileTests/GatewayPairingTransportTests \
+    --only-testing TronMobileTests/AppModelPairingAttemptTests \
+    --only-testing TronMobileTests/PairingInvitationParserTests || exit 1
 done
 ```
 
@@ -430,14 +423,13 @@ decodable image. Record the seed and requested byte/count/rate/dimension inputs
 with performance results. Validate the fixture contracts with:
 
 ```bash
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/SessionScenarioBuilderTests \
-  -only-testing:TronMobileTests/MarkdownPresentationTests \
-  -only-testing:TronMobileTests/ChatTextPreparationTests \
-  -only-testing:TronMobileTests/ChatMediaLoaderTests \
-  -only-testing:TronMobileTests/ChatTranscriptPresentationStoreTests \
-  -only-testing:TronMobileTests/PresentationStyleGuardTests
+scripts/tron-ios-test run \
+  --only-testing TronMobileTests/SessionScenarioBuilderTests \
+  --only-testing TronMobileTests/MarkdownPresentationTests \
+  --only-testing TronMobileTests/ChatTextPreparationTests \
+  --only-testing TronMobileTests/ChatMediaLoaderTests \
+  --only-testing TronMobileTests/ChatTranscriptPresentationStoreTests \
+  --only-testing TronMobileTests/PresentationStyleGuardTests
 ```
 
 Phase 6.0 source characterization and provisional budgets, Phase 6.1 pure Markdown
@@ -597,14 +589,13 @@ have these explicit observable replacements:
 | `interactionCancelsPendingFollow` (45) | `directTakeoverCancelsPendingAutomaticWork` plus the coordinator opening/catch-up/restore interruption cases — direct takeover wins synchronously and leaves no write. |
 
 ```bash
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/ChatScrollCoordinatorTests \
-  -only-testing:TronMobileTests/ChatTranscriptPresentationStoreTests \
-  -only-testing:TronMobileTests/ChatTranscriptPresentationTests \
-  -only-testing:TronMobileTests/ChatCompactPillTests \
-  -only-testing:TronMobileTests/ChatViewScrollHarnessTests \
-  -only-testing:TronMobileTests/ChatPerformanceTrackerTests
+scripts/tron-ios-test run \
+  --only-testing TronMobileTests/ChatScrollCoordinatorTests \
+  --only-testing TronMobileTests/ChatTranscriptPresentationStoreTests \
+  --only-testing TronMobileTests/ChatTranscriptPresentationTests \
+  --only-testing TronMobileTests/ChatCompactPillTests \
+  --only-testing TronMobileTests/ChatViewScrollHarnessTests \
+  --only-testing TronMobileTests/ChatPerformanceTrackerTests
 ```
 
 `ChatPerformanceBaselineTests` is opt-in and records five post-warm-up timing,
@@ -619,15 +610,10 @@ explicit checkpoints and keep device identifiers
 out of source. The recorded Phase 0 environment, results, limitations, and commands
 are in [performance-baseline.md](performance-baseline.md).
 
-Run UI tests separately because simulator launch dominates their cost:
-
-```bash
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron UI Validation' \
-  -configuration Test \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileUITests/TronSmokeUITests \
-  -collect-test-diagnostics never
-```
+The checked-in `UIValidation.xctestplan` keeps routine UI diagnostics disabled.
+UI journeys run on the Development app identity but only on the exact owned test
+simulator; they never use the persistent Development simulator. The repository's
+real Gateway UI harness below owns that simulator/process boundary.
 
 For real gateway-to-iOS E2E work, keep the deterministic gateway fixture and
 DerivedData alive across edits. Preparation and the first build happen once;
@@ -866,9 +852,8 @@ proof of APNs delivery.
 Focused contract validation:
 
 ```bash
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/PushNotificationCoordinatorTests
+scripts/tron-ios-test run \
+  --only-testing TronMobileTests/PushNotificationCoordinatorTests
 ```
 
 ## Session subagent activity
@@ -880,15 +865,14 @@ The native orb ports only the upstream 20-point solving and composing geometry; 
 Focused validation:
 
 ```bash
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/SessionProcessModelsTests \
-  -only-testing:TronMobileTests/ReadOnlyProcessTranscriptMergeTests \
-  -only-testing:TronMobileTests/ProcessActivityOrbTests \
-  -only-testing:TronMobileTests/ProcessActivityHostedProbeTests \
-  -only-testing:TronMobileTests/SessionProcessPresentationGuardTests \
-  -only-testing:TronMobileTests/AppModelEventTests \
-  -only-testing:TronMobileTests/ChatSessionPresentationTests
+scripts/tron-ios-test run \
+  --only-testing TronMobileTests/SessionProcessModelsTests \
+  --only-testing TronMobileTests/ReadOnlyProcessTranscriptMergeTests \
+  --only-testing TronMobileTests/ProcessActivityOrbTests \
+  --only-testing TronMobileTests/ProcessActivityHostedProbeTests \
+  --only-testing TronMobileTests/SessionProcessPresentationGuardTests \
+  --only-testing TronMobileTests/AppModelEventTests \
+  --only-testing TronMobileTests/ChatSessionPresentationTests
 ```
 
 On a physical device verify solving-to-thinking-to-hidden expiry, simultaneous synchronous and asynchronous rows, and live-to-terminal updates. The composer subagent orb must enter and leave with the same scoped spring as the catch-up arrow; Subagents and a tapped child transcript open at medium, while Subagent History opens at large. Row taps present a bottom sheet instead of a rightward push; active/completed rows keep caption-scale lifecycle/mode/tool/turn pills in one flow, plain right-aligned durations, a small trailing duration-scaled solving/thinking orb, and one normalized latest-action/output preview. Liquid Glass containers exist only in the bounded active sheet; history uses scroll-optimized containers and retains its bounded 400-row projection incrementally. Active rows remain tappable before child-session binding, show a waiting state, and open the canonical tail once that binding appears. Short/empty child transcripts stay top-aligned while long newest pages open at the tail. An active child sheet shows the leading red stop icon only when `process-transcript-abort.v1` is advertised; tapping it disables the control, stops only that exact lease-bound execution through the synchronous parent abort or asynchronous trusted-controller path, and terminal sheets omit it. Child transcript checks must verify the main transcript's zero-spacing stack, shared 16-point horizontal inset, 12-point top/tail affordances, eight-point row spacing, prepared Markdown in thinking and assistant text, one reconciled run chip per exact invocation/result identity during both live refresh and history paging, preserved orphan results, and no second process-summary tool/output card; explicit earlier paging, append-aware transcript refresh, VoiceOver, large Dynamic Type, and Reduce Motion remain correct. Assistant bash—including `nohup x &`—remains ordinary transcript/tool activity and never appears in Subagents.
@@ -904,8 +888,10 @@ performs every TestFlight or App Store delivery deliberately:
    target, required UI/E2E journeys, and eyes-on physical iPhone/iPad review of
    onboarding, pairing, chat/attachments, system-keyboard dictation, terminal,
    settings, accessibility, and signed-device networking.
-3. With a stable non-beta Xcode and maintainer-controlled signing credentials,
-   archive the `Tron Release` scheme in `Release`. Run
+3. Run `scripts/ios-release-toolchain-doctor.sh` as the explicit manual
+   toolchain/capacity gate. It validates only and never archives or uploads. With
+   maintainer-controlled signing credentials, archive the `Tron Release` scheme
+   in `Release`. Run
    `packages/ios-app/scripts/verify-archive-privacy.sh <path-to-xcarchive>`, then inspect
    the app and share extension bundle identifiers, versions/builds, and signatures before export.
 4. Use Xcode Organizer/App Store Connect to export and upload manually, then make

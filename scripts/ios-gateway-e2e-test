@@ -8,13 +8,43 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 gateway_dir="$repo_root/packages/gateway"
 ios_dir="$repo_root/packages/ios-app"
+# shellcheck disable=SC1091
+source "$repo_root/config/ci-toolchain.env"
+export PATH="$repo_root/.ci-tools/bin:/opt/homebrew/bin:$PATH"
 run_root="${TRON_IOS_E2E_STATE_DIR:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-$UID}"
 derived_data="${TRON_IOS_E2E_DERIVED_DATA:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-derived-$UID}"
+test_state_root="${TRON_IOS_TEST_STATE_DIR:-$HOME/.tron/internal/ios-test}"
+simulator_marker="$test_state_root/simulator.json"
+test_lock="$test_state_root/lease.lock"
+development_state="${TRON_IOS_SIMULATOR_STATE_DIR:-$HOME/.tron/internal/run}/ios-simulator-udid"
+test_device_name="${TRON_IOS_TEST_DEVICE_NAME:-Tron iOS Tests}"
 state_file="$run_root/state.env"
 pid_file="$run_root/gateway.pid"
 log_file="$run_root/gateway.log"
-destination="${TRON_IOS_DESTINATION:-platform=iOS Simulator,name=iPhone 17 Pro}"
+process_owner="$repo_root/scripts/ios-test-process.py"
+simulator_owner="$repo_root/scripts/ios-test-simulator.py"
+lock_owner="$repo_root/scripts/ios-test-lock.py"
+mkdir -p "$test_state_root"
+chmod 700 "$test_state_root"
+simulator_args=(
+  --marker "$simulator_marker"
+  --runtime "$TRON_CI_IOS_RUNTIME_VERSION"
+  --device-type "$TRON_CI_IOS_SIMULATOR_NAME"
+  --name "$test_device_name"
+  --development-state "$development_state"
+)
+[[ "$run_root" != / && "$run_root" != "$HOME" && "$run_root" != "$repo_root" && ! -L "$run_root" ]] \
+  || { echo "error: unsafe E2E fixture directory: $run_root" >&2; exit 1; }
+if [[ -e "$run_root" && ! -f "$run_root/.tron-ios-e2e-owned" ]]; then
+  owner_uid="$(stat -f '%u' "$run_root" 2>/dev/null || true)"
+  if [[ "$owner_uid" != "$UID" || ! -f "$run_root/state.env" || ! -f "$run_root/gateway.log" ]]; then
+    echo "error: refusing pre-existing unowned E2E fixture directory: $run_root" >&2
+    exit 1
+  fi
+  echo "Migrating the exact current-user legacy E2E fixture to an ownership marker." >&2
+fi
 mkdir -p "$run_root"
+printf 'tron.ios-e2e-state.v1\n' >"$run_root/.tron-ios-e2e-owned"
 chmod 700 "$run_root"
 
 usage() {
@@ -38,7 +68,7 @@ Typical edit loop:
   scripts/ios-gateway-e2e-test run      # repeat; renews pairing/session state only
 
 Environment:
-  TRON_IOS_DESTINATION          xcodebuild destination
+  TRON_IOS_TEST_STATE_DIR       shared repository-owned test-simulator state
   TRON_IOS_E2E_STATE_DIR        persistent fixture directory
   TRON_IOS_E2E_DERIVED_DATA     persistent focused-test DerivedData
   TRON_E2E_ATTACHMENT_ONLY      set to 1 to stop after attachment picker coverage
@@ -47,12 +77,48 @@ USAGE
 
 die() { echo "error: $*" >&2; exit 1; }
 
+provision_test_simulator() {
+  local simulator_id
+  simulator_id="$(python3 "$simulator_owner" provision "${simulator_args[@]}")" \
+    || die "owned test simulator provisioning failed"
+  [[ "$simulator_id" =~ ^[0-9A-Fa-f-]{36}$ ]] || die "provisioner returned an invalid simulator UDID"
+  printf '%s\n' "$simulator_id"
+}
+
+run_bounded() {
+  local phase="$1" failure_exit="$2" overall="$3" no_output="$4" artifact="$5"; shift 5
+  local evidence="$run_root/$phase-evidence" output="$run_root/$phase.log" status
+  if NSUnbufferedIO=YES python3 "$process_owner" \
+    --log "$output" --evidence-dir "$evidence" \
+    --overall-seconds "$overall" --no-output-seconds "$no_output" \
+    --artifact "$artifact" -- "$@"; then
+    status=0
+  else
+    status=$?
+  fi
+  if ((status == 124)); then
+    echo "error: $phase timed out; evidence: $evidence" >&2
+    return 75
+  fi
+  if ((status >= 128)); then return "$status"; fi
+  if ((status != 0)); then return "$failure_exit"; fi
+  return 0
+}
+
 gateway_running() {
   [[ -s "$pid_file" ]] || return 1
-  kill -0 "$(<"$pid_file")" 2>/dev/null
+  local pid command
+  pid="$(<"$pid_file")"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  [[ "$command" == *"node $gateway_dir/dist/index.js"* ]]
 }
 
 stop_gateway() {
+  if [[ -s "$pid_file" ]] && kill -0 "$(<"$pid_file")" 2>/dev/null && ! gateway_running; then
+    die "refusing to signal PID $(<"$pid_file"): it is not the owned E2E Gateway"
+  fi
   if gateway_running; then
     kill "$(<"$pid_file")" 2>/dev/null || true
     for _ in {1..50}; do gateway_running || break; sleep 0.1; done
@@ -66,6 +132,12 @@ load_state() {
   # Generated exclusively by this script with shell-escaped values.
   # shellcheck disable=SC1090
   source "$state_file"
+  [[ "${TRON_E2E_WORKSPACE:-}" == "$run_root/workspace" \
+      && "${TRON_E2E_TRON_HOME:-}" == "$run_root/tron" \
+      && "${TRON_E2E_AGENT_DIR:-}" == "$run_root/agent" \
+      && "${TRON_E2E_PORT:-}" =~ ^[1-9][0-9]*$ \
+      && -n "${TRON_E2E_CODE:-}" ]] \
+    || die "fixture state does not match the owned E2E paths/identity"
   gateway_running || die "fixture gateway is not running; run '$0 prepare'"
 }
 
@@ -202,7 +274,6 @@ values = {
 }
 entry.setdefault("EnvironmentVariables", {}).update(values)
 entry.setdefault("UITargetAppEnvironmentVariables", {}).update(values)
-entry["DiagnosticCollectionPolicy"] = 0
 with open(path, "wb") as handle:
     plistlib.dump(document, handle)
 PY
@@ -211,15 +282,27 @@ PY
 
 build_tests() {
   load_state
-  cd "$ios_dir"
-  xcodegen generate
-  xcodebuild build-for-testing \
-    -project TronMobile.xcodeproj \
-    -scheme 'Tron UI Validation' \
-    -configuration Test \
-    -destination "$destination" \
-    -derivedDataPath "$derived_data" \
-    -quiet
+  command -v xcodegen >/dev/null || die "pinned XcodeGen is missing; run scripts/install-ci-tools.sh xcodegen"
+  "$repo_root/scripts/verify-ci-toolchain.sh" ios xcodegen
+  local simulator_id destination attempt attempt_dir
+  simulator_id="$(provision_test_simulator)"
+  destination="platform=iOS Simulator,id=$simulator_id"
+  mkdir -p "$run_root/attempts"
+  attempt_dir="$(mktemp -d "$run_root/attempts/$(date -u '+%Y%m%dT%H%M%SZ')-build.XXXXXX")"
+  attempt="attempts/$(basename "$attempt_dir")"
+  mkdir -p "$derived_data"
+  printf 'tron.ios-e2e-derived.v1\n' >"$derived_data/.tron-ios-e2e-owned"
+  "$repo_root/scripts/generate-ios-project"
+  run_bounded "$attempt" 70 "${TRON_IOS_E2E_BUILD_TIMEOUT_SECONDS:-1800}" \
+    "${TRON_IOS_E2E_BUILD_NO_OUTPUT_SECONDS:-300}" "$derived_data/Build/Products" \
+    xcodebuild build-for-testing \
+      -project "$ios_dir/TronMobile.xcodeproj" \
+      -scheme 'Tron UI Validation' \
+      -testPlan UIValidation \
+      -configuration Development \
+      -destination "$destination" \
+      -derivedDataPath "$derived_data" \
+      -parallel-testing-enabled NO
   local xctestrun
   xctestrun="$(find_xctestrun)"
   [[ -n "$xctestrun" ]] || die "focused build did not produce an xctestrun file"
@@ -239,20 +322,28 @@ run_test() {
   [[ -f "$xctestrun" ]] || die "test products are not built; run '$0 build'"
   patch_xctestrun "$xctestrun"
 
-  local started=$SECONDS status result_bundle="$run_root/FocusedE2E.xcresult"
-  rm -rf "$result_bundle"
-  set +e
-  NSUnbufferedIO=YES xcodebuild test-without-building \
-    -xctestrun "$xctestrun" \
-    -destination "$destination" \
-    -only-testing:TronMobileUITests/TronGatewayEndToEndUITests \
-    -parallel-testing-enabled NO \
-    -collect-test-diagnostics never \
-    -resultBundlePath "$result_bundle" \
-    -quiet
-  status=$?
-  set -e
-  echo "Focused E2E run completed in $((SECONDS - started))s (status $status)"
+  local started=$SECONDS status simulator_id destination attempt_id attempt_dir result_bundle
+  simulator_id="$(provision_test_simulator)"
+  destination="platform=iOS Simulator,id=$simulator_id"
+  mkdir -p "$run_root/results"
+  attempt_dir="$(mktemp -d "$run_root/results/$(date -u '+%Y%m%dT%H%M%SZ')-run.XXXXXX")"
+  attempt_id="$(basename "$attempt_dir")"
+  result_bundle="$attempt_dir/FocusedE2E.xcresult"
+  if run_bounded "results/$attempt_id/test" 65 "${TRON_IOS_E2E_RUN_TIMEOUT_SECONDS:-1800}" \
+    "${TRON_IOS_E2E_RUN_NO_OUTPUT_SECONDS:-240}" "$result_bundle" \
+    xcodebuild test-without-building \
+      -xctestrun "$xctestrun" \
+      -destination "$destination" \
+      -only-testing:TronMobileUITests/TronGatewayEndToEndUITests \
+      -parallel-testing-enabled NO \
+      -collect-test-diagnostics never \
+      -resultBundlePath "$result_bundle"; then
+    status=0
+  else
+    status=$?
+  fi
+  ln -sfn "$attempt_dir" "$run_root/results/latest"
+  echo "Focused E2E run completed in $((SECONDS - started))s (status $status); artifacts: $attempt_dir"
   if ((status != 0)) && [[ -d "$result_bundle" ]]; then
     xcrun xcresulttool get test-results tests --path "$result_bundle" 2>/dev/null \
       | python3 -c 'import json,sys
@@ -275,10 +366,30 @@ show_status() {
   [[ -s "$state_file" ]] && { source "$state_file"; echo "Endpoint: 127.0.0.1:$TRON_E2E_PORT"; echo "Workspace: $TRON_E2E_WORKSPACE"; }
   local xctestrun="$(find_xctestrun)"
   [[ -n "$xctestrun" ]] && echo "Test products: $xctestrun" || echo "Test products: not built"
+  python3 "$simulator_owner" status "${simulator_args[@]}" || true
   echo "DerivedData: $derived_data"
 }
 
 command="${1:-all}"
+case "$command" in
+  prepare|build|run|iterate|all|stop|clean) ;;
+  status|logs|-h|--help|help) ;;
+  *) usage >&2; die "unknown command: $command" ;;
+esac
+if [[ "$command" != status && "$command" != logs && "$command" != -h && "$command" != --help && "$command" != help \
+      && "${TRON_IOS_TEST_LOCK_HELD:-0}" != 1 ]]; then
+  exec python3 "$lock_owner" --lock "$test_lock" -- "$0" "$@"
+fi
+handle_signal() {
+  local signal_number="$1"
+  trap - INT TERM HUP
+  stop_gateway
+  exit $((128 + signal_number))
+}
+trap 'handle_signal 2' INT
+trap 'handle_signal 15' TERM
+trap 'handle_signal 1' HUP
+
 case "$command" in
   prepare) prepare_fixture ;;
   build) build_tests ;;
@@ -288,7 +399,14 @@ case "$command" in
   status) show_status ;;
   logs) touch "$log_file"; tail -f "$log_file" ;;
   stop) stop_gateway; rm -rf "$run_root/tron" "$run_root/agent" "$run_root/workspace" "$state_file" "$run_root/xctestrun-path" ;;
-  clean) stop_gateway; rm -rf "$run_root" "$derived_data" ;;
+  clean)
+    stop_gateway
+    python3 "$simulator_owner" delete "${simulator_args[@]}"
+    if [[ -e "$derived_data" ]]; then
+      [[ -f "$derived_data/.tron-ios-e2e-owned" ]] || die "refusing to remove unowned E2E DerivedData: $derived_data"
+      rm -rf "$derived_data"
+    fi
+    rm -rf "$run_root"
+    ;;
   -h|--help|help) usage ;;
-  *) usage >&2; die "unknown command: $command" ;;
 esac

@@ -78,13 +78,9 @@ cd packages/gateway
 npm run build
 npx vitest run <owning-test-file>
 
-# iOS: compile once, then execute only the owner
-cd packages/ios-app && xcodegen generate
-xcodebuild build-for-testing -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/<Suite>
+# iOS: canonical owned test simulator, bounded process, and focused owner
+scripts/tron-ios-test build
+scripts/tron-ios-test run --only-testing TronMobileTests/<Suite>
 
 # Mac
 cd packages/mac-app && xcodegen generate

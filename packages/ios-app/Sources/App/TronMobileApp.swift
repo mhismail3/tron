@@ -2,6 +2,13 @@ import SwiftUI
 
 @main
 struct TronMobileApp: App {
+    #if HOSTED_TEST
+    var body: some Scene {
+        WindowGroup {
+            HostedTestRootView()
+        }
+    }
+    #else
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel()
     @State private var appearance = AppearanceSettings.shared
@@ -100,8 +107,17 @@ struct TronMobileApp: App {
         model.pushNotificationReadiness = pushNotifications.readiness
         model.pushRegistrationDiagnostic = pushNotifications.diagnostic
     }
-
+    #endif
 }
+
+#if HOSTED_TEST
+private struct HostedTestRootView: View {
+    var body: some View {
+        Color.clear
+            .accessibilityIdentifier("tron.hosted-test-root")
+    }
+}
+#endif
 
 private struct SceneRootView: View {
     let model: AppModel

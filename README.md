@@ -79,7 +79,7 @@ idempotency boundary, and APNs adapter.
 ## Requirements
 
 - macOS 15 or newer
-- Xcode 26 and XcodeGen 2.45.3
+- The Xcode and XcodeGen versions pinned in `config/ci-toolchain.env`
 - Node 22.22.0 for gateway development (the exact pin is `.node-version`)
 - Tailscale on the Mac and iPhone for mobile operation
 
@@ -121,15 +121,13 @@ are the final push-route and signing authority.
 
 ### Focused native tests
 
-Build for testing once, then use `test-without-building` while iterating:
+Use the canonical owned simulator runner for iOS; it builds once, then reuses
+products for focused tests with bounded process and result evidence. See the
+[iOS development guide](packages/ios-app/docs/development.md).
 
 ```bash
-cd packages/ios-app
-xcodebuild build-for-testing -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
-xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Development' \
-  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/SnapshotCacheTests
+scripts/tron-ios-test build
+scripts/tron-ios-test run --only-testing TronMobileTests/SnapshotCacheTests
 
 cd packages/mac-app
 xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \

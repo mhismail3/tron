@@ -21,10 +21,22 @@ jobs:
       - run: scripts/tron version test
       - run: python3 scripts/test-gateway-protocol-contract.py
       - name: Check Python syntax
-        run: python3 -m py_compile scripts/gateway_protocol_contract.py scripts/verify-gateway-protocol-contract.py scripts/test-gateway-protocol-contract.py scripts/validate-ios-artifact.py
+        run: |
+          python3 -m py_compile \
+            scripts/gateway_protocol_contract.py \
+            scripts/verify-gateway-protocol-contract.py \
+            scripts/test-gateway-protocol-contract.py \
+            scripts/validate-ios-artifact.py \
+            scripts/ios-test-lock.py \
+            scripts/ios-test-process.py \
+            scripts/ios-test-simulator.py \
+            scripts/test-ios-test-infrastructure.py
+      - name: Test iOS runner infrastructure without hardware
+        run: python3 scripts/test-ios-test-infrastructure.py
       - name: Check shell syntax
         run: |
           bash -n \
+            scripts/generate-ios-project \
             scripts/install-ci-tools.sh \
             scripts/ios-ci-test.sh \
             scripts/ios-gateway-e2e-test \
@@ -45,7 +57,12 @@ jobs:
             packages/ios-app/scripts/verify-archive-privacy.sh \
             scripts/test-agent-policy.sh \
             scripts/test-ios-artifact-validator.sh \
-            scripts/tron-ios-device-test
+            scripts/test-ios-test-policy.sh \
+            scripts/tron-ios-device-test \
+            scripts/tron-ios-simulator \
+            scripts/tron-ios-test
+      - run: scripts/ios-release-toolchain-doctor.sh --self-test
+      - run: scripts/test-ios-test-policy.sh
 
   gateway:
     runs-on: macos-15
@@ -74,9 +91,14 @@ jobs:
           node-version-file: .node-version
           cache: npm
           cache-dependency-path: packages/gateway/package-lock.json
+      - name: Resolve canonical iOS Xcode
+        id: ios-toolchain
+        run: |
+          source config/ci-toolchain.env
+          echo "xcode=$TRON_CI_XCODE_VERSION" >> "$GITHUB_OUTPUT"
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
-          xcode-version: "26.3"
+          xcode-version: ${{ steps.ios-toolchain.outputs.xcode }}
       - run: scripts/install-ci-tools.sh xcodegen
       - run: scripts/verify-ci-toolchain.sh node ios xcodegen
       - run: packages/ios-app/scripts/test-source-policy.sh
@@ -86,6 +108,19 @@ jobs:
       - run: packages/ios-app/scripts/test-verify-archive-privacy.sh
       - run: scripts/tron-ios-device-test
       - run: scripts/ios-ci-test.sh
+      - name: Upload bounded iOS test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ios-test-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            packages/ios-app/build/test-runs
+            packages/ios-app/build/ios-ci-metrics.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Delete only the CI-owned simulator
+        if: always()
+        run: scripts/ios-ci-test.sh cleanup
 
   mac:
     runs-on: macos-26
@@ -96,9 +131,14 @@ jobs:
           node-version-file: .node-version
           cache: npm
           cache-dependency-path: packages/gateway/package-lock.json
+      - name: Resolve canonical Mac Xcode
+        id: mac-toolchain
+        run: |
+          source config/ci-toolchain.env
+          echo "xcode=$TRON_CI_XCODE_VERSION" >> "$GITHUB_OUTPUT"
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
-          xcode-version: "26.3"
+          xcode-version: ${{ steps.mac-toolchain.outputs.xcode }}
       - run: scripts/install-ci-tools.sh xcodegen
       - run: scripts/verify-ci-toolchain.sh node xcode xcodegen
       - run: packages/mac-app/scripts/bundle-gateway.sh
