@@ -218,21 +218,6 @@ struct ChatSessionPresentationTests {
         ))
     }
 
-    @Test("background suspension cancels an unanchored page task")
-    func unanchoredPageCancellation() async throws {
-        let clock = ManualClock()
-        let owner = ChatSessionPresentation(sessionID: "session-a")
-        owner.startUnanchoredPrepend {
-            try? await clock.clock.sleep(.seconds(30))
-        }
-        try await clock.waitUntilSleeping(count: 1)
-
-        owner.suspendForBackground()
-        await Task.yield()
-
-        #expect(clock.activeSleeperCount() == 0)
-    }
-
     @Test("canonical alias ledger is causal one-to-one and bounded")
     func boundedAliases() {
         var ledger = BoundedChatIdentityAliasLedger()

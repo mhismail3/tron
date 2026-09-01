@@ -203,8 +203,8 @@ entries, which the chat can request backward in 600 KB/512-item pages without ri
 oversized or generically truncated WebSocket frame. Page `start`/`end`/`total`, item count,
 neighbor identity, mount, runtime, and subscription ownership must all agree before prepend.
 The presentation owner keeps the newest authoritative tail separate from explicitly loaded
-older browsing rows. A fitted empty/short positive-start baseline is compatibility-backfilled under
-the provisional subscription before publication, including active and compacting sessions. Every
+older browsing rows. Opening publishes the usable bounded authoritative tail immediately; earlier
+rows remain explicit canonical paging and never extend the synchronization quarantine. Every
 compatible replacement/reconnect reconciles only an exact visible prefix: the visible coverage end
 is the authority tail end, sliding tails promote covered old-tail rows, backward expansion trims the
 prefix, and ordinal ID overlap, parent, leaf, and runtime/total identity conflicts fail closed. A
@@ -215,10 +215,13 @@ summary rows enter the disk cache.
 `ChatTranscriptPresentationStore` serializes snapshot-to-timeline preparation off MainActor,
 coalesces a burst to one pending newest source, and keeps the last complete installed commit
 visible while a replacement builds. Transcript rows and Load-earlier availability come from the
-installed source window, while queue management stays owned by the installed queue revision/items
-and the exact Gateway capability authority; generic transcript build lag never locks a stable queue
-card. An admitted Load-earlier page owns one local exact token from click through Gateway paging,
-projection installation, and anchored prepend (or unanchored installation); ordinary projection
+installed source window. Transcript-coupled composer chrome—phase, retry presentation, and
+response signature—is frozen in that same source tag, while drafts, command admission, and the
+independent process projection remain with their canonical owners. Queue management stays owned by the
+installed queue revision/items and the exact Gateway capability authority; generic transcript
+build lag never locks a stable queue card. An admitted Load-earlier page owns one exact token in
+`ChatScrollCoordinator` from click through Gateway paging, projection installation, and anchored
+restore or geometry-free completion; there is no parallel unanchored task. Ordinary projection
 updates do not relabel or disable the pill. It installs only an exact tag
 containing session, mounted presentation, runtime, canonical/timeline generations, and paging
 bounds/edge identity. It retains at most one installed, one building, and one pending immutable
@@ -691,10 +694,13 @@ so geometry/application callback inversion cannot strand catch-up or composer su
 An installed projection captured while anchored advances an
 exact layout epoch and restores a surviving semantic anchor within one point, with at most two
 corrections and a one-second deadline when layout evidence never arrives. Prepend uses the same
-fresh semantic-and-geometry proof and bounded correction, while anchorless history still loads
-through one session-owned, cancellation-aware canonical task. Starting that explicit page intent
-supersedes a pending semantic-restore command; active catch-up or opening retains stronger ownership
-and rejects paging. Direct interaction
+fresh semantic-and-geometry proof and bounded correction, while anchorless history remains inside
+the same coordinator-owned operation and eight-second terminal deadline. Starting that explicit
+page intent supersedes a pending semantic-restore command; active catch-up or opening retains stronger ownership
+and rejects paging. Every `ChatLayoutTransaction` publishes an exact settled or abandoned terminal
+event. Watchdog abandonment retires only its matching materialization lease, and a bounded physical-ID
+handshake preserves entrance completion that arrives before local lifecycle admission. Repeated
+keyboard participants reopen their exact unsettled generation. Direct interaction
 cancels either correction transaction. Progress-only tool changes and ordinary streaming never
 request a position. Keyboard and complete-composer layout therefore keep a pinned reader at the
 latest tail and leave an anchored reader at the same semantic locus without changing durable

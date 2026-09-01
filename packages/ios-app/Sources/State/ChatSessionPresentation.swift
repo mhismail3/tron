@@ -83,9 +83,7 @@ final class ChatSessionPresentation {
     @ObservationIgnored var photoImportTask: Task<Void, Never>?
     @ObservationIgnored var attachmentPresentationTask: Task<Void, Never>?
     @ObservationIgnored private(set) var openingTask: Task<Void, Never>?
-    @ObservationIgnored private var unanchoredPrependTask: Task<Void, Never>?
     private var openingTaskGeneration = 0
-    private var unanchoredPrependGeneration = 0
 
     init(sessionID: String) {
         self.sessionID = sessionID
@@ -178,25 +176,9 @@ final class ChatSessionPresentation {
         }
     }
 
-    func startUnanchoredPrepend(
-        _ operation: @escaping @MainActor @Sendable () async -> Void
-    ) {
-        unanchoredPrependTask?.cancel()
-        unanchoredPrependGeneration &+= 1
-        let generation = unanchoredPrependGeneration
-        unanchoredPrependTask = Task { [weak self] in
-            await operation()
-            guard let self, self.unanchoredPrependGeneration == generation else { return }
-            self.unanchoredPrependTask = nil
-        }
-    }
-
     func suspendForBackground() {
         cancelOpeningTask()
         earlierMessagesOperation.cancel()
-        unanchoredPrependGeneration &+= 1
-        unanchoredPrependTask?.cancel()
-        unanchoredPrependTask = nil
         suspendTransientInteractions()
     }
 

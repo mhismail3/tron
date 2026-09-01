@@ -54,14 +54,6 @@ enum ChatEarlierMessagesOperationPolicy {
     }
 }
 
-/// `beginPrepend` invokes completion synchronously when strict anchor
-/// admission rejects a request. This box distinguishes that rejection from a
-/// later coordinator settlement without creating a second local operation.
-@MainActor
-final class ChatEarlierMessagesOperationAdmission {
-    var coordinatorAdmitted = false
-}
-
 struct ExtensionInteractionScope: Equatable, Hashable, Sendable {
     let id: String
     let hostEpoch: String
@@ -943,7 +935,7 @@ struct ChatTranscriptPageRequest: Equatable {
     }
 }
 
-struct ChatStreamingResponseSignature: Equatable {
+struct ChatStreamingResponseSignature: Hashable {
     let itemID: String
     let parts: [ChatMessagePart]
     let errorMessage: String?
@@ -962,11 +954,23 @@ struct ChatStreamingResponseSignature: Equatable {
     }
 }
 
-struct ChatResponseState: Equatable {
+struct ChatResponseState: Hashable {
     let sessionID: String
     let canonicalEntryCount: Int
     let tailEntryID: String?
     let streaming: ChatStreamingResponseSignature?
+
+    init(
+        sessionID: String,
+        canonicalEntryCount: Int,
+        tailEntryID: String?,
+        streaming: ChatStreamingResponseSignature?
+    ) {
+        self.sessionID = sessionID
+        self.canonicalEntryCount = canonicalEntryCount
+        self.tailEntryID = tailEntryID
+        self.streaming = streaming
+    }
 
     init(snapshot: SessionSnapshot) {
         sessionID = snapshot.sessionId

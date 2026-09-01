@@ -775,6 +775,50 @@ struct ChatScrollCoordinatorTests {
         coordinator.cancel()
     }
 
+    @Test("entrance settlement before admission is consumed by its exact layout owner")
+    func entranceSettlementBeforeAdmissionIsOrderIndependent() {
+        let coordinator = ChatScrollCoordinator()
+        #expect(coordinator.layoutTransactionForSettledEntrance(
+            renderedID: "outgoing-row"
+        ) == nil)
+
+        #expect(coordinator.discreteTailInserted(
+            renderedID: "outgoing-row",
+            layoutTransactionID: 41
+        ))
+        #expect(coordinator.consumePreAdmissionEntranceSettlement(
+            renderedID: "outgoing-row",
+            layoutTransactionID: 41
+        ))
+        #expect(!coordinator.consumePreAdmissionEntranceSettlement(
+            renderedID: "outgoing-row",
+            layoutTransactionID: 41
+        ))
+        coordinator.cancel()
+    }
+
+    @Test("pre-admission settlement cannot settle another row or generation")
+    func entranceSettlementIsExact() {
+        let coordinator = ChatScrollCoordinator()
+        #expect(coordinator.layoutTransactionForSettledEntrance(
+            renderedID: "old-row"
+        ) == nil)
+        #expect(coordinator.discreteTailInserted(
+            renderedID: "new-row",
+            layoutTransactionID: 42
+        ))
+
+        #expect(!coordinator.consumePreAdmissionEntranceSettlement(
+            renderedID: "new-row",
+            layoutTransactionID: 41
+        ))
+        #expect(!coordinator.consumePreAdmissionEntranceSettlement(
+            renderedID: "old-row",
+            layoutTransactionID: 42
+        ))
+        coordinator.cancel()
+    }
+
     @Test("submission lease waits for its exact layout transaction and stable frames")
     func submissionLeaseWaitsForLayoutSettlement() async throws {
         try await withTestWatchdog { @MainActor in
@@ -817,6 +861,46 @@ struct ChatScrollCoordinatorTests {
             #expect(coordinator.targetReleaseGeneration == 1)
             #expect(coordinator.consumeTargetRelease())
         }
+    }
+
+    @Test("abandoned layout generation releases its applied materialization lease")
+    func abandonedLayoutReleasesMaterialization() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            #expect(coordinator.discreteTailInserted(
+                renderedID: "outgoing-row",
+                layoutTransactionID: 41
+            ))
+            let command = try #require(coordinator.command)
+            #expect(coordinator.commandApplied(command))
+
+            coordinator.layoutTransactionAbandoned(40)
+            #expect(coordinator.targetReleaseGeneration == 0)
+            coordinator.layoutTransactionAbandoned(41)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            await Task.yield()
+
+            #expect(coordinator.targetReleaseGeneration == 1)
+            #expect(coordinator.consumeTargetRelease())
+            #expect(coordinator.materializationLayoutTransactionID(for: "outgoing-row") == nil)
+        }
+    }
+
+    @Test("abandoned layout generation cancels an unapplied materialization command")
+    func abandonedLayoutCancelsPendingMaterializationCommand() {
+        let coordinator = ChatScrollCoordinator()
+        #expect(coordinator.discreteTailInserted(
+            renderedID: "outgoing-row",
+            layoutTransactionID: 41
+        ))
+        #expect(coordinator.command?.origin == .tailMaterialization)
+
+        coordinator.layoutTransactionAbandoned(41)
+
+        #expect(coordinator.command == nil)
+        #expect(coordinator.materializationLayoutTransactionID(for: "outgoing-row") == nil)
     }
 
     @Test("a row frame before its materialization request still releases the exact lease")
@@ -1409,7 +1493,58 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
-    @Test("missing measured anchor discards without starting page load")
+    @Test("canonical history loads once without a measured anchor")
+    func unanchoredHistoryLoadIsOwnedByCoordinator() async throws {
+        try await withTestWatchdog { @MainActor in
+            let recorder = ResultRecorder()
+            let loadCount = Counter()
+            let coordinator = ChatScrollCoordinator()
+            let began = coordinator.beginHistoryPageLoad(
+                anchor: nil,
+                load: { admittedAnchor in
+                    #expect(admittedAnchor == nil)
+                    loadCount.value += 1
+                    return .installed(nil)
+                },
+                completion: recorder.record
+            )
+
+            #expect(began)
+            await recorder.waitForValue()
+            #expect(loadCount.value == 1)
+            #expect(recorder.values == [.success])
+            #expect(!coordinator.isPrependingHistory)
+            #expect(coordinator.command == nil)
+        }
+    }
+
+    @Test("stale anchor degrades to canonical unanchored history")
+    func staleAnchorDoesNotBlockHistoryLoad() async throws {
+        try await withTestWatchdog { @MainActor in
+            let recorder = ResultRecorder()
+            let coordinator = ChatScrollCoordinator()
+            let stale = ChatSemanticAnchor(
+                semanticID: "row",
+                renderedID: "row",
+                layoutEpoch: coordinator.layoutEpoch - 1,
+                viewportOffsetY: 20
+            )
+            let began = coordinator.beginHistoryPageLoad(
+                anchor: stale,
+                load: { admittedAnchor in
+                    #expect(admittedAnchor == nil)
+                    return .installed(nil)
+                },
+                completion: recorder.record
+            )
+
+            #expect(began)
+            await recorder.waitForValue()
+            #expect(recorder.values == [.success])
+        }
+    }
+
+    @Test("missing measured anchor discards without starting legacy anchored load")
     func missingAnchorDoesNotLoad() {
         let recorder = ResultRecorder()
         let loadCount = Counter()

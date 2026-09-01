@@ -3,7 +3,9 @@ import SwiftUI
 /// Value-driven composer presentation. Draft, route, transport, and canonical
 /// ownership remain outside this view and enter only through bindings/intents.
 struct ChatComposerView: View {
-    let snapshot: SessionSnapshot?
+    let sessionFacts: ChatVisibleSessionFacts?
+    let processOverview: SessionProcessOverview?
+    let processActivities: [SessionProcessActivity]?
     let pendingAttachments: [PendingAttachment]
     let selectedResource: ComposerResourceEntry?
     let resourcePicker: ComposerResourcePickerSource?
@@ -62,8 +64,8 @@ struct ChatComposerView: View {
                 resourcePickerView
                 GlassEffectContainer(spacing: 8) {
                     HStack(alignment: .bottom, spacing: 8) {
-                        if let overview = snapshot?.processOverview,
-                           snapshot?.processActivities?.contains(where: {
+                        if let overview = processOverview,
+                           processActivities?.contains(where: {
                                $0.kind == .subagent && SessionProcessAdmissionPolicy.admits($0)
                            }) == true {
                             SessionProcessButton(
@@ -87,7 +89,7 @@ struct ChatComposerView: View {
                     reduceMotion
                         ? .easeOut(duration: 0.12)
                         : .spring(response: 0.32, dampingFraction: 0.82),
-                    value: snapshot?.processOverview?.visibility
+                    value: processOverview?.visibility
                 )
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
@@ -134,7 +136,7 @@ struct ChatComposerView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ComposerResourceChip(
-                        sessionID: snapshot?.sessionId,
+                        sessionID: sessionFacts?.sessionID,
                         resource: selectedResource,
                         onRemove: onRemoveResource
                     )
@@ -153,7 +155,7 @@ struct ChatComposerView: View {
     private var resourcePickerView: some View {
         if let resourcePicker {
             ComposerResourcePicker(
-                sessionID: snapshot?.sessionId,
+                sessionID: sessionFacts?.sessionID,
                 kind: resourcePicker.kind,
                 query: resourcePicker.query,
                 entries: resourceResults,
@@ -207,7 +209,7 @@ struct ChatComposerView: View {
                     mode: trailingMode,
                     isDisabled: isSending || submissionPending || hasActiveUploads || !isCommandReady,
                     isSending: isSending,
-                    offersQueueChoices: snapshot?.phase.isActive == true,
+                    offersQueueChoices: sessionFacts?.phase.isActive == true,
                     onSend: onSend,
                     onAbort: onAbort
                 )

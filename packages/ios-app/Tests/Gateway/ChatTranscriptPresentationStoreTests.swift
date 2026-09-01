@@ -58,6 +58,26 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("transcript-coupled composer phase is frozen with its exact source")
+    func visibleSessionFactsAreAtomicWithProjection() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 1_204)
+            .openingTail(targetEncodedBytes: 8_000)
+        let baseline = ChatTranscriptProjectionTag(
+            snapshot: snapshot,
+            presentationGeneration: 7
+        )
+        snapshot.phase = snapshot.phase == .running ? .idle : .running
+        let replacement = ChatTranscriptProjectionTag(
+            snapshot: snapshot,
+            presentationGeneration: 7
+        )
+
+        #expect(baseline.layoutIdentity != replacement.layoutIdentity)
+        #expect(replacement.layoutIdentity.visibleSessionFacts.sessionID == snapshot.sessionId)
+        #expect(replacement.layoutIdentity.visibleSessionFacts.phase == snapshot.phase)
+        #expect(replacement.responseState == ChatResponseState(snapshot: snapshot))
+    }
+
     @Test("handoff identity freezes outgoing text and attachment preview facts")
     func handoffIdentityFreezesOutgoingFacts() throws {
         let target = SessionPresentationIdentity(sessionID: "session", generation: 3)

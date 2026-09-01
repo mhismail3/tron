@@ -1,6 +1,21 @@
 import Foundation
 import Observation
 
+/// Transcript-coupled session facts frozen with the exact installed commit.
+/// Drafts, command admission, and the independent process projection retain
+/// their existing owners.
+struct ChatVisibleSessionFacts: Hashable, Sendable {
+    let sessionID: String
+    let phase: SessionPhase
+    let retry: RetryState?
+
+    init(snapshot: SessionSnapshot) {
+        sessionID = snapshot.sessionId
+        phase = snapshot.phase
+        retry = snapshot.retry
+    }
+}
+
 struct ChatTranscriptProjectionTag: Hashable, Sendable {
     /// Bounded layout facts only. Authority sequence/revision may advance for
     /// model, context, or other metadata without requiring transcript work or
@@ -17,6 +32,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         let hiddenThinkingLabel: String?
         let isCachedProjection: Bool
         let queueManagementCapability: Bool
+        let visibleSessionFacts: ChatVisibleSessionFacts
 
         init(
             snapshot: SessionSnapshot,
@@ -34,6 +50,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
             self.hiddenThinkingLabel = hiddenThinkingLabel
             isCachedProjection = snapshot.isCachedProjection == true
             self.queueManagementCapability = queueManagementCapability
+            visibleSessionFacts = ChatVisibleSessionFacts(snapshot: snapshot)
         }
     }
 
@@ -194,6 +211,15 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         )
         hiddenThinkingLabel = projectedHiddenThinkingLabel
         self.entranceSuppressionGeneration = entranceSuppressionGeneration
+    }
+
+    var responseState: ChatResponseState {
+        ChatResponseState(
+            sessionID: sessionID,
+            canonicalEntryCount: transcriptTotal ?? transcriptCount,
+            tailEntryID: lastTranscriptID,
+            streaming: ChatStreamingResponseSignature(layoutIdentity.streaming)
+        )
     }
 
     func matchesIdentity(of other: Self) -> Bool {

@@ -45,6 +45,13 @@ struct ChatPrependPage: Equatable, Sendable {
     let installedLayout: ChatInstalledLayoutEpoch
 }
 
+enum ChatHistoryPageLoadResult: Equatable, Sendable {
+    /// Canonical history installed. A page value means a semantic anchor can be
+    /// restored; nil means the authoritative page installed without geometry.
+    case installed(ChatPrependPage?)
+    case failed
+}
+
 /// Owns explicit viewport intent plus opening, catch-up, semantic restore, and
 /// prepend commands. Native anchoring owns payload and size changes. A genuinely
 /// New lazy rows lease the stable tail sentinel through their exact layout
@@ -139,7 +146,7 @@ final class ChatScrollCoordinator {
 
     private struct PrependContext {
         let token: Int
-        let anchor: ChatSemanticAnchor
+        let anchor: ChatSemanticAnchor?
         var interrupted = false
         var renderedAnchorID: String?
         var expectedLayoutEpoch: Int?
@@ -188,6 +195,10 @@ final class ChatScrollCoordinator {
     private var tailMaterializationEvidenceRevision = 0
     private var targetReleaseEvidenceRevision: Int?
     private var pendingTailMaterialization: PendingTailMaterialization?
+    /// Entrance completion may arrive synchronously before ChatView admits the
+    /// exact local lifecycle row. Retain only its unique physical ID until that
+    /// admission arrives; presentation reset clears this bounded ledger.
+    private var preAdmissionSettledEntranceIDs: [String] = []
     private var targetReleaseToken: Int?
     private(set) var targetReleaseGeneration = 0
     private var catchUpPhase: CatchUpPhase = .none
@@ -762,6 +773,10 @@ final class ChatScrollCoordinator {
         layoutTransactionID: Int? = nil
     ) -> Bool {
         guard !renderedID.isEmpty, canAutomaticallyFollow else { return false }
+        if layoutTransactionID == nil,
+           let index = preAdmissionSettledEntranceIDs.firstIndex(of: renderedID) {
+            preAdmissionSettledEntranceIDs.remove(at: index)
+        }
         if renderedID == tailMaterialization?.renderedID
             || renderedID == pendingTailMaterialization?.renderedID {
             return layoutTransactionID != nil
@@ -803,6 +818,25 @@ final class ChatScrollCoordinator {
         }
     }
 
+    /// Abandonment is a terminal cancellation, not successful layout evidence.
+    /// Drop pending work owned by that generation and release any already-applied
+    /// sentinel lease so a watchdog, background transition, or superseding
+    /// presentation cannot strand the SwiftUI `ScrollPosition` target.
+    func layoutTransactionAbandoned(_ id: Int) {
+        if pendingTailMaterialization?.layoutTransactionID == id {
+            pendingTailMaterialization = nil
+        }
+        guard tailMaterialization?.layoutTransactionID == id else { return }
+        if command?.origin == .tailMaterialization {
+            clearCommand()
+            return
+        }
+        if appliedTargetOrigin == .tailMaterialization {
+            requestAppliedTargetRelease(origin: .tailMaterialization)
+        }
+        clearTailMaterializationState()
+    }
+
     func materializationLayoutTransactionID(for renderedID: String) -> Int? {
         if tailMaterialization?.layoutOwnerRenderedID == renderedID {
             return tailMaterialization?.layoutTransactionID
@@ -811,6 +845,36 @@ final class ChatScrollCoordinator {
             return pendingTailMaterialization?.layoutTransactionID
         }
         return nil
+    }
+
+    /// Returns the exact admitted generation, or buffers this unique row's
+    /// terminal entrance callback until admission. It never falls back to a
+    /// current generation, so stale rows cannot settle newer layout work.
+    func layoutTransactionForSettledEntrance(renderedID: String) -> Int? {
+        if let generation = materializationLayoutTransactionID(for: renderedID) {
+            return generation
+        }
+        guard !renderedID.isEmpty,
+              !preAdmissionSettledEntranceIDs.contains(renderedID) else { return nil }
+        preAdmissionSettledEntranceIDs.append(renderedID)
+        if preAdmissionSettledEntranceIDs.count > 32 {
+            preAdmissionSettledEntranceIDs.removeFirst(
+                preAdmissionSettledEntranceIDs.count - 32
+            )
+        }
+        return nil
+    }
+
+    func consumePreAdmissionEntranceSettlement(
+        renderedID: String,
+        layoutTransactionID: Int
+    ) -> Bool {
+        guard materializationLayoutTransactionID(for: renderedID) == layoutTransactionID,
+              let index = preAdmissionSettledEntranceIDs.firstIndex(of: renderedID) else {
+            return false
+        }
+        preAdmissionSettledEntranceIDs.remove(at: index)
+        return true
     }
 
     private func beginTailMaterialization(
@@ -854,6 +918,9 @@ final class ChatScrollCoordinator {
         if shouldTrackUnreadResponse { hasUnreadContent = true }
     }
 
+    /// Compatibility entry point for existing anchored owner tests. Production
+    /// paging uses `beginHistoryPageLoad`, whose optional admitted anchor keeps
+    /// canonical loading independent from transient geometry.
     @discardableResult
     func beginPrepend(
         anchor: ChatSemanticAnchor?,
@@ -864,28 +931,47 @@ final class ChatScrollCoordinator {
             completion(.discarded)
             return false
         }
-        // Loading earlier is explicit reader intent. It supersedes a pending
-        // semantic-restore command before anchored or unanchored paging starts,
-        // so that stale write cannot land after page installation. Catch-up and
-        // opening retain their stronger ownership and reject paging above.
         cancelLayoutRestore()
         clearCommand()
-        guard let anchor, anchor.layoutEpoch == layoutEpoch,
-              let sample = semanticFrames[anchor.renderedID],
-              sample.layoutEpoch == anchor.layoutEpoch,
-              abs(sample.frame.minY - anchor.viewportOffsetY) <= 0.5,
-              sample.frame.maxY > 0,
-              sample.frame.minY < geometry.containerHeight else {
+        guard let anchor, admittedPrependAnchor(anchor) != nil else {
             completion(.discarded)
             return false
         }
+        return beginHistoryPageLoad(
+            anchor: anchor,
+            load: { _ in
+                guard let page = await load() else { return .failed }
+                return .installed(page)
+            },
+            completion: completion
+        )
+    }
+
+    /// Owns the complete canonical history operation. Geometry is optional
+    /// restoration evidence; a missing or stale anchor never turns an enabled
+    /// history action into a no-op or creates a second untracked loading task.
+    @discardableResult
+    func beginHistoryPageLoad(
+        anchor: ChatSemanticAnchor?,
+        load: @escaping @MainActor @Sendable (ChatSemanticAnchor?) async -> ChatHistoryPageLoadResult,
+        completion: @escaping @MainActor (PerformanceResult) -> Void
+    ) -> Bool {
+        guard canRequestHistoryPage else {
+            completion(.discarded)
+            return false
+        }
+        // Explicit history intent supersedes semantic restoration. Catch-up and
+        // opening retain stronger ownership and are rejected by the guard above.
+        cancelLayoutRestore()
+        clearCommand()
+        let admittedAnchor = anchor.flatMap(admittedPrependAnchor)
         sequence &+= 1
         let token = sequence
         let admittedPresentation = presentation
         viewportMode.reduce(.prependBegan)
         prepend = PrependContext(
             token: token,
-            anchor: anchor,
+            anchor: admittedAnchor,
             requiredSampleRevision: semanticFrameRevision,
             requiredGeometryRevision: geometryRevision,
             completion: completion
@@ -899,29 +985,51 @@ final class ChatScrollCoordinator {
             self.finishPrepend(result: .failure)
         }
         prependTask = Task { [weak self] in
-            let page = await load()
+            let result = await load(admittedAnchor)
             guard let self, var context = self.prepend,
                   context.token == token,
                   self.presentation == admittedPresentation else { return }
             self.prependTask = nil
-            guard let page,
-                  page.installedLayout.value == self.layoutEpoch,
-                  page.installedLayout.value != anchor.layoutEpoch,
-                  !context.interrupted else {
+            guard !context.interrupted else {
                 self.finishPrepend(result: .discarded)
                 return
             }
-            context.renderedAnchorID = page.renderedAnchorID
-            context.expectedLayoutEpoch = page.installedLayout.value
-            context.requiredSampleRevision = page.installedLayout.firstValidSampleRevision
-            context.readyForMeasurement = true
-            self.prepend = context
-            self.evaluatePrependIfReady()
-            #if HOSTED_TEST
-            self.resumeHostedPrependSampleWaiters()
-            #endif
+            switch result {
+            case .failed:
+                self.finishPrepend(result: .failure)
+            case .installed(nil):
+                // Canonical data is already installed. With no admitted anchor
+                // there is no app-generated offset command to settle.
+                self.finishPrepend(result: .success)
+            case .installed(let page?):
+                guard let admittedAnchor,
+                      page.installedLayout.value == self.layoutEpoch,
+                      page.installedLayout.value != admittedAnchor.layoutEpoch else {
+                    self.finishPrepend(result: .discarded)
+                    return
+                }
+                context.renderedAnchorID = page.renderedAnchorID
+                context.expectedLayoutEpoch = page.installedLayout.value
+                context.requiredSampleRevision = page.installedLayout.firstValidSampleRevision
+                context.readyForMeasurement = true
+                self.prepend = context
+                self.evaluatePrependIfReady()
+                #if HOSTED_TEST
+                self.resumeHostedPrependSampleWaiters()
+                #endif
+            }
         }
         return true
+    }
+
+    private func admittedPrependAnchor(_ anchor: ChatSemanticAnchor) -> ChatSemanticAnchor? {
+        guard anchor.layoutEpoch == layoutEpoch,
+              let sample = semanticFrames[anchor.renderedID],
+              sample.layoutEpoch == anchor.layoutEpoch,
+              abs(sample.frame.minY - anchor.viewportOffsetY) <= 0.5,
+              sample.frame.maxY > 0,
+              sample.frame.minY < geometry.containerHeight else { return nil }
+        return anchor
     }
 
     /// Applies exactly one currently-owned command. Its ScrollPosition target
@@ -1042,13 +1150,14 @@ final class ChatScrollCoordinator {
     private func evaluatePrependIfReady() {
         guard var context = prepend, context.readyForMeasurement,
               command == nil, context.correctionCommandToken == nil, !context.interrupted,
+              let anchor = context.anchor,
               let renderedID = context.renderedAnchorID,
               context.expectedLayoutEpoch == layoutEpoch,
               let sample = semanticFrames[renderedID], sample.layoutEpoch == layoutEpoch,
               sample.revision > context.requiredSampleRevision,
               geometryRevision > context.requiredGeometryRevision else { return }
         context.readyForMeasurement = false
-        let residual = sample.frame.minY - context.anchor.viewportOffsetY
+        let residual = sample.frame.minY - anchor.viewportOffsetY
         maximumPrependSemanticExcursion = max(maximumPrependSemanticExcursion, abs(residual))
         if abs(residual) <= 1 {
             prepend = context
@@ -1063,7 +1172,7 @@ final class ChatScrollCoordinator {
         context.correctionCount &+= 1
         let requested = Self.prependCorrectionOffset(
             currentOffsetY: geometry.offsetY,
-            capturedViewportOffsetY: context.anchor.viewportOffsetY,
+            capturedViewportOffsetY: anchor.viewportOffsetY,
             installedFrameMinY: sample.frame.minY
         )
         publish(.offsetY(requested), animation: .disabled, origin: .prepend)
@@ -1072,11 +1181,12 @@ final class ChatScrollCoordinator {
     }
 
     private func recordPrependExcursionIfOwned(renderedID: String, layoutEpoch: Int, frame: CGRect) {
-        guard let context = prepend, context.renderedAnchorID == renderedID,
+        guard let context = prepend, let anchor = context.anchor,
+              context.renderedAnchorID == renderedID,
               context.expectedLayoutEpoch == layoutEpoch else { return }
         maximumPrependSemanticExcursion = max(
             maximumPrependSemanticExcursion,
-            abs(frame.minY - context.anchor.viewportOffsetY)
+            abs(frame.minY - anchor.viewportOffsetY)
         )
     }
 
@@ -1450,6 +1560,7 @@ final class ChatScrollCoordinator {
         physicalTailRepairFailedDisplacement = nil
         physicalTailRepairBlockedUntilEvidenceRevision = nil
         pendingTailMaterialization = nil
+        preAdmissionSettledEntranceIDs.removeAll(keepingCapacity: true)
         tailMaterializationSettlementTask?.cancel()
         tailMaterializationSettlementTask = nil
         retireAppliedTargetWithoutCallback()

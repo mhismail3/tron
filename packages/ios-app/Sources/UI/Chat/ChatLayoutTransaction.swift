@@ -73,6 +73,11 @@ struct ChatLayoutClock: Equatable, Sendable {
 @MainActor
 @Observable
 final class ChatLayoutTransaction {
+    enum TerminalEvent: Equatable, Sendable {
+        case settled(Int)
+        case abandoned(Int)
+    }
+
     struct Generation: Equatable, Sendable {
         let id: Int
         fileprivate(set) var joined: Set<ChatLayoutMutation>
@@ -86,12 +91,17 @@ final class ChatLayoutTransaction {
     /// interrupted background/layout work cannot masquerade as success.
     private(set) var settledGenerationID: Int?
     private(set) var abandonedGenerationID: Int?
-    private(set) var settlementEventRevision = 0
-    private(set) var pendingSettlementGenerationIDs: [Int] = []
+    private(set) var terminalEventRevision = 0
+    private(set) var pendingTerminalEvents: [TerminalEvent] = []
     private var nextGenerationID = 0
+    private let clock: MonotonicClock
     private var keyboardTransition: ChatKeyboardTransition?
     private var reduceMotion = false
     @ObservationIgnored private var watchdogTask: Task<Void, Never>?
+
+    init(clock: MonotonicClock = .continuous) {
+        self.clock = clock
+    }
 
     func configure(keyboard: ChatKeyboardTransition?, reduceMotion: Bool) {
         keyboardTransition = keyboard
@@ -102,6 +112,11 @@ final class ChatLayoutTransaction {
     func join(_ mutation: ChatLayoutMutation) -> Int {
         if var current = generation {
             current.joined.insert(mutation)
+            // A newer transition from an already-settled participant reopens
+            // that participant in the same atomic generation. A Set records
+            // ownership, while this removal preserves repeated keyboard or
+            // composer work without inventing a second layout clock.
+            current.settled.remove(mutation)
             generation = current
             return current.id
         }
@@ -150,15 +165,19 @@ final class ChatLayoutTransaction {
     func abandon() {
         watchdogTask?.cancel()
         watchdogTask = nil
-        if let id = generation?.id { abandonedGenerationID = id }
+        guard let id = generation?.id else { return }
+        abandonedGenerationID = id
         generation = nil
+        publishTerminal(.abandoned(id))
     }
 
-    /// Records every completion in a bounded queue because SwiftUI may coalesce
-    /// multiple observable mutations before delivering an `onChange` callback.
-    func consumeSettlementEvents() -> [Int] {
-        let events = pendingSettlementGenerationIDs
-        pendingSettlementGenerationIDs.removeAll(keepingCapacity: true)
+    /// Records every terminal outcome in a bounded queue because SwiftUI may
+    /// coalesce multiple observable mutations before delivering an `onChange`
+    /// callback. Abandonment must be observable by the viewport owner so a
+    /// command lease cannot remain installed after its layout participant dies.
+    func consumeTerminalEvents() -> [TerminalEvent] {
+        let events = pendingTerminalEvents
+        pendingTerminalEvents.removeAll(keepingCapacity: true)
         return events
     }
 
@@ -167,20 +186,22 @@ final class ChatLayoutTransaction {
         watchdogTask?.cancel()
         watchdogTask = nil
         settledGenerationID = id
-        pendingSettlementGenerationIDs.append(id)
-        if pendingSettlementGenerationIDs.count > 32 {
-            pendingSettlementGenerationIDs.removeFirst(
-                pendingSettlementGenerationIDs.count - 32
-            )
-        }
-        settlementEventRevision &+= 1
         generation = nil
+        publishTerminal(.settled(id))
+    }
+
+    private func publishTerminal(_ event: TerminalEvent) {
+        pendingTerminalEvents.append(event)
+        if pendingTerminalEvents.count > 32 {
+            pendingTerminalEvents.removeFirst(pendingTerminalEvents.count - 32)
+        }
+        terminalEventRevision &+= 1
     }
 
     private func armWatchdog(for id: Int) {
         watchdogTask?.cancel()
-        watchdogTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(1))
+        watchdogTask = Task { @MainActor [weak self, clock] in
+            try? await clock.sleep(.seconds(1))
             guard !Task.isCancelled, self?.generation?.id == id else { return }
             self?.abandon()
         }

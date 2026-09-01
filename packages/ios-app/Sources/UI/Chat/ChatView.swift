@@ -274,9 +274,14 @@ struct ChatView: View {
         .onChange(of: reduceMotion) { _, enabled in
             layoutTransaction.configure(keyboard: keyboardObserver.transition, reduceMotion: enabled)
         }
-        .onChange(of: layoutTransaction.settlementEventRevision) { _, _ in
-            for settledID in layoutTransaction.consumeSettlementEvents() {
-                scrollCoordinator.layoutTransactionSettled(settledID)
+        .onChange(of: layoutTransaction.terminalEventRevision) { _, _ in
+            for event in layoutTransaction.consumeTerminalEvents() {
+                switch event {
+                case .settled(let generationID):
+                    scrollCoordinator.layoutTransactionSettled(generationID)
+                case .abandoned(let generationID):
+                    scrollCoordinator.layoutTransactionAbandoned(generationID)
+                }
             }
         }
         .onChange(of: scenePhase) { _, current in
@@ -507,8 +512,8 @@ struct ChatView: View {
     }
 
     private func settleTranscriptEntrance(renderedID: String) {
-        guard let generation = scrollCoordinator.materializationLayoutTransactionID(
-            for: renderedID
+        guard let generation = scrollCoordinator.layoutTransactionForSettledEntrance(
+            renderedID: renderedID
         ) else { return }
         layoutTransaction.settle(generation, source: .transcriptGrowth)
     }
@@ -878,11 +883,17 @@ struct ChatView: View {
         model.authoritativeSnapshot(for: sessionID)
     }
 
+    /// Visible chrome advances with the exact immutable transcript commit.
+    /// Command admission and draft ownership still read canonical owners.
+    private var visibleSessionFacts: ChatVisibleSessionFacts? {
+        transcriptPresentation.installed?.tag.layoutIdentity.visibleSessionFacts
+    }
+
     private var showsAmbientWorkingBlur: Bool {
-        guard let snapshot = selectedAuthoritativeSnapshot else { return false }
+        guard let facts = visibleSessionFacts else { return false }
         return ChatRuntimeWorkingPresentation(
-            phase: snapshot.phase,
-            retry: snapshot.retry
+            phase: facts.phase,
+            retry: facts.retry
         )?.usesAmbientBottomIndicator == true
     }
 
@@ -1176,7 +1187,7 @@ struct ChatView: View {
     }
 
     private var responseState: ChatResponseState? {
-        selectedAuthoritativeSnapshot.map(ChatResponseState.init)
+        transcriptPresentation.installed?.tag.responseState
     }
 
     private var isTranscriptReady: Bool { sessionPresentation.open.phase == .ready }
@@ -1610,58 +1621,41 @@ struct ChatView: View {
                       scrollCoordinator.canRequestHistoryPage,
                       let generation = sessionPresentation.modelPresentationGeneration,
                       let operationToken = sessionPresentation.earlierMessagesOperation.begin() else { return false }
-                let admission = ChatEarlierMessagesOperationAdmission()
                 let anchor = transcriptPresentation.installed
                     .flatMap { installed in
                         installed.tag == transcriptProjectionSource
                             ? scrollCoordinator.semanticAnchor(in: installed.timeline)
                             : nil
                     }
-                let began = scrollCoordinator.beginPrepend(
+                return scrollCoordinator.beginHistoryPageLoad(
                     anchor: anchor,
-                    load: {
+                    load: { admittedAnchor in
                         do { try await probe.waitForPrependPageRelease() }
-                        catch { return nil }
+                        catch { return .failed }
                         // The hosted boundary owns no Gateway transport. Model
-                        // an admitted exact page installation by advancing the
-                        // real coordinator/layout epoch around the current
-                        // semantic anchor; Gateway pagination contracts are
-                        // covered by their focused store tests.
-                        guard sessionPresentation.modelPresentationGeneration == generation,
-                              let anchor,
+                        // exact canonical installation; semantic restoration is
+                        // emitted only when the coordinator admitted its anchor.
+                        guard sessionPresentation.modelPresentationGeneration == generation else {
+                            return .failed
+                        }
+                        guard let admittedAnchor,
                               let current = transcriptPresentation.installed,
                               current.tag == transcriptProjectionSource,
                               let renderedID = current.timeline
-                                .renderedIDBySemanticID[anchor.semanticID] else { return nil }
+                                .renderedIDBySemanticID[admittedAnchor.semanticID] else {
+                            return .installed(nil)
+                        }
                         let installedLayout = scrollCoordinator.beginInstalledLayoutEpoch()
-                        return ChatPrependPage(
+                        return .installed(ChatPrependPage(
                             renderedAnchorID: renderedID,
                             installedLayout: installedLayout
-                        )
+                        ))
                     },
-                    completion: { [admission] result in
+                    completion: { result in
                         probe.recordPrependCompletion(result)
-                        guard admission.coordinatorAdmitted else { return }
                         self.settleEarlierMessagesOperation(operationToken)
                     }
                 )
-                if began {
-                    admission.coordinatorAdmitted = true
-                    return true
-                }
-                // The native coordinator may reject anchoring because its
-                // command/semantic sample is stale. Canonical history still
-                // starts, and its projection is installed explicitly.
-                sessionPresentation.startUnanchoredPrepend {
-                    defer { self.settleEarlierMessagesOperation(operationToken) }
-                    do { try await probe.waitForPrependPageRelease() } catch { return }
-                    await loadEarlierTranscriptUnanchored(
-                        sessionID: sessionID,
-                        presentationGeneration: generation,
-                        operationToken: operationToken
-                    )
-                }
-                return true
             },
             reapplyPinnedPosition: {
                 scrollCoordinator.foregroundViewportBecameActive()
@@ -1852,27 +1846,6 @@ struct ChatView: View {
         sessionPresentation.earlierMessagesOperation.settle(token)
     }
 
-    @MainActor
-    private func loadEarlierTranscriptUnanchored(
-        sessionID: String,
-        presentationGeneration: Int,
-        operationToken: ChatEarlierMessagesOperationOwner.Token
-    ) async {
-        defer { settleEarlierMessagesOperation(operationToken) }
-        let result = await model.loadEarlierTranscript(
-            sessionID: sessionID,
-            presentationGeneration: presentationGeneration
-        )
-        guard result == .installed, sessionPresentation.modelPresentationGeneration == presentationGeneration else { return }
-        // A rejected prepend admission (no semantic anchor, stale geometry, or
-        // an outstanding automatic command) must still install canonical data.
-        // Do not rely on the source-change callback here: it is intentionally
-        // suppressed while another layout transaction is settling.
-        _ = try? await installCurrentTranscriptProjection(
-            presentationGeneration: presentationGeneration
-        )
-    }
-
     private func earlierMessagesChip(installed: InstalledChatTranscript) -> some View {
         Button {
             guard !isLoadingEarlierMessages,
@@ -1883,54 +1856,33 @@ struct ChatView: View {
             let capturedAnchor = transcriptPresentation.installed.map {
                 scrollCoordinator.semanticAnchor(in: $0.timeline)
             } ?? nil
-            let admission = ChatEarlierMessagesOperationAdmission()
-            let began = scrollCoordinator.beginPrepend(
+            _ = scrollCoordinator.beginHistoryPageLoad(
                 anchor: capturedAnchor,
-                load: { @MainActor in
+                load: { @MainActor admittedAnchor in
                     let result = await model.loadEarlierTranscript(
                         sessionID: sessionID,
                         presentationGeneration: presentationGeneration
                     )
                     guard result == .installed,
-                          sessionPresentation.modelPresentationGeneration == presentationGeneration else { return nil }
-                    guard let anchor = capturedAnchor else {
-                        // Materialize the canonical page without a semantic anchor.
-                        _ = try? await installCurrentTranscriptProjection(
-                            presentationGeneration: presentationGeneration
-                        )
-                        return nil
-                    }
-                    guard let installed = try? await installCurrentTranscriptProjection(
-                        presentationGeneration: presentationGeneration
-                    ),
-                    let renderedID = installed.timeline.renderedIDBySemanticID[anchor.semanticID] else {
-                        return nil
+                          sessionPresentation.modelPresentationGeneration == presentationGeneration,
+                          let installed = try? await installCurrentTranscriptProjection(
+                              presentationGeneration: presentationGeneration
+                          ) else { return .failed }
+                    guard let admittedAnchor,
+                          let renderedID = installed.timeline
+                            .renderedIDBySemanticID[admittedAnchor.semanticID] else {
+                        return .installed(nil)
                     }
                     let installedLayout = scrollCoordinator.beginInstalledLayoutEpoch()
-                    return ChatPrependPage(
+                    return .installed(ChatPrependPage(
                         renderedAnchorID: renderedID,
                         installedLayout: installedLayout
-                    )
+                    ))
                 },
-                completion: { [admission] _ in
-                    guard admission.coordinatorAdmitted else { return }
+                completion: { _ in
                     self.settleEarlierMessagesOperation(operationToken)
                 }
             )
-            if began {
-                admission.coordinatorAdmitted = true
-                return
-            }
-            // beginPrepend is deliberately strict for viewport preservation;
-            // its rejection is not permission to turn a canonical request into
-            // a silent no-op.
-            sessionPresentation.startUnanchoredPrepend {
-                await loadEarlierTranscriptUnanchored(
-                    sessionID: sessionID,
-                    presentationGeneration: presentationGeneration,
-                    operationToken: operationToken
-                )
-            }
         } label: {
             HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
                 ChatCompactPillLeadingIcon(
@@ -1947,7 +1899,7 @@ struct ChatView: View {
             .chatTranscriptPill()
         }
         .buttonStyle(.plain)
-        .disabled(isLoadingEarlierMessages)
+        .disabled(isLoadingEarlierMessages || !scrollCoordinator.canRequestHistoryPage)
         .frame(maxWidth: .infinity, minHeight: 44)
         .accessibilityLabel(
             isLoadingEarlierMessages
@@ -1967,7 +1919,9 @@ struct ChatView: View {
 
     private var composer: some View {
         ChatComposerView(
-            snapshot: selectedAuthoritativeSnapshot,
+            sessionFacts: visibleSessionFacts,
+            processOverview: selectedAuthoritativeSnapshot?.processOverview,
+            processActivities: selectedAuthoritativeSnapshot?.processActivities,
             pendingAttachments: pendingAttachments,
             selectedResource: selectedComposerResource,
             resourcePicker: composerResourcePicker,
@@ -2016,6 +1970,7 @@ struct ChatView: View {
             onShowContext: { sessionPresentation.showContext = true },
             onSend: { behavior in send(behavior: behavior) },
             onAbort: {
+                // Command identity is canonical authority, not delayed render state.
                 let operation = selectedAuthoritativeSnapshot?.operation
                 let kind = ChatComposerPolicy.abortKind(operation: operation)
                 Task {
@@ -2035,7 +1990,7 @@ struct ChatView: View {
 
     private var composerTrailingMode: ComposerTrailingMode? {
         ChatComposerPolicy.trailingMode(
-            phase: selectedAuthoritativeSnapshot?.phase,
+            phase: visibleSessionFacts?.phase,
             hasContent: !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !pendingAttachments.isEmpty,
             isSending: sending
@@ -2048,7 +2003,7 @@ struct ChatView: View {
             isTranscriptReady: isTranscriptReady && snapshot != nil,
             contextPercentage: snapshot.map(contextPercentage),
             modelName: snapshot?.model?.displayDescription,
-            isCompacting: snapshot?.phase == .compacting
+            isCompacting: visibleSessionFacts?.phase == .compacting
         )
     }
 
@@ -2587,7 +2542,13 @@ struct ChatView: View {
                     renderedID: submission.presentationID,
                     layoutTransactionID: layoutGeneration
                 )
-                if !materializationAdmitted {
+                if materializationAdmitted,
+                   scrollCoordinator.consumePreAdmissionEntranceSettlement(
+                       renderedID: submission.presentationID,
+                       layoutTransactionID: layoutGeneration
+                   ) {
+                    layoutTransaction.settle(layoutGeneration, source: .transcriptGrowth)
+                } else if !materializationAdmitted {
                     layoutTransaction.settle(layoutGeneration, source: .transcriptGrowth)
                 }
                 return submission

@@ -1,6 +1,6 @@
 # Chat ownership corrective plan
 
-Status: Milestone 3 transcript ownership is implemented in the current worktree. The session snapshot is the sole whole-session authority; the mounted transcript window retains only an exact prefix before that authority's Gateway tail. Summary-only cache persistence, exact paging admission, reconnect retention, and pure projection inputs are implemented. Independent review and physical flow acceptance remain open; this status makes no physical acceptance claim.
+Status: active SwiftUI-preserving hardening. Milestone 3 transcript ownership remains implemented: the session snapshot is the sole whole-session authority and the mounted transcript window retains only an exact prefix before the Gateway tail. The first new slice now gives anchored and anchorless paging one coordinator-owned operation, propagates layout settlement and abandonment to the sole viewport command owner, closes the pre-admission entrance race, and freezes layout-affecting composer chrome with the installed transcript commit. The existing SwiftUI hierarchy, renderer, composer, animation constants, and visual styling are unchanged. Recent-tail compatibility backfill, further coordinator reduction, integrated reconnect coverage, and physical flow acceptance remain open; this status makes no physical acceptance claim.
 
 ## Goal
 
@@ -78,7 +78,7 @@ publishes the canonical timeline with handoff `none`.
 
 ### Scroll coordinator
 
-`ChatScrollCoordinator` remains the sole app-generated viewport-command owner. It consumes explicit installed transitions (`initial`, `append`, `prepend`, `replace`, `layoutNeutral`) and never mutates transcript retention. Paging authority is independent of geometry. An anchor is optional evidence used only to preserve viewport position after a page installs.
+`ChatScrollCoordinator` remains the sole app-generated viewport-command owner and never mutates transcript retention. Paging authority is independent of geometry: one bounded coordinator operation owns both anchored restoration and successful geometry-free installation, while an anchor is optional evidence only. Exact layout terminal events release matching command leases on settlement or abandonment; no independent unanchored paging task exists in the view owner.
 
 ### Composer and queue
 
@@ -110,7 +110,7 @@ Exit: fresh and in-progress resume shows the bounded latest canonical window; Lo
 ### 2 — Atomic source-to-visible commit
 
 - Preserve the last complete installed transcript during same-session/runtime replacement until its validated replacement is ready.
-- Derive Load earlier, rows, queue rows, and runtime rows from the same installed commit.
+- Derive Load earlier, rows, queue rows, runtime rows, response signature, and layout-affecting composer chrome from the same installed commit.
 - Replace independent readiness booleans with one exact ready identity containing presentation target, installed commit cursor, and mutation authority.
 - Same-session reconnect uses viewport-retaining reset and never issues reset-to-bottom merely because the presentation generation changes.
 
@@ -128,6 +128,8 @@ Exit: every transcript item is stored once in the mounted reducer, visible cover
 
 ### 4 — Bound projection and scroll transactions
 
+- In progress: layout transactions now publish bounded settled/abandoned terminal events, watchdog abandonment releases only its exact materialization lease, repeated participants reopen correctly, and entrance completion is order-independent with local lifecycle admission.
+- In progress: anchored and anchorless history now share one coordinator-owned operation and deadline; the retired view-owned fallback task has been removed.
 - Projection intake never stops during prepend; newer desired commits coalesce and install immediately after the exact prepend transaction.
 - Every prepend, automatic-tail command, opening settlement, and layout mutation ends by physical acknowledgement, supersession, direct interaction, cancellation, or deadline.
 - Projection installation emits an explicit receipt with transition classification and semantic mapping; scroll does not observe its own epoch through SwiftUI to manufacture acknowledgement.
