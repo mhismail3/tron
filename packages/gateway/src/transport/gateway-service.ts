@@ -10,7 +10,12 @@ import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../sessions/extension-activity-history.js";
-import { PROCESS_ACTIVITY_CAPABILITY, PROCESS_ACTIVITY_HISTORY_CAPABILITY, PROCESS_TRANSCRIPT_CAPABILITY } from "../sessions/process-activity.js";
+import {
+  PROCESS_ACTIVITY_CAPABILITY,
+  PROCESS_ACTIVITY_HISTORY_CAPABILITY,
+  PROCESS_TRANSCRIPT_ABORT_CAPABILITY,
+  PROCESS_TRANSCRIPT_CAPABILITY,
+} from "../sessions/process-activity.js";
 import { ProcessTranscriptLeaseStore } from "./process-transcript-leases.js";
 import type { FilesystemService } from "../machine/filesystem-service.js";
 import {
@@ -100,7 +105,7 @@ const restartDrainMethods = new Set([
   "device.install.config.status", "device.install.status",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
   "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get", "session.workspace.git.history.diff",
-  "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
+  "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
 ]);
 
@@ -246,6 +251,7 @@ export class GatewayService {
         PROCESS_ACTIVITY_CAPABILITY,
         PROCESS_ACTIVITY_HISTORY_CAPABILITY,
         PROCESS_TRANSCRIPT_CAPABILITY,
+        PROCESS_TRANSCRIPT_ABORT_CAPABILITY,
         "queue-management.v1",
         "skill-prompt.v1",
         "restart-drain.v1",
@@ -704,6 +710,7 @@ export class GatewayService {
         const binding = slot.processChildSessionBinding(processId);
         if (!binding?.runId) throw new GatewayError("not_found", "Subagent session ownership is unavailable");
         const live = slot.processChildSessionPath(processId);
+        const abortAuthority = slot.processSubagentAbortAuthority(processId, binding.runId);
         return safeJson(await this.processTranscriptLeases.open(
           client.id,
           slot.id,
@@ -712,6 +719,7 @@ export class GatewayService {
           binding.runId,
           live?.path,
           client.sendEvent,
+          abortAuthority,
         ));
       }
       case "session.processTranscript.page": {
@@ -727,6 +735,12 @@ export class GatewayService {
           expectedRevision,
         ));
       }
+      case "session.processTranscript.abort":
+        return this.mutation(client, method, params, async () => {
+          const leaseId = string(params.leaseId, "leaseId", { max: 200 });
+          await this.processTranscriptLeases.abortOwned(client.id, leaseId);
+          return { aborted: true };
+        }, true);
       case "session.processTranscript.close": {
         const leaseId = string(params.leaseId, "leaseId", { max: 200 });
         return { closed: this.processTranscriptLeases.closeOwned(client.id, leaseId) };

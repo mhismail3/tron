@@ -17,6 +17,8 @@ type Lease = {
   processId: string;
   childSessionRef: string;
   runId: string;
+  canAbort: boolean;
+  expectedOperationId?: string;
   path: string;
   fileIdentity: string;
   /** Last revision acknowledged by a page response to this client. */
@@ -31,7 +33,8 @@ type Lease = {
 };
 
 /** Connection-owned, disposable observer of a validated canonical child file.
- * It stores no transcript mirror and never acquires a child runtime. */
+ * It stores no transcript mirror. Its sole mutation revalidates the exact lease
+ * binding before asking the already-owned parent runtime to stop that process. */
 export class ProcessTranscriptLeaseStore {
   private readonly leases = new Map<string, Lease>();
   private readonly openingByClient = new Map<string, number>();
@@ -47,11 +50,13 @@ export class ProcessTranscriptLeaseStore {
     runId: string,
     preferredPath: string | undefined,
     notify: (topic: string, sessionId: string, payload: JsonValue) => void,
+    abortAuthority?: { expectedOperationId?: string },
   ): Promise<ProcessTranscriptLease> {
     const releaseOpening = this.reserveOpening(clientId, parentSessionId);
     try {
       return await this.openReserved(
-        clientId, parentSessionId, processId, childSessionRef, runId, preferredPath, notify,
+        clientId, parentSessionId, processId, childSessionRef, runId,
+        preferredPath, notify, abortAuthority,
       );
     } finally {
       releaseOpening();
@@ -66,6 +71,7 @@ export class ProcessTranscriptLeaseStore {
     runId: string,
     preferredPath: string | undefined,
     notify: (topic: string, sessionId: string, payload: JsonValue) => void,
+    abortAuthority?: { expectedOperationId?: string },
   ): Promise<ProcessTranscriptLease> {
     const admission = await this.sessions.resolveReadOnlySubagentPath(
       childSessionRef, preferredPath, parentSessionId, processId, runId,
@@ -103,6 +109,10 @@ export class ProcessTranscriptLeaseStore {
       processId,
       childSessionRef,
       runId,
+      canAbort: abortAuthority !== undefined,
+      ...(abortAuthority?.expectedOperationId
+        ? { expectedOperationId: abortAuthority.expectedOperationId }
+        : {}),
       path: admission.path,
       fileIdentity: page.fileIdentity,
       revision: page.revision,
@@ -119,6 +129,7 @@ export class ProcessTranscriptLeaseStore {
       leaseId: id,
       processId,
       childSessionRef,
+      canAbort: abortAuthority !== undefined,
       revision: page.revision,
       page: {
         items: page.items,
@@ -181,6 +192,36 @@ export class ProcessTranscriptLeaseStore {
         ...(page.leafEntryId ? { leafEntryId: page.leafEntryId } : {}),
         revision: page.revision,
       };
+    });
+  }
+
+  async abortOwned(clientId: string, leaseId: string): Promise<void> {
+    const admittedLease = this.owned(clientId, leaseId);
+    if (!admittedLease.canAbort) {
+      throw new GatewayError("conflict", "This subagent transcript lease is not stoppable", true);
+    }
+    await admittedLease.pageMutex.run(async () => {
+      const lease = this.owned(clientId, leaseId);
+      if (lease !== admittedLease) {
+        throw new GatewayError("conflict", "Subagent transcript lease changed", true);
+      }
+      const admission = await this.sessions.resolveReadOnlySubagentPath(
+        lease.childSessionRef,
+        lease.path,
+        lease.parentSessionId,
+        lease.processId,
+        lease.runId,
+      );
+      if (this.owned(clientId, leaseId) !== admittedLease
+        || admission.path !== lease.path
+        || admission.fileIdentity !== lease.fileIdentity) {
+        throw new GatewayError("conflict", "Subagent session ownership changed", true);
+      }
+      await (await this.sessions.acquire(lease.parentSessionId)).abortSubagentProcess(
+        lease.processId,
+        lease.runId,
+        lease.expectedOperationId,
+      );
     });
   }
 

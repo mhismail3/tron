@@ -50,6 +50,7 @@ describe("session transcript paging", () => {
       "process-activity.v1",
       "process-history.v1",
       "process-transcript.v1",
+      "process-transcript-abort.v1",
       "uploads-status.v2",
       "session-export.v2",
     ]));
@@ -87,6 +88,35 @@ describe("session transcript paging", () => {
       historyRevision: "revision",
     })).resolves.toEqual({ activity: expect.objectContaining({ kind: "command" }) });
     expect(processDetail).toHaveBeenCalledWith("process:command:test", "revision");
+  });
+
+  it("routes subagent stop only through the exact connection-owned transcript lease", async () => {
+    const abortOwned = vi.fn(async () => undefined);
+    const execute = vi.fn(async (
+      _identity: string,
+      _method: string,
+      _commandId: string,
+      operation: () => Promise<unknown>,
+    ) => operation());
+    const service = new GatewayService({
+      sessions: {},
+      receipts: { execute },
+    } as unknown as GatewayServiceDependencies);
+    Object.assign(service as unknown as Record<string, unknown>, {
+      processTranscriptLeases: { abortOwned },
+    });
+
+    await expect(service.invoke(client, "session.processTranscript.abort", {
+      leaseId: "lease-1",
+      commandId: "command-subagent-stop",
+    })).resolves.toEqual({ aborted: true });
+    expect(abortOwned).toHaveBeenCalledWith("phone", "lease-1");
+    expect(execute).toHaveBeenCalledWith(
+      "device:test",
+      "session.processTranscript.abort",
+      "command-subagent-stop",
+      expect.any(Function),
+    );
   });
 
   it("returns a bounded page only for an established subscription without creating ownership", async () => {

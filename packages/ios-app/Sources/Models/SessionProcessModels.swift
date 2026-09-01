@@ -211,6 +211,7 @@ struct ProcessTranscriptChanged: Codable, Hashable, Sendable {
 enum SessionProcessAdmissionPolicy {
     static let historyCapability = "process-history.v1"
     static let transcriptCapability = "process-transcript.v1"
+    static let transcriptAbortCapability = "process-transcript-abort.v1"
     static let maximumActivities = 32
     static let maximumRemovedProcessIDs = 32
     static let maximumOverviewCount = 2_080

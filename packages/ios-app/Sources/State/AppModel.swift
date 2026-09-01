@@ -2306,6 +2306,21 @@ final class AppModel {
         } catch { surface(error) }
     }
 
+    @discardableResult
+    func abortSubagent(leaseID: String) async -> Bool {
+        do {
+            try await sessionMutations.abortSubagent(leaseID: leaseID)
+            return true
+        } catch is CancellationError {
+            guard !Task.isCancelled else { return false }
+            presentError("Stop could not be delivered to the Mac. Reopen the subagent session and try again.")
+            return false
+        } catch {
+            surface(error)
+            return false
+        }
+    }
+
     func clearQueue(sessionID: String) async throws {
         guard let target = presentationTarget(for: sessionID),
               admitsLiveSessionCommands(target) else { throw CancellationError() }

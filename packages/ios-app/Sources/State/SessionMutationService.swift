@@ -142,6 +142,26 @@ final class SessionMutationService {
         }
     }
 
+    func abortSubagent(leaseID: String) async throws {
+        struct Params: Codable {
+            let leaseId: String
+            let commandId: String
+        }
+        struct Response: Codable { let aborted: Bool }
+        let commandID = uuidSource.next().uuidString
+        let params = Params(leaseId: leaseID, commandId: commandID)
+        let _: Response = try await executor.perform(
+            method: "session.processTranscript.abort",
+            commandID: commandID
+        ) {
+            try await client.request(
+                "session.processTranscript.abort",
+                params,
+                timeout: .seconds(30)
+            )
+        }
+    }
+
     func clearQueue(sessionID: String) async throws {
         struct Params: Codable { let sessionId, commandId: String }
         struct Response: Codable { let cleared: Bool }

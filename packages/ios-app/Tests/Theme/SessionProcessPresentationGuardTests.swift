@@ -93,6 +93,15 @@ struct SessionProcessPresentationGuardTests {
         #expect(child.contains("isConnected: model.connectionState == .connected"))
         #expect(child.contains("guard model.connectionState == .connected"))
         #expect(child.contains(".onChange(of: mountedActivity)"))
+        #expect(child.contains("ToolbarItem(placement: .cancellationAction)"))
+        #expect(child.contains("Image(systemName: \"stop.fill\")"))
+        #expect(child.contains(".accessibilityLabel(\"Stop Subagent\")"))
+        #expect(child.contains("ReadOnlySubagentStopControlPolicy.isVisible("))
+        #expect(child.contains("SessionProcessAdmissionPolicy.transcriptAbortCapability"))
+        #expect(child.contains("store?.leaseID != nil"))
+        #expect(child.contains("store?.canAbort == true"))
+        #expect(child.contains("store?.liveActivity?.lifecycle.state.isActive == true"))
+        #expect(child.contains("model.abortSubagent(leaseID: leaseID)"))
         let transcript = try #require(
             child.components(separatedBy: "private func transcript").dropFirst().first?
                 .components(separatedBy: "private struct ReadOnlySubagentTranscriptRow").first

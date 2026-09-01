@@ -94,13 +94,47 @@ struct SessionProcessModelsTests {
     func admission() {
         let active = makeProcess(state: .running, visibility: .active, sequence: 2)
         #expect(SessionProcessAdmissionPolicy.admits(active))
+        #expect(active.lifecycle.state.isActive)
         let recent = makeProcess(
             state: .completed, visibility: .recent, sequence: 3,
             terminalAt: "2026-01-01T00:00:01Z", recentUntil: "2026-01-01T00:05:01Z"
         )
         #expect(SessionProcessAdmissionPolicy.admits(recent))
+        #expect(!recent.lifecycle.state.isActive)
         #expect(SessionProcessProjection.sections([recent, active]).active.map(\.id) == [active.id])
         #expect(SessionProcessProjection.sections([recent, active]).recent.map(\.id) == [recent.id])
+    }
+
+    @Test("subagent stop control requires active lifecycle exact authority and Gateway support")
+    func stopControlVisibility() {
+        #expect(ReadOnlySubagentStopControlPolicy.isVisible(
+            lifecycleState: .running,
+            hasAbortAuthority: true,
+            supportsAbort: true
+        ))
+        for terminal in [
+            SessionProcessLifecycleState.completed,
+            .failed,
+            .stopped,
+            .rejected,
+            .interrupted,
+        ] {
+            #expect(!ReadOnlySubagentStopControlPolicy.isVisible(
+                lifecycleState: terminal,
+                hasAbortAuthority: true,
+                supportsAbort: true
+            ))
+        }
+        #expect(!ReadOnlySubagentStopControlPolicy.isVisible(
+            lifecycleState: .running,
+            hasAbortAuthority: false,
+            supportsAbort: true
+        ))
+        #expect(!ReadOnlySubagentStopControlPolicy.isVisible(
+            lifecycleState: .running,
+            hasAbortAuthority: true,
+            supportsAbort: false
+        ))
     }
 
     @Test("a mounted aggregate follows only one exact tool and run successor")

@@ -91,6 +91,7 @@ import {
   listProcessHistory,
   processHistoryDetail,
   processOverview,
+  subagentAbortRoute,
   subagentProcessesFromActivity,
 } from "./process-activity.js";
 import type { ExtensionActivityHistoryPage } from "./extension-activity-history.js";
@@ -418,6 +419,9 @@ export class RuntimeSlot {
   private readonly unregisterExtensionExpiry: () => void;
   private readonly unregisterProcessExpiry: () => void;
   private readonly processActivities = new Map<string, SessionProcessActivity>();
+  /** Foreground operation captured only while the owning subagent tool call is
+   * actively executing. This fences a later sheet stop from newer parent work. */
+  private readonly processOperationIDs = new Map<string, string>();
   private readonly processIDsByToolCall = new Map<string, Set<string>>();
   private readonly pendingProcessRemovalsByToolCall = new Map<string, Set<string>>();
   private readonly validatedChildSessionPaths = new Map<string, string>();
@@ -1476,6 +1480,7 @@ export class RuntimeSlot {
   private clearProcessActivities(): void {
     for (const processId of this.processActivities.keys()) this.dependencies.processActivityRecency.remove(processId);
     this.processActivities.clear();
+    this.processOperationIDs.clear();
     this.processIDsByToolCall.clear();
     this.pendingProcessRemovalsByToolCall.clear();
     this.validatedChildSessionPaths.clear();
@@ -1492,6 +1497,7 @@ export class RuntimeSlot {
     for (const processId of previousIDs) {
       if (projectedIDs.has(processId)) continue;
       if (this.processActivities.delete(processId)) removed.add(processId);
+      this.processOperationIDs.delete(processId);
       this.dependencies.processActivityRecency.remove(processId);
       this.processRevision += 1;
     }
@@ -1499,6 +1505,7 @@ export class RuntimeSlot {
       if (projectedCandidate.lifecycle.state === "unknown"
         || projectedCandidate.visibility === "unknown") {
         if (this.processActivities.delete(projectedCandidate.processId)) removed.add(projectedCandidate.processId);
+        this.processOperationIDs.delete(projectedCandidate.processId);
         this.dependencies.processActivityRecency.remove(projectedCandidate.processId);
         this.processRevision += 1;
         continue;
@@ -1523,9 +1530,19 @@ export class RuntimeSlot {
       }
       if (admitted.activity.visibility !== "active" && admitted.activity.visibility !== "recent") {
         if (this.processActivities.delete(candidate.processId)) removed.add(candidate.processId);
+        this.processOperationIDs.delete(candidate.processId);
         continue;
       }
       this.processActivities.set(candidate.processId, admitted.activity);
+      const operationId = this.operation?.id;
+      if (admitted.activity.executionMode === "synchronous"
+        && ["queued", "running", "paused"].includes(admitted.activity.lifecycle.state)
+        && this.toolExecutions.get(toolCallId)?.status === "running"
+        && operationId) {
+        this.processOperationIDs.set(candidate.processId, operationId);
+      } else {
+        this.processOperationIDs.delete(candidate.processId);
+      }
       installedNextIDs.add(candidate.processId);
       this.processRevision += 1;
     }
@@ -4357,6 +4374,7 @@ export class RuntimeSlot {
     let removed = false;
     for (const processId of frame.expiredProcessIds) {
       if (!this.processActivities.delete(processId)) continue;
+      this.processOperationIDs.delete(processId);
       this.childSessionBindings.delete(processId);
       removed = true;
       for (const [toolCallId, processIDs] of this.processIDsByToolCall) {
@@ -4806,6 +4824,84 @@ export class RuntimeSlot {
       path,
       ...(binding.runId ? { runId: binding.runId } : {}),
     } : undefined;
+  }
+
+  processSubagentAbortAuthority(
+    processId: string,
+    expectedRunId: string,
+  ): { expectedOperationId?: string } | undefined {
+    this.assertNoTrustReload();
+    const origin = this.extensionToolOrigin("subagent");
+    const tool = this.runtime.session.extensionRunner.getToolDefinition("subagent");
+    const capturedOperationId = this.processOperationIDs.get(processId);
+    const currentOperationId = capturedOperationId === this.operation?.id
+      ? capturedOperationId
+      : undefined;
+    const route = subagentAbortRoute(
+      this.processActivities.get(processId),
+      this.processChildSessionBinding(processId),
+      expectedRunId,
+      currentOperationId,
+      origin?.owner !== undefined
+        && trustedExtensionOriginKind(origin.owner) === "subagent"
+        && tool !== undefined,
+    );
+    return route?.kind === "foreground"
+      ? { expectedOperationId: route.expectedOperationId }
+      : route ? {} : undefined;
+  }
+
+  async abortSubagentProcess(
+    processId: string,
+    expectedRunId: string,
+    expectedOperationId?: string,
+  ): Promise<void> {
+    const origin = this.extensionToolOrigin("subagent");
+    const tool = this.runtime.session.extensionRunner.getToolDefinition("subagent");
+    const capturedOperationId = this.processOperationIDs.get(processId);
+    const currentOperationId = capturedOperationId === this.operation?.id
+      ? capturedOperationId
+      : undefined;
+    const route = subagentAbortRoute(
+      this.processActivities.get(processId),
+      this.processChildSessionBinding(processId),
+      expectedRunId,
+      currentOperationId,
+      origin?.owner !== undefined
+        && trustedExtensionOriginKind(origin.owner) === "subagent"
+        && tool !== undefined,
+    );
+    if (!route) {
+      throw new GatewayError("conflict", "The subagent execution changed before it could be stopped", true);
+    }
+
+    // A synchronous subagent is the parent session's current foreground tool.
+    // Fence the same settled abort path used by the ordinary composer control
+    // to the operation captured when this exact transcript lease opened.
+    if (route.kind === "foreground") {
+      if (!expectedOperationId || route.expectedOperationId !== expectedOperationId) {
+        throw new GatewayError("conflict", "The foreground operation changed before it could be stopped", true);
+      }
+      await this.abort("agent", expectedOperationId);
+      return;
+    }
+
+    if (!tool) throw new GatewayError("unsupported", "The installed subagent controller is unavailable");
+    const result = await tool.execute(
+      `tron-stop-${randomUUID()}`,
+      { action: "stop", id: route.runId, childId: route.childId },
+      new AbortController().signal,
+      undefined,
+      this.runtime.session.extensionRunner.createContext(),
+    );
+    if ((result as typeof result & { isError?: boolean }).isError === true) {
+      const message = result.content.find(content => content.type === "text")?.text;
+      throw new GatewayError(
+        "conflict",
+        message?.slice(0, 512) || "The subagent controller rejected the stop request",
+        true,
+      );
+    }
   }
 
   publishSnapshot(): void {
@@ -6283,6 +6379,7 @@ export class RuntimeSlot {
       this.dependencies.processActivityRecency.remove(processId);
     }
     this.processActivities.clear();
+    this.processOperationIDs.clear();
     this.processIDsByToolCall.clear();
     this.pendingProcessRemovalsByToolCall.clear();
     this.validatedChildSessionPaths.clear();

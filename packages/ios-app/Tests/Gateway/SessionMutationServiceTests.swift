@@ -275,6 +275,17 @@ struct SessionMutationServiceTests {
                 ]
             )
 
+            let subagentAbort = Task {
+                try await harness.service.abortSubagent(leaseID: "subagent-lease")
+            }
+            _ = try await complete(
+                subagentAbort, socket: harness.socket, frameIndex: &frameIndex,
+                method: "session.processTranscript.abort",
+                result: .object(["aborted": .bool(true)]),
+                requiresSessionID: false,
+                expectedParams: ["leaseId": .string("subagent-lease")]
+            )
+
             let bash = Task {
                 try await harness.service.executeBash(
                     "pwd", sessionID: "bash-session", excludeFromContext: true

@@ -423,6 +423,7 @@ export interface ProcessTranscriptLease {
   leaseId: string;
   processId: string;
   childSessionRef: string;
+  canAbort: boolean;
   revision: string;
   page: {
     items: TranscriptItem[];

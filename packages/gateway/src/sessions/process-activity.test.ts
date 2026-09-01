@@ -8,6 +8,7 @@ import {
   listProcessHistory,
   processOverview,
   redactProcessText,
+  subagentAbortRoute,
   subagentProcessesFromActivity,
 } from "./process-activity.js";
 
@@ -45,6 +46,62 @@ const subagent: ExtensionRunActivity = {
 };
 
 describe("session process projection", () => {
+  it("routes exact active subagent stop ownership and rejects terminal or unfenced work", () => {
+    const running: ExtensionRunActivity = {
+      ...subagent,
+      mode: "async",
+      status: "running",
+      completedAt: undefined,
+      children: subagent.children.map(child => ({
+        ...child,
+        status: "running",
+        lifecycle: "running",
+      })),
+      lifecycle: {
+        ...subagent.lifecycle!,
+        state: "running",
+        terminalAt: undefined,
+        recentUntil: undefined,
+      },
+    };
+    const asyncProcess = subagentProcessesFromActivity("session", running)[0];
+    expect(asyncProcess?.parentProcessId).toBeUndefined();
+    expect(subagentAbortRoute(
+      asyncProcess,
+      { runId: "run-1", producerId: "child-1" },
+      "run-1",
+      undefined,
+      true,
+    )).toEqual({ kind: "controller", runId: "run-1", childId: "child-1" });
+    expect(subagentAbortRoute(
+      { ...asyncProcess!, executionMode: "synchronous" },
+      { runId: "run-1", producerId: "child-1" },
+      "run-1",
+      "operation-1",
+      true,
+    )).toEqual({ kind: "foreground", expectedOperationId: "operation-1" });
+    expect(subagentAbortRoute(
+      { ...asyncProcess!, executionMode: "synchronous" },
+      { runId: "run-1", producerId: "child-1" },
+      "run-1",
+      undefined,
+      true,
+    )).toBeUndefined();
+    expect(subagentAbortRoute(
+      { ...asyncProcess!, lifecycle: { ...asyncProcess!.lifecycle, state: "completed" } },
+      { runId: "run-1", producerId: "child-1" },
+      "run-1",
+      undefined,
+      true,
+    )).toBeUndefined();
+    expect(subagentAbortRoute(
+      asyncProcess,
+      { runId: "run-1", producerId: "child-1" },
+      "run-1",
+      undefined,
+      false,
+    )).toBeUndefined();
+  });
   it("redacts delegated output previews", () => {
     const secret = "API_KEY=top-secret curl -H 'Authorization: Bearer abc123' https://user:pass@example.test";
     expect(redactProcessText(secret)).not.toMatch(/top-secret|abc123|:pass@/u);

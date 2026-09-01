@@ -524,6 +524,16 @@ enum SessionProcessRowPresentation {
     }
 }
 
+enum ReadOnlySubagentStopControlPolicy {
+    static func isVisible(
+        lifecycleState: SessionProcessLifecycleState,
+        hasAbortAuthority: Bool,
+        supportsAbort: Bool
+    ) -> Bool {
+        lifecycleState.isActive && hasAbortAuthority && supportsAbort
+    }
+}
+
 private struct ReadOnlySubagentOpenIdentity: Hashable {
     let presentationGeneration: Int?
     let isConnected: Bool
@@ -539,6 +549,7 @@ struct ReadOnlySubagentSessionSheet: View {
     @State private var scrollPosition = ScrollPosition(idType: String.self)
     @State private var isNearTail = true
     @State private var detent: PresentationDetent = .medium
+    @State private var stopRequested = false
 
     private let tailID = "read-only-subagent-tail"
 
@@ -550,6 +561,19 @@ struct ReadOnlySubagentSessionSheet: View {
             }
             .tronNavigationTitle(process.title)
             .toolbar {
+                if showsStopControl {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(action: requestStop) {
+                            Image(systemName: "stop.fill")
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(Color.tronError)
+                        }
+                        .disabled(!canStop)
+                        .accessibilityLabel("Stop Subagent")
+                        .accessibilityHint("Stops this subagent execution")
+                        .accessibilityIdentifier("stop-subagent-button")
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
@@ -598,6 +622,35 @@ struct ReadOnlySubagentSessionSheet: View {
             selected: process,
             activities: model.authoritativeSnapshot(for: parentSessionID)?.processActivities ?? []
         )
+    }
+
+    private var currentActivity: SessionProcessActivity {
+        mountedActivity ?? store?.liveActivity ?? process
+    }
+
+    private var showsStopControl: Bool {
+        ReadOnlySubagentStopControlPolicy.isVisible(
+            lifecycleState: currentActivity.lifecycle.state,
+            hasAbortAuthority: store?.leaseID != nil
+                && store?.canAbort == true
+                && store?.liveActivity?.lifecycle.state.isActive == true,
+            supportsAbort: model.gatewayInfo?.capabilities.contains(
+                SessionProcessAdmissionPolicy.transcriptAbortCapability
+            ) == true
+        )
+    }
+
+    private var canStop: Bool {
+        !stopRequested && model.connectionState == .connected
+    }
+
+    private func requestStop() {
+        guard canStop, let leaseID = store?.leaseID else { return }
+        stopRequested = true
+        Task {
+            let delivered = await model.abortSubagent(leaseID: leaseID)
+            if !delivered { stopRequested = false }
+        }
     }
 
     @ViewBuilder

@@ -1102,7 +1102,16 @@ cache; they continue to omit paths, task text, and output.
 
 The companion `process-history.v1` capability advertises canonical history reads.
 The `process-transcript.v1` capability authorizes `session.processTranscript.open`,
-`.page`, and `.close` through the exact parent process-to-child relationship. A
+`.page`, and `.close` through the exact parent process-to-child relationship. The separate
+`process-transcript-abort.v1` capability authorizes only
+`session.processTranscript.abort`: the Gateway requires the caller's exact live lease,
+serializes with that lease's reads, revalidates parent/process/run, path, and file identity,
+then routes stop through an idempotent command receipt. Synchronous children use the
+parent session's ordinary settled agent abort, matching the composer stop control; asynchronous
+children use only the trusted installed subagent controller with the exact root run and exact
+child producer. The open response sets `canAbort` only when that route exists; synchronous leases
+also capture the exact foreground operation ID, so a stale lease cannot abort newer parent work.
+It exposes no generic child mutation or writable transcript authority. A
 connection-owned lease watches only the validated canonical child file, installs that
 watch before capturing its initial page, latches any append in the baseline-publication
 window, emits bounded invalidation events, and reopens it through a read-only projection
@@ -1131,8 +1140,10 @@ parses the already-open, identity-pinned descriptor through a pure read-only bra
 under an explicit 64 MiB per-session parse budget, so a replace/read/swap-back race cannot
 redirect parsing to another inode and a legitimate but unbounded child file cannot exhaust
 Gateway memory.
-It never calls `RuntimeRegistry.acquire` for the child, exposes mutation methods, or
-keeps a second transcript mirror. Producer admission requires the exact owning tool/run,
+Read-only open/page/refresh never call `RuntimeRegistry.acquire` for the child and the
+lease keeps no second transcript mirror. Only the separately advertised exact-lease abort
+may reacquire the already-owned parent runtime, and only to invoke its existing settled
+foreground abort or trusted subagent stop control. Producer admission requires the exact owning tool/run,
 a unique child identity, and a regular session file structurally nested beneath the
 canonical parent session's child root; persisted reopening repeats the parent/process/run,
 producer-token, and catalog checks. Reads reject missing ownership, symlinks, oversized headers,

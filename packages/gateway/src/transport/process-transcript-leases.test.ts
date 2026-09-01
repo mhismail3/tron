@@ -30,7 +30,11 @@ describe("ProcessTranscriptLeaseStore", () => {
     const notify = vi.fn();
 
     const opened = await store.open("client-1", "parent-1", "process-1", "child-1", "run-1", undefined, notify);
-    expect(opened).toMatchObject({ processId: "process-1", childSessionRef: "child-1", revision: "revision-1" });
+    expect(opened).toMatchObject({
+      processId: "process-1", childSessionRef: "child-1", canAbort: false, revision: "revision-1",
+    });
+    await expect(store.abortOwned("client-1", opened.leaseId))
+      .rejects.toMatchObject({ code: "conflict", retryable: true });
     await expect(store.page("client-2", opened.leaseId)).rejects.toMatchObject({ code: "not_found" });
     await expect(store.page("client-1", opened.leaseId, undefined, undefined, "stale")).rejects.toMatchObject({ code: "conflict" });
     await store.page("client-1", opened.leaseId);
@@ -39,6 +43,37 @@ describe("ProcessTranscriptLeaseStore", () => {
     );
     expect(store.closeOwned("client-1", opened.leaseId)).toBe(true);
     await expect(store.page("client-1", opened.leaseId)).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("revalidates an owned lease before forwarding the ordinary child abort", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-process-abort-"));
+    roots.push(root);
+    const path = join(root, "child.jsonl");
+    await writeFile(path, "{}\n");
+    const abortSubagentProcess = vi.fn(async () => undefined);
+    const sessions = {
+      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
+      readOnlySubagentTranscriptPage: vi.fn(async () => page("revision-1")),
+      acquire: vi.fn(async () => ({ abortSubagentProcess })),
+    } as unknown as RuntimeRegistry;
+    const store = new ProcessTranscriptLeaseStore(sessions);
+    const opened = await store.open(
+      "client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn(),
+      { expectedOperationId: "operation-1" },
+    );
+
+    expect(opened.canAbort).toBe(true);
+    await expect(store.abortOwned("client-2", opened.leaseId))
+      .rejects.toMatchObject({ code: "not_found" });
+    await expect(store.abortOwned("client-1", opened.leaseId)).resolves.toBeUndefined();
+    expect(sessions.resolveReadOnlySubagentPath).toHaveBeenLastCalledWith(
+      "child-1", path, "parent-1", "process-1", "run-1",
+    );
+    expect(sessions.acquire).toHaveBeenCalledWith("parent-1");
+    expect(abortSubagentProcess).toHaveBeenCalledWith(
+      "process-1", "run-1", "operation-1",
+    );
+    store.releaseClient("client-1");
   });
 
   it("serializes same-lease page and refresh revisions", async () => {

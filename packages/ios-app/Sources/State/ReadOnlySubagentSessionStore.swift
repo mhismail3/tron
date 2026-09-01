@@ -55,6 +55,7 @@ private struct ProcessTranscriptOpenResponse: Decodable, Sendable {
     let leaseId: String
     let processId: String
     let childSessionRef: String
+    let canAbort: Bool?
     let revision: String
     let page: ProcessTranscriptPage
 }
@@ -167,6 +168,7 @@ final class ReadOnlySubagentSessionStore {
     private(set) var presentationGeneration: Int?
     private(set) var leaseID: String?
     private(set) var childSessionRef: String?
+    private(set) var canAbort = false
     private(set) var revision: String?
     private(set) var items: [TranscriptItem] = []
     private(set) var presentation: ChatReadOnlyTranscriptProjection = .empty
@@ -248,9 +250,11 @@ final class ReadOnlySubagentSessionStore {
                     }
                     self.leaseID = response.leaseId
                     self.childSessionRef = response.childSessionRef
+                    self.canAbort = response.canAbort == true
                     self.revision = response.revision
                     guard self.install(response.page) else {
                         self.leaseID = nil
+                        self.canAbort = false
                         self.status = .failed("The canonical subagent transcript is inconsistent.")
                         Self.closeDetached(client: client, leaseID: response.leaseId)
                         return
@@ -573,7 +577,7 @@ final class ReadOnlySubagentSessionStore {
         textPreparationTask?.cancel(); textPreparationTask = nil
         textPreparationGeneration &+= 1
         pendingRefreshRevision = nil
-        leaseID = nil; childSessionRef = nil; revision = nil
+        leaseID = nil; childSessionRef = nil; canAbort = false; revision = nil
         items.removeAll(); presentation = .empty; preparedText = .empty
         transcriptStart = 0; transcriptTotal = 0
         nextEntryID = nil; leafEntryID = nil; liveActivity = nil

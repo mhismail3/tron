@@ -17,6 +17,7 @@ import { PROCESS_ACTIVITY_RECENT_MS } from "./process-activity-recency.js";
 export const PROCESS_ACTIVITY_CAPABILITY = "process-activity.v1";
 export const PROCESS_ACTIVITY_HISTORY_CAPABILITY = "process-history.v1";
 export const PROCESS_TRANSCRIPT_CAPABILITY = "process-transcript.v1";
+export const PROCESS_TRANSCRIPT_ABORT_CAPABILITY = "process-transcript-abort.v1";
 export const MAX_PROCESS_ACTIVITY_COUNT = 32;
 export const MAX_PROCESS_ACTIVITY_BYTES = 256 * 1_024;
 export const MAX_PROCESS_HISTORY_PAGE = 50;
@@ -111,6 +112,31 @@ function subagentMode(mode: string | undefined): SessionProcessActivity["executi
   if (normalized?.includes("sync") || normalized === "workflow" || normalized === "single"
     || normalized === "parallel" || normalized === "chain") return "synchronous";
   return "unknown";
+}
+
+export type SubagentAbortRoute =
+  | { kind: "foreground"; expectedOperationId: string }
+  | { kind: "controller"; runId: string; childId: string };
+
+export function subagentAbortRoute(
+  process: SessionProcessActivity | undefined,
+  binding: { runId?: string; producerId: string } | undefined,
+  expectedRunId: string,
+  currentOperationId: string | undefined,
+  trustedControllerAvailable: boolean,
+): SubagentAbortRoute | undefined {
+  if (!process || !binding || process.kind !== "subagent"
+    || !["queued", "running", "paused"].includes(process.lifecycle.state)
+    || process.runId !== expectedRunId || binding.runId !== expectedRunId) return undefined;
+  if (process.executionMode === "synchronous") {
+    return currentOperationId
+      ? { kind: "foreground", expectedOperationId: currentOperationId }
+      : undefined;
+  }
+  if (process.executionMode === "asynchronous" && trustedControllerAvailable) {
+    return { kind: "controller", runId: expectedRunId, childId: binding.producerId };
+  }
+  return undefined;
 }
 
 function childRows(
