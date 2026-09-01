@@ -272,4 +272,3 @@ enum ChatUIKitPresentationAdapter {
         }
     }
 }
-

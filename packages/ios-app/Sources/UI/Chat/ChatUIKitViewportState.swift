@@ -28,4 +28,3 @@ enum ChatUIKitViewportTransactionOutcome: Equatable, Sendable {
     case recovered(UInt64)
     case cancelled(UInt64)
 }
-

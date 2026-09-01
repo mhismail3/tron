@@ -476,4 +476,3 @@ final class ChatUIKitMarkdownView: UIView {
         stack.addArrangedSubview(wrapper)
     }
 }
-
