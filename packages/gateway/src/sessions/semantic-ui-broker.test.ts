@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { SemanticUIBroker, type ExtensionNotificationInput } from "./semantic-ui-broker.js";
 import { ExtensionPresentationStore } from "../extensions/host/extension-presentation-store.js";
-import type { JsonValue } from "../protocol/types.js";
+import type { ExtensionInteraction, JsonValue } from "../protocol/types.js";
 import { withInvocationContext } from "../extensions/owner-attribution.js";
 
 function brokerWith(
   broadcast: (topic: string, payload: JsonValue) => void = () => {},
   notificationSink?: (notification: ExtensionNotificationInput) => void,
+  interactionSink?: (interaction: ExtensionInteraction) => void | Promise<void>,
 ): SemanticUIBroker {
   return new SemanticUIBroker(
     new ExtensionPresentationStore((topic, payload) => broadcast(topic, payload)),
     notificationSink,
+    interactionSink,
   );
 }
 
@@ -58,6 +60,7 @@ describe("SemanticUIBroker", () => {
   it("installs settlement authority before synchronously broadcasting presentation", async () => {
     let broker!: SemanticUIBroker;
     let answered = false;
+    const announced: string[] = [];
     broker = brokerWith((_topic, payload) => {
       const interaction = (payload as { interactionList?: Array<{ id: string; hostEpoch: string; presentationRevision: number }> }).interactionList?.[0];
       if (!interaction || answered) return;
@@ -69,7 +72,7 @@ describe("SemanticUIBroker", () => {
           { questionId: "q-region", optionIds: ["eu"] },
         ],
       }, false);
-    });
+    }, undefined, (interaction) => { announced.push(interaction.id); });
     await expect(broker.requestForm({ form: form() })).resolves.toEqual({
       version: 1,
       answers: [
@@ -78,6 +81,7 @@ describe("SemanticUIBroker", () => {
       ],
     });
     expect(broker.interactions()).toEqual([]);
+    expect(announced).toEqual([]);
   });
 
   it("rejects malformed, incomplete, conflicting, and unknown form answers without removing the request", async () => {
@@ -119,21 +123,40 @@ describe("SemanticUIBroker", () => {
     await expect(pending).rejects.toMatchObject({ code: "cancelled" });
   });
 
-  it("admits before notifying and settles an abort exactly once", async () => {
-    const broker = brokerWith(() => {});
+  it("announces an admitted interaction without owning its settlement", async () => {
+    const observed: Array<{ id: string; method: string; pending: number }> = [];
+    let broker!: SemanticUIBroker;
+    broker = brokerWith(
+      () => {},
+      undefined,
+      async (interaction) => {
+        observed.push({ id: interaction.id, method: interaction.method, pending: broker.interactions().length });
+        throw new Error("notification unavailable");
+      },
+    );
     const controller = new AbortController();
-    const observed: number[] = [];
-    const pending = broker.requestForm({
-      form: form(), signal: controller.signal,
-      presented: () => { observed.push(broker.interactions().length); throw new Error("notification unavailable"); },
-    });
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(observed).toEqual([1]);
+    const pending = broker.requestForm({ form: form(), signal: controller.signal });
+    const interaction = broker.interactions()[0]!;
+    expect(observed).toEqual([{ id: interaction.id, method: "form", pending: 1 }]);
     controller.abort();
     await expect(pending).resolves.toBeUndefined();
     expect(broker.interactions()).toEqual([]);
-    controller.abort();
-    expect(broker.interactions()).toEqual([]);
+  });
+
+  it("routes every response-capable semantic interaction through one admission sink", async () => {
+    const methods: string[] = [];
+    const broker = brokerWith(() => {}, undefined, (interaction) => { methods.push(interaction.method); });
+    const context = broker.context();
+    const pending: Promise<unknown>[] = [
+      context.select("Select", ["one", "two"]),
+      context.confirm("Confirm", "Proceed?"),
+      context.input("Input", "Value"),
+      context.editor("Editor", "Draft"),
+      broker.requestForm({ form: form() }),
+    ];
+    expect(methods).toEqual(["select", "confirm", "input", "editor", "form"]);
+    broker.cancelAll();
+    await Promise.allSettled(pending);
   });
 
   it("binds interaction requests to the exact invocation context", async () => {

@@ -7,5 +7,4 @@ export type FormRequest = (input: {
   form: ExtensionFormDescriptor;
   signal?: AbortSignal;
   timeout?: number;
-  presented?: () => void | Promise<void>;
 }) => Promise<ExtensionFormAnswer | undefined>;

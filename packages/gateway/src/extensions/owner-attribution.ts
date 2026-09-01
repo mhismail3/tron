@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { basename, extname } from "node:path";
 import type { Extension, LoadExtensionsResult, RegisteredCommand, RegisteredTool, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { adaptedExtensionEventHandler, adaptedToolDefinition, type ExtensionAdapterHooks } from "./extension-adapters.js";
+import { adaptedExtensionEventHandler, adaptedToolDefinition } from "./extension-adapters.js";
 import type { ExtensionOwner } from "../protocol/types.js";
 import { GatewayError } from "../errors.js";
 
@@ -62,7 +62,7 @@ function owned<T extends (...args: any[]) => any>(fn: T, owner: ExtensionOwner):
 /** Wrap every callback registered by one loaded extension. The result is safe
  * to apply on every resource reload because each load result is wrapped once
  * and all maps/functions are retained as public Pi objects. */
-export function attributeExtensions(base: LoadExtensionsResult, hooks: ExtensionAdapterHooks = {}): LoadExtensionsResult {
+export function attributeExtensions(base: LoadExtensionsResult): LoadExtensionsResult {
   const bashOwners = base.extensions.filter((extension) => extension.tools.has("bash"));
   if (bashOwners.length > 0) {
     throw new GatewayError("conflict", "The bash tool name is reserved by Tron");
@@ -80,7 +80,7 @@ export function attributeExtensions(base: LoadExtensionsResult, hooks: Extension
       extension.handlers.set(event, handlers.map((handler) => owned(adaptedExtensionEventHandler(extension, handler), owner)));
     }
     for (const [name, registered] of extension.tools) {
-      const definition = adaptedToolDefinition(extension, name, registered.definition, hooks);
+      const definition = adaptedToolDefinition(extension, name, registered.definition);
       const execute = owned(definition.execute, owner);
       attributedToolOwners.set(execute, owner);
       extension.tools.set(name, {

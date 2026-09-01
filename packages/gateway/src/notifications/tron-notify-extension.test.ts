@@ -11,7 +11,7 @@ function fixture() {
     sessionTitle: () => "Canonical title",
     machineId: "machine-abcdefgh",
     isAutomaticCompletionSuppressed: (completionId) => completionId === "assistant-entry",
-    suppressAutomaticCompletion: async (input) => { suppressed.push(input); return "suppressed"; },
+    suppressAutomatic: async (input) => { suppressed.push(input); return "suppressed"; },
     enqueue: async (input) => { admitted.push(input); return "queued"; },
   });
   return {
@@ -61,6 +61,7 @@ describe("first-party Tron notify extension", () => {
     expect(value.suppressed).toEqual([{
       sessionId: "canonical-session",
       sourceId: "assistant-entry",
+      kind: "agent_finished",
     }]);
   });
 

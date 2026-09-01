@@ -518,7 +518,25 @@ export class RuntimeSlot {
         { code: "theme.baseline-only", message: "Per-session process-global Pi theme synchronization is unavailable through the pinned public API." },
       ],
     });
-    return new SemanticUIBroker(presentation, (notification) => this.enqueueExtensionNotification(notification));
+    return new SemanticUIBroker(
+      presentation,
+      (notification) => this.enqueueExtensionNotification(notification),
+      (interaction) => {
+        const notifications = this.dependencies.notifications;
+        if (!notifications) return;
+        // Sample the same token-bound foreground lease at the exact semantic
+        // interaction admission boundary. The detached service call receives
+        // that latched disposition, so a later close/open race cannot change
+        // whether this input request was already visible to the user.
+        const observed = this.dependencies.isSessionPresented(this.id);
+        return notifications.userInputRequired({
+          sessionId: this.id,
+          interactionId: interaction.id,
+          observed,
+          ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
+        });
+      },
+    );
   }
 
   private currentExtensionContextOrigin(): ExtensionToolOrigin | undefined {
@@ -1039,16 +1057,12 @@ export class RuntimeSlot {
                 sessionTitle: () => this.notificationTitle(),
                 ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
                 isAutomaticCompletionSuppressed: (completionId) => this.completionObserved(completionId),
-                suppressAutomaticCompletion: (input) => notifications.suppressAutomaticCompletion(input),
+                suppressAutomatic: (input) => notifications.suppressAutomatic(input),
                 enqueue: (input) => notifications.enqueue(input),
               }),
             }],
           } : {}),
-          extensionsOverride: (base) => attributeExtensions(base, {
-            ...(notifications ? {
-              askPresented: ({ toolCallId }) => notifications.askPresented(this.id, toolCallId, this.dependencies.machineId),
-            } : {}),
-          }),
+          extensionsOverride: (base) => attributeExtensions(base),
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });

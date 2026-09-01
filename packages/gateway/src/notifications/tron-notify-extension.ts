@@ -26,7 +26,7 @@ export function createTronNotifyExtension(input: {
   sessionTitle: () => string;
   machineId?: string;
   isAutomaticCompletionSuppressed: (completionId: string) => boolean;
-  suppressAutomaticCompletion: (input: { sessionId: string; sourceId: string }) => Promise<"suppressed">;
+  suppressAutomatic: (input: { sessionId: string; sourceId: string; kind: "agent_finished" }) => Promise<"suppressed">;
   enqueue: TronNotificationEnqueue;
 }): ExtensionFactory {
   return (pi) => {
@@ -53,7 +53,7 @@ export function createTronNotifyExtension(input: {
       if (!completion) return;
       const sessionId = input.sessionId();
       if (input.isAutomaticCompletionSuppressed(completion.id)) {
-        await input.suppressAutomaticCompletion({ sessionId, sourceId: completion.id });
+        await input.suppressAutomatic({ sessionId, sourceId: completion.id, kind: "agent_finished" });
         return;
       }
       await input.enqueue({

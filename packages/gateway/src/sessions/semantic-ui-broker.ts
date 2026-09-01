@@ -51,7 +51,6 @@ interface PendingInteraction {
 interface InteractionRequestOptions {
   signal?: AbortSignal;
   timeout?: number;
-  presented?: () => void | Promise<void>;
 }
 
 // Pi exposes Theme and initTheme at its package root, but not its mutable global
@@ -123,6 +122,7 @@ export class SemanticUIBroker {
   constructor(
     readonly presentation: ExtensionPresentationStore,
     private readonly notificationSink?: (notification: ExtensionNotificationInput) => void,
+    private readonly interactionSink?: (interaction: ExtensionInteraction) => void | Promise<void>,
   ) {}
 
   get hostEpoch(): string { return this.presentation.hostEpoch; }
@@ -185,7 +185,6 @@ export class SemanticUIBroker {
     form: ExtensionFormDescriptor;
     signal?: AbortSignal;
     timeout?: number;
-    presented?: () => void | Promise<void>;
   }): Promise<ExtensionFormAnswer | undefined> {
     let form: ExtensionFormDescriptor;
     try {
@@ -344,11 +343,15 @@ export class SemanticUIBroker {
       try {
         this.presentation.transact((draft) => { draft.pendingInteractions.push(wire); });
       } catch (error) { this.cleanup(pending); reject(error); return; }
-      const presented = options?.presented;
-      if (presented) queueMicrotask(() => {
-        try { void Promise.resolve(presented()).catch(() => undefined); }
-        catch { /* Notification admission must never fail the form. */ }
-      });
+      // The interaction itself is the authoritative user-input boundary. A
+      // synchronous presentation observer may already have answered it, so
+      // notify only while its exact settlement owner is still pending. Invoke
+      // the detached sink now so it can latch foreground presence at the same
+      // admission cut; notification failure never owns interaction settlement.
+      if (this.pending.has(wire.id) && this.interactionSink) {
+        try { void Promise.resolve(this.interactionSink(wire)).catch(() => undefined); }
+        catch { /* Notification admission must never fail the interaction. */ }
+      }
     });
   }
 

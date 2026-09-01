@@ -187,7 +187,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
       machineId: "machine-notification-test",
-      notifications: { enqueue, askPresented: vi.fn() } as unknown as NotificationService,
+      notifications: { enqueue } as unknown as NotificationService,
     });
     registries.push(registry);
     await registry.initialize();
@@ -224,7 +224,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     ]);
     runtime.registerNativeProvider(faux.provider);
     const enqueue = vi.fn(async () => "queued" as const);
-    const suppressAutomaticCompletion = vi.fn(async () => "suppressed" as const);
+    const suppressAutomatic = vi.fn(async () => "suppressed" as const);
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
@@ -235,7 +235,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
       machineId: "machine-observed-test",
-      notifications: { enqueue, suppressAutomaticCompletion, askPresented: vi.fn() } as unknown as NotificationService,
+      notifications: { enqueue, suppressAutomatic } as unknown as NotificationService,
     });
     registries.push(registry);
     await registry.initialize();
@@ -255,15 +255,16 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await waitUntil(() => !slot.isBusy);
     await waitUntil(() => registry.attentionProjection(slot.id).completionRevision === 1);
     expect(registry.attentionProjection(slot.id)).toMatchObject({ completionRevision: 1, isUnread: false });
-    await waitUntil(() => suppressAutomaticCompletion.mock.calls.length > 0);
+    await waitUntil(() => suppressAutomatic.mock.calls.length > 0);
     expect(enqueue).not.toHaveBeenCalled();
-    expect(suppressAutomaticCompletion).toHaveBeenCalledWith({
+    expect(suppressAutomatic).toHaveBeenCalledWith({
       sessionId: slot.id,
       sourceId: expect.any(String),
+      kind: "agent_finished",
     });
 
     enqueue.mockClear();
-    suppressAutomaticCompletion.mockClear();
+    suppressAutomatic.mockClear();
     await slot.prompt("finish after presentation closes");
     await waitUntil(() => slot.isBusy);
     registry.setPresentationVisibility({
@@ -283,7 +284,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       kind: "agent_finished",
       sourceId: expect.any(String),
     }));
-    expect(suppressAutomaticCompletion).not.toHaveBeenCalled();
+    expect(suppressAutomatic).not.toHaveBeenCalled();
   });
 
   it("recovers a canonical successful completion missed before restart", async () => {
@@ -4088,9 +4089,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
     const summaries: SessionSummaryUpdate[] = [];
+    const userInputRequired = vi.fn(async () => {});
     const registry = new RuntimeRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
       broadcast: () => {}, sessionSummaryChanged: (summary) => summaries.push(summary), sessionListChanged: () => {},
+      machineId: "machine-input-test",
+      notifications: { userInputRequired } as unknown as NotificationService,
     });
     registries.push(registry);
     await registry.initialize();
@@ -4100,6 +4104,12 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const pending = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
     expect(pending.method).toBe("select");
     expect(pending.options).toEqual(["Keep", "Change"]);
+    expect(userInputRequired).toHaveBeenCalledWith({
+      sessionId: slot.id,
+      interactionId: pending.id,
+      machineId: "machine-input-test",
+      observed: false,
+    });
     expect(summaries.at(-1)?.waitingForUser).toBe(true);
     expect((await registry.list()).find((session) => session.id === slot.id)?.waitingForUser).toBe(true);
     const internal = slot as unknown as { respondToInteraction: (id: string, epoch: string, revision: number, value: unknown, cancelled: boolean) => void };
@@ -4108,6 +4118,32 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect((await registry.list()).find((session) => session.id === slot.id)?.waitingForUser).toBe(false);
     await command;
     expect(slot.snapshot().extensionPresentation.semanticState.statuses.answer).toBe("Keep");
+
+    registry.subscribe("visible-phone", slot.id);
+    registry.setPresentationVisibility({
+      clientId: "visible-phone",
+      sessionId: slot.id,
+      subscriptionToken: "visible-subscription",
+      revision: 1,
+      visible: true,
+    });
+    const visibleCommand = slot.prompt("/semantic-ask");
+    await waitUntil(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1);
+    const visiblePending = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
+    expect(userInputRequired).toHaveBeenLastCalledWith({
+      sessionId: slot.id,
+      interactionId: visiblePending.id,
+      machineId: "machine-input-test",
+      observed: true,
+    });
+    internal.respondToInteraction(
+      visiblePending.id,
+      visiblePending.hostEpoch,
+      visiblePending.presentationRevision,
+      "Change",
+      false,
+    );
+    await visibleCommand;
   });
 
   it("rotates and retires semantic epochs on direct, command, and trust reload paths", async () => {

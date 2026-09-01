@@ -30,14 +30,9 @@ type ProtoQuestion = {
 };
 type ProtoPayload = { questions: ProtoQuestion[]; allowCancel: boolean };
 
-export interface ExtensionAdapterHooks {
-  /** Exact ask_user admission seam. Failures are deliberately detached from the form. */
-  askPresented?: (input: { toolCallId: string }) => void | Promise<void>;
-}
-
 interface ExtensionToolAdapter {
   matches(extension: Extension, name: string, definition: ToolDefinition): boolean;
-  adapt(extension: Extension, name: string, definition: ToolDefinition, hooks: ExtensionAdapterHooks): ToolDefinition;
+  adapt(extension: Extension, name: string, definition: ToolDefinition): ToolDefinition;
 }
 
 const EXTENSION_TOOL_ADAPTERS: readonly ExtensionToolAdapter[] = [
@@ -48,10 +43,9 @@ export function adaptedToolDefinition(
   extension: Extension,
   name: string,
   definition: ToolDefinition,
-  hooks: ExtensionAdapterHooks = {},
 ): ToolDefinition {
   const adapter = EXTENSION_TOOL_ADAPTERS.find((candidate) => candidate.matches(extension, name, definition));
-  return adapter ? adapter.adapt(extension, name, definition, hooks) : definition;
+  return adapter ? adapter.adapt(extension, name, definition) : definition;
 }
 
 /**
@@ -69,7 +63,6 @@ function adaptZhushanwenAskUser(
   _extension: Extension,
   _name: string,
   definition: ToolDefinition,
-  hooks: ExtensionAdapterHooks,
 ): ToolDefinition {
   const original = definition.execute;
   return {
@@ -78,16 +71,8 @@ function adaptZhushanwenAskUser(
     execute: async (...args: Parameters<ToolDefinition["execute"]>) => {
       const ctx = args[4] as ExtensionContext | undefined;
       if (!ctx?.ui) return original(...args);
-      let didPresent = false;
-      const presented = typeof args[0] === "string" && hooks.askPresented
-        ? () => {
-            if (didPresent) return;
-            didPresent = true;
-            return hooks.askPresented!({ toolCallId: args[0] as string });
-          }
-        : undefined;
       const adaptedArgs = [...args] as Parameters<ToolDefinition["execute"]>;
-      adaptedArgs[4] = adaptContext(ctx, args[2] as AbortSignal | undefined, presented) as Parameters<ToolDefinition["execute"]>[4];
+      adaptedArgs[4] = adaptContext(ctx, args[2] as AbortSignal | undefined) as Parameters<ToolDefinition["execute"]>[4];
       return original(...adaptedArgs);
     },
   };
@@ -215,9 +200,8 @@ function adaptContextValue(value: unknown): unknown {
 function adaptContext(
   context: ExtensionContext,
   outerSignal?: AbortSignal,
-  presented?: () => void | Promise<void>,
 ): ExtensionContext {
-  const ui = adaptUI(context.ui as AskUserUI, outerSignal, presented);
+  const ui = adaptUI(context.ui as AskUserUI, outerSignal);
   return new Proxy(context, {
     get(target, property, receiver) {
       if (property === "ui") return ui;
@@ -229,7 +213,6 @@ function adaptContext(
 function adaptUI(
   base: AskUserUI,
   outerSignal?: AbortSignal,
-  presented?: () => void | Promise<void>,
 ): AskUserUI {
   return new Proxy(base, {
     get(target, property, receiver) {
@@ -245,7 +228,6 @@ function adaptUI(
         const answer = await request({
           form,
           ...(signal === undefined ? {} : { signal }),
-          ...(presented === undefined ? {} : { presented }),
         });
         if (signal?.aborted || answer === undefined) return undefined;
         return JSON.stringify(formAnswerToProto(payload.questions, form, answer));

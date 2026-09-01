@@ -105,7 +105,7 @@ describe("NotificationGrantStore and NotificationService", () => {
       sourceId: "assistant-observed",
     };
 
-    await expect(service.suppressAutomaticCompletion(completion)).resolves.toBe("suppressed");
+    await expect(service.suppressAutomatic({ ...completion, kind: "agent_finished" })).resolves.toBe("suppressed");
     expect(relay.sent).toEqual([]);
     expect((await service.inbox()).notifications).toEqual([]);
     expect((await store.snapshot()).receipts).toEqual([
@@ -127,9 +127,10 @@ describe("NotificationGrantStore and NotificationService", () => {
       targetDailyIntents: 1,
     });
     await service.upsertGrant(grant);
-    await service.suppressAutomaticCompletion({
+    await service.suppressAutomatic({
       sessionId: "session-observed",
       sourceId: "assistant-observed",
+      kind: "agent_finished",
     });
 
     await expect(service.enqueue({
@@ -410,10 +411,48 @@ describe("NotificationGrantStore and NotificationService", () => {
     expect((await service.inbox()).notifications[0]).toMatchObject({ outcome: "accepted_by_apns" });
   });
 
-  it("does not notify for Ask when its typed persistent policy is disabled", async () => {
+  it("queues one routed input-needed notification for an unobserved semantic interaction", async () => {
+    const { service, relay } = await fixture();
+    await service.upsertGrant(grant);
+    await service.userInputRequired({
+      sessionId: "session-input",
+      interactionId: "interaction-one",
+      machineId: "machine-abcdefgh",
+      observed: false,
+    });
+    await vi.waitFor(() => expect(relay.sent).toHaveLength(1));
+    expect(relay.sent[0]).toMatchObject({
+      title: "Input needed",
+      message: "Tron needs your input. Open Tron to respond.",
+      sessionId: "session-input",
+      machineId: "machine-abcdefgh",
+    });
+  });
+
+  it("durably suppresses an observed input request without relay or inbox work", async () => {
+    const { service, relay, store } = await fixture();
+    await service.upsertGrant(grant);
+    const input = {
+      sessionId: "session-input",
+      interactionId: "interaction-observed",
+      observed: true,
+    };
+    await service.userInputRequired(input);
+    expect(relay.sent).toEqual([]);
+    expect((await service.inbox()).notifications).toEqual([]);
+    expect((await store.snapshot()).receipts).toEqual([
+      expect.objectContaining({ result: "suppressed", grantIds: [] }),
+    ]);
+    await service.userInputRequired({ ...input, observed: false });
+    expect(relay.sent).toEqual([]);
+  });
+
+  it("does not notify for semantic input when its typed persistent policy is disabled", async () => {
     const { service, relay } = await fixture();
     await service.upsertGrant({ ...grant, notifyWhenAskPresented: false });
-    await service.askPresented("session-one", "ask-one");
+    await service.userInputRequired({
+      sessionId: "session-one", interactionId: "interaction-one", observed: false,
+    });
     expect(relay.sent).toEqual([]);
     expect((await service.status(grant.deviceId)).notifyWhenAskPresented).toBe(false);
   });

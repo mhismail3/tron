@@ -83,7 +83,6 @@ function context(answer: unknown, calls: any[] = []) {
     ui: {
       [TRON_FORM_REQUEST]: async (input: any) => {
         calls.push(input);
-        if (input.presented) queueMicrotask(() => void Promise.resolve(input.presented()).catch(() => undefined));
         return answer;
       },
       async select(title: string, options: string[]) { calls.push({ primitive: { title, options } }); return options[0]; },
@@ -215,18 +214,6 @@ describe("exact @zhushanwen/pi-ask-user semantic form adapter", () => {
     await expect(adaptedToolDefinition(extension(), "ask_user", reserved).execute(
       "call", {}, undefined, undefined, context(undefined),
     )).rejects.toThrow(/Unsupported .* RPC form contract/);
-  });
-
-  it("emits one detached Ask notification only after successful admission", async () => {
-    const presented: string[] = [];
-    const original = definition(async (_id: string, _params: unknown, _signal: unknown, _update: unknown, ctx: any) =>
-      ctx.ui.select(marker, [markerPayload([single])]));
-    const adapted = adaptedToolDefinition(extension(), "ask_user", original, {
-      askPresented: async ({ toolCallId }) => { presented.push(toolCallId); throw new Error("push unavailable"); },
-    });
-    await expect(adapted.execute("ask-call", {}, undefined, undefined, context(undefined))).resolves.toBeUndefined();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(presented).toEqual(["ask-call"]);
   });
 
   it("adapts the session_start context captured by the package channel handler", async () => {

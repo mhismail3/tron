@@ -380,15 +380,16 @@ export class NotificationService {
     return { changed };
   }
 
-  async suppressAutomaticCompletion(input: {
+  async suppressAutomatic(input: {
     sessionId: string;
     sourceId: string;
+    kind: Exclude<NotificationKind, "explicit">;
   }): Promise<"suppressed"> {
-    if (!input.sessionId || !input.sourceId) {
-      throw new GatewayError("invalid_request", "Notification identity is missing");
+    if (!input.sessionId || !input.sourceId || (input.kind !== "ask" && input.kind !== "agent_finished")) {
+      throw new GatewayError("invalid_request", "Automatic notification identity is malformed");
     }
     const now = this.now();
-    const dedupeKey = notificationHash(`agent_finished\0${input.sessionId}\0${input.sourceId}`);
+    const dedupeKey = notificationHash(`${input.kind}\0${input.sessionId}\0${input.sourceId}`);
     const sessionKey = notificationHash(`session\0${input.sessionId}`);
     await this.store.update((document) => {
       prune(document, now);
@@ -492,16 +493,29 @@ export class NotificationService {
     return result;
   }
 
-  async askPresented(sessionId: string, toolCallId: string, machineId?: string): Promise<void> {
+  async userInputRequired(input: {
+    sessionId: string;
+    interactionId: string;
+    observed: boolean;
+    machineId?: string;
+  }): Promise<void> {
     const document = await this.store.snapshot();
     if (!document.policy.notifyWhenAskPresented) return;
+    if (input.observed) {
+      await this.suppressAutomatic({
+        sessionId: input.sessionId,
+        sourceId: input.interactionId,
+        kind: "ask",
+      });
+      return;
+    }
     await this.enqueue({
-      sessionId,
-      sourceId: toolCallId,
+      sessionId: input.sessionId,
+      sourceId: input.interactionId,
       kind: "ask",
       title: "Input needed",
-      message: "Tron needs your input. Open Tron to answer a question.",
-      ...(machineId ? { route: { sessionId, machineId } } : {}),
+      message: "Tron needs your input. Open Tron to respond.",
+      ...(input.machineId ? { route: { sessionId: input.sessionId, machineId: input.machineId } } : {}),
     });
   }
 
