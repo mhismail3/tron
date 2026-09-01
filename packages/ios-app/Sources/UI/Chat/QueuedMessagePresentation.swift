@@ -637,7 +637,7 @@ struct QueuedMessageEditorSheet: View {
                         if isSaving {
                             TronPulseLoadingIndicator(accent: behavior == .steer ? .tronEmerald : .tronPurple, size: 18)
                         } else {
-                            Image(systemName: "checkmark")
+                            Image(systemName: TronSaveActionPresentation.systemImage)
                                 .font(TronTypography.buttonSM)
                                 .foregroundStyle(behavior == .steer ? Color.tronEmerald : Color.tronPurple)
                         }

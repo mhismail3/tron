@@ -932,6 +932,10 @@ struct TronToolbarTextLabel: View {
     }
 }
 
+enum TronSaveActionPresentation {
+    static let systemImage = "externaldrive"
+}
+
 struct TronSaveToolbarButton: View {
     let isSaving: Bool
     let isEnabled: Bool
@@ -946,7 +950,7 @@ struct TronSaveToolbarButton: View {
         Button(action: action) {
             TronToolbarTextLabel(
                 isSaving ? "Saving…" : "Save",
-                systemImage: "square.and.arrow.down",
+                systemImage: TronSaveActionPresentation.systemImage,
                 isWorking: isSaving
             )
             .tronToolbarAction(accent: actionColor)

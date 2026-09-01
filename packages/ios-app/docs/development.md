@@ -198,7 +198,7 @@ callback or accidentally adopt an edit as a new baseline; a successful exact-dra
 baseline and disables Save again, while edits made during the request stay dirty.
 Custom-model field bindings advance their revision in the same setter transaction and apply the same exact-revision
 completion rule. Every textual toolbar action uses the shared system-weight label with a leading SF Symbol (or its
-in-progress indicator); toolbar typography does not impose bold, semibold, or medium text. The dashboard Settings
+in-progress indicator); toolbar typography does not impose bold, semibold, or medium text. Save actions across settings and other editable sheets use the shared outline `externaldrive` floppy-disk-style symbol rather than a download or generic confirmation glyph. The dashboard Settings
 action is deliberately icon-only and retains an explicit accessibility label. Technical-detail sheets use the shared
 `TronTechnicalMetadataSection`/`TronTechnicalSectionLabel` treatment and drill into bounded JSON through
 `TronTechnicalJSONRow` instead of inventing sheet-local metadata cards or displaying large raw payloads inline. Custom provider editors keep their three dense text fields together before the API-format row
