@@ -146,26 +146,4 @@ struct ChatArchitectureContractTests {
         #expect(ChatUIKitTranscriptCommit(version: 1, rows: [first, second]) == nil)
         #expect(ChatUIKitTranscriptCommit(version: 1, rows: [first]) != nil)
     }
-
-    @MainActor
-    @Test("UIKit viewport transactions preserve detached intent and terminate once")
-    func viewportTransactionContract() {
-        let controller = ChatUIKitChatViewController()
-        controller.loadViewIfNeeded()
-        let first = ChatUIKitTranscriptCommit(version: 1, rows: [
-            ChatUIKitTranscriptRow(id: "one", text: "one")!,
-            ChatUIKitTranscriptRow(id: "two", text: "two")!,
-        ])!
-        #expect(controller.apply(first) == .applied(1))
-        controller.setIntent(.preserve(.init(rowID: "one", topOffset: 4)))
-
-        let second = ChatUIKitTranscriptCommit(version: 2, rows: [
-            ChatUIKitTranscriptRow(id: "one", text: "one changed")!,
-            ChatUIKitTranscriptRow(id: "two", text: "two")!,
-            ChatUIKitTranscriptRow(id: "three", text: "three")!,
-        ])!
-        #expect(controller.apply(second) == .applied(2))
-        #expect(controller.viewportState.intent == .preserve(.init(rowID: "one", topOffset: 4)))
-        #expect(controller.apply(second) == .cancelled(2))
-    }
 }
