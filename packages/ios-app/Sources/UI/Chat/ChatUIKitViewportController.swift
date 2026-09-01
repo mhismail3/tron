@@ -13,18 +13,16 @@ final class ChatUIKitChatViewController: UIViewController,
 {
     private(set) var input: ChatUIKitPresentationInput?
     private(set) var viewportState = ChatUIKitViewportState()
-    var onAttachmentTapped: ((String, Int) -> Void)?
     /// The existing transcript/paging owner performs the request. UIKit emits
     /// this one semantic action and never tracks a page or cursor.
     var onLoadEarlier: (() -> Void)?
-    var onToolTapped: ((String) -> Void)?
-    var onThinkingDetails: ((String) -> Void)?
-    var onNotificationDetails: ((String) -> Void)?
+    var onDetailIntent: ((ChatUIKitTranscriptDetailIntent) -> Void)?
     /// The app/model owner supplies the existing lifecycle-bound media loader;
     /// UIKit never creates a second cache or fetches Gateway blobs itself.
     var chatMediaLoader: ChatMediaLoader?
     var chatMediaIdentity: ((String) -> ChatMediaIdentity?)?
     var onTransactionOutcome: ((ChatUIKitViewportTransactionOutcome) -> Void)?
+    var onViewportStateChanged: ((ChatUIKitViewportState) -> Void)?
     private var presentationActivity = ChatUIKitPresentationActivity.active(generation: 0)
     private var isApplyingPresentation = false
 
@@ -203,6 +201,7 @@ final class ChatUIKitChatViewController: UIViewController,
             ? .recovered(transactionID)
             : .applied(transactionID)
         onTransactionOutcome?(outcome)
+        onViewportStateChanged?(viewportState)
         return outcome
     }
 
@@ -225,6 +224,11 @@ final class ChatUIKitChatViewController: UIViewController,
             if let retained = restore(anchor) { viewportState.intent = .preserve(retained) }
         }
         clampOffset()
+        onViewportStateChanged?(viewportState)
+    }
+
+    private func publishViewportState() {
+        onViewportStateChanged?(viewportState)
     }
 
     func numberOfSections(in collectionView: UICollectionView) -> Int { 1 }
@@ -253,11 +257,17 @@ final class ChatUIKitChatViewController: UIViewController,
         let rowIndex = indexPath.item - historyOffset
         let row = rows[rowIndex]
         cell.onAttachmentTapped = { [weak self] index in
-            self?.onAttachmentTapped?(row.id, index)
+            self?.onDetailIntent?(.attachment(rowID: row.id, index: index))
         }
-        cell.onToolTapped = { [weak self] in self?.onToolTapped?(row.id) }
-        cell.onThinkingDetails = { [weak self] in self?.onThinkingDetails?(row.id) }
-        cell.onNotificationDetails = { [weak self] in self?.onNotificationDetails?(row.id) }
+        cell.onToolTapped = { [weak self] in
+            self?.onDetailIntent?(.tool(rowID: row.id))
+        }
+        cell.onThinkingDetails = { [weak self] in
+            self?.onDetailIntent?(.thinking(rowID: row.id))
+        }
+        cell.onNotificationDetails = { [weak self] in
+            self?.onDetailIntent?(.notification(rowID: row.id))
+        }
         cell.mediaLoader = chatMediaLoader
         cell.mediaIdentity = chatMediaIdentity
         cell.setPresentationActivity(presentationActivity)
@@ -268,6 +278,7 @@ final class ChatUIKitChatViewController: UIViewController,
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         viewportState.interaction = .tracking
         if let anchor = captureAnchor() { viewportState.intent = .preserve(anchor) }
+        publishViewportState()
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -277,11 +288,13 @@ final class ChatUIKitChatViewController: UIViewController,
         // Track incremental native movement as user intent. Programmatic
         // restoration inside apply is excluded by isApplyingPresentation.
         viewportState.intent = .preserve(anchor)
+        publishViewportState()
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if decelerate {
             viewportState.interaction = .decelerating
+            publishViewportState()
         } else {
             finishInteraction()
         }
@@ -301,6 +314,7 @@ final class ChatUIKitChatViewController: UIViewController,
         }
         if hasReachedTail { viewportState.intent = .followTail }
         if !hasVisibleRows && !rows.isEmpty { recoverBlankViewport() }
+        publishViewportState()
     }
 
     private func captureAnchor() -> ChatUIKitSemanticAnchor? {

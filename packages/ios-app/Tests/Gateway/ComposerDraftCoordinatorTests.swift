@@ -8,6 +8,29 @@ import Testing
 @MainActor
 @Suite("Composer draft coordinator")
 struct ComposerDraftCoordinatorTests {
+    @Test("preflight identity is consumed by the matching submission admission")
+    func preflightIdentityMatchesBeginSubmission() throws {
+        let target = SessionPresentationIdentity(sessionID: "session", generation: 1)
+        let coordinator = ComposerDraftCoordinator(
+            upload: { _, _, _ in "unused" },
+            fileUpload: { _, _, _, _ in "unused" },
+            send: { _, _, _, _, _ in "operation" },
+            admitsLifecycleGeneration: { $0 == 1 }
+        )
+        let scope = coordinator.installHostedPresentation(
+            profileID: "profile", target: target, lifecycleGeneration: 1
+        )
+        coordinator.setText("hello", for: scope)
+        let preflight = try #require(coordinator.preflightSubmissionID(for: target))
+        #expect(coordinator.preflightSubmissionID(for: target) == preflight)
+        let submission = try coordinator.beginSubmission(
+            target: target, behavior: nil, resourceInvocation: nil,
+            canonicalTranscript: [], queuedMessages: []
+        )
+        #expect(submission.presentationID == preflight)
+        #expect(coordinator.preflightSubmissionID(for: target) == nil)
+    }
+
     @Test("durable text, photo, and file restore only to the exact remounted scope and re-upload")
     func durableRestartAndRemount() async throws {
         try await withTestWatchdog { @MainActor in

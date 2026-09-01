@@ -14,38 +14,38 @@ struct ChatUIKitSessionSurfaceHost: UIViewControllerRepresentable {
     let onComposerIntent: @MainActor (ChatUIKitComposerIntent) -> Void
     let onSend: @MainActor (String?, ChatUIKitComposerSendIdentity) -> Bool
     let onLoadEarlier: @MainActor () -> Void
-    let onAttachmentTapped: @MainActor (String, Int) -> Void
-    let onToolTapped: @MainActor (String) -> Void
-    let onThinkingDetails: @MainActor (String) -> Void
-    let onNotificationDetails: @MainActor (String) -> Void
+    let onDetailIntent: @MainActor (ChatUIKitTranscriptDetailIntent) -> Void
     let onViewportOutcome: @MainActor (ChatUIKitViewportTransactionOutcome) -> Void
+    let onViewportStateChanged: @MainActor (ChatUIKitViewportState) -> Void
 
     final class Coordinator {
-        private var sourceGeneration: UInt64?
-        private var sourceVersion: UInt64?
-        private var sourceRows: [ChatUIKitTranscriptRow] = []
-        private var sourceHistory: ChatUIKitHistoryState = .hidden
+        private struct SourceIdentity: Equatable {
+            let generation: UInt64
+            let sourceVersion: UInt64
+            let payloadFingerprint: Int
+        }
+
+        private var sourceIdentity: SourceIdentity?
         private(set) var uiVersion: UInt64 = 0
 
         /// The projection source supplies the payload. This coordinator owns
-        /// only the UI admission clock, never a second transcript value. A
-        /// body refresh with the same immutable source is deliberately a no-op.
+        /// only a bounded admission identity, never a second row projection.
+        /// A body refresh with the same immutable source is deliberately a
+        /// no-op, while handoff-only payload changes remain distinguishable.
         func admittedInput(_ input: ChatUIKitPresentationInput) -> ChatUIKitPresentationInput? {
-            if let sourceGeneration, input.generation < sourceGeneration { return nil }
-            if sourceGeneration == input.generation,
-               let sourceVersion,
-               input.version < sourceVersion { return nil }
-            if sourceGeneration == input.generation,
-               sourceVersion == input.version,
-               sourceRows == input.rows,
-               sourceHistory == input.history {
-                return nil
-            }
-            sourceGeneration = input.generation
-            sourceVersion = input.version
-            sourceRows = input.rows
-            sourceHistory = input.history
+            let identity = SourceIdentity(
+                generation: input.generation,
+                sourceVersion: input.version,
+                payloadFingerprint: Self.fingerprint(input)
+            )
+            if let sourceIdentity,
+               input.generation < sourceIdentity.generation { return nil }
+            if let sourceIdentity,
+               input.generation == sourceIdentity.generation,
+               input.version < sourceIdentity.sourceVersion { return nil }
+            guard identity != sourceIdentity else { return nil }
             guard uiVersion < .max else { return nil }
+            sourceIdentity = identity
             uiVersion &+= 1
             return ChatUIKitPresentationInput(
                 generation: input.generation,
@@ -53,6 +53,22 @@ struct ChatUIKitSessionSurfaceHost: UIViewControllerRepresentable {
                 rows: input.rows,
                 history: input.history
             )
+        }
+
+        private static func fingerprint(_ input: ChatUIKitPresentationInput) -> Int {
+            var hasher = Hasher()
+            hasher.combine(input.generation)
+            hasher.combine(input.version)
+            switch input.history {
+            case .hidden: hasher.combine(0)
+            case .available: hasher.combine(1)
+            case .loading: hasher.combine(2)
+            case .failed(let message): hasher.combine(3); hasher.combine(message)
+            }
+            for row in input.rows {
+                hasher.combine(row)
+            }
+            return hasher.finalize()
         }
     }
 
@@ -81,18 +97,21 @@ struct ChatUIKitSessionSurfaceHost: UIViewControllerRepresentable {
 
     private func installCallbacks(on controller: ChatUIKitSessionSurfaceController) {
         controller.composer.onIntent = { [weak composer = controller.composer] intent in
-            guard case .send(let behavior, let identity) = intent else {
+            if case .send(let behavior, let identity) = intent {
+                let accepted = self.onSend(behavior, identity)
+                composer?.resolveSend(identity: identity, accepted: accepted)
+            } else {
                 self.onComposerIntent(intent)
-                return
+                if case .catchUp = intent {
+                    controller.transcript.setIntent(.followTail)
+                }
             }
-            let accepted = self.onSend(behavior, identity)
-            composer?.resolveSend(identity: identity, accepted: accepted)
         }
         controller.transcript.onLoadEarlier = onLoadEarlier
-        controller.transcript.onAttachmentTapped = onAttachmentTapped
-        controller.transcript.onToolTapped = onToolTapped
-        controller.transcript.onThinkingDetails = onThinkingDetails
-        controller.transcript.onNotificationDetails = onNotificationDetails
+        controller.transcript.onDetailIntent = onDetailIntent
         controller.transcript.onTransactionOutcome = onViewportOutcome
+        controller.transcript.onViewportStateChanged = { state in
+            self.onViewportStateChanged(state)
+        }
     }
 }

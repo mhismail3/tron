@@ -29,6 +29,7 @@ struct ChatRoutes: ViewModifier {
     @Binding var showContext: Bool
     @Binding var showSettings: Bool
     @Binding var queuedMessageEditor: QueuedMessageEditorRoute?
+    @Binding var nativeDetailRoute: ChatUIKitDetailRoute?
     let installed: InstalledChatTranscript?
     let mutatingQueuedMessageIDs: Set<String>
     let onUpdateQueuedMessage: (
@@ -78,6 +79,12 @@ struct ChatRoutes: ViewModifier {
                     }
                 )
                 .presentationDragIndicator(.hidden)
+            }
+            .tronManagedSheet(
+                item: $nativeDetailRoute,
+                identity: { "chat.\(sessionID).detail.\($0.id)" }
+            ) { route in
+                ChatUIKitDetailSheet(route: route)
             }
             .tronManagedSheet(
                 item: $queuedMessageEditor,

@@ -40,6 +40,8 @@ struct ChatView: View {
     @State private var composerResourceCatalog = ComposerResourceCatalog(commands: [])
     @State private var composerResourcePicker: ComposerResourcePickerSource?
     @State private var composerResourceResults: [ComposerResourceEntry] = []
+    @State private var nativeViewportState = ChatUIKitViewportState()
+    @State private var nativeDetailRoute: ChatUIKitDetailRoute?
 
     #if HOSTED_TEST
     init(
@@ -105,11 +107,9 @@ struct ChatView: View {
             onComposerIntent: { intent in handleUIKitComposerIntent(intent) },
             onSend: { behavior, identity in handleUIKitSend(behavior: behavior, identity: identity) },
             onLoadEarlier: { loadEarlierFromUIKit() },
-            onAttachmentTapped: { rowID, index in handleUIKitAttachment(rowID: rowID, index: index) },
-            onToolTapped: { rowID in handleUIKitTool(rowID: rowID) },
-            onThinkingDetails: { rowID in handleUIKitThinking(rowID: rowID) },
-            onNotificationDetails: { rowID in handleUIKitNotification(rowID: rowID) },
-            onViewportOutcome: { outcome in handleUIKitViewportOutcome(outcome) }
+            onDetailIntent: { intent in handleUIKitDetailIntent(intent) },
+            onViewportOutcome: { outcome in handleUIKitViewportOutcome(outcome) },
+            onViewportStateChanged: { state in nativeViewportState = state }
         )
         .overlay(alignment: .top) { topBlur }
         .background { Color.tronBackground.ignoresSafeArea(.all) }
@@ -130,6 +130,7 @@ struct ChatView: View {
             showContext: $sessionPresentation.showContext,
             showSettings: $sessionPresentation.showSettings,
             queuedMessageEditor: $sessionPresentation.queuedMessageEditor,
+            nativeDetailRoute: $nativeDetailRoute,
             installed: transcriptPresentation.installed,
             mutatingQueuedMessageIDs: sessionPresentation.mutatingQueuedMessageIDs,
             onUpdateQueuedMessage: { id, text, behavior in
@@ -719,60 +720,6 @@ struct ChatView: View {
         TronTopBlurOverlay(style: .chat)
     }
 
-    private var transcript: some View {
-        GeometryReader { viewport in
-            transcriptContent(
-                minimumUnderflowContentHeight: ChatTranscriptUnderflowLayoutPolicy.minimumContentHeight(
-                    containerHeight: viewport.size.height,
-                    bottomInset: viewport.safeAreaInsets.bottom
-                )
-            )
-        }
-    }
-
-    private func transcriptContent(minimumUnderflowContentHeight: CGFloat) -> some View {
-        ChatTranscriptScrollView(
-            transcriptPresentation: transcriptPresentation,
-            scrollCoordinator: scrollCoordinator,
-            performanceTracker: performanceTracker,
-            installed: transcriptPresentation.installed,
-            canonicalSubmissionIDs: sessionPresentation.canonicalSubmissionHandoffs.ids,
-            canonicalSubmissionAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
-            isReady: isTranscriptReady,
-            minimumUnderflowContentHeight: minimumUnderflowContentHeight,
-            reduceMotion: reduceMotion,
-            presentationEpoch: sessionPresentation.open.epoch,
-            presentationPhase: sessionPresentation.open.phase,
-            admitsGeometryCallbacks: admitsScrollGeometryCallbacks,
-            admitsNativeCallbacks: admitsNativeScrollCallbacks,
-            responseState: responseState,
-            mutatingQueuedMessageIDs: sessionPresentation.mutatingQueuedMessageIDs,
-            morphRegistry: morphRegistry,
-            scrollPosition: $transcriptScrollPosition,
-            earlierRow: { installed in earlierMessagesChip(installed: installed) },
-            openingSurface: { openingSurface },
-            onEditQueuedMessage: { sessionPresentation.queuedMessageEditor = .init(id: $0) },
-            onClearQueuedMessages: { Task { await clearQueuedMessages() } },
-            onMoveQueuedMessage: { id, offset in
-                Task { await moveQueuedMessage(id, offset: offset) }
-            },
-            onEntranceSettled: settleTranscriptEntrance,
-            onAbandonLayout: abandonLayoutTransaction,
-            onExecuteCommand: executePendingScrollCommand,
-            onReleaseCommandTarget: releaseScrollPositionTarget,
-            onApplyViewportMode: applyViewportMode,
-            hostedRecorder: transcriptHostedRecorder
-        )
-    }
-
-    private var transcriptHostedRecorder: (any ChatTranscriptHostedRecording)? {
-        #if HOSTED_TEST
-        hostedProbe
-        #else
-        nil
-        #endif
-    }
-
     @ViewBuilder
     private var activeProjectionObservationDriver: some View {
         if presentationActivity.allowsPresentationPublication {
@@ -946,9 +893,10 @@ struct ChatView: View {
 
     private var chatUIKitPresentationActivity: ChatUIKitPresentationActivity {
         ChatUIKitPresentationActivity(
-            isPresented: true,
+            isPresented: sessionPresentation.modelPresentationGeneration != nil,
             isSceneActive: scenePhase == .active,
-            isCovered: !presentationActivity.allowsPresentationPublication,
+            isCovered: !presentationActivity.allowsPresentationPublication
+                || sessionPresentation.open.phase != .ready,
             generation: UInt64(max(sessionPresentation.modelPresentationGeneration ?? 0, 0))
         )
     }
@@ -975,7 +923,13 @@ struct ChatView: View {
 
     private var chatUIKitComposerInput: ChatUIKitComposerInput {
         let target = presentationTarget
-        let submissionID = target.flatMap { model.composerDrafts.outgoingSubmission(for: $0)?.presentationID }
+        let hasDraftContent = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !pendingAttachments.isEmpty
+            || selectedComposerResource != nil
+        let submissionID = target.flatMap { target in
+            model.composerDrafts.outgoingSubmission(for: target)?.presentationID
+                ?? (hasDraftContent ? model.composerDrafts.preflightSubmissionID(for: target) : nil)
+        }
         let snapshot = selectedAuthoritativeSnapshot
         let hasSubagent = snapshot?.processActivities?.contains {
             $0.kind == .subagent && SessionProcessAdmissionPolicy.admits($0)
@@ -992,7 +946,7 @@ struct ChatView: View {
             resourceResults: composerResourceResults,
             reduceMotion: reduceMotion,
             keyboardVisible: keyboardObserver.isVisible,
-            showsCatchUp: scrollCoordinator.shouldShowCatchUpButton,
+            showsCatchUp: nativeViewportState.intent != .followTail,
             showsAmbientWorkingBlur: showsAmbientWorkingBlur,
             processOverview: snapshot?.processOverview,
             hasSubagent: hasSubagent,
@@ -1072,7 +1026,7 @@ struct ChatView: View {
     @MainActor
     private func loadEarlierFromUIKit() {
         guard !isLoadingEarlierMessages,
-              scrollCoordinator.canRequestHistoryPage,
+              transcriptPresentation.installed?.sourceWindow.originalStart.map { $0 > 0 } == true,
               let generation = sessionPresentation.modelPresentationGeneration,
               let token = sessionPresentation.earlierMessagesOperation.begin() else { return }
         Task { @MainActor in
@@ -1086,18 +1040,36 @@ struct ChatView: View {
     }
 
     @MainActor
-    private func handleUIKitAttachment(rowID: String, index: Int) {
-        // Transcript media is already leased to the canonical loader by the
-        // native cell. Preview routing remains owned by the existing row route.
-        _ = (rowID, index)
+    private func handleUIKitDetailIntent(_ intent: ChatUIKitTranscriptDetailIntent) {
+        guard let row = chatUIKitTranscriptInput?.rows.first(where: { $0.id == rowID(for: intent) }) else { return }
+        switch intent {
+        case .attachment(_, let index):
+            guard row.attachmentFacts.indices.contains(index) else { return }
+            let attachment = row.attachmentFacts[index]
+            nativeDetailRoute = .init(id: "attachment-\(attachment.id)", kind: .attachment(attachment))
+        case .tool:
+            guard let run = row.toolRun, let descriptor = run.tools.first else { return }
+            let payload = ChatToolPayload(request: nil, response: nil, content: row.text, fallbackContent: nil)
+            let tool = ChatToolPresentation(descriptor: descriptor, payload: payload)
+            nativeDetailRoute = .init(id: "tool-\(descriptor.id)", kind: .tool(tool))
+        case .thinking:
+            guard !row.thinkingSegments.isEmpty else { return }
+            nativeDetailRoute = .init(
+                id: "thinking-\(row.id)",
+                kind: .thinking(.init(id: row.id, label: row.thinkingLabel, segments: row.thinkingSegments))
+            )
+        case .notification:
+            guard let notification = row.notification else { return }
+            nativeDetailRoute = .init(id: "notification-\(notification.id)", kind: .notification(notification))
+        }
     }
 
-    @MainActor
-    private func handleUIKitTool(rowID: String) { _ = rowID }
-    @MainActor
-    private func handleUIKitThinking(rowID: String) { _ = rowID }
-    @MainActor
-    private func handleUIKitNotification(rowID: String) { _ = rowID }
+    private func rowID(for intent: ChatUIKitTranscriptDetailIntent) -> String {
+        switch intent {
+        case .attachment(let rowID, _), .tool(let rowID), .thinking(let rowID), .notification(let rowID): return rowID
+        }
+    }
+
     @MainActor
     private func handleUIKitViewportOutcome(_ outcome: ChatUIKitViewportTransactionOutcome) {
         _ = outcome
@@ -1945,7 +1917,6 @@ struct ChatView: View {
     @MainActor
     private func catchUpToTail() {
         transcriptPresentation.discardPendingEntrances()
-        scrollCoordinator.requestCatchUp(reduceMotion: reduceMotion)
     }
 
     @MainActor
@@ -2064,74 +2035,6 @@ struct ChatView: View {
                     .padding(.top, 42)
             }
         }
-    }
-
-    private var composer: some View {
-        ChatComposerView(
-            snapshot: selectedAuthoritativeSnapshot,
-            pendingAttachments: pendingAttachments,
-            selectedResource: selectedComposerResource,
-            resourcePicker: composerResourcePicker,
-            resourceResults: composerResourceResults,
-            morphRegistry: morphRegistry,
-            reduceMotion: reduceMotion,
-            showsCatchUp: scrollCoordinator.shouldShowCatchUpButton,
-            showsAmbientWorkingBlur: showsAmbientWorkingBlur,
-            keyboardVisible: keyboardObserver.isVisible,
-            text: composerTextBinding,
-            isFocused: Binding(
-                get: { composerFocused },
-                set: { composerFocused = $0 }
-            ),
-            selection: $composerSelection,
-            responder: composerResponder,
-            isEditable: ChatComposerPolicy.isTextEditable(isTranscriptReady: isTranscriptReady),
-            keyboardAppearance: colorScheme == .dark ? .dark : .light,
-            contextProgress: contextProgressPresentation,
-            trailingMode: composerTrailingMode,
-            isSending: sending,
-            submissionPending: submissionPending,
-            hasActiveUploads: hasActiveComposerUploads,
-            isTranscriptReady: isTranscriptReady,
-            isCommandReady: admitsLiveSessionCommands,
-            attachmentMenuState: attachmentMenuState,
-            attachmentActionsEnabled: attachmentActionsEnabled,
-            resourcePickerAvailable: resourcePickerAvailable,
-            glassNamespace: composerGlassNamespace,
-            onProcessesTap: {
-                sessionPresentation.showProcesses = true
-                #if HOSTED_TEST
-                hostedProbe?.recordProcessRoute()
-                #endif
-            },
-            onRemoveAttachment: { id in
-                guard let target = presentationTarget else { return }
-                model.composerDrafts.removeAttachment(id, target: target)
-            },
-            onRemoveResource: {
-                guard let composerScope else { return }
-                model.composerDrafts.removeSelectedResource(for: composerScope)
-            },
-            onSelectResource: selectComposerResource,
-            onDismissResourcePicker: dismissComposerResourcePicker,
-            onShowContext: { sessionPresentation.showContext = true },
-            onSend: { behavior in send(behavior: behavior) },
-            onAbort: {
-                let operation = selectedAuthoritativeSnapshot?.operation
-                let kind = ChatComposerPolicy.abortKind(operation: operation)
-                Task {
-                    await model.abort(
-                        sessionID: sessionID,
-                        kind: kind,
-                        operationID: operation?.id
-                    )
-                }
-            },
-            onSelectAttachmentDestination: requestAttachmentPresentation,
-            onCatchUp: catchUpToTail,
-            onComposerHeight: composerHeightChanged,
-            onComposerHeightSettled: composerHeightSettled
-        )
     }
 
     private var composerTrailingMode: ComposerTrailingMode? {

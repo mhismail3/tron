@@ -402,15 +402,44 @@ enum ChatUIKitPresentationAdapter {
     private static func toolRun(
         for content: ChatPhysicalTranscriptRow.Content
     ) -> ChatToolRunPresentation? {
-        guard case .transcript(let item, _) = content, case .toolRun(let value) = item else { return nil }
-        return value
+        guard case .transcript(let item, _) = content else { return nil }
+        switch item {
+        case .toolRun(let value): return value
+        case .transcript(let value) where value.kind == .bash:
+            let tool = ChatToolPresentation(
+                id: value.id,
+                title: "bash",
+                toolName: "bash",
+                subtitle: value.cancelled == true
+                    ? "Cancelled"
+                    : "Exit \(value.exitCode.map(String.init) ?? "—")",
+                request: .object(["command": .string(value.command ?? "")]),
+                response: nil,
+                content: value.output ?? "",
+                fallbackContent: nil,
+                error: value.cancelled == true || value.exitCode.map { $0 != 0 } == true,
+                startedAt: value.startedAt,
+                completedAt: value.completedAt,
+                durationMs: value.durationMs,
+                lastProgressAt: value.completedAt,
+                progressSequence: nil,
+                outputTruncated: value.truncated == true
+            )
+            return ChatToolRunPresentation(tools: [tool])
+        default: return nil
+        }
     }
 
     private static func notification(
         for content: ChatPhysicalTranscriptRow.Content
     ) -> ChatNotificationPresentation? {
-        guard case .transcript(let item, _) = content, case .notification(let value) = item else { return nil }
-        return value
+        guard case .transcript(let item, _) = content else { return nil }
+        switch item {
+        case .notification(let value): return value
+        case .transcript(let value):
+            return ChatNotificationPresentation.canonical(value, globalOrdinal: nil)
+        default: return nil
+        }
     }
 
     private static func attachmentFacts(
@@ -511,4 +540,30 @@ enum ChatUIKitPresentationAdapter {
             }
         }
     }
+}
+
+/// Row actions cross the UIKit boundary as semantic intents. The native
+/// renderer does not own route state or media data.
+enum ChatUIKitTranscriptDetailIntent {
+    case attachment(rowID: String, index: Int)
+    case tool(rowID: String)
+    case thinking(rowID: String)
+    case notification(rowID: String)
+}
+
+struct ChatUIKitThinkingDetailRoute: Identifiable {
+    let id: String
+    let label: String?
+    let segments: [ChatThinkingSegment]
+}
+
+struct ChatUIKitDetailRoute: Identifiable {
+    enum Kind {
+        case attachment(ChatUIKitTranscriptAttachment)
+        case tool(ChatToolPresentation)
+        case thinking(ChatUIKitThinkingDetailRoute)
+        case notification(ChatNotificationPresentation)
+    }
+    let id: String
+    let kind: Kind
 }
