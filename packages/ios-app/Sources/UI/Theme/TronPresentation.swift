@@ -1599,6 +1599,11 @@ struct TronCaption: View {
 enum TronPulseLoadingIndicatorEngine {
     static let pulseCount = 3
     static let cycleDuration = 1.6
+    static let visualFootprintScale: CGFloat = 1.2
+
+    static func visualSize(for requestedSize: CGFloat) -> CGFloat {
+        requestedSize * visualFootprintScale
+    }
 
     static func animationPaused(
         reduceMotion: Bool,
@@ -1636,6 +1641,7 @@ struct TronPulseLoadingIndicator: View {
 
     var body: some View {
         let resolvedAccent = settingsTheme?.accent ?? accent
+        let visualSize = TronPulseLoadingIndicatorEngine.visualSize(for: size)
         TimelineView(.animation(
             minimumInterval: 1 / 30,
             paused: TronPulseLoadingIndicatorEngine.animationPaused(
@@ -1682,7 +1688,7 @@ struct TronPulseLoadingIndicator: View {
                 }
             }
         }
-        .frame(width: size, height: size)
+        .frame(width: visualSize, height: visualSize)
         .onAppear { isVisible = true }
         .onDisappear { isVisible = false }
         .accessibilityHidden(true)

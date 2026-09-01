@@ -15,8 +15,8 @@ xcodegen generate
 ## UI motion and loading surfaces
 
 Compact in-progress UI uses `TronPulseLoadingIndicator`, an in-house SwiftUI
-Canvas pulse. It is lifecycle-aware, stops with the view, and pauses for Reduce
-Motion or inactive scenes. Keep `ProgressView(value:total:)` for determinate
+Canvas pulse. Its rendered footprint is 20% larger than the requested nominal size to compensate for the faded outer wave. It is lifecycle-aware, stops with the view, and pauses for Reduce
+Motion or inactive scenes. The session-opening cover shows only a centered pulse at twice its former nominal size while retaining an accessibility label. Keep `ProgressView(value:total:)` for determinate
 progress only; do not reintroduce stock indeterminate spinners in chat chips,
 dashboard activity rows, or shared loading states. Diff content owns an
 intrinsic horizontal code column so long lines scroll without competing with
@@ -711,7 +711,7 @@ the Settings gear in the chat toolbar, and the context ring at the trailing edge
 movement between the device-bottom inset and beneath the keyboard's rounded top corners, static subtle emerald under Reduce Motion,
 retained compact rows for custom/compaction/retry detail, and emerald toolbar/sheet actions. Physical chat spacing acceptance additionally checks that
 a one-visual-line prompt has intrinsic height, sent photo/file chips stay above and outside prompt glass,
-tool pills retain six-point vertical insets, use the shared metadata-pill 13-point leading icon/pulse and five-point label gap, and avoid a 44-point label minimum; attachment/context/send visuals share the 16-point metric inside 40-point targets,
+tool pills retain six-point vertical insets, use the shared metadata-pill 13-point leading symbol or 20%-compensated nominal 13-point pulse and five-point label gap, and avoid a 44-point label minimum; attachment/context/send visuals share the 16-point metric inside 40-point targets,
 elapsed timing hugs its intrinsic width, and a pending photo's 22-point remove
 circle sits half outside the 64-point preview within a 30-point target centered on its top-trailing corner.
 Active-chat reliability checks must advance a desired completion before the displayed running tool receives

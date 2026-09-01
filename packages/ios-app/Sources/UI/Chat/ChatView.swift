@@ -1139,15 +1139,13 @@ struct ChatView: View {
     @ViewBuilder private var openingSurface: some View {
         switch sessionPresentation.open.phase {
         case .opening, .positioning:
-            VStack(spacing: 12) {
-                TronPulseLoadingIndicator(accent: .tronEmerald, size: 22)
-                Text("Opening conversation…")
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextSecondary)
+            ZStack {
+                TronPulseLoadingIndicator(accent: .tronEmerald, size: 44)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.tronBackground)
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Opening conversation")
             .transition(.opacity)
         case .failed(let message):
             VStack(spacing: 12) {

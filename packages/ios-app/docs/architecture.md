@@ -250,7 +250,7 @@ counts; it carries no identifiers or content. A pure tool patch reports zero sou
 counts every runtime membership state examined in `toolsInspected`, and reports only the distinct
 descriptors changed in `toolsPatched`. Opening
 a new chat presentation always synchronizes a fresh authoritative bounded latest page; disposable cached or previously paged prefixes are never revealed as
-its baseline. The transcript remains behind a nonblank opening surface until the
+its baseline. The transcript remains behind a nonblank opening surface containing only a centered pulse, rendered at twice its former nominal size with an accessibility-only label, until the
 two-phase `session.open`/`session.sync` handshake installs its authoritative tail, the
 exact initial transcript projection, and a physically verified viewport at the marker
 after transcript and queue rows. Rows remain fully realizable beneath that opaque cover;
@@ -1260,7 +1260,7 @@ the authoritative response is an object/list or the bounded readable result is v
 details. Non-JSON content-only results remain text, response data wins, and a fallback identical to Request is rejected. Running sheets consume the newest immutable tool presentation, update status, timing,
 partial output, and bounded-output disclosure in place, and never move
 the reader's scroll position. Tool chips retain six-point vertical capsule insets and
-intrinsic label/timing geometry without a layout-inflating minimum interaction frame. Every compact chat pill and tool-detail status/metadata/activity chip uses the metadata-pill leading rhythm: a 13-point icon or pulse followed by a five-point gap, with no legacy 18-point icon reservation.
+intrinsic label/timing geometry without a layout-inflating minimum interaction frame. Every compact chat pill and tool-detail status/metadata/activity chip uses the metadata-pill leading rhythm: a 13-point symbol or a pulse with a nominal 13-point size and 20%-compensated visual footprint, followed by a five-point gap, with no legacy 18-point icon reservation.
 Thinking traces remain one compact inline run while they fit, but their visible viewport
 is capped at four measured text lines rather than truncating canonical content. Once the run
 actually overflows, the compact viewport presents only the latest four measured lines without
@@ -1300,7 +1300,7 @@ model, thinking level, peer-presented Project Resources sheet, and final Rename 
 progressive searchable `ModelPicker` sheet as Models and Defaults, and its thinking row uses that settings surface's
 shared inline Change control while retaining the session's authoritative available-level list and immediate mutations;
 Session owns Agent Context, recent history/audit actions, terminal, Git evidence, and
-exports. Its Current Branch row is a button in every state and is backed only by the
+exports. Its Current Branch row is a button in every state, places the branch beneath the row title and the working-tree status at the trailing edge, and is backed only by the
 session-bound `workspace-inspector.v1` projection; it never reuses the path-based New Session
 Git probe or a locally remembered branch. The progressive Workspace sheet owns three
 mobile-native views over that projection: lazy Files navigation rooted at the runtime's
@@ -1414,7 +1414,7 @@ preview alone owns rounded glass clipping, leaving the half-offset remove contro
 Sent prompt attachment strips add three points of vertical breathing room without
 changing the 64-point image/file chip geometry. Pending and sent photo chips share the historical medium-detent,
 concentrically rounded preview with native pinch and double-tap zoom. Earlier-history loading, context summaries, and unread-response navigation share one
-content-sized compact pill treatment while preserving 44-point semantic targets; every leading symbol and progress pulse uses the shared 13-point metadata scale and five-point icon-to-label gap without changing pill geometry. A
+content-sized compact pill treatment while preserving 44-point semantic targets; every leading symbol uses the shared 13-point metadata scale, while progress pulses apply the shared 20% visual-footprint compensation to that nominal size, followed by the same five-point icon-to-label gap. A
 history request captures the visually first measured semantic frame intersecting the
 viewport; threshold visibility cannot authorize loading. Canonical-to-rendered metadata
 maps every tool call to its single compact grouped transcript chip, so page-boundary

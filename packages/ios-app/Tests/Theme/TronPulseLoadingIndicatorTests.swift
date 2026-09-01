@@ -21,6 +21,12 @@ struct TronPulseLoadingIndicatorTests {
         ))
     }
 
+    @Test("visual footprint compensates for the faded outer pulse")
+    func visualFootprint() {
+        #expect(TronPulseLoadingIndicatorEngine.visualFootprintScale == 1.2)
+        #expect(abs(TronPulseLoadingIndicatorEngine.visualSize(for: 18) - 21.6) < 0.001)
+    }
+
     @Test("concentric waves are staggered and bounded")
     func pulseGeometry() {
         let progress = (0..<TronPulseLoadingIndicatorEngine.pulseCount).map {

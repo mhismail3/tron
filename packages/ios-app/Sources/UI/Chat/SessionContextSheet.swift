@@ -647,14 +647,18 @@ struct SessionContextSheet: View {
                         Text("No Git").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
                     }
                 case .loaded(let branch, let dirty, let changeCount):
+                    let workingTreeStatus = dirty
+                        ? "\(changeCount) uncommitted \(changeCount == 1 ? "change" : "changes")"
+                        : "Working tree clean"
                     TronSettingsRow(
                         icon: "arrow.triangle.branch",
                         title: "Current Branch",
-                        subtitle: dirty ? "\(changeCount) uncommitted \(changeCount == 1 ? "change" : "changes")" : "Working tree clean",
+                        subtitle: branch,
                         subtitleRole: .dynamicValue,
+                        subtitleLineLimit: 1,
                         accent: sessionRowAccent
                     ) {
-                        Text(branch)
+                        Text(workingTreeStatus)
                             .font(TronTypography.codeContent)
                             .foregroundStyle(Color.tronTextPrimary)
                             .lineLimit(1)
