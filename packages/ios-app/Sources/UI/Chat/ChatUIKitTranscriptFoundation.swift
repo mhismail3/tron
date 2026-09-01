@@ -284,7 +284,10 @@ final class ChatUIKitChatViewController: UIViewController,
         viewportState.transactionID &+= 1
         let transactionID = viewportState.transactionID
         let anchor = captureAnchor()
+        let nativePosition = collectionView.contentOffset
         let intent = viewportState.intent
+        let isInteracting = viewportState.interaction == .tracking
+            || viewportState.interaction == .decelerating
         input = next
 
         UIView.performWithoutAnimation {
@@ -293,7 +296,12 @@ final class ChatUIKitChatViewController: UIViewController,
         }
         viewportState.appliedVersion = next.version
 
-        if viewportState.interaction == .tracking || viewportState.interaction == .decelerating {
+        if isInteracting {
+            // reloadData may invalidate estimated heights and move the native
+            // offset. Restore only that measured pre-update position; this is
+            // a safety correction, not a semantic navigation command. The
+            // anchor is retained for the next idle settlement as evidence.
+            preserveNativePosition(nativePosition)
             if let anchor { viewportState.intent = .preserve(anchor) }
         } else {
             switch intent {
@@ -303,7 +311,7 @@ final class ChatUIKitChatViewController: UIViewController,
                 restore(semantic)
             }
         }
-        let recovered = !hasVisibleRows && !rows.isEmpty
+        let recovered = !isInteracting && !hasVisibleRows && !rows.isEmpty
         if recovered { recoverBlankViewport() }
         clampOffset()
         let outcome: ChatUIKitViewportTransactionOutcome = recovered
@@ -377,6 +385,7 @@ final class ChatUIKitChatViewController: UIViewController,
             viewportState.intent = .preserve(anchor)
         }
         if hasReachedTail { viewportState.intent = .followTail }
+        if !hasVisibleRows && !rows.isEmpty { recoverBlankViewport() }
     }
 
     private func captureAnchor() -> ChatUIKitSemanticAnchor? {
@@ -390,17 +399,17 @@ final class ChatUIKitChatViewController: UIViewController,
         )
     }
 
-    private func restore(_ anchor: ChatUIKitSemanticAnchor) {
+    @discardableResult
+    private func restore(_ anchor: ChatUIKitSemanticAnchor) -> Bool {
         guard let index = rows.firstIndex(where: { $0.id == anchor.rowID }) else {
-            recoverBlankViewport()
-            return
+            return false
         }
         let path = IndexPath(item: index, section: 0)
         guard let attributes = collectionView.layoutAttributesForItem(at: path) else {
-            recoverBlankViewport()
-            return
+            return false
         }
         setOffset(y: attributes.frame.minY - anchor.topOffset)
+        return true
     }
 
     private var minOffsetY: CGFloat { -collectionView.adjustedContentInset.top }
@@ -419,12 +428,14 @@ final class ChatUIKitChatViewController: UIViewController,
 
     private func recoverBlankViewport() {
         guard !rows.isEmpty else { return }
+        // Recovery is deliberately bounded and never calls back into itself:
+        // a missing layout attribute is a terminal recovery condition for this
+        // transaction, not permission to recurse through anchor restoration.
         switch viewportState.intent {
         case .followTail:
             setOffset(y: maxOffsetY)
         case .preserve(let anchor):
-            if rows.contains(where: { $0.id == anchor.rowID }) { restore(anchor) }
-            else { setOffset(y: minOffsetY) }
+            guard restore(anchor) else { setOffset(y: minOffsetY); return }
         }
         clampOffset()
     }
@@ -432,6 +443,12 @@ final class ChatUIKitChatViewController: UIViewController,
     private func clampOffset() {
         let y = min(max(collectionView.contentOffset.y, minOffsetY), maxOffsetY)
         guard y != collectionView.contentOffset.y else { return }
+        setOffset(y: y)
+    }
+
+    private func preserveNativePosition(_ position: CGPoint) {
+        let y = min(max(position.y, minOffsetY), maxOffsetY)
+        guard collectionView.contentOffset.y != y else { return }
         setOffset(y: y)
     }
 

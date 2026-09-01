@@ -146,4 +146,17 @@ struct ChatArchitectureContractTests {
         #expect(ChatUIKitTranscriptCommit(version: 1, rows: [first, second]) == nil)
         #expect(ChatUIKitTranscriptCommit(version: 1, rows: [first]) != nil)
     }
+
+    @MainActor
+    @Test("blank viewport recovery terminates when the semantic anchor cannot materialize")
+    func blankRecoveryIsBounded() {
+        let controller = ChatUIKitChatViewController()
+        controller.loadViewIfNeeded()
+        controller.setIntent(.preserve(.init(rowID: "missing", topOffset: 0)))
+        let row = ChatUIKitTranscriptRow(id: "one", text: "one")!
+        let commit = ChatUIKitTranscriptCommit(version: 1, rows: [row])!
+        let outcome = controller.apply(commit)
+        #expect(outcome == .recovered(1))
+        #expect(controller.viewportState.intent == .preserve(.init(rowID: "missing", topOffset: 0)))
+    }
 }
