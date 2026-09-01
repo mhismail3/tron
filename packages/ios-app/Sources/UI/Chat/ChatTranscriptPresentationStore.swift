@@ -1068,6 +1068,10 @@ final class ChatTranscriptPresentationStore {
     #endif
 
     private(set) var installed: InstalledChatTranscript?
+    /// The most recent immutable boundary delivered to the eventual UIKit
+    /// viewport owner. This is diagnostic/state evidence, not a second row
+    /// mutation path.
+    private(set) var lastTransition: ChatTranscriptPresentationTransition?
     private(set) var pendingEntranceIDs: Set<String> = []
     private(set) var admittedEntranceIDs: Set<String> = []
     private(set) var displayedSemanticIDCount: Int = 0
@@ -1567,6 +1571,7 @@ final class ChatTranscriptPresentationStore {
         consumedLifecycleEntranceIDs.formIntersection(output.lifecycleRenderedIDs)
         appendPendingEntrances(inserted, output: output)
         recordDisplayedSemanticIDs(from: output)
+        lastTransition = ChatTranscriptPresentationTransition(previous: installed, next: output)
         installed = output
         return output
     }

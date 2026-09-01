@@ -549,11 +549,10 @@ enum ChatTranscriptProjectionKernel {
         // before its deferred live presentation binding is installed.
         let canonicalToolCallIDs = Set(fragments.flatMap(\.toolCallIDs))
         if let streamingFragment,
-           snapshot.transcript.contains(where: { item in
-               item.kind == .message
-                   && item.role == streamingFragment.source.role
-                   && item.presentationId == streamingFragment.source.presentationId
-           }) || (!streamingFragment.toolCallIDs.isEmpty
+           ChatLiveCanonicalIdentityPolicy.hasCanonicalSuccessor(
+               for: streamingFragment.source,
+               in: snapshot.transcript
+           ) || (!streamingFragment.toolCallIDs.isEmpty
                && Set(streamingFragment.toolCallIDs).isSubset(of: canonicalToolCallIDs)) {
             var canonicalSnapshot = snapshot
             canonicalSnapshot.streaming = nil

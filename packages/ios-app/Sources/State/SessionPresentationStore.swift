@@ -682,6 +682,23 @@ final class SessionPresentationStore {
         return MountedTranscriptWindow(coverage: coverage, prefixItems: retainedPrefix)
     }
 
+    /// A nil prefix reconciliation is safe only when the incoming authority
+    /// tail completely covers the mounted prefix. Otherwise nil means that a
+    /// same-lineage frame could not be proven continuous and must not erase
+    /// already-visible history.
+    private func incomingTailCoversMountedPrefix(_ incoming: SessionSnapshot) -> Bool {
+        guard let window = mountedTranscriptWindow,
+              let current = snapshot,
+              let incomingStart = incoming.transcriptStart,
+              let incomingEnd = authorityTranscriptEnd(incoming),
+              current.sessionId == incoming.sessionId,
+              current.runtimeGeneration == incoming.runtimeGeneration else {
+            return false
+        }
+        return incomingStart <= window.coverage.start
+            && incomingEnd >= window.coverage.end
+    }
+
     func loadEarlier(sessionID: String, presentationGeneration: Int) async -> SessionTranscriptLoadResult {
         guard !loadingEarlierTranscript else { return .unavailable }
         guard let loadTarget = mountedTarget,
@@ -2618,11 +2635,23 @@ final class SessionPresentationStore {
                 preserving: snapshot?.processActivities ?? [],
                 previousOverview: snapshot?.processOverview
             )
-            mountedTranscriptWindow = reconcilePrefix(
+            let reconciledPrefix = reconcilePrefix(
                 mountedTranscriptWindow,
                 from: snapshot,
                 into: admitted
             )
+            if mountedTranscriptWindow != nil,
+               reconciledPrefix == nil,
+               !incomingTailCoversMountedPrefix(admitted) {
+                // Preserve the last complete commit while the authoritative
+                // subscription rebaselines. Never turn a continuity failure
+                // into an empty visible transcript.
+                if !synchronization.markRetryRequired(sessionID: admitted.sessionId) {
+                    return admitted.sessionId
+                }
+                return nil
+            }
+            mountedTranscriptWindow = reconciledPrefix
             snapshot = admitted
             advanceChatProjection(canonical: true)
             if admitted.transcriptStart == incoming.transcriptStart,

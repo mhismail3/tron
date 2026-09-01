@@ -13,7 +13,7 @@ implementation detail; all user-facing language calls the agent Tron.
 | `Sources/Models` | provider-qualified model and snapshot DTOs |
 | `Sources/State` | authoritative UI projection and reconnect orchestration |
 | `Sources/Support` | bounded cache and share intake |
-| `Sources/UI/Chat` | session shell, chat composition, attachment presentation, entrance rows, transcript, composer, context, and forks |
+| `Sources/UI/Chat` | session shell, chat composition, attachment presentation, entrance rows, transcript, composer, context, and forks; the UIKit transcript foundation is being introduced here |
 | `Sources/UI/Onboarding` | pairing/setup flow, reusable onboarding chrome, workspace, provider, and default setup |
 | `Sources/UI/Settings` | settings shell plus appearance, connection, provider, agent-default, on-demand package/resource, trust, custom-model, and diagnostic presentations |
 | `Sources/UI/Terminal` | sheet composition, presentation lifecycle, and SwiftTerm renderer |
@@ -33,6 +33,22 @@ attachment preview identities, never preview bytes. Composer and authoritative s
 once before submission; handoff-only changes reuse the cached canonical timeline, and the prior complete
 commit remains installed until its replacement reaches the frame gate. Canonical JSONL remains the sole
 owner of transcript truth.
+
+The transcript authority boundary is explicit: `SessionTranscriptWindowAdmissionPolicy` validates
+bounded window shape and same-runtime ordinal continuity before a live snapshot can replace the
+current commit. Its rejected outcome requests rebaseline while preserving the last valid visible
+commit; a failed prefix reconciliation is never treated as an empty transcript. Presentation uses
+`InstalledChatTranscript` as an immutable commit and emits one `ChatTranscriptPresentationTransition`
+for its eventual viewport owner. `ChatLiveCanonicalIdentityPolicy` permits a live-to-canonical
+handoff only when exactly one successor is provable, so row identity cannot be inferred from timing.
+
+The interactive chat replacement is intentionally UIKit-only at its viewport boundary.
+`ChatUIKitChatViewController` is the isolated foundation for the future cutover: it owns one native
+collection view, semantic-anchor restoration, physical-tail following, legal-offset clamping, and
+its composer. It is not mounted in production during this phase. The eventual cutover must delete
+the SwiftUI transcript scroll surface, sentinel/materialization control path, and competing
+`ScrollPosition`/geometry ownership rather than retain a hybrid second owner. UIKit rows remain
+presentation consumers; they do not admit snapshots or mutate canonical state.
 
 ## State flow
 

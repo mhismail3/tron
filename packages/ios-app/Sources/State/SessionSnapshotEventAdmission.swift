@@ -41,7 +41,11 @@ enum SessionRebaselineAdmission: Equatable, Sendable {
         current: SessionSnapshot?,
         incoming: SessionSnapshot
     ) -> SessionRebaselineAdmission {
-        guard SessionSnapshotQueueAdmissionPolicy.admit(incoming) else { return .resynchronize }
+        guard SessionSnapshotQueueAdmissionPolicy.admit(incoming),
+              SessionTranscriptWindowAdmissionPolicy.evaluate(
+                  current: current,
+                  incoming: incoming
+              ).isAccepted else { return .resynchronize }
         guard let current, current.sessionId == incoming.sessionId else { return .install }
         guard current.runtimeGeneration == incoming.runtimeGeneration else { return .install }
         guard incoming.eventSequence > current.eventSequence else { return .ignore }
@@ -70,6 +74,16 @@ enum SessionSnapshotEventAdmission: Equatable, Sendable {
     ) -> SessionSnapshotEventAdmission {
         guard hasLiveAuthority, let eventSessionID else { return .ignore }
         guard SessionSnapshotQueueAdmissionPolicy.admit(incoming) else {
+            return .resynchronize(eventSessionID)
+        }
+        guard SessionTranscriptWindowAdmissionPolicy.evaluate(
+            current: current,
+            incoming: incoming
+        ).isAccepted else {
+            // Cursor order alone cannot prove that the bounded transcript is
+            // the same canonical window. Keep the previous commit visible and
+            // obtain an authoritative rebaseline instead of installing a
+            // sparse or conflicting replacement.
             return .resynchronize(eventSessionID)
         }
         guard eventSessionID == incoming.sessionId else {
