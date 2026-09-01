@@ -480,9 +480,11 @@ rendering is capped at the existing 320,000-byte source bound with explicit omis
 multi-page scrolling up to the 512-page safety cap. Live composer files retain exact bytes within the existing
 25 MiB aggregate limit; frozen handoff strips them before queued/canonical settlement. Physical pixel and
 peak-memory calibration remains required. The test-only `ChatUIKitParityHarnessTests` mounts the
-real transcript projection and composer together in a UIWindow, with SessionPresentationStore
-authority, ChatTranscriptPresentationStore frame-gated installation, the physical-row adapter,
-and a recording command boundary. It checks bounded tails, pinned sends, detached deceleration and
+production `ChatUIKitSessionSurfaceController` in a real `UIWindow`; that native parent alone fits
+the complete composer and constrains it above `UIKeyboardLayoutGuide`. The gate supplies the real
+transcript projection and composer through `SessionPresentationStore` authority,
+`ChatTranscriptPresentationStore` frame-gated installation, the physical-row adapter, and a
+recording command boundary. It checks bounded tails, pinned sends, detached deceleration and
 prepend, generation replacement, exact send settlement, canonical content/traits/accessibility,
 and keyboard/activity lifecycle behavior. It is intentionally not a production feature flag or a
 replacement for final device/pixel parity; physical-device differential parity and production

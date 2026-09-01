@@ -135,6 +135,24 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         updateEditorHeight()
     }
 
+    /// Returns the complete natural composer height for the host's current
+    /// width. Measuring the owned content stack avoids feeding the host's
+    /// existing height constraint back into the next fit.
+    func preferredContentHeight(for width: CGFloat) -> CGFloat? {
+        loadViewIfNeeded()
+        guard width.isFinite, width > 32 else { return nil }
+        view.layoutIfNeeded()
+        updateEditorHeight()
+        rootStack.layoutIfNeeded()
+        let fitting = rootStack.systemLayoutSizeFitting(
+            CGSize(width: width - 32, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        guard fitting.height.isFinite, fitting.height > 0 else { return nil }
+        return ceil(fitting.height + 8)
+    }
+
     private func configureStacks() {
         rootStack.axis = .vertical
         rootStack.spacing = 10

@@ -63,8 +63,11 @@ intent and terminal resolution carries the exact nonempty scoped submission iden
 suppression is keyed only by that identity: revision refreshes cannot release an accepted send, and
 only exact terminal rejection or identity replacement releases it. Draft, submission, resource, attachment,
 and viewport authorities remain outside the surface. The
-composer never writes collection-view offsets. Neither controller is mounted in production during
-this phase. The eventual cutover must delete
+composer never writes collection-view offsets. `ChatUIKitSessionSurfaceController` is the single
+native vertical-layout owner: it contains both controllers, derives the composer's complete fitted
+height from Auto Layout, and constrains that height above `UIKeyboardLayoutGuide` without a mirrored
+keyboard frame or SwiftUI geometry callback. The production route still does not mount this native
+parent during this phase. The eventual cutover must delete
 the SwiftUI transcript scroll surface, sentinel/materialization control path, and competing
 `ScrollPosition`/geometry ownership rather than retain a hybrid second owner. UIKit rows remain
 presentation consumers; they do not admit snapshots or mutate canonical state. This phase is not a
@@ -77,9 +80,9 @@ state, and accessibility ordering in isolation. It is the only UIKit composer si
 viewport controller is transcript-only. `ChatUIKitPresentationAdapter` carries complete installed
 physical-row content and prepared-text facts into the isolated surface. Its transcript row uses
 one canonical installed enum payload, with labels and presentation accessors derived from that
-payload rather than competing stored fields. The hosted integration gate mounts only installed
-physical rows from the authoritative projection; its recording command boundary and UIWindow shell
-are test-only. Focused unit tests may still use a synthetic fixture payload for adapter contracts,
+payload rather than competing stored fields. The hosted integration gate mounts the production
+native parent in a real `UIWindow`, but feeds it only installed physical rows from the authoritative
+projection; its recording command boundary is test-only. Focused unit tests may still use a synthetic fixture payload for adapter contracts,
 but that case and its fallback renderer are excluded from shipping compilation. The UIKit renderer maps the
 shared `MarkdownPresentation.Document` and `Inline` values to native TextKit, code, table, quote,
 list, rule, thinking-tail, and streaming views; normalized attributed-string ranges are measured

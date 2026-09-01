@@ -156,6 +156,8 @@ struct ChatUIKitParityHarnessTests {
             submissionID: rejected.submissionID, trailingMode: .send,
             isTranscriptReady: true, isCommandReady: true
         ))
+        #expect(harness.shell.hostedComposerHeight >= 48)
+        #expect(harness.shell.hostedComposerHeight < 120)
         harness.commandAdapter.nextResolution = .rejected
         try harness.tapSend()
         try harness.tapSend()
@@ -180,6 +182,43 @@ struct ChatUIKitParityHarnessTests {
         try harness.tapSend()
         #expect(harness.commandAdapter.commands.map(\.identity) == [rejected, rejected, accepted])
         #expect(harness.commandAdapter.settlements.last == .init(identity: accepted, accepted: true))
+    }
+
+    @Test("native session parent solely owns composer fitting and transcript boundary")
+    func nativeSessionParentGeometry() async throws {
+        let harness = try await ChatUIKitHostedHarness(snapshot: harnessSnapshot(seed: 708, count: 8))
+        harness.applyComposer(ChatUIKitComposerInput(
+            sessionID: harness.sessionID, text: "short", revision: 1,
+            submissionID: "compact-708", trailingMode: .send,
+            isTranscriptReady: true, isCommandReady: true
+        ))
+        let compactHeight = harness.shell.hostedComposerHeight
+
+        let attachment = PendingAttachment(
+            id: "attachment-708", name: "notes.md", mimeType: "text/markdown",
+            size: 128, previewData: nil
+        )
+        harness.applyComposer(ChatUIKitComposerInput(
+            sessionID: harness.sessionID,
+            text: String(repeating: "line\n", count: 12),
+            revision: 2, submissionID: "expanded-708",
+            attachments: [attachment], trailingMode: .send,
+            isTranscriptReady: true, isCommandReady: true,
+            attachmentActionsEnabled: true
+        ))
+        let expandedHeight = harness.shell.hostedComposerHeight
+        #expect(expandedHeight > compactHeight)
+        #expect(expandedHeight < harness.shell.view.bounds.height)
+        #expect(abs(harness.transcript.view.frame.maxY - harness.composer.view.frame.minY) < 0.5)
+        #expect(abs(harness.composer.view.frame.maxY
+            - harness.shell.view.keyboardLayoutGuide.layoutFrame.minY) < 0.5)
+
+        harness.applyComposer(ChatUIKitComposerInput(
+            sessionID: harness.sessionID, text: "", revision: 3,
+            submissionID: "collapsed-708", trailingMode: .send,
+            isTranscriptReady: true, isCommandReady: true
+        ))
+        #expect(harness.shell.hostedComposerHeight == compactHeight)
     }
 
     @Test("canonical Markdown, media, lifecycle, tool, queue, traits and accessibility mount together")
@@ -299,7 +338,7 @@ private final class ChatUIKitHostedHarness {
     let presentation: ChatTranscriptPresentationStore
     let transcript: ChatUIKitChatViewController
     let composer: ChatUIKitComposerController
-    let shell: ShellViewController
+    let shell: ChatUIKitSessionSurfaceController
     let window: UIWindow
     let commandAdapter = RecordingCommandAdapter()
     private(set) var input: ChatUIKitPresentationInput
@@ -316,7 +355,7 @@ private final class ChatUIKitHostedHarness {
         presentation = ChatTranscriptPresentationStore()
         transcript = ChatUIKitChatViewController()
         composer = ChatUIKitComposerController()
-        shell = ShellViewController(transcript: transcript, composer: composer)
+        shell = ChatUIKitSessionSurfaceController(transcript: transcript, composer: composer)
         window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         nextUIVersion = version
         window.rootViewController = shell
@@ -375,14 +414,14 @@ private final class ChatUIKitHostedHarness {
             version: nextVersion
         ))
         input = next
-        _ = transcript.apply(next)
+        _ = shell.applyTranscript(next)
         transcript.view.layoutIfNeeded()
         collectionView.layoutIfNeeded()
         return next
     }
 
     func applyComposer(_ next: ChatUIKitComposerInput) {
-        composer.apply(next)
+        _ = shell.applyComposer(next)
         composer.view.layoutIfNeeded()
     }
 
@@ -454,43 +493,6 @@ private final class ChatUIKitHostedHarness {
             if let value = descendant(of: child, where: predicate) { return value }
         }
         return nil
-    }
-}
-
-@MainActor
-private final class ShellViewController: UIViewController {
-    private let transcript: ChatUIKitChatViewController
-    private let composer: ChatUIKitComposerController
-
-    init(transcript: ChatUIKitChatViewController, composer: ChatUIKitComposerController) {
-        self.transcript = transcript
-        self.composer = composer
-        super.init(nibName: nil, bundle: nil)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        addChild(transcript)
-        addChild(composer)
-        transcript.view.translatesAutoresizingMaskIntoConstraints = false
-        composer.view.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(transcript.view)
-        view.addSubview(composer.view)
-        NSLayoutConstraint.activate([
-            transcript.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            transcript.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            transcript.view.topAnchor.constraint(equalTo: view.topAnchor),
-            transcript.view.bottomAnchor.constraint(equalTo: composer.view.topAnchor),
-            composer.view.heightAnchor.constraint(equalToConstant: 120),
-            composer.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            composer.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            composer.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
-        transcript.didMove(toParent: self)
-        composer.didMove(toParent: self)
     }
 }
 
