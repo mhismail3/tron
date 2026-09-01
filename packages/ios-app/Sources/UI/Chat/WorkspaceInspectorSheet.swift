@@ -25,6 +25,40 @@ private struct WorkspaceCommitRoute: Identifiable {
     var id: String { detail.oid }
 }
 
+@MainActor
+private final class WorkspaceDetailRequestOwner {
+    private var generation = 0
+    private var task: Task<Void, Never>?
+
+    func begin() -> Int? {
+        guard task == nil else { return nil }
+        generation &+= 1
+        return generation
+    }
+
+    func install(_ task: Task<Void, Never>, generation candidate: Int) {
+        guard candidate == generation else {
+            task.cancel()
+            return
+        }
+        self.task = task
+    }
+
+    func admits(_ candidate: Int) -> Bool {
+        candidate == generation && !Task.isCancelled
+    }
+
+    func complete(_ candidate: Int) {
+        if candidate == generation { task = nil }
+    }
+
+    func cancel() {
+        generation &+= 1
+        task?.cancel()
+        task = nil
+    }
+}
+
 enum WorkspaceCommitMessagePresentation {
     static func body(subject: String, message: String) -> String? {
         let message = message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -39,12 +73,12 @@ enum WorkspaceCommitMessagePresentation {
     }
 }
 
-struct WorkspaceHistoryGraphSegment: Equatable {
+struct WorkspaceHistoryGraphSegment: Equatable, Sendable {
     let from: Int
     let to: Int
 }
 
-struct WorkspaceHistoryGraphRow: Equatable {
+struct WorkspaceHistoryGraphRow: Equatable, Sendable {
     let nodeLane: Int
     let laneCount: Int
     let transitions: [WorkspaceHistoryGraphSegment]
@@ -54,22 +88,26 @@ struct WorkspaceHistoryGraphRow: Equatable {
 enum WorkspaceHistoryGraphLayout {
     static func rows(for commits: [SessionWorkspaceCommit]) -> [WorkspaceHistoryGraphRow] {
         var lanes: [String] = []
+        var laneSet: Set<String> = []
         return commits.map { commit in
-            if !lanes.contains(commit.oid) { lanes.append(commit.oid) }
+            if laneSet.insert(commit.oid).inserted { lanes.append(commit.oid) }
             let before = lanes
-            let nodeLane = before.firstIndex(of: commit.oid) ?? 0
+            let beforeIndices = Dictionary(uniqueKeysWithValues: before.enumerated().map { ($0.element, $0.offset) })
+            let nodeLane = beforeIndices[commit.oid] ?? 0
             var after = before
             after.remove(at: nodeLane)
+            laneSet.remove(commit.oid)
             var insertion = min(nodeLane, after.count)
-            for parent in commit.parents where !after.contains(parent) {
+            for parent in commit.parents where laneSet.insert(parent).inserted {
                 after.insert(parent, at: insertion)
                 insertion += 1
             }
+            let afterIndices = Dictionary(uniqueKeysWithValues: after.enumerated().map { ($0.element, $0.offset) })
             let transitions = before.enumerated().compactMap { index, oid -> WorkspaceHistoryGraphSegment? in
-                guard oid != commit.oid, let destination = after.firstIndex(of: oid) else { return nil }
+                guard oid != commit.oid, let destination = afterIndices[oid] else { return nil }
                 return WorkspaceHistoryGraphSegment(from: index, to: destination)
             }
-            let parentLanes = commit.parents.compactMap { after.firstIndex(of: $0) }
+            let parentLanes = commit.parents.compactMap { afterIndices[$0] }
             lanes = after
             return WorkspaceHistoryGraphRow(
                 nodeLane: nodeLane,
@@ -164,11 +202,7 @@ struct WorkspaceInspectorSheet: View {
     @State private var fileRoute: WorkspaceFileRoute?
     @State private var diffRoute: WorkspaceDiffRoute?
     @State private var commitRoute: WorkspaceCommitRoute?
-    @State private var loadingPath: String?
-    @State private var loadingCommit: String?
-    @State private var detailTask: Task<Void, Never>?
-    @State private var detailGeneration = 0
-    @State private var selectedDiffScope: SessionWorkspaceDiffScope = .current
+    @State private var detailRequests = WorkspaceDetailRequestOwner()
     @State private var detent: PresentationDetent = .medium
 
     var body: some View {
@@ -205,18 +239,23 @@ struct WorkspaceInspectorSheet: View {
             }
             .task(id: sessionID) {
                 await owner.loadInitial(service: model.workspaceInspection, sessionID: sessionID)
+                guard !Task.isCancelled else { return }
+                await reconcileWhileVisible()
             }
-            .task(id: "poll:\(sessionID)") { await reconcileWhileVisible() }
             .onChange(of: selectedTab) { _, tab in
-                guard tab == .history, owner.inspection?.repository != nil,
-                      owner.commits.isEmpty else { return }
-                Task { await owner.loadHistory(service: model.workspaceInspection, sessionID: sessionID, append: false) }
+                switch tab {
+                case .files:
+                    Task { await owner.reloadCurrentDirectory(service: model.workspaceInspection, sessionID: sessionID) }
+                case .history:
+                    guard owner.inspection?.repository != nil, !owner.hasLoadedHistory else { return }
+                    Task { await owner.loadHistory(service: model.workspaceInspection, sessionID: sessionID, append: false) }
+                case .changes:
+                    break
+                }
             }
             .onDisappear {
                 owner.cancel()
-                detailGeneration &+= 1
-                detailTask?.cancel()
-                detailTask = nil
+                detailRequests.cancel()
             }
             .tronManagedSheet(item: $fileRoute, identity: { "workspace.file.\($0.id)" }) { route in
                 AttachmentFilePreviewSheet(
@@ -391,7 +430,7 @@ struct WorkspaceInspectorSheet: View {
                         .lineLimit(1)
                     HStack(spacing: 6) {
                         if let size = entry.size { Text(size.formatted(.byteCount(style: .file))) }
-                        if let change = owner.inspection?.repository?.changes.first(where: { $0.path == entry.path }) {
+                        if let change = owner.changesByPath[entry.path] {
                             Text(changeLabel(change)).foregroundStyle(change.conflicted ? Color.tronError : Color.tronAmber)
                         }
                         if entry.kind == .symlink { Text("Symbolic link") }
@@ -407,7 +446,7 @@ struct WorkspaceInspectorSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(entry.kind == .symlink || loadingPath != nil)
+        .disabled(entry.kind == .symlink)
         .tronScrollSurface(accent: .tronBlue, cornerRadius: 14, tintOpacity: 0.07)
         .accessibilityLabel(entry.name)
         .accessibilityValue(entry.kind == .symlink ? "Symbolic link, preview unavailable" : entry.kind.rawValue)
@@ -415,12 +454,11 @@ struct WorkspaceInspectorSheet: View {
 
     @ViewBuilder private var changesContent: some View {
         if let repository = owner.inspection?.repository {
-            let groups = changeGroups(repository.changes)
             LazyVStack(alignment: .leading, spacing: 16) {
                 if repository.changes.isEmpty {
                     TronInfoCard(icon: "checkmark.circle", text: "Working tree clean", accent: .tronEmerald)
                 } else {
-                    ForEach(groups, id: \.title) { group in
+                    ForEach(owner.changeGroups) { group in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(group.title.uppercased())
                                 .font(TronTypography.sheetSectionHeader)
@@ -439,10 +477,7 @@ struct WorkspaceInspectorSheet: View {
     }
 
     private func changeRow(_ change: SessionWorkspaceChange) -> some View {
-        Button {
-            selectedDiffScope = change.staged && !change.unstaged ? .staged : change.unstaged && !change.staged ? .unstaged : .current
-            openDiff(change)
-        } label: {
+        Button { openDiff(change) } label: {
             HStack(spacing: 10) {
                 Image(systemName: change.conflicted ? "exclamationmark.triangle.fill" : "doc.text.magnifyingglass")
                     .foregroundStyle(change.conflicted ? Color.tronError : Color.tronBlue)
@@ -472,7 +507,6 @@ struct WorkspaceInspectorSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(loadingPath != nil)
         .tronScrollSurface(accent: change.conflicted ? .tronError : .tronBlue, cornerRadius: 12, tintOpacity: 0.07)
         .accessibilityLabel("\(change.path), \(changeLabel(change))")
     }
@@ -507,12 +541,11 @@ struct WorkspaceInspectorSheet: View {
                 } else if owner.commits.isEmpty {
                     TronInfoCard(icon: "clock", text: "No commits are available for this scope.", accent: .tronBlue)
                 } else {
-                    let graphRows = WorkspaceHistoryGraphLayout.rows(for: owner.commits)
                     if owner.historyScope == .allReferences {
                         historyReferences
                     }
-                    ForEach(Array(owner.commits.enumerated()), id: \.element.id) { index, commit in
-                        commitRow(commit, graph: graphRows[index])
+                    ForEach(owner.historyRows) { row in
+                        commitRow(row)
                     }
                     if owner.historyCursor != nil {
                         Button {
@@ -538,7 +571,7 @@ struct WorkspaceInspectorSheet: View {
     }
 
     private var historyReferences: some View {
-        let references = Array(Set(owner.commits.flatMap(\.decorations))).sorted()
+        let references = owner.historyReferences
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(references, id: \.self) { reference in
@@ -551,11 +584,12 @@ struct WorkspaceInspectorSheet: View {
         .padding(.bottom, references.isEmpty ? 0 : 8)
     }
 
-    private func commitRow(_ commit: SessionWorkspaceCommit, graph: WorkspaceHistoryGraphRow) -> some View {
-        Button { openCommit(commit) } label: {
-            let accent = WorkspaceHistoryGraphPalette.color(for: graph.nodeLane)
+    private func commitRow(_ row: WorkspaceHistoryRowPresentation) -> some View {
+        let commit = row.commit
+        return Button { openCommit(commit) } label: {
+            let accent = WorkspaceHistoryGraphPalette.color(for: row.graph.nodeLane)
             HStack(alignment: .center, spacing: 10) {
-                WorkspaceHistoryGraph(row: graph)
+                WorkspaceHistoryGraph(row: row.graph)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Text(commit.subject.isEmpty ? "Untitled commit" : commit.subject)
@@ -569,7 +603,7 @@ struct WorkspaceInspectorSheet: View {
                     }
                     HStack(spacing: 8) {
                         Text(commit.authorName)
-                        Text(GatewayTimestamp.relativeDescription(commit.authoredAt, relativeTo: .now))
+                        Text(row.relativeTimestamp)
                         if commit.parents.count > 1 {
                             Label("Merge", systemImage: "arrow.triangle.merge")
                                 .foregroundStyle(accent)
@@ -589,67 +623,62 @@ struct WorkspaceInspectorSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(loadingCommit != nil)
         .accessibilityLabel("\(commit.subject), \(commit.shortOid), \(commit.authorName)")
     }
 
     private func openFile(_ entry: SessionWorkspaceDirectoryEntry) {
-        detailGeneration &+= 1
-        let generation = detailGeneration
-        loadingPath = entry.path
-        detailTask?.cancel()
-        detailTask = Task {
-            defer { if generation == detailGeneration { loadingPath = nil } }
+        guard let generation = detailRequests.begin() else { return }
+        let task = Task {
+            defer { detailRequests.complete(generation) }
             do {
                 let descriptor = try await model.workspaceInspection.file(sessionID: sessionID, path: entry.path)
-                guard !Task.isCancelled, generation == detailGeneration,
+                guard detailRequests.admits(generation),
                       let identity = model.chatMediaIdentity(blobID: descriptor.blobId) else { return }
                 fileRoute = WorkspaceFileRoute(descriptor: descriptor, identity: identity, leaseID: UUID())
             } catch {
-                guard generation == detailGeneration else { return }
+                guard detailRequests.admits(generation) else { return }
                 surface(error)
             }
         }
+        detailRequests.install(task, generation: generation)
     }
 
     private func openDiff(_ change: SessionWorkspaceChange) {
-        detailGeneration &+= 1
-        let generation = detailGeneration
-        loadingPath = change.path
-        let scope = selectedDiffScope
-        detailTask?.cancel()
-        detailTask = Task {
-            defer { if generation == detailGeneration { loadingPath = nil } }
+        guard let generation = detailRequests.begin() else { return }
+        let scope: SessionWorkspaceDiffScope = change.staged && !change.unstaged
+            ? .staged
+            : change.unstaged && !change.staged ? .unstaged : .current
+        let task = Task {
+            defer { detailRequests.complete(generation) }
             do {
                 let diff = try await model.workspaceInspection.diff(sessionID: sessionID, path: change.path, scope: scope)
-                guard !Task.isCancelled, generation == detailGeneration else { return }
-                diffRoute = WorkspaceDiffRoute(
-                    diff: diff,
-                    presentation: ToolDiffPresentation.make(unifiedPatch: diff.patch, sourceLabel: "Git diff")
-                )
+                let presentation = await Task.detached(priority: .userInitiated) {
+                    ToolDiffPresentation.make(unifiedPatch: diff.patch, sourceLabel: "Git diff")
+                }.value
+                guard detailRequests.admits(generation) else { return }
+                diffRoute = WorkspaceDiffRoute(diff: diff, presentation: presentation)
             } catch {
-                guard generation == detailGeneration else { return }
+                guard detailRequests.admits(generation) else { return }
                 surface(error)
             }
         }
+        detailRequests.install(task, generation: generation)
     }
 
     private func openCommit(_ commit: SessionWorkspaceCommit) {
-        detailGeneration &+= 1
-        let generation = detailGeneration
-        loadingCommit = commit.oid
-        detailTask?.cancel()
-        detailTask = Task {
-            defer { if generation == detailGeneration { loadingCommit = nil } }
+        guard let generation = detailRequests.begin() else { return }
+        let task = Task {
+            defer { detailRequests.complete(generation) }
             do {
                 let detail = try await model.workspaceInspection.commit(sessionID: sessionID, oid: commit.oid)
-                guard !Task.isCancelled, generation == detailGeneration else { return }
+                guard detailRequests.admits(generation) else { return }
                 commitRoute = WorkspaceCommitRoute(detail: detail)
             } catch {
-                guard generation == detailGeneration else { return }
+                guard detailRequests.admits(generation) else { return }
                 surface(error)
             }
         }
+        detailRequests.install(task, generation: generation)
     }
 
     private func reconcileWhileVisible() async {
@@ -660,9 +689,9 @@ struct WorkspaceInspectorSheet: View {
             let previous = owner.inspection?.revision
             await owner.refreshInspection(service: model.workspaceInspection, sessionID: sessionID)
             guard !Task.isCancelled, previous != owner.inspection?.revision else { continue }
-            await owner.reloadCurrentDirectory(service: model.workspaceInspection, sessionID: sessionID)
-            if selectedTab == .history {
-                owner.resetHistory()
+            if selectedTab == .files {
+                await owner.reloadCurrentDirectory(service: model.workspaceInspection, sessionID: sessionID)
+            } else if selectedTab == .history, !owner.hasLoadedHistory {
                 await owner.loadHistory(service: model.workspaceInspection, sessionID: sessionID, append: false)
             }
         }
@@ -703,19 +732,6 @@ struct WorkspaceInspectorSheet: View {
         if change.staged && change.unstaged { return "tray.and.arrow.down.fill" }
         if change.staged { return "tray.and.arrow.down" }
         return "pencil"
-    }
-
-    private func changeGroups(_ changes: [SessionWorkspaceChange]) -> [(title: String, rows: [SessionWorkspaceChange])] {
-        let definitions: [(String, (SessionWorkspaceChange) -> Bool)] = [
-            ("Conflicts", { $0.conflicted }),
-            ("Staged", { !$0.conflicted && $0.staged }),
-            ("Modified", { !$0.conflicted && !$0.staged && !$0.untracked }),
-            ("Untracked", { $0.untracked }),
-        ]
-        return definitions.compactMap { title, includes in
-            let rows = changes.filter(includes)
-            return rows.isEmpty ? nil : (title, rows)
-        }
     }
 
     private func surface(_ error: Error) {
@@ -774,9 +790,7 @@ private struct WorkspaceCommitDetailSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var diffRoute: WorkspaceDiffRoute?
-    @State private var loadingPath: String?
-    @State private var detailGeneration = 0
-    @State private var detailTask: Task<Void, Never>?
+    @State private var detailRequests = WorkspaceDetailRequestOwner()
 
     private var supportsHistoricalDiff: Bool {
         model.gatewayInfo?.capabilities.contains(WorkspaceInspectionService.historyDiffCapability) == true
@@ -831,7 +845,7 @@ private struct WorkspaceCommitDetailSheet: View {
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .disabled(!supportsHistoricalDiff || loadingPath != nil)
+                            .disabled(!supportsHistoricalDiff)
                             .tronScrollSurface(accent: .tronBlue, cornerRadius: 14, tintOpacity: 0.06)
                             .accessibilityHint(supportsHistoricalDiff ? "Opens this file's diff for the commit" : "Historical file diffs require a newer Gateway")
                         }
@@ -851,12 +865,7 @@ private struct WorkspaceCommitDetailSheet: View {
             .tronManagedSheet(item: $diffRoute, identity: { "workspace.commit.diff.\($0.id)" }) { route in
                 WorkspaceGitDiffSheet(route: route)
             }
-            .onDisappear {
-                detailGeneration &+= 1
-                detailTask?.cancel()
-                detailTask = nil
-                loadingPath = nil
-            }
+            .onDisappear { detailRequests.cancel() }
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
@@ -868,28 +877,25 @@ private struct WorkspaceCommitDetailSheet: View {
     }
 
     private func openDiff(_ change: SessionWorkspaceCommitChange) {
-        guard supportsHistoricalDiff else { return }
-        detailGeneration &+= 1
-        let generation = detailGeneration
-        loadingPath = change.path
-        detailTask?.cancel()
-        detailTask = Task {
-            defer { if generation == detailGeneration { loadingPath = nil } }
+        guard supportsHistoricalDiff, let generation = detailRequests.begin() else { return }
+        let task = Task {
+            defer { detailRequests.complete(generation) }
             do {
                 let diff = try await model.workspaceInspection.commitDiff(
                     sessionID: sessionID,
                     oid: detail.oid,
                     path: change.path
                 )
-                guard !Task.isCancelled, generation == detailGeneration else { return }
-                diffRoute = WorkspaceDiffRoute(
-                    diff: diff,
-                    presentation: ToolDiffPresentation.make(unifiedPatch: diff.patch, sourceLabel: "Commit diff")
-                )
+                let presentation = await Task.detached(priority: .userInitiated) {
+                    ToolDiffPresentation.make(unifiedPatch: diff.patch, sourceLabel: "Commit diff")
+                }.value
+                guard detailRequests.admits(generation) else { return }
+                diffRoute = WorkspaceDiffRoute(diff: diff, presentation: presentation)
             } catch {
-                guard generation == detailGeneration, !(error is CancellationError) else { return }
+                guard detailRequests.admits(generation) else { return }
                 model.presentError(error)
             }
         }
+        detailRequests.install(task, generation: generation)
     }
 }

@@ -603,12 +603,17 @@ Primary operation groups are `system`, `device`, `legacy`, `session`,
 established subscription and derive their root from the runtime slot's canonical
 `cwd`; mobile input can never substitute an absolute workspace. Directory and
 status projections fail atomically at their count/byte ceilings, relative paths
-cannot traverse or follow symbolic links, and file previews are no-follow,
-identity-revalidated snapshots registered in the existing 25 MiB bounded blob
-store. Git runs without a shell, pager, external diff, or text conversion, uses
-the configured Git executable and deterministic locale, and is killed on timeout
-or output overflow. Status uses porcelain-v2 NUL records and represents named,
-detached, and unborn heads explicitly. Per-file working-tree diffs are produced lazily and bounded before transport.
+cannot traverse or follow symbolic links, and directory/file reads revalidate canonical containment and inode
+identity before publication. Directory metadata uses a fixed 16-operation concurrency ceiling instead of serial
+filesystem round trips. File previews are no-follow snapshots registered in the existing 25 MiB bounded blob store;
+the content-addressed blob identity also owns their revision, avoiding a second full-file hash. Git runs without a
+shell, pager, external diff, or text conversion, uses the configured Git executable and deterministic locale, and
+kills the detached process group on timeout or output overflow. Concurrent identical workspace inspections share
+one in-flight status projection without caching completed truth. Status uses porcelain-v2 NUL records and represents named,
+detached, and unborn heads explicitly. Per-file working-tree diffs are produced lazily and bounded before transport;
+staged, unstaged, history, and commit-detail reads use an operation-scoped canonical repository context and avoid a
+full recursive status scan when they only need a selected path or immutable commit evidence. Independent commit
+metadata and changed-name commands execute concurrently after commit visibility admission.
 `workspace-history-diff.v1` adds the equally bounded `session.workspace.git.history.diff` read: it admits only a
 full commit already visible in the session workspace's history and a contained relative file path, then renders that
 commit's first-parent patch without external diff or text-conversion hooks. History cursors are authenticated, client/root/scope

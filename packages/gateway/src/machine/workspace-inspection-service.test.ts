@@ -75,10 +75,20 @@ describe("WorkspaceInspectionService", () => {
       expect.objectContaining({ path: "linked", kind: "symlink" }),
     ]));
     const file = await service.file(root, "Sources/File.swift");
-    expect(file).toMatchObject({ blobId: "blob-id", name: "File.swift", size: 14 });
+    expect(file).toMatchObject({ blobId: "blob-id", name: "File.swift", size: 14, revision: "blob-id" });
     expect(registered.toString("utf8")).toBe("let value = 1\n");
     await expect(service.list(root, "linked")).rejects.toMatchObject({ code: "invalid_request" });
     await expect(service.file(root, "../outside")).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("rejects directory listings above the bounded entry ceiling", async () => {
+    const root = await repository();
+    const crowded = join(root, "crowded");
+    await mkdir(crowded);
+    await Promise.all(Array.from({ length: 1_001 }, (_, index) => mkdir(join(crowded, `entry-${index}`))));
+    const service = new WorkspaceInspectionService(() => "blob");
+
+    await expect(service.list(root, "crowded")).rejects.toMatchObject({ code: "conflict" });
   });
 
   it("rejects oversized file snapshots before blob registration", async () => {

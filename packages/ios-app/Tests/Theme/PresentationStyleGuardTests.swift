@@ -1522,6 +1522,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/WorkspaceInspectorSheet.swift"),
             encoding: .utf8
         )
+        let workspaceOwner = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/WorkspaceInspectorOwner.swift"),
+            encoding: .utf8
+        )
         let attachmentPreview = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/AttachmentFilePreviewSheet.swift"),
             encoding: .utf8
@@ -1546,6 +1550,7 @@ struct PresentationStyleGuardTests {
         #expect(workspaceService.contains("session.workspace.git.diff"))
         #expect(workspaceService.contains("session.workspace.git.history.list"))
         #expect(workspaceService.contains("session.workspace.git.history.diff"))
+        #expect(workspaceService.contains("Task.detached(priority: .userInitiated)"))
         #expect(workspaceSheet.contains("ToolDiffView(lines: presentation.lines"))
         #expect(workspaceSheet.contains("AttachmentFilePreviewSheet("))
         #expect(workspaceSheet.contains("Task.sleep(for: .seconds(4))"))
@@ -1555,7 +1560,7 @@ struct PresentationStyleGuardTests {
         #expect(workspaceSheet.contains(".tronScrollEdgeChrome()"))
         #expect(workspaceSheet.contains("@State private var detent: PresentationDetent = .medium"))
         #expect(workspaceSheet.contains("foreground: .tronBlue"))
-        #expect(workspaceSheet.contains("WorkspaceHistoryGraphLayout.rows"))
+        #expect(workspaceOwner.contains("WorkspaceHistoryGraphLayout.rows"))
         #expect(workspaceSheet.contains("WorkspaceHistoryGraphPalette.color"))
         #expect(workspaceSheet.contains("private let lineWidth: CGFloat = 2.2"))
         #expect(!workspaceSheet.contains(".background(Color.tronBackground)"))
@@ -1565,6 +1570,10 @@ struct PresentationStyleGuardTests {
         #expect(workspaceSheet.contains("truncationMode: .head"))
         #expect(workspaceSheet.contains("WorkspaceCommitMessagePresentation.body"))
         #expect(workspaceSheet.contains("model.workspaceInspection.commitDiff("))
+        #expect(workspaceSheet.contains("Task.detached(priority: .userInitiated)"))
+        #expect(workspaceOwner.contains("maximumRetainedCommits = 400"))
+        #expect(workspaceOwner.contains("changesByPath"))
+        #expect(workspaceOwner.contains("historyRows"))
         #expect(attachmentPreview.contains(".presentationDetents([.large])"))
         #expect(attachmentPreview.contains(".tronTopBlurSurface()"))
         #expect(!attachmentPreview.contains(".presentationDetents([.medium, .large]"))

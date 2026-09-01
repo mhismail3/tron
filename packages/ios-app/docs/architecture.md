@@ -1307,7 +1307,11 @@ diffs, and tip-pinned paginated current-branch/all-reference History. File conte
 on demand into the existing bounded authenticated blob transport and uses the shared
 Markdown/text/code/PDF/image preview pipeline. The sheet has an isolated observable owner;
 the onboarding selector's global folder listing can neither overwrite it nor become canonical
-workspace state. One tab-scoped scroll owner contains the workspace identity, tab switcher, and
+workspace state. Initial inspection and root-directory reads overlap, while bounded DTO decoding,
+change indexing/grouping, history graph preparation, reference collection, relative timestamps, and
+unified-diff parsing execute off the main actor. The owner publishes equal inspection revisions as
+no-ops, indexes changes by path for constant-time Files annotations, and retains at most 400 prepared
+history rows so repeated pagination cannot create unbounded memory or graph work. One tab-scoped scroll owner contains the workspace identity, tab switcher, and
 active collection, so the established top blur begins directly below navigation chrome and content
 scrolls continuously beneath it instead of splitting the toolbar from a lower blurred region; tab
 changes return that owner to its top boundary. The sheet opens progressively at medium height, uses the Session
@@ -1322,10 +1326,13 @@ parent OIDs, with uniform-weight lane-colored rails, matching hash/reference acc
 and reference chips; `All References` therefore shows where branch tips fork and reconnect without treating the mobile
 projection as Git authority. Commit detail strips the subject duplicated by Git's full message, fills the available card
 width, and capability-gates per-file historical diffs through `workspace-history-diff.v1`; those patches are fetched only
-after selection and use the shared diff renderer. While uncovered and foregrounded, the sheet and Manage Session reconcile at
+after selection and use the shared diff renderer. Detail admission lives in an unobserved single-flight owner, so taps
+cannot launch request bursts or invalidate every visible row while the selected destination is prepared. While uncovered and foregrounded, the sheet and Manage Session reconcile at
 a four-second bounded cadence, retain their last useful values through transient failure, and
-reject replaced profile/session/path generations. Polling stops under coverage, background,
-or dismissal. Git/file responses are point-in-time revisions; later workspace truth replaces
+reject replaced profile/session/path generations. A worktree-only change does not rebuild tip-pinned History, and
+Directory is refreshed only while Files is visible or when the user returns to it. Polling starts only after the
+parallel initial load and stops under coverage, background, or dismissal. Failed directory navigation keeps the prior
+path and rows as one atomic projection instead of labeling stale contents with the requested path. Git/file responses are point-in-time revisions; later workspace truth replaces
 lists atomically and never mutates an already-open diff beneath the reader.
 Configuration row icons use the section's purple palette, while every Session row
 icon—including Git states, exports, sharing, and diagnostics—uses the section's blue palette.

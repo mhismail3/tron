@@ -84,11 +84,13 @@ struct WorkspaceInspectionService: Sendable {
         return values
     }
 
-    private func decode<T: Decodable>(
+    private func decode<T: Decodable & Sendable>(
         _ method: String,
         params: [String: JSONValue]
     ) async throws -> T {
         let value = try await request(method, .object(params))
-        return try value.decode(T.self)
+        return try await Task.detached(priority: .userInitiated) {
+            try value.decode(T.self)
+        }.value
     }
 }

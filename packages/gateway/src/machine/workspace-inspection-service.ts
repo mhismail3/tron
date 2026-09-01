@@ -14,6 +14,7 @@ const WORKSPACE_MAXIMUM_ENTRIES = 1_000;
 const WORKSPACE_MAXIMUM_PROJECTED_BYTES = 768 * 1_024;
 const WORKSPACE_FILE_MAXIMUM_BYTES = 25 * 1_048_576;
 const WORKSPACE_MAXIMUM_CHANGES = 5_000;
+const WORKSPACE_METADATA_CONCURRENCY = 16;
 const HISTORY_MAXIMUM_LIMIT = 100;
 const HISTORY_CURSOR_MAXIMUM_AGE_MS = 5 * 60_000;
 
@@ -55,6 +56,12 @@ interface GitResult {
   truncated: boolean;
 }
 
+interface RepositoryContext {
+  workspaceRoot: string;
+  repositoryRoot: string;
+  pathspec: string;
+}
+
 interface HistoryCursor {
   clientID: string;
   root: string;
@@ -94,8 +101,7 @@ async function canonicalRoot(path: string): Promise<string> {
   return root;
 }
 
-async function containedPath(rootInput: string, relativePath: string, finalKind?: "directory" | "file"): Promise<string> {
-  const root = await canonicalRoot(rootInput);
+async function containedPathFromRoot(root: string, relativePath: string, finalKind?: "directory" | "file"): Promise<string> {
   const normalized = validateRelativePath(relativePath);
   let candidate = root;
   for (const component of normalized ? normalized.split(sep) : []) {
@@ -114,6 +120,23 @@ async function containedPath(rootInput: string, relativePath: string, finalKind?
     throw new GatewayError("invalid_request", "Workspace path is not a regular file");
   }
   return candidate;
+}
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  transform: (value: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (nextIndex < values.length) {
+      const index = nextIndex++;
+      results[index] = await transform(values[index]!, index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 function gitEnvironment(): NodeJS.ProcessEnv {
@@ -146,7 +169,19 @@ async function runGit(
       env: gitEnvironment(),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      detached: process.platform !== "win32",
     });
+    const killProcessGroup = () => {
+      if (process.platform !== "win32" && child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, "SIGKILL");
+          return;
+        } catch {
+          // Fall back to the direct child if the process group already retired.
+        }
+      }
+      child.kill("SIGKILL");
+    };
     const chunks: Buffer[] = [];
     const errors: Buffer[] = [];
     let bytes = 0;
@@ -156,7 +191,7 @@ async function runGit(
     let overflowed = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killProcessGroup();
     }, options.timeoutMs ?? GIT_TIMEOUT_MS);
     timer.unref();
 
@@ -168,10 +203,10 @@ async function runGit(
           if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
           bytes = maximumBytes;
           truncated = true;
-          child.kill("SIGKILL");
+          killProcessGroup();
         } else {
           overflowed = true;
-          child.kill("SIGKILL");
+          killProcessGroup();
         }
         return;
       }
@@ -249,8 +284,7 @@ async function repositoryRoot(cwd: string): Promise<string | undefined> {
   return await realpath(value);
 }
 
-async function statusInspection(workspaceInput: string): Promise<WorkspaceRepositoryInspection | undefined> {
-  const workspaceRoot = await canonicalRoot(workspaceInput);
+async function statusInspectionFromRoot(workspaceRoot: string): Promise<WorkspaceRepositoryInspection | undefined> {
   const root = await repositoryRoot(workspaceRoot);
   if (!root) return undefined;
   const pathspec = relative(root, workspaceRoot) || ".";
@@ -332,6 +366,34 @@ async function statusInspection(workspaceInput: string): Promise<WorkspaceReposi
   };
 }
 
+async function statusInspection(workspaceInput: string): Promise<WorkspaceRepositoryInspection | undefined> {
+  return await statusInspectionFromRoot(await canonicalRoot(workspaceInput));
+}
+
+async function repositoryContext(workspaceInput: string): Promise<RepositoryContext | undefined> {
+  const workspaceRoot = await canonicalRoot(workspaceInput);
+  const repositoryRootValue = await repositoryRoot(workspaceRoot);
+  if (!repositoryRootValue) return undefined;
+  return {
+    workspaceRoot,
+    repositoryRoot: repositoryRootValue,
+    pathspec: relative(repositoryRootValue, workspaceRoot) || ".",
+  };
+}
+
+async function repositoryHead(root: string): Promise<{ head?: string; unborn: boolean }> {
+  const result = await runGit(root, ["rev-parse", "--verify", "HEAD"], {
+    maximumBytes: 8_192,
+    allowedExitCodes: [0, 128],
+  });
+  if (result.exitCode !== 0) return { unborn: true };
+  const head = result.stdout.toString("utf8").trim();
+  if (!/^[0-9a-f]{40,64}$/.test(head)) {
+    throw new GatewayError("conflict", "Git returned an invalid HEAD commit", true);
+  }
+  return { head, unborn: false };
+}
+
 function revisionFor(root: string, repository: WorkspaceRepositoryInspection | undefined): string {
   return createHash("sha256").update(JSON.stringify({ root, repository })).digest("base64url");
 }
@@ -382,17 +444,28 @@ async function readBoundedFile(
 
 export class WorkspaceInspectionService {
   private readonly cursorSecret = randomBytes(32);
+  private readonly inspectionFlights = new Map<string, Promise<WorkspaceInspection>>();
 
   constructor(private readonly registerBlob: (data: Buffer, mimeType: string) => string) {}
 
   async inspect(workspace: string): Promise<WorkspaceInspection> {
     const root = await canonicalRoot(workspace);
-    const repository = await statusInspection(root);
-    return {
-      root,
-      revision: revisionFor(root, repository),
-      ...(repository ? { repository: { ...repository, root } } : {}),
-    };
+    const existing = this.inspectionFlights.get(root);
+    if (existing) return await existing;
+    const flight = (async () => {
+      const repository = await statusInspectionFromRoot(root);
+      return {
+        root,
+        revision: revisionFor(root, repository),
+        ...(repository ? { repository: { ...repository, root } } : {}),
+      };
+    })();
+    this.inspectionFlights.set(root, flight);
+    try {
+      return await flight;
+    } finally {
+      if (this.inspectionFlights.get(root) === flight) this.inspectionFlights.delete(root);
+    }
   }
 
   async list(workspace: string, requestedPath?: string): Promise<{
@@ -404,43 +477,59 @@ export class WorkspaceInspectionService {
   }> {
     const root = await canonicalRoot(workspace);
     const relativePath = validateRelativePath(requestedPath);
-    const directoryPath = await containedPath(root, relativePath, "directory");
+    const directoryPath = await containedPathFromRoot(root, relativePath, "directory");
+    const beforeDirectory = await lstat(directoryPath);
+    const openedDirectoryPath = await realpath(directoryPath);
+    if (!inside(root, openedDirectoryPath) || beforeDirectory.isSymbolicLink() || !beforeDirectory.isDirectory()) {
+      return invalidRelativePath();
+    }
     const directory = await opendir(directoryPath);
-    const entries: Array<{ name: string; path: string; kind: WorkspaceEntryKind; hidden: boolean; size?: number; modifiedAt?: string }> = [];
-    let bytes = 2;
-    let examined = 0;
+    const names: string[] = [];
     try {
       for await (const entry of directory) {
-        examined += 1;
-        if (examined > WORKSPACE_MAXIMUM_ENTRIES) {
+        names.push(entry.name);
+        if (names.length > WORKSPACE_MAXIMUM_ENTRIES) {
           throw new GatewayError("conflict", "This folder contains too many entries to browse safely", true);
         }
-        const absolute = join(directoryPath, entry.name);
-        const metadata = await lstat(absolute);
-        const kind: WorkspaceEntryKind | undefined = metadata.isSymbolicLink()
-          ? "symlink"
-          : metadata.isDirectory() ? "directory" : metadata.isFile() ? "file" : undefined;
-        if (!kind) continue;
-        const path = relative(root, absolute).split(sep).join("/");
-        const candidate = {
-          name: entry.name,
-          path,
-          kind,
-          hidden: entry.name.startsWith("."),
-          ...(kind === "file" ? { size: metadata.size } : {}),
-          modifiedAt: metadata.mtime.toISOString(),
-        };
-        const candidateBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
-        if (candidateBytes > WORKSPACE_MAXIMUM_PROJECTED_BYTES - bytes) {
-          throw new GatewayError("conflict", "This folder contains too much metadata to browse safely", true);
-        }
-        entries.push(candidate);
-        bytes += candidateBytes;
       }
     } finally {
       await directory.close().catch((error: NodeJS.ErrnoException) => {
         if (error.code !== "ERR_DIR_CLOSED") throw error;
       });
+    }
+    const projected = await mapWithConcurrency(names, WORKSPACE_METADATA_CONCURRENCY, async (name) => {
+      const absolute = join(directoryPath, name);
+      const metadata = await lstat(absolute);
+      const kind: WorkspaceEntryKind | undefined = metadata.isSymbolicLink()
+        ? "symlink"
+        : metadata.isDirectory() ? "directory" : metadata.isFile() ? "file" : undefined;
+      if (!kind) return undefined;
+      return {
+        name,
+        path: relative(root, absolute).split(sep).join("/"),
+        kind,
+        hidden: name.startsWith("."),
+        ...(kind === "file" ? { size: metadata.size } : {}),
+        modifiedAt: metadata.mtime.toISOString(),
+      };
+    });
+    const entries: Array<{ name: string; path: string; kind: WorkspaceEntryKind; hidden: boolean; size?: number; modifiedAt?: string }> = [];
+    let bytes = 2;
+    for (const candidate of projected) {
+      if (!candidate) continue;
+      const candidateBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
+      if (candidateBytes > WORKSPACE_MAXIMUM_PROJECTED_BYTES - bytes) {
+        throw new GatewayError("conflict", "This folder contains too much metadata to browse safely", true);
+      }
+      entries.push(candidate);
+      bytes += candidateBytes;
+    }
+    const afterDirectory = await lstat(directoryPath);
+    const currentDirectoryPath = await realpath(directoryPath);
+    if (!inside(root, currentDirectoryPath) || afterDirectory.isSymbolicLink() || !afterDirectory.isDirectory()
+      || beforeDirectory.dev !== afterDirectory.dev || beforeDirectory.ino !== afterDirectory.ino
+      || beforeDirectory.mtimeMs !== afterDirectory.mtimeMs || beforeDirectory.size !== afterDirectory.size) {
+      throw new GatewayError("conflict", "Workspace directory changed while it was listed", true);
     }
     entries.sort((left, right) => left.kind === right.kind
       ? left.name.localeCompare(right.name)
@@ -465,7 +554,7 @@ export class WorkspaceInspectionService {
   }> {
     const root = await canonicalRoot(workspace);
     const relativePath = validateRelativePath(requestedPath, false);
-    const source = await containedPath(root, relativePath, "file");
+    const source = await containedPathFromRoot(root, relativePath, "file");
     let handle: Awaited<ReturnType<typeof open>>;
     try {
       handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -477,25 +566,29 @@ export class WorkspaceInspectionService {
     }
     try {
       const before = await handle.stat();
+      const openedRealPath = await realpath(source);
+      if (!inside(root, openedRealPath)) return invalidRelativePath();
       if (!before.isFile() || before.size > WORKSPACE_FILE_MAXIMUM_BYTES) {
         throw new GatewayError("conflict", "Workspace file exceeds the 25 MiB preview limit");
       }
       const data = await readBoundedFile(handle, WORKSPACE_FILE_MAXIMUM_BYTES);
       const after = await handle.stat();
       const current = await lstat(source);
-      if (!after.isFile() || current.isSymbolicLink() || !current.isFile()
+      const currentRealPath = await realpath(source);
+      if (!inside(root, currentRealPath) || !after.isFile() || current.isSymbolicLink() || !current.isFile()
         || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
         || before.mtimeMs !== after.mtimeMs || current.dev !== before.dev || current.ino !== before.ino
         || data.length !== before.size) {
         throw new GatewayError("conflict", "Workspace file changed while its preview was captured", true);
       }
       const mimeType = mimeTypeFor(source);
+      const blobId = this.registerBlob(data, mimeType);
       return {
-        blobId: this.registerBlob(data, mimeType),
+        blobId,
         name: basename(source),
         mimeType,
         size: data.length,
-        revision: createHash("sha256").update(data).digest("base64url"),
+        revision: blobId,
       };
     } finally {
       await handle.close().catch(() => {});
@@ -509,44 +602,50 @@ export class WorkspaceInspectionService {
     truncated: boolean;
     revision: string;
   }> {
-    const root = await canonicalRoot(workspace);
+    const context = await repositoryContext(workspace);
+    if (!context) throw new GatewayError("invalid_request", "The session workspace is not a Git repository");
     const relativePath = validateRelativePath(requestedPath, false).split(sep).join("/");
-    const repository = await statusInspection(root);
-    if (!repository) throw new GatewayError("invalid_request", "The session workspace is not a Git repository");
-    const absolute = resolve(root, relativePath);
-    if (!inside(root, absolute)) return invalidRelativePath();
-    const repositoryPath = relative(repository.root, absolute).split(sep).join("/");
-    const change = repository.changes.find((candidate) => candidate.path === relativePath);
+    const absolute = resolve(context.workspaceRoot, relativePath);
+    if (!inside(context.workspaceRoot, absolute)) return invalidRelativePath();
+    const repositoryPath = relative(context.repositoryRoot, absolute).split(sep).join("/");
     const common = ["--no-ext-diff", "--no-textconv", "--no-color", "--unified=3"];
     let results: GitResult[];
     if (scope === "staged") {
-      results = [await runGit(repository.root, ["diff", "--cached", ...common, "--", repositoryPath], {
+      results = [await runGit(context.repositoryRoot, ["diff", "--cached", ...common, "--", repositoryPath], {
         maximumBytes: DIFF_MAX_OUTPUT_BYTES,
         truncate: true,
       })];
     } else if (scope === "unstaged") {
-      results = [await runGit(repository.root, ["diff", ...common, "--", repositoryPath], {
+      results = [await runGit(context.repositoryRoot, ["diff", ...common, "--", repositoryPath], {
         maximumBytes: DIFF_MAX_OUTPUT_BYTES,
-        truncate: true,
-      })];
-    } else if (change?.untracked) {
-      await containedPath(root, relativePath, "file");
-      results = [await runGit(repository.root, ["diff", "--no-index", ...common, "--", "/dev/null", absolute], {
-        maximumBytes: DIFF_MAX_OUTPUT_BYTES,
-        allowedExitCodes: [0, 1],
         truncate: true,
       })];
     } else {
-      const staged = await runGit(repository.root, ["diff", "--cached", ...common, "--", repositoryPath], {
-        maximumBytes: DIFF_MAX_OUTPUT_BYTES,
-        truncate: true,
+      const tracked = await runGit(context.repositoryRoot, ["ls-files", "--error-unmatch", "--", repositoryPath], {
+        maximumBytes: 8_192,
+        allowedExitCodes: [0, 1],
       });
-      const remaining = Math.max(1, DIFF_MAX_OUTPUT_BYTES - staged.stdout.length);
-      const unstaged = await runGit(repository.root, ["diff", ...common, "--", repositoryPath], {
-        maximumBytes: remaining,
-        truncate: true,
-      });
-      results = [staged, unstaged];
+      if (tracked.exitCode !== 0) {
+        await containedPathFromRoot(context.workspaceRoot, relativePath, "file");
+        const untrackedRealPath = await realpath(absolute);
+        if (!inside(context.workspaceRoot, untrackedRealPath)) return invalidRelativePath();
+        results = [await runGit(context.repositoryRoot, ["diff", "--no-index", ...common, "--", "/dev/null", absolute], {
+          maximumBytes: DIFF_MAX_OUTPUT_BYTES,
+          allowedExitCodes: [0, 1],
+          truncate: true,
+        })];
+      } else {
+        const staged = await runGit(context.repositoryRoot, ["diff", "--cached", ...common, "--", repositoryPath], {
+          maximumBytes: DIFF_MAX_OUTPUT_BYTES,
+          truncate: true,
+        });
+        const remaining = Math.max(1, DIFF_MAX_OUTPUT_BYTES - staged.stdout.length);
+        const unstaged = await runGit(context.repositoryRoot, ["diff", ...common, "--", repositoryPath], {
+          maximumBytes: remaining,
+          truncate: true,
+        });
+        results = [staged, unstaged];
+      }
     }
     const patch = results.map((result) => result.stdout.toString("utf8")).filter(Boolean).join("\n");
     return {
@@ -554,7 +653,9 @@ export class WorkspaceInspectionService {
       patch,
       binary: patch.includes("Binary files ") || patch.includes("GIT binary patch"),
       truncated: results.some((result) => result.truncated),
-      revision: revisionFor(root, repository),
+      revision: createHash("sha256").update(scope).update("\0").update(relativePath).update("\0")
+        .update(results.map((result) => result.stdout).reduce((value, chunk) => Buffer.concat([value, chunk]), Buffer.alloc(0)))
+        .digest("base64url"),
     };
   }
 
@@ -572,27 +673,26 @@ export class WorkspaceInspectionService {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > HISTORY_MAXIMUM_LIMIT) {
       throw new GatewayError("invalid_request", `History limit must be between 1 and ${HISTORY_MAXIMUM_LIMIT}`);
     }
-    const root = await canonicalRoot(workspace);
-    const repository = await statusInspection(root);
-    if (!repository) throw new GatewayError("invalid_request", "The session workspace is not a Git repository");
-    const generation = await this.historyGeneration(repository.root, scope, repository.head);
+    const context = await repositoryContext(workspace);
+    if (!context) throw new GatewayError("invalid_request", "The session workspace is not a Git repository");
+    const head = await repositoryHead(context.repositoryRoot);
+    const generation = await this.historyGeneration(context.repositoryRoot, scope, head.head);
     let offset = 0;
     if (rawCursor !== undefined) {
       const cursor = this.decodeCursor(rawCursor);
-      if (cursor.clientID !== clientID || cursor.root !== repository.root || cursor.scope !== scope
+      if (cursor.clientID !== clientID || cursor.root !== context.repositoryRoot || cursor.scope !== scope
         || cursor.generation !== generation || Date.now() - cursor.issuedAt > HISTORY_CURSOR_MAXIMUM_AGE_MS) {
         throw new GatewayError("conflict", "Repository history changed or the cursor expired; restart the listing", true);
       }
       offset = cursor.offset;
     }
-    const pathspec = relative(repository.root, root) || ".";
     const source = scope === "allReferences" ? ["--all"] : ["HEAD"];
-    if (scope === "currentBranch" && repository.unborn) {
+    if (scope === "currentBranch" && head.unborn) {
       return { commits: [], revision: generation };
     }
-    const result = await runGit(repository.root, [
+    const result = await runGit(context.repositoryRoot, [
       "log", "-z", "--topo-order", `--skip=${offset}`, `--max-count=${limit + 1}`,
-      "--format=%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%D%x1f%s", ...source, "--", pathspec,
+      "--format=%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%D%x1f%s", ...source, "--", context.pathspec,
     ], { timeoutMs: HISTORY_TIMEOUT_MS });
     const parsed = splitNul(result.stdout).filter(Boolean).map((record) => {
       const [oid = "", shortOid = "", parents = "", authorName = "", authoredAt = "", decorations = "", subject = ""] = record.split("\x1f");
@@ -613,7 +713,7 @@ export class WorkspaceInspectionService {
       commits,
       ...(hasMore ? { nextCursor: this.encodeCursor({
         clientID,
-        root: repository.root,
+        root: context.repositoryRoot,
         scope,
         generation,
         offset: offset + commits.length,
@@ -631,15 +731,14 @@ export class WorkspaceInspectionService {
     revision: string;
   }> {
     if (!/^[0-9a-f]{40,64}$/.test(oid)) throw new GatewayError("invalid_request", "Commit ID is invalid");
-    const root = await canonicalRoot(workspace);
-    const repository = await statusInspection(root);
-    if (!repository) throw new GatewayError("invalid_request", "The session workspace is not a Git repository");
-    await this.assertVisibleCommit(repository.root, root, oid);
+    const context = await repositoryContext(workspace);
+    if (!context) throw new GatewayError("invalid_request", "The session workspace is not a Git repository");
+    await this.assertVisibleCommit(context.repositoryRoot, context.workspaceRoot, oid);
     const relativePath = validateRelativePath(requestedPath, false).split(sep).join("/");
-    const absolute = resolve(root, relativePath);
-    if (!inside(root, absolute)) return invalidRelativePath();
-    const repositoryPath = relative(repository.root, absolute).split(sep).join("/");
-    const result = await runGit(repository.root, [
+    const absolute = resolve(context.workspaceRoot, relativePath);
+    if (!inside(context.workspaceRoot, absolute)) return invalidRelativePath();
+    const repositoryPath = relative(context.repositoryRoot, absolute).split(sep).join("/");
+    const result = await runGit(context.repositoryRoot, [
       "diff-tree", "--root", "--no-commit-id", "-p", "-r", "-M", "--first-parent",
       "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", oid, "--", repositoryPath,
     ], { maximumBytes: DIFF_MAX_OUTPUT_BYTES, truncate: true });
@@ -667,20 +766,20 @@ export class WorkspaceInspectionService {
     revision: string;
   }> {
     if (!/^[0-9a-f]{40,64}$/.test(oid)) throw new GatewayError("invalid_request", "Commit ID is invalid");
-    const root = await canonicalRoot(workspace);
-    const repository = await statusInspection(root);
-    if (!repository) throw new GatewayError("invalid_request", "The session workspace is not a Git repository");
-    const pathspec = relative(repository.root, root) || ".";
-    await this.assertVisibleCommit(repository.root, root, oid);
-    const metadata = await runGit(repository.root, [
-      "show", "-s", "-z", "--format=%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%D%x1f%s%x1f%B", oid,
-    ], { maximumBytes: 128 * 1_024 });
+    const context = await repositoryContext(workspace);
+    if (!context) throw new GatewayError("invalid_request", "The session workspace is not a Git repository");
+    await this.assertVisibleCommit(context.repositoryRoot, context.workspaceRoot, oid);
+    const [metadata, names] = await Promise.all([
+      runGit(context.repositoryRoot, [
+        "show", "-s", "-z", "--format=%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%D%x1f%s%x1f%B", oid,
+      ], { maximumBytes: 128 * 1_024 }),
+      runGit(context.repositoryRoot, [
+        "diff-tree", "--root", "--no-commit-id", "--name-status", "-z", "-r", "-M", oid, "--", context.pathspec,
+      ], { maximumBytes: 256 * 1_024 }),
+    ]);
     const fields = metadata.stdout.toString("utf8").replace(/\0+$/, "").split("\x1f");
     const [full = "", shortOid = "", parents = "", authorName = "", authorEmail = "", authoredAt = "", decorations = "", subject = "", ...messageParts] = fields;
     if (full !== oid) throw new GatewayError("conflict", "Git returned a different commit", true);
-    const names = await runGit(repository.root, [
-      "diff-tree", "--root", "--no-commit-id", "--name-status", "-z", "-r", "-M", oid, "--", pathspec,
-    ], { maximumBytes: 256 * 1_024 });
     const records = splitNul(names.stdout);
     const changes: Array<{ path: string; originalPath?: string; kind: WorkspaceChangeKind }> = [];
     for (let index = 0; index < records.length;) {
@@ -692,10 +791,10 @@ export class WorkspaceInspectionService {
         originalRepositoryPath = sourcePath;
         destinationPath = records[index++] ?? "";
       }
-      const path = workspaceRelativePath(repository.root, root, destinationPath);
+      const path = workspaceRelativePath(context.repositoryRoot, context.workspaceRoot, destinationPath);
       if (!path) continue;
       const originalPath = originalRepositoryPath
-        ? workspaceRelativePath(repository.root, root, originalRepositoryPath)
+        ? workspaceRelativePath(context.repositoryRoot, context.workspaceRoot, originalRepositoryPath)
         : undefined;
       changes.push({
         path,
@@ -717,7 +816,8 @@ export class WorkspaceInspectionService {
       authoredAt,
       decorations: decorations.split(",").map((value) => value.trim()).filter(Boolean).slice(0, 64),
       changes,
-      revision: revisionFor(root, repository),
+      revision: createHash("sha256").update(context.workspaceRoot).update("\0")
+        .update(metadata.stdout).update("\0").update(names.stdout).digest("base64url"),
     };
   }
 

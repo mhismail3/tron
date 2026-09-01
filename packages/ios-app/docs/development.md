@@ -358,9 +358,12 @@ the dedicated logs UI. `WorkspaceInspectionServiceTests` own the separate sessio
 and pre-materialization collection limits. Manage Session never falls
 back to `git.inspect`: its tappable Current Branch row and Files/Changes/History sheet read only
 through the established session subscription. `WorkspaceInspectorOwner` generation-gates inspection,
-directory navigation, and tip-pinned history independently, preserves useful content through transient
-refresh failure, keeps established header/list geometry free of polling and detail-load indicators, and
-cancels every flight on dismissal. Physical acceptance must switch branches and
+directory navigation, and tip-pinned history independently, overlaps initial inspection/list reads, preserves
+useful content through transient refresh failure, keeps established header/list geometry free of polling and
+detail-load indicators, and cancels every flight on dismissal. Owner coverage proves late-response rejection,
+atomic failed navigation, completed empty history, and the 400-commit retention ceiling. Service coverage keeps
+bounded decoding off-main, while presentation guards require cached path indexes/history rows and off-main diff
+preparation. Physical acceptance must switch branches and
 edit/stage/rename/delete/create files while the sheet is open, inspect text, Markdown, image, PDF,
 binary, and oversized files, verify staged/unstaged/untracked/conflicted and historical commit-file diffs,
 page both history scopes, then repeat across coverage, background, reconnect, and Dynamic Type without stale branch or

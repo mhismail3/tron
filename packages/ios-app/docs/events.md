@@ -274,8 +274,9 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   Filesystem/Git state has no canonical session event stream. Visible uncovered sheets perform
   bounded four-second reconciliation without publishing progress accessories into already-presented
   rows, retain the last useful projection through transient failure, and stop on coverage, background,
-  or dismissal; revision changes atomically refresh
-  the visible directory/status and restart tip-pinned history rather than mixing generations.
+  or dismissal. Equal revisions do not republish, working-tree-only changes do not restart History, and
+  Files metadata refreshes only while that tab is visible or on entry. A branch/tip identity change resets
+  the prepared bounded History projection before a replacement page is admitted, rather than mixing generations.
   `workspace-history-diff.v1` admits a selected commit/file pair only through that same subscribed
   session and returns one bounded immutable patch for the nested shared diff sheet;
 - terminal output/exit payloads decode into typed `Sendable` preparations from the original
