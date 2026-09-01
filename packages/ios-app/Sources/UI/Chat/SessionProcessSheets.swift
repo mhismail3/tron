@@ -527,10 +527,23 @@ enum SessionProcessRowPresentation {
 enum ReadOnlySubagentStopControlPolicy {
     static func isVisible(
         lifecycleState: SessionProcessLifecycleState,
-        hasAbortAuthority: Bool,
         supportsAbort: Bool
     ) -> Bool {
-        lifecycleState.isActive && hasAbortAuthority && supportsAbort
+        lifecycleState.isActive && supportsAbort
+    }
+
+    static func isEnabled(
+        lifecycleState: SessionProcessLifecycleState,
+        hasAbortAuthority: Bool,
+        supportsAbort: Bool,
+        isConnected: Bool,
+        stopRequested: Bool
+    ) -> Bool {
+        lifecycleState.isActive
+            && hasAbortAuthority
+            && supportsAbort
+            && isConnected
+            && !stopRequested
     }
 }
 
@@ -628,20 +641,33 @@ struct ReadOnlySubagentSessionSheet: View {
         mountedActivity ?? store?.liveActivity ?? process
     }
 
+    private var supportsStop: Bool {
+        model.gatewayInfo?.capabilities.contains(
+            SessionProcessAdmissionPolicy.transcriptAbortCapability
+        ) == true
+    }
+
+    private var hasAbortAuthority: Bool {
+        store?.leaseID != nil
+            && store?.canAbort == true
+            && store?.liveActivity?.lifecycle.state.isActive == true
+    }
+
     private var showsStopControl: Bool {
         ReadOnlySubagentStopControlPolicy.isVisible(
             lifecycleState: currentActivity.lifecycle.state,
-            hasAbortAuthority: store?.leaseID != nil
-                && store?.canAbort == true
-                && store?.liveActivity?.lifecycle.state.isActive == true,
-            supportsAbort: model.gatewayInfo?.capabilities.contains(
-                SessionProcessAdmissionPolicy.transcriptAbortCapability
-            ) == true
+            supportsAbort: supportsStop
         )
     }
 
     private var canStop: Bool {
-        !stopRequested && model.connectionState == .connected
+        ReadOnlySubagentStopControlPolicy.isEnabled(
+            lifecycleState: currentActivity.lifecycle.state,
+            hasAbortAuthority: hasAbortAuthority,
+            supportsAbort: supportsStop,
+            isConnected: model.connectionState == .connected,
+            stopRequested: stopRequested
+        )
     }
 
     private func requestStop() {

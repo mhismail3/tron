@@ -105,12 +105,39 @@ struct SessionProcessModelsTests {
         #expect(SessionProcessProjection.sections([recent, active]).recent.map(\.id) == [recent.id])
     }
 
-    @Test("subagent stop control requires active lifecycle exact authority and Gateway support")
+    @Test("subagent stop control mounts disabled before exact authority arrives")
     func stopControlVisibility() {
         #expect(ReadOnlySubagentStopControlPolicy.isVisible(
             lifecycleState: .running,
-            hasAbortAuthority: true,
             supportsAbort: true
+        ))
+        #expect(!ReadOnlySubagentStopControlPolicy.isEnabled(
+            lifecycleState: .running,
+            hasAbortAuthority: false,
+            supportsAbort: true,
+            isConnected: true,
+            stopRequested: false
+        ))
+        #expect(ReadOnlySubagentStopControlPolicy.isEnabled(
+            lifecycleState: .running,
+            hasAbortAuthority: true,
+            supportsAbort: true,
+            isConnected: true,
+            stopRequested: false
+        ))
+        #expect(!ReadOnlySubagentStopControlPolicy.isEnabled(
+            lifecycleState: .running,
+            hasAbortAuthority: true,
+            supportsAbort: true,
+            isConnected: false,
+            stopRequested: false
+        ))
+        #expect(!ReadOnlySubagentStopControlPolicy.isEnabled(
+            lifecycleState: .running,
+            hasAbortAuthority: true,
+            supportsAbort: true,
+            isConnected: true,
+            stopRequested: true
         ))
         for terminal in [
             SessionProcessLifecycleState.completed,
@@ -121,18 +148,18 @@ struct SessionProcessModelsTests {
         ] {
             #expect(!ReadOnlySubagentStopControlPolicy.isVisible(
                 lifecycleState: terminal,
-                hasAbortAuthority: true,
                 supportsAbort: true
+            ))
+            #expect(!ReadOnlySubagentStopControlPolicy.isEnabled(
+                lifecycleState: terminal,
+                hasAbortAuthority: true,
+                supportsAbort: true,
+                isConnected: true,
+                stopRequested: false
             ))
         }
         #expect(!ReadOnlySubagentStopControlPolicy.isVisible(
             lifecycleState: .running,
-            hasAbortAuthority: false,
-            supportsAbort: true
-        ))
-        #expect(!ReadOnlySubagentStopControlPolicy.isVisible(
-            lifecycleState: .running,
-            hasAbortAuthority: true,
             supportsAbort: false
         ))
     }

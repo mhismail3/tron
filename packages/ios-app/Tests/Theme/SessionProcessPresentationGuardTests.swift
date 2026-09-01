@@ -97,6 +97,8 @@ struct SessionProcessPresentationGuardTests {
         #expect(child.contains("Image(systemName: \"stop.fill\")"))
         #expect(child.contains(".accessibilityLabel(\"Stop Subagent\")"))
         #expect(child.contains("ReadOnlySubagentStopControlPolicy.isVisible("))
+        #expect(child.contains("ReadOnlySubagentStopControlPolicy.isEnabled("))
+        #expect(child.contains(".disabled(!canStop)"))
         #expect(child.contains("SessionProcessAdmissionPolicy.transcriptAbortCapability"))
         #expect(child.contains("store?.leaseID != nil"))
         #expect(child.contains("store?.canAbort == true"))
