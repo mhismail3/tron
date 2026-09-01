@@ -2,8 +2,8 @@ import { realpathSync } from "node:fs";
 import { lstat, mkdir, opendir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { spawn } from "node:child_process";
 import { GatewayError } from "../errors.js";
+import { inspectGitPath } from "./workspace-inspection-service.js";
 
 export interface WorkspaceEntry {
   name: string;
@@ -109,25 +109,6 @@ export class FilesystemService {
   }
 
   async inspectGit(path: string): Promise<{ isRepository: boolean; branch?: string; dirty?: boolean }> {
-    const cwd = await this.canonical(path);
-    return new Promise((resolvePromise) => {
-      const child = spawn("/usr/bin/git", ["status", "--porcelain=v1", "--branch", "--untracked-files=all"], {
-        cwd,
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 3_000,
-      });
-      let output = "";
-      child.stdout.on("data", (chunk: Buffer) => {
-        if (output.length < 128_000) output += chunk.toString("utf8");
-      });
-      child.on("error", () => resolvePromise({ isRepository: false }));
-      child.on("close", (code) => {
-        if (code !== 0) return resolvePromise({ isRepository: false });
-        const lines = output.split("\n");
-        const header = lines[0] ?? "";
-        const branch = header.replace(/^## /, "").split("...")[0]?.trim();
-        resolvePromise({ isRepository: true, ...(branch ? { branch } : {}), dirty: lines.slice(1).some(Boolean) });
-      });
-    });
+    return inspectGitPath(await this.canonical(path));
   }
 }

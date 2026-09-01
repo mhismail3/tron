@@ -126,14 +126,26 @@ struct ChatCompactPillTests {
         #expect(SessionExportPresentationPolicy.title(for: "jsonl") == "JSONL Export")
     }
 
-    @Test("Manage Session Git loading preserves branch evidence and exact request ownership")
-    func sessionGitPresentation() {
-        #expect(SessionGitPresentation.resolve(.init(isRepository: false, branch: nil, isDirty: false)) == .notRepository)
-        #expect(SessionGitPresentation.resolve(.init(isRepository: true, branch: "main", isDirty: false)) == .loaded(branch: "main", dirty: false))
-        #expect(SessionGitPresentation.resolve(.init(isRepository: true, branch: "feature", isDirty: true)) == .loaded(branch: "feature", dirty: true))
-        #expect(SessionGitLoadAdmission.admits(requestGeneration: 3, currentGeneration: 3, requestedCwd: "/a", currentCwd: "/a"))
-        #expect(!SessionGitLoadAdmission.admits(requestGeneration: 1, currentGeneration: 3, requestedCwd: "/a", currentCwd: "/a"))
-        #expect(!SessionGitLoadAdmission.admits(requestGeneration: 3, currentGeneration: 3, requestedCwd: "/b", currentCwd: "/a"))
+    @Test("Manage Session workspace row preserves branch, detached, and change evidence")
+    func sessionWorkspacePresentation() throws {
+        func inspection(_ repository: String) throws -> SessionWorkspaceInspection {
+            try JSONDecoder.gateway.decode(
+                SessionWorkspaceInspection.self,
+                from: Data(#"{"root":"/workspace","revision":"revision","repository":\#(repository)}"#.utf8)
+            )
+        }
+
+        let none = try JSONDecoder.gateway.decode(
+            SessionWorkspaceInspection.self,
+            from: Data(#"{"root":"/workspace","revision":"revision"}"#.utf8)
+        )
+        #expect(SessionWorkspaceRowPresentation.resolve(none) == .notRepository)
+        #expect(SessionWorkspaceRowPresentation.resolve(try inspection(
+            #"{"root":"/workspace","branch":"feature/tron","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","detached":false,"unborn":false,"dirty":true,"changes":[{"path":"README.md","originalPath":null,"staged":false,"unstaged":true,"untracked":false,"conflicted":false,"kind":"modified"}]}"#
+        )) == .loaded(branch: "feature/tron", dirty: true, changeCount: 1))
+        #expect(SessionWorkspaceRowPresentation.resolve(try inspection(
+            #"{"root":"/workspace","head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","detached":true,"unborn":false,"dirty":false,"changes":[]}"#
+        )) == .loaded(branch: "Detached · bbbbbbbb", dirty: false, changeCount: 0))
     }
 
     @Test("Agent Context summarizes capabilities without retaining inventories")

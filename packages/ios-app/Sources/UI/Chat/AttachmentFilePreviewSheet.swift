@@ -2,12 +2,17 @@ import Foundation
 import PDFKit
 import SwiftUI
 
+struct AttachmentImageFilePreview: @unchecked Sendable {
+    let image: UIImage
+}
+
 struct AttachmentPDFPreview: @unchecked Sendable {
     let document: PDFDocument
     let pageCount: Int
 }
 
 enum AttachmentFilePreviewKind: Equatable, Sendable {
+    case image
     case markdown
     case plainText
     case code(language: String?)
@@ -16,6 +21,7 @@ enum AttachmentFilePreviewKind: Equatable, Sendable {
 }
 
 enum AttachmentFilePreviewContent: Sendable {
+    case image(AttachmentImageFilePreview)
     case markdown(MarkdownPresentation.Document)
     case plainText(String)
     case code(String)
@@ -56,6 +62,7 @@ enum AttachmentFilePreviewPolicy {
     static func kind(name: String, mimeType: String) -> AttachmentFilePreviewKind {
         let mime = normalizedMIMEType(mimeType)
         let pathExtension = URL(fileURLWithPath: name).pathExtension.lowercased()
+        if mime.hasPrefix("image/") || ["gif", "jpeg", "jpg", "png", "webp"].contains(pathExtension) { return .image }
         if mime == "application/pdf" || pathExtension == "pdf" { return .pdf }
         if mime == "text/markdown" || markdownExtensions.contains(pathExtension) { return .markdown }
         if codeMIMETypes.contains(mime)
@@ -86,6 +93,11 @@ enum AttachmentFilePreviewPolicy {
         mimeType: String
     ) throws -> PreparedAttachmentFilePreview {
         switch kind(name: name, mimeType: mimeType) {
+        case .image:
+            return PreparedAttachmentFilePreview(
+                content: .image(AttachmentImageFilePreview(image: try ChatMediaLoader.decodeFullPreview(data))),
+                isTruncated: false
+            )
         case .markdown:
             let decoded = try decodedTextPrefix(data)
             return PreparedAttachmentFilePreview(
@@ -239,6 +251,14 @@ struct AttachmentFilePreviewSheet: View {
     @ViewBuilder
     private func preparedContent(_ preview: PreparedAttachmentFilePreview) -> some View {
         switch preview.content {
+        case .image(let preview):
+            ScrollView([.horizontal, .vertical]) {
+                Image(uiImage: preview.image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .background(Color.black.opacity(0.86))
         case .markdown(let document):
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: TronSpacing.lg) {

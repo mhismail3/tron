@@ -341,8 +341,8 @@ and nested façade observation. `CustomModelConfigurationCoordinatorTests` owns 
 mutation admission, validate-before-put ordering, no-put failure/retirement, current-versus-retired
 validation/put errors, stable put receipts, A → B → A rejection, lifecycle-bound restart failures,
 cancellation-safe presentation, nested observation, and exact draft-revision save admission.
-`GatewayDiagnosticsServiceTests` own the read-only view boundary for exact-path `git.inspect` and
-bounded `system.logs` requests, typed projection, malformed-record skipping, newest-first ordering,
+`GatewayDiagnosticsServiceTests` own the read-only New Session boundary for exact-path `git.inspect`
+and bounded `system.logs` requests, typed projection, malformed-record skipping, newest-first ordering,
 collision-qualified row identity, and foreground merge policy. The Logs destination uses AppModel's
 profile-targeted diagnostics façade; it never reaches `model.client`. AppModel publishes diagnostics
 readiness only after admitted initial, reconnect, or in-place foreground projection completion, and
@@ -352,7 +352,16 @@ useful bounded rows on an automatic empty read, and merges fresh profiles with r
 profile whose reconnect-time diagnostics request failed. Manual refresh may admit a confirmed empty
 successful result. DTO fields and per-profile failure metadata remain in the service/state boundary,
 while log level color, compact metadata/date formatting, and Tron-styled loading/empty presentation remain in
-the dedicated logs UI.
+the dedicated logs UI. `WorkspaceInspectionServiceTests` own the separate session-bound
+`workspace-inspector.v1` wire and pre-materialization collection limits. Manage Session never falls
+back to `git.inspect`: its tappable Current Branch row and Files/Changes/History sheet read only
+through the established session subscription. `WorkspaceInspectorOwner` generation-gates inspection,
+directory navigation, and tip-pinned history independently, preserves useful content through transient
+refresh failure, and cancels every flight on dismissal. Physical acceptance must switch branches and
+edit/stage/rename/delete/create files while the sheet is open, inspect text, Markdown, image, PDF,
+binary, and oversized files, verify staged/unstaged/untracked/conflicted diffs, page both history
+scopes, then repeat across coverage, background, reconnect, and Dynamic Type without stale branch or
+path publication.
 `AppModelInvalidationTests` scripts every
 successful response and proves publication cannot schedule its own next load; event tests
 separately prove one generation advance per canonical invalidation. Settings requests use a

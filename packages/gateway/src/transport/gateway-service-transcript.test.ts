@@ -438,6 +438,7 @@ describe("session transcript paging", () => {
     let reconciled = false;
     const snapshot = vi.fn(() => ({ sessionId: "session", revision: 2 }));
     const slot = {
+      id: "session",
       reconcileAttention: vi.fn(async () => { await barrier; reconciled = true; }),
       snapshot: vi.fn(() => {
         expect(reconciled).toBe(true);

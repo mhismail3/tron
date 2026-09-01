@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum ManageSessionDestination: String, Identifiable {
-    case agentContext, projectResources, history, processHistory, terminal
+    case agentContext, projectResources, history, processHistory, terminal, workspace
     var id: String { rawValue }
 }
 
@@ -107,28 +107,25 @@ enum SessionContextUsagePresentation: Equatable {
     }
 }
 
-enum SessionGitLoadAdmission {
-    static func admits(
-        requestGeneration: Int,
-        currentGeneration: Int,
-        requestedCwd: String,
-        currentCwd: String?
-    ) -> Bool {
-        requestGeneration == currentGeneration && requestedCwd == currentCwd
-    }
-}
-
-enum SessionGitPresentation: Equatable {
+enum SessionWorkspaceRowPresentation: Equatable {
     case loading
     case notRepository
-    case loaded(branch: String, dirty: Bool)
+    case loaded(branch: String, dirty: Bool, changeCount: Int)
     case failed(String)
 
-    static func resolve(_ inspection: GitInspection) -> SessionGitPresentation {
-        guard inspection.isRepository,
-              let branch = inspection.branch,
-              !branch.isEmpty else { return .notRepository }
-        return .loaded(branch: branch, dirty: inspection.isDirty)
+    static func resolve(_ inspection: SessionWorkspaceInspection) -> SessionWorkspaceRowPresentation {
+        guard let repository = inspection.repository else { return .notRepository }
+        let branch: String
+        if repository.unborn {
+            branch = repository.branch ?? "Unborn branch"
+        } else if let value = repository.branch, !value.isEmpty {
+            branch = value
+        } else if let head = repository.head {
+            branch = "Detached · \(head.prefix(8))"
+        } else {
+            branch = "Detached HEAD"
+        }
+        return .loaded(branch: branch, dirty: repository.dirty, changeCount: repository.changes.count)
     }
 }
 
@@ -181,8 +178,8 @@ struct SessionContextSheet: View {
     @State private var exportedURL: URL?
     @State private var exportingFormat: String?
     @State private var exportTask: Task<Void, Never>?
-    @State private var gitPresentation: SessionGitPresentation = .loading
-    @State private var gitLoadGeneration = 0
+    @State private var workspacePresentation: SessionWorkspaceRowPresentation = .loading
+    @State private var workspaceLoadGeneration = 0
     @State private var capturedNoticeScope: InAppNoticeScope?
     @State private var fallbackNoticeScope = InAppNoticeScope.presentation(UUID())
     @State private var presentation: SessionContextPresentation?
@@ -243,12 +240,9 @@ struct SessionContextSheet: View {
                     .accessibilityLabel("Done")
                 }
             }
-            .task(id: "\(presentation?.cwd ?? "none"):\(presentationActivity.allowsPresentationPublication)") {
+            .task(id: "\(sessionID):\(presentation?.cwd ?? "none"):\(presentationActivity.allowsPresentationPublication)") {
                 guard presentationActivity.allowsPresentationPublication else { return }
-                gitLoadGeneration &+= 1
-                let generation = gitLoadGeneration
-                gitPresentation = .loading
-                await loadGit(snapshot: presentation, generation: generation)
+                await monitorWorkspace(snapshot: presentation)
             }
             .background {
                 if presentationActivity.allowsPresentationPublication {
@@ -284,6 +278,8 @@ struct SessionContextSheet: View {
                     ProcessHistorySheet(sessionID: sessionID)
                 case .terminal:
                     TerminalSheet(sessionID: sessionID)
+                case .workspace:
+                    WorkspaceInspectorSheet(sessionID: sessionID)
                 }
             }
             .tronTextEntryAlert(
@@ -633,47 +629,51 @@ struct SessionContextSheet: View {
     }
 
     private var gitRow: some View {
-        Group {
-            switch gitPresentation {
-            case .loading:
-                TronSettingsRow(
-                    icon: "arrow.triangle.branch",
-                    title: "Current Branch",
-                    subtitle: "Checking workspace…",
-                    subtitleRole: .dynamicValue,
-                    accent: sessionRowAccent
-                ) {
-                    TronPulseLoadingIndicator(size: 18)
-                }
-            case .notRepository:
-                TronSettingsRow(icon: "folder", title: "Current Branch", subtitle: "Workspace is not a Git repository", accent: sessionRowAccent) {
-                    Text("None").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
-                }
-            case .loaded(let branch, let dirty):
-                TronSettingsRow(
-                    icon: "arrow.triangle.branch",
-                    title: "Current Branch",
-                    subtitle: dirty ? "Uncommitted changes" : "Working tree clean",
-                    subtitleRole: .dynamicValue,
-                    accent: sessionRowAccent
-                ) {
-                    Text(branch)
-                        .font(TronTypography.codeContent)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .lineLimit(1)
-                }
-            case .failed:
-                TronSettingsRow(
-                    icon: "exclamationmark.triangle",
-                    title: "Current Branch",
-                    subtitle: "Unable to inspect this workspace",
-                    subtitleRole: .dynamicValue,
-                    accent: sessionRowAccent
-                ) {
-                    Text("Unavailable").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+        Button { destination = .workspace } label: {
+            Group {
+                switch workspacePresentation {
+                case .loading:
+                    TronSettingsRow(
+                        icon: "arrow.triangle.branch",
+                        title: "Current Branch",
+                        subtitle: "Checking workspace…",
+                        subtitleRole: .dynamicValue,
+                        accent: sessionRowAccent
+                    ) {
+                        TronPulseLoadingIndicator(size: 18)
+                    }
+                case .notRepository:
+                    TronSettingsRow(icon: "folder", title: "Current Branch", subtitle: "Browse workspace files", accent: sessionRowAccent) {
+                        Text("No Git").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                    }
+                case .loaded(let branch, let dirty, let changeCount):
+                    TronSettingsRow(
+                        icon: "arrow.triangle.branch",
+                        title: "Current Branch",
+                        subtitle: dirty ? "\(changeCount) uncommitted \(changeCount == 1 ? "change" : "changes")" : "Working tree clean",
+                        subtitleRole: .dynamicValue,
+                        accent: sessionRowAccent
+                    ) {
+                        Text(branch)
+                            .font(TronTypography.codeContent)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .lineLimit(1)
+                    }
+                case .failed:
+                    TronSettingsRow(
+                        icon: "exclamationmark.triangle",
+                        title: "Current Branch",
+                        subtitle: "Tap to retry workspace inspection",
+                        subtitleRole: .dynamicValue,
+                        accent: sessionRowAccent
+                    ) {
+                        Text("Unavailable").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                    }
                 }
             }
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Current Branch and Workspace")
     }
 
     private func divider() -> some View {
@@ -723,28 +723,29 @@ struct SessionContextSheet: View {
         ) ? "Exporting" : "")
     }
 
-    private func loadGit(snapshot: SessionContextPresentation?, generation: Int) async {
+    private func monitorWorkspace(snapshot: SessionContextPresentation?) async {
         guard let snapshot else { return }
-        do {
-            let inspection = try await model.gatewayDiagnostics.inspectGit(path: snapshot.cwd)
-            guard SessionGitLoadAdmission.admits(
-                requestGeneration: generation,
-                currentGeneration: gitLoadGeneration,
-                requestedCwd: snapshot.cwd,
-                currentCwd: presentation?.cwd
-            ) else { return }
-            gitPresentation = SessionGitPresentation.resolve(inspection)
-        } catch is CancellationError {
-            return
-        } catch {
-            guard SessionGitLoadAdmission.admits(
-                requestGeneration: generation,
-                currentGeneration: gitLoadGeneration,
-                requestedCwd: snapshot.cwd,
-                currentCwd: presentation?.cwd
-            ) else { return }
-            gitPresentation = .failed(error.localizedDescription)
-            surfaceActionError(error)
+        workspaceLoadGeneration &+= 1
+        let generation = workspaceLoadGeneration
+        workspacePresentation = .loading
+        while !Task.isCancelled,
+              presentationActivity.allowsPresentationPublication,
+              presentation?.cwd == snapshot.cwd {
+            do {
+                let inspection = try await model.workspaceInspection.inspect(sessionID: sessionID)
+                guard generation == workspaceLoadGeneration,
+                      presentation?.cwd == snapshot.cwd,
+                      !Task.isCancelled else { return }
+                workspacePresentation = SessionWorkspaceRowPresentation.resolve(inspection)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard generation == workspaceLoadGeneration,
+                      presentation?.cwd == snapshot.cwd else { return }
+                workspacePresentation = .failed(error.localizedDescription)
+            }
+            do { try await Task.sleep(for: .seconds(4)) }
+            catch { return }
         }
     }
 

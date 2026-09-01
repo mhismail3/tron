@@ -1298,7 +1298,24 @@ model, thinking level, peer-presented Project Resources sheet, and final Rename 
 progressive searchable `ModelPicker` sheet as Models and Defaults, and its thinking row uses that settings surface's
 shared inline Change control while retaining the session's authoritative available-level list and immediate mutations;
 Session owns Agent Context, recent history/audit actions, terminal, Git evidence, and
-exports. Configuration row icons use the section's purple palette, while every Session row
+exports. Its Current Branch row is a button in every state and is backed only by the
+session-bound `workspace-inspector.v1` projection; it never reuses the path-based New Session
+Git probe or a locally remembered branch. The progressive Workspace sheet owns three
+mobile-native views over that projection: lazy Files navigation rooted at the runtime's
+canonical `cwd`, atomic staged/unstaged/untracked Changes with on-demand bounded unified
+diffs, and tip-pinned paginated current-branch/all-reference History. File content is captured
+on demand into the existing bounded authenticated blob transport and uses the shared
+Markdown/text/code/PDF/image preview pipeline. The sheet has an isolated observable owner;
+the onboarding selector's global folder listing can neither overwrite it nor become canonical
+workspace state. One tab-scoped scroll owner contains the workspace identity, tab switcher, and
+active collection, so the established top blur begins directly below navigation chrome and content
+scrolls continuously beneath it instead of splitting the toolbar from a lower blurred region; tab
+changes return that owner to its top boundary. While uncovered and foregrounded, the sheet and Manage Session reconcile at
+a four-second bounded cadence, retain their last useful values through transient failure, and
+reject replaced profile/session/path generations. Polling stops under coverage, background,
+or dismissal. Git/file responses are point-in-time revisions; later workspace truth replaces
+lists atomically and never mutates an already-open diff beneath the reader.
+Configuration row icons use the section's purple palette, while every Session row
 icon—including Git states, exports, sharing, and diagnostics—uses the section's blue palette.
 The compact top summary owns automatic-compaction status beside a single-line context
 value, followed by the cache-hit/read-write/input/output/cost statistics row, with every

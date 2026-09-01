@@ -9,6 +9,7 @@ struct AttachmentFilePreviewTests {
     func classification() {
         #expect(AttachmentFilePreviewPolicy.maximumTextBytes == 320_000)
         #expect(AttachmentFilePreviewPolicy.maximumPDFPages == 512)
+        #expect(AttachmentFilePreviewPolicy.kind(name: "photo.png", mimeType: "image/png") == .image)
         #expect(AttachmentFilePreviewPolicy.kind(name: "README.md", mimeType: "application/octet-stream") == .markdown)
         #expect(AttachmentFilePreviewPolicy.kind(name: "notes.txt", mimeType: "text/plain; charset=utf-8") == .plainText)
         #expect(AttachmentFilePreviewPolicy.kind(name: "payload.json", mimeType: "application/json") == .code(language: "json"))
@@ -16,6 +17,26 @@ struct AttachmentFilePreviewTests {
         #expect(AttachmentFilePreviewPolicy.kind(name: "module", mimeType: "text/javascript") == .code(language: nil))
         #expect(AttachmentFilePreviewPolicy.kind(name: "report.pdf", mimeType: "application/octet-stream") == .pdf)
         #expect(AttachmentFilePreviewPolicy.kind(name: "archive.zip", mimeType: "application/zip") == .unsupported)
+    }
+
+    @Test("images use the bounded full-preview decoder")
+    func imagePreparation() throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        }
+        let data = try #require(image.pngData())
+        let prepared = try AttachmentFilePreviewPolicy.prepareSynchronously(
+            data: data,
+            name: "pixel.png",
+            mimeType: "image/png"
+        )
+        guard case .image(let preview) = prepared.content else {
+            Issue.record("Expected image content")
+            return
+        }
+        #expect(preview.image.size.width > 0)
+        #expect(!prepared.isTruncated)
     }
 
     @Test("markdown prepares the established immutable document off the bounded source")

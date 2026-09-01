@@ -224,20 +224,38 @@ struct ToolDiffPresentation: Hashable, Sendable {
         density == .glance ? compactLines : lines
     }
 
+    static func make(
+        unifiedPatch patch: String,
+        sourceLabel: String = "Current diff"
+    ) -> ToolDiffPresentation? {
+        guard !patch.isEmpty else { return nil }
+        var accumulator = DiffAccumulator()
+        var classifier = PatchLineClassifier()
+        BoundedLineScanner.scan(patch, maximumCharacters: maximumRenderedLineCharacters) { line in
+            accumulator.append(classifier.classify(line.text))
+        }
+        return accumulator.presentation(
+            sourceLabel: sourceLabel,
+            requestedChangeCount: nil,
+            diffUnitCount: classifier.exactDiffUnitCount,
+            hasChangeContent: classifier.hasChangeContent
+        )
+    }
+
     static func make(request: JSONValue?, response: JSONValue?) -> ToolDiffPresentation? {
         let requestedCount = exactRequestedChangeCount(in: request)
-        if let patch = authoritativePatch(in: response), !patch.isEmpty {
-            var accumulator = DiffAccumulator()
-            var classifier = PatchLineClassifier()
-            BoundedLineScanner.scan(patch, maximumCharacters: maximumRenderedLineCharacters) { line in
-                accumulator.append(classifier.classify(line.text))
-            }
-            return accumulator.presentation(
-                sourceLabel: "Applied diff",
+        if let patch = authoritativePatch(in: response), !patch.isEmpty,
+           var presentation = make(unifiedPatch: patch, sourceLabel: "Applied diff") {
+            presentation = ToolDiffPresentation(
+                lines: presentation.lines,
+                compactLines: presentation.compactLines,
+                sourceLabel: presentation.sourceLabel,
+                totalLineCount: presentation.totalLineCount,
                 requestedChangeCount: requestedCount,
-                diffUnitCount: classifier.exactDiffUnitCount,
-                hasChangeContent: classifier.hasChangeContent
+                diffUnitCount: presentation.diffUnitCount,
+                hasChangeContent: presentation.hasChangeContent
             )
+            return presentation
         }
 
         guard let edits = request?.objectValue?["edits"]?.arrayValue,

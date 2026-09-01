@@ -164,6 +164,7 @@ final class AppModel {
     let composerDrafts: ComposerDraftCoordinator
     let extensionInteractionDrafts: ExtensionInteractionDraftStore
     let gatewayDiagnostics: GatewayDiagnosticsService
+    let workspaceInspection: WorkspaceInspectionService
     private var iosClientDiagnostics = IOSClientDiagnosticBuffer()
     let chatMedia: ChatMediaLoader
     private let chatMediaMemoryPressureObserver: ChatMediaMemoryPressureObserver
@@ -393,6 +394,7 @@ final class AppModel {
             admitsLifecycleGeneration: { lifecycle.admits(.init(generation: $0, connectionID: nil)) }
         )
         let gatewayDiagnostics = GatewayDiagnosticsService(client: client)
+        let workspaceInspection = WorkspaceInspectionService(client: client)
         let chatMedia = ChatMediaLoader(
             fetch: { identity in
                 let value = try await client.blob(
@@ -437,6 +439,7 @@ final class AppModel {
         self.composerDrafts = composerDrafts
         self.extensionInteractionDrafts = extensionInteractionDrafts
         self.gatewayDiagnostics = gatewayDiagnostics
+        self.workspaceInspection = workspaceInspection
         self.chatMedia = chatMedia
         self.chatMediaMemoryPressureObserver = chatMediaMemoryPressureObserver
         self.sessionPresentation = sessionPresentation

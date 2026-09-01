@@ -268,8 +268,13 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
 - structure/context/resource invalidations reload an already-presented History,
   Manage Session, Agent Context, or Project Resources surface from the runtime. Context,
   tree, and resource reads each carry a subscription-scoped request generation, so an older
-  overlapping completion cannot overwrite newer evidence. Manage Session keys Git inspection
-  directly to the authoritative cwd instead of waiting behind a broad catalog refresh;
+  overlapping completion cannot overwrite newer evidence. Manage Session and its Workspace
+  sheet read `workspace-inspector.v1` through the open session, so Gateway derives the root
+  from the authoritative runtime `cwd`; no mobile path or cached branch can replace it.
+  Filesystem/Git state has no canonical session event stream. Visible uncovered sheets perform
+  bounded four-second reconciliation, retain the last useful projection through transient
+  failure, and stop on coverage, background, or dismissal; revision changes atomically refresh
+  the visible directory/status and restart tip-pinned history rather than mixing generations;
 - terminal output/exit payloads decode into typed `Sendable` preparations from the original
   event frame before MainActor routing; malformed known payloads remain inert rather than failing
   the transport. Terminal output is admitted only for a current presentation lease, sequence-checked,

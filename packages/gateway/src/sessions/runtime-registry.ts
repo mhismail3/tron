@@ -3225,6 +3225,10 @@ export class RuntimeRegistry {
     }
   }
 
+  registerWorkspaceBlob(data: Buffer, mimeType: string): string {
+    return this.blobs.registerData(data, mimeType);
+  }
+
   async acquireBlob(id: string, range?: import("./blob-store.js").BlobByteRange) {
     try {
       return await this.blobs.acquire(id, range);

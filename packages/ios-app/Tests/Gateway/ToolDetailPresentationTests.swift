@@ -241,6 +241,18 @@ struct ToolDetailPresentationTests {
         #expect(!diff.lines.contains { $0.kind == .addition && $0.text == "new" })
     }
 
+    @Test("generic unified patches reuse the bounded diff presentation")
+    func genericUnifiedPatch() throws {
+        let diff = try #require(ToolDiffPresentation.make(
+            unifiedPatch: "--- a/file.swift\n+++ b/file.swift\n@@ -1 +1 @@\n-old\n+new",
+            sourceLabel: "Git diff"
+        ))
+        #expect(diff.sourceLabel == "Git diff")
+        #expect(diff.requestedChangeCount == nil)
+        #expect(diff.lines.contains { $0.kind == .removal && $0.text == "old" })
+        #expect(diff.lines.contains { $0.kind == .addition && $0.text == "new" })
+    }
+
     @Test("authoritative patch admission is exact and fails closed")
     func inlineDiffAdmission() throws {
         let oneRequest: JSONValue = .object(["edits": .array([

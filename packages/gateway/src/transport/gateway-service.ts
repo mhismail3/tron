@@ -13,6 +13,11 @@ import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../sessions/extension-act
 import { PROCESS_ACTIVITY_CAPABILITY, PROCESS_ACTIVITY_HISTORY_CAPABILITY, PROCESS_TRANSCRIPT_CAPABILITY } from "../sessions/process-activity.js";
 import { ProcessTranscriptLeaseStore } from "./process-transcript-leases.js";
 import type { FilesystemService } from "../machine/filesystem-service.js";
+import {
+  WorkspaceInspectionService,
+  type WorkspaceDiffScope,
+  type WorkspaceHistoryScope,
+} from "../machine/workspace-inspection-service.js";
 import { GitWorktreeService, type SessionSourceControlRequest } from "../machine/git-worktree-service.js";
 import type { UploadStore } from "../machine/upload-store.js";
 import type { TerminalService } from "../machine/terminal-service.js";
@@ -81,6 +86,7 @@ const restartDrainMethods = new Set([
   "system.info", "system.logs", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status",
   "device.install.config.status", "device.install.status",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
+  "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get",
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
 ]);
@@ -112,6 +118,7 @@ export interface GatewayServiceDependencies {
   devices: DeviceStore;
   sessions: RuntimeRegistry;
   filesystem: FilesystemService;
+  workspaceInspector?: WorkspaceInspectionService;
   gitWorktrees?: GitWorktreeService;
   uploads: UploadStore;
   terminals: TerminalService;
@@ -146,6 +153,7 @@ export class GatewayService {
   private readonly workRegistry: GatewayWorkRegistry | undefined;
   private readonly mobileIdentityLanes = new Map<string, MobileIdentityLane>();
   private readonly processTranscriptLeases: ProcessTranscriptLeaseStore;
+  private readonly workspaceInspector: WorkspaceInspectionService;
 
   constructor(private readonly dependencies: GatewayServiceDependencies) {
     this.updateService = dependencies.updateService ?? new GatewayUpdateService({
@@ -161,6 +169,9 @@ export class GatewayService {
     );
     this.workRegistry = dependencies.workRegistry ?? dependencies.sessions?.administrativeWorkRegistry;
     this.processTranscriptLeases = new ProcessTranscriptLeaseStore(dependencies.sessions);
+    this.workspaceInspector = dependencies.workspaceInspector ?? new WorkspaceInspectionService(
+      (data, mimeType) => dependencies.sessions.registerWorkspaceBlob(data, mimeType),
+    );
   }
 
   releaseClient(clientID: string): void {
@@ -209,6 +220,7 @@ export class GatewayService {
         "trust.v1",
         "filesystem.v1",
         "source-control.v1",
+        "workspace-inspector.v1",
         "uploads.v1",
         "uploads-status.v2",
         "terminal.v1",
@@ -1097,6 +1109,56 @@ export class GatewayService {
         return this.mutation(client, method, params, async () => ({ path: await this.dependencies.filesystem.createDirectory(string(params.parent, "parent", { max: 4_096 }), string(params.name, "name", { max: 120 })) }));
       case "git.inspect":
         return safeJson(await this.dependencies.filesystem.inspectGit(string(params.path, "path", { max: 4_096 })));
+
+      case "session.workspace.inspect": {
+        const slot = await this.openedSlot(client, params);
+        return safeJson(await this.workspaceInspector.inspect(slot.cwd));
+      }
+      case "session.workspace.list": {
+        const slot = await this.openedSlot(client, params);
+        return safeJson(await this.workspaceInspector.list(
+          slot.cwd,
+          optionalString(params.path, "path", 4_096),
+        ));
+      }
+      case "session.workspace.file": {
+        const slot = await this.openedSlot(client, params);
+        return safeJson(await this.workspaceInspector.file(
+          slot.cwd,
+          string(params.path, "path", { min: 1, max: 4_096 }),
+        ));
+      }
+      case "session.workspace.git.diff": {
+        const slot = await this.openedSlot(client, params);
+        const scope = params.scope === undefined
+          ? "current"
+          : oneOf(params.scope, "scope", ["current", "staged", "unstaged"] as const);
+        return safeJson(await this.workspaceInspector.diff(
+          slot.cwd,
+          string(params.path, "path", { min: 1, max: 4_096 }),
+          scope as WorkspaceDiffScope,
+        ));
+      }
+      case "session.workspace.git.history.list": {
+        const slot = await this.openedSlot(client, params);
+        const scope = params.scope === undefined
+          ? "currentBranch"
+          : oneOf(params.scope, "scope", ["currentBranch", "allReferences"] as const);
+        return safeJson(await this.workspaceInspector.historyList(
+          slot.cwd,
+          client.id,
+          scope as WorkspaceHistoryScope,
+          optionalString(params.cursor, "cursor", 2_048),
+          params.limit === undefined ? 40 : integer(params.limit, "limit", 1, 100),
+        ));
+      }
+      case "session.workspace.git.history.get": {
+        const slot = await this.openedSlot(client, params);
+        return safeJson(await this.workspaceInspector.historyGet(
+          slot.cwd,
+          string(params.oid, "oid", { min: 40, max: 64 }),
+        ));
+      }
 
       case "terminal.list": {
         const slot = await this.openedSlot(client, params);

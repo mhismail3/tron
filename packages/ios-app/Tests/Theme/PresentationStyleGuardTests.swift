@@ -1506,21 +1506,40 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/State/GatewayDiagnosticsService.swift"),
             encoding: .utf8
         )
+        let workspaceService = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/WorkspaceInspectionService.swift"),
+            encoding: .utf8
+        )
+        let workspaceSheet = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/WorkspaceInspectorSheet.swift"),
+            encoding: .utf8
+        )
         #expect(logs.contains("extension GatewayLogRecord"))
         #expect(logs.contains("Newest entries first"))
         #expect(settings.contains("await model.requestGatewayRestart(for: currentProfile)"))
         #expect(logs.contains("let loaded = await model.loadGatewayLogsResult(limit: 1_000)"))
         #expect(!logs.contains("while !Task.isCancelled"))
         #expect(!settings.contains("try? await model."))
-        #expect(context.contains("model.gatewayDiagnostics.inspectGit"))
+        #expect(context.contains("model.workspaceInspection.inspect(sessionID: sessionID)"))
+        #expect(!context.contains("model.gatewayDiagnostics.inspectGit"))
         #expect(context.contains("detailInline: true"))
-        #expect(context.contains("SessionGitPresentation"))
-        #expect(context.contains("gitPresentation = .loading"))
-        #expect(context.contains("SessionGitLoadAdmission.admits"))
-        #expect(context.contains("gitLoadGeneration &+= 1"))
+        #expect(context.contains("SessionWorkspaceRowPresentation"))
+        #expect(context.contains("workspacePresentation = .loading"))
+        #expect(context.contains("workspaceLoadGeneration &+= 1"))
         #expect(context.contains("case .failed"))
+        #expect(context.contains("Button { destination = .workspace }"))
         #expect(!context.contains("await model.refreshSessions()"))
-        #expect(context.contains("await loadGit(snapshot: presentation"))
+        #expect(context.contains("await monitorWorkspace(snapshot: presentation)"))
+        #expect(workspaceService.contains("session.workspace.inspect"))
+        #expect(workspaceService.contains("session.workspace.git.diff"))
+        #expect(workspaceService.contains("session.workspace.git.history.list"))
+        #expect(workspaceSheet.contains("ToolDiffView(lines: presentation.lines"))
+        #expect(workspaceSheet.contains("AttachmentFilePreviewSheet("))
+        #expect(workspaceSheet.contains("Task.sleep(for: .seconds(4))"))
+        #expect(workspaceSheet.contains("ScrollViewReader { proxy in"))
+        #expect(workspaceSheet.contains("Color.clear.frame(height: 0).id(\"workspace-top\")"))
+        #expect(workspaceSheet.contains("proxy.scrollTo(\"workspace-top\", anchor: .top)"))
+        #expect(workspaceSheet.contains(".tronScrollEdgeChrome()"))
         #expect(context.contains("model.sessionContextPresentation(for: sessionID)"))
         #expect(context.contains("model.sessionContextRevision(for: sessionID)"))
         #expect(resources.contains("model.sessionResourceRevision(for: sessionID)"))

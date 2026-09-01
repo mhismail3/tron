@@ -598,6 +598,22 @@ controlling another connection's PTY, or leaving an orphan terminal process.
 Primary operation groups are `system`, `device`, `legacy`, `session`,
 `extension`, `provider`, `model`, `auth`, `settings`, `trust`, `packages`,
 `models.custom`, `filesystem`, `git`, `terminal`, and uploads/blobs over HTTP.
+`workspace-inspector.v1` adds only session-bound reads: `session.workspace.inspect`,
+`list`, `file`, `git.diff`, and paginated `git.history.list/get` all require an
+established subscription and derive their root from the runtime slot's canonical
+`cwd`; mobile input can never substitute an absolute workspace. Directory and
+status projections fail atomically at their count/byte ceilings, relative paths
+cannot traverse or follow symbolic links, and file previews are no-follow,
+identity-revalidated snapshots registered in the existing 25 MiB bounded blob
+store. Git runs without a shell, pager, external diff, or text conversion, uses
+the configured Git executable and deterministic locale, and is killed on timeout
+or output overflow. Status uses porcelain-v2 NUL records and represents named,
+detached, and unborn heads explicitly. Per-file diffs are produced lazily and
+bounded before transport. History cursors are authenticated, client/root/scope
+bound, expiring, and pinned to the selected tip/ref generation, so reset, rebase,
+or ref mutation forces a fresh traversal rather than mixing pages. Clients use
+visibility-scoped reconciliation reads for live presentation; filesystem state
+is never mirrored into canonical session storage.
 Provider authentication admits at most eight operations globally and two per
 authenticated device identity. Each operation has a 15-minute Gateway-owned lifetime, so providers that
 ignore abort cannot retain broker capacity; completion, failure, explicit cancellation,
