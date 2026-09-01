@@ -176,6 +176,13 @@ enum ChatContentTransitionPolicy {
     static let promptFlightDuration: TimeInterval = 0.18
     static let promptReplacementDuration: TimeInterval = 0.14
     static let notificationReplacementDuration: TimeInterval = 0.16
+    static let attachmentHiddenScale: CGFloat = 0.5
+    static let attachmentStaggerInterval: TimeInterval = 0.04
+
+    static func attachmentInsertionIDs(current: [String], target: [String]) -> [String] {
+        let installed = Set(current)
+        return target.filter { !installed.contains($0) }
+    }
 
     static func hiddenTransform(
         for kind: ChatContentEntranceKind,
@@ -235,7 +242,7 @@ enum ChatContentTransitionPolicy {
     static func attachmentAnimation(reduceMotion: Bool) -> Animation {
         reduceMotion
             ? .easeOut(duration: 0.12)
-            : .smooth(duration: 0.20)
+            : .smooth(duration: 0.22)
     }
 
     static func promptFlightAnimation(reduceMotion: Bool) -> Animation? {
@@ -266,14 +273,8 @@ enum ChatContentTransitionPolicy {
 
     static func attachmentTransition(reduceMotion: Bool) -> AnyTransition {
         guard !reduceMotion else { return .opacity }
-        return .asymmetric(
-            insertion: .move(edge: .bottom)
-                .combined(with: .scale(scale: 0.92, anchor: .bottom))
-                .combined(with: .opacity),
-            removal: .move(edge: .top)
-                .combined(with: .scale(scale: 0.94, anchor: .top))
-                .combined(with: .opacity)
-        )
+        return .scale(scale: attachmentHiddenScale, anchor: .center)
+            .combined(with: .opacity)
     }
 }
 

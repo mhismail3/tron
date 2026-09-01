@@ -25,7 +25,12 @@ struct AppearanceSettingsView: View {
                 TronSettingsGroup("Text Font", accent: .tronPurple) {
                     VStack(alignment: .leading, spacing: 0) {
                         TronProgressiveSheetLink(accessibilityLabel: "Text Font") {
-                            FontFamilySelectionView(title: "Text Font", selection: $fonts.selectedFamily, families: FontFamily.textFamilies)
+                            FontFamilySelectionView(
+                                title: "Text Font",
+                                selection: $fonts.selectedFamily,
+                                families: FontFamily.textFamilies,
+                                previewsMonospacedVariant: false
+                            )
                         } label: {
                             TronValueRow(icon: "textformat", title: "Font", value: fonts.selectedFamily.displayName, accent: .tronPurple)
                         }
@@ -63,7 +68,12 @@ struct AppearanceSettingsView: View {
                 TronSettingsGroup("Code Font", accent: .tronCyan) {
                     VStack(alignment: .leading, spacing: 0) {
                         TronProgressiveSheetLink(accessibilityLabel: "Code Font") {
-                            FontFamilySelectionView(title: "Code Font", selection: $fonts.selectedMonoFamily, families: FontFamily.monoFamilies)
+                            FontFamilySelectionView(
+                                title: "Code Font",
+                                selection: $fonts.selectedMonoFamily,
+                                families: FontFamily.monoFamilies,
+                                previewsMonospacedVariant: true
+                            )
                         } label: {
                             TronValueRow(icon: "curlybraces", title: "Font", value: fonts.selectedMonoFamily.displayName, accent: .tronCyan)
                         }
@@ -155,6 +165,7 @@ struct FontFamilySelectionView: View {
     let title: String
     @Binding var selection: FontFamily
     let families: [FontFamily]
+    let previewsMonospacedVariant: Bool
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             TronGlassCard(accent: .tronPurple) {
@@ -166,7 +177,13 @@ struct FontFamilySelectionView: View {
                                 icon: family == selection ? "checkmark.circle.fill" : "circle",
                                 title: family.displayName,
                                 subtitle: family.shortDescription,
-                                accent: family == selection ? .tronPurple : .tronSlate
+                                accent: family == selection ? .tronPurple : .tronSlate,
+                                titleFont: TronFontLoader.createFont(
+                                    size: TronTypography.sizeBody,
+                                    weight: .semibold,
+                                    mono: previewsMonospacedVariant,
+                                    family: family
+                                )
                             )
                         }
                         .buttonStyle(.plain)

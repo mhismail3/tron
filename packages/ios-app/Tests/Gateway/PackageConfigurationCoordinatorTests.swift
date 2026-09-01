@@ -21,12 +21,47 @@ struct PackageConfigurationCoordinatorTests {
         #expect(sameRowUpdate != sameRowRemove)
     }
 
-    @Test("resolved resource overview uses bounded top-level summaries")
-    func resourceSummary() {
-        #expect(PackageResourceSummaryPolicy.summary(for: .object(["skills": .array([])])) == "1 top-level category")
-        #expect(PackageResourceSummaryPolicy.summary(for: .object(["skills": .array([]), "tools": .array([])])) == "2 top-level categories")
-        #expect(PackageResourceSummaryPolicy.summary(for: .array([.string("one"), .string("two")])) == "2 resolved items")
-        #expect(PackageResourceSummaryPolicy.summary(for: .string("opaque")) == "Resolved package resource details")
+    @Test("resolved resource overview extracts bounded user-facing categories")
+    func resourceSummary() throws {
+        let resources = JSONValue.object([
+            "extensions": .array([
+                .object([
+                    "path": .string("/packages/sample/extensions/browser.ts"),
+                    "enabled": .bool(true),
+                    "metadata": .object([
+                        "source": .string("npm:sample"),
+                        "scope": .string("user"),
+                        "origin": .string("package"),
+                    ]),
+                ]),
+            ]),
+            "skills": .array([
+                .object([
+                    "path": .string("/packages/sample/skills/review/SKILL.md"),
+                    "enabled": .bool(false),
+                    "metadata": .object([
+                        "source": .string("npm:sample"),
+                        "scope": .string("project"),
+                        "origin": .string("package"),
+                    ]),
+                ]),
+            ]),
+            "prompts": .array([]),
+            "futureCategory": .array([.string("preserved only in technical JSON")]),
+        ])
+        let presentation = PackageResolvedResourcesPresentation(resources: resources)
+        #expect(presentation.totalCount == 2)
+        #expect(presentation.enabledCount == 1)
+        #expect(presentation.disabledCount == 1)
+        #expect(presentation.populatedCategoryCount == 2)
+        #expect(presentation.additionalCategoryCount == 1)
+        #expect(presentation.overview == "2 resources across 2 resource types. 1 is ready to use and 1 is turned off. Additional technical resource data is available below.")
+        #expect(PackageResourceSummaryPolicy.summary(for: resources) == "2 known resolved resources")
+        let skill = try #require(presentation.categories.first(where: { $0.kind == .skills })?.items.first)
+        #expect(skill.displayName == "review")
+        #expect(skill.sourceDescription == "From npm:sample · Current project")
+        #expect(PackageResourceSummaryPolicy.summary(for: .object(["skills": .array([])])) == "No resources resolved")
+        #expect(PackageResourceSummaryPolicy.summary(for: .string("opaque")) == "No resources resolved")
     }
 
     @Test("target-keyed inventories admit independently and newest same-target load wins")

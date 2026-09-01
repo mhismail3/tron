@@ -119,29 +119,13 @@ struct ChatComposerView: View {
         }
     }
 
-    @ViewBuilder
     private var attachmentStrip: some View {
-        if !pendingAttachments.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(pendingAttachments) { attachment in
-                        PendingAttachmentChip(attachment: attachment) {
-                            onRemoveAttachment(attachment.id)
-                        }
-                        .chatDraftAttachmentMorphSource(id: attachment.id, registry: morphRegistry)
-                        .transition(ChatContentTransitionPolicy.attachmentTransition(
-                            reduceMotion: reduceMotion
-                        ))
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 2)
-            }
-            .scrollClipDisabled()
-            .transition(ChatContentTransitionPolicy.composerSurfaceTransition(
-                reduceMotion: reduceMotion
-            ))
-        }
+        ChatPendingAttachmentStrip(
+            attachments: pendingAttachments,
+            morphRegistry: morphRegistry,
+            reduceMotion: reduceMotion,
+            onRemove: onRemoveAttachment
+        )
     }
 
     @ViewBuilder
@@ -296,5 +280,125 @@ struct ChatComposerView: View {
         )
         .accessibilityLabel("Catch up")
         .accessibilityHint("Returns to the latest response and follows new messages")
+    }
+}
+
+private struct ChatPendingAttachmentStrip: View {
+    let attachments: [PendingAttachment]
+    let morphRegistry: ChatMorphFrameRegistry
+    let reduceMotion: Bool
+    let onRemove: (String) -> Void
+
+    @State private var presentedAttachments: [PendingAttachment]
+    @State private var reconciliationTask: Task<Void, Never>?
+
+    init(
+        attachments: [PendingAttachment],
+        morphRegistry: ChatMorphFrameRegistry,
+        reduceMotion: Bool,
+        onRemove: @escaping (String) -> Void
+    ) {
+        self.attachments = attachments
+        self.morphRegistry = morphRegistry
+        self.reduceMotion = reduceMotion
+        self.onRemove = onRemove
+        _presentedAttachments = State(initialValue: attachments)
+    }
+
+    var body: some View {
+        Group {
+            if !presentedAttachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(presentedAttachments) { attachment in
+                            PendingAttachmentChip(attachment: attachment) {
+                                onRemove(attachment.id)
+                            }
+                            .chatDraftAttachmentMorphSource(id: attachment.id, registry: morphRegistry)
+                            .transition(
+                                presentedAttachments.count == 1
+                                    ? .identity
+                                    : ChatContentTransitionPolicy.attachmentTransition(
+                                        reduceMotion: reduceMotion
+                                    )
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 2)
+                }
+                .scrollClipDisabled()
+                .transition(ChatContentTransitionPolicy.attachmentTransition(
+                    reduceMotion: reduceMotion
+                ))
+            }
+        }
+        .onChange(of: attachments) { _, target in
+            reconcile(to: target)
+        }
+        .onDisappear {
+            reconciliationTask?.cancel()
+            reconciliationTask = nil
+        }
+    }
+
+    private func reconcile(to target: [PendingAttachment]) {
+        reconciliationTask?.cancel()
+        reconciliationTask = nil
+
+        if reduceMotion {
+            withAnimation(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: true)) {
+                presentedAttachments = target
+            }
+            return
+        }
+
+        let targetIDs = Set(target.map(\.id))
+        let targetByID = Dictionary(uniqueKeysWithValues: target.map { ($0.id, $0) })
+        for index in presentedAttachments.indices {
+            if let updated = targetByID[presentedAttachments[index].id] {
+                presentedAttachments[index] = updated
+            }
+        }
+
+        let insertionIDs = ChatContentTransitionPolicy.attachmentInsertionIDs(
+            current: presentedAttachments.map(\.id),
+            target: target.map(\.id)
+        )
+        let animation = ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: false)
+        withAnimation(animation) {
+            presentedAttachments.removeAll { !targetIDs.contains($0.id) }
+            if insertionIDs.isEmpty {
+                presentedAttachments = target
+            }
+        }
+
+        guard !insertionIDs.isEmpty else { return }
+        reconciliationTask = Task { @MainActor in
+            for (rank, id) in insertionIDs.enumerated() {
+                if rank > 0 {
+                    try? await Task.sleep(for: .seconds(
+                        ChatContentTransitionPolicy.attachmentStaggerInterval
+                    ))
+                }
+                guard !Task.isCancelled,
+                      let attachment = targetByID[id],
+                      !presentedAttachments.contains(where: { $0.id == id }) else { continue }
+                let targetIndex = target.firstIndex(where: { $0.id == id }) ?? target.endIndex
+                let precedingIDs = Set(target[..<targetIndex].map(\.id))
+                let insertionIndex = presentedAttachments.prefix {
+                    precedingIDs.contains($0.id)
+                }.count
+                withAnimation(animation) {
+                    presentedAttachments.insert(
+                        attachment,
+                        at: min(insertionIndex, presentedAttachments.endIndex)
+                    )
+                }
+            }
+            guard !Task.isCancelled else { return }
+            withAnimation(animation) { presentedAttachments = target }
+            reconciliationTask = nil
+        }
     }
 }

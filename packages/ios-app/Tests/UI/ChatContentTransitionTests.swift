@@ -131,6 +131,16 @@ struct ChatContentTransitionTests {
     func composerChildMotion() {
         #expect(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: false)
             != ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: true))
+        #expect(ChatContentTransitionPolicy.attachmentHiddenScale == 0.5)
+        #expect(ChatContentTransitionPolicy.attachmentStaggerInterval == 0.04)
+        #expect(ChatContentTransitionPolicy.attachmentInsertionIDs(
+            current: ["existing"],
+            target: ["existing", "photo-1", "photo-2", "file-1"]
+        ) == ["photo-1", "photo-2", "file-1"])
+        #expect(ChatContentTransitionPolicy.attachmentInsertionIDs(
+            current: ["photo-1", "photo-2"],
+            target: ["photo-2"]
+        ).isEmpty)
         #expect(ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: false)
             != ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: true))
         #expect(ChatContentTransitionPolicy.composerSurfaceRemovalEdge == .bottom)

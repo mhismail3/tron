@@ -1,14 +1,142 @@
 import SwiftUI
 
+enum PackageResourceKind: String, CaseIterable, Identifiable, Sendable {
+    case extensions, skills, prompts, themes
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .extensions: "Extensions"
+        case .skills: "Skills"
+        case .prompts: "Prompts"
+        case .themes: "Themes"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .extensions: "puzzlepiece.extension.fill"
+        case .skills: "sparkles"
+        case .prompts: "text.quote"
+        case .themes: "paintpalette.fill"
+        }
+    }
+}
+
+struct PackageResolvedResourceItem: Identifiable, Equatable, Sendable {
+    let path: String
+    let enabled: Bool
+    let source: String?
+    let scope: String?
+    let origin: String?
+
+    var id: String { path }
+
+    var displayName: String {
+        let url = URL(fileURLWithPath: path)
+        if url.lastPathComponent == "SKILL.md" {
+            return url.deletingLastPathComponent().lastPathComponent
+        }
+        return url.lastPathComponent.isEmpty ? path : url.lastPathComponent
+    }
+
+    var sourceDescription: String {
+        let scopeLabel = switch scope {
+        case "project": "Current project"
+        case "temporary": "This session"
+        default: "Every project"
+        }
+        if origin == "package", let source, !source.isEmpty {
+            return "From \(source) · \(scopeLabel)"
+        }
+        if source == "auto" { return "Discovered automatically · \(scopeLabel)" }
+        if let source, !source.isEmpty { return "From \(source) · \(scopeLabel)" }
+        return scopeLabel
+    }
+}
+
+struct PackageResolvedResourceCategory: Identifiable, Equatable, Sendable {
+    let kind: PackageResourceKind
+    let items: [PackageResolvedResourceItem]
+    let rawValue: JSONValue
+
+    var id: String { kind.id }
+    var enabledCount: Int { items.count(where: \.enabled) }
+    var disabledCount: Int { items.count - enabledCount }
+
+    var summary: String {
+        guard !items.isEmpty else { return "None resolved" }
+        if disabledCount == 0 {
+            return "\(items.count) ready to use"
+        }
+        return "\(enabledCount) ready · \(disabledCount) turned off"
+    }
+}
+
+struct PackageResolvedResourcesPresentation: Equatable, Sendable {
+    let categories: [PackageResolvedResourceCategory]
+    let additionalCategoryCount: Int
+
+    init(resources: JSONValue) {
+        let root = resources.objectValue ?? [:]
+        let knownKeys = Set(PackageResourceKind.allCases.map(\.rawValue))
+        additionalCategoryCount = root.keys.count(where: { !knownKeys.contains($0) })
+        categories = PackageResourceKind.allCases.compactMap { kind in
+            guard let rawValue = root[kind.rawValue], let values = rawValue.arrayValue else { return nil }
+            let items = values.compactMap { value -> PackageResolvedResourceItem? in
+                guard let object = value.objectValue,
+                      let path = object["path"]?.stringValue else { return nil }
+                let metadata = object["metadata"]?.objectValue
+                return PackageResolvedResourceItem(
+                    path: path,
+                    enabled: object["enabled"]?.boolValue != false,
+                    source: metadata?["source"]?.stringValue,
+                    scope: metadata?["scope"]?.stringValue,
+                    origin: metadata?["origin"]?.stringValue
+                )
+            }
+            return PackageResolvedResourceCategory(kind: kind, items: items, rawValue: rawValue)
+        }
+    }
+
+    var totalCount: Int { categories.reduce(0) { $0 + $1.items.count } }
+    var enabledCount: Int { categories.reduce(0) { $0 + $1.enabledCount } }
+    var disabledCount: Int { totalCount - enabledCount }
+    var populatedCategoryCount: Int { categories.count(where: { !$0.items.isEmpty }) }
+
+    var overview: String {
+        guard totalCount > 0 else {
+            return additionalCategoryCount == 0
+                ? "No package resources are currently resolved."
+                : "Additional technical resource data is available below."
+        }
+        let typeLabel = populatedCategoryCount == 1 ? "resource type" : "resource types"
+        let availability: String
+        if disabledCount == 0 {
+            availability = "All are ready to use."
+        } else {
+            let ready = "\(enabledCount) \(enabledCount == 1 ? "is" : "are") ready to use"
+            let disabled = "\(disabledCount) \(disabledCount == 1 ? "is" : "are") turned off"
+            availability = "\(ready) and \(disabled)."
+        }
+        let additional = additionalCategoryCount == 0
+            ? ""
+            : " Additional technical resource data is available below."
+        return "\(totalCount) resources across \(populatedCategoryCount) \(typeLabel). \(availability)\(additional)"
+    }
+}
+
 enum PackageResourceSummaryPolicy {
     static func summary(for resources: JSONValue) -> String {
-        if let object = resources.objectValue {
-            return "\(object.count) top-level categor\(object.count == 1 ? "y" : "ies")"
+        let presentation = PackageResolvedResourcesPresentation(resources: resources)
+        guard presentation.totalCount > 0 else {
+            return presentation.additionalCategoryCount == 0
+                ? "No resources resolved"
+                : "Additional resource details"
         }
-        if let array = resources.arrayValue {
-            return "\(array.count) resolved item\(array.count == 1 ? "" : "s")"
-        }
-        return "Resolved package resource details"
+        let known = presentation.additionalCategoryCount == 0 ? "" : " known"
+        return "\(presentation.totalCount)\(known) resolved resource\(presentation.totalCount == 1 ? "" : "s")"
     }
 }
 
@@ -337,23 +465,47 @@ struct PackagesSettingsView: View {
 
     private var packageInstallSheet: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                TronSettingsGroup("Source", detail: "Use an npm package, Git URL, or local path.", accent: .tronEmerald) {
-                    VStack(spacing: 10) {
-                        TextField("Package source", text: $source)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .tronField(monospaced: true, compact: true)
-                        TronToggleRow(icon: "folder.badge.gearshape", title: "Project scope", accent: .tronEmerald, isOn: $local)
-                            .disabled(projectCWD == nil)
-                        Button("Install Package") { install() }
-                            .buttonStyle(TronActionButtonStyle(role: .primary))
-                            .disabled(source.isEmpty || activeMutations[.install(source)] != nil)
-                    }
-                    .padding(10)
+            LazyVStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
+                    sheetSectionHeader(
+                        "Source",
+                        detail: "Use an npm package, Git URL, or local path."
+                    )
+                    TextField("Package source", text: $source)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .tronField(
+                            monospaced: true,
+                            compact: true,
+                            dense: true,
+                            surfaceTint: Color.tronEmerald.opacity(0.14),
+                            border: Color.tronEmerald.opacity(0.42)
+                        )
                 }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    sheetSectionHeader(
+                        "Install Scope",
+                        detail: projectCWD == nil
+                            ? "Packages are installed for every project from this screen."
+                            : "Choose whether this package is available everywhere or only in the current project."
+                    )
+                    TronToggleRow(
+                        icon: "folder.badge.gearshape",
+                        title: "Current project only",
+                        accent: .tronEmerald,
+                        isOn: $local
+                    )
+                    .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
+                    .disabled(projectCWD == nil)
+                }
+
+                Button("Install Package") { install() }
+                    .buttonStyle(TronActionButtonStyle(role: .primary))
+                    .disabled(source.isEmpty || activeMutations[.install(source)] != nil)
             }
-            .padding(16)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Install Package")
@@ -366,6 +518,19 @@ struct PackagesSettingsView: View {
                 }
                 .accessibilityLabel("Done")
             }
+        }
+    }
+
+    private func sheetSectionHeader(_ title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: TronSpacing.xs) {
+            Text(title)
+                .font(TronTypography.sheetSectionHeader)
+                .foregroundStyle(Color.tronTextPrimary)
+                .accessibilityAddTraits(.isHeader)
+            Text(detail)
+                .font(TronTypography.caption)
+                .foregroundStyle(Color.tronTextMuted)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -551,17 +716,111 @@ struct PackagesSettingsView: View {
 struct PackageResolvedResourcesView: View {
     let resources: JSONValue
 
+    private var presentation: PackageResolvedResourcesPresentation {
+        PackageResolvedResourcesPresentation(resources: resources)
+    }
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            TronStructuredJSONView(
-                value: resources,
-                title: "Resolved Resources",
-                accent: .tronTeal
-            )
-            .padding(18)
+            LazyVStack(alignment: .leading, spacing: 18) {
+                TronInfoCard(
+                    icon: presentation.totalCount == 0 ? "tray" : "checkmark.seal.fill",
+                    text: presentation.overview,
+                    accent: .tronTeal
+                )
+
+                if !presentation.categories.isEmpty {
+                    TronSettingsGroup(
+                        "Resource Types",
+                        detail: "Open a type to see the user-facing names and where they came from.",
+                        accent: .tronTeal
+                    ) {
+                        VStack(spacing: 0) {
+                            ForEach(Array(presentation.categories.enumerated()), id: \.element.id) { index, category in
+                                if index > 0 { TronSettingsDivider(accent: .tronTeal) }
+                                TronProgressiveSheetLink(
+                                    accessibilityLabel: "\(category.kind.title), \(category.summary)",
+                                    accent: .tronTeal
+                                ) {
+                                    PackageResolvedResourceCategoryView(category: category)
+                                } label: {
+                                    TronSettingsRow(
+                                        icon: category.kind.icon,
+                                        title: category.kind.title,
+                                        subtitle: category.summary,
+                                        accent: .tronTeal,
+                                        subtitleColor: .tronTextSecondary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                TronTechnicalJSONRow(
+                    value: resources,
+                    title: "Technical JSON",
+                    subtitle: "View the full resolved resource protocol data",
+                    sheetTitle: "Resolved Resources JSON",
+                    accent: .tronSlate
+                )
+            }
+            .padding(20)
         }
         .defaultScrollAnchor(.top)
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Resolved Resources")
+    }
+}
+
+private struct PackageResolvedResourceCategoryView: View {
+    let category: PackageResolvedResourceCategory
+
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                TronInfoCard(
+                    icon: category.kind.icon,
+                    text: category.summary,
+                    accent: .tronTeal
+                )
+
+                if category.items.isEmpty {
+                    TronInfoCard(
+                        icon: "tray",
+                        text: "No \(category.kind.title.lowercased()) are currently available.",
+                        accent: .tronSlate
+                    )
+                } else {
+                    TronSettingsGroup("Available", accent: .tronTeal) {
+                        VStack(spacing: 0) {
+                            ForEach(Array(category.items.enumerated()), id: \.element.id) { index, item in
+                                if index > 0 { TronSettingsDivider(accent: .tronTeal) }
+                                TronSettingsRow(
+                                    icon: item.enabled ? "checkmark.circle.fill" : "minus.circle",
+                                    title: item.displayName,
+                                    subtitle: item.sourceDescription,
+                                    subtitleLineLimit: 2,
+                                    accent: item.enabled ? .tronTeal : .tronSlate,
+                                    subtitleColor: .tronTextSecondary
+                                )
+                                .accessibilityValue(item.enabled ? "Ready to use" : "Turned off")
+                            }
+                        }
+                    }
+                }
+
+                TronTechnicalJSONRow(
+                    value: category.rawValue,
+                    title: "Technical Details",
+                    subtitle: "View paths, metadata, and raw values for \(category.kind.title.lowercased())",
+                    sheetTitle: "\(category.kind.title) JSON",
+                    accent: .tronSlate
+                )
+            }
+            .padding(20)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle(category.kind.title, accent: .tronTeal)
     }
 }

@@ -1097,6 +1097,8 @@ struct PresentationStyleGuardTests {
         #expect(!appearance.contains(".pickerStyle(.segmented)"))
         #expect(appearance.contains("icon: \"textformat.size\""))
         #expect(appearance.contains("icon: \"slider.horizontal.3\""))
+        #expect(appearance.contains("titleFont: TronFontLoader.createFont("))
+        #expect(appearance.contains("family: family"))
         let textFontSection = (appearance.components(separatedBy: "TronSettingsGroup(\"Text Font\"").dropFirst().first ?? "")
             .components(separatedBy: "TronSettingsGroup(\"Code Font\"").first ?? ""
         let textSlider = try #require(textFontSection.firstRange(of: "axisSlider(")?.lowerBound)
@@ -1112,6 +1114,9 @@ struct PresentationStyleGuardTests {
         #expect(!connections.contains("model.loadGatewayLogs"))
         #expect(logs.contains("struct GatewayLogsSettingsView"))
         #expect(settings.contains("GatewayLogsSettingsView()"))
+        let authorizedDevicesPosition = try #require(connections.firstRange(of: "\"Authorized Devices\"")?.lowerBound)
+        let pushNotificationsPosition = try #require(connections.firstRange(of: "\"Push Notifications\"")?.lowerBound)
+        #expect(authorizedDevicesPosition < pushNotificationsPosition)
         #expect(connections.contains("serverDetailDetent"))
         #expect(connections.contains(".presentationDetents([.medium, .large], selection: $serverDetailDetent)"))
         #expect(connections.contains("gatewayActionButton"))
@@ -1581,13 +1586,23 @@ struct PresentationStyleGuardTests {
         #expect(packageOverview.contains("icon: \"arrow.down.circle.fill\""))
         #expect(packageOverview.contains("icon: \"magnifyingglass.circle.fill\""))
         #expect(packageOverview.contains("private var packageInstallSheet: some View"))
+        let packageInstall = (packageOverview.components(separatedBy: "private var packageInstallSheet: some View").dropFirst().first ?? "")
+            .components(separatedBy: "private func sheetSectionHeader").first ?? ""
+        #expect(packageInstall.contains("sheetSectionHeader("))
+        #expect(packageInstall.contains("dense: true"))
+        #expect(packageInstall.contains("surfaceTint: Color.tronEmerald.opacity(0.14)"))
+        #expect(!packageInstall.contains("TronSettingsGroup"))
         #expect(packageOverview.contains("presentationDetents([.medium, .large])"))
         #expect(packageOverview.contains("await model.checkPackageUpdates(target: requestedTarget"))
         #expect(!packageOverview.contains("TronSettingsGroup(\"Updates\""))
         #expect(!packageOverview.contains("Update All"))
         #expect(!packageOverview.contains("Check for Updates"))
         #expect(!packageOverview.contains("TronStructuredJSONView"))
-        #expect(packageDetail.contains("TronStructuredJSONView"))
+        #expect(!packageDetail.contains("TronStructuredJSONView"))
+        #expect(packageDetail.contains("PackageResolvedResourcesPresentation"))
+        #expect(packageDetail.contains("TronProgressiveSheetLink("))
+        #expect(packageDetail.contains("PackageResolvedResourceCategoryView"))
+        #expect(packageDetail.contains("TronTechnicalJSONRow("))
         let runtimeSettings = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ResourceSettingsView.swift"),
             encoding: .utf8
@@ -1828,10 +1843,12 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains("func suspendForBackground()"))
         #expect(chat.contains("@Environment(\\.scenePhase)"))
         #expect(chat.contains("private func scenePhaseChanged(_ current: ScenePhase)"))
-        let pendingStrip = (chat.components(separatedBy: "if !pendingAttachments.isEmpty").dropFirst().first ?? "")
-            .components(separatedBy: "GlassEffectContainer(spacing: 8)").first ?? ""
+        let pendingStrip = chat.components(separatedBy: "private struct ChatPendingAttachmentStrip").dropFirst().first ?? ""
         #expect(pendingStrip.contains("ScrollView(.horizontal, showsIndicators: false)"))
         #expect(pendingStrip.contains(".scrollClipDisabled()"))
+        #expect(pendingStrip.contains("ChatContentTransitionPolicy.attachmentInsertionIDs("))
+        #expect(pendingStrip.contains("ChatContentTransitionPolicy.attachmentStaggerInterval"))
+        #expect(pendingStrip.contains("presentedAttachments.removeAll"))
         let thumbnailSurface = try #require(
             attachmentPresentation.components(separatedBy: "struct AttachmentThumbnailSurface").dropFirst().first?
                 .components(separatedBy: "struct PendingAttachmentChip").first

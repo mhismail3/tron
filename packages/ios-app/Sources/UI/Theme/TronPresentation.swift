@@ -1129,6 +1129,7 @@ struct TronSettingsRow<Trailing: View>: View {
     let subtitleRole: TronSettingsSecondaryRole
     let subtitleLineLimit: Int?
     let accent: Color
+    let titleFont: Font
     let titleColor: Color
     let subtitleColor: Color
     let trailing: Trailing
@@ -1141,6 +1142,7 @@ struct TronSettingsRow<Trailing: View>: View {
         subtitleRole: TronSettingsSecondaryRole = .informational,
         subtitleLineLimit: Int? = nil,
         accent: Color = .tronEmerald,
+        titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
         titleColor: Color = .tronTextPrimary,
         subtitleColor: Color = .tronTextPrimary,
         @ViewBuilder trailing: () -> Trailing
@@ -1151,6 +1153,7 @@ struct TronSettingsRow<Trailing: View>: View {
         self.subtitleRole = subtitleRole
         self.subtitleLineLimit = subtitleLineLimit
         self.accent = accent
+        self.titleFont = titleFont
         self.titleColor = titleColor
         self.subtitleColor = subtitleColor
         self.trailing = trailing()
@@ -1165,7 +1168,7 @@ struct TronSettingsRow<Trailing: View>: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .font(titleFont)
                     .foregroundStyle(titleColor)
                     .fixedSize(horizontal: false, vertical: true)
                 if let subtitle {
@@ -1196,6 +1199,7 @@ extension TronSettingsRow where Trailing == EmptyView {
         subtitleRole: TronSettingsSecondaryRole = .informational,
         subtitleLineLimit: Int? = nil,
         accent: Color = .tronEmerald,
+        titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
         titleColor: Color = .tronTextPrimary,
         subtitleColor: Color = .tronTextPrimary
     ) {
@@ -1206,6 +1210,7 @@ extension TronSettingsRow where Trailing == EmptyView {
             subtitleRole: subtitleRole,
             subtitleLineLimit: subtitleLineLimit,
             accent: accent,
+            titleFont: titleFont,
             titleColor: titleColor,
             subtitleColor: subtitleColor
         ) { EmptyView() }

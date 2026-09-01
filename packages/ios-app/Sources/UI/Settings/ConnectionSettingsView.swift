@@ -108,6 +108,43 @@ struct ConnectionsSettingsView: View {
                 }
 
                 TronSettingsGroup(
+                    "Authorized Devices",
+                    detail: "Devices authorized for each paired Mac.",
+                    accent: .tronPurple
+                ) {
+                    VStack(spacing: 0) {
+                        if authorizedDevices.isEmpty {
+                            TronValueRow(
+                                icon: "iphone.slash",
+                                title: "No authorized devices",
+                                detail: "Connect to a server to load its device list.",
+                                accent: .tronPurple
+                            )
+                        } else {
+                            ForEach(Array(authorizedDevices.enumerated()), id: \.element.id) { index, authorized in
+                                if index > 0 { TronSettingsDivider(accent: .tronPurple) }
+                                Button { selectedAuthorizedDevice = authorized } label: {
+                                    TronValueRow(
+                                        icon: "iphone",
+                                        title: authorized.device.name,
+                                        detail: deviceDetail(authorized),
+                                        accent: .tronPurple
+                                    ) {
+                                        GatewayConnectionStatusBadge(
+                                            state: model.dashboardServerState(for: authorized.profileID)
+                                        )
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Details for \(authorized.device.name) on \(authorized.profileLabel)")
+                                .accessibilityHint("Shows source build, installation, and device authorization actions")
+                            }
+                        }
+                    }
+                }
+
+                TronSettingsGroup(
                     "Push Notifications",
                     detail: "Private agent alerts for this iPhone.",
                     accent: .tronBlue
@@ -142,43 +179,6 @@ struct ConnectionsSettingsView: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityHint("Preserves the APNs token, pairings, grants, and other Keychain data")
-                        }
-                    }
-                }
-
-                TronSettingsGroup(
-                    "Authorized Devices",
-                    detail: "Devices authorized for each paired Mac.",
-                    accent: .tronPurple
-                ) {
-                    VStack(spacing: 0) {
-                        if authorizedDevices.isEmpty {
-                            TronValueRow(
-                                icon: "iphone.slash",
-                                title: "No authorized devices",
-                                detail: "Connect to a server to load its device list.",
-                                accent: .tronPurple
-                            )
-                        } else {
-                            ForEach(Array(authorizedDevices.enumerated()), id: \.element.id) { index, authorized in
-                                if index > 0 { TronSettingsDivider(accent: .tronPurple) }
-                                Button { selectedAuthorizedDevice = authorized } label: {
-                                    TronValueRow(
-                                        icon: "iphone",
-                                        title: authorized.device.name,
-                                        detail: deviceDetail(authorized),
-                                        accent: .tronPurple
-                                    ) {
-                                        GatewayConnectionStatusBadge(
-                                            state: model.dashboardServerState(for: authorized.profileID)
-                                        )
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Details for \(authorized.device.name) on \(authorized.profileLabel)")
-                                .accessibilityHint("Shows source build, installation, and device authorization actions")
-                            }
                         }
                     }
                 }
