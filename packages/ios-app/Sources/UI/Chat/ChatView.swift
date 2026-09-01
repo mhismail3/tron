@@ -96,26 +96,22 @@ struct ChatView: View {
     #endif
 
     private var contentSurface: some View {
-        transcript
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                // The complete composer is the sole structural inset owner, so
-                // the keyboard, multiline text, and attachment chips push the
-                // native transcript viewport exactly once and reverse naturally.
-                composer
-            }
-            .overlay(alignment: .top) { topBlur }
-            .overlay {
-                ChatMorphFlightLayer(
-                    registry: morphRegistry,
-                    layoutTransaction: layoutTransaction,
-                    reduceMotion: reduceMotion
-                )
-            }
-        .onGeometryChange(for: CGFloat.self) { geometry in
-            geometry.size.width
-        } action: { width in
-            toolbarContainerWidth = width
-        }
+        ChatUIKitSessionSurfaceHost(
+            transcriptInput: chatUIKitTranscriptInput,
+            composerInput: chatUIKitComposerInput,
+            activity: chatUIKitPresentationActivity,
+            mediaLoader: model.chatMedia,
+            mediaIdentity: { blobID in model.chatMediaIdentity(blobID: blobID) },
+            onComposerIntent: { intent in handleUIKitComposerIntent(intent) },
+            onSend: { behavior, identity in handleUIKitSend(behavior: behavior, identity: identity) },
+            onLoadEarlier: { loadEarlierFromUIKit() },
+            onAttachmentTapped: { rowID, index in handleUIKitAttachment(rowID: rowID, index: index) },
+            onToolTapped: { rowID in handleUIKitTool(rowID: rowID) },
+            onThinkingDetails: { rowID in handleUIKitThinking(rowID: rowID) },
+            onNotificationDetails: { rowID in handleUIKitNotification(rowID: rowID) },
+            onViewportOutcome: { outcome in handleUIKitViewportOutcome(outcome) }
+        )
+        .overlay(alignment: .top) { topBlur }
         .background { Color.tronBackground.ignoresSafeArea(.all) }
         .environment(\.canonicalResourceSessionID, sessionID)
         .navigationTitle("")
@@ -948,6 +944,165 @@ struct ChatView: View {
         composerScope.map(model.composerDrafts.text(for:)) ?? ""
     }
 
+    private var chatUIKitPresentationActivity: ChatUIKitPresentationActivity {
+        ChatUIKitPresentationActivity(
+            isPresented: true,
+            isSceneActive: scenePhase == .active,
+            isCovered: !presentationActivity.allowsPresentationPublication,
+            generation: UInt64(max(sessionPresentation.modelPresentationGeneration ?? 0, 0))
+        )
+    }
+
+    private var chatUIKitTranscriptInput: ChatUIKitPresentationInput? {
+        guard let installed = transcriptPresentation.installed,
+              let generation = sessionPresentation.modelPresentationGeneration,
+              installed.tag.presentationGeneration == generation else { return nil }
+        let history: ChatUIKitHistoryState
+        switch model.transcriptLoadState {
+        case .idle:
+            history = (installed.sourceWindow.originalStart ?? 0) > 0 ? .available : .hidden
+        case .loading: history = .loading
+        case .failed(let message): history = .failed(message)
+        }
+        return ChatUIKitPresentationAdapter.input(
+            from: installed,
+            canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
+            generation: UInt64(max(generation, 0)),
+            version: UInt64(max(installed.tag.timelineGeneration, 0)),
+            historyState: history
+        )
+    }
+
+    private var chatUIKitComposerInput: ChatUIKitComposerInput {
+        let target = presentationTarget
+        let submissionID = target.flatMap { model.composerDrafts.outgoingSubmission(for: $0)?.presentationID }
+        let snapshot = selectedAuthoritativeSnapshot
+        let hasSubagent = snapshot?.processActivities?.contains {
+            $0.kind == .subagent && SessionProcessAdmissionPolicy.admits($0)
+        } == true
+        return ChatUIKitComposerInput(
+            sessionID: sessionID,
+            text: composerText,
+            selection: composerSelection,
+            revision: composerScope.map(model.composerDrafts.revision(for:)) ?? 0,
+            submissionID: submissionID,
+            attachments: pendingAttachments,
+            selectedResource: selectedComposerResource,
+            resourcePicker: composerResourcePicker,
+            resourceResults: composerResourceResults,
+            reduceMotion: reduceMotion,
+            keyboardVisible: keyboardObserver.isVisible,
+            showsCatchUp: scrollCoordinator.shouldShowCatchUpButton,
+            showsAmbientWorkingBlur: showsAmbientWorkingBlur,
+            processOverview: snapshot?.processOverview,
+            hasSubagent: hasSubagent,
+            contextProgress: contextProgressPresentation,
+            trailingMode: composerTrailingMode,
+            offersQueueChoices: snapshot?.phase == .running,
+            isSending: sending,
+            submissionPending: submissionPending,
+            hasActiveUploads: hasActiveComposerUploads,
+            isTranscriptReady: isTranscriptReady,
+            isCommandReady: admitsLiveSessionCommands,
+            attachmentMenuState: attachmentMenuState,
+            attachmentActionsEnabled: attachmentActionsEnabled,
+            resourcePickerAvailable: resourcePickerAvailable,
+            isEditable: ChatComposerPolicy.isTextEditable(isTranscriptReady: isTranscriptReady),
+            keyboardAppearance: colorScheme == .dark ? .dark : .light,
+            focus: composerFocused ? .focused : .resigned
+        )
+    }
+
+    @MainActor
+    private func handleUIKitComposerIntent(_ intent: ChatUIKitComposerIntent) {
+        switch intent {
+        case .textChanged(let text, let selection):
+            composerSelection = selection
+            guard let composerScope else { return }
+            model.composerDrafts.setText(text, for: composerScope)
+            if selectedAuthoritativeSnapshot?.extensionPresentation.hostEpoch.isEmpty == false,
+               let presentationTarget {
+                model.scheduleExtensionEditorUpdate(target: presentationTarget, text: text)
+            }
+        case .focusChanged(let focused):
+            composerFocused = focused
+        case .send:
+            break
+        case .abort:
+            let operation = selectedAuthoritativeSnapshot?.operation
+            let kind = ChatComposerPolicy.abortKind(operation: operation)
+            Task { await model.abort(sessionID: sessionID, kind: kind, operationID: operation?.id) }
+        case .selectAttachmentDestination(let destination):
+            requestAttachmentPresentation(destination)
+        case .previewAttachment:
+            break
+        case .removeAttachment(let id):
+            guard let target = presentationTarget else { return }
+            model.composerDrafts.removeAttachment(id, target: target)
+        case .selectResource(let entry):
+            selectComposerResource(entry)
+        case .showResourceDetails:
+            break
+        case .removeResource:
+            guard let composerScope else { return }
+            model.composerDrafts.removeSelectedResource(for: composerScope)
+        case .dismissResourcePicker:
+            dismissComposerResourcePicker()
+        case .showContext:
+            sessionPresentation.showContext = true
+        case .showProcesses:
+            sessionPresentation.showProcesses = true
+        case .catchUp:
+            catchUpToTail()
+        }
+    }
+
+    @MainActor
+    private func handleUIKitSend(
+        behavior: String?,
+        identity: ChatUIKitComposerSendIdentity
+    ) -> Bool {
+        guard identity.sessionID == sessionID else { return false }
+        let target = presentationTarget
+        let before = target.flatMap { model.composerDrafts.outgoingSubmission(for: $0)?.presentationID }
+        send(behavior: behavior)
+        return target.flatMap { model.composerDrafts.outgoingSubmission(for: $0)?.presentationID } != before
+    }
+
+    @MainActor
+    private func loadEarlierFromUIKit() {
+        guard !isLoadingEarlierMessages,
+              scrollCoordinator.canRequestHistoryPage,
+              let generation = sessionPresentation.modelPresentationGeneration,
+              let token = sessionPresentation.earlierMessagesOperation.begin() else { return }
+        Task { @MainActor in
+            defer { settleEarlierMessagesOperation(token) }
+            guard await model.loadEarlierTranscript(
+                sessionID: sessionID,
+                presentationGeneration: generation
+            ) == .installed else { return }
+            _ = try? await installCurrentTranscriptProjection(presentationGeneration: generation)
+        }
+    }
+
+    @MainActor
+    private func handleUIKitAttachment(rowID: String, index: Int) {
+        // Transcript media is already leased to the canonical loader by the
+        // native cell. Preview routing remains owned by the existing row route.
+        _ = (rowID, index)
+    }
+
+    @MainActor
+    private func handleUIKitTool(rowID: String) { _ = rowID }
+    @MainActor
+    private func handleUIKitThinking(rowID: String) { _ = rowID }
+    @MainActor
+    private func handleUIKitNotification(rowID: String) { _ = rowID }
+    @MainActor
+    private func handleUIKitViewportOutcome(_ outcome: ChatUIKitViewportTransactionOutcome) {
+        _ = outcome
+    }
+
     private var composerTextBinding: Binding<String> {
         Binding(
             get: { composerText },
@@ -1689,11 +1844,20 @@ struct ChatView: View {
 
     @MainActor
     private func positionLatestTail(epoch: Int, targetRenderedID: String?) async -> Bool {
-        // The opening surface remains opaque until the exact physical marker
-        // after transcript and queue rows intersects a plausible bottom viewport.
+        // The native parent installs and measures the complete transcript in one
+        // synchronous transaction. It owns the tail offset; the retired
+        // SwiftUI marker/geometry protocol must not be re-entered here.
         guard !Task.isCancelled,
               sessionPresentation.open.epoch == epoch,
               sessionPresentation.open.phase == .positioning else { return false }
+        if chatUIKitTranscriptInput != nil {
+            do { try await displayFrameScheduler.nextFrame() }
+            catch { return false }
+            performanceTracker.settleScroll()
+            return !Task.isCancelled
+                && sessionPresentation.open.epoch == epoch
+                && sessionPresentation.open.phase == .positioning
+        }
         let positioned = await scrollCoordinator.positionOpeningTail(
             targetRenderedID: targetRenderedID
         )

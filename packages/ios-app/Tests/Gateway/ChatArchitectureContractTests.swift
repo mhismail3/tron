@@ -203,6 +203,28 @@ struct ChatArchitectureContractTests {
     }
 
     @MainActor
+    @Test("UIKit host does not reapply an unchanged immutable source")
+    func uikitHostSourceAdmissionIsStable() throws {
+        let row = ChatUIKitTranscriptRow(id: "one", text: "one")!
+        let input = try #require(ChatUIKitPresentationInput(
+            generation: 4,
+            version: 20,
+            rows: [row]
+        ))
+        let coordinator = ChatUIKitSessionSurfaceHost.Coordinator()
+        #expect(coordinator.admittedInput(input) != nil)
+        #expect(coordinator.admittedInput(input) == nil)
+        #expect(coordinator.uiVersion == 1)
+        let changed = try #require(ChatUIKitPresentationInput(
+            generation: 4,
+            version: 21,
+            rows: [ChatUIKitTranscriptRow(id: "one", text: "changed")!]
+        ))
+        #expect(coordinator.admittedInput(changed) != nil)
+        #expect(coordinator.uiVersion == 2)
+    }
+
+    @MainActor
     @Test("UIKit generation replacement adopts a lower version and rejects old completions")
     func uikitGenerationScopesVersionAdmission() throws {
         let controller = ChatUIKitChatViewController()
