@@ -52,8 +52,10 @@ presentation consumers; they do not admit snapshots or mutate canonical state. T
 production cutover: the foundation has not yet been proven pixel-equivalent to the existing Tron
 surface. The parity gate still requires mapping every installed row kind and existing Markdown,
 tool, attachment, selection, link, accessibility, Dynamic Type, animation, keyboard, and composer
-behavior before the SwiftUI path can be deleted. Until that evidence exists, the UIKit controller
-must remain isolated and no runtime switch may expose it to users.
+behavior before the SwiftUI path can be deleted. `ChatUIKitPresentationAdapter` carries complete
+installed physical-row content and prepared-text facts into the isolated surface; its fallback label
+is not an authority model. Until that evidence exists, the UIKit controller must remain isolated and
+no runtime switch may expose it to users.
 
 ## State flow
 
