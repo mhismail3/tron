@@ -86,7 +86,7 @@ const restartDrainMethods = new Set([
   "system.info", "system.logs", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.status", "gateway.restart", "gateway.drain.status",
   "device.install.config.status", "device.install.status",
   "session.list", "session.open", "session.sync", "session.close", "session.presentation.set", "session.transcript", "session.attention.read",
-  "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get",
+  "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get", "session.workspace.git.history.diff",
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
 ]);
@@ -221,6 +221,7 @@ export class GatewayService {
         "filesystem.v1",
         "source-control.v1",
         "workspace-inspector.v1",
+        "workspace-history-diff.v1",
         "uploads.v1",
         "uploads-status.v2",
         "terminal.v1",
@@ -1157,6 +1158,14 @@ export class GatewayService {
         return safeJson(await this.workspaceInspector.historyGet(
           slot.cwd,
           string(params.oid, "oid", { min: 40, max: 64 }),
+        ));
+      }
+      case "session.workspace.git.history.diff": {
+        const slot = await this.openedSlot(client, params);
+        return safeJson(await this.workspaceInspector.historyDiff(
+          slot.cwd,
+          string(params.oid, "oid", { min: 40, max: 64 }),
+          string(params.path, "path", { min: 1, max: 4_096 }),
         ));
       }
 

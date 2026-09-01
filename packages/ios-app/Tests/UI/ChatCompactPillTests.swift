@@ -169,6 +169,51 @@ struct ChatCompactPillTests {
         #expect(summary.instructionPreview.count == AgentContextSummary.maximumInstructionPreviewCharacters + 1)
     }
 
+    @Test("workspace history graph preserves branch and merge lanes")
+    func workspaceHistoryGraph() {
+        func commit(_ oid: String, parents: [String]) -> SessionWorkspaceCommit {
+            SessionWorkspaceCommit(
+                oid: oid,
+                shortOid: oid,
+                parents: parents,
+                subject: oid,
+                authorName: "Author",
+                authoredAt: "2026-08-31T00:00:00Z",
+                decorations: []
+            )
+        }
+        let rows = WorkspaceHistoryGraphLayout.rows(for: [
+            commit("merge", parents: ["left", "right"]),
+            commit("left", parents: ["base"]),
+            commit("right", parents: ["base"]),
+            commit("base", parents: []),
+        ])
+
+        #expect(rows.count == 4)
+        #expect(rows[0].nodeLane == 0)
+        #expect(rows[0].parentLanes == [0, 1])
+        #expect(rows[1].transitions.contains(WorkspaceHistoryGraphSegment(from: 1, to: 1)))
+        #expect(rows[2].nodeLane == 1)
+        #expect(rows[2].parentLanes == [0])
+        #expect(rows[3].nodeLane == 0)
+    }
+
+    @Test("commit details remove only the duplicated subject line")
+    func workspaceCommitMessageBody() {
+        #expect(WorkspaceCommitMessagePresentation.body(
+            subject: "Fix workspace",
+            message: "Fix workspace\n"
+        ) == nil)
+        #expect(WorkspaceCommitMessagePresentation.body(
+            subject: "Fix workspace",
+            message: "Fix workspace\n\nDetailed explanation.\nSecond line."
+        ) == "Detailed explanation.\nSecond line.")
+        #expect(WorkspaceCommitMessagePresentation.body(
+            subject: "Fix workspace",
+            message: "Independent message"
+        ) == "Independent message")
+    }
+
     @Test("Project resource descriptions normalize producer line breaks")
     func projectResourceDescriptionsNormalizeWhitespace() {
         #expect(

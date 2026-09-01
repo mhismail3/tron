@@ -12,6 +12,7 @@ struct WorkspaceInspectionServiceTests {
             .object(["blobId": .string("blob"), "name": .string("File.swift"), "mimeType": .string("text/plain"), "size": .number(4), "revision": .string("three")]),
             .object(["path": .string("File.swift"), "patch": .string("@@ -1 +1 @@\n-old\n+new"), "binary": .bool(false), "truncated": .bool(false), "revision": .string("four")]),
             .object(["commits": .array([]), "revision": .string("five")]),
+            .object(["path": .string("File.swift"), "patch": .string("@@ -1 +1 @@\n-old\n+new"), "binary": .bool(false), "truncated": .bool(false), "revision": .string("six")]),
         ])
         let service = WorkspaceInspectionService { method, params in
             try await recorder.request(method: method, params: params)
@@ -22,6 +23,7 @@ struct WorkspaceInspectionServiceTests {
         _ = try await service.file(sessionID: "session", path: "File.swift")
         _ = try await service.diff(sessionID: "session", path: "File.swift", scope: .current)
         _ = try await service.history(sessionID: "session", scope: .currentBranch)
+        _ = try await service.commitDiff(sessionID: "session", oid: String(repeating: "a", count: 40), path: "File.swift")
 
         let requests = await recorder.requests
         #expect(requests.map(\.method) == [
@@ -30,11 +32,14 @@ struct WorkspaceInspectionServiceTests {
             "session.workspace.file",
             "session.workspace.git.diff",
             "session.workspace.git.history.list",
+            "session.workspace.git.history.diff",
         ])
         #expect(requests.allSatisfy { $0.params.objectValue?["sessionId"] == .string("session") })
         #expect(requests[1].params.objectValue?["path"] == nil)
         #expect(requests[3].params.objectValue?["scope"] == .string("current"))
         #expect(requests[4].params.objectValue?["limit"] == .number(40))
+        #expect(requests[5].params.objectValue?["oid"] == .string(String(repeating: "a", count: 40)))
+        #expect(requests[5].params.objectValue?["path"] == .string("File.swift"))
     }
 
     @Test("workspace collections reject limit plus one during decoding")

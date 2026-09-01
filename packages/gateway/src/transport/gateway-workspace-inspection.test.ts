@@ -22,7 +22,10 @@ describe("Gateway workspace inspection dispatch", () => {
       config: { machineId: "machine", machineName: "Mac", tronHome: "/tmp/tron-workspace-capability" },
       sessions: {},
     } as unknown as GatewayServiceDependencies);
-    expect((service.info() as { capabilities: string[] }).capabilities).toContain("workspace-inspector.v1");
+    expect((service.info() as { capabilities: string[] }).capabilities).toEqual(expect.arrayContaining([
+      "workspace-inspector.v1",
+      "workspace-history-diff.v1",
+    ]));
   });
 
   it("derives every workspace root from the subscribed runtime slot", async () => {
@@ -32,7 +35,8 @@ describe("Gateway workspace inspection dispatch", () => {
     const diff = vi.fn(async () => ({ path: "a.txt", patch: "", binary: false, truncated: false, revision: "diff" }));
     const historyList = vi.fn(async () => ({ commits: [], revision: "history" }));
     const historyGet = vi.fn(async () => ({ oid: "a".repeat(40), changes: [], revision: "detail" }));
-    const workspaceInspector = { inspect, list, file, diff, historyList, historyGet } as unknown as WorkspaceInspectionService;
+    const historyDiff = vi.fn(async () => ({ path: "a.txt", patch: "", binary: false, truncated: false, revision: "historical-diff" }));
+    const workspaceInspector = { inspect, list, file, diff, historyList, historyGet, historyDiff } as unknown as WorkspaceInspectionService;
     const service = new GatewayService({
       config: { machineId: "machine", machineName: "Mac", tronHome: "/tmp/tron-workspace-dispatch" },
       sessions: {
@@ -48,6 +52,7 @@ describe("Gateway workspace inspection dispatch", () => {
     await service.invoke(client, "session.workspace.git.diff", { sessionId: "session", path: "a.txt", scope: "staged" });
     await service.invoke(client, "session.workspace.git.history.list", { sessionId: "session", scope: "allReferences", limit: 20 });
     await service.invoke(client, "session.workspace.git.history.get", { sessionId: "session", oid: "a".repeat(40) });
+    await service.invoke(client, "session.workspace.git.history.diff", { sessionId: "session", oid: "a".repeat(40), path: "a.txt" });
 
     expect(inspect).toHaveBeenCalledWith("/authoritative");
     expect(list).toHaveBeenCalledWith("/authoritative", undefined);
@@ -55,6 +60,7 @@ describe("Gateway workspace inspection dispatch", () => {
     expect(diff).toHaveBeenCalledWith("/authoritative", "a.txt", "staged");
     expect(historyList).toHaveBeenCalledWith("/authoritative", "phone", "allReferences", undefined, 20);
     expect(historyGet).toHaveBeenCalledWith("/authoritative", "a".repeat(40));
+    expect(historyDiff).toHaveBeenCalledWith("/authoritative", "a".repeat(40), "a.txt");
   });
 
   it("rejects reads without an established session subscription", async () => {

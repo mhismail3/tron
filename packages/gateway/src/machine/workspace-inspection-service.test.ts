@@ -157,5 +157,13 @@ describe("WorkspaceInspectionService", () => {
     const detail = await service.historyGet(root, first.commits[0]!.oid);
     expect(detail).toMatchObject({ subject: "two" });
     expect(detail.changes).toContainEqual(expect.objectContaining({ path: "two.txt", kind: "added" }));
+    await expect(service.historyDiff(root, detail.oid, "two.txt")).resolves.toMatchObject({
+      path: "two.txt",
+      binary: false,
+      truncated: false,
+      patch: expect.stringContaining("+two"),
+    });
+    await expect(service.historyDiff(root, detail.oid, "../outside.txt"))
+      .rejects.toMatchObject({ code: "invalid_request" });
   });
 });

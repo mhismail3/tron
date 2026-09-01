@@ -608,8 +608,10 @@ identity-revalidated snapshots registered in the existing 25 MiB bounded blob
 store. Git runs without a shell, pager, external diff, or text conversion, uses
 the configured Git executable and deterministic locale, and is killed on timeout
 or output overflow. Status uses porcelain-v2 NUL records and represents named,
-detached, and unborn heads explicitly. Per-file diffs are produced lazily and
-bounded before transport. History cursors are authenticated, client/root/scope
+detached, and unborn heads explicitly. Per-file working-tree diffs are produced lazily and bounded before transport.
+`workspace-history-diff.v1` adds the equally bounded `session.workspace.git.history.diff` read: it admits only a
+full commit already visible in the session workspace's history and a contained relative file path, then renders that
+commit's first-parent patch without external diff or text-conversion hooks. History cursors are authenticated, client/root/scope
 bound, expiring, and pinned to the selected tip/ref generation, so reset, rebase,
 or ref mutation forces a fresh traversal rather than mixing pages. Clients use
 visibility-scoped reconciliation reads for live presentation; filesystem state

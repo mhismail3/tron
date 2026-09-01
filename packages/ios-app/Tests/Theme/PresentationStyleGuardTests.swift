@@ -1514,6 +1514,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/WorkspaceInspectorSheet.swift"),
             encoding: .utf8
         )
+        let attachmentPreview = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/AttachmentFilePreviewSheet.swift"),
+            encoding: .utf8
+        )
         #expect(logs.contains("extension GatewayLogRecord"))
         #expect(logs.contains("Newest entries first"))
         #expect(settings.contains("await model.requestGatewayRestart(for: currentProfile)"))
@@ -1533,6 +1537,7 @@ struct PresentationStyleGuardTests {
         #expect(workspaceService.contains("session.workspace.inspect"))
         #expect(workspaceService.contains("session.workspace.git.diff"))
         #expect(workspaceService.contains("session.workspace.git.history.list"))
+        #expect(workspaceService.contains("session.workspace.git.history.diff"))
         #expect(workspaceSheet.contains("ToolDiffView(lines: presentation.lines"))
         #expect(workspaceSheet.contains("AttachmentFilePreviewSheet("))
         #expect(workspaceSheet.contains("Task.sleep(for: .seconds(4))"))
@@ -1540,6 +1545,21 @@ struct PresentationStyleGuardTests {
         #expect(workspaceSheet.contains("Color.clear.frame(height: 0).id(\"workspace-top\")"))
         #expect(workspaceSheet.contains("proxy.scrollTo(\"workspace-top\", anchor: .top)"))
         #expect(workspaceSheet.contains(".tronScrollEdgeChrome()"))
+        #expect(workspaceSheet.contains("@State private var detent: PresentationDetent = .medium"))
+        #expect(workspaceSheet.contains("foreground: .tronBlue"))
+        #expect(workspaceSheet.contains("WorkspaceHistoryGraphLayout.rows"))
+        #expect(workspaceSheet.contains("WorkspaceHistoryGraphPalette.color"))
+        #expect(workspaceSheet.contains("private let lineWidth: CGFloat = 2.2"))
+        #expect(!workspaceSheet.contains(".background(Color.tronBackground)"))
+        #expect(workspaceSheet.contains(".foregroundStyle(Color.tronBlue)"))
+        #expect(workspaceSheet.contains("icon: changeStatusIcon(change)"))
+        #expect(!workspaceSheet.contains("TronPulseLoadingIndicator"))
+        #expect(workspaceSheet.contains("truncationMode: .head"))
+        #expect(workspaceSheet.contains("WorkspaceCommitMessagePresentation.body"))
+        #expect(workspaceSheet.contains("model.workspaceInspection.commitDiff("))
+        #expect(attachmentPreview.contains(".presentationDetents([.large])"))
+        #expect(attachmentPreview.contains(".tronTopBlurSurface()"))
+        #expect(!attachmentPreview.contains(".presentationDetents([.medium, .large]"))
         #expect(context.contains("model.sessionContextPresentation(for: sessionID)"))
         #expect(context.contains("model.sessionContextRevision(for: sessionID)"))
         #expect(resources.contains("model.sessionResourceRevision(for: sessionID)"))

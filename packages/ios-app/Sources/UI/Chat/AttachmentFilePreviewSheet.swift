@@ -196,7 +196,6 @@ struct AttachmentFilePreviewSheet: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var detent: PresentationDetent = .large
     @State private var phase: Phase = .loading
 
     private enum Phase {
@@ -219,14 +218,14 @@ struct AttachmentFilePreviewSheet: View {
                         Button { dismiss() } label: {
                             Image(systemName: "checkmark")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronEmerald)
+                                .foregroundStyle(Color.tronBlue)
                         }
                         .accessibilityLabel("Done")
                     }
                 }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
         .tronPresentation()
         .task(id: source.loadID) { await load() }
@@ -259,6 +258,7 @@ struct AttachmentFilePreviewSheet: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .background(Color.black.opacity(0.86))
+            .tronScrollEdgeChrome()
         case .markdown(let document):
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: TronSpacing.lg) {
@@ -277,6 +277,7 @@ struct AttachmentFilePreviewSheet: View {
                     .padding(.top, preview.isTruncated ? TronSpacing.large : 0)
                 TronReadOnlyTextView(text: text)
             }
+            .tronTopBlurSurface()
         case .code(let text):
             VStack(spacing: 0) {
                 truncationNotice(if: preview.isTruncated)
@@ -284,8 +285,10 @@ struct AttachmentFilePreviewSheet: View {
                     .padding(.top, preview.isTruncated ? TronSpacing.large : 0)
                 TronReadOnlyTextView(text: text, style: .code)
             }
+            .tronTopBlurSurface()
         case .pdf(let preview):
             AttachmentPDFView(document: preview.document)
+                .tronTopBlurSurface()
         }
     }
 
@@ -364,8 +367,20 @@ private struct AttachmentPDFView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: PDFView, context: Context) {
-        guard view.document !== document else { return }
-        view.document = document
-        view.autoScales = true
+        if view.document !== document {
+            view.document = document
+            view.autoScales = true
+        }
+        softenScrollEdges(in: view)
+    }
+
+    private func softenScrollEdges(in view: UIView) {
+        if let scrollView = view as? UIScrollView {
+            scrollView.topEdgeEffect.style = .soft
+            scrollView.bottomEdgeEffect.style = .soft
+            scrollView.leftEdgeEffect.style = .soft
+            scrollView.rightEdgeEffect.style = .soft
+        }
+        view.subviews.forEach { softenScrollEdges(in: $0) }
     }
 }

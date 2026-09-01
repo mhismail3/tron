@@ -1310,7 +1310,19 @@ the onboarding selector's global folder listing can neither overwrite it nor bec
 workspace state. One tab-scoped scroll owner contains the workspace identity, tab switcher, and
 active collection, so the established top blur begins directly below navigation chrome and content
 scrolls continuously beneath it instead of splitting the toolbar from a lower blurred region; tab
-changes return that owner to its top boundary. While uncovered and foregrounded, the sheet and Manage Session reconcile at
+changes return that owner to its top boundary. The sheet opens progressively at medium height, uses the Session
+section's blue accent across controls and status evidence, keeps path context and overflow-scrollable repository
+chips on one adaptive row, and matches the workspace selector's compact file-navigation actions. File previews are
+large-only and every SwiftUI/UIKit document owner uses soft edges plus the same top blur. The root leaves the
+system sheet material visible, matching Session History instead of painting an opaque black navigation surface.
+Changes collapse state into one trailing chip per compact row. Background reconciliation and detail admission never
+insert transient progress glyphs into established headers or rows; fixed row geometry and status accessories remain
+stable until the destination sheet is ready. History uses a bounded, deterministic lane projection over each commit's
+parent OIDs, with uniform-weight lane-colored rails, matching hash/reference accents, larger row text, merge markers,
+and reference chips; `All References` therefore shows where branch tips fork and reconnect without treating the mobile
+projection as Git authority. Commit detail strips the subject duplicated by Git's full message, fills the available card
+width, and capability-gates per-file historical diffs through `workspace-history-diff.v1`; those patches are fetched only
+after selection and use the shared diff renderer. While uncovered and foregrounded, the sheet and Manage Session reconcile at
 a four-second bounded cadence, retain their last useful values through transient failure, and
 reject replaced profile/session/path generations. Polling stops under coverage, background,
 or dismissal. Git/file responses are point-in-time revisions; later workspace truth replaces

@@ -623,6 +623,36 @@ export class WorkspaceInspectionService {
     };
   }
 
+  async historyDiff(workspace: string, oid: string, requestedPath: string): Promise<{
+    path: string;
+    patch: string;
+    binary: boolean;
+    truncated: boolean;
+    revision: string;
+  }> {
+    if (!/^[0-9a-f]{40,64}$/.test(oid)) throw new GatewayError("invalid_request", "Commit ID is invalid");
+    const root = await canonicalRoot(workspace);
+    const repository = await statusInspection(root);
+    if (!repository) throw new GatewayError("invalid_request", "The session workspace is not a Git repository");
+    await this.assertVisibleCommit(repository.root, root, oid);
+    const relativePath = validateRelativePath(requestedPath, false).split(sep).join("/");
+    const absolute = resolve(root, relativePath);
+    if (!inside(root, absolute)) return invalidRelativePath();
+    const repositoryPath = relative(repository.root, absolute).split(sep).join("/");
+    const result = await runGit(repository.root, [
+      "diff-tree", "--root", "--no-commit-id", "-p", "-r", "-M", "--first-parent",
+      "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", oid, "--", repositoryPath,
+    ], { maximumBytes: DIFF_MAX_OUTPUT_BYTES, truncate: true });
+    const patch = result.stdout.toString("utf8");
+    return {
+      path: relativePath,
+      patch,
+      binary: patch.includes("Binary files ") || patch.includes("GIT binary patch"),
+      truncated: result.truncated,
+      revision: createHash("sha256").update(oid).update("\0").update(relativePath).update("\0").update(result.stdout).digest("base64url"),
+    };
+  }
+
   async historyGet(workspace: string, oid: string): Promise<{
     oid: string;
     shortOid: string;
@@ -641,12 +671,7 @@ export class WorkspaceInspectionService {
     const repository = await statusInspection(root);
     if (!repository) throw new GatewayError("invalid_request", "The session workspace is not a Git repository");
     const pathspec = relative(repository.root, root) || ".";
-    const visible = await runGit(repository.root, [
-      "log", "-1", "--format=%H", oid, "--", pathspec,
-    ], { maximumBytes: 8_192 });
-    if (visible.stdout.toString("utf8").trim() !== oid) {
-      throw new GatewayError("invalid_request", "Commit is not part of this session workspace's history");
-    }
+    await this.assertVisibleCommit(repository.root, root, oid);
     const metadata = await runGit(repository.root, [
       "show", "-s", "-z", "--format=%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%D%x1f%s%x1f%B", oid,
     ], { maximumBytes: 128 * 1_024 });
@@ -694,6 +719,16 @@ export class WorkspaceInspectionService {
       changes,
       revision: revisionFor(root, repository),
     };
+  }
+
+  private async assertVisibleCommit(repositoryRoot: string, workspaceRoot: string, oid: string): Promise<void> {
+    const pathspec = relative(repositoryRoot, workspaceRoot) || ".";
+    const visible = await runGit(repositoryRoot, [
+      "log", "-1", "--format=%H", oid, "--", pathspec,
+    ], { maximumBytes: 8_192 });
+    if (visible.stdout.toString("utf8").trim() !== oid) {
+      throw new GatewayError("invalid_request", "Commit is not part of this session workspace's history");
+    }
   }
 
   private async historyGeneration(root: string, scope: WorkspaceHistoryScope, head?: string): Promise<string> {

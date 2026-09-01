@@ -3,6 +3,8 @@ import Foundation
 typealias WorkspaceInspectionRequest = @Sendable (String, JSONValue) async throws -> JSONValue
 
 struct WorkspaceInspectionService: Sendable {
+    static let historyDiffCapability = "workspace-history-diff.v1"
+
     private let request: WorkspaceInspectionRequest
 
     init(client: GatewayClient) {
@@ -63,6 +65,13 @@ struct WorkspaceInspectionService: Sendable {
     func commit(sessionID: String, oid: String) async throws -> SessionWorkspaceCommitDetail {
         try await decode("session.workspace.git.history.get", params: sessionParams(sessionID, adding: [
             "oid": .string(oid),
+        ]))
+    }
+
+    func commitDiff(sessionID: String, oid: String, path: String) async throws -> SessionWorkspaceDiff {
+        try await decode("session.workspace.git.history.diff", params: sessionParams(sessionID, adding: [
+            "oid": .string(oid),
+            "path": .string(path),
         ]))
     }
 

@@ -562,6 +562,10 @@ struct TronReadOnlyTextView: UIViewRepresentable {
         view.isEditable = false
         view.isSelectable = true
         view.alwaysBounceVertical = true
+        view.topEdgeEffect.style = .soft
+        view.bottomEdgeEffect.style = .soft
+        view.leftEdgeEffect.style = .soft
+        view.rightEdgeEffect.style = .soft
         view.backgroundColor = .clear
         view.adjustsFontForContentSizeCategory = true
         view.textContainer.lineFragmentPadding = 0
@@ -683,10 +687,12 @@ struct TronSegmentedControl<Value: Hashable>: View {
     let options: [(label: String, value: Value)]
     @Binding var selection: Value
     var accent: Color = .tronEmerald
+    var foreground: Color? = nil
     var minimumHeight: CGFloat = 44
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     private var resolvedAccent: Color { settingsTheme?.accent ?? accent }
+    private var resolvedForeground: Color { settingsTheme?.accent ?? foreground ?? .tronAccentText }
 
     var body: some View {
         GlassEffectContainer(spacing: TronSpacing.xs) {
@@ -702,7 +708,7 @@ struct TronSegmentedControl<Value: Hashable>: View {
                                 size: TronTypography.sizeBody3,
                                 weight: selected ? .semibold : .medium
                             ))
-                            .foregroundStyle(Color.tronAccentText)
+                            .foregroundStyle(resolvedForeground)
                             .frame(maxWidth: .infinity, minHeight: minimumHeight)
                             .contentShape(RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous))
                     }
@@ -724,6 +730,7 @@ struct TronSheetTitle: View {
     let title: String
     var accent: Color = .tronEmerald
     var icon: String? = nil
+    var truncationMode: Text.TruncationMode = .tail
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     private var resolvedAccent: Color { settingsTheme?.accent ?? accent }
@@ -736,7 +743,7 @@ struct TronSheetTitle: View {
                     .foregroundStyle(resolvedAccent)
                     .accessibilityHidden(true)
             }
-            TronTitleLabel(title: title, accent: resolvedAccent)
+            TronTitleLabel(title: title, accent: resolvedAccent, truncationMode: truncationMode)
         }
     }
 }
@@ -975,6 +982,7 @@ struct TronReloadToolbarButton: View {
 private struct TronTitleLabel: UIViewRepresentable {
     let title: String
     let accent: Color
+    let truncationMode: Text.TruncationMode
 
     func makeUIView(context: Context) -> UILabel {
         let label = UILabel()
@@ -990,6 +998,12 @@ private struct TronTitleLabel: UIViewRepresentable {
         label.font = UIFontMetrics(forTextStyle: .headline).scaledFont(for: base)
         label.text = title
         label.textColor = UIColor(accent)
+        label.lineBreakMode = switch truncationMode {
+        case .head: .byTruncatingHead
+        case .middle: .byTruncatingMiddle
+        case .tail: .byTruncatingTail
+        @unknown default: .byTruncatingTail
+        }
         label.accessibilityLabel = title
     }
 
