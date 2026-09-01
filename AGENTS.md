@@ -27,6 +27,13 @@
    prepare and validate source or build artifacts and report the exact user
    action, but the user or maintainer must perform the action that transitions a
    running Gateway.
+9. **Do not OS-freeze Gateway-owned agent work.** `SIGSTOP` or equivalent
+   suspension does not update Pi's authoritative lifecycle, so Tron still
+   projects the run as active and a drain-aware Gateway restart remains blocked.
+   Use the owning session's soft interrupt or stop control. If that route is
+   unavailable, state the limitation; only settle the exact child after explicit
+   user authorization, preserve its isolated worktree, and verify both terminal
+   run state and release of the Gateway drain.
 
 ## Architecture invariants
 
