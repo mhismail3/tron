@@ -55,7 +55,10 @@ tool, attachment, selection, link, accessibility, Dynamic Type, animation, keybo
 behavior before the SwiftUI path can be deleted. `ChatUIKitPresentationAdapter` carries complete installed physical-row content and prepared-text
 facts into the isolated surface. The UIKit renderer maps the shared `MarkdownPresentation.Document`
 and `Inline` values to native TextKit, code, table, quote, list, rule, thinking-tail, and streaming
-views; its fallback label is not an authority model. Until that evidence exists, the UIKit controller must remain isolated and
+views; its fallback label is not an authority model. The implementation is split into
+`ChatUIKitTranscriptTypes`, `ChatUIKitViewportState`, `ChatUIKitMarkdownRenderer`,
+`ChatUIKitTranscriptCells`, and `ChatUIKitViewportController` so authority, rendering, cells, and
+viewport ownership remain discoverable. Until that evidence exists, the UIKit controller must remain isolated and
 no runtime switch may expose it to users.
 
 ## State flow
