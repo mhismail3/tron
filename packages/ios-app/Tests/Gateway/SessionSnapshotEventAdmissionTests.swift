@@ -25,6 +25,35 @@ struct SessionSnapshotEventAdmissionTests {
         #expect(admission(current: current, incoming: gap) == .resynchronize(current.sessionId))
     }
 
+    @Test("an exact-next snapshot cannot regress the aggregate authority revision")
+    func aggregateRevisionIsMonotonic() throws {
+        var current = try SessionScenarioBuilder(seed: 5_801)
+            .openingTail(targetEncodedBytes: 8_192)
+        current.revision = 8
+
+        var regressed = current
+        regressed.eventSequence += 1
+        regressed.revision = 7
+        #expect(admission(current: current, incoming: regressed) == .resynchronize(current.sessionId))
+        #expect(SessionRebaselineAdmission.evaluate(
+            current: current,
+            incoming: regressed
+        ) == .resynchronize)
+
+        var equal = current
+        equal.eventSequence += 1
+        #expect(admission(current: current, incoming: equal) == .install)
+
+        var invalid = current
+        invalid.runtimeGeneration = "replacement"
+        invalid.eventSequence += 1
+        invalid.revision = -1
+        #expect(SessionRebaselineAdmission.evaluate(
+            current: current,
+            incoming: invalid
+        ) == .resynchronize)
+    }
+
     @Test("an exact-next snapshot missing a known activity revision rebaselines")
     func missingLiveActivityRevisionRequiresAuthority() throws {
         let current = try SessionScenarioBuilder(seed: 54).openingTail(targetEncodedBytes: 8_192)

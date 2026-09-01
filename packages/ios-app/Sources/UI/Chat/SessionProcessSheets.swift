@@ -524,6 +524,11 @@ enum SessionProcessRowPresentation {
     }
 }
 
+private struct ReadOnlySubagentOpenIdentity: Hashable {
+    let presentationGeneration: Int?
+    let isConnected: Bool
+}
+
 struct ReadOnlySubagentSessionSheet: View {
     let parentSessionID: String
     let process: SessionProcessActivity
@@ -555,8 +560,9 @@ struct ReadOnlySubagentSessionSheet: View {
                 }
             }
         }
-        .task(id: model.presentationGeneration(for: parentSessionID)) {
-            guard let target = model.presentationTarget(for: parentSessionID) else { return }
+        .task(id: openIdentity) {
+            guard model.connectionState == .connected,
+                  let target = model.presentationTarget(for: parentSessionID) else { return }
             if store == nil { store = ReadOnlySubagentSessionStore(client: model.client) }
             store?.open(
                 parentSessionID: parentSessionID,
@@ -578,6 +584,13 @@ struct ReadOnlySubagentSessionSheet: View {
         .presentationDragIndicator(.hidden)
         .tronPresentation()
         .accessibilityIdentifier("read-only-subagent-session-sheet")
+    }
+
+    private var openIdentity: ReadOnlySubagentOpenIdentity {
+        ReadOnlySubagentOpenIdentity(
+            presentationGeneration: model.presentationGeneration(for: parentSessionID),
+            isConnected: model.connectionState == .connected
+        )
     }
 
     private var mountedActivity: SessionProcessActivity? {

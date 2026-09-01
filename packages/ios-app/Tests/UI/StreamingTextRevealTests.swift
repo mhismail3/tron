@@ -38,6 +38,17 @@ struct StreamingTextRevealTests {
         #expect(ChatStreamingTextRevealPolicy.shouldCatchUp(pendingTokenCount: 19))
     }
 
+    @Test("oversized streams bypass per-word animation")
+    func oversizedStreamsRenderAuthoritatively() {
+        #expect(ChatStreamingTextRevealPolicy.permitsAnimation(renderedUTF16Length: 0))
+        #expect(ChatStreamingTextRevealPolicy.permitsAnimation(
+            renderedUTF16Length: ChatStreamingTextRevealPolicy.maximumAnimatedUTF16Length
+        ))
+        #expect(!ChatStreamingTextRevealPolicy.permitsAnimation(
+            renderedUTF16Length: ChatStreamingTextRevealPolicy.maximumAnimatedUTF16Length + 1
+        ))
+    }
+
     @Test("thinking trace height grows naturally and caps at four measured lines")
     func thinkingTraceHeight() {
         #expect(ChatThinkingTraceLayoutPolicy.maximumLines == 4)

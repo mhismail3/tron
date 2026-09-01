@@ -7,8 +7,17 @@ enum ChatStreamingTextRevealPolicy {
     static let wordIntervalMilliseconds = 55
     static let fadeMilliseconds = 220
     static let maximumAnimatedBacklog = 18
+    /// Large streaming bodies render authoritatively without per-word
+    /// reconstruction. The transcript remains current while avoiding O(message)
+    /// allocation on every reveal tick.
+    static let maximumAnimatedUTF16Length = 16_384
+
     static func shouldCatchUp(pendingTokenCount: Int) -> Bool {
         pendingTokenCount > maximumAnimatedBacklog
+    }
+
+    static func permitsAnimation(renderedUTF16Length: Int) -> Bool {
+        renderedUTF16Length >= 0 && renderedUTF16Length <= maximumAnimatedUTF16Length
     }
 
     static func shouldAnimate(
@@ -94,7 +103,17 @@ struct ChatStreamingInlineText: View {
     }
 
     private var tokens: [ChatStreamingTextToken] {
-        Self.tokens(in: attributed, identity: identity)
+        let value = attributed
+        guard ChatStreamingTextRevealPolicy.permitsAnimation(
+            renderedUTF16Length: inline.source.utf16.count
+        ) else {
+            return [ChatStreamingTextToken(
+                id: "\(identity):authoritative",
+                value: value,
+                isWord: false
+            )]
+        }
+        return Self.tokens(in: value, identity: identity)
     }
 
     private var taskKey: TaskKey {

@@ -319,6 +319,7 @@ final class ReadOnlySubagentSessionStore {
                     guard let page = response.page,
                           response.revision == revision,
                           page.end == before,
+                          page.start < page.end,
                           page.total == self.transcriptTotal,
                           page.nextEntryId == expectedNext,
                           page.items.allSatisfy({ !existingIDs.contains($0.id) }) else {

@@ -135,7 +135,8 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
             && lhs.name == rhs.name
             && lhs.mimeType == rhs.mimeType
             && lhs.size == rhs.size
-            && lhs.previewData == rhs.previewData
+            // The digest is computed once when preview bytes are admitted.
+            // Routine composer equality must never rescan image data.
             && lhs.previewIdentity == rhs.previewIdentity
     }
 

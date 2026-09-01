@@ -89,15 +89,22 @@ struct SessionProcessPresentationGuardTests {
         #expect(child.contains("title: isActive ? \"Transcript starting\" : \"No transcript recorded\""))
         #expect(child.contains("case .waiting:"))
         #expect(child.contains("activity: mountedActivity ?? process"))
+        #expect(child.contains(".task(id: openIdentity)"))
+        #expect(child.contains("isConnected: model.connectionState == .connected"))
+        #expect(child.contains("guard model.connectionState == .connected"))
         #expect(child.contains(".onChange(of: mountedActivity)"))
-        #expect(child.contains("ForEach(store.presentation.timeline.items)"))
-        #expect(child.contains("ReadOnlySubagentTranscriptRow("))
-        #expect(child.contains("LazyVStack(alignment: .leading, spacing: 0)"))
-        #expect(child.contains(".padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)"))
-        #expect(child.contains(".frame(height: ChatTranscriptLayoutConstants.tailAffordanceHeight)"))
-        #expect(child.contains(".padding(.horizontal, 16)"))
-        #expect(child.contains(".padding(.top, 12)"))
-        #expect(!child.contains(".padding(18)"))
+        let transcript = try #require(
+            child.components(separatedBy: "private func transcript").dropFirst().first?
+                .components(separatedBy: "private struct ReadOnlySubagentTranscriptRow").first
+        )
+        #expect(transcript.contains("ForEach(store.presentation.timeline.items)"))
+        #expect(transcript.contains("ReadOnlySubagentTranscriptRow("))
+        #expect(transcript.contains("LazyVStack(alignment: .leading, spacing: 0)"))
+        #expect(transcript.contains(".padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)"))
+        #expect(transcript.contains(".frame(height: ChatTranscriptLayoutConstants.tailAffordanceHeight)"))
+        #expect(transcript.contains(".padding(.horizontal, 16)"))
+        #expect(transcript.contains(".padding(.top, 12)"))
+        #expect(!transcript.contains(".padding(18)"))
         #expect(!child.contains("private func liveActivity("))
         #expect(!child.contains("ScrollViewReader"))
         #expect(!child.contains(".onAppear"))
@@ -112,6 +119,7 @@ struct SessionProcessPresentationGuardTests {
         #expect(store.contains("self.status = .waiting"))
         #expect(store.contains("guard status == .waiting else { return }"))
         #expect(store.contains("private static let maximumBindingRetryAttempts = 2"))
+        #expect(store.contains("page.start < page.end"))
         #expect(store.contains("scheduleBindingRetry(activity: activity, delay: .milliseconds(200))"))
         let retryAdmission = try #require(
             store.components(separatedBy: "private func scheduleBindingRetry").dropFirst().first?

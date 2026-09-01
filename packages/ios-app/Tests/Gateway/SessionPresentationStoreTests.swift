@@ -547,6 +547,9 @@ struct SessionPresentationStoreTests {
         #expect(!request.canInstallPage(
             start: 12, end: 20, total: 28, itemCount: 8, visibleItemCount: 7
         ))
+        #expect(!request.canInstallPage(
+            start: 20, end: 20, total: 28, itemCount: 0, visibleItemCount: 8
+        ))
     }
 
     @Test("admission preserves allowed LF and CR while rejecting other controls")

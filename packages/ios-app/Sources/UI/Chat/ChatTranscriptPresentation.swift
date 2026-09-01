@@ -934,7 +934,7 @@ struct ChatTranscriptPageRequest: Equatable {
     ) -> Bool {
         end == before
             && start >= 0
-            && start <= end
+            && start < end
             && itemCount == end - start
             && itemCount <= Self.maximumItemCount
             && total == expectedTotal

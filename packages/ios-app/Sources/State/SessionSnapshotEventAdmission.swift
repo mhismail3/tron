@@ -41,10 +41,14 @@ enum SessionRebaselineAdmission: Equatable, Sendable {
         current: SessionSnapshot?,
         incoming: SessionSnapshot
     ) -> SessionRebaselineAdmission {
-        guard SessionSnapshotQueueAdmissionPolicy.admit(incoming) else { return .resynchronize }
+        guard incoming.revision >= 0,
+              SessionSnapshotQueueAdmissionPolicy.admit(incoming) else {
+            return .resynchronize
+        }
         guard let current, current.sessionId == incoming.sessionId else { return .install }
         guard current.runtimeGeneration == incoming.runtimeGeneration else { return .install }
         guard incoming.eventSequence > current.eventSequence else { return .ignore }
+        guard incoming.revision >= current.revision else { return .resynchronize }
         if let currentLiveRevision = current.liveActivityRevision {
             guard let incomingLiveRevision = incoming.liveActivityRevision,
                   incomingLiveRevision >= currentLiveRevision else { return .resynchronize }
@@ -69,7 +73,8 @@ enum SessionSnapshotEventAdmission: Equatable, Sendable {
         incoming: SessionSnapshot
     ) -> SessionSnapshotEventAdmission {
         guard hasLiveAuthority, let eventSessionID else { return .ignore }
-        guard SessionSnapshotQueueAdmissionPolicy.admit(incoming) else {
+        guard incoming.revision >= 0,
+              SessionSnapshotQueueAdmissionPolicy.admit(incoming) else {
             return .resynchronize(eventSessionID)
         }
         guard eventSessionID == incoming.sessionId else {
@@ -81,6 +86,9 @@ enum SessionSnapshotEventAdmission: Equatable, Sendable {
             return .resynchronize(eventSessionID)
         }
         if incoming.eventSequence <= current.eventSequence { return .ignore }
+        guard incoming.revision >= current.revision else {
+            return .resynchronize(eventSessionID)
+        }
         // Activity recency is a separate Gateway-owned projection. A delayed
         // snapshot must not resurrect an older current/recent frame even when
         // its session event sequence is otherwise admissible.
