@@ -289,6 +289,7 @@ private final class ChatUIKitHostedHarness {
     // lifecycle test detaches its root explicitly and verifies cleanup.
     private static var retainedWindows: [UIWindow] = []
     enum Resolution { case accepted, rejected, unacknowledged }
+    enum HarnessError: Error { case missingWindowScene }
 
     struct Command: Equatable {
         let identity: ChatUIKitComposerSendIdentity
@@ -356,7 +357,12 @@ private final class ChatUIKitHostedHarness {
         transcript = ChatUIKitChatViewController()
         composer = ChatUIKitComposerController()
         shell = ChatUIKitSessionSurfaceController(transcript: transcript, composer: composer)
-        window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        guard let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene }).first else {
+            throw HarnessError.missingWindowScene
+        }
+        window = UIWindow(windowScene: windowScene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
         nextUIVersion = version
         window.rootViewController = shell
         window.makeKeyAndVisible()
