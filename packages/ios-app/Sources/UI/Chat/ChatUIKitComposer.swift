@@ -32,6 +32,7 @@ struct ChatUIKitComposerInput {
     let resourcePickerAvailable: Bool
     let isEditable: Bool
     let keyboardAppearance: UIKeyboardAppearance
+    let focus: ChatUIKitComposerFocus
 
     init(
         sessionID: String? = nil,
@@ -70,7 +71,8 @@ struct ChatUIKitComposerInput {
         attachmentActionsEnabled: Bool = false,
         resourcePickerAvailable: Bool = false,
         isEditable: Bool = true,
-        keyboardAppearance: UIKeyboardAppearance = .default
+        keyboardAppearance: UIKeyboardAppearance = .default,
+        focus: ChatUIKitComposerFocus = .resigned
     ) {
         self.sessionID = sessionID
         self.text = text
@@ -99,7 +101,13 @@ struct ChatUIKitComposerInput {
         self.resourcePickerAvailable = resourcePickerAvailable
         self.isEditable = isEditable
         self.keyboardAppearance = keyboardAppearance
+        self.focus = focus
     }
+}
+
+enum ChatUIKitComposerFocus: Equatable, Sendable {
+    case focused
+    case resigned
 }
 
 /// Semantic composer output. A host translates these intents to the existing
@@ -159,6 +167,7 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     typealias IntentHandler = @MainActor (ChatUIKitComposerIntent) -> Void
 
     private(set) var input: ChatUIKitComposerInput?
+    private(set) var appliedRevision: Int?
     var onIntent: IntentHandler?
 
     private let rootStack = UIStackView()
@@ -179,9 +188,11 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     private let trailingButton = UIButton(type: .system)
     private let trailingSpinner = UIActivityIndicatorView(style: .medium)
     private var editorHeight: NSLayoutConstraint?
-    private var lastSentRevision: Int?
+    private var sendHandoffRevision: Int?
+    private var sendHandoffAccepted = false
+    private var sendHandoffTimeout: Task<Void, Never>?
+    private var applyingAuthoritativeInput = false
     private var keyboardObservers: [NSObjectProtocol] = []
-    private var currentRows: [ComposerResourceEntry] = []
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -195,21 +206,37 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
 
     /// Installs a new authoritative projection. This is the only input path;
     /// local UI events are emitted as intents and are never merged into it.
-    func apply(_ next: ChatUIKitComposerInput) {
-        if let prior = input, prior.revision != next.revision {
-            lastSentRevision = nil
+    @discardableResult
+    func apply(_ next: ChatUIKitComposerInput) -> Bool {
+        if let appliedRevision, next.revision <= appliedRevision {
+            return false
         }
-        if next.isSending == false && next.submissionPending == false,
-           input?.isSending == true || input?.submissionPending == true {
-            lastSentRevision = nil
+        if let prior = input, prior.revision != next.revision {
+            clearSendHandoff()
+        }
+        if sendHandoffRevision == next.revision,
+           next.isSending || next.submissionPending {
+            sendHandoffAccepted = true
+            sendHandoffTimeout?.cancel()
+            sendHandoffTimeout = nil
         }
         input = next
+        applyingAuthoritativeInput = true
         configureEditorFromInput(next)
+        switch next.focus {
+        case .focused:
+            if next.isEditable, !editor.isFirstResponder { editor.becomeFirstResponder() }
+        case .resigned:
+            if editor.isFirstResponder { editor.resignFirstResponder() }
+        }
+        applyingAuthoritativeInput = false
         configureAttachments(next)
         configureResource(next)
         configureButtonsFromInput(next)
         updateEditorHeight()
         updateAccessibilityOrder()
+        appliedRevision = next.revision
+        return true
     }
 
     override func viewDidLayoutSubviews() {
@@ -337,7 +364,6 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         )
         attachmentButton.accessibilityLabel = "Add attachment"
         attachmentButton.showsMenuAsPrimaryAction = true
-        attachmentButton.addTarget(self, action: #selector(attachmentMenuPressed), for: .primaryActionTriggered)
 
         contextButton.addTarget(self, action: #selector(contextPressed), for: .primaryActionTriggered)
         processButton.setImage(UIImage(systemName: "person.2"), for: .normal)
@@ -374,6 +400,31 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
                 }
             })
         }
+    }
+
+    deinit {
+        sendHandoffTimeout?.cancel()
+    }
+
+    /// The host must resolve the terminal admission explicitly. Rejected sends
+    /// release the same revision for retry; accepted sends remain suppressed
+    /// until a new authoritative revision arrives.
+    func resolveSend(revision: Int, accepted: Bool) {
+        guard sendHandoffRevision == revision else { return }
+        if accepted {
+            sendHandoffAccepted = true
+            sendHandoffTimeout?.cancel()
+            sendHandoffTimeout = nil
+        } else {
+            clearSendHandoff()
+        }
+    }
+
+    private func clearSendHandoff() {
+        sendHandoffRevision = nil
+        sendHandoffAccepted = false
+        sendHandoffTimeout?.cancel()
+        sendHandoffTimeout = nil
     }
 
     private func configureEditorFromInput(_ next: ChatUIKitComposerInput) {
@@ -456,12 +507,14 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
             trailingButton.setImage(nil, for: .normal)
             trailingSpinner.color = ChatUIKitComposerColors.emerald
             trailingSpinner.startAnimating()
-            trailingButton.addSubview(trailingSpinner)
-            trailingSpinner.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                trailingSpinner.centerXAnchor.constraint(equalTo: trailingButton.centerXAnchor),
-                trailingSpinner.centerYAnchor.constraint(equalTo: trailingButton.centerYAnchor)
-            ])
+            if trailingSpinner.superview == nil {
+                trailingButton.addSubview(trailingSpinner)
+                trailingSpinner.translatesAutoresizingMaskIntoConstraints = false
+                NSLayoutConstraint.activate([
+                    trailingSpinner.centerXAnchor.constraint(equalTo: trailingButton.centerXAnchor),
+                    trailingSpinner.centerYAnchor.constraint(equalTo: trailingButton.centerYAnchor)
+                ])
+            }
         } else {
             trailingSpinner.stopAnimating()
             trailingSpinner.removeFromSuperview()
@@ -536,11 +589,13 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
 
     func textViewDidBeginEditing(_ textView: UITextView) {
         placeholder.isHidden = true
+        guard !applyingAuthoritativeInput else { return }
         onIntent?(.focusChanged(true))
     }
 
     func textViewDidEndEditing(_ textView: UITextView) {
         placeholder.isHidden = !textView.text.isEmpty
+        guard !applyingAuthoritativeInput else { return }
         onIntent?(.focusChanged(false))
     }
 
@@ -555,7 +610,6 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         onIntent?(.textChanged(text: textView.text, selection: textView.selectedRange))
     }
 
-    @objc private func attachmentMenuPressed() {}
     @objc private func contextPressed() { onIntent?(.showContext) }
     @objc private func processesPressed() { onIntent?(.showProcesses) }
     @objc private func catchUpPressed() { onIntent?(.catchUp) }
@@ -576,8 +630,21 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         guard next.trailingMode == .send,
               (!text.isEmpty || !next.attachments.isEmpty),
               !next.isSending, !next.submissionPending, !next.hasActiveUploads,
-              next.isCommandReady, lastSentRevision != next.revision else { return }
-        lastSentRevision = next.revision
+              next.isCommandReady,
+              !(sendHandoffRevision == next.revision && sendHandoffAccepted) else { return }
+        // A pending handoff suppresses duplicate native actions until the host
+        // reports acceptance/rejection or the bounded terminal deadline opens
+        // a retry. It is deliberately not keyed only to revision forever.
+        guard sendHandoffRevision == nil else { return }
+        sendHandoffRevision = next.revision
+        sendHandoffAccepted = false
+        sendHandoffTimeout?.cancel()
+        sendHandoffTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(2_000))
+            guard let self, self.sendHandoffRevision == next.revision,
+                  !self.sendHandoffAccepted else { return }
+            self.clearSendHandoff()
+        }
         onIntent?(.send(behavior: behavior))
     }
 

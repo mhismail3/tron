@@ -75,8 +75,10 @@ private final class ChatUIKitStreamingInlineTextView: UITextView {
     private var timer: Timer?
     private var admittedInitialContent = false
     private var streaming = false
+    private var presentationActive = true
 
     func configure(inline: MarkdownPresentation.Inline, identity: String, streaming: Bool) {
+        timer?.invalidate(); timer = nil
         self.identity = identity
         self.source = inline.source
         self.streaming = streaming
@@ -108,15 +110,28 @@ private final class ChatUIKitStreamingInlineTextView: UITextView {
         schedule()
     }
 
+    func setPresentationActivity(_ active: Bool) {
+        presentationActive = active
+        if active { schedule() } else { timer?.invalidate(); timer = nil }
+    }
+
+    func reset() {
+        timer?.invalidate(); timer = nil
+        identity = ""; source = ""; baseAttributedText = nil; attributedText = nil
+        tokens.removeAll(); revealedIDs.removeAll(); revealStarts.removeAll()
+        admittedInitialContent = false; streaming = false; presentationActive = false
+    }
+
     private func schedule() {
         timer?.invalidate(); timer = nil
-        guard streaming, !UIAccessibility.isReduceMotionEnabled else { return }
+        guard presentationActive, streaming, !UIAccessibility.isReduceMotionEnabled else { return }
         let nextTimer = Timer(timeInterval: 0.033, target: self, selector: #selector(revealTick(_:)), userInfo: nil, repeats: true)
         timer = nextTimer
         RunLoop.main.add(nextTimer, forMode: .common)
     }
 
     @objc private func revealTick(_ timer: Timer) {
+        guard presentationActive else { return }
         let now = Date.now
         if let next = tokens.first(where: { $0.isWord && !revealedIDs.contains($0.id) && revealStarts[$0.id] == nil }) {
             let last = revealStarts.values.max() ?? now.addingTimeInterval(-Double(ChatStreamingTextRevealPolicy.wordIntervalMilliseconds) / 1_000)
@@ -173,6 +188,8 @@ final class ChatUIKitMarkdownView: UIView {
     private var activeInlineIDs: Set<String> = []
     private var codeButtons: [UIButton] = []
     private var thinkingButton: UIButton?
+    private var activityIndicators: [UIActivityIndicatorView] = []
+    private var presentationActivity = ChatUIKitPresentationActivity.active(generation: 0)
     var onCodeCopied: ((String) -> Void)?
     var onThinkingDetails: (() -> Void)?
     var onNotificationDetails: (() -> Void)?
@@ -196,11 +213,31 @@ final class ChatUIKitMarkdownView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
+        presentationActivity = activity
+        activityIndicators.forEach { indicator in
+            if activity.isActive { indicator.startAnimating() } else { indicator.stopAnimating() }
+        }
+        inlineViews.values.forEach { $0.setPresentationActivity(activity.isActive) }
+    }
+
+    func reset() {
+        inlineViews.values.forEach { $0.reset() }
+        inlineViews.removeAll()
+        activityIndicators.forEach { $0.stopAnimating() }
+        activityIndicators.removeAll()
+        codeButtons.removeAll()
+        thinkingButton = nil
+        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+    }
+
     func render(_ row: ChatUIKitTranscriptRow) {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         codeButtons.removeAll()
         thinkingButton = nil
         activeInlineIDs.removeAll()
+        activityIndicators.forEach { $0.stopAnimating() }
+        activityIndicators.removeAll()
         let documents = row.markdownDocuments
         if let toolRun = row.toolRun {
             stack.addArrangedSubview(toolRunView(toolRun))
@@ -228,6 +265,7 @@ final class ChatUIKitMarkdownView: UIView {
                 renderThinking(row.thinkingSegments, label: row.thinkingLabel)
             }
         }
+        setPresentationActivity(presentationActivity)
         if documents.isEmpty, row.thinkingSegments.isEmpty, row.text.isEmpty {
             let spacer = UIView()
             spacer.heightAnchor.constraint(equalToConstant: 1).isActive = true
@@ -237,6 +275,8 @@ final class ChatUIKitMarkdownView: UIView {
     }
 
     private func pruneInlineViews() {
+        let stale = inlineViews.filter { !activeInlineIDs.contains($0.key) }
+        stale.values.forEach { $0.reset() }
         inlineViews = inlineViews.filter { activeInlineIDs.contains($0.key) }
     }
 
@@ -251,7 +291,12 @@ final class ChatUIKitMarkdownView: UIView {
         let title = UILabel(); title.text = presentation.title; title.font = TronFontLoader.createUIFont(size: 12, weight: .semibold); title.textColor = .label
         let status = UILabel(); status.text = [presentation.status, presentation.elapsedMilliseconds().map { ToolTiming.format(milliseconds: $0) }].compactMap { $0 }.joined(separator: " · "); status.font = TronFontLoader.createUIFont(size: 11); status.textColor = presentation.failureCount > 0 ? .systemRed : .secondaryLabel
         stack.addArrangedSubview(title); stack.addArrangedSubview(status)
-        if presentation.isRunning { let indicator = UIActivityIndicatorView(style: .medium); indicator.startAnimating(); stack.addArrangedSubview(indicator) }
+        if presentation.isRunning {
+            let indicator = UIActivityIndicatorView(style: .medium)
+            activityIndicators.append(indicator)
+            stack.addArrangedSubview(indicator)
+            if presentationActivity.isActive { indicator.startAnimating() }
+        }
         for descriptor in presentation.reverseChronologicalTools {
             let line = UILabel(); line.text = "• \(descriptor.title): \(descriptor.subtitle)"; line.font = TronFontLoader.createUIFont(size: 11); line.textColor = .secondaryLabel; line.numberOfLines = 0; stack.addArrangedSubview(line)
         }
@@ -323,6 +368,7 @@ final class ChatUIKitMarkdownView: UIView {
         let view = inlineViews[identity] ?? ChatUIKitStreamingInlineTextView()
         inlineViews[identity] = view
         view.configure(inline: inline, identity: identity, streaming: streaming)
+        view.setPresentationActivity(presentationActivity.isActive)
         view.accessibilityLabel = inline.accessibilitySource
         return view
     }
@@ -380,7 +426,8 @@ final class ChatUIKitMarkdownView: UIView {
         if streaming {
             let indicator = UIActivityIndicatorView(style: .medium)
             indicator.color = UIColor(hex: "#059669")
-            indicator.startAnimating()
+            activityIndicators.append(indicator)
+            if presentationActivity.isActive { indicator.startAnimating() }
             header.addArrangedSubview(indicator)
         }
         let copy = UIButton(type: .system)

@@ -58,6 +58,21 @@ struct ChatUIKitComposerTests {
     }
 
     @Test
+    @MainActor
+    func authoritativeFocusControlIsApplied() {
+        let controller = ChatUIKitComposerController()
+        controller.loadViewIfNeeded()
+        controller.apply(ChatUIKitComposerInput(
+            isEditable: true,
+            focus: .focused
+        ))
+        #expect(controller.input?.focus == .focused)
+        controller.apply(ChatUIKitComposerInput(revision: 1, focus: .resigned))
+        #expect(controller.input?.focus == .resigned)
+        #expect(!controller.apply(ChatUIKitComposerInput(revision: 0, focus: .focused)))
+    }
+
+    @Test
     func semanticIntentHasDistinctTerminalActions() {
         let send = ChatUIKitComposerIntent.send(behavior: nil)
         let steer = ChatUIKitComposerIntent.send(behavior: "steer")

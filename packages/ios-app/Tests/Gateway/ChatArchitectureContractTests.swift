@@ -178,6 +178,26 @@ struct ChatArchitectureContractTests {
     }
 
     @MainActor
+    @Test("UIKit admission is monotonic and stale outcomes do not mutate state")
+    func uikitAdmissionIsMonotonic() throws {
+        let controller = ChatUIKitChatViewController()
+        controller.loadViewIfNeeded()
+        let row = ChatUIKitTranscriptRow(id: "one", text: "one")!
+        #expect(controller.apply(.init(version: 4, rows: [row])!) == .applied(1))
+        #expect(controller.apply(.init(version: 3, rows: [row])!) == .stale(3))
+        #expect(controller.apply(.init(version: 4, rows: [row])!) == .stale(4))
+        #expect(controller.viewportState.appliedVersion == 4)
+    }
+
+    @Test("UIKit history is a projection affordance with one semantic action")
+    func uikitHistoryProjection() {
+        #expect(ChatUIKitHistoryState.available.isAffordanceVisible)
+        #expect(ChatUIKitHistoryState.loading.isAffordanceVisible)
+        #expect(ChatUIKitHistoryState.failed("offline").isAffordanceVisible)
+        #expect(!ChatUIKitHistoryState.hidden.isAffordanceVisible)
+    }
+
+    @MainActor
     @Test("blank viewport recovery terminates when the semantic anchor cannot materialize")
     func blankRecoveryIsBounded() {
         let controller = ChatUIKitChatViewController()

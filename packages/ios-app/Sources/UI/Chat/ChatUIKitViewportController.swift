@@ -14,6 +14,9 @@ final class ChatUIKitChatViewController: UIViewController,
     private(set) var input: ChatUIKitPresentationInput?
     private(set) var viewportState = ChatUIKitViewportState()
     var onAttachmentTapped: ((String, Int) -> Void)?
+    /// The existing transcript/paging owner performs the request. UIKit emits
+    /// this one semantic action and never tracks a page or cursor.
+    var onLoadEarlier: (() -> Void)?
     var onToolTapped: ((String) -> Void)?
     var onThinkingDetails: ((String) -> Void)?
     var onNotificationDetails: ((String) -> Void)?
@@ -22,8 +25,10 @@ final class ChatUIKitChatViewController: UIViewController,
     var chatMediaLoader: ChatMediaLoader?
     var chatMediaIdentity: ((String) -> ChatMediaIdentity?)?
     var onTransactionOutcome: ((ChatUIKitViewportTransactionOutcome) -> Void)?
+    private var presentationActivity = ChatUIKitPresentationActivity.active(generation: 0)
 
     private var rows: [ChatUIKitTranscriptRow] { input?.rows ?? [] }
+    private var historyOffset: Int { input?.history.isAffordanceVisible == true ? 1 : 0 }
     private let collectionView: UICollectionView
 
     override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
@@ -46,6 +51,7 @@ final class ChatUIKitChatViewController: UIViewController,
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.register(ChatUIKitTranscriptCell.self, forCellWithReuseIdentifier: ChatUIKitTranscriptCell.reuseIdentifier)
+        collectionView.register(ChatUIKitHistoryCell.self, forCellWithReuseIdentifier: ChatUIKitHistoryCell.reuseIdentifier)
 
         view.addSubview(collectionView)
         NSLayoutConstraint.activate([
@@ -61,31 +67,43 @@ final class ChatUIKitChatViewController: UIViewController,
     /// all recovery paths.
     @discardableResult
     func apply(_ next: ChatUIKitPresentationInput) -> ChatUIKitViewportTransactionOutcome {
-        guard input?.version != next.version else {
-            let outcome: ChatUIKitViewportTransactionOutcome = .cancelled(viewportState.transactionID)
+        if let appliedVersion = viewportState.appliedVersion, next.version <= appliedVersion {
+            let outcome: ChatUIKitViewportTransactionOutcome = .stale(next.version)
             onTransactionOutcome?(outcome)
             return outcome
         }
-        viewportState.transactionID &+= 1
+        guard viewportState.transactionID < .max else {
+            let outcome: ChatUIKitViewportTransactionOutcome = .failed(
+                viewportState.transactionID,
+                "Viewport transaction sequence exhausted"
+            )
+            onTransactionOutcome?(outcome)
+            return outcome
+        }
+        viewportState.transactionID += 1
         let transactionID = viewportState.transactionID
+        // Capture the semantic row and its measured pixel offset before any
+        // mutation. Native contentOffset alone cannot account for prepend or
+        // row-height changes while a gesture is in flight.
         let anchor = captureAnchor()
-        let nativePosition = collectionView.contentOffset
         let intent = viewportState.intent
         let isInteracting = viewportState.interaction == .tracking
             || viewportState.interaction == .decelerating
         let previousRows = input?.rows ?? []
+        let previousHistory = input?.history ?? .hidden
         input = next
 
         UIView.performWithoutAnimation {
-            if previousRows.map(\.id) == next.rows.map(\.id) {
+            if previousRows.map(\.id) == next.rows.map(\.id), previousHistory == next.history {
                 // Existing cells are updated in place. This preserves mounted
                 // TextKit/link/code-copy state while the authority streams a
                 // new row presentation and avoids reloading unrelated cells.
                 for cell in collectionView.visibleCells {
                     guard let indexPath = collectionView.indexPath(for: cell),
-                          indexPath.item < next.rows.count,
+                          let rowIndex = rowIndex(for: indexPath),
+                          rowIndex < next.rows.count,
                           let transcriptCell = cell as? ChatUIKitTranscriptCell else { continue }
-                    transcriptCell.configure(next.rows[indexPath.item])
+                    transcriptCell.configure(next.rows[rowIndex])
                 }
             } else {
                 collectionView.reloadData()
@@ -100,12 +118,13 @@ final class ChatUIKitChatViewController: UIViewController,
         viewportState.appliedVersion = next.version
 
         if isInteracting {
-            // reloadData may invalidate estimated heights and move the native
-            // offset. Restore only that measured pre-update position; this is
-            // a safety correction, not a semantic navigation command. The
-            // anchor is retained for the next idle settlement as evidence.
-            preserveNativePosition(nativePosition)
-            if let anchor { viewportState.intent = .preserve(anchor) }
+            // Restore against post-layout attributes. If the captured row was
+            // removed, restore the nearest retained ordinal rather than
+            // jumping to an unconditional top offset.
+            if let anchor {
+                _ = restore(anchor)
+                viewportState.intent = .preserve(anchor)
+            }
         } else {
             switch intent {
             case .followTail:
@@ -114,7 +133,12 @@ final class ChatUIKitChatViewController: UIViewController,
                 restore(semantic)
             }
         }
-        let recovered = !isInteracting && !hasVisibleRows && !rows.isEmpty
+        let missingRequestedAnchor: Bool = switch intent {
+        case .followTail: false
+        case .preserve(let anchor): !rows.contains(where: { $0.id == anchor.rowID })
+        }
+        let recovered = !isInteracting && !rows.isEmpty
+            && (!hasVisibleRows || missingRequestedAnchor)
         if recovered { recoverBlankViewport() }
         clampOffset()
         let outcome: ChatUIKitViewportTransactionOutcome = recovered
@@ -122,6 +146,15 @@ final class ChatUIKitChatViewController: UIViewController,
             : .applied(transactionID)
         onTransactionOutcome?(outcome)
         return outcome
+    }
+
+    /// Presentation activity is explicit so covered/inactive generations stop
+    /// row-local work without creating another lifecycle owner.
+    func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
+        presentationActivity = activity
+        for cell in collectionView.visibleCells {
+            (cell as? ChatUIKitTranscriptCell)?.setPresentationActivity(activity)
+        }
     }
 
     func setIntent(_ intent: ChatUIKitViewportIntent) {
@@ -136,17 +169,28 @@ final class ChatUIKitChatViewController: UIViewController,
 
     func numberOfSections(in collectionView: UICollectionView) -> Int { 1 }
 
-    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int { rows.count }
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        rows.count + historyOffset
+    }
 
     func collectionView(
         _ collectionView: UICollectionView,
         cellForItemAt indexPath: IndexPath
     ) -> UICollectionViewCell {
+        if indexPath.item < historyOffset {
+            let cell = collectionView.dequeueReusableCell(
+                withReuseIdentifier: ChatUIKitHistoryCell.reuseIdentifier,
+                for: indexPath
+            ) as! ChatUIKitHistoryCell
+            cell.configure(input?.history ?? .hidden) { [weak self] in self?.onLoadEarlier?() }
+            return cell
+        }
         let cell = collectionView.dequeueReusableCell(
             withReuseIdentifier: ChatUIKitTranscriptCell.reuseIdentifier,
             for: indexPath
         ) as! ChatUIKitTranscriptCell
-        let row = rows[indexPath.item]
+        let rowIndex = indexPath.item - historyOffset
+        let row = rows[rowIndex]
         cell.onAttachmentTapped = { [weak self] index in
             self?.onAttachmentTapped?(row.id, index)
         }
@@ -155,6 +199,7 @@ final class ChatUIKitChatViewController: UIViewController,
         cell.onNotificationDetails = { [weak self] in self?.onNotificationDetails?(row.id) }
         cell.mediaLoader = chatMediaLoader
         cell.mediaIdentity = chatMediaIdentity
+        cell.setPresentationActivity(presentationActivity)
         cell.configure(row)
         return cell
     }
@@ -190,26 +235,32 @@ final class ChatUIKitChatViewController: UIViewController,
 
     private func captureAnchor() -> ChatUIKitSemanticAnchor? {
         let visible = collectionView.indexPathsForVisibleItems.sorted()
-        guard let path = visible.first,
-              path.item < rows.count,
+        guard let path = visible.first(where: { $0.item >= historyOffset }),
+              let rowIndex = rowIndex(for: path),
               let attributes = collectionView.layoutAttributesForItem(at: path) else { return nil }
         return ChatUIKitSemanticAnchor(
-            rowID: rows[path.item].id,
+            rowID: rows[rowIndex].id,
+            ordinal: rowIndex,
             topOffset: attributes.frame.minY - collectionView.contentOffset.y
         )
     }
 
     @discardableResult
     private func restore(_ anchor: ChatUIKitSemanticAnchor) -> Bool {
-        guard let index = rows.firstIndex(where: { $0.id == anchor.rowID }) else {
-            return false
-        }
-        let path = IndexPath(item: index, section: 0)
+        guard !rows.isEmpty else { return false }
+        let index = rows.firstIndex(where: { $0.id == anchor.rowID })
+            ?? min(max(anchor.ordinal, 0), rows.count - 1)
+        let path = IndexPath(item: index + historyOffset, section: 0)
         guard let attributes = collectionView.layoutAttributesForItem(at: path) else {
             return false
         }
         setOffset(y: attributes.frame.minY - anchor.topOffset)
         return true
+    }
+
+    private func rowIndex(for path: IndexPath) -> Int? {
+        let index = path.item - historyOffset
+        return rows.indices.contains(index) ? index : nil
     }
 
     private var minOffsetY: CGFloat { -collectionView.adjustedContentInset.top }

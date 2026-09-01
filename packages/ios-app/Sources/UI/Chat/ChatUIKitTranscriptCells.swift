@@ -5,6 +5,72 @@ import Foundation
 /// installed physical row remains the authority; this view only consumes its
 /// immutable payload and keeps media work leased to ChatMediaLoader.
 @MainActor
+final class ChatUIKitHistoryCell: UICollectionViewCell {
+    static let reuseIdentifier = "ChatUIKitHistoryCell"
+    private let button = UIButton(type: .system)
+    private let spinner = UIActivityIndicatorView(style: .medium)
+    private var action: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        button.translatesAutoresizingMaskIntoConstraints = false
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(button)
+        contentView.addSubview(spinner)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            button.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            button.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
+            button.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
+            button.heightAnchor.constraint(greaterThanOrEqualToConstant: 34),
+            spinner.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            spinner.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -24)
+        ])
+        button.addTarget(self, action: #selector(pressed), for: .primaryActionTriggered)
+        button.titleLabel?.font = ChatUIKitFont.sans(12, .semibold)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(_ state: ChatUIKitHistoryState, onLoad: @escaping () -> Void) {
+        action = onLoad
+        spinner.stopAnimating()
+        spinner.isHidden = true
+        button.setImage(nil, for: .normal)
+        switch state {
+        case .hidden: button.setTitle(nil, for: .normal); button.isHidden = true
+        case .available:
+            button.isHidden = false
+            button.setTitle("Load earlier messages", for: .normal)
+            button.isEnabled = true
+        case .loading:
+            button.isHidden = false
+            button.setTitle("Loading earlier messages…", for: .normal)
+            button.isEnabled = false
+            spinner.isHidden = false
+            spinner.startAnimating()
+        case .failed(let message):
+            button.isHidden = false
+            button.setTitle(message.isEmpty ? "Retry earlier messages" : "Retry: \(message)", for: .normal)
+            button.isEnabled = true
+        }
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        action = nil
+        spinner.stopAnimating()
+        spinner.isHidden = true
+        button.setTitle(nil, for: .normal)
+        button.isHidden = false
+    }
+
+    @objc private func pressed() { action?() }
+}
+
+@MainActor
 final class ChatUIKitTranscriptCell: UICollectionViewCell {
     static let reuseIdentifier = "ChatUIKitTranscriptCell"
 
@@ -15,6 +81,7 @@ final class ChatUIKitTranscriptCell: UICollectionViewCell {
     var onNotificationDetails: (() -> Void)?
     var mediaLoader: ChatMediaLoader?
     var mediaIdentity: ((String) -> ChatMediaIdentity?)?
+    private var presentationActivity = ChatUIKitPresentationActivity.active(generation: 0)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -38,13 +105,21 @@ final class ChatUIKitTranscriptCell: UICollectionViewCell {
         rowView.onToolTapped = onToolTapped
         rowView.onThinkingDetails = onThinkingDetails
         rowView.onNotificationDetails = onNotificationDetails
+        rowView.setPresentationActivity(presentationActivity)
         rowView.configure(row, mediaLoader: mediaLoader, mediaIdentity: mediaIdentity)
         accessibilityIdentifier = "chat-row-\(row.id)"
+    }
+
+    func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
+        presentationActivity = activity
+        rowView.setPresentationActivity(activity)
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
         rowView.reset()
+        mediaLoader = nil
+        mediaIdentity = nil
     }
 }
 
@@ -58,6 +133,7 @@ private final class ChatUIKitTranscriptRowView: UIView {
     var onToolTapped: (() -> Void)?
     var onThinkingDetails: (() -> Void)?
     var onNotificationDetails: (() -> Void)?
+    private var presentationActivity = ChatUIKitPresentationActivity.active(generation: 0)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -80,8 +156,31 @@ private final class ChatUIKitTranscriptRowView: UIView {
     func reset() {
         mediaChips.forEach { $0.cancelLoad() }
         mediaChips.removeAll()
+        stack.arrangedSubviews.compactMap { $0 as? ChatUIKitToolPill }.forEach {
+            $0.setPresentationActivity(.inactive(generation: 0))
+        }
+        stack.arrangedSubviews.compactMap { $0 as? ChatUIKitNotificationPill }.forEach {
+            $0.setPresentationActivity(.inactive(generation: 0))
+        }
+        markdownView.reset()
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        onAttachmentTapped = nil
+        onToolTapped = nil
+        onThinkingDetails = nil
+        onNotificationDetails = nil
         currentID = ""
+    }
+
+    func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
+        presentationActivity = activity
+        markdownView.setPresentationActivity(activity)
+        mediaChips.forEach { $0.setPresentationActivity(activity) }
+        stack.arrangedSubviews.compactMap { $0 as? ChatUIKitToolPill }.forEach {
+            $0.setPresentationActivity(activity)
+        }
+        stack.arrangedSubviews.compactMap { $0 as? ChatUIKitNotificationPill }.forEach {
+            $0.setPresentationActivity(activity)
+        }
     }
 
     func configure(
@@ -137,6 +236,7 @@ private final class ChatUIKitTranscriptRowView: UIView {
         case .none:
             renderFallback(row)
         }
+        setPresentationActivity(presentationActivity)
         updateAccessibility(row)
     }
 
@@ -156,6 +256,31 @@ private final class ChatUIKitTranscriptRowView: UIView {
             pill.onActivate = notification.hasDetailSheet ? onNotificationDetails : nil
             stack.addArrangedSubview(pill)
         case .transcript(let value):
+            if value.kind == .customMessage {
+                let tone = InboundProducerPresentationPolicy.tone(for: value.semantic?.origin.kind)
+                let duration = InboundContextCompactPresentationPolicy.durationMilliseconds(details: value.details)
+                let detail = [
+                    InboundContextCompactPresentationPolicy.status(details: value.details),
+                    duration.map { ToolTiming.format(milliseconds: $0) }
+                ].compactMap { $0 }.joined(separator: " · ")
+                let pill = ChatUIKitNotificationPill(
+                    presentation: ChatNotificationPresentation(
+                        id: "inbound-context-\(value.id)",
+                        semanticID: value.id,
+                        icon: "arrow.down.message.fill",
+                        title: InboundProducerPresentationPolicy.compactTitle(for: value.semantic?.origin),
+                        detail: detail,
+                        body: nil,
+                        tone: tone,
+                        material: .glass
+                    )
+                )
+                // customMessage is always an actionable inbound-context row,
+                // including when its wire role is not user.
+                pill.onActivate = onNotificationDetails
+                stack.addArrangedSubview(pill)
+                return
+            }
             if value.kind == .customEntry, value.semantic?.kind == .command {
                 let resource = value.semantic?.resourceInvocation
                 let name = resource?.name ?? "Extension command"
@@ -210,7 +335,8 @@ private final class ChatUIKitTranscriptRowView: UIView {
         mediaIdentity: ((String) -> ChatMediaIdentity?)?
     ) {
         let item = message.item
-        stack.alignment = item.role == .user ? .trailing : .fill
+        let isTrailing = item.role == .user || item.semantic?.direction == .inboundContext
+        stack.alignment = isTrailing ? .trailing : .fill
         if item.role == .toolResult {
             let output = item.text.isEmpty ? (item.details.map { String(describing: $0) } ?? "") : item.text
             let card = ChatUIKitToolDetailCard(
@@ -416,6 +542,7 @@ private final class ChatUIKitToolPill: UIControl {
     private let activity = UIActivityIndicatorView(style: .medium)
     private var run: ChatToolRunPresentation?
     private var elapsedTimer: Timer?
+    private var presentationActive = true
 
     init(run: ChatToolRunPresentation) {
         self.run = run
@@ -444,7 +571,7 @@ private final class ChatUIKitToolPill: UIControl {
         detail.text = run.status; detail.font = ChatUIKitFont.mono(10, .semibold); detail.textColor = tone; detail.numberOfLines = 1
         elapsed.text = run.elapsedMilliseconds().map(ToolTiming.format(milliseconds:)); elapsed.font = ChatUIKitFont.mono(10, .semibold); elapsed.textColor = tone
         activity.isHidden = !run.isRunning; activity.color = tone
-        if run.isRunning { activity.startAnimating() }
+        if run.isRunning, presentationActive { activity.startAnimating() }
         if run.isRunning {
             row.addArrangedSubview(activity)
         } else {
@@ -452,11 +579,9 @@ private final class ChatUIKitToolPill: UIControl {
         }
         row.addArrangedSubview(title); row.addArrangedSubview(detail); row.addArrangedSubview(elapsed)
         addTarget(self, action: #selector(activate), for: .primaryActionTriggered)
-        if run.isRunning {
-            elapsedTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-                guard let self, let run = self.run else { return }
-                self.elapsed.text = run.elapsedMilliseconds().map(ToolTiming.format(milliseconds:))
-            }
+        if run.isRunning, presentationActive {
+            elapsedTimer = Timer(timeInterval: 0.1, target: self, selector: #selector(elapsedTick(_:)), userInfo: nil, repeats: true)
+            if let elapsedTimer { RunLoop.main.add(elapsedTimer, forMode: .common) }
         }
         isAccessibilityElement = true
         accessibilityTraits = .button
@@ -466,16 +591,37 @@ private final class ChatUIKitToolPill: UIControl {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
+        presentationActive = activity.isActive
+        if presentationActive, run?.isRunning == true {
+            self.activity.startAnimating()
+            if elapsedTimer == nil {
+                elapsedTimer = Timer(timeInterval: 0.1, target: self, selector: #selector(elapsedTick(_:)), userInfo: nil, repeats: true)
+                if let elapsedTimer { RunLoop.main.add(elapsedTimer, forMode: .common) }
+            }
+        } else {
+            self.activity.stopAnimating()
+            elapsedTimer?.invalidate(); elapsedTimer = nil
+        }
+    }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window == nil { elapsedTimer?.invalidate(); elapsedTimer = nil }
+        if window == nil { setPresentationActivity(.inactive(generation: 0)) }
     }
+    @objc private func elapsedTick(_ timer: Timer) {
+        guard let run else { return }
+        elapsed.text = run.elapsedMilliseconds().map(ToolTiming.format(milliseconds:))
+    }
+
     @objc private func activate() { onActivate?() }
 }
 
 @MainActor
 private final class ChatUIKitNotificationPill: UIControl {
     var onActivate: (() -> Void)?
+    private var activityIndicator: UIActivityIndicatorView?
+    private var presentationActive = true
     init(presentation: ChatNotificationPresentation) {
         super.init(frame: .zero)
         let accent = UIColor.tronNotificationColor(presentation.tone)
@@ -494,13 +640,27 @@ private final class ChatUIKitNotificationPill: UIControl {
         let title = UILabel(); title.text = presentation.title; title.font = ChatUIKitFont.sans(12, .bold); title.textColor = accent; title.numberOfLines = 1
         let detail = UILabel(); detail.text = presentation.detail; detail.font = ChatUIKitFont.mono(10, .semibold); detail.textColor = UIColor.tronTextSecondary; detail.numberOfLines = 1
         row.addArrangedSubview(image); row.addArrangedSubview(title); row.addArrangedSubview(detail)
-        if presentation.showsProgress { let spinner = UIActivityIndicatorView(style: .medium); spinner.color = accent; spinner.startAnimating(); row.addArrangedSubview(spinner) }
+        if presentation.showsProgress {
+            let spinner = UIActivityIndicatorView(style: .medium)
+            spinner.color = accent
+            activityIndicator = spinner
+            if presentationActive { spinner.startAnimating() }
+            row.addArrangedSubview(spinner)
+        }
         addTarget(self, action: #selector(activate), for: .primaryActionTriggered)
         isAccessibilityElement = true; accessibilityTraits = presentation.hasDetailSheet ? .button : .staticText
         accessibilityLabel = [presentation.title, presentation.detail].compactMap { $0 }.joined(separator: ", ")
         accessibilityHint = presentation.hasDetailSheet ? "Opens details" : nil
     }
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
+        presentationActive = activity.isActive
+        if presentationActive { activityIndicator?.startAnimating() } else { activityIndicator?.stopAnimating() }
+    }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { setPresentationActivity(.inactive(generation: 0)) }
+    }
     @objc private func activate() { onActivate?() }
 }
 
@@ -624,6 +784,7 @@ private final class ChatUIKitMediaChip: UIControl {
     private var identity: ChatMediaIdentity?
     private var loadGeneration: UInt64 = 0
     private var failed = false
+    private var presentationActive = true
     private let normalAccessibilityLabel: String
 
     init(attachment: ChatUIKitTranscriptAttachment) {
@@ -652,7 +813,7 @@ private final class ChatUIKitMediaChip: UIControl {
         let generation = loadGeneration
         // A prepared thumbnail is already the authoritative bounded image and
         // must not be replaced by an asynchronous fetch.
-        guard attachment.preparedThumbnail == nil, let loader, let identity else { return }
+        guard presentationActive, attachment.preparedThumbnail == nil, let loader, let identity else { return }
         if let cached = loader.cachedThumbnail(for: identity) {
             imageView.image = cached
             failed = false
@@ -675,10 +836,24 @@ private final class ChatUIKitMediaChip: UIControl {
             }
         }
     }
+    func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
+        presentationActive = activity.isActive
+        if presentationActive {
+            load(using: loader, identity: identity)
+        } else {
+            cancelLoad()
+        }
+    }
+
     func cancelLoad() {
         loadGeneration &+= 1
         loadTask?.cancel()
         loadTask = nil
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil { setPresentationActivity(.inactive(generation: 0)) }
     }
     private func showPlaceholder() { imageView.image = UIImage(systemName: attachment.mimeType.hasPrefix("image/") ? "photo" : "doc.text"); imageView.tintColor = UIColor.tronBlue; imageView.backgroundColor = UIColor.tronBlue.withAlphaComponent(0.10) }
     private func showFailure() { imageView.image = UIImage(systemName: "arrow.clockwise"); imageView.tintColor = UIColor.tronBlue; accessibilityLabel = "\(accessibilityLabel ?? "Attachment") unavailable, retry" }

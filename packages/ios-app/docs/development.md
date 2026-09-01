@@ -461,7 +461,14 @@ ID. The UIKit transcript parity renderer consumes the same installed physical-ro
 message parts retain Markdown blocks and thinking tails, lifecycle/tool/notification rows retain their
 compact state and detail callbacks, and attachment chips use the existing loader's cache and single-flight
 authority. UIKit cells retain row-local Markdown/media children for payload updates and never own transcript
-ordering, canonical data, or viewport offsets. Tests own exact 192-pixel oriented downsampling, duplicate single-flight behavior, one shared
+ordering, canonical data, or viewport offsets. UIKit admission rejects stale versions monotonically and
+reports stale/cancelled/failure distinctly; its installed source-window fact exposes one earlier-message
+affordance and one load-earlier action without a paging owner. Gesture updates restore measured semantic
+row anchors and pixel offsets, including nearest-ordinal fallback after removal. An explicit activity
+lease pauses streaming/tool/media tasks and indicators when covered, inactive, offscreen, or replaced;
+reuse resets every Markdown/stream/media/tool child. Custom messages use the existing inbound producer
+policy and trailing action semantics. Composer focus is authoritative and its bounded send handoff
+releases rejected revisions for retry while suppressing duplicate accepted sends. Tests own exact 192-pixel oriented downsampling, duplicate single-flight behavior, one shared
 preparation slot, the 32-flight ceiling, 64-item and 4 MiB decoded LRU eviction, transport-level 25 MiB
 response admission, stale-identity and late-publication rejection, uncached one-at-a-time full previews,
 and app-lifetime memory-pressure cleanup. Images and files share that single exact preview lease/priority slot;

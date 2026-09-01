@@ -54,25 +54,59 @@ struct ChatUIKitTranscriptRow: Hashable {
         case user, assistant, streaming, thinking, tool, attachment, status
     }
 
+    /// One canonical payload prevents a stale fallback label or one of several
+    /// parallel fields from becoming an accidental rendering authority.
+    struct PresentationFacts: Hashable {
+        let text: String
+        let kind: Kind
+        let preparedText: ChatTextPreparationSnapshot?
+        let markdownDocuments: [MarkdownPresentation.Document]
+        let thinkingSegments: [ChatThinkingSegment]
+        let thinkingLabel: String?
+        let streaming: Bool
+        let toolRun: ChatToolRunPresentation?
+        let notification: ChatNotificationPresentation?
+        let links: [ChatUIKitLink]
+        let attachmentNames: [String]
+        let attachmentFacts: [ChatUIKitTranscriptAttachment]
+        let resourceInvocation: ComposerResourceInvocation?
+        let toolLabel: String?
+    }
+
+    enum Payload: Hashable {
+        case installed(content: ChatPhysicalTranscriptRow.Content, facts: PresentationFacts)
+        /// Synthetic payloads are explicit test/standalone rows, never a
+        /// fallback for an installed physical row.
+        case synthetic(PresentationFacts)
+    }
+
     let id: String
     let semanticID: String
-    /// The complete installed physical-row payload. `text` is only a derived
-    /// accessibility/fallback label and is never the presentation authority.
-    let content: ChatPhysicalTranscriptRow.Content?
-    let preparedText: ChatTextPreparationSnapshot?
-    let markdownDocuments: [MarkdownPresentation.Document]
-    let thinkingSegments: [ChatThinkingSegment]
-    let thinkingLabel: String?
-    let streaming: Bool
-    let toolRun: ChatToolRunPresentation?
-    let notification: ChatNotificationPresentation?
-    let text: String
-    let kind: Kind
-    let links: [ChatUIKitLink]
-    let attachments: [String]
-    let attachmentFacts: [ChatUIKitTranscriptAttachment]
-    let resourceInvocation: ComposerResourceInvocation?
-    let toolLabel: String?
+    let payload: Payload
+
+    var content: ChatPhysicalTranscriptRow.Content? {
+        if case .installed(let content, _) = payload { return content }
+        return nil
+    }
+    private var facts: PresentationFacts {
+        switch payload {
+        case .installed(_, let facts), .synthetic(let facts): return facts
+        }
+    }
+    var preparedText: ChatTextPreparationSnapshot? { facts.preparedText }
+    var markdownDocuments: [MarkdownPresentation.Document] { facts.markdownDocuments }
+    var thinkingSegments: [ChatThinkingSegment] { facts.thinkingSegments }
+    var thinkingLabel: String? { facts.thinkingLabel }
+    var streaming: Bool { facts.streaming }
+    var toolRun: ChatToolRunPresentation? { facts.toolRun }
+    var notification: ChatNotificationPresentation? { facts.notification }
+    var text: String { facts.text }
+    var kind: Kind { facts.kind }
+    var links: [ChatUIKitLink] { facts.links }
+    var attachmentFacts: [ChatUIKitTranscriptAttachment] { facts.attachmentFacts }
+    var attachments: [String] { facts.attachmentNames }
+    var resourceInvocation: ComposerResourceInvocation? { facts.resourceInvocation }
+    var toolLabel: String? { facts.toolLabel }
 
     init?(
         id: String,
@@ -98,32 +132,46 @@ struct ChatUIKitTranscriptRow: Hashable {
         else { return nil }
         self.id = id
         self.semanticID = semanticID ?? id
-        self.content = content
-        self.preparedText = preparedText
-        self.markdownDocuments = markdownDocuments
-        self.thinkingSegments = thinkingSegments
-        self.thinkingLabel = thinkingLabel
-        self.streaming = streaming
-        self.toolRun = toolRun
-        self.notification = notification
-        self.text = text
-        self.kind = kind
-        self.links = links
-        self.attachments = attachments.isEmpty ? attachmentFacts.map(\.name) : attachments
-        self.attachmentFacts = attachmentFacts
-        self.resourceInvocation = resourceInvocation
-        self.toolLabel = toolLabel
+        let facts = PresentationFacts(
+            text: text, kind: kind, preparedText: preparedText,
+            markdownDocuments: markdownDocuments, thinkingSegments: thinkingSegments,
+            thinkingLabel: thinkingLabel, streaming: streaming, toolRun: toolRun,
+            notification: notification, links: links,
+            attachmentNames: attachments.isEmpty ? attachmentFacts.map(\.name) : attachments,
+            attachmentFacts: attachmentFacts,
+            resourceInvocation: resourceInvocation, toolLabel: toolLabel
+        )
+        self.payload = if let content { .installed(content: content, facts: facts) } else { .synthetic(facts) }
+    }
+}
+
+enum ChatUIKitHistoryState: Equatable, Sendable {
+    case hidden
+    case available
+    case loading
+    case failed(String)
+
+    var isAffordanceVisible: Bool {
+        self != .hidden
     }
 }
 
 struct ChatUIKitPresentationInput: Equatable {
     let version: UInt64
     let rows: [ChatUIKitTranscriptRow]
+    /// A projection of the installed source window. Loading and failure are
+    /// supplied by the existing paging owner; UIKit only exposes the action.
+    let history: ChatUIKitHistoryState
 
-    init?(version: UInt64, rows: [ChatUIKitTranscriptRow]) {
+    init?(
+        version: UInt64,
+        rows: [ChatUIKitTranscriptRow],
+        history: ChatUIKitHistoryState = .hidden
+    ) {
         guard Set(rows.map(\.id)).count == rows.count else { return nil }
         self.version = version
         self.rows = rows
+        self.history = history
     }
 }
 
@@ -137,7 +185,8 @@ enum ChatUIKitPresentationAdapter {
     static func input(
         from installed: InstalledChatTranscript,
         canonicalAliases: [String: String] = [:],
-        version: UInt64
+        version: UInt64,
+        historyState: ChatUIKitHistoryState? = nil
     ) -> ChatUIKitPresentationInput? {
         let physical = ChatPhysicalTranscriptRowPolicy.rows(
             installed: installed,
@@ -165,7 +214,10 @@ enum ChatUIKitPresentationAdapter {
                 toolLabel: toolLabel(for: row.content)
             )
         }
-        return ChatUIKitPresentationInput(version: version, rows: rows)
+        let history = historyState ?? ((installed.sourceWindow.originalStart ?? 0) > 0
+            ? .available
+            : .hidden)
+        return ChatUIKitPresentationInput(version: version, rows: rows, history: history)
     }
 
     private static func transcriptItem(
