@@ -470,7 +470,7 @@ private final class ChatUIKitMarkdownView: UIView {
         activeInlineIDs.removeAll()
         let documents = row.markdownDocuments
         if documents.isEmpty, row.thinkingSegments.isEmpty, !row.text.isEmpty {
-            let view = inlineView(MarkdownPresentation.Inline(source: row.text), identity: "fallback", streaming: row.streaming)
+            let view = inlineView(MarkdownPresentation.Inline(source: row.text), identity: "row:\(row.id):fallback", streaming: row.streaming)
             let value = NSMutableAttributedString(attributedString: view.attributedText ?? NSAttributedString(string: row.text))
             for link in row.links where NSMaxRange(link.range) <= value.length {
                 value.addAttribute(.link, value: link.url, range: link.range)
@@ -479,7 +479,7 @@ private final class ChatUIKitMarkdownView: UIView {
             stack.addArrangedSubview(view)
         } else {
             for (documentIndex, document) in documents.enumerated() {
-                render(document: document, identityPrefix: "document:\(documentIndex)", streaming: row.streaming)
+                render(document: document, identityPrefix: "row:\(row.id):document:\(documentIndex)", streaming: row.streaming)
             }
             if !row.thinkingSegments.isEmpty {
                 renderThinking(row.thinkingSegments, label: row.thinkingLabel)
