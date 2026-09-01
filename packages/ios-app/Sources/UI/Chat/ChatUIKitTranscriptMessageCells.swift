@@ -31,13 +31,18 @@ final class ChatUIKitTranscriptCell: UICollectionViewCell {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configure(_ row: ChatUIKitTranscriptRow) {
+    func configure(_ row: ChatUIKitTranscriptRow, forceRefresh: Bool = false) {
         rowView.onAttachmentTapped = onAttachmentTapped
         rowView.onToolTapped = onToolTapped
         rowView.onThinkingDetails = onThinkingDetails
         rowView.onNotificationDetails = onNotificationDetails
         rowView.setPresentationActivity(presentationActivity)
-        rowView.configure(row, mediaLoader: mediaLoader, mediaIdentity: mediaIdentity)
+        rowView.configure(
+            row,
+            mediaLoader: mediaLoader,
+            mediaIdentity: mediaIdentity,
+            forceRefresh: forceRefresh
+        )
         accessibilityIdentifier = "chat-row-\(row.id)"
     }
 
@@ -63,11 +68,23 @@ final class ChatUIKitTranscriptRowView: UIView {
     private var activeAttachmentIDs: Set<String> = []
     private var lastConfiguredRow: ChatUIKitTranscriptRow?
     private weak var lastMediaLoader: ChatMediaLoader?
+    private var lastMediaIdentity: ((String) -> ChatMediaIdentity?)?
+    private var configuredActivityGeneration: UInt64?
     var onAttachmentTapped: ((Int) -> Void)?
     var onToolTapped: (() -> Void)?
     var onThinkingDetails: (() -> Void)?
     var onNotificationDetails: (() -> Void)?
     private var presentationActivity = ChatUIKitPresentationActivity.active(generation: 0)
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory
+            || previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle else { return }
+        if let row = lastConfiguredRow {
+            lastConfiguredRow = nil
+            configure(row, mediaLoader: lastMediaLoader, mediaIdentity: lastMediaIdentity, forceRefresh: true)
+        }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -100,6 +117,8 @@ final class ChatUIKitTranscriptRowView: UIView {
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         lastConfiguredRow = nil
         lastMediaLoader = nil
+        lastMediaIdentity = nil
+        configuredActivityGeneration = nil
         onAttachmentTapped = nil
         onToolTapped = nil
         onThinkingDetails = nil
@@ -108,7 +127,11 @@ final class ChatUIKitTranscriptRowView: UIView {
     }
 
     func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
+        let generationChanged = configuredActivityGeneration != nil
+            && configuredActivityGeneration != activity.generation
+        configuredActivityGeneration = activity.generation
         presentationActivity = activity
+        if generationChanged { mediaChips.forEach { $0.cancelLoad() } }
         markdownView.setPresentationActivity(activity)
         mediaChips.forEach { $0.setPresentationActivity(activity) }
         stack.arrangedSubviews.compactMap { $0 as? ChatUIKitToolPill }.forEach {
@@ -123,11 +146,15 @@ final class ChatUIKitTranscriptRowView: UIView {
         _ row: ChatUIKitTranscriptRow,
         mediaLoader: ChatMediaLoader?,
         mediaIdentity: ((String) -> ChatMediaIdentity?)?,
+        forceRefresh: Bool = false
     ) {
         // The physical ID is stable for lifecycle updates. Keep the markdown
         // and media child instances when the same row receives a new payload.
         if currentID != row.id { reset(); currentID = row.id }
-        if lastConfiguredRow == row, lastMediaLoader === mediaLoader {
+        if !forceRefresh,
+           lastConfiguredRow == row,
+           lastMediaLoader === mediaLoader,
+           configuredActivityGeneration == presentationActivity.generation {
             setPresentationActivity(presentationActivity)
             updateAccessibility(row)
             return
@@ -185,6 +212,7 @@ final class ChatUIKitTranscriptRowView: UIView {
         setPresentationActivity(presentationActivity)
         lastConfiguredRow = row
         lastMediaLoader = mediaLoader
+        lastMediaIdentity = mediaIdentity
         updateAccessibility(row)
     }
 
@@ -419,7 +447,8 @@ final class ChatUIKitTranscriptRowView: UIView {
         ])
         for (index, attachment) in attachments.enumerated() {
             activeAttachmentIDs.insert(attachment.id)
-            let chip = mediaChips.first(where: { $0.attachment == attachment }) ?? ChatUIKitMediaChip(attachment: attachment)
+            let chip = mediaChips.first(where: { $0.attachment.id == attachment.id }) ?? ChatUIKitMediaChip(attachment: attachment)
+            chip.reconfigure(attachment)
             chip.onActivate = { [weak self] in self?.onAttachmentTapped?(index) }
             chip.load(using: mediaLoader, identity: attachment.blobID.flatMap { mediaIdentity?($0) })
             content.addArrangedSubview(chip)

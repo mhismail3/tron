@@ -23,6 +23,22 @@ struct ChatArchitectureContractTests {
         )
     }
 
+    @Test("an exact preceding window is admitted for prepend")
+    func acceptsValidPrepend() throws {
+        var current = try SessionScenarioBuilder(seed: 9_402).openingTail(targetEncodedBytes: 8_192)
+        current.transcriptStart = 1
+        current.transcriptTotal = current.transcript.count + 1
+        var incoming = current
+        incoming.transcript = [try #require(
+            SessionScenarioBuilder(seed: 9_405).historyPage(count: 1, longRowBytes: 8).first
+        )]
+        incoming.transcriptStart = 0
+        #expect(
+            SessionTranscriptWindowAdmissionPolicy.evaluate(current: current, incoming: incoming)
+                == .accepted
+        )
+    }
+
     @Test("a gap or conflicting overlap is rejected before authority replacement")
     func rejectsDiscontinuousWindow() throws {
         var current = try SessionScenarioBuilder(seed: 9_403).openingTail(targetEncodedBytes: 8_192)

@@ -9,6 +9,10 @@ struct ChatUIKitComposerInput {
     let text: String
     let selection: NSRange
     let revision: Int
+    /// Existing ComposerDraftCoordinator admission identity. It is only used
+    /// to correlate same-revision authoritative terminal state; it is not a
+    /// second receipt store.
+    let submissionID: String?
     let attachments: [PendingAttachment]
     let selectedResource: ComposerResourceEntry?
     let resourcePicker: ComposerResourcePickerSource?
@@ -39,6 +43,7 @@ struct ChatUIKitComposerInput {
         text: String = "",
         selection: NSRange = NSRange(location: 0, length: 0),
         revision: Int = 0,
+        submissionID: String? = nil,
         attachments: [PendingAttachment] = [],
         selectedResource: ComposerResourceEntry? = nil,
         resourcePicker: ComposerResourcePickerSource? = nil,
@@ -78,6 +83,7 @@ struct ChatUIKitComposerInput {
         self.text = text
         self.selection = selection
         self.revision = revision
+        self.submissionID = submissionID
         self.attachments = attachments
         self.selectedResource = selectedResource
         self.resourcePicker = resourcePicker

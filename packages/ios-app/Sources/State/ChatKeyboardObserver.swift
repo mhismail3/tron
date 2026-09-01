@@ -21,6 +21,7 @@ final class ChatKeyboardObserver {
 
     func setOwnerWindow(_ window: UIWindow?) {
         ownerWindow = window
+        if window == nil { transition = nil }
     }
 
     func transitionArrived(after admittedRevision: Int) -> Bool {
@@ -48,7 +49,20 @@ final class ChatKeyboardObserver {
                 // primitive transition in this callback, not in a deferred Task,
                 // so send() can read the UIKit clock after resigning.
                 MainActor.assumeIsolated {
-                    self?.receive(
+                    guard let self,
+                          let owner = self.ownerWindow,
+                          owner.windowScene != nil,
+                          owner.isHidden == false else { return }
+                    if isHide {
+                        // A hide from another scene must not clear this
+                        // scene's keyboard state. Only an owned visible
+                        // transition may be dismissed.
+                        guard self.transition?.isVisible == true else { return }
+                    } else {
+                        guard let endFrame,
+                              owner.convert(endFrame, from: nil).intersects(owner.bounds) else { return }
+                    }
+                    self.receive(
                         endFrame: endFrame,
                         duration: duration,
                         rawCurve: rawCurve,

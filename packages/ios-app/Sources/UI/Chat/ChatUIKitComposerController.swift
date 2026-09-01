@@ -29,8 +29,8 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     private let trailingSpinner = ChatUIKitPulseLoadingView(accent: ChatUIKitTheme.emerald)
     private var editorHeight: NSLayoutConstraint?
     private var sendHandoffRevision: Int?
+    private var sendHandoffID: String?
     private var sendHandoffAccepted = false
-    private var sendHandoffTimeout: Task<Void, Never>?
     private var applyingAuthoritativeInput = false
     nonisolated(unsafe) private var keyboardObservers: [NSObjectProtocol] = []
     private var attachmentChips: [String: ChatUIKitComposerAttachmentChip] = [:]
@@ -42,24 +42,34 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         configureEditor()
         configureButtons()
         configurePicker()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
         installKeyboardObservers()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        removeKeyboardObservers()
     }
 
     /// Installs a new authoritative projection. This is the only input path;
     /// local UI events are emitted as intents and are never merged into it.
     @discardableResult
     func apply(_ next: ChatUIKitComposerInput) -> Bool {
-        if let appliedRevision, next.revision <= appliedRevision {
+        // Equal revisions may carry authoritative admission, rejection, or
+        // focus transitions. Only an older revision is stale.
+        if let appliedRevision, next.revision < appliedRevision {
             return false
         }
         if let prior = input, prior.revision != next.revision {
             clearSendHandoff()
         }
         if sendHandoffRevision == next.revision,
-           next.isSending || next.submissionPending {
+           (next.submissionID == nil || next.submissionID == sendHandoffID),
+           (next.isSending || next.submissionPending) {
             sendHandoffAccepted = true
-            sendHandoffTimeout?.cancel()
-            sendHandoffTimeout = nil
         }
         input = next
         applyingAuthoritativeInput = true
@@ -243,11 +253,12 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     }
 
     private func installKeyboardObservers() {
+        guard keyboardObservers.isEmpty, viewIfLoaded?.window != nil else { return }
         let center = NotificationCenter.default
         for name in [UIResponder.keyboardWillChangeFrameNotification, UIResponder.keyboardWillHideNotification] {
             keyboardObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
+                    guard let self, self.viewIfLoaded?.window != nil else { return }
                     self.view.setNeedsLayout()
                     self.view.layoutIfNeeded()
                 }
@@ -255,8 +266,14 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
         }
     }
 
+    private func removeKeyboardObservers() {
+        let center = NotificationCenter.default
+        keyboardObservers.forEach { center.removeObserver($0) }
+        keyboardObservers.removeAll()
+    }
+
     deinit {
-        sendHandoffTimeout?.cancel()
+        // Lifecycle methods own suspension; deinit is only final cleanup.
         let center = NotificationCenter.default
         keyboardObservers.forEach { center.removeObserver($0) }
     }
@@ -264,12 +281,11 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
     /// The host must resolve the terminal admission explicitly. Rejected sends
     /// release the same revision for retry; accepted sends remain suppressed
     /// until a new authoritative revision arrives.
-    func resolveSend(revision: Int, accepted: Bool) {
-        guard sendHandoffRevision == revision else { return }
+    func resolveSend(revision: Int, submissionID: String? = nil, accepted: Bool) {
+        guard sendHandoffRevision == revision,
+              submissionID == nil || submissionID == sendHandoffID else { return }
         if accepted {
             sendHandoffAccepted = true
-            sendHandoffTimeout?.cancel()
-            sendHandoffTimeout = nil
         } else {
             clearSendHandoff()
         }
@@ -277,9 +293,8 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
 
     private func clearSendHandoff() {
         sendHandoffRevision = nil
+        sendHandoffID = nil
         sendHandoffAccepted = false
-        sendHandoffTimeout?.cancel()
-        sendHandoffTimeout = nil
     }
 
     private func configureEditorFromInput(_ next: ChatUIKitComposerInput) {
@@ -493,18 +508,13 @@ final class ChatUIKitComposerController: UIViewController, UITextViewDelegate,
               next.isCommandReady,
               !(sendHandoffRevision == next.revision && sendHandoffAccepted) else { return }
         // A pending handoff suppresses duplicate native actions until the host
-        // reports acceptance/rejection or the bounded terminal deadline opens
-        // a retry. It is deliberately not keyed only to revision forever.
+        // reports the terminal acceptance or rejection for this admission.
         guard sendHandoffRevision == nil else { return }
+        // No speculative timeout: an ambiguous transport result must not
+        // reopen an accepted command and emit it a second time.
         sendHandoffRevision = next.revision
+        sendHandoffID = next.submissionID
         sendHandoffAccepted = false
-        sendHandoffTimeout?.cancel()
-        sendHandoffTimeout = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(2_000))
-            guard let self, self.sendHandoffRevision == next.revision,
-                  !self.sendHandoffAccepted else { return }
-            self.clearSendHandoff()
-        }
         onIntent?(.send(behavior: behavior))
     }
 

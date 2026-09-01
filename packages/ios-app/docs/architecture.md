@@ -46,7 +46,7 @@ The interactive chat replacement is intentionally UIKit-only at its viewport bou
 `ChatUIKitChatViewController` is the isolated foundation for the future cutover: it owns one native
 collection view, semantic-anchor restoration, physical-tail following, and legal-offset clamping.
 Admission is strictly monotonic (`version <= appliedVersion` is stale), and every transaction
-has an overflow-safe sequence with explicit applied, stale, cancelled, and failed outcomes.
+has an overflow-safe sequence with explicit applied, stale, recovered, and failed outcomes.
 The installed source-window projection supplies the single earlier-history affordance and one
 load-earlier intent; UIKit owns no paging cursor or loading state. During native tracking and
 deceleration, measured semantic row attributes retain both row identity and pixel offset across

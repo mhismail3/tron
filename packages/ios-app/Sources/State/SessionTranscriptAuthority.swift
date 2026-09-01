@@ -60,7 +60,13 @@ enum SessionTranscriptWindowAdmissionPolicy {
         let overlapEnd = min(oldWindow.end, newWindow.end)
         let adjacentAppend = newWindow.start == oldWindow.end
             && (newWindow.total > oldWindow.total || oldWindow.ids.isEmpty)
-        guard adjacentAppend || (overlapStart < overlapEnd) else {
+        // A bounded history page may arrive immediately before the retained
+        // window while the total stays constant. Its end is the old start;
+        // this is an exact prepend, not a gap. Do not require the total to
+        // increase (the server's total is the collection cardinality).
+        let adjacentPrepend = newWindow.end == oldWindow.start
+            && newWindow.total >= oldWindow.total
+        guard adjacentAppend || adjacentPrepend || (overlapStart < overlapEnd) else {
             return .rejected(.gap)
         }
         guard overlapStart >= oldWindow.start,

@@ -59,6 +59,54 @@ struct ChatUIKitComposerTests {
 
     @Test
     @MainActor
+    func equalRevisionAuthoritativeStateIsAdmittedWithoutRollback() {
+        let controller = ChatUIKitComposerController()
+        controller.loadViewIfNeeded()
+        #expect(controller.apply(ChatUIKitComposerInput(
+            revision: 7,
+            submissionID: "submission-7",
+            isSending: false,
+            focus: .focused
+        )))
+        #expect(controller.apply(ChatUIKitComposerInput(
+            revision: 7,
+            submissionID: "submission-7",
+            isSending: true,
+            submissionPending: true,
+            focus: .resigned
+        )))
+        #expect(controller.input?.isSending == true)
+        #expect(controller.input?.focus == .resigned)
+        #expect(!controller.apply(ChatUIKitComposerInput(revision: 6, focus: .focused)))
+    }
+
+    @Test
+    @MainActor
+    func rejectedSendCanRetryOnlyAfterExplicitResolution() {
+        let controller = ChatUIKitComposerController()
+        controller.loadViewIfNeeded()
+        controller.apply(ChatUIKitComposerInput(
+            text: "send",
+            revision: 1,
+            trailingMode: .send,
+            isTranscriptReady: true,
+            isCommandReady: true
+        ))
+        var sends = 0
+        controller.onIntent = { intent in
+            if case .send = intent { sends += 1 }
+        }
+        let sendButton = controller.view.accessibilityElements?.compactMap { $0 as? UIButton }.last
+        sendButton?.sendActions(for: .primaryActionTriggered)
+        sendButton?.sendActions(for: .primaryActionTriggered)
+        #expect(sends == 1)
+        controller.resolveSend(revision: 1, accepted: false)
+        sendButton?.sendActions(for: .primaryActionTriggered)
+        #expect(sends == 2)
+    }
+
+    @Test
+    @MainActor
     func authoritativeFocusControlIsApplied() {
         let controller = ChatUIKitComposerController()
         controller.loadViewIfNeeded()

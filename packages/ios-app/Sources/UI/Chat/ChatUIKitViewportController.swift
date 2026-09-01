@@ -54,7 +54,7 @@ final class ChatUIKitChatViewController: UIViewController,
                 guard let transcriptCell = cell as? ChatUIKitTranscriptCell,
                       let indexPath = collectionView.indexPath(for: cell),
                       let rowIndex = rowIndex(for: indexPath), rowIndex < input.rows.count else { continue }
-                transcriptCell.configure(input.rows[rowIndex])
+                transcriptCell.configure(input.rows[rowIndex], forceRefresh: true)
             }
         }
     }
@@ -146,7 +146,11 @@ final class ChatUIKitChatViewController: UIViewController,
             case .followTail:
                 setOffset(y: maxOffsetY)
             case .preserve(let semantic):
-                if let retained = restore(semantic) {
+                // Keep a missing semantic request visible to recovery and
+                // diagnostics; ordinal fallback may repair pixels without
+                // rewriting the caller's anchor identity.
+                if rows.contains(where: { $0.id == semantic.rowID }),
+                   let retained = restore(semantic) {
                     viewportState.intent = .preserve(retained)
                 }
             }
@@ -317,12 +321,6 @@ final class ChatUIKitChatViewController: UIViewController,
     private func clampOffset() {
         let y = min(max(collectionView.contentOffset.y, minOffsetY), maxOffsetY)
         guard y != collectionView.contentOffset.y else { return }
-        setOffset(y: y)
-    }
-
-    private func preserveNativePosition(_ position: CGPoint) {
-        let y = min(max(position.y, minOffsetY), maxOffsetY)
-        guard collectionView.contentOffset.y != y else { return }
         setOffset(y: y)
     }
 

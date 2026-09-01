@@ -260,6 +260,7 @@ final class ChatUIKitMarkdownView: UIView {
     private var thinkingButton: UIButton?
     private var activityIndicators: [ChatUIKitPulseLoadingView] = []
     private var presentationActivity = ChatUIKitPresentationActivity.active(generation: 0)
+    private var activityGeneration: UInt64 = 0
     var onCodeCopied: ((String) -> Void)?
     var onThinkingDetails: (() -> Void)?
     var onNotificationDetails: (() -> Void)?
@@ -284,6 +285,13 @@ final class ChatUIKitMarkdownView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
+        if activityGeneration != activity.generation {
+            // A new presentation lease supersedes every reveal timer. Keep
+            // rendered content visible, but require the next authoritative
+            // render to establish new streaming state.
+            inlineViews.values.forEach { $0.setPresentationActivity(false) }
+            activityGeneration = activity.generation
+        }
         presentationActivity = activity
         activityIndicators.forEach { indicator in
             if activity.isActive { indicator.startAnimating() } else { indicator.stopAnimating() }

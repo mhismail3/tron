@@ -58,6 +58,7 @@ final class ChatUIKitToolPill: UIControl {
     private var run: ChatToolRunPresentation?
     private var elapsedTimer: Timer?
     private var presentationActive = true
+    private var activityGeneration: UInt64 = 0
 
     init(run: ChatToolRunPresentation) {
         self.run = run
@@ -110,6 +111,11 @@ final class ChatUIKitToolPill: UIControl {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
+        if activityGeneration != activity.generation {
+            elapsedTimer?.invalidate()
+            elapsedTimer = nil
+        }
+        activityGeneration = activity.generation
         presentationActive = activity.isActive
         if presentationActive, run?.isRunning == true {
             self.activity.startAnimating()
@@ -140,6 +146,7 @@ final class ChatUIKitNotificationPill: UIControl {
     var onActivate: (() -> Void)?
     private var activityIndicator: ChatUIKitPulseLoadingView?
     private var presentationActive = true
+    private var activityGeneration: UInt64 = 0
     init(presentation: ChatNotificationPresentation) {
         super.init(frame: .zero)
         let accent = ChatUIKitTheme.notificationColor(presentation.tone)
@@ -175,6 +182,7 @@ final class ChatUIKitNotificationPill: UIControl {
     }
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
+        activityGeneration = activity.generation
         presentationActive = activity.isActive
         if presentationActive { activityIndicator?.startAnimating() } else { activityIndicator?.stopAnimating() }
     }
@@ -266,6 +274,7 @@ final class ChatUIKitPromptCard: UIView {
         let old = Dictionary(uniqueKeysWithValues: reusableChips.map { ($0.attachment.id, $0) })
         for (index, attachment) in attachments.enumerated() {
             let chip = old[attachment.id] ?? ChatUIKitMediaChip(attachment: attachment)
+            chip.reconfigure(attachment)
             chip.onActivate = { onTap(index) }
             chip.load(using: mediaLoader, identity: attachment.blobID.flatMap { mediaIdentity?($0) })
             attachmentStack.addArrangedSubview(chip)
@@ -332,7 +341,7 @@ final class ChatUIKitModelFooter: UILabel {
 
 @MainActor
 final class ChatUIKitMediaChip: UIControl {
-    let attachment: ChatUIKitTranscriptAttachment
+    private(set) var attachment: ChatUIKitTranscriptAttachment
     var onActivate: (() -> Void)?
     private let imageView = UIImageView()
     private var loadTask: Task<Void, Never>?
@@ -341,8 +350,9 @@ final class ChatUIKitMediaChip: UIControl {
     private var loadGeneration: UInt64 = 0
     private var failed = false
     private var presentationActive = true
+    private var activityGeneration: UInt64 = 0
     private(set) var loadState: ChatMediaLoadState = .idle
-    private let normalAccessibilityLabel: String
+    private var normalAccessibilityLabel: String
 
     init(attachment: ChatUIKitTranscriptAttachment) {
         self.attachment = attachment
@@ -361,6 +371,27 @@ final class ChatUIKitMediaChip: UIControl {
         if let image = attachment.preparedThumbnail { imageView.image = image }
     }
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Metadata is mutable even when the chip's stable ID is retained. A
+    /// replacement retires the previous request and clears its accessibility
+    /// projection before any new loader completion can arrive.
+    func reconfigure(_ attachment: ChatUIKitTranscriptAttachment) {
+        guard self.attachment != attachment else { return }
+        cancelLoad()
+        self.attachment = attachment
+        normalAccessibilityLabel = attachment.mimeType.hasPrefix("image/")
+            ? "Image attachment, \(attachment.name)"
+            : "File attachment, \(attachment.name)"
+        failed = false
+        loadState = .idle
+        loader = nil
+        identity = nil
+        showPlaceholder()
+        accessibilityLabel = normalAccessibilityLabel
+        accessibilityValue = attachmentFacts
+        if let image = attachment.preparedThumbnail { imageView.image = image }
+    }
+
     func load(using loader: ChatMediaLoader?, identity: ChatMediaIdentity?) {
         if let prepared = attachment.preparedThumbnail {
             imageView.image = prepared
@@ -421,6 +452,9 @@ final class ChatUIKitMediaChip: UIControl {
         }
     }
     func setPresentationActivity(_ activity: ChatUIKitPresentationActivity) {
+        let generationChanged = activityGeneration != activity.generation
+        activityGeneration = activity.generation
+        if generationChanged { cancelLoad() }
         let wasActive = presentationActive
         presentationActive = activity.isActive
         if presentationActive {

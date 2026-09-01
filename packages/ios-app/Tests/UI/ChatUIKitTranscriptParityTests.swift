@@ -81,6 +81,23 @@ struct ChatUIKitTranscriptParityTests {
         #expect(ChatMediaLoadState.cancelled != .idle)
     }
 
+    @Test("stable media chips replace metadata and VoiceOver projection")
+    @MainActor
+    func mediaChipReconfigurationRetiresOldAccessibilityFacts() {
+        let first = ChatUIKitTranscriptAttachment(
+            id: "same", name: "old.txt", mimeType: "text/plain", size: 10
+        )
+        let replacement = ChatUIKitTranscriptAttachment(
+            id: "same", name: "new.png", mimeType: "image/png", size: 20
+        )
+        let chip = ChatUIKitMediaChip(attachment: first)
+        chip.reconfigure(replacement)
+        #expect(chip.attachment == replacement)
+        #expect(chip.accessibilityLabel == "Image attachment, new.png")
+        #expect(chip.accessibilityValue?.contains("old.txt") == false)
+        #expect(chip.loadState == .idle)
+    }
+
     @Test("UIKit attachment equality ignores decoded image object identity")
     func attachmentEqualityUsesWireFacts() {
         let first = ChatUIKitTranscriptAttachment(

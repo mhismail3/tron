@@ -19,20 +19,18 @@ struct ChatKeyboardObserverTests {
         ) == 0)
     }
 
-    @Test("hide notification synchronously clears the target height")
-    func synchronousHide() throws {
+    @Test("notifications are ignored until an attached owner window exists")
+    func requiresOwnerWindow() throws {
         let center = NotificationCenter()
         let observer = ChatKeyboardObserver()
         observer.start(center: center)
         defer { observer.stop(center: center) }
-        let revision = observer.revision
         center.post(
             name: UIResponder.keyboardWillHideNotification,
             object: nil,
             userInfo: [UIResponder.keyboardAnimationDurationUserInfoKey: 0.2]
         )
-        #expect(observer.revision == 1)
-        #expect(observer.transitionArrived(after: revision))
-        #expect(try #require(observer.transition).targetHeight == 0)
+        #expect(observer.revision == 0)
+        #expect(observer.transition == nil)
     }
 }

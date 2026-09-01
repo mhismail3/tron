@@ -74,7 +74,10 @@ struct ChatUIKitTranscriptRow: Hashable {
     }
 
     enum Payload: Hashable {
-        case installed(content: ChatPhysicalTranscriptRow.Content, facts: PresentationFacts)
+        /// Installed rows carry exactly one authority payload. Presentation
+        /// facts are derived from it at read time, so callers cannot pair a
+        /// physical row with stale text, attachment, or tool metadata.
+        case installed(content: ChatPhysicalTranscriptRow.Content, preparedText: ChatTextPreparationSnapshot?)
         /// Synthetic payloads are explicit test/standalone rows, never a
         /// fallback for an installed physical row.
         case synthetic(PresentationFacts)
@@ -90,7 +93,9 @@ struct ChatUIKitTranscriptRow: Hashable {
     }
     private var facts: PresentationFacts {
         switch payload {
-        case .installed(_, let facts), .synthetic(let facts): return facts
+        case .installed(let content, let preparedText):
+            return ChatUIKitPresentationAdapter.facts(for: content, preparedText: preparedText)
+        case .synthetic(let facts): return facts
         }
     }
     var preparedText: ChatTextPreparationSnapshot? { facts.preparedText }
@@ -113,7 +118,6 @@ struct ChatUIKitTranscriptRow: Hashable {
         text: String,
         kind: Kind = .assistant,
         semanticID: String? = nil,
-        content: ChatPhysicalTranscriptRow.Content? = nil,
         preparedText: ChatTextPreparationSnapshot? = nil,
         markdownDocuments: [MarkdownPresentation.Document] = [],
         thinkingSegments: [ChatThinkingSegment] = [],
@@ -141,7 +145,24 @@ struct ChatUIKitTranscriptRow: Hashable {
             attachmentFacts: attachmentFacts,
             resourceInvocation: resourceInvocation, toolLabel: toolLabel
         )
-        self.payload = if let content { .installed(content: content, facts: facts) } else { .synthetic(facts) }
+        // This initializer is intentionally synthetic-only. Installed rows
+        // must use the content factory below so facts cannot disagree with
+        // their canonical payload.
+        self.payload = .synthetic(facts)
+    }
+
+    /// Factory for physical rows. Unlike the compatibility initializer above,
+    /// this has no independent presentation fields to disagree with content.
+    init?(
+        id: String,
+        semanticID: String? = nil,
+        content: ChatPhysicalTranscriptRow.Content,
+        preparedText: ChatTextPreparationSnapshot? = nil
+    ) {
+        guard !id.isEmpty else { return nil }
+        self.id = id
+        self.semanticID = semanticID ?? id
+        self.payload = .installed(content: content, preparedText: preparedText)
     }
 }
 
@@ -182,6 +203,34 @@ typealias ChatUIKitTranscriptCommit = ChatUIKitPresentationInput
 /// row payload, including lifecycle and queue rows, while `text` remains only
 /// a derived accessibility fallback.
 enum ChatUIKitPresentationAdapter {
+    /// Derives every renderer fact from the one canonical physical payload.
+    /// This is intentionally shared by installed rows and never accepts a
+    /// caller-supplied text/attachment/tool override.
+    static func facts(
+        for content: ChatPhysicalTranscriptRow.Content,
+        preparedText: ChatTextPreparationSnapshot? = nil
+    ) -> ChatUIKitTranscriptRow.PresentationFacts {
+        let prepared = preparedText
+        let documents = markdownDocuments(for: content, prepared: prepared)
+        let attachments = attachmentFacts(for: content)
+        return .init(
+            text: accessibilityText(for: content),
+            kind: kind(for: content),
+            preparedText: prepared,
+            markdownDocuments: documents,
+            thinkingSegments: thinkingSegments(for: content),
+            thinkingLabel: prepared?.hiddenThinkingLabel,
+            streaming: isStreaming(content),
+            toolRun: toolRun(for: content),
+            notification: notification(for: content),
+            links: links(in: documents),
+            attachmentNames: attachments.map(\.name),
+            attachmentFacts: attachments,
+            resourceInvocation: resourceInvocation(for: content),
+            toolLabel: toolLabel(for: content)
+        )
+    }
+
     static func input(
         from installed: InstalledChatTranscript,
         canonicalAliases: [String: String] = [:],
@@ -193,27 +242,12 @@ enum ChatUIKitPresentationAdapter {
             canonicalAliases: canonicalAliases
         )
         let rows = physical.compactMap { row -> ChatUIKitTranscriptRow? in
-            let item = transcriptItem(from: row.content)
-            let prepared = item.map { installed.preparedText(for: $0) }
-            let documents = markdownDocuments(for: row.content, prepared: prepared)
+            let prepared = transcriptItem(from: row.content).map { installed.preparedText(for: $0) }
             return ChatUIKitTranscriptRow(
                 id: row.id,
-                text: accessibilityText(for: row.content),
-                kind: kind(for: row.content),
                 semanticID: row.semanticID,
                 content: row.content,
-                preparedText: prepared,
-                markdownDocuments: documents,
-                thinkingSegments: thinkingSegments(for: row.content),
-                thinkingLabel: prepared?.hiddenThinkingLabel,
-                streaming: isStreaming(row.content),
-                toolRun: toolRun(for: row.content),
-                notification: notification(for: row.content),
-                links: links(in: documents),
-                attachments: attachmentFacts(for: row.content).map(\.name),
-                attachmentFacts: attachmentFacts(for: row.content),
-                resourceInvocation: resourceInvocation(for: row.content),
-                toolLabel: toolLabel(for: row.content)
+                preparedText: prepared
             )
         }
         let history = historyState ?? ((installed.sourceWindow.originalStart ?? 0) > 0
