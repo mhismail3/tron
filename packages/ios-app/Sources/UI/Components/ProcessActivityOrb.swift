@@ -406,7 +406,11 @@ private struct ProcessActivityOrbCanvas: View, @preconcurrency Animatable {
     }
 
     var body: some View {
-        Canvas(rendersAsynchronously: true) { context, canvasSize in
+        // This frame is intentionally tiny and bounded. Synchronous drawing
+        // keeps its pixels in the same presentation transaction as the
+        // composer's matched-geometry glass transition instead of queueing a
+        // stale asynchronous frame while transcript updates are arriving.
+        Canvas(rendersAsynchronously: false) { context, canvasSize in
             let weights = ProcessActivityOrbModeTransitionPolicy.weights(
                 thinkingBlend: thinkingBlend
             )

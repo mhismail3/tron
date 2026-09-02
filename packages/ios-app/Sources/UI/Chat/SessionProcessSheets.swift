@@ -375,7 +375,7 @@ private struct SessionProcessRow: View {
 
             if latestAction != nil || outputPreview != nil {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(process.lifecycle.state.isActive ? "LIVE ACTIVITY" : "RECENT ACTIVITY")
+                    Text(SessionProcessRowPresentation.activityLabel(for: process.lifecycle.state))
                         .font(TronTypography.caption)
                         .foregroundStyle(cardAccent)
                     if let latestAction {
@@ -422,8 +422,11 @@ private struct SessionProcessRow: View {
     /// Lifecycle remains explicit for VoiceOver while container color is the
     /// sole visible status treatment.
     private var statusText: String {
-        if process.lifecycle.state.isActive { return "Live" }
-        return process.lifecycle.state == .completed ? "Completed" : process.lifecycle.state.displayName
+        switch process.lifecycle.state {
+        case .running: "Live"
+        case .completed: "Completed"
+        default: process.lifecycle.state.displayName
+        }
     }
 
     private var summaryParts: [String] {
@@ -495,6 +498,16 @@ enum SessionProcessRowPresentation {
 
     static func countLabel(_ count: Int, singular: String) -> String {
         "\(count) \(count == 1 ? singular : "\(singular)s")"
+    }
+
+    // Paused is a canonical resumable state and must not be labeled live.
+    static func activityLabel(for state: SessionProcessLifecycleState) -> String {
+        switch state {
+        case .queued: "QUEUED"
+        case .running: "LIVE ACTIVITY"
+        case .paused: "PAUSED"
+        default: "RECENT ACTIVITY"
+        }
     }
 
     static func latestAction(for process: SessionProcessActivity) -> String? {

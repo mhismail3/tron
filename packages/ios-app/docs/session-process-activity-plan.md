@@ -28,7 +28,8 @@ sheet have no fallback route. This presentation rule does not alter the transcri
 
 The orb appears when there is:
 
-- **Solving** while any subagent is queued, running, or paused.
+- **Solving** while any subagent is queued, running, or paused. Rows distinguish these
+  canonical states with `QUEUED`, `LIVE ACTIVITY`, and `PAUSED` headings.
 - **Thinking** while only terminal subagents remain in the five-minute recent window.
 - Hidden when neither partition contains a subagent.
 
@@ -40,8 +41,10 @@ duration text. Container color alone carries lifecycle meaning: amber for in-pro
 for successful completion, and red for failure or interruption. The bounded active sheet
 retains Liquid Glass card containers; history uses the provider-settings scroll-optimized
 container surface for long lists. The composer orb remains the single animated
-subagent activity affordance. Tool/path, counts, and bounded output remain distinct metadata
-when supplied. A row with a validated child session
+subagent activity affordance. Its matched-geometry glass shell is the only geometry transition
+from the input bar; the content fades over a synchronously drawn Canvas so live transcript
+updates cannot queue a stale orb frame or introduce a second move/scale path. Tool/path,
+counts, and bounded output remain distinct metadata when supplied. A row with a validated child session
 presents a standardized large-detent bottom sheet containing the canonical-live, read-only
 transcript viewer; it never pushes a second navigation route. Short or empty transcript
 content aligns to the top while overflowing newest pages retain tail-opening intent. Rows
@@ -177,7 +180,7 @@ iOS checks must cover:
 
 Device acceptance after rebuilding the Gateway:
 
-1. Launch one 60-second async subagent and verify the solving orb plus Active row.
+1. Launch one 60-second async subagent and verify the solving orb plus Active row. If it is a no-edit visual fixture, use the version-1 agent contract and an explicit reason-bearing no-acceptance policy so the implementation completion guard does not intentionally pause it.
 2. Let it finish and verify the same stable row moves to Recently finished.
 3. Open its read-only child transcript.
 4. Verify Subagent History retains earlier receipt-backed rows.

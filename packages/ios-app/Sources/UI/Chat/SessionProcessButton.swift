@@ -52,14 +52,11 @@ struct SessionProcessButton: View {
                     in: .circle
                 )
                 .glassEffectID("chat-processes", in: glassNamespace)
+                // Liquid Glass owns the geometry morph from the composer. A
+                // second move/scale transition makes the material and its
+                // continuously rendered Canvas follow competing paths.
                 .glassEffectTransition(.matchedGeometry)
-                .transition(
-                    reduceMotion
-                        ? .opacity
-                        : .move(edge: .trailing)
-                            .combined(with: .scale(scale: 0.82, anchor: .trailing))
-                            .combined(with: .opacity)
-                )
+                .transition(.opacity)
                 .accessibilityLabel("Subagents")
                 .accessibilityValue(accessibilityValue(overview: overview))
                 .accessibilityHint("Shows current and recently finished subagents")

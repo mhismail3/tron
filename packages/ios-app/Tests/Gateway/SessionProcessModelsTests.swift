@@ -92,6 +92,15 @@ struct SessionProcessModelsTests {
         #expect(SessionProcessRowPresentation.countLabel(2, singular: "turn") == "2 turns")
     }
 
+    @Test("paused subagents are not presented as live execution")
+    func pausedPresentation() {
+        #expect(SessionProcessRowPresentation.activityLabel(for: .queued) == "QUEUED")
+        #expect(SessionProcessRowPresentation.activityLabel(for: .running) == "LIVE ACTIVITY")
+        #expect(SessionProcessRowPresentation.activityLabel(for: .paused) == "PAUSED")
+        #expect(SessionProcessRowPresentation.activityLabel(for: .completed) == "RECENT ACTIVITY")
+        #expect(SessionProcessRowPresentation.activityLabel(for: .failed) == "RECENT ACTIVITY")
+    }
+
     @Test("subagent row tone gives lifecycle colors one standard meaning")
     func rowTone() {
         for state in [
