@@ -565,6 +565,17 @@ mounted synchronization before queue controls retire.
 The obsolete visibility modifier is removed; the native SwiftUI geometry modifier still
 reports a multiple-update-per-frame diagnostic in hosted runs and remains a physical checkpoint.
 
+Intermittent resumed-session blanking or post-send displacement is diagnosed with the
+bounded **Chat trace** records in Settings → Logs. Reproduce the issue, keep the app
+running, then open Logs; Chat trace rows are labeled **iOS client · Chat trace**.
+Use the Error level for automatic anomaly markers or copy the All view to preserve the
+preceding causal events. Preserve the `context` and `sequence` fields when sharing
+evidence. The ring keeps
+only the newest 256 events and is process-local; it intentionally records no prompt,
+transcript text, protocol identity, path, filename, or model/provider value. Ordinary
+streaming-token projection updates are not logged, so tracing does not create a new
+per-token publication or layout workload.
+
 ### Viewport test migration matrix
 
 The pre-pinning coordinator suite contained 81 cases. The 50 observable Group A cases keep

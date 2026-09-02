@@ -166,6 +166,9 @@ final class AppModel {
     let gatewayDiagnostics: GatewayDiagnosticsService
     let workspaceInspection: WorkspaceInspectionService
     private var iosClientDiagnostics = IOSClientDiagnosticBuffer()
+    /// Bounded, content-free causal trace for intermittent chat viewport and
+    /// opening failures. It is merged into Logs on demand and never persisted.
+    let chatInteractionTrace = ChatInteractionTrace()
     let chatMedia: ChatMediaLoader
     private let chatMediaMemoryPressureObserver: ChatMediaMemoryPressureObserver
 
@@ -1570,6 +1573,7 @@ final class AppModel {
     func loadGatewayLogsResult(limit: Int = 1_000) async -> GatewayLogsLoadResult {
         let profileSnapshot = profiles.profiles
         var loaded = Array(iosClientDiagnostics.records.prefix(limit))
+        loaded.append(contentsOf: chatInteractionTrace.diagnosticRecords(limit: limit))
         var failedProfileIDs: Set<String> = []
         for profile in profileSnapshot {
             do {

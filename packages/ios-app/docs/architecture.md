@@ -283,9 +283,10 @@ retries or fails positioning; it never certifies an unverified ready frame. A re
 pinned presentation re-enters this same physical-marker positioning gate on resume;
 a retained detached reader remains anchored and is never repinned. Foreground
 activation retires any target belonging to the suspended native scroll tree before
-revalidating current marker evidence. Every installed projection, including
-lifecycle-only and compaction/tool height changes, advances the layout epoch so delayed
-frames cannot prove a replacement tree. A visible pinned presentation therefore
+revalidating current marker evidence. An installed projection advances the layout epoch
+when its physical row spine changes; streaming payload and shallow tool-state updates
+retain their existing hosts and current geometry evidence. Delayed frames from a replaced
+spine still cannot prove the new tree. A visible pinned presentation therefore
 requires fresh, current-layout marker proof; overflow requires alignment, while
 underflow requires the eager marker to be visible. Row existence, forced underflow
 height alone, elapsed frames, or an abandoned layout generation are not proof. Ordinary
@@ -310,7 +311,15 @@ that viewport so a detached reader is not displaced. Explicit earlier-page loads
 remain request-only, are scoped to the exact mount generation/cursor, and restore the
 former visible anchor with bounded late-layout correction so the viewport does not jump.
 A gesture that begins during that correction cancels every remaining position write
-and its final native geometry wins over the pre-load detached state. The UIKit composer keeps focus reconciliation deferred but resolves internal overflow and caret visibility only from final post-layout TextKit geometry, preventing speculative SwiftUI measurement or keyboard/safe-area callbacks from changing the editor offset.
+and its final native geometry wins over the pre-load detached state. A 256-record,
+content-free in-memory chat trace correlates opening, projection-spine replacement,
+layout participants, viewport intent, explicit scroll commands, submission lifecycle,
+and thresholded geometry changes with local context/generation numbers. It emits
+automatic anomalies when a ready opening loses its installed rows or a pinned opening or
+submission becomes substantially displaced. Records are merged into the existing Logs
+destination on demand and also enter Unified Logging; they never contain session or row
+IDs, prompts, transcript content, paths, filenames, model/provider names, or error payloads,
+and disappear when the app process exits. The UIKit composer keeps focus reconciliation deferred but resolves internal overflow and caret visibility only from final post-layout TextKit geometry, preventing speculative SwiftUI measurement or keyboard/safe-area callbacks from changing the editor offset.
 Create and fork return navigation identity without mounting or selecting a transcript;
 only the destination route may establish live presentation authority. An admitted composer
 transport intentionally survives route disappearance: its target is retained by the

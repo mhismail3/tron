@@ -33,6 +33,7 @@ struct ChatView: View {
     @State private var composerFocused = false
     @State private var composerSelection = NSRange(location: 0, length: 0)
     @State private var composerHeightLedger = ChatComposerHeightLedger()
+    @State private var interactionTraceLedger = ChatInteractionTraceLedger()
     @State private var composerResponder = ChatComposerResponder()
     @State private var keyboardObserver = ChatKeyboardObserver()
     @State private var layoutTransaction = ChatLayoutTransaction()
@@ -248,6 +249,7 @@ struct ChatView: View {
     var body: some View {
         contentSurface
         .onAppear {
+            _ = ensureInteractionTraceContext()
             keyboardObserver.setOwnerWindow(composerResponder.window)
             keyboardObserver.start()
             reconcileSessionPresentationVisibility()
@@ -386,6 +388,106 @@ struct ChatView: View {
         .onDisappear(perform: retirePresentation)
     }
 
+    @discardableResult
+    private func ensureInteractionTraceContext() -> Int {
+        if let context = interactionTraceLedger.context { return context }
+        let context = model.chatInteractionTrace.beginContext(
+            retainedPresentation: transcriptPresentation.installed != nil
+        )
+        interactionTraceLedger.installContext(context)
+        scrollCoordinator.configureInteractionTrace(model.chatInteractionTrace, context: context)
+        layoutTransaction.configureInteractionTrace(model.chatInteractionTrace, context: context)
+        return context
+    }
+
+    private func interactionTraceState(
+        installed: InstalledChatTranscript? = nil
+    ) -> ChatInteractionTrace.State {
+        let installed = installed ?? transcriptPresentation.installed
+        let geometry = scrollCoordinator.latestGeometry
+        let hasLifecycleRow: Bool? = installed.map { value in
+            if case .none = value.handoff { return false }
+            return true
+        }
+        return ChatInteractionTrace.State(
+            presentationEpoch: sessionPresentation.open.epoch,
+            layoutEpoch: scrollCoordinator.layoutEpoch,
+            layoutGeneration: layoutTransaction.generation?.id,
+            canonicalRows: installed?.timeline.items.count,
+            runtimeRows: installed?.runtimeItems.count,
+            queueRows: installed?.queuedMessages.count,
+            hasLifecycleRow: hasLifecycleRow,
+            viewportMode: scrollCoordinator.viewportMode,
+            isUserInteracting: scrollCoordinator.isUserInteracting,
+            isPositionedByUser: transcriptScrollPosition.isPositionedByUser,
+            distanceFromBottom: geometry.isValid ? geometry.distanceFromBottom : nil,
+            offsetY: geometry.isValid ? geometry.offsetY : nil,
+            contentHeight: geometry.isValid ? geometry.contentHeight : nil,
+            containerHeight: geometry.isValid ? geometry.containerHeight : nil,
+            bottomInset: geometry.isValid ? geometry.bottomInset : nil,
+            isPastBottomEdge: geometry.isValid ? geometry.isPastBottomEdge : nil,
+            tailClassification: scrollCoordinator.physicalTailEvidence?.classification,
+            tailDisplacement: scrollCoordinator.physicalTailEvidence?.signedDisplacement,
+            hasCommand: scrollCoordinator.command != nil
+        )
+    }
+
+    private var totalInteractionTraceRows: Int {
+        guard let installed = transcriptPresentation.installed else { return 0 }
+        let lifecycleCount: Int = if case .none = installed.handoff { 0 } else { 1 }
+        return installed.timeline.items.count
+            + installed.runtimeItems.count
+            + installed.queuedMessages.count
+            + lifecycleCount
+    }
+
+    private func scheduleOpeningTraceCheckpoints(
+        context: Int,
+        epoch: Int,
+        expectedVisibleRows: Int
+    ) {
+        Task { @MainActor in
+            for delay in [Duration.milliseconds(350), .milliseconds(1_250)] {
+                do { try await Task.sleep(for: delay); try Task.checkCancellation() }
+                catch { return }
+                guard interactionTraceLedger.context == context,
+                      sessionPresentation.open.epoch == epoch,
+                      sessionPresentation.open.phase == .ready else { return }
+                let state = interactionTraceState()
+                model.chatInteractionTrace.geometry(
+                    .openingCheckpoint,
+                    context: context,
+                    state: state
+                )
+                if ChatInteractionAnomalyPolicy.lostProjection(
+                    expectedRows: expectedVisibleRows,
+                    currentRows: totalInteractionTraceRows
+                ) {
+                    model.chatInteractionTrace.anomaly(
+                        .openingLostProjection,
+                        context: context,
+                        state: state
+                    )
+                    continue
+                }
+                if ChatInteractionAnomalyPolicy.displacedPinnedViewport(
+                    expectedPinned: true,
+                    currentMode: scrollCoordinator.viewportMode,
+                    isUserInteracting: scrollCoordinator.isUserInteracting,
+                    isPositionedByUser: transcriptScrollPosition.isPositionedByUser,
+                    geometry: scrollCoordinator.latestGeometry,
+                    tailClassification: scrollCoordinator.physicalTailEvidence?.classification
+                ) {
+                    model.chatInteractionTrace.anomaly(
+                        .openingViewportDisplaced,
+                        context: context,
+                        state: state
+                    )
+                }
+            }
+        }
+    }
+
     private func reconcileSessionPresentationVisibility(
         sceneActive: Bool? = nil,
         surfaceActive: Bool? = nil
@@ -436,6 +538,7 @@ struct ChatView: View {
     }
 
     private func retirePresentation() {
+        let traceContext = interactionTraceLedger.context
         if let target = presentationTarget {
             model.setSessionPresentationVisible(target, visible: false)
             model.revokePresentationIntake(target)
@@ -453,6 +556,10 @@ struct ChatView: View {
         performanceTracker.cancelAll()
         if let generation = sessionPresentation.modelPresentationGeneration {
             Task { await model.closeSessionPresentation(sessionID, generation: generation) }
+        }
+        if let traceContext {
+            model.chatInteractionTrace.endContext(traceContext)
+            interactionTraceLedger.retire()
         }
     }
 
@@ -1368,6 +1475,11 @@ struct ChatView: View {
             guard sessionPresentation.expireOpeningTask(generation) else { return }
             transcriptPresentation.suspendPendingWork()
             scrollCoordinator.cancel()
+            model.chatInteractionTrace.opening(
+                .failed,
+                context: ensureInteractionTraceContext(),
+                state: interactionTraceState()
+            )
             _ = sessionPresentation.open.fail(
                 sessionID: sessionID,
                 epoch: sessionPresentation.open.epoch,
@@ -1383,6 +1495,11 @@ struct ChatView: View {
         // retirement invalidates the task generation above and remains silently
         // resumable; an exact task that simply returned cannot leave an opaque
         // opening surface with no owner.
+        model.chatInteractionTrace.opening(
+            .failed,
+            context: ensureInteractionTraceContext(),
+            state: interactionTraceState()
+        )
         _ = sessionPresentation.open.fail(
             sessionID: sessionID,
             epoch: sessionPresentation.open.epoch,
@@ -1427,6 +1544,12 @@ struct ChatView: View {
             retainingVisiblePresentation: retainsVisiblePresentation
                 && !retainedPinnedRevalidation
         )
+        model.chatInteractionTrace.opening(
+            .attemptBegan,
+            context: ensureInteractionTraceContext(),
+            retainedPresentation: retainsVisiblePresentation,
+            state: interactionTraceState()
+        )
         scrollCoordinator.resetForPresentation(
             epoch,
             retainingVisibleViewport: retainsVisiblePresentation
@@ -1459,6 +1582,12 @@ struct ChatView: View {
                 return
             }
             sessionPresentation.modelPresentationGeneration = generation
+            model.chatInteractionTrace.opening(
+                .authorityOpened,
+                context: ensureInteractionTraceContext(),
+                retainedPresentation: retainsVisiblePresentation,
+                state: interactionTraceState()
+            )
             // Presence follows exact synchronized route authority, not scroll
             // positioning. The composer can admit work before a large retained
             // transcript reaches its first ready frame.
@@ -1466,6 +1595,12 @@ struct ChatView: View {
             let installed = try await installCurrentTranscriptProjection(
                 presentationGeneration: generation,
                 consistency: .firstCompletePresentationCommit
+            )
+            model.chatInteractionTrace.opening(
+                .projectionInstalled,
+                context: ensureInteractionTraceContext(),
+                retainedPresentation: retainsVisiblePresentation,
+                state: interactionTraceState(installed: installed)
             )
             if retainsVisiblePresentation && !retainedPinnedRevalidation {
                 guard !Task.isCancelled,
@@ -1503,6 +1638,12 @@ struct ChatView: View {
                     )
                     return
                 }
+                model.chatInteractionTrace.opening(
+                    .baselineInstalled,
+                    context: ensureInteractionTraceContext(),
+                    retainedPresentation: true,
+                    state: interactionTraceState(installed: installed)
+                )
                 let positioned = await positionLatestTail(
                     epoch: epoch,
                     targetRenderedID: physicalOpeningTailID(for: installed)
@@ -1533,6 +1674,12 @@ struct ChatView: View {
                 )
                 return
             }
+            model.chatInteractionTrace.opening(
+                .baselineInstalled,
+                context: ensureInteractionTraceContext(),
+                retainedPresentation: false,
+                state: interactionTraceState(installed: installed)
+            )
             let positioned = await positionLatestTail(
                 epoch: epoch,
                 targetRenderedID: physicalOpeningTailID(for: installed)
@@ -1547,6 +1694,12 @@ struct ChatView: View {
                     metrics: .none
                 )
                 if isCurrentTimeout {
+                    model.chatInteractionTrace.opening(
+                        .failed,
+                        context: ensureInteractionTraceContext(),
+                        positioningSucceeded: false,
+                        state: interactionTraceState()
+                    )
                     _ = sessionPresentation.open.fail(
                         sessionID: sessionID,
                         epoch: epoch,
@@ -1580,6 +1733,12 @@ struct ChatView: View {
             let result = PerformanceResult.forFailure(error)
             performanceSignposts.end(interval, result: result, metrics: .none)
             if result == .cancelled { return }
+            model.chatInteractionTrace.opening(
+                .failed,
+                context: ensureInteractionTraceContext(),
+                retainedPresentation: retainsVisiblePresentation,
+                state: interactionTraceState()
+            )
             _ = sessionPresentation.open.fail(
                 sessionID: sessionID,
                 epoch: epoch,
@@ -1595,6 +1754,12 @@ struct ChatView: View {
     ) async {
         await model.closeSessionPresentation(sessionID, generation: generation)
         guard sessionPresentation.modelPresentationGeneration == generation else { return }
+        model.chatInteractionTrace.opening(
+            .retired,
+            context: ensureInteractionTraceContext(),
+            retainedPresentation: retainingVisiblePresentation,
+            state: interactionTraceState()
+        )
         sessionPresentation.modelPresentationGeneration = nil
         if !retainingVisiblePresentation {
             transcriptPresentation.reset()
@@ -1771,7 +1936,12 @@ struct ChatView: View {
 
     @MainActor
     private func revealPositionedTranscript(epoch: Int) -> Bool {
-        withAnimation(
+        model.chatInteractionTrace.opening(
+            .revealBegan,
+            context: ensureInteractionTraceContext(),
+            state: interactionTraceState()
+        )
+        return withAnimation(
             transcriptRevealAnimation,
             completionCriteria: .logicallyComplete
         ) {
@@ -1794,6 +1964,17 @@ struct ChatView: View {
                 return false
             }
             performanceSignposts.end(interval, result: .success, metrics: .none)
+            let context = ensureInteractionTraceContext()
+            model.chatInteractionTrace.opening(
+                .readyFrame,
+                context: context,
+                state: interactionTraceState()
+            )
+            scheduleOpeningTraceCheckpoints(
+                context: context,
+                epoch: epoch,
+                expectedVisibleRows: totalInteractionTraceRows
+            )
             reconcileSessionPresentationVisibility()
             // Publish leased interaction/editor routes only after chat opening
             // has crossed a real ready frame. Otherwise their sheet can cover
@@ -1833,8 +2014,20 @@ struct ChatView: View {
         guard !Task.isCancelled,
               sessionPresentation.open.epoch == epoch,
               sessionPresentation.open.phase == .positioning else { return false }
+        let context = ensureInteractionTraceContext()
+        model.chatInteractionTrace.opening(
+            .positioningBegan,
+            context: context,
+            state: interactionTraceState()
+        )
         let positioned = await scrollCoordinator.positionOpeningTail(
             targetRenderedID: targetRenderedID
+        )
+        model.chatInteractionTrace.opening(
+            .positioningEnded,
+            context: context,
+            positioningSucceeded: positioned,
+            state: interactionTraceState()
         )
         if positioned { performanceTracker.settleScroll() }
         return positioned
@@ -2557,6 +2750,15 @@ struct ChatView: View {
                 return
             }
         }
+        let traceContext = ensureInteractionTraceContext()
+        let traceToken = interactionTraceLedger.beginSubmission()
+        let submissionBeganPinned = scrollCoordinator.viewportMode == .pinned
+        let expectedVisibleRows = max(1, totalInteractionTraceRows)
+        model.chatInteractionTrace.submission(
+            .began,
+            context: traceContext,
+            state: interactionTraceState(installed: installed)
+        )
         // Transfer an applied sentinel lease directly to the outgoing row while
         // preserving detached-reader ownership.
         scrollCoordinator.submitted()
@@ -2581,7 +2783,7 @@ struct ChatView: View {
             let installedBeforeSubmission = installed
             // A neutral root transaction preserves descendant-scoped composer
             // and flight animations.
-            let submission = try withTransaction(Transaction()) {
+            let admission = try withTransaction(Transaction()) {
                 composerResourcePicker = nil
                 let submission = try model.beginComposerSubmission(
                     target: target,
@@ -2635,14 +2837,27 @@ struct ChatView: View {
                 } else if !materializationAdmitted {
                     layoutTransaction.settle(layoutGeneration, source: .transcriptGrowth)
                 }
-                return submission
+                return (submission, grafted, materializationAdmitted)
             }
+            let submission = admission.0
+            model.chatInteractionTrace.submission(
+                .lifecycleGrafted,
+                context: traceContext,
+                grafted: admission.1,
+                materialized: admission.2,
+                state: interactionTraceState()
+            )
             if let capture = transcriptProjectionCapture {
                 var stableTransaction = Transaction()
                 stableTransaction.disablesAnimations = true
                 withTransaction(stableTransaction) {
                     intakeTranscriptProjection(capture)
                 }
+                model.chatInteractionTrace.submission(
+                    .projectionSubmitted,
+                    context: traceContext,
+                    state: interactionTraceState()
+                )
             }
             settleUnchangedComposerAfterDisplayFrames(
                 generation: layoutGeneration,
@@ -2653,16 +2868,95 @@ struct ChatView: View {
             Task { @MainActor in
                 do {
                     try await model.sendComposer(submission)
+                    model.chatInteractionTrace.submission(
+                        .transportSucceeded,
+                        context: traceContext,
+                        state: interactionTraceState()
+                    )
                     if selectedAuthoritativeSnapshot?.extensionPresentation.hostEpoch.isEmpty == false {
                         model.scheduleExtensionEditorUpdate(target: target, text: "")
                     }
                 } catch {
+                    model.chatInteractionTrace.submission(
+                        .transportFailed,
+                        context: traceContext,
+                        state: interactionTraceState()
+                    )
                     model.presentComposerActionError(error, target: target)
                 }
             }
+            scheduleSubmissionTraceCheckpoints(
+                context: traceContext,
+                token: traceToken,
+                beganPinned: submissionBeganPinned,
+                expectedVisibleRows: expectedVisibleRows
+            )
         } catch {
+            model.chatInteractionTrace.submission(
+                .admissionFailed,
+                context: traceContext,
+                state: interactionTraceState()
+            )
+            interactionTraceLedger.endSubmission(traceToken)
             abandonLayoutTransaction()
             model.presentComposerActionError(error, target: target)
+        }
+    }
+
+    private func scheduleSubmissionTraceCheckpoints(
+        context: Int,
+        token: Int,
+        beganPinned: Bool,
+        expectedVisibleRows: Int
+    ) {
+        Task { @MainActor in
+            defer { interactionTraceLedger.endSubmission(token) }
+            for delay in [
+                Duration.milliseconds(250),
+                .milliseconds(750),
+                .milliseconds(1_250)
+            ] {
+                do { try await Task.sleep(for: delay); try Task.checkCancellation() }
+                catch { return }
+                guard interactionTraceLedger.context == context,
+                      interactionTraceLedger.ownsSubmission(token) else { return }
+                let state = interactionTraceState()
+                model.chatInteractionTrace.submission(
+                    .checkpoint,
+                    context: context,
+                    state: state
+                )
+                model.chatInteractionTrace.geometry(
+                    .submissionCheckpoint,
+                    context: context,
+                    state: state
+                )
+                if ChatInteractionAnomalyPolicy.lostProjection(
+                    expectedRows: expectedVisibleRows,
+                    currentRows: totalInteractionTraceRows
+                ) {
+                    model.chatInteractionTrace.anomaly(
+                        .submissionLostProjection,
+                        context: context,
+                        state: state
+                    )
+                    continue
+                }
+                if ChatInteractionAnomalyPolicy.displacedPinnedViewport(
+                    expectedPinned: beganPinned,
+                    currentMode: scrollCoordinator.viewportMode,
+                    isUserInteracting: scrollCoordinator.isUserInteracting,
+                    isPositionedByUser: transcriptScrollPosition.isPositionedByUser,
+                    geometry: scrollCoordinator.latestGeometry,
+                    tailClassification: scrollCoordinator.physicalTailEvidence?.classification
+                ) {
+                    model.chatInteractionTrace.anomaly(
+                        .submissionLostTail,
+                        context: context,
+                        state: state
+                    )
+                }
+            }
         }
     }
 
