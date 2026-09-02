@@ -319,6 +319,7 @@ struct SessionProcessModelsTests {
         )
         #expect(SessionProcessButtonPolicy.isVisible(
             overview: active,
+            hasAdmittedActivity: true,
             localRecentExpired: true
         ))
         let recent = SessionProcessOverview(
@@ -332,7 +333,62 @@ struct SessionProcessModelsTests {
         )
         #expect(!SessionProcessButtonPolicy.isVisible(
             overview: recent,
+            hasAdmittedActivity: true,
             localRecentExpired: true
+        ))
+    }
+
+    @Test("every projection retirement path hides through the stable button owner")
+    func projectionRetirementVisibility() {
+        let recent = SessionProcessOverview(
+            revision: 1,
+            asOf: "2026-01-01T00:00:00Z",
+            activeCount: 0,
+            recentCount: 1,
+            problemCount: 0,
+            visibility: .recent,
+            nearestExpiry: "2026-01-01T00:05:00Z"
+        )
+        let hidden = SessionProcessOverview(
+            revision: 2,
+            asOf: "2026-01-01T00:05:00Z",
+            activeCount: 0,
+            recentCount: 0,
+            problemCount: 0,
+            visibility: .hidden
+        )
+
+        #expect(SessionProcessButtonPolicy.isVisible(
+            overview: recent,
+            hasAdmittedActivity: true,
+            localRecentExpired: false
+        ))
+        #expect(!SessionProcessButtonPolicy.isVisible(
+            overview: recent,
+            hasAdmittedActivity: false,
+            localRecentExpired: false
+        ))
+        #expect(!SessionProcessButtonPolicy.isVisible(
+            overview: hidden,
+            hasAdmittedActivity: false,
+            localRecentExpired: false
+        ))
+        #expect(!SessionProcessButtonPolicy.isVisible(
+            overview: nil,
+            hasAdmittedActivity: false,
+            localRecentExpired: false
+        ))
+        #expect(SessionProcessButtonPolicy.isLocallyExpired(
+            recentExpiry: "2026-01-01T00:05:00Z",
+            expiredRecentExpiry: "2026-01-01T00:05:00Z"
+        ))
+        #expect(!SessionProcessButtonPolicy.isLocallyExpired(
+            recentExpiry: "2026-01-01T00:10:00Z",
+            expiredRecentExpiry: "2026-01-01T00:05:00Z"
+        ))
+        #expect(!SessionProcessButtonPolicy.isLocallyExpired(
+            recentExpiry: nil,
+            expiredRecentExpiry: "2026-01-01T00:05:00Z"
         ))
     }
 

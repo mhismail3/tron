@@ -2,25 +2,39 @@ import SwiftUI
 
 enum SessionProcessButtonPolicy {
     static func isVisible(
-        overview: SessionProcessOverview,
+        overview: SessionProcessOverview?,
+        hasAdmittedActivity: Bool,
         localRecentExpired: Bool
     ) -> Bool {
-        overview.visibility != .hidden
+        guard let overview, hasAdmittedActivity else { return false }
+        return overview.visibility != .hidden
             && !(overview.visibility == .recent && localRecentExpired)
+    }
+
+    static func isLocallyExpired(
+        recentExpiry: String?,
+        expiredRecentExpiry: String?
+    ) -> Bool {
+        guard let recentExpiry else { return false }
+        return expiredRecentExpiry == recentExpiry
     }
 }
 
+/// Permanently mounted composer owner for every process-projection visibility
+/// path. Keeping this wrapper alive lets its child transition run when a final
+/// Gateway removal, projection loss, or the local recent deadline hides the orb.
 struct SessionProcessButton: View {
-    let overview: SessionProcessOverview
+    let overview: SessionProcessOverview?
+    let hasAdmittedActivity: Bool
     let glassNamespace: Namespace.ID
     let reduceMotion: Bool
     let onTap: () -> Void
 
-    @State private var localRecentExpired = false
+    @State private var locallyExpiredRecentExpiry: String?
 
     var body: some View {
         Group {
-            if isVisible {
+            if let overview, isVisible {
                 Button(action: onTap) {
                     ProcessActivityOrb(
                         mode: overview.visibility == .active ? .solving : .thinking,
@@ -47,7 +61,7 @@ struct SessionProcessButton: View {
                             .combined(with: .opacity)
                 )
                 .accessibilityLabel("Subagents")
-                .accessibilityValue(accessibilityValue)
+                .accessibilityValue(accessibilityValue(overview: overview))
                 .accessibilityHint("Shows current and recently finished subagents")
             }
         }
@@ -57,34 +71,37 @@ struct SessionProcessButton: View {
                 : .spring(response: 0.32, dampingFraction: 0.82),
             value: isVisible
         )
-        .task(id: expiryTaskIdentity) {
-            localRecentExpired = false
-            guard overview.visibility == .recent,
-                  let value = overview.nearestExpiry,
-                  let expiry = GatewayTimestamp.parse(value) else { return }
+        .task(id: recentExpiryIdentity) {
+            guard let recentExpiryIdentity,
+                  let expiry = GatewayTimestamp.parse(recentExpiryIdentity) else { return }
             let milliseconds = max(0, Int(expiry.timeIntervalSinceNow * 1_000))
-            guard milliseconds > 0 else {
-                localRecentExpired = true
-                return
+            if milliseconds > 0 {
+                try? await Task.sleep(for: .milliseconds(milliseconds))
             }
-            try? await Task.sleep(for: .milliseconds(milliseconds))
             guard !Task.isCancelled else { return }
-            localRecentExpired = true
+            // Store the deadline identity rather than a shared Boolean. A task
+            // canceled by newer process evidence can never hide that evidence.
+            locallyExpiredRecentExpiry = recentExpiryIdentity
         }
     }
 
     private var isVisible: Bool {
         SessionProcessButtonPolicy.isVisible(
             overview: overview,
-            localRecentExpired: localRecentExpired
+            hasAdmittedActivity: hasAdmittedActivity,
+            localRecentExpired: SessionProcessButtonPolicy.isLocallyExpired(
+                recentExpiry: recentExpiryIdentity,
+                expiredRecentExpiry: locallyExpiredRecentExpiry
+            )
         )
     }
 
-    private var expiryTaskIdentity: String {
-        "\(overview.revision):\(overview.visibility.rawValue):\(overview.nearestExpiry ?? "none")"
+    private var recentExpiryIdentity: String? {
+        guard overview?.visibility == .recent else { return nil }
+        return overview?.nearestExpiry
     }
 
-    private var accessibilityValue: String {
+    private func accessibilityValue(overview: SessionProcessOverview) -> String {
         var parts: [String] = []
         if overview.activeCount > 0 {
             parts.append("\(overview.activeCount) active")

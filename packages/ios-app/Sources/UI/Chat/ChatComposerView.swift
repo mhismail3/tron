@@ -64,17 +64,15 @@ struct ChatComposerView: View {
                 resourcePickerView
                 GlassEffectContainer(spacing: 8) {
                     HStack(alignment: .bottom, spacing: 8) {
-                        if let overview = processOverview,
-                           processActivities?.contains(where: {
-                               $0.kind == .subagent && SessionProcessAdmissionPolicy.admits($0)
-                           }) == true {
-                            SessionProcessButton(
-                                overview: overview,
-                                glassNamespace: glassNamespace,
-                                reduceMotion: reduceMotion,
-                                onTap: onProcessesTap
-                            )
-                        }
+                        SessionProcessButton(
+                            overview: processOverview,
+                            hasAdmittedActivity: processActivities?.contains(where: {
+                                $0.kind == .subagent && SessionProcessAdmissionPolicy.admits($0)
+                            }) == true,
+                            glassNamespace: glassNamespace,
+                            reduceMotion: reduceMotion,
+                            onTap: onProcessesTap
+                        )
                         inputBar
                         if showsCatchUp { catchUpButton }
                     }
@@ -84,12 +82,6 @@ struct ChatComposerView: View {
                         ? .easeOut(duration: 0.12)
                         : .spring(response: 0.32, dampingFraction: 0.82),
                     value: showsCatchUp
-                )
-                .animation(
-                    reduceMotion
-                        ? .easeOut(duration: 0.12)
-                        : .spring(response: 0.32, dampingFraction: 0.82),
-                    value: processOverview?.visibility
                 )
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
