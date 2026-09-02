@@ -77,6 +77,16 @@ enum SessionExportPresentationPolicy {
     }
 }
 
+enum SessionModelSelectionPresentation {
+    static func displayed(pending: ModelRef?, authoritative: ModelRef?) -> ModelRef? {
+        pending ?? authoritative
+    }
+
+    static func reconciledPending(pending: ModelRef?, authoritative: ModelRef?) -> ModelRef? {
+        pending == authoritative ? nil : pending
+    }
+}
+
 enum SessionContextUsagePresentation: Equatable {
     case available(used: Int, window: Int, percent: Double)
     case unavailable
@@ -183,6 +193,7 @@ struct SessionContextSheet: View {
     @State private var capturedNoticeScope: InAppNoticeScope?
     @State private var fallbackNoticeScope = InAppNoticeScope.presentation(UUID())
     @State private var presentation: SessionContextPresentation?
+    @State private var pendingModelSelection: ModelRef?
     @State private var forkNavigation = ChatForkNavigationOwner()
 
     private var presentationSource: SessionContextPresentation? {
@@ -248,15 +259,14 @@ struct SessionContextSheet: View {
                 if presentationActivity.allowsPresentationPublication {
                     Color.clear
                         .onChange(of: presentationSource, initial: true) { _, value in
-                            if presentation != value { presentation = value }
+                            reconcilePresentation(value)
                         }
                 }
             }
             .onChange(of: presentationActivity) { previous, current in
                 guard !previous.allowsPresentationPublication,
                       current.allowsPresentationPublication else { return }
-                let value = presentationSource
-                if presentation != value { presentation = value }
+                reconcilePresentation(presentationSource)
             }
             .tronManagedSheet(
                 item: $destination,
@@ -528,12 +538,25 @@ struct SessionContextSheet: View {
             VStack(spacing: 0) {
                 TronModelSelectionRow(
                     selection: Binding(
-                        get: { snapshot.model },
+                        get: {
+                            SessionModelSelectionPresentation.displayed(
+                                pending: pendingModelSelection,
+                                authoritative: snapshot.model
+                            )
+                        },
                         set: { selection in
-                            guard let selection, selection != snapshot.model else { return }
+                            guard let selection,
+                                  selection != SessionModelSelectionPresentation.displayed(
+                                    pending: pendingModelSelection,
+                                    authoritative: snapshot.model
+                                  ) else { return }
+                            pendingModelSelection = selection
                             Task {
                                 do { try await model.setModel(selection, sessionID: sessionID) }
-                                catch { surfaceActionError(error) }
+                                catch {
+                                    if pendingModelSelection == selection { pendingModelSelection = nil }
+                                    surfaceActionError(error)
+                                }
                             }
                         }
                     ),
@@ -570,6 +593,14 @@ struct SessionContextSheet: View {
                 }
             }
         }
+    }
+
+    private func reconcilePresentation(_ value: SessionContextPresentation?) {
+        if presentation != value { presentation = value }
+        pendingModelSelection = SessionModelSelectionPresentation.reconciledPending(
+            pending: pendingModelSelection,
+            authoritative: value?.model
+        )
     }
 
     private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {

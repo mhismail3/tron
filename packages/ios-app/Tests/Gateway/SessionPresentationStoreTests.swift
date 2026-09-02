@@ -153,6 +153,26 @@ struct SessionPresentationStoreTests {
         #expect(model.authoritativeSnapshot(for: snapshot.sessionId) == snapshot)
     }
 
+    @Test("Manage Session model picker displays an in-flight selection until authority confirms it")
+    func modelPickerSelectionReconcilesWithAuthority() {
+        let original = ModelRef(provider: "provider", id: "original")
+        let firstSelection = ModelRef(provider: "provider", id: "first")
+        let latestSelection = ModelRef(provider: "provider", id: "latest")
+
+        #expect(SessionModelSelectionPresentation.displayed(
+            pending: firstSelection,
+            authoritative: original
+        ) == firstSelection)
+        #expect(SessionModelSelectionPresentation.reconciledPending(
+            pending: latestSelection,
+            authoritative: firstSelection
+        ) == latestSelection)
+        #expect(SessionModelSelectionPresentation.reconciledPending(
+            pending: latestSelection,
+            authoritative: latestSelection
+        ) == nil)
+    }
+
     @Test("Manage Session projection does not publish streaming-only snapshot churn")
     func contextProjectionIsNarrowlyObservable() throws {
         let store = SessionPresentationStore(

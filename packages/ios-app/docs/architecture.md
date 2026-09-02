@@ -1325,7 +1325,7 @@ default-selection policy. Dashboard Settings explicitly exposes only global conf
 trust, and project package actions appear only when Settings is opened from a
 project session. Manage Session has two primary groups: Configuration owns the
 model, thinking level, peer-presented Project Resources sheet, and final Rename action. Rename uses the same clearable native text-entry alert as the dashboard row action, including trimmed nonempty admission and a fixed trailing clear control. Its model row uses the same
-progressive searchable `ModelPicker` sheet as Models and Defaults, and its thinking row uses that settings surface's
+progressive searchable `ModelPicker` sheet as Models and Defaults; a tapped model becomes selected in that sheet immediately while its session mutation is awaiting authoritative confirmation. Its thinking row uses that settings surface's
 shared inline Change control while retaining the session's authoritative available-level list and immediate mutations;
 Session owns Agent Context, recent history/audit actions, terminal, Git evidence, and
 exports. Its Current Branch row is a button in every state, places the branch beneath the row title and the working-tree status at the trailing edge, and is backed only by the
