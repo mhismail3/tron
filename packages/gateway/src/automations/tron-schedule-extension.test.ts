@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTronScheduleExtension } from "./tron-schedule-extension.js";
+import { withInvocationContext } from "../extensions/owner-attribution.js";
 
 function fixture() {
   let tool: any;
@@ -19,5 +20,21 @@ describe("Tron schedule extension", () => {
     expect(tool.executionMode).toBe("sequential");
     expect(operations.execute).toHaveBeenCalledWith("session-one", "tool-call-one", expect.objectContaining({ action: "create" }));
     expect(result).toMatchObject({ content: [{ type: "text", text: "Created automation." }] });
+  });
+
+  it("requires confirmation and blocks recursive automation mutation", async () => {
+    const { tool, operations } = fixture();
+    const declined = await tool.execute("tool-call-two", {
+      action: "pause", automationId: "automation-one", expectedRevision: 1,
+    }, undefined, undefined, { hasUI: true, ui: { confirm: vi.fn(async () => false) } });
+    expect(declined.details).toEqual({ cancelled: true });
+    expect(operations.execute).not.toHaveBeenCalled();
+
+    await expect(withInvocationContext(
+      { invocationId: "invocation-one", operationId: "automation:10000000-0000-4000-8000-000000000001" },
+      () => tool.execute("tool-call-three", {
+        action: "enable", automationId: "automation-one", expectedRevision: 1,
+      }, undefined, undefined, { hasUI: true, ui: { confirm: vi.fn(async () => true) } }),
+    )).rejects.toThrow("cannot mutate automations");
   });
 });

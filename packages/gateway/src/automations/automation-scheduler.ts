@@ -520,9 +520,13 @@ export class AutomationScheduler {
         return next;
       });
       if (settled.activation === "blocked" && settled.lastRun?.runId === runId) {
-        void Promise.resolve(this.onBlocked(settled, settled.lastRun)).catch((error) => {
+        try {
+          await this.onBlocked(settled, settled.lastRun);
+        } catch (error) {
+          // The run is already durably terminal. Advisory notification failure
+          // is observable but can never rewrite or strand that result.
           this.onDiagnostic(error instanceof Error ? error.message : String(error), automationId, runId);
-        });
+        }
       }
     } finally {
       const waiter = this.settlementWaiters.get(runId);

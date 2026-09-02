@@ -139,7 +139,8 @@ export class AutomationService {
       if (record.activation === "completed") continue;
       try {
         await this.targets.requirePersistedUserSession(record.targetSessionId);
-      } catch {
+      } catch (error) {
+        if (error instanceof GatewayError && (error.code === "busy" || error.code === "internal")) throw error;
         await this.store.blockTarget(record.targetSessionId, "target-session-unavailable");
       }
     }
