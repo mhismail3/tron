@@ -160,7 +160,11 @@ struct SessionProcessPresentationGuardTests {
         #expect(orb.contains("reduceMotion || !isVisible || !sceneActive"))
         #expect(orb.contains("ProcessActivityOrbEngine.reducedMotionTime"))
         #expect(orb.contains("Canvas(rendersAsynchronously: true)"))
-        #expect(orb.contains("Color.tronEmerald.opacity(opacity)"))
+        #expect(orb.contains("private static let solvingMoves = makeMoves(count: 8)"))
+        #expect(!orb.contains("let moves = makeMoves"))
+        #expect(orb.contains("path.addCurve("))
+        #expect(orb.contains("lineCap: .round"))
+        #expect(orb.contains("for dot in frame.dots"))
     }
 
     private func source(_ relativePath: String) throws -> String {

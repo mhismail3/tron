@@ -1,21 +1,39 @@
 import SwiftUI
 
-/// Native emerald-tinted port of the 20-point `solving` and `composing`
-/// geometry from Jakub Antalik's MIT-licensed thinking-orbs project.
-/// Geometry stays renderer-independent so focused tests can compare the
-/// upstream numeric golden vectors without relying on screenshots.
+/// Minimal emerald activity animation inspired by Jakub Antalik's
+/// MIT-licensed thinking-orbs project. Working uses a sparse twisting sphere;
+/// resting uses a small set of continuous curved strands.
+/// Geometry stays renderer-independent for deterministic focused tests.
 enum ProcessActivityOrbMode: Hashable, Sendable {
     case solving
     case thinking
 }
 
-struct ProcessActivityOrbDot: Equatable, Sendable {
+struct ProcessActivityOrbPoint: Equatable, Sendable {
     let x: Double
     let y: Double
-    let z: Double
+}
+
+struct ProcessActivityOrbDot: Equatable, Sendable {
+    let center: ProcessActivityOrbPoint
+    let depth: Double
     let radius: Double
-    let white: Double
-    let alpha: Double
+    let opacity: Double
+}
+
+struct ProcessActivityOrbStroke: Equatable, Sendable {
+    let start: ProcessActivityOrbPoint
+    let control1: ProcessActivityOrbPoint
+    let control2: ProcessActivityOrbPoint
+    let end: ProcessActivityOrbPoint
+    let depth: Double
+    let width: Double
+    let opacity: Double
+}
+
+struct ProcessActivityOrbFrame: Equatable, Sendable {
+    let dots: [ProcessActivityOrbDot]
+    let strokes: [ProcessActivityOrbStroke]
 }
 
 enum ProcessActivityOrbEngine {
@@ -46,8 +64,9 @@ enum ProcessActivityOrbEngine {
     }
 
     private static let size = 20.0
+    private static let solvingMoves = makeMoves(count: 8)
 
-    static func frame(mode: ProcessActivityOrbMode, time: Double) -> [ProcessActivityOrbDot] {
+    static func frame(mode: ProcessActivityOrbMode, time: Double) -> ProcessActivityOrbFrame {
         switch mode {
         case .solving: solvingFrame(time: time)
         case .thinking: thinkingFrame(time: time)
@@ -56,9 +75,9 @@ enum ProcessActivityOrbEngine {
 
     // MARK: Solving / Rubik
 
-    private static func solvingFrame(time: Double) -> [ProcessActivityOrbDot] {
+    private static func solvingFrame(time: Double) -> ProcessActivityOrbFrame {
         let center = size / 2
-        let sphereRadius = (size / 2) * 0.82
+        let sphereRadius = (size / 2) * 0.78
         let project = projector(
             yaw: time * 0.55,
             tilt: 0.35 + 0.1 * sin(time * 0.9),
@@ -66,12 +85,12 @@ enum ProcessActivityOrbEngine {
             centerY: center,
             scale: sphereRadius
         )
-        let radiusScale = pow(size / 300, 0.6)
-        let moves = makeMoves(count: 14)
-        let cycle = solveCycle(time: time, count: 14, slotDuration: 0.42, rest: 1.2)
+        let moves = solvingMoves
+        let cycle = solveCycle(time: time, count: moves.count, slotDuration: 0.48, rest: 1.4)
         var dots: [ProcessActivityOrbDot] = []
-        let latitudeRings = 4
-        let longitudeDensity = 12
+        let latitudeRings = 3
+        let longitudeDensity = 8
+        dots.reserveCapacity(16)
 
         for latitudeIndex in 0...latitudeRings {
             let latitude = -Double.pi / 2 + (Double(latitudeIndex) / Double(latitudeRings)) * Double.pi
@@ -87,18 +106,19 @@ enum ProcessActivityOrbEngine {
                     active: cycle.active
                 )
                 let projected = project(moved.x, moved.y, moved.z)
-                let depth = (projected.z + 1) / 2
+                let depth = min(1, max(0, (projected.z + 1) / 2))
                 dots.append(ProcessActivityOrbDot(
-                    x: projected.x,
-                    y: projected.y,
-                    z: projected.z,
-                    radius: max(0.3, (1.14 + 3.23 * depth + (moved.inActive ? 0.57 : 0)) * radiusScale),
-                    white: 0.62 - 0.54 * depth - (moved.inActive ? 0.14 : 0),
-                    alpha: 1
+                    center: ProcessActivityOrbPoint(x: projected.x, y: projected.y),
+                    depth: projected.z,
+                    radius: 0.7 + 0.52 * depth + (moved.inActive ? 0.16 : 0),
+                    opacity: 0.38 + 0.62 * depth
                 ))
             }
         }
-        return finalized(dots)
+        return ProcessActivityOrbFrame(
+            dots: dots.sorted { $0.depth < $1.depth },
+            strokes: []
+        )
     }
 
     private static func solveCycle(
@@ -179,92 +199,55 @@ enum ProcessActivityOrbEngine {
         return (x, y, z, inActive)
     }
 
-    // MARK: Thinking / Composing ribbon
+    // MARK: Thinking / resting strands
 
-    /// The demo labels upstream's `composing` ribbon as “Thinking…”. Unlike
-    /// the compact `breathing` ring, this is the dotted spherical sash the
-    /// resting composer control is intended to show.
-    private static func thinkingFrame(time: Double) -> [ProcessActivityOrbDot] {
+    /// Nine continuous cubic strands retain the old ribbon's vertical rhythm
+    /// and traveling wave without rebuilding it from hundreds of tiny circles.
+    private static func thinkingFrame(time: Double) -> ProcessActivityOrbFrame {
         let center = size / 2
-        let sphereRadius = (size / 2) * 0.78
-        let cameraTilt = 0.3
-        let project = projector(yaw: 0, tilt: cameraTilt, centerX: center, centerY: center, scale: 1)
-        let radiusScale = pow(size / 300, 0.6)
-        var dots: [ProcessActivityOrbDot] = []
+        let laneCount = 9
+        let edge = Double(laneCount - 1) / 2
+        var strokes: [ProcessActivityOrbStroke] = []
+        strokes.reserveCapacity(laneCount)
 
-        // Upstream composing-20 preset: eight faint Fibonacci-lattice dots
-        // retain the spherical volume behind the ten-lane ribbon.
-        let ghostCount = 8
-        dots.reserveCapacity(ghostCount + 200)
-        for index in 0..<ghostCount {
-            let direction = fibonacciDirection(index: index, count: ghostCount)
-            let projected = project(
-                direction.x * sphereRadius,
-                direction.y * sphereRadius,
-                direction.z * sphereRadius
-            )
-            let depth = (projected.z / sphereRadius + 1) / 2
-            dots.append(ProcessActivityOrbDot(
-                x: projected.x,
-                y: projected.y,
-                z: projected.z,
-                radius: max(0.3, 0.8 * radiusScale),
-                white: 0.78,
-                alpha: 0.1 + 0.22 * depth
+        for lane in 0..<laneCount {
+            let normalized = (Double(lane) - edge) / edge
+            let depth = 1 - abs(normalized) * 0.68
+            let x = center + normalized * 5.4
+            let halfHeight = 3.2 + 3.8 * sqrt(max(0, 1 - pow(normalized * 0.86, 2)))
+            let phase = time * 1.7 + Double(lane) * 0.42
+            let secondary = time * 1.1 - Double(lane) * 0.27
+            let sway = 0.52 * sin(phase) + 0.18 * sin(secondary)
+            let bend = 0.68 * sin(phase * 0.72 + normalized)
+            let capLift = 0.2 * cos(secondary)
+
+            strokes.append(ProcessActivityOrbStroke(
+                start: ProcessActivityOrbPoint(
+                    x: x + sway * 0.3,
+                    y: center - halfHeight + capLift
+                ),
+                control1: ProcessActivityOrbPoint(
+                    x: x + sway + bend,
+                    y: center - halfHeight * 0.38
+                ),
+                control2: ProcessActivityOrbPoint(
+                    x: x + sway * 0.45 - bend,
+                    y: center + halfHeight * 0.38
+                ),
+                end: ProcessActivityOrbPoint(
+                    x: x - sway * 0.25,
+                    y: center + halfHeight - capLift * 0.55
+                ),
+                depth: depth,
+                width: 0.62 + 0.38 * depth,
+                opacity: 0.36 + 0.64 * depth
             ))
         }
 
-        // spin=0 freezes the band orientation while its two waves travel.
-        let tilt = 0.55
-        let ux = 1.0
-        let uy = 0.0
-        let uz = 0.0
-        let vx = 0.0
-        let vy = cos(tilt)
-        let vz = sin(tilt)
-        let nx = uy * vz - uz * vy
-        let ny = uz * vx - ux * vz
-        let nz = ux * vy - uy * vx
-        let lanes = 10
-        let segments = 20
-
-        for lane in 0..<lanes {
-            let laneOffset = (Double(lane) - Double(lanes - 1) / 2) * 0.075
-            let edge = abs(Double(lane) - Double(lanes - 1) / 2) / max(1, Double(lanes - 1) / 2)
-            for segment in 0..<segments {
-                let angle = (Double(segment) / Double(segments)) * 2 * Double.pi
-                let wobble = 0.16 * sin(angle * 3 - time * 1.7 + Double(lane) * 0.22)
-                    + 0.07 * sin(angle * 5 + time * 1.1)
-                let offset = laneOffset + wobble
-                let x = ux * cos(angle) + vx * sin(angle) + nx * offset
-                let y = uy * cos(angle) + vy * sin(angle) + ny * offset
-                let z = uz * cos(angle) + vz * sin(angle) + nz * offset
-                let length = sqrt(x * x + y * y + z * z)
-                let projected = project(
-                    (x / length) * sphereRadius,
-                    (y / length) * sphereRadius,
-                    (z / length) * sphereRadius
-                )
-                let depth = (projected.z / sphereRadius + 1) / 2
-                dots.append(ProcessActivityOrbDot(
-                    x: projected.x,
-                    y: projected.y,
-                    z: projected.z,
-                    radius: max(0.3, (1.1803 + 1.8241 * depth) * (1 - 0.25 * edge) * radiusScale),
-                    white: 0.52 - 0.44 * depth + 0.18 * edge,
-                    alpha: 0.4 + 0.6 * depth
-                ))
-            }
-        }
-        return finalized(dots)
-    }
-
-    private static func fibonacciDirection(index: Int, count: Int) -> (x: Double, y: Double, z: Double) {
-        let goldenAngle = Double.pi * (3 - sqrt(5))
-        let y = 1 - (2 * (Double(index) + 0.5)) / Double(count)
-        let radial = sqrt(1 - y * y)
-        let angle = Double(index) * goldenAngle
-        return (radial * cos(angle), y, radial * sin(angle))
+        return ProcessActivityOrbFrame(
+            dots: [],
+            strokes: strokes.sorted { $0.depth < $1.depth }
+        )
     }
 
     // MARK: Shared math
@@ -299,10 +282,6 @@ enum ProcessActivityOrbEngine {
     private static func positiveRemainder(_ value: Double, _ divisor: Double) -> Double {
         value - floor(value / divisor) * divisor
     }
-
-    private static func finalized(_ dots: [ProcessActivityOrbDot]) -> [ProcessActivityOrbDot] {
-        dots.filter { $0.alpha >= 0.02 }.sorted { $0.z < $1.z }
-    }
 }
 
 struct ProcessActivityOrb: View {
@@ -329,24 +308,59 @@ struct ProcessActivityOrb: View {
                 let time = reduceMotion
                     ? ProcessActivityOrbEngine.reducedMotionTime
                     : ProcessInfo.processInfo.systemUptime * speed
-                let dots = ProcessActivityOrbEngine.frame(mode: mode, time: time)
+                let frame = ProcessActivityOrbEngine.frame(mode: mode, time: time)
                 let scale = min(canvasSize.width, canvasSize.height) / 20
-                for dot in dots {
-                    let depthInk = min(1, max(0, 1 - dot.white))
-                    let opacity = min(1, max(0, dot.alpha * (0.16 + 0.84 * depthInk)))
+                for stroke in frame.strokes {
+                    var path = Path()
+                    path.move(to: scaled(stroke.start, by: scale))
+                    path.addCurve(
+                        to: scaled(stroke.end, by: scale),
+                        control1: scaled(stroke.control1, by: scale),
+                        control2: scaled(stroke.control2, by: scale)
+                    )
+                    let top = scaled(stroke.start, by: scale)
+                    let bottom = scaled(stroke.end, by: scale)
+                    let ink = Color.tronEmerald
+                    context.stroke(
+                        path,
+                        with: .linearGradient(
+                            Gradient(stops: [
+                                .init(color: ink.opacity(stroke.opacity * 0.82), location: 0),
+                                .init(color: ink.opacity(stroke.opacity), location: 0.42),
+                                .init(color: ink.opacity(stroke.opacity * 0.3), location: 1),
+                            ]),
+                            startPoint: top,
+                            endPoint: bottom
+                        ),
+                        style: StrokeStyle(
+                            lineWidth: stroke.width * scale,
+                            lineCap: .round,
+                            lineJoin: .round
+                        )
+                    )
+                }
+                for dot in frame.dots {
                     let radius = dot.radius * scale
+                    let center = scaled(dot.center, by: scale)
                     let rect = CGRect(
-                        x: dot.x * scale - radius,
-                        y: dot.y * scale - radius,
+                        x: center.x - radius,
+                        y: center.y - radius,
                         width: radius * 2,
                         height: radius * 2
                     )
-                    context.fill(Path(ellipseIn: rect), with: .color(Color.tronEmerald.opacity(opacity)))
+                    context.fill(
+                        Path(ellipseIn: rect),
+                        with: .color(Color.tronEmerald.opacity(dot.opacity))
+                    )
                 }
             }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+
+    private func scaled(_ point: ProcessActivityOrbPoint, by scale: CGFloat) -> CGPoint {
+        CGPoint(x: CGFloat(point.x) * scale, y: CGFloat(point.y) * scale)
     }
 
     private var speed: Double {
