@@ -63,8 +63,14 @@ enum ProcessActivityOrbEngine {
         let angle: Double
     }
 
+    private struct ProjectedPoint: Sendable {
+        let point: ProcessActivityOrbPoint
+        let depth: Double
+    }
+
     private static let size = 20.0
     private static let solvingMoves = makeMoves(count: 8)
+    private static let thinkingLaneSamples = [0.0, 3.0, 6.0, 9.0]
 
     static func frame(mode: ProcessActivityOrbMode, time: Double) -> ProcessActivityOrbFrame {
         switch mode {
@@ -199,54 +205,104 @@ enum ProcessActivityOrbEngine {
         return (x, y, z, inActive)
     }
 
-    // MARK: Thinking / resting strands
+    // MARK: Thinking / composing ribbon
 
-    /// Nine continuous cubic strands retain the old ribbon's vertical rhythm
-    /// and traveling wave without rebuilding it from hundreds of tiny circles.
+    /// Preserve the original ribbon projection and its two traveling waves,
+    /// but join mirrored longitude samples into eleven continuous strands
+    /// instead of drawing 208 independent circles.
     private static func thinkingFrame(time: Double) -> ProcessActivityOrbFrame {
         let center = size / 2
-        let laneCount = 9
-        let edge = Double(laneCount - 1) / 2
+        let sphereRadius = (size / 2) * 0.78
+        let project = projector(
+            yaw: 0,
+            tilt: 0.3,
+            centerX: center,
+            centerY: center,
+            scale: 1
+        )
+        let segments = 20
         var strokes: [ProcessActivityOrbStroke] = []
-        strokes.reserveCapacity(laneCount)
+        strokes.reserveCapacity(segments / 2 + 1)
 
-        for lane in 0..<laneCount {
-            let normalized = (Double(lane) - edge) / edge
-            let depth = 1 - abs(normalized) * 0.68
-            let x = center + normalized * 5.4
-            let halfHeight = 3.2 + 3.8 * sqrt(max(0, 1 - pow(normalized * 0.86, 2)))
-            let phase = time * 1.7 + Double(lane) * 0.42
-            let secondary = time * 1.1 - Double(lane) * 0.27
-            let sway = 0.52 * sin(phase) + 0.18 * sin(secondary)
-            let bend = 0.68 * sin(phase * 0.72 + normalized)
-            let capLift = 0.2 * cos(secondary)
+        for column in 0...(segments / 2) {
+            let angle = (Double(column) / Double(segments)) * 2 * Double.pi
+            let mirroredAngle = positiveRemainder(2 * Double.pi - angle, 2 * Double.pi)
+            var samples: [ProjectedPoint] = []
+            samples.reserveCapacity(thinkingLaneSamples.count * 2)
+            for lane in thinkingLaneSamples {
+                samples.append(thinkingPoint(
+                    angle: angle,
+                    lane: lane,
+                    time: time,
+                    sphereRadius: sphereRadius,
+                    project: project
+                ))
+                if column > 0, column < segments / 2 {
+                    samples.append(thinkingPoint(
+                        angle: mirroredAngle,
+                        lane: lane,
+                        time: time,
+                        sphereRadius: sphereRadius,
+                        project: project
+                    ))
+                }
+            }
+            samples.sort { $0.point.y < $1.point.y }
+            guard let first = samples.first, let last = samples.last else { continue }
+            let firstThird = samples[samples.count / 3]
+            let secondThird = samples[(samples.count * 2) / 3]
+            let height = last.point.y - first.point.y
+            let frontDepth = samples.reduce(-Double.infinity) { max($0, $1.depth) }
+            let normalizedDepth = min(1, max(0, (frontDepth / sphereRadius + 1) / 2))
+            let averageDepth = samples.reduce(0) { $0 + $1.depth } / Double(samples.count)
 
             strokes.append(ProcessActivityOrbStroke(
-                start: ProcessActivityOrbPoint(
-                    x: x + sway * 0.3,
-                    y: center - halfHeight + capLift
-                ),
+                start: first.point,
                 control1: ProcessActivityOrbPoint(
-                    x: x + sway + bend,
-                    y: center - halfHeight * 0.38
+                    x: firstThird.point.x,
+                    y: first.point.y + height * 0.33
                 ),
                 control2: ProcessActivityOrbPoint(
-                    x: x + sway * 0.45 - bend,
-                    y: center + halfHeight * 0.38
+                    x: secondThird.point.x,
+                    y: first.point.y + height * 0.67
                 ),
-                end: ProcessActivityOrbPoint(
-                    x: x - sway * 0.25,
-                    y: center + halfHeight - capLift * 0.55
-                ),
-                depth: depth,
-                width: 0.62 + 0.38 * depth,
-                opacity: 0.36 + 0.64 * depth
+                end: last.point,
+                depth: averageDepth,
+                width: 0.58 + 0.38 * normalizedDepth,
+                opacity: 0.3 + 0.68 * normalizedDepth
             ))
         }
 
         return ProcessActivityOrbFrame(
             dots: [],
             strokes: strokes.sorted { $0.depth < $1.depth }
+        )
+    }
+
+    private static func thinkingPoint(
+        angle: Double,
+        lane: Double,
+        time: Double,
+        sphereRadius: Double,
+        project: Projector
+    ) -> ProjectedPoint {
+        let laneOffset = (lane - 4.5) * 0.075
+        let wobble = 0.16 * sin(angle * 3 - time * 1.7 + lane * 0.22)
+            + 0.07 * sin(angle * 5 + time * 1.1)
+        let offset = laneOffset + wobble
+        let tilt = 0.55
+        let x = cos(angle)
+        let y = cos(tilt) * sin(angle) - sin(tilt) * offset
+        let z = sin(tilt) * sin(angle) + cos(tilt) * offset
+        let length = sqrt(x * x + y * y + z * z)
+        let projected = project(
+            (x / length) * sphereRadius,
+            (y / length) * sphereRadius,
+            (z / length) * sphereRadius
+        )
+        return ProjectedPoint(
+            point: ProcessActivityOrbPoint(x: projected.x, y: projected.y),
+            depth: projected.z
         )
     }
 

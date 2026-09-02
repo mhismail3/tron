@@ -20,14 +20,14 @@ struct ProcessActivityOrbTests {
         })
     }
 
-    @Test("resting geometry uses nine rounded continuous curves")
+    @Test("resting geometry preserves the ribbon wave with eleven continuous curves")
     func restingGeometry() {
         let frame = ProcessActivityOrbEngine.frame(mode: .thinking, time: 0.6)
         let moved = ProcessActivityOrbEngine.frame(mode: .thinking, time: 3.3)
 
         #expect(frame.dots.isEmpty)
-        #expect(frame.strokes.count == 9)
-        #expect(moved.strokes.count == 9)
+        #expect(frame.strokes.count == 11)
+        #expect(moved.strokes.count == 11)
         #expect(frame != moved)
         #expect(frame.strokes.allSatisfy { stroke in
             stroke.start.y < stroke.end.y
