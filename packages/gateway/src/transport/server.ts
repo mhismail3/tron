@@ -351,7 +351,7 @@ export class GatewayServer {
   private lastHeartbeatAt = performance.now();
   private ready = false;
   private shuttingDown = false;
-  private startupPhase: "starting" | "catalog-warming" | "attention-recovery" | "storage-warming" = "starting";
+  private startupPhase: "starting" | "catalog-warming" | "attention-recovery" | "automation-recovery" | "storage-warming" = "starting";
 
   constructor(
     private readonly options: {
@@ -405,7 +405,7 @@ export class GatewayServer {
     this.heartbeat.unref();
   }
 
-  setStartupPhase(phase: "catalog-warming" | "attention-recovery" | "storage-warming"): void {
+  setStartupPhase(phase: "catalog-warming" | "attention-recovery" | "automation-recovery" | "storage-warming"): void {
     if (this.ready || this.shuttingDown) return;
     this.startupPhase = phase;
     this.options.logger.log("info", `Gateway startup phase: ${phase}`, { event: "gateway.startup-phase", source: "lifecycle" });

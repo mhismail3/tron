@@ -99,6 +99,7 @@ import type { NotificationService } from "../notifications/notification-service.
 import type { GatewayWorkHandle, GatewayWorkKind, GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { createTronNotifyExtension } from "../notifications/tron-notify-extension.js";
 import { createTronDisplayExtension } from "../display/tron-display-extension.js";
+import { createTronScheduleExtension, type ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { displayArtifactIDs } from "../display/display-contract.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
@@ -237,6 +238,14 @@ export function completionOwnedByMarker(
   return completion ? { ...completion, operationId: marker.operationId } : undefined;
 }
 
+export interface AutomationOperationTerminal {
+  lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown";
+  operationId: string;
+  invocationId: string;
+  errorCode?: string;
+  assistantCompletionId?: string;
+}
+
 export interface RuntimeSlotHooks {
   broadcast: SessionBroadcast;
   summaryChanged: (summary: SessionSummaryUpdate) => void;
@@ -258,6 +267,13 @@ export interface RuntimeSlotHooks {
   closed?: (sessionId: string, slot: RuntimeSlot) => void;
 }
 
+export interface PromptOwnership {
+  operationId: string;
+  origin: ChatOrigin;
+  onAdmitted?: (invocationId: string) => void;
+  onTerminal: (terminal: AutomationOperationTerminal) => Promise<void> | void;
+}
+
 export interface RuntimeSlotDependencies {
   agentDir: string;
   createModelRuntime: () => Promise<ModelRuntime>;
@@ -273,6 +289,7 @@ export interface RuntimeSlotDependencies {
   machineId?: string;
   notifications?: NotificationService;
   extensionArtifactWarning?: (warning: { reason: ExtensionArtifactRejectionReason; owner: string }) => void;
+  scheduleToolOperations?: ScheduleToolOperations;
   /** Extension cleanup is advisory once runtime disposal begins. A handler that
    * never settles must not strand the canonical session behind idle eviction. */
   runtimeDisposalTimedOut?: (graceMs: number) => void;
@@ -318,6 +335,8 @@ export class RuntimeSlot {
   private phase: SessionPhase;
   private disposed = false;
   private readonly stateChangeWaiters = new Set<() => void>();
+  private automationLeaseCount = 0;
+  private readonly automationTerminalObservers = new Map<string, (terminal: AutomationOperationTerminal) => Promise<void> | void>();
   private snapshotTimer: NodeJS.Timeout | undefined;
   private progressFlushTimer: NodeJS.Timeout | undefined;
   /** The latest cumulative SDK message is projected only at the wire flush boundary. */
@@ -703,10 +722,24 @@ export class RuntimeSlot {
   get isBusy(): boolean {
     return this.lifecycle.preventsOperationalQuiescence
       || this.pendingAssistantCompletion !== undefined
-      || this.activeExports > 0;
+      || this.activeExports > 0
+      || this.automationLeaseCount > 0;
   }
-  /** Retained presentation protects only automatic idle eviction. */
-  get isEvictionProtected(): boolean { return this.lifecycle.preventsEviction; }
+  /** Retained presentation and exact automation admission protect automatic idle eviction. */
+  get isEvictionProtected(): boolean { return this.lifecycle.preventsEviction || this.automationLeaseCount > 0; }
+
+  retainAutomationLease(): () => void {
+    this.assertUsable();
+    this.automationLeaseCount += 1;
+    this.touch();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.automationLeaseCount = Math.max(0, this.automationLeaseCount - 1);
+      this.touch();
+    };
+  }
   get isDrainBusy(): boolean {
     return this.dependencies.workRegistry.hasSessionWork(this.id)
       || this.administrativeDrainBlockers().length > 0;
@@ -1101,6 +1134,13 @@ export class RuntimeSlot {
                 artifacts: this.dependencies.displayArtifacts,
               }),
             },
+            ...(this.dependencies.scheduleToolOperations ? [{
+              name: "tron-schedule",
+              factory: createTronScheduleExtension({
+                sessionId: () => this.id,
+                operations: this.dependencies.scheduleToolOperations,
+              }),
+            }] : []),
             ...(notifications ? [{
               name: "tron-notify",
               factory: createTronNotifyExtension({
@@ -2144,11 +2184,19 @@ export class RuntimeSlot {
     return canonical;
   }
 
+  private async notifyAutomationTerminal(terminal: AutomationOperationTerminal): Promise<void> {
+    const observer = this.automationTerminalObservers.get(terminal.operationId);
+    if (!observer) return;
+    this.automationTerminalObservers.delete(terminal.operationId);
+    await observer(terminal);
+  }
+
   private async terminalizeInvocation(
     operationId: string | undefined,
     lifecycle: "completed" | "failed" | "interrupted" | "outcomeUnknown",
     errorCode?: string,
     owner?: GatewayWorkHandle,
+    assistantCompletionId?: string,
   ): Promise<void> {
     const invocation = this.invocationForOperation(operationId);
     if (!invocation || ["completed", "failed", "interrupted", "outcomeUnknown"].includes(invocation.lifecycle)) return;
@@ -2168,6 +2216,13 @@ export class RuntimeSlot {
       createdAt: new Date().toISOString(),
     }), owner ?? this.operationWork.get(invocation.operationId));
     this.invocations.delete(invocation.invocationId);
+    await this.notifyAutomationTerminal({
+      lifecycle,
+      operationId: invocation.operationId,
+      invocationId: invocation.invocationId,
+      ...(errorCode === undefined ? {} : { errorCode }),
+      ...(assistantCompletionId === undefined ? {} : { assistantCompletionId }),
+    });
   }
 
   private enqueueMarkerOwnership(operationId: string): Promise<void> {
@@ -2294,9 +2349,10 @@ export class RuntimeSlot {
         completionLifecycle,
         completionLifecycle === "interrupted" ? "user-abort" : undefined,
         item.fallbackWork,
+        completion.id,
       );
       if (completion.operationId) this.abortedOperations.delete(completion.operationId);
-      if (!this.pendingManualCompaction) {
+      if (!this.pendingManualCompaction && !completion.operationId?.startsWith("automation:")) {
         await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
       const completionWorkOwner = completion.operationId ?? this.completionWorkOwners.get(completion.id);
@@ -5079,6 +5135,7 @@ export class RuntimeSlot {
       attachments?: QueuedMessageState["attachments"];
     },
     onAdmitted?: (result: { operationId: string }) => void,
+    ownership?: PromptOwnership,
   ): Promise<{ operationId: string }> {
     return this.lane.run(async () => {
       this.assertUsable();
@@ -5128,7 +5185,10 @@ export class RuntimeSlot {
       const isExactExtensionCommand = extensionCommandName !== undefined
         && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
       const queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
-      const operationId = randomUUID();
+      const operationId = ownership?.operationId ?? randomUUID();
+      if (ownership && this.automationTerminalObservers.has(operationId)) {
+        throw new GatewayError("conflict", "Automation operation is already registered", true);
+      }
       const invocationId = randomUUID();
       const invocationSource: InvocationProjection["source"] = isExactExtensionCommand
         ? "extension"
@@ -5144,9 +5204,9 @@ export class RuntimeSlot {
         ...(invocationName ? { name: invocationName } : {}),
         ...(queueDisplay?.resourceInvocation?.arguments === undefined ? {} : { arguments: queueDisplay.resourceInvocation.arguments }),
         lifecycle: "staged",
-        origin: invocationSource === "extension" && invocationName
+        origin: ownership?.origin ?? (invocationSource === "extension" && invocationName
           ? this.extensionCommandOrigin(invocationName)
-          : { kind: "user", confidence: "boundary" },
+          : { kind: "user", confidence: "boundary" }),
         sequence: this.revision + 1,
         updatedAt: new Date().toISOString(),
       };
@@ -5190,6 +5250,7 @@ export class RuntimeSlot {
         };
       }
 
+      if (ownership) this.automationTerminalObservers.set(operationId, ownership.onTerminal);
       let operationWork!: GatewayWorkHandle;
       let preflightStarted = false;
       let acceptedResolve!: (accepted: boolean) => void;
@@ -5280,7 +5341,10 @@ export class RuntimeSlot {
         // callback. The Gateway has already durably admitted the exact command
         // and started its SDK promise, so release the RPC response while this
         // session lane continues to serialize the handler and its side effects.
-        if (isExactExtensionCommand) onAdmitted?.({ operationId });
+        if (isExactExtensionCommand) {
+          ownership?.onAdmitted?.(invocationId);
+          onAdmitted?.({ operationId });
+        }
       } catch (error) {
         if (preflightStarted) this.lifecycle.cancelPreflight(operationId);
         this.pendingQueueAdmission = undefined;
@@ -5306,9 +5370,15 @@ export class RuntimeSlot {
             sequence: this.revision + 1,
             createdAt: new Date().toISOString(),
           }), operationWork);
+          await this.notifyAutomationTerminal({
+            lifecycle: "outcomeUnknown",
+            operationId,
+            invocationId,
+          });
         }
         this.invocations.delete(invocationId);
         this.settleOperationWork(operationId);
+        if (!startPersisted) this.automationTerminalObservers.delete(operationId);
         throw error;
       }
       let runSettled = false;
@@ -5331,7 +5401,12 @@ export class RuntimeSlot {
           this.pendingPrompt = undefined;
           this.pendingPromptMessage = undefined;
         }
-        if (!this.pendingManualCompaction) await this.clearMarkerOwnership(operationId);
+        if (this.automationTerminalObservers.has(operationId)) {
+          await this.terminalizeInvocation(operationId, "completed");
+        }
+        if (!this.pendingManualCompaction && !operationId.startsWith("automation:")) {
+          await this.clearMarkerOwnership(operationId);
+        }
         // Marker I/O may suspend behind a newer run. Clear only this run's live
         // projection; conditional marker deletion already protects its successor.
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
@@ -5360,6 +5435,10 @@ export class RuntimeSlot {
             operationId,
             message: error instanceof Error ? error.message : String(error),
           }));
+          if (admissionFinalized && this.automationTerminalObservers.has(operationId)
+            && !this.hasActiveAgentRun) {
+            await this.terminalizeInvocation(operationId, "failed", "runtime-prompt-failed");
+          }
           if (admissionFinalized) await settleWithoutAgent();
         },
       );
@@ -5387,6 +5466,12 @@ export class RuntimeSlot {
           sequence: this.revision + 1,
           createdAt: new Date().toISOString(),
         }), operationWork);
+        await this.notifyAutomationTerminal({
+          lifecycle: "failed",
+          operationId,
+          invocationId,
+          errorCode: "preflight-rejected",
+        });
         this.invocations.delete(invocationId);
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
         if (this.operation?.id === operationId) this.operation = undefined;
@@ -5437,7 +5522,10 @@ export class RuntimeSlot {
       }
       this.revision += 1;
       this.publishSnapshot();
-      if (!isExactExtensionCommand) onAdmitted?.({ operationId });
+      if (!isExactExtensionCommand) {
+        ownership?.onAdmitted?.(invocationId);
+        onAdmitted?.({ operationId });
+      }
 
       if (isExactExtensionCommand) {
         const finishCommand = async () => {

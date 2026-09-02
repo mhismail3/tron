@@ -98,7 +98,7 @@ export function admitsAutomationAction(value: unknown): value is AutomationActio
       admitPromptText(input.text);
       if (input.resourceInvocation !== undefined) {
         const invocation = admitResourceInvocation(input.resourceInvocation);
-        if (invocation.arguments !== input.text) return false;
+        if (invocation.source === "extension" || invocation.arguments !== input.text) return false;
       }
       return true;
     } catch {
@@ -236,6 +236,13 @@ export function admitAutomationCreateInput(value: unknown, provenance: Automatio
 }
 
 export function admitAutomationUpdateInput(value: unknown): AutomationUpdateInput {
+  const input = record(value);
+  const allowed = ["name", "description", "targetSessionId", "trigger", "misfirePolicy", "overlapPolicy", "executionDeadlineSeconds", "action"];
+  const required = allowed.filter((key) => key !== "description");
+  if (!input || Object.keys(input).some((key) => !allowed.includes(key))
+    || !required.every((key) => Object.hasOwn(input, key))) {
+    throw new GatewayError("invalid_request", "Automation update must contain one complete definition without unknown fields");
+  }
   const created = admitAutomationCreateInput(value, { kind: "local" });
   return {
     name: created.name,

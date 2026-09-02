@@ -53,6 +53,8 @@ import { admitExtensionLifecycleArtifact } from "./extension-run-projection.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
+import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
+import { invocationProjection, invocationReceipts, type InvocationProjection } from "./invocation-receipts.js";
 import { projectTranscriptPage, type TranscriptPage } from "./projection.js";
 import {
   CatalogMetadataIndex,
@@ -451,6 +453,8 @@ export class RuntimeRegistry {
       sessionSummaryChanged: (summary: SessionSummaryUpdate) => void;
       sessionListChanged: () => void;
       sessionRekeyed?: (previousId: string, nextId: string) => void;
+      beforeSessionRekey?: (previousId: string, nextId: string) => Promise<void>;
+      beforeSessionDelete?: (sessionId: string) => Promise<void>;
       sessionClosed?: (sessionId: string) => void;
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
       stageTiming?: (stage: string, durationMs: number, outcome: "success" | "failure") => void;
@@ -458,6 +462,7 @@ export class RuntimeRegistry {
       notifications?: NotificationService;
       workRegistry?: GatewayWorkRegistry;
       extensionArtifactWarning?: (warning: { reason: import("./extension-run-projection.js").ExtensionArtifactRejectionReason; owner: string }) => void;
+      scheduleToolOperations?: ScheduleToolOperations;
     },
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
@@ -566,7 +571,11 @@ export class RuntimeRegistry {
         const completion = completionOwnedByMarker(manager, marker);
         if (!completion) continue;
         await this.attention.complete(sessionId, completion.id);
-        await this.markers.clear(sessionId, marker.operationId);
+        // Automation recovery must commit its own terminal record before this
+        // exact marker is cleared. Ordinary prompt markers remain attention-owned.
+        if (!marker.operationId.startsWith("automation:")) {
+          await this.markers.clear(sessionId, marker.operationId);
+        }
       }
     }
     await this.attention.advanceReconciliationCursor(scanBoundary);
@@ -647,6 +656,7 @@ export class RuntimeRegistry {
         for (const artifactID of slot.displayArtifactIDs()) {
           await this.displayArtifacts.grant(artifactID, nextId, previousId);
         }
+        await this.options.beforeSessionRekey?.(previousId, nextId);
         commitIdentity();
         if (this.slots.get(previousId) === slot) this.slots.delete(previousId);
         this.slots.set(nextId, slot);
@@ -826,6 +836,7 @@ export class RuntimeRegistry {
       ...(this.options.machineId ? { machineId: this.options.machineId } : {}),
       ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
+      ...(this.options.scheduleToolOperations ? { scheduleToolOperations: this.options.scheduleToolOperations } : {}),
       ...(this.options.stageTiming ? {
         runtimeDisposalTimedOut: (graceMs: number) => this.options.stageTiming!("runtime.dispose-timeout", graceMs, "failure"),
       } : {}),
@@ -1301,6 +1312,55 @@ export class RuntimeRegistry {
 
   async list(scope: "user" | "all" = "user"): Promise<SessionSummary[]> {
     return (await this.catalog(scope)).sessions;
+  }
+
+  async requirePersistedUserSession(sessionId: string): Promise<void> {
+    const acquisition = await this.catalogAcquisition();
+    this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
+    const entry = acquisition.entriesByID.get(sessionId);
+    if (!entry) throw new GatewayError("not_found", "Automation target session was not found");
+    if (entry.structuralSubagent) {
+      throw new GatewayError("conflict", "Automations cannot target runtime-owned subagent sessions");
+    }
+    if (!await this.attentionEntryStillAdmitted(entry)) {
+      throw new GatewayError("busy", "Automation target changed during validation", true);
+    }
+  }
+
+  async acquireAutomationLease(sessionId: string): Promise<{ slot: RuntimeSlot; release: () => void }> {
+    const slot = await this.acquire(sessionId);
+    return this.mutex.run(() => {
+      if (this.deletingSessionIds.has(sessionId) || this.slots.get(sessionId) !== slot
+        || slot.persistedSessionFile === undefined) {
+        throw new GatewayError("busy", "Automation target is being removed or is not yet persisted", true);
+      }
+      return { slot, release: slot.retainAutomationLease() };
+    });
+  }
+
+  async automationRecoveryEvidence(sessionId: string, operationId: string): Promise<{
+    marker?: RunMarkerEvidence;
+    invocation?: InvocationProjection;
+  }> {
+    const acquisition = await this.catalogAcquisition();
+    this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
+    const entry = acquisition.entriesByID.get(sessionId);
+    if (!entry || entry.structuralSubagent) return {};
+    let manager: SessionManager;
+    try { manager = SessionManager.open(entry.path, this.sessionDirectoryFor(entry.canonicalCwd)); }
+    catch { return {}; }
+    const marker = (await this.markers.evidenceFor(sessionId)).find((candidate) => candidate.operationId === operationId);
+    const invocation = invocationProjection(invocationReceipts(manager.getBranch(), sessionId))
+      .find((candidate) => candidate.operationId === operationId);
+    return {
+      ...(marker === undefined ? {} : { marker }),
+      ...(invocation === undefined ? {} : { invocation }),
+    };
+  }
+
+  async clearAutomationMarker(sessionId: string, operationId: string): Promise<void> {
+    if (!operationId.startsWith("automation:")) throw new Error("Only automation markers may be cleared through this boundary");
+    await this.markers.clear(sessionId, operationId);
   }
 
   private async attentionLiveOnlyStillAdmitted(sessionId: string): Promise<boolean> {
@@ -2691,6 +2751,7 @@ export class RuntimeRegistry {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         if (slot?.isBusy) throw new GatewayError("busy", "Stop the active session before deleting it");
+        await this.options.beforeSessionDelete?.(sessionId);
         this.cancelIdleEviction(sessionId, slot);
         if (slot) await slot.dispose();
         this.slots.delete(sessionId);

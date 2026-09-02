@@ -26,6 +26,11 @@ import { PushRelayClient } from "./notifications/relay-client.js";
 import { NotificationService } from "./notifications/notification-service.js";
 import { handledSignalExitCode, SUPERVISOR_RELAUNCH_EXIT_CODE } from "./lifecycle/supervisor-exit-policy.js";
 import { configureSupervisedNodeCommandEnvironment } from "./runtime/node-command-environment.js";
+import { AutomationStore } from "./automations/automation-store.js";
+import { AutomationScheduler } from "./automations/automation-scheduler.js";
+import { AutomationService } from "./automations/automation-service.js";
+import { GatewayAutomationExecutor } from "./automations/automation-executor.js";
+import { GatewayScheduleToolOperations } from "./automations/automation-tool-operations.js";
 
 const config = await loadConfig();
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
@@ -94,6 +99,8 @@ const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
 
 const workRegistry = new GatewayWorkRegistry();
+let automations!: AutomationService;
+let automationToolOperations!: GatewayScheduleToolOperations;
 const sessions = new RuntimeRegistry({
   agentDir: config.agentDir,
   tronHome: config.tronHome,
@@ -104,10 +111,15 @@ const sessions = new RuntimeRegistry({
   sessionSummaryChanged: (summary) => transport?.broadcast("session.summary", summary as unknown as JsonValue),
   sessionListChanged: () => transport?.notifySessionListChanged(),
   sessionRekeyed: (previousId, nextId) => transport?.rekeySession(previousId, nextId),
+  beforeSessionRekey: (previousId, nextId) => automations.rekeySessionTarget(previousId, nextId),
+  beforeSessionDelete: (sessionId) => automations.blockSessionTarget(sessionId),
   sessionClosed: (sessionId) => transport?.revokeSessionTerminals(sessionId),
   machineId: config.machineId,
   notifications,
   workRegistry,
+  scheduleToolOperations: {
+    execute: (sessionId, toolCallId, request) => automationToolOperations.execute(sessionId, toolCallId, request),
+  },
   extensionArtifactWarning: ({ reason, owner }) => logger.log(
     "warning",
     `Extension lifecycle artifact rejected (${reason}; owner ${owner})`,
@@ -139,6 +151,28 @@ const packages = new PackageService(
   workRegistry,
 );
 const legacyImport = new LegacyImportService(config.tronHome);
+const automationStore = new AutomationStore(config.tronHome, {
+  changed: (automationId) => transport?.broadcast("automation.changed", {
+    catalogRevision: automationStore.status().catalogRevision,
+    ...(automationId === undefined ? {} : { automationId }),
+  }),
+});
+const automationExecutor = new GatewayAutomationExecutor(
+  sessions,
+  workRegistry,
+  notifications,
+  config.machineId,
+);
+const automationScheduler = new AutomationScheduler(automationStore, automationExecutor, {
+  hostEpoch: workRegistry.runtimeEpoch,
+  onDiagnostic: (message, automationId, runId) => logger.log(
+    "warning",
+    message,
+    { event: "automation.dispatch-failed", source: "automations" },
+  ),
+});
+automations = new AutomationService(automationStore, automationScheduler, sessions);
+automationToolOperations = new GatewayScheduleToolOperations(automations, receipts);
 
 let stopping = false;
 let storageMaintenanceTimer: NodeJS.Timeout | undefined;
@@ -150,11 +184,15 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
   const forced = setTimeout(() => process.exit(1), 15_000);
   forced.unref();
   try {
+    automations.beginDrain();
     workRegistry.beginDrain();
     if (storageMaintenanceTimer) clearInterval(storageMaintenanceTimer);
     storageMaintenanceTimer = undefined;
     await transport.close();
-    await workRegistry.requestCancellation();
+    await Promise.allSettled([
+      automations.requestShutdownCancellation(),
+      workRegistry.requestCancellation(),
+    ]);
     // Administrative restart already waited without a deadline. Signal/error
     // shutdown gets only a short cleanup grace; failure cannot reopen admission.
     let cleanupTimer!: NodeJS.Timeout;
@@ -173,6 +211,7 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     }
     terminal.dispose();
     notifications.dispose();
+    await automations.dispose();
     await sessions.dispose();
     // pi-coding-agent 0.84.1 exposes no disposal API on the retained
     // administration resource loader/model runtime. Admission closure and exact
@@ -243,6 +282,7 @@ const service = new GatewayService({
   broadcast: (topic, payload) => transport?.broadcast(topic, payload),
   notifications,
   workRegistry,
+  automations,
 });
 transport = new GatewayServer({
   host: config.host,
@@ -276,6 +316,8 @@ const enrollmentTimer = setInterval(() => void devices.ensureEnrollment(), 60_00
 enrollmentTimer.unref();
 await transport.listen(async () => {
   await sessions.initialize((phase) => transport.setStartupPhase(phase));
+  transport.setStartupPhase("automation-recovery");
+  await automations.initialize();
   transport.setStartupPhase("storage-warming");
   await sessions.initializeBlobStorage();
 });

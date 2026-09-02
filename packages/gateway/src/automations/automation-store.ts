@@ -277,6 +277,40 @@ export class AutomationStore {
     });
   }
 
+  async resolveUnknown(
+    id: string,
+    expectedRevision: number,
+    runId: string,
+    outcome: "succeeded" | "failed" | "cancelled",
+    provenance: AutomationRecord["provenance"],
+  ): Promise<AutomationRecord> {
+    return this.definitionMutation(id, expectedRevision, (current) => {
+      const uncertain = current.lastRun?.runId === runId && current.lastRun.state === "outcomeUnknown"
+        ? current.lastRun : current.history.find((run) => run.runId === runId && run.state === "outcomeUnknown");
+      if (!uncertain) throw new GatewayError("conflict", "Automation run is not awaiting an outcome resolution");
+      const resolvedAt = new Date(this.now()).toISOString();
+      const resolveRun = (run: AutomationRun): AutomationRun => run.runId !== runId ? run : {
+        ...run,
+        state: outcome,
+        resolution: { outcome, resolvedAt, provenance: clone(provenance) },
+      };
+      const next = clone(current);
+      if (next.lastRun) next.lastRun = resolveRun(next.lastRun);
+      next.history = next.history.map(resolveRun);
+      next.activation = "enabled";
+      next.consecutiveFailureCount = outcome === "failed" ? 1 : 0;
+      delete next.blockedReason;
+      const occurrence = firstAutomationOccurrence(next.trigger, this.now());
+      if (occurrence === undefined) {
+        delete next.nextOccurrenceAt;
+        next.activation = "completed";
+      } else {
+        next.nextOccurrenceAt = occurrence;
+      }
+      return next;
+    });
+  }
+
   async delete(id: string, expectedRevision: number): Promise<void> {
     await this.mutex.run(async () => {
       this.assertInitialized();
@@ -364,7 +398,7 @@ export class AutomationStore {
   private async publishNew(record: AutomationRecord): Promise<void> {
     if (!admitsAutomationRecord(record)) throw new Error("Automation record failed its canonical contract");
     const bytes = serializedBytes(record);
-    this.requireCapacity(bytes);
+    this.requireCapacity(bytes, bytes);
     await durableAtomicWriteJson(this.path(record.id), record);
     this.records.set(record.id, clone(record));
     this.bytes.set(record.id, bytes);
@@ -374,15 +408,15 @@ export class AutomationStore {
   private async publishReplacement(current: AutomationRecord, next: AutomationRecord, notify = true): Promise<void> {
     if (!admitsAutomationRecord(next)) throw new Error("Automation record failed its canonical contract");
     const bytes = serializedBytes(next);
-    this.requireCapacity(bytes - (this.bytes.get(current.id) ?? 0));
+    this.requireCapacity(bytes, bytes - (this.bytes.get(current.id) ?? 0));
     await durableAtomicWriteJson(this.path(next.id), next);
     this.records.set(next.id, clone(next));
     this.bytes.set(next.id, bytes);
     if (notify) this.didChange(next.id);
   }
 
-  private requireCapacity(additionalBytes: number): void {
-    if (additionalBytes > MAXIMUM_AUTOMATION_RECORD_BYTES
+  private requireCapacity(recordBytes: number, additionalBytes: number): void {
+    if (recordBytes > MAXIMUM_AUTOMATION_RECORD_BYTES
       || this.aggregateBytes() + additionalBytes > MAXIMUM_AUTOMATION_AGGREGATE_BYTES) {
       throw new GatewayError("busy", "Automation storage capacity is full", true);
     }

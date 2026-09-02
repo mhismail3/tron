@@ -48,6 +48,9 @@ import type { NotificationService } from "../notifications/notification-service.
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { admitPromptText, admitResourceInvocation, canonicalResourceName } from "../sessions/resource-invocation.js";
+import type { AutomationService } from "../automations/automation-service.js";
+import { AUTOMATIONS_CAPABILITY } from "../automations/types.js";
+import { AutomationPaginationStore } from "../automations/automation-pagination.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
@@ -108,6 +111,7 @@ const restartDrainMethods = new Set([
   "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get", "session.workspace.git.history.diff",
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
+  "automation.status", "automation.list", "automation.get", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
 ]);
 
 export interface ClientContext {
@@ -162,6 +166,7 @@ export interface GatewayServiceDependencies {
   broadcast: (topic: string, payload: JsonValue) => void;
   notifications?: NotificationService;
   workRegistry?: GatewayWorkRegistry;
+  automations?: AutomationService;
 }
 
 export class GatewayService {
@@ -175,6 +180,7 @@ export class GatewayService {
   private readonly workRegistry: GatewayWorkRegistry | undefined;
   private readonly mobileIdentityLanes = new Map<string, MobileIdentityLane>();
   private readonly processTranscriptLeases: ProcessTranscriptLeaseStore;
+  private readonly automationPages = new AutomationPaginationStore();
   private readonly workspaceInspector: WorkspaceInspectionService;
 
   constructor(private readonly dependencies: GatewayServiceDependencies) {
@@ -198,6 +204,7 @@ export class GatewayService {
 
   releaseClient(clientID: string): void {
     this.sessionListPages.releaseClient(clientID);
+    this.automationPages.releaseClient(clientID);
     this.processTranscriptLeases.releaseClient(clientID);
   }
 
@@ -261,6 +268,7 @@ export class GatewayService {
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
+        ...(this.dependencies.automations ? [AUTOMATIONS_CAPABILITY] : []),
       ],
     };
   }
@@ -457,6 +465,7 @@ export class GatewayService {
               throw new GatewayError("busy", "Close active terminal sessions before restarting the Gateway", true);
             }
             const activeSessionIds = this.dependencies.sessions.activeSessionIds();
+            this.dependencies.automations?.beginDrain();
             const drain = this.dependencies.sessions.beginAdministrativeDrain();
             this.dependencies.logger?.log(
               "info",
@@ -486,6 +495,91 @@ export class GatewayService {
           }
         }
       }
+      case "automation.status": {
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Automation status accepts no parameters");
+        return safeJson(this.requireAutomations().status());
+      }
+      case "automation.list": {
+        if (Object.keys(params).some((key) => !["cursor", "limit"].includes(key))) {
+          throw new GatewayError("invalid_request", "Automation list accepts only cursor and limit");
+        }
+        const cursor = optionalString(params.cursor, "cursor", 64);
+        const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 100);
+        return safeJson(this.automationPages.page(client.id, this.requireAutomations().list(), cursor, limit));
+      }
+      case "automation.get": {
+        if (Object.keys(params).some((key) => key !== "automationId")) throw new GatewayError("invalid_request", "Automation get accepts only automationId");
+        return safeJson(this.requireAutomations().get(string(params.automationId, "automationId", { max: 64 })));
+      }
+      case "automation.run.list": {
+        if (Object.keys(params).some((key) => key !== "automationId")) throw new GatewayError("invalid_request", "Automation run list accepts only automationId");
+        return safeJson({ runs: this.requireAutomations().runList(string(params.automationId, "automationId", { max: 64 })) });
+      }
+      case "automation.run.get": {
+        if (Object.keys(params).some((key) => !["automationId", "runId"].includes(key))) throw new GatewayError("invalid_request", "Automation run get accepts only automationId and runId");
+        return safeJson(this.requireAutomations().runGet(
+          string(params.automationId, "automationId", { max: 64 }),
+          string(params.runId, "runId", { max: 64 }),
+        ));
+      }
+      case "automation.create":
+        return this.mutation(client, method, params, async () => {
+          if (Object.keys(params).some((key) => !["commandId", "definition"].includes(key))) throw new GatewayError("invalid_request", "Automation create accepts only definition and commandId");
+          return safeJson(await this.requireAutomations().create(params.definition, { kind: client.isLocal ? "local" : "mobile" }));
+        });
+      case "automation.update":
+        return this.mutation(client, method, params, async () => {
+          if (Object.keys(params).some((key) => !["commandId", "automationId", "expectedRevision", "definition"].includes(key))) throw new GatewayError("invalid_request", "Automation update contains unknown parameters");
+          return safeJson(await this.requireAutomations().update(
+            string(params.automationId, "automationId", { max: 64 }),
+            integer(params.expectedRevision, "expectedRevision", 1, Number.MAX_SAFE_INTEGER),
+            params.definition,
+          ));
+        });
+      case "automation.enable":
+      case "automation.pause":
+        return this.mutation(client, method, params, async () => {
+          if (Object.keys(params).some((key) => !["commandId", "automationId", "expectedRevision"].includes(key))) throw new GatewayError("invalid_request", "Automation activation mutation contains unknown parameters");
+          const id = string(params.automationId, "automationId", { max: 64 });
+          const revision = integer(params.expectedRevision, "expectedRevision", 1, Number.MAX_SAFE_INTEGER);
+          return safeJson(method === "automation.enable"
+            ? await this.requireAutomations().enable(id, revision)
+            : await this.requireAutomations().pause(id, revision));
+        });
+      case "automation.delete":
+        return this.mutation(client, method, params, async () => {
+          if (Object.keys(params).some((key) => !["commandId", "automationId", "expectedRevision"].includes(key))) throw new GatewayError("invalid_request", "Automation delete contains unknown parameters");
+          await this.requireAutomations().delete(
+            string(params.automationId, "automationId", { max: 64 }),
+            integer(params.expectedRevision, "expectedRevision", 1, Number.MAX_SAFE_INTEGER),
+          );
+          return { deleted: true };
+        });
+      case "automation.runNow":
+        return this.mutation(client, method, params, async () => {
+          if (Object.keys(params).some((key) => !["commandId", "automationId"].includes(key))) throw new GatewayError("invalid_request", "Automation run-now contains unknown parameters");
+          return safeJson(await this.requireAutomations().runNow(string(params.automationId, "automationId", { max: 64 })));
+        });
+      case "automation.run.cancel":
+        return this.mutation(client, method, params, async () => {
+          if (Object.keys(params).some((key) => !["commandId", "automationId", "runId"].includes(key))) throw new GatewayError("invalid_request", "Automation cancellation contains unknown parameters");
+          return safeJson(await this.requireAutomations().cancel(
+            string(params.automationId, "automationId", { max: 64 }),
+            string(params.runId, "runId", { max: 64 }),
+          ));
+        }, true);
+      case "automation.run.resolve":
+        return this.mutation(client, method, params, async () => {
+          if (Object.keys(params).some((key) => !["commandId", "automationId", "runId", "expectedRevision", "outcome"].includes(key))) throw new GatewayError("invalid_request", "Automation resolution contains unknown parameters");
+          return safeJson(await this.requireAutomations().resolve(
+            string(params.automationId, "automationId", { max: 64 }),
+            string(params.runId, "runId", { max: 64 }),
+            integer(params.expectedRevision, "expectedRevision", 1, Number.MAX_SAFE_INTEGER),
+            oneOf(params.outcome, "outcome", ["succeeded", "failed", "cancelled"] as const),
+            { kind: client.isLocal ? "local" : "mobile" },
+          ));
+        }, true);
+
       case "legacy.inspect":
         return safeJson(await this.dependencies.legacyImport.inspect());
       case "legacy.import":
@@ -1305,6 +1399,11 @@ export class GatewayService {
     if (["starting", "building", "staging", "draining", "promoting", "restart", "rollback", "rollback-requested", "restart-requested"].includes(status.state)) {
       throw new GatewayError("busy", "Wait for the active Gateway update or rollback to finish before installing iOS", true);
     }
+  }
+
+  private requireAutomations(): AutomationService {
+    if (!this.dependencies.automations) throw new GatewayError("unsupported", "Automations are unavailable in this Gateway build");
+    return this.dependencies.automations;
   }
 
   private requireNotifications(): NotificationService {

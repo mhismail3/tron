@@ -67,6 +67,53 @@ the Gateway is stopped and restarted; the runtime also snapshots the admitted
 session directory at startup so an out-of-band settings edit cannot redirect
 new work around the ownership lock.
 
+## Automations
+
+The Gateway is the sole scheduler and canonical owner for durable automations.
+Pi extensions and delegated subagents may execute work inside a scheduled turn,
+but they own no timer, definition, retry, or run ledger. Automation records live
+under `gateway/automations/` as bounded owner-only documents containing one
+definition, at most one nonterminal run, and 64 retained terminal runs. Writes
+sync the replacement file and parent directory before acknowledgement. iOS and
+Pi's first-party `schedule` tool are clients of this authority, never mirrors.
+
+`automations.v1` supports one-time, anchored interval, and IANA-timezone
+daily/weekly triggers. Calendar gaps advance to the first valid local minute and
+repeated local minutes choose the earlier instant. Misfire policy is `latest` or
+`skip`; overlap policy is `skip` or one `queueLatest` occurrence. Catch-up,
+history, dispatch batches, timers, prompts, storage, and concurrency are all
+bounded. Recurrence advances from intended schedule time rather than completion
+time, and clock movement cannot recreate an already-recorded occurrence.
+
+Agent automations target an existing persisted user session and enter only
+through `RuntimeRegistry`/`RuntimeSlot`. An exact slot lease closes deletion and
+idle-eviction races; ordinary per-session serialization remains authoritative.
+Scheduled prompts never steer or enqueue into an active turn, so a busy target
+waits durably while unrelated sessions may proceed. Resource actions revalidate
+the current typed skill or prompt identity and project Gateway automation
+provenance instead of pretending the input came from a user. Extension commands,
+attachments, arbitrary shell, webhooks, deployment, and Gateway lifecycle
+actions are not automation capabilities.
+
+Each occurrence and run is durable before dispatch. Pre-admission transient
+failures may retry with bounded backoff; accepted agent failures do not. A crash
+before any canonical invocation/marker evidence permits the same run to requeue.
+Accepted work without exact terminal evidence becomes `outcomeUnknown`, blocks
+future occurrences, and requires an explicit receipt-backed user resolution.
+Successful canonical completion remains marked until the automation terminal
+record is durable, so restart recovery can finish settlement without replaying
+the prompt. One-time work completes after its terminal occurrence, three
+consecutive definitive failures open a circuit breaker, and running work has an
+exact operation-fenced cancellation/deadline rather than a fictional pause.
+
+Startup performs bounded target and run reconciliation before dispatch opens.
+Malformed individual records remain untouched and disable automation dispatch
+for that evidence instead of being interpreted as absence. Administrative drain
+closes the scheduler synchronously; future due work never blocks restart, while
+already admitted dispatch and terminal persistence use the shared Gateway work
+registry and must settle truthfully. The global `automation.changed` event is
+only an invalidation hint; list/get/run RPCs remain authoritative.
+
 ## Moonshot Kimi K3
 
 The built-in Moonshot K3 model uses the Open Platform OpenAI-compatible endpoint
@@ -132,13 +179,26 @@ The Gateway also owns a bounded 512-entry user-facing notification inbox in the 
 
 Every successfully admitted semantic interaction (`select`, `confirm`, `input`, `editor`, or form) emits one detached input-required callback from the shared `SemanticUIBroker` boundary while that exact interaction remains pending. This includes forms produced by the provenance-checked `@zhushanwen/pi-ask-user@7.0.15` adapter without giving that adapter a second notification path. The generated interaction ID is the durable notification deduplication source. RuntimeSlot samples the same token-bound `session.presentation.set` lease synchronously at interaction admission: an already-visible chat writes only a `suppressed` receipt, with no relay intent, inbox row, or quota charge; a hidden chat queues fixed “Input needed” copy with the exact Gateway machine/session route. Notification failure never delays or fails the interaction. The persisted `notifyWhenAskPresented` field retains its wire name for registration compatibility but governs all semantic input-required alerts. Producer `needsAttention` activity, status text, widgets, retained surfaces, and ordinary runtime phases do not prove a response-capable user interaction and therefore do not trigger this hook.
 
+Authenticated automation reads are `automation.status`, `automation.list`,
+`automation.get`, `automation.run.list`, and `automation.run.get`. Receipt-backed
+mutations are `automation.create`, `automation.update`, `automation.enable`,
+`automation.pause`, `automation.delete`, `automation.runNow`,
+`automation.run.cancel`, and `automation.run.resolve`. Definitions use optimistic
+revision fences; scheduler state advances a separate state revision so a running
+occurrence does not invalidate an unrelated definition edit. List responses omit
+action bodies and page under an opaque exact catalog lease. Get returns the full
+authenticated definition. The first-party schedule tool is restricted to its
+current persisted user session, deduplicates mutations by canonical tool-call
+identity, and rejects mutations from an automation-originated turn to prevent
+self-replication.
+
 Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list`, `notification.inbox.read`, and `notification.inbox.readAll`. Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
 
 Outbound relay requests use one fixed `/v3/notifications` route, no redirects, a twenty-second deadline that exceeds the relay's bounded APNs deadline, a 2 KiB request and 16 KiB response boundary, and a lowercase-hex HMAC over method, path, timestamp, stable request ID, and the exact body's lowercase-hex SHA-256. Restart recovery retries transient outcomes with the same request ID. When the relay specifically reports that this ID still owns an active provider attempt, the Gateway polls it through the same bounded retry schedule; the relay ledger returns the eventual terminal result without creating a second APNs request. Unclassified ambiguous outcomes remain terminal and are never blindly replayed. Exact relay `invalid_signature` and `installation_unavailable` errors invalidate that grant without persisting or logging response bodies; mobile registration then rotates the capability instead of retrying an identity that cannot reach APNs. Quotas apply across the installation, canonical session, and target grant.
 
 ## Transport
 
-- `GET /health` — unauthenticated readiness and compatibility metadata. The bound listener reports `starting`, `catalog-warming`, `attention-recovery`, or `storage-warming` with HTTP 503 until all startup prerequisites complete, then reports `ok` with HTTP 200; every other HTTP route and WebSocket upgrade remains retryable `busy`/503 during warmup and does not enter session APIs.
+- `GET /health` — unauthenticated readiness and compatibility metadata. The bound listener reports `starting`, `catalog-warming`, `attention-recovery`, `automation-recovery`, or `storage-warming` with HTTP 503 until all startup prerequisites complete, then reports `ok` with HTTP 200; every other HTTP route and WebSocket upgrade remains retryable `busy`/503 during warmup and does not enter session APIs.
 - `POST /v1/pair` — rate-limited one-time enrollment exchange
 - `POST /v1/uploads` — authenticated bounded upload
 - `DELETE /v1/uploads/:id` — authenticated discard of unclaimed client staging; prompt-owned attachments fail closed

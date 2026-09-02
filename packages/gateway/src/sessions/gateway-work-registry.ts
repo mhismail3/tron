@@ -11,6 +11,8 @@ export const gatewayWorkKinds = [
   "terminal-receipt-persistence",
   "extension-command-prompt-ui",
   "administrative-provider-package-operation",
+  "automation-dispatch",
+  "automation-terminal-persistence",
 ] as const;
 
 export type GatewayWorkKind = typeof gatewayWorkKinds[number];
