@@ -156,7 +156,7 @@ struct DisplayToolView: View {
                 .opacity(disclosure.inlineOpacity)
                 .scaleEffect(disclosure.isCollapsed ? 0.985 : 1, anchor: .topLeading)
                 .allowsHitTesting(disclosure.phase == .expanded)
-                .accessibilityHidden(disclosure.isCollapsed)
+                .accessibilityHidden(disclosure.phase != .expanded)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
                     recordDisclosureHeight($0, expanded: true)
                 }
@@ -166,13 +166,12 @@ struct DisplayToolView: View {
                 .opacity(disclosure.pillOpacity)
                 .scaleEffect(disclosure.isCollapsed ? 1 : 0.985, anchor: .topLeading)
                 .allowsHitTesting(disclosure.phase == .collapsed)
-                .accessibilityHidden(!disclosure.isCollapsed)
+                .accessibilityHidden(disclosure.phase != .collapsed)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
                     recordDisclosureHeight($0, expanded: false)
                 }
         }
         .frame(height: disclosureHeight, alignment: .top)
-        .clipped()
         .frame(maxWidth: .infinity, alignment: .leading)
         .contextMenu {
             Button("Tool Details", systemImage: "info.circle", action: onOpenTechnicalDetails)
@@ -224,8 +223,12 @@ struct DisplayToolView: View {
         display != nil && !tool.error && !tool.isRunning && effectiveSurface == .inline
     }
 
-    private var disclosureAnimation: Animation? {
-        reduceMotion ? nil : .smooth(duration: 0.28)
+    private var disclosureFadeAnimation: Animation? {
+        reduceMotion ? nil : .easeOut(duration: 0.10)
+    }
+
+    private var disclosureLayoutAnimation: Animation? {
+        reduceMotion ? nil : .smooth(duration: 0.22)
     }
 
     private var displayPill: some View {
@@ -321,19 +324,25 @@ struct DisplayToolView: View {
     }
 
     private func collapseInline() {
-        transitionDisclosure(.collapse)
+        guard let transition = disclosure.proposed(.collapse) else { return }
+        // Both endpoints remain in one measured host. First fade the card and
+        // its native shadow completely while preserving row height; only then
+        // contract the invisible card region into the already-visible pill.
+        withAnimation(disclosureFadeAnimation, completionCriteria: .logicallyComplete) {
+            guard disclosure.begin(transition) else { return }
+        } completion: {
+            guard disclosure.generation == transition.generation else { return }
+            withAnimation(disclosureLayoutAnimation) {
+                _ = disclosure.complete(transition)
+            }
+        }
     }
 
     private func expandInline() {
-        transitionDisclosure(.expand)
-    }
-
-    private func transitionDisclosure(_ direction: DisplayInlineDisclosureDirection) {
-        guard let transition = disclosure.proposed(direction) else { return }
-        // The persistent ZStack crossfades both endpoints while this one frame
-        // animates between measured heights. Clipping follows the interpolated
-        // host boundary, so neither endpoint can paint across neighboring rows.
-        withAnimation(disclosureAnimation) {
+        guard let transition = disclosure.proposed(.expand) else { return }
+        // Growth cannot paint across following rows, so expansion can resize and
+        // crossfade in one transaction without any temporary clipping surface.
+        withAnimation(disclosureLayoutAnimation) {
             guard disclosure.begin(transition) else { return }
             _ = disclosure.complete(transition)
         }
@@ -401,6 +410,7 @@ private struct DisplayInlineImageChip: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.displayTranscriptReady) private var transcriptReady
+    @Environment(\.colorScheme) private var colorScheme
     @State private var image: UIImage?
     @State private var loadedIdentity: ChatMediaIdentity?
     @State private var failed = false
@@ -442,7 +452,7 @@ private struct DisplayInlineImageChip: View {
     @ViewBuilder
     private var imageSurface: some View {
         ZStack {
-            Color.black.opacity(0.88)
+            transparencyBackdrop
             if let image {
                 Image(uiImage: image)
                     .resizable()
@@ -467,6 +477,12 @@ private struct DisplayInlineImageChip: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var transparencyBackdrop: Color {
+        colorScheme == .dark
+            ? Color(uiColor: .black)
+            : Color(uiColor: .systemBackground)
     }
 
     private var mediaIdentity: ChatMediaIdentity? {
