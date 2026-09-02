@@ -308,6 +308,17 @@ export class AutomationStore {
         else next.nextOccurrenceAt = occurrence;
       } else {
         delete next.nextOccurrenceAt;
+        if (next.currentRun && (next.currentRun.state === "queued" || next.currentRun.state === "waiting")) {
+          const terminal: AutomationRun = {
+            ...next.currentRun,
+            state: "cancelled",
+            reason: "automation-paused",
+            terminalAt: new Date(this.now()).toISOString(),
+          };
+          delete next.currentRun;
+          next.lastRun = terminal;
+          next.history = boundedHistory([...next.history, terminal]);
+        }
       }
       return next;
     });

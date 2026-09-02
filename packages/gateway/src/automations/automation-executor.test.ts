@@ -57,6 +57,30 @@ describe("GatewayAutomationExecutor", () => {
     expect(work.size).toBe(0);
   });
 
+  it("recovers a canonical completion marker even before its terminal receipt", async () => {
+    const { record, run } = fixture();
+    const sessions = {
+      automationRecoveryEvidence: vi.fn(async () => ({
+        marker: { operationId: run.operationId, acceptedAt: "2026-01-01T01:00:00.000Z", assistantCompletionId: "completion-one", assistantCompletedAt: "2026-01-01T01:01:00.000Z" },
+        invocation: { invocationId: "invocation-one", lifecycle: "accepted" },
+      })),
+    };
+    const executor = new GatewayAutomationExecutor(sessions as any, new GatewayWorkRegistry(), undefined, undefined);
+    await expect(executor.recover(record, run)).resolves.toEqual({
+      state: "succeeded", invocationId: "invocation-one", assistantCompletionId: "completion-one",
+    });
+  });
+
+  it("preserves a durable cancellation intent when no admission evidence exists", async () => {
+    const { record, run } = fixture();
+    run.state = "cancelling";
+    const sessions = { automationRecoveryEvidence: vi.fn(async () => ({})) };
+    const executor = new GatewayAutomationExecutor(sessions as any, new GatewayWorkRegistry(), undefined, undefined);
+    await expect(executor.recover(record, run)).resolves.toEqual({
+      state: "cancelled", reason: "cancelled-before-admission",
+    });
+  });
+
   it("classifies accepted recovery without terminal evidence as unknown", async () => {
     const { record, run } = fixture();
     const sessions = {

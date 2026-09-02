@@ -66,6 +66,27 @@ describe("AutomationStore", () => {
     await expect(store.setActivation(created.id, 1, "paused")).resolves.toMatchObject({ revision: 2 });
   });
 
+  it("pauses future admission by terminalizing a queued occurrence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-pause-"));
+    const store = new AutomationStore(root, { now: () => Date.parse("2026-01-01T00:00:01Z") });
+    await store.initialize();
+    const created = await store.create(input());
+    const run: AutomationRun = {
+      runId: "10000000-0000-4000-8000-000000000008",
+      occurrenceId: automationOccurrenceId(created.id, created.revision, created.nextOccurrenceAt!),
+      automationRevision: created.revision, scheduledFor: created.nextOccurrenceAt!,
+      triggerSnapshot: created.trigger, actionSnapshot: created.action, state: "queued",
+      createdAt: "2026-01-01T00:00:01.000Z", preAdmissionAttemptCount: 0,
+      operationId: "automation:10000000-0000-4000-8000-000000000008",
+    };
+    await store.mutateState(created.id, (current) => ({ ...current, currentRun: run }));
+
+    const paused = await store.setActivation(created.id, created.revision, "paused");
+
+    expect(paused.currentRun).toBeUndefined();
+    expect(paused.lastRun).toMatchObject({ runId: run.runId, state: "cancelled", reason: "automation-paused" });
+  });
+
   it("terminalizes queued target work before blocking a deleted session", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-automation-target-delete-"));
     const store = new AutomationStore(root, { now: () => Date.parse("2026-01-01T00:00:01Z") });

@@ -358,6 +358,7 @@ export class AutomationScheduler {
     const claimedAt = new Date(this.now()).toISOString();
     const claimed = await this.store.mutateState(candidate.id, (current) => {
       if (current.currentRun?.runId !== run.runId
+        || current.activation !== "enabled" && !current.currentRun.occurrenceId.startsWith("manual:")
         || (current.currentRun.state !== "queued" && current.currentRun.state !== "waiting")) return current;
       const next = clone(current);
       next.currentRun = {
