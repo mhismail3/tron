@@ -371,6 +371,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let canonicalSubmissionIDs: Set<String>
     let canonicalSubmissionAliases: [String: String]
     let isReady: Bool
+    let permitsAsynchronousContent: Bool
     let minimumUnderflowContentHeight: CGFloat
     let reduceMotion: Bool
     let presentationEpoch: Int
@@ -475,10 +476,18 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             if isReady, current.isAtCatchUpBoundary {
                 hostedRecorder?.recordScrollSettle(distanceFromBottom: current.distanceFromBottom)
             }
+            guard admitsNativeCallbacks else { return }
+            if observation.presentationPhase == .opening {
+                // Preserve the initial native viewport even if the transition to
+                // positioning has identical geometry and emits no second callback.
+                // The coordinator records evidence only; opening cannot mutate
+                // anchoring or publish commands through this path.
+                scrollCoordinator.observeOpeningGeometry(current)
+                return
+            }
             guard observation.presentationPhase == .positioning
                     || observation.presentationPhase == .ready,
-                  admitsGeometryCallbacks,
-                  admitsNativeCallbacks else { return }
+                  admitsGeometryCallbacks else { return }
             if current.hasViewportChange(from: prior) {
                 scrollCoordinator.viewportChanged(previous: prior, current: current)
             } else {
@@ -747,6 +756,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             recordToolChip: { sample in hostedRecorder?.recordToolChip(sample) }
         )
         .equatable()
+        .environment(\.displayTranscriptReady, isReady && permitsAsynchronousContent)
         .chatStableTranscriptUpdates(projectionIdentity: installed.tag)
     }
 

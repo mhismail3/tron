@@ -86,6 +86,7 @@ struct ChatSessionPresentationTests {
         #expect(!owner.finishOpeningTask(generation &+ 1))
         #expect(owner.openingTask != nil)
         owner.cancelOpeningTask()
+        #expect(owner.openingTaskWasCancelled(generation))
         #expect(owner.installOpeningTask(Task<Void, Never> {}) == nil)
         #expect(owner.activeOpeningTaskLease?.generation == generation)
         #expect(owner.finishOpeningTask(generation))
@@ -103,12 +104,14 @@ struct ChatSessionPresentationTests {
         #expect(!owner.expireOpeningTask(firstGeneration &+ 1))
         #expect(owner.openingTask != nil)
         #expect(owner.expireOpeningTask(firstGeneration))
+        #expect(owner.openingTaskWasCancelled(firstGeneration))
         #expect(owner.openingTask != nil)
         #expect(owner.installOpeningTask(Task<Void, Never> {}) == nil)
         #expect(owner.finishOpeningTask(firstGeneration))
 
         let replacement = Task<Void, Never> { try? await Task.sleep(for: .seconds(30)) }
         let replacementGeneration = try #require(owner.installOpeningTask(replacement))
+        #expect(!owner.openingTaskWasCancelled(replacementGeneration))
         #expect(!owner.expireOpeningTask(firstGeneration))
         #expect(owner.openingTask != nil)
         owner.cancelOpeningTask()
@@ -122,6 +125,30 @@ struct ChatSessionPresentationTests {
         #expect(ChatOpeningAttemptPolicy.isUnsettled(.positioning))
         #expect(!ChatOpeningAttemptPolicy.isUnsettled(.ready))
         #expect(!ChatOpeningAttemptPolicy.isUnsettled(.failed("retry")))
+        #expect(ChatOpeningAttemptPolicy.shouldFailUnsettledAttempt(
+            completedOwnedTask: true,
+            taskCancelled: false,
+            sceneActive: true,
+            presentationActive: true,
+            modelAdmitsOpen: true,
+            phase: .positioning
+        ))
+        for admission in [
+            (true, true, true, true, true),
+            (false, false, true, true, true),
+            (true, false, false, true, true),
+            (true, false, true, false, true),
+            (true, false, true, true, false),
+        ] {
+            #expect(!ChatOpeningAttemptPolicy.shouldFailUnsettledAttempt(
+                completedOwnedTask: admission.0,
+                taskCancelled: admission.1,
+                sceneActive: admission.2,
+                presentationActive: admission.3,
+                modelAdmitsOpen: admission.4,
+                phase: .opening
+            ))
+        }
     }
 
     @Test("foreground resumes an interrupted opening but not a passive ready session")

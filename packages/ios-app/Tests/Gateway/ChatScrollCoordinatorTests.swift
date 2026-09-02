@@ -1159,15 +1159,50 @@ struct ChatScrollCoordinatorTests {
     @Test("opening tail opaque fallback defaults to 750 milliseconds")
     func openingTailDefaultTimeout() {
         #expect(ChatScrollCoordinator.defaultOpeningTailTimeout == .milliseconds(750))
+        #expect(ChatScrollCoordinator.maximumOpeningTailCommandAttempts == 3)
     }
 
-    @Test("opening timeout fails without physical marker proof")
-    func openingTailTimeoutRequiresPhysicalProof() async throws {
-        try await assertOpeningTimeout(target: "missing-tail", reveals: false)
+    @Test("opening acknowledgement deadline repairs rather than revealing displaced evidence")
+    func openingTailAcknowledgementRepairsDisplacedEvidence() async throws {
+        try await withTestWatchdog { @MainActor in
+            let clock = ManualClock()
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(
+                frameScheduler: frames.scheduler,
+                clock: clock.clock,
+                openingTailTimeout: .seconds(1)
+            )
+            let positioning = Task {
+                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
+            }
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let first = try await coordinator.hostedNextCommand()
+            #expect(coordinator.commandApplied(first))
+            coordinator.semanticFrameChanged(
+                renderedID: "transcript-bottom",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 100, width: 100, height: 12)
+            )
+            coordinator.geometryChanged(previous: .zero, current: away)
+
+            try await clock.waitUntilSleeping(count: 1)
+            let requestCount = frames.requestCount
+            clock.advance(by: .seconds(1))
+            await frames.waitForRequest(count: requestCount + 1)
+            frames.releaseNext()
+            let repair = try await coordinator.hostedNextCommand()
+            #expect(repair.token != first.token)
+            #expect(repair.destination == .openingTail("transcript-bottom"))
+            #expect(coordinator.viewportMode == .pinned)
+
+            positioning.cancel()
+            #expect(!(await positioning.value))
+        }
     }
 
-    @Test("opening timeout clears a published command before delayed application")
-    func openingTimeoutClearsDelayedCommand() async throws {
+    @Test("opening acknowledgement deadline starts only after command application")
+    func openingTimeoutStartsAfterCommandApplication() async throws {
         try await withTestWatchdog { @MainActor in
             let clock = ManualClock()
             let frames = ManualViewportFrameScheduler()
@@ -1179,17 +1214,31 @@ struct ChatScrollCoordinatorTests {
             coordinator.requestOpeningTail(targetRenderedID: "transcript-bottom")
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
-            for _ in 0..<20 where coordinator.command == nil {
-                await Task.yield()
-            }
-            #expect(coordinator.command != nil)
+            let command = try await coordinator.hostedNextCommand()
+            #expect(clock.activeSleeperCount() == 0)
+            #expect(coordinator.command == command)
+
+            #expect(coordinator.commandApplied(command))
             try await clock.waitUntilSleeping(count: 1)
-            clock.advance(by: .seconds(1))
-            for _ in 0..<4 where coordinator.command != nil {
-                await Task.yield()
-            }
-            #expect(coordinator.command == nil)
+            coordinator.cancel()
         }
+    }
+
+    @Test("opaque opening preserves initial native evidence without side effects")
+    func opaqueOpeningPreservesInitialEvidence() async {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.semanticFrameChanged(
+            renderedID: "transcript-bottom",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+        )
+        coordinator.observeOpeningGeometry(bottom)
+
+        #expect(await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom"))
+        #expect(coordinator.command == nil)
+        #expect(coordinator.viewportMode == .pinned)
+        #expect(!coordinator.hasUnreadContent)
+        coordinator.cancel()
     }
 
     @Test("physical opening proof clears a published command before delayed application")
@@ -1218,22 +1267,30 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
-    @Test("opening timeout does not expose a best-effort ready frame")
-    func openingTailTimeoutDoesNotRevealWithoutProof() async throws {
+    @Test("opening acknowledgement does not fail without fresh native evidence")
+    func openingTailTimeoutRequiresFreshEvidence() async throws {
         try await withTestWatchdog { @MainActor in
             let clock = ManualClock()
+            let frames = ManualViewportFrameScheduler()
             let coordinator = ChatScrollCoordinator(
+                frameScheduler: frames.scheduler,
                 clock: clock.clock,
                 openingTailTimeout: .seconds(1)
             )
             let positioning = Task {
                 await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
             }
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(coordinator.commandApplied(command))
             try await clock.waitUntilSleeping(count: 1)
             clock.advance(by: .seconds(1))
-            #expect(!(await positioning.value))
-            #expect(coordinator.command == nil)
+            for _ in 0..<8 where clock.activeSleeperCount() == 0 { await Task.yield() }
+            #expect(clock.activeSleeperCount() == 1)
             #expect(coordinator.viewportMode == .pinned)
+            positioning.cancel()
+            #expect(!(await positioning.value))
         }
     }
 
@@ -1854,21 +1911,6 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.viewportMode == .pinned)
         #expect(!coordinator.hasUnreadContent)
         #expect(coordinator.command == nil)
-    }
-
-    private func assertOpeningTimeout(target: String, reveals: Bool) async throws {
-        try await withTestWatchdog { @MainActor in
-            let clock = ManualClock()
-            let coordinator = ChatScrollCoordinator(
-                clock: clock.clock, openingTailTimeout: .seconds(1)
-            )
-            let task = Task { await coordinator.positionOpeningTail(targetRenderedID: target) }
-            try await clock.waitUntilSleeping(count: 1)
-            clock.advance(by: .seconds(1))
-            #expect(await task.value == reveals)
-            #expect(coordinator.command == nil)
-            coordinator.cancel()
-        }
     }
 
     private func prependReadyCoordinator(clock: ManualClock? = nil) -> ChatScrollCoordinator {

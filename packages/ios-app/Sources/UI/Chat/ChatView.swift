@@ -120,6 +120,7 @@ struct ChatView: View {
             .overlay {
                 ChatFloatingDisplayHost(
                     route: $sessionPresentation.floatingDisplay,
+                    bottomExclusion: composerMeasuredHeight,
                     onOpenSheet: { sessionPresentation.displaySheet = $0 }
                 )
             }
@@ -400,11 +401,20 @@ struct ChatView: View {
                 abandonLayoutTransaction()
             }
             if previous.allowsViewportObservation,
-               !current.allowsViewportObservation,
-               current.allowsDataPublication,
-               !hasDeferredViewportProjection {
-                deferredViewportProjectionBaseline = transcriptPresentation.installed
-                hasDeferredViewportProjection = true
+               !current.allowsViewportObservation {
+                if ChatOpeningAttemptPolicy.isUnsettled(sessionPresentation.open.phase) {
+                    // A covered transcript cannot publish the native geometry
+                    // needed to finish positioning. Cancel the exact opening and
+                    // scroll leases now so uncovering resumes with a fresh epoch;
+                    // never let their deadlines mature behind another surface.
+                    sessionPresentation.cancelOpeningTask()
+                    scrollCoordinator.cancel()
+                }
+                if current.allowsDataPublication,
+                   !hasDeferredViewportProjection {
+                    deferredViewportProjectionBaseline = transcriptPresentation.installed
+                    hasDeferredViewportProjection = true
+                }
             }
             if previous.allowsDataPublication,
                !current.allowsDataPublication {
@@ -505,11 +515,17 @@ struct ChatView: View {
             // AppModel retains accepted uploads and submissions.
             sessionPresentation.suspendForBackground()
         } else if current == .active,
-                  presentationActivity.allowsPresentationPublication,
-                  !sessionPresentation.needsOpeningResume,
-                  transcriptPresentation.installed != nil {
-            intakeLatestTranscriptProjectionIfNeeded()
-            scrollCoordinator.foregroundViewportBecameActive()
+                  presentationActivity.allowsPresentationPublication {
+            if sessionPresentation.needsOpeningResume
+                || transcriptPresentation.installed == nil {
+                // Foregrounding does not necessarily change connection state or
+                // publish a reconciliation generation. Resume explicitly instead
+                // of waiting for an unrelated model event.
+                beginOpeningAfterForegroundWhenConnected()
+            } else {
+                intakeLatestTranscriptProjectionIfNeeded()
+                scrollCoordinator.foregroundViewportBecameActive()
+            }
         }
     }
 
@@ -904,6 +920,7 @@ struct ChatView: View {
             canonicalSubmissionIDs: sessionPresentation.canonicalSubmissionHandoffs.ids,
             canonicalSubmissionAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
             isReady: isTranscriptReady,
+            permitsAsynchronousContent: scrollCoordinator.permitsAsynchronousTranscriptContent,
             minimumUnderflowContentHeight: minimumUnderflowContentHeight,
             reduceMotion: reduceMotion,
             presentationEpoch: sessionPresentation.open.epoch,
@@ -1455,6 +1472,14 @@ struct ChatView: View {
             guard sessionPresentation.expireOpeningTask(generation) else { return }
             transcriptPresentation.suspendPendingWork()
             scrollCoordinator.cancel()
+            guard scenePhase == .active,
+                  presentationActivity.allowsPresentationPublication,
+                  model.admitsSessionPresentationOpen,
+                  ChatOpeningAttemptPolicy.isUnsettled(sessionPresentation.open.phase) else {
+                // Coverage/background/navigation cancellation is resumable and
+                // must not publish a delayed timeout behind another surface.
+                return
+            }
             _ = sessionPresentation.open.fail(
                 sessionID: sessionID,
                 epoch: sessionPresentation.open.epoch,
@@ -1462,14 +1487,20 @@ struct ChatView: View {
             )
         }
         await task.value
+        let childWasCancelled = sessionPresentation.openingTaskWasCancelled(generation)
         let completedOwnedTask = sessionPresentation.finishOpeningTask(generation)
         deadlineTask.cancel()
-        guard completedOwnedTask,
-              ChatOpeningAttemptPolicy.isUnsettled(sessionPresentation.open.phase) else { return }
-        // Every current foreground attempt must settle. Background/route
-        // retirement invalidates the task generation above and remains silently
-        // resumable; an exact task that simply returned cannot leave an opaque
-        // opening surface with no owner.
+        guard ChatOpeningAttemptPolicy.shouldFailUnsettledAttempt(
+            completedOwnedTask: completedOwnedTask,
+            taskCancelled: Task.isCancelled || childWasCancelled,
+            sceneActive: scenePhase == .active,
+            presentationActive: presentationActivity.allowsPresentationPublication,
+            modelAdmitsOpen: model.admitsSessionPresentationOpen,
+            phase: sessionPresentation.open.phase
+        ) else { return }
+        // Only a still-current foreground owner may turn an unexplained return
+        // into a visible failure. Cancellation, route coverage, and background
+        // retirement leave the opening phase resumable instead.
         _ = sessionPresentation.open.fail(
             sessionID: sessionID,
             epoch: sessionPresentation.open.epoch,
@@ -1625,9 +1656,15 @@ struct ChatView: View {
                 targetRenderedID: physicalOpeningTailID(for: installed)
             )
             guard positioned else {
-                let isCurrentTimeout = !Task.isCancelled
-                    && sessionPresentation.open.epoch == epoch
-                    && sessionPresentation.open.phase == .positioning
+                let isCurrentTimeout = sessionPresentation.open.epoch == epoch
+                    && ChatOpeningAttemptPolicy.shouldFailUnsettledAttempt(
+                        completedOwnedTask: true,
+                        taskCancelled: Task.isCancelled,
+                        sceneActive: scenePhase == .active,
+                        presentationActive: presentationActivity.allowsPresentationPublication,
+                        modelAdmitsOpen: model.admitsSessionPresentationOpen,
+                        phase: sessionPresentation.open.phase
+                    )
                 performanceSignposts.end(
                     interval,
                     result: isCurrentTimeout ? .failure : .discarded,
@@ -1887,6 +1924,7 @@ struct ChatView: View {
             // the parent, cancel opening, and create a present/dismiss loop.
             sessionPresentation.permitsExtensionInteractionPresentation = true
             intakeLatestTranscriptProjectionIfNeeded()
+            admitPendingFloatingDisplay()
             return true
         } catch {
             performanceSignposts.end(

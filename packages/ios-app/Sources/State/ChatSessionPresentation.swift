@@ -32,6 +32,22 @@ enum ChatOpeningAttemptPolicy {
     static func isUnsettled(_ phase: ChatOpenPresentationPhase) -> Bool {
         phase == .opening || phase == .positioning
     }
+
+    static func shouldFailUnsettledAttempt(
+        completedOwnedTask: Bool,
+        taskCancelled: Bool,
+        sceneActive: Bool,
+        presentationActive: Bool,
+        modelAdmitsOpen: Bool,
+        phase: ChatOpenPresentationPhase
+    ) -> Bool {
+        completedOwnedTask
+            && !taskCancelled
+            && sceneActive
+            && presentationActive
+            && modelAdmitsOpen
+            && isUnsettled(phase)
+    }
 }
 
 enum ChatSessionVisibilityPolicy {
@@ -88,6 +104,7 @@ final class ChatSessionPresentation {
     @ObservationIgnored var attachmentPresentationTask: Task<Void, Never>?
     @ObservationIgnored private(set) var openingTask: Task<Void, Never>?
     private var openingTaskGeneration = 0
+    private var cancelledOpeningTaskGeneration: Int?
 
     init(sessionID: String) {
         self.sessionID = sessionID
@@ -132,8 +149,13 @@ final class ChatSessionPresentation {
     func installOpeningTask(_ task: Task<Void, Never>) -> Int? {
         guard openingTask == nil else { return nil }
         openingTaskGeneration &+= 1
+        cancelledOpeningTaskGeneration = nil
         openingTask = task
         return openingTaskGeneration
+    }
+
+    func openingTaskWasCancelled(_ generation: Int) -> Bool {
+        cancelledOpeningTaskGeneration == generation
     }
 
     @discardableResult
@@ -149,12 +171,15 @@ final class ChatSessionPresentation {
     @discardableResult
     func expireOpeningTask(_ generation: Int) -> Bool {
         guard openingTaskGeneration == generation, let openingTask else { return false }
+        cancelledOpeningTaskGeneration = generation
         openingTask.cancel()
         return true
     }
 
     func cancelOpeningTask() {
-        openingTask?.cancel()
+        guard let openingTask else { return }
+        cancelledOpeningTaskGeneration = openingTaskGeneration
+        openingTask.cancel()
     }
 
     func requestInteractionPresentation(_ interaction: ExtensionInteraction) {

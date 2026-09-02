@@ -698,10 +698,13 @@ unread state, and five bounded command purposes only: exact opening-tail realiza
 semantic-anchor correction, prepend correction, and a token-guarded physical-tail repair. Automatic growth follow, tail-correction arbitration, and callback-order compatibility flags no longer exist.
 
 Opening still keeps the opaque surface until the exact physical marker after transcript and
-queue rows is positioned. It permits bounded exact-marker realization attempts; the
-750-millisecond deadline retries or fails and never substitutes physical proof. The
-lease remains through the reveal's stable frames before releasing to native size-change
-anchoring. Direct interaction abandons
+queue rows is positioned. Initial opaque-surface geometry is retained as evidence without
+admitting ordinary scroll side effects. The 750-millisecond acknowledgement cadence starts only
+after an exact command crosses the application boundary, requires fresh post-application marker
+and viewport evidence, and permits at most three corrective commands; it never converts missing
+or cross-frame evidence into a user-visible failure. The 30-second opening owner is the sole
+terminal deadline. The lease remains through the reveal's stable frames before releasing to native
+size-change anchoring. Direct interaction abandons
 opening immediately. Catch-up retains its
 staged long-distance approach and unread ownership until physical settlement; interruption
 restores anchored/unread state. Command application re-evaluates an already-admitted tail boundary,
@@ -1289,7 +1292,7 @@ details. Non-JSON content-only results remain text, response data wins, and a fa
 partial output, and bounded-output disclosure in place, and never move
 the reader's scroll position. Tool chips retain six-point vertical capsule insets and
 intrinsic label/timing geometry without a layout-inflating minimum interaction frame. Every compact chat pill and tool-detail status/metadata/activity chip uses the metadata-pill leading rhythm: a 13-point symbol or a pulse with a nominal 13-point size and 20%-compensated visual footprint, followed by a five-point gap, with no legacy 18-point icon reservation.
-The reserved first-party display tool adds a strictly typed `tron.display.v1` projection without interpreting arbitrary extension details. Its isolated one-tool run keeps one physical identity while a running pill settles to the default sheet pill, an inset adaptive-height lavender Liquid Glass inline renderer, or a completed pill plus one session-local draggable floating panel. Sheet routing remains centralized in `ChatRoutes`; floating and deferred-route ownership is disposable `ChatSessionPresentation` state; artifact bytes stay outside snapshots and load through the exact authenticated session route. Unsupported mode/content combinations fall back to sheet, and an installed-transcript completion baseline prevents background, reconnect, cache, history, or route restoration from replaying floating auto-presentation. Generated HTML is nonpersistent, script-disabled, CSP-isolated, network/navigation-blocked content; public webpages remain explicit Safari presentations. See [Display artifacts](display-artifacts.md) for the complete surface, security, lifecycle, and accessibility contract.
+The reserved first-party display tool adds a strictly typed `tron.display.v1` projection without interpreting arbitrary extension details. Its isolated one-tool run keeps one physical identity while a running pill settles to the default sheet pill, a measured clipped inline host containing either an adaptive lavender text card or enlarged photo chip, or a completed pill plus one session-local draggable Liquid Glass panel. Sheet routing remains centralized in `ChatRoutes`; floating and deferred-route ownership is disposable `ChatSessionPresentation` state; artifact bytes stay outside snapshots and load through the exact authenticated session route. Unsupported mode/content combinations fall back to sheet, and an installed-transcript completion baseline prevents background, reconnect, cache, history, or route restoration from replaying floating auto-presentation. Generated HTML is nonpersistent, script-disabled, CSP-isolated, network/navigation-blocked content; public webpages remain explicit Safari presentations. See [Display artifacts](display-artifacts.md) for the complete surface, security, lifecycle, and accessibility contract.
 
 Thinking traces remain one compact inline run while they fit, but their visible viewport
 is capped at four measured text lines rather than truncating canonical content. Once the run

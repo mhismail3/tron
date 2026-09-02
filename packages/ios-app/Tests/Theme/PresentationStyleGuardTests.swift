@@ -2022,6 +2022,8 @@ struct PresentationStyleGuardTests {
         #expect(source.contains("static let controlDiameter: CGFloat = 34"))
         #expect(source.contains("static let controlTouchTarget: CGFloat = 44"))
         #expect(source.contains("static let contentTopPadding: CGFloat = 4"))
+        #expect(source.contains("static let imageChipScale: CGFloat = 1.7"))
+        #expect(source.contains("PendingPhotoRemoveLayoutPolicy.previewSide * imageChipScale"))
         #expect(container.contains(".frame(maxHeight: DisplayInlineLayoutPolicy.maximumViewportHeight"))
         #expect(container.contains(".tronGlassSurface("))
         #expect(container.contains("accent: .tronLavender"))
@@ -2032,7 +2034,27 @@ struct PresentationStyleGuardTests {
         #expect(container.contains(".padding(.trailing, 8)"))
         #expect(container.contains(".glassEffect("))
         #expect(!container.contains("Divider()"))
-        #expect(!source.contains("completedInlineDisplay"))
+        #expect(source.contains("@State private var disclosure = DisplayInlineDisclosureState()"))
+        #expect(source.contains("ZStack(alignment: .topLeading)"))
+        #expect(source.contains(".frame(height: disclosureHeight, alignment: .top)"))
+        #expect(source.contains("recordDisclosureHeight($0, expanded:"))
+        #expect(source.contains("private struct DisplayInlineImageChip: View"))
+        #expect(source.contains("model.chatMedia.thumbnail(for: identity)"))
+        #expect(source.contains("width: DisplayInlineLayoutPolicy.imageChipSide"))
+        #expect(source.contains(".accessibilityLabel(\"Collapse \\(display.title)\")"))
+        #expect(source.contains("PresentationActivityTaskID("))
+        #expect(source.contains("presentationActive: presentationActivity.allowsPresentationPublication"))
+        #expect(source.contains("private func transitionDisclosure("))
+        #expect(source.contains("withAnimation(disclosureAnimation)"))
+        #expect(source.contains("settleDisclosureWithoutAnimation()"))
+        #expect(source.contains("presentationActivity.allowsViewportObservation"))
+        #expect(source.contains("if transcriptReady"))
+        #expect(source.contains("TronLoadingState(label: \"Preparing display…\""))
+        #expect(transcript.contains(".environment(\\.displayTranscriptReady, isReady && permitsAsynchronousContent)"))
+        #expect(!source.contains("@State private var collapsed"))
+        #expect(!source.contains(".animation(animation, value: collapsed)"))
+        #expect(!source.contains(".animation(animation, value: tool.display)"))
+        #expect(!source.contains(".animation(completionAnimation, value: tool.isRunning)"))
         let inlineMarkdown = try #require(
             source.components(separatedBy: "if context == .inline {").dropFirst().first?
                 .components(separatedBy: "} else {").first
@@ -2042,6 +2064,29 @@ struct PresentationStyleGuardTests {
         #expect(!inlineMarkdown.contains("ScrollView"))
         #expect(transcript.contains(".padding(.horizontal, 16)"))
         #expect(!transcript.contains("private func horizontalPadding(for item: ChatTranscriptRenderItem)"))
+    }
+
+    @Test("floating displays use bounded glass PiP chrome and composer-aware movement")
+    func floatingDisplayChrome() throws {
+        let source = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatFloatingDisplayHost.swift"),
+            encoding: .utf8
+        )
+        let chat = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        #expect(source.contains("static let controlDiameter: CGFloat = 32"))
+        #expect(source.contains("static let controlTouchTarget: CGFloat = 44"))
+        #expect(source.contains("bottomExclusion: CGFloat"))
+        #expect(source.contains("snappedToNearestHorizontalEdge"))
+        #expect(source.contains("value.predictedEndTranslation"))
+        #expect(source.contains(".spring(response: 0.38, dampingFraction: 0.86)"))
+        #expect(source.contains(".glassEffect(.regular.interactive(), in: .circle)"))
+        #expect(source.contains(".regular.tint(Color.tronLavender.opacity(0.06))"))
+        #expect(!source.contains("Divider()"))
+        #expect(!source.contains(".background(.regularMaterial"))
+        #expect(chat.contains("bottomExclusion: composerMeasuredHeight"))
     }
 
     @Test("display webpages use one full-height native browser sheet")

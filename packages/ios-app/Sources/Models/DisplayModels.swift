@@ -238,6 +238,18 @@ enum DisplayPresentationPolicy {
             : .sheet
     }
 
+    /// Large local media remains ineligible for automatic inline/floating
+    /// presentation, but an explicit tap on a requested floating result is
+    /// sufficient user intent to begin bounded file staging in the panel.
+    static func activationSurface(for display: DisplayProjection) -> DisplaySurface {
+        if display.presentation.requestedSurface == .floating,
+           display.eligibleSurfaces == [.sheet],
+           (display.kind == .video || display.kind == .audio) {
+            return .floating
+        }
+        return effectiveSurface(for: display)
+    }
+
     static func invocationSurface(toolName: String?, request: JSONValue?) -> DisplaySurface? {
         guard toolName == "display", let object = request?.objectValue else { return nil }
         guard let presentation = object["presentation"]?.objectValue,

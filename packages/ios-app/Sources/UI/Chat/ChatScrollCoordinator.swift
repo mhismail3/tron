@@ -61,6 +61,7 @@ enum ChatHistoryPageLoadResult: Equatable, Sendable {
 @MainActor
 final class ChatScrollCoordinator {
     static let defaultOpeningTailTimeout: Duration = .milliseconds(750)
+    static let maximumOpeningTailCommandAttempts = 3
     static let liveGrowthAnimationDuration = 0.16
 
     private struct SemanticFrameSample: Equatable {
@@ -272,6 +273,9 @@ final class ChatScrollCoordinator {
     var admitsSubmission: Bool {
         prepend == nil && catchUpPhase == .none && !openingTailPhase.isActive
     }
+    /// Async transcript descendants may begin intrinsic-size work only after the
+    /// opening reveal and its physical tail lease have fully settled.
+    var permitsAsynchronousTranscriptContent: Bool { !openingTailPhase.isActive }
 
     private var openingTailSettlementPending: Bool { openingTailPhase.isActive }
     private var openingTailToken: Int? { openingTailPhase.context?.token }
@@ -406,6 +410,20 @@ final class ChatScrollCoordinator {
         geometryRevision &+= 1
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
+    }
+
+    /// Retains evidence emitted while the opaque opening surface is mounted,
+    /// without admitting ordinary anchoring, unread, repair, or interaction
+    /// side effects before the authoritative baseline is installed.
+    func observeOpeningGeometry(_ current: ChatTranscriptGeometry) {
+        guard current.isValid else { return }
+        if current != geometry {
+            geometry = current
+            geometryRevision &+= 1
+        }
+        if let marker = semanticFrames["transcript-bottom"], marker.layoutEpoch == layoutEpoch {
+            refreshPhysicalTailEvidence(markerFrame: marker.frame)
+        }
     }
 
     func geometryChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
@@ -1056,7 +1074,17 @@ final class ChatScrollCoordinator {
             )
         }
 
-        if openingTailPhase.context?.commandToken == applied.token { scheduleOpeningTailFrame() }
+        if case .positioning(var opening) = openingTailPhase,
+           opening.commandToken == applied.token {
+            // The command application boundary owns the acknowledgement clock.
+            // Baselines captured here require post-application marker and native
+            // geometry evidence before a timeout may be treated as a failure.
+            opening.commandSemanticRevision = semanticFrameRevision
+            opening.commandGeometryRevision = geometryRevision
+            openingTailPhase = .positioning(opening)
+            scheduleOpeningTailTimeout(token: opening.token, presentation: opening.presentation)
+            scheduleOpeningTailFrame()
+        }
         if catchUpCommandToken == applied.token {
             catchUpCommandToken = nil
             if catchUpPhase == .staged {
@@ -1197,7 +1225,10 @@ final class ChatScrollCoordinator {
         )
         openingTailPhase = .positioning(context)
         openingTailContinuation = continuation
-        scheduleOpeningTailTimeout(token: token, presentation: presentation)
+        // Rendering and lazy marker realization are not native-scroll failures.
+        // The narrow acknowledgement deadline starts only after a command has
+        // crossed the SwiftUI application boundary; the outer opening owner
+        // bounds pre-application work and cancellation.
         evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
         if case .positioning = openingTailPhase { scheduleOpeningTailFrame() }
     }
@@ -1266,6 +1297,11 @@ final class ChatScrollCoordinator {
         guard viewportMode == .pinned, !isUserInteracting, command == nil,
               value.targetSample?.layoutEpoch == layoutEpoch || allowsUnrealizedTailCommand,
               geometry.isValid || allowsUnrealizedTailCommand else { return }
+        // A newly published correction supersedes the acknowledgement clock
+        // for the prior application. The replacement starts its own clock only
+        // when `commandApplied` confirms it crossed the native boundary.
+        openingTailTimeoutTask?.cancel()
+        openingTailTimeoutTask = nil
         publish(.openingTail(value.targetRenderedID), animation: .disabled, origin: .presentation)
         var updated = value
         updated.commandToken = command?.token
@@ -1297,7 +1333,8 @@ final class ChatScrollCoordinator {
                self.command?.token != commandToken {
                 let fresh = self.semanticFrameRevision > (value.commandSemanticRevision ?? self.semanticFrameRevision)
                     || self.geometryRevision > (value.commandGeometryRevision ?? self.geometryRevision)
-                if fresh || value.commandAttemptCount < 2 {
+                if fresh,
+                   value.commandAttemptCount < Self.maximumOpeningTailCommandAttempts {
                     value.commandToken = nil
                     value.commandSemanticRevision = nil
                     value.commandGeometryRevision = nil
@@ -1408,31 +1445,37 @@ final class ChatScrollCoordinator {
             guard let self, case .positioning(let value) = self.openingTailPhase,
                   value.token == token, value.presentation == presentation else { return }
 
-            // A deadline is a failure boundary, never physical proof. A
-            // command that crossed the native application boundary cannot be
-            // safely replayed while its target is still installed, so fail the
-            // bounded opening rather than revealing an unverified viewport.
-            self.clearOpeningCommand(matching: value.commandToken)
-            self.failOpeningTailPositioning()
-        }
-    }
+            guard self.command == nil,
+                  self.appliedTargetCommandToken == value.commandToken,
+                  let admittedSemanticRevision = value.commandSemanticRevision,
+                  let admittedGeometryRevision = value.commandGeometryRevision else {
+                // A replacement command is pending application. It will install
+                // its own acknowledgement deadline; the outer opening task still
+                // bounds a command that never reaches that boundary.
+                return
+            }
+            let hasFreshTargetEvidence = value.targetSample.map {
+                $0.layoutEpoch == self.layoutEpoch
+                    && $0.revision > admittedSemanticRevision
+            } == true
+            let hasFreshGeometryEvidence = self.geometryRevision > admittedGeometryRevision
+            guard hasFreshTargetEvidence, hasFreshGeometryEvidence else {
+                // Main-thread pressure, lazy realization, and unchanged native
+                // callbacks are absence of evidence, not positioning failure.
+                // Keep the installed target and retry this bounded observation;
+                // the 30-second opening owner remains the final deadline.
+                self.scheduleOpeningTailTimeout(token: token, presentation: presentation)
+                return
+            }
 
-    private func failOpeningTailPositioning() {
-        let token = openingTailToken
-        openingTailTimeoutTask?.cancel()
-        openingTailTimeoutTask = nil
-        openingTailFrameTaskGeneration &+= 1
-        openingTailFrameTask?.cancel()
-        openingTailFrameTask = nil
-        if let commandToken = openingTailPhase.context?.commandToken,
-           command?.token == commandToken {
-            clearCommand()
+            // A displaced sample can straddle native display frames while the
+            // lazy stack and ScrollPosition settle. Treat the short deadline as
+            // a repair cadence, not a user-visible failure boundary: the frame
+            // reconciler will retire this applied token and publish a fresh
+            // correction. The outer opening owner is the sole terminal deadline.
+            self.openingTailTimeoutTask = nil
+            self.scheduleOpeningTailFrame()
         }
-        retireAppliedTargetWithoutCallback()
-        openingTailPhase = .idle
-        openingTailContinuation?.resume(returning: false)
-        openingTailContinuation = nil
-        if let token { resumeOpeningTailFinalWaiters(token: token) }
     }
 
     private func resumeOpeningTailFinalWaiter(id: Int, token: Int) {

@@ -22,10 +22,82 @@ private struct DisplayPresentationHandlerKey: EnvironmentKey {
     static let defaultValue: DisplayPresentationHandler? = nil
 }
 
+private struct DisplayTranscriptReadyKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
 extension EnvironmentValues {
     var displayPresentationHandler: DisplayPresentationHandler? {
         get { self[DisplayPresentationHandlerKey.self] }
         set { self[DisplayPresentationHandlerKey.self] = newValue }
+    }
+
+    var displayTranscriptReady: Bool {
+        get { self[DisplayTranscriptReadyKey.self] }
+        set { self[DisplayTranscriptReadyKey.self] = newValue }
+    }
+}
+
+enum DisplayInlineDisclosureDirection: Equatable, Sendable {
+    case collapse
+    case expand
+}
+
+struct DisplayInlineDisclosureTransition: Equatable, Sendable {
+    let direction: DisplayInlineDisclosureDirection
+    let generation: Int
+}
+
+struct DisplayInlineDisclosureState: Equatable, Sendable {
+    enum Phase: Equatable, Sendable {
+        case expanded
+        case collapsing
+        case collapsed
+        case expanding
+    }
+
+    private(set) var phase: Phase = .expanded
+    private(set) var generation = 0
+
+    var rendersInlineContainer: Bool {
+        phase == .expanded || phase == .collapsing
+    }
+
+    var inlineOpacity: Double { phase == .expanded ? 1 : 0 }
+    var pillOpacity: Double { phase == .expanded ? 0 : 1 }
+    var isCollapsed: Bool { phase == .collapsed || phase == .expanding }
+    var permitsInteraction: Bool { phase == .expanded || phase == .collapsed }
+
+    func proposed(_ direction: DisplayInlineDisclosureDirection) -> DisplayInlineDisclosureTransition? {
+        guard (direction == .collapse && phase == .expanded)
+                || (direction == .expand && phase == .collapsed) else { return nil }
+        return DisplayInlineDisclosureTransition(direction: direction, generation: generation + 1)
+    }
+
+    @discardableResult
+    mutating func begin(_ transition: DisplayInlineDisclosureTransition) -> Bool {
+        let expectedSource: Phase = transition.direction == .collapse ? .expanded : .collapsed
+        guard phase == expectedSource, transition.generation == generation + 1 else { return false }
+        generation = transition.generation
+        phase = transition.direction == .collapse ? .collapsing : .expanding
+        return true
+    }
+
+    @discardableResult
+    mutating func complete(_ transition: DisplayInlineDisclosureTransition) -> Bool {
+        let expectedSource: Phase = transition.direction == .collapse ? .collapsing : .expanding
+        guard generation == transition.generation, phase == expectedSource else { return false }
+        phase = transition.direction == .collapse ? .collapsed : .expanded
+        return true
+    }
+
+    mutating func settleTransientPhase() {
+        generation &+= 1
+        switch phase {
+        case .collapsing: phase = .collapsed
+        case .expanding: phase = .expanded
+        case .expanded, .collapsed: break
+        }
     }
 }
 
@@ -36,45 +108,124 @@ struct DisplayToolView: View {
     @Environment(\.canonicalResourceSessionID) private var sessionID
     @Environment(\.displayPresentationHandler) private var present
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var collapsed = false
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @State private var disclosure = DisplayInlineDisclosureState()
+    @State private var expandedHeight: CGFloat = 0
+    @State private var pillHeight: CGFloat = 0
 
     private var display: DisplayProjection? { tool.display }
     private var effectiveSurface: DisplaySurface {
         display.map(DisplayPresentationPolicy.effectiveSurface)
             ?? tool.requestedDisplaySurface ?? .sheet
     }
+    private var activationSurface: DisplaySurface {
+        display.map(DisplayPresentationPolicy.activationSurface) ?? effectiveSurface
+    }
 
     var body: some View {
         Group {
-            if let display, !tool.error, !tool.isRunning,
-               effectiveSurface == .inline, !collapsed {
-                DisplayInlineContainer(
-                    sessionID: sessionID,
-                    display: display,
-                    onCollapse: { withAnimation(animation) { collapsed = true } },
-                    onOpenSheet: inlineSheetAction(for: display)
-                )
-                .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.985)))
-                .contextMenu {
-                    Button("Tool Details", systemImage: "info.circle", action: onOpenTechnicalDetails)
-                }
+            if let display, completedInlineDisplay {
+                inlineDisclosureHost(display)
             } else {
                 displayPill
-                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96)))
             }
         }
-        .animation(animation, value: tool.isRunning)
-        .animation(animation, value: tool.display)
-        .animation(animation, value: collapsed)
+        // Projection installation never owns disclosure animation. Only an
+        // explicit user action animates this measured, clipped row host, so
+        // reconnect and retained resume cannot inherit a local height transition.
+        .transaction { transaction in
+            if scenePhase != .active || !presentationActivity.allowsContinuousAnimation {
+                transaction.disablesAnimations = true
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { settleDisclosureWithoutAnimation() }
+        }
+        .onChange(of: presentationActivity.allowsViewportObservation) { _, active in
+            if !active { settleDisclosureWithoutAnimation() }
+        }
+        .onDisappear { settleDisclosureWithoutAnimation() }
+    }
+
+    @ViewBuilder
+    private func inlineDisclosureHost(_ display: DisplayProjection) -> some View {
+        ZStack(alignment: .topLeading) {
+            inlineExpandedSurface(display)
+                .fixedSize(horizontal: false, vertical: true)
+                .opacity(disclosure.inlineOpacity)
+                .scaleEffect(disclosure.isCollapsed ? 0.985 : 1, anchor: .topLeading)
+                .allowsHitTesting(disclosure.phase == .expanded)
+                .accessibilityHidden(disclosure.isCollapsed)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                    recordDisclosureHeight($0, expanded: true)
+                }
+
+            displayPill
+                .fixedSize(horizontal: false, vertical: true)
+                .opacity(disclosure.pillOpacity)
+                .scaleEffect(disclosure.isCollapsed ? 1 : 0.985, anchor: .topLeading)
+                .allowsHitTesting(disclosure.phase == .collapsed)
+                .accessibilityHidden(!disclosure.isCollapsed)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                    recordDisclosureHeight($0, expanded: false)
+                }
+        }
+        .frame(height: disclosureHeight, alignment: .top)
+        .clipped()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contextMenu {
+            Button("Tool Details", systemImage: "info.circle", action: onOpenTechnicalDetails)
+        }
+    }
+
+    @ViewBuilder
+    private func inlineExpandedSurface(_ display: DisplayProjection) -> some View {
+        if display.kind == .image {
+            DisplayInlineImageChip(
+                sessionID: sessionID,
+                display: display,
+                onOpenSheet: inlineSheetAction(for: display),
+                onCollapse: collapseInline
+            )
+        } else {
+            DisplayInlineContainer(
+                sessionID: sessionID,
+                display: display,
+                onCollapse: collapseInline,
+                onOpenSheet: inlineSheetAction(for: display)
+            )
+        }
+    }
+
+    private var disclosureHeight: CGFloat? {
+        let measured = disclosure.rendersInlineContainer ? expandedHeight : pillHeight
+        return measured > 0 ? measured : nil
+    }
+
+    private func recordDisclosureHeight(_ height: CGFloat, expanded: Bool) {
+        guard height.isFinite, height > 0 else { return }
+        let current = expanded ? expandedHeight : pillHeight
+        guard abs(current - height) > 0.5 else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            if expanded { expandedHeight = height } else { pillHeight = height }
+        }
     }
 
     private func inlineSheetAction(for display: DisplayProjection) -> (() -> Void)? {
-        guard display.presentation.inlineTapAction == .sheet, let sessionID else { return nil }
+        guard (display.kind == .image || display.presentation.inlineTapAction == .sheet),
+              let sessionID else { return nil }
         return { present?(.showSheet(DisplayRoute(sessionID: sessionID, display: display))) }
     }
 
-    private var animation: Animation? {
-        reduceMotion ? .linear(duration: 0.10) : .smooth(duration: 0.24)
+    private var completedInlineDisplay: Bool {
+        display != nil && !tool.error && !tool.isRunning && effectiveSurface == .inline
+    }
+
+    private var disclosureAnimation: Animation? {
+        reduceMotion ? nil : .smooth(duration: 0.28)
     }
 
     private var displayPill: some View {
@@ -115,11 +266,11 @@ struct DisplayToolView: View {
             return
         }
         let route = DisplayRoute(sessionID: sessionID, display: display)
-        switch effectiveSurface {
+        switch activationSurface {
         case .sheet:
             present?(.showSheet(route))
         case .inline:
-            withAnimation(animation) { collapsed = false }
+            expandInline()
         case .floating:
             present?(.showFloating(route))
         }
@@ -134,9 +285,9 @@ struct DisplayToolView: View {
             case .floating: "Preparing window"
             }
         }
-        return switch effectiveSurface {
+        return switch activationSurface {
         case .sheet: "Open"
-        case .inline: collapsed ? "Show inline" : "Inline"
+        case .inline: disclosure.isCollapsed ? "Show inline" : "Inline"
         case .floating: "Open window"
         }
     }
@@ -161,12 +312,38 @@ struct DisplayToolView: View {
     }
 
     private var accessibilityLabel: String {
-        let action = switch effectiveSurface {
+        let action = switch activationSurface {
         case .sheet: "Opens sheet"
-        case .inline: collapsed ? "Expands inline" : "Displayed inline"
+        case .inline: disclosure.isCollapsed ? "Expands inline" : "Displayed inline"
         case .floating: "Opens floating window"
         }
         return [display?.title ?? "Display", detail, action].joined(separator: ", ")
+    }
+
+    private func collapseInline() {
+        transitionDisclosure(.collapse)
+    }
+
+    private func expandInline() {
+        transitionDisclosure(.expand)
+    }
+
+    private func transitionDisclosure(_ direction: DisplayInlineDisclosureDirection) {
+        guard let transition = disclosure.proposed(direction) else { return }
+        // The persistent ZStack crossfades both endpoints while this one frame
+        // animates between measured heights. Clipping follows the interpolated
+        // host boundary, so neither endpoint can paint across neighboring rows.
+        withAnimation(disclosureAnimation) {
+            guard disclosure.begin(transition) else { return }
+            _ = disclosure.complete(transition)
+        }
+    }
+
+    private func settleDisclosureWithoutAnimation() {
+        guard !disclosure.permitsInteraction else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { disclosure.settleTransientPhase() }
     }
 }
 
@@ -203,6 +380,118 @@ enum DisplayInlineLayoutPolicy {
     static let controlDiameter: CGFloat = 34
     static let controlTouchTarget: CGFloat = 44
     static let contentTopPadding: CGFloat = 4
+    static let imageChipScale: CGFloat = 1.7
+    static var imageChipSide: CGFloat {
+        PendingPhotoRemoveLayoutPolicy.previewSide * imageChipScale
+    }
+
+    static func openingViewportHeight(for kind: DisplayKind) -> CGFloat {
+        switch kind {
+        case .image, .video, .audio, .pdf: 220
+        case .markdown, .text, .code, .html, .document, .webpage, .hls: 180
+        }
+    }
+}
+
+private struct DisplayInlineImageChip: View {
+    let sessionID: String?
+    let display: DisplayProjection
+    let onOpenSheet: (() -> Void)?
+    let onCollapse: () -> Void
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.displayTranscriptReady) private var transcriptReady
+    @State private var image: UIImage?
+    @State private var loadedIdentity: ChatMediaIdentity?
+    @State private var failed = false
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Button(action: { onOpenSheet?() }) {
+                imageSurface
+            }
+            .buttonStyle(.plain)
+            .disabled(onOpenSheet == nil)
+            .accessibilityLabel("Open \(display.title) photo preview")
+
+            Button(action: onCollapse) {
+                ZStack {
+                    Circle().fill(.ultraThinMaterial)
+                    Circle().stroke(Color.white.opacity(0.22), lineWidth: 0.5)
+                    Image(systemName: "xmark")
+                        .font(TronTypography.sans(size: 11, weight: .bold))
+                        .foregroundStyle(Color.tronTextPrimary)
+                }
+                .frame(width: 24, height: 24)
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Collapse \(display.title)")
+            .padding(2)
+        }
+        .frame(
+            width: DisplayInlineLayoutPolicy.imageChipSide,
+            height: DisplayInlineLayoutPolicy.imageChipSide,
+            alignment: .topLeading
+        )
+        .task(id: transcriptReady ? mediaIdentity : nil) { await loadThumbnail() }
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private var imageSurface: some View {
+        ZStack {
+            Color.black.opacity(0.88)
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else if failed {
+                Image(systemName: "photo.badge.exclamationmark")
+                    .font(TronTypography.sans(size: 28, weight: .semibold))
+                    .foregroundStyle(Color.tronTextSecondary)
+            } else {
+                ProgressView()
+                    .tint(.tronLavender)
+            }
+        }
+        .frame(
+            width: DisplayInlineLayoutPolicy.imageChipSide,
+            height: DisplayInlineLayoutPolicy.imageChipSide
+        )
+        .clipped()
+        .glassEffect(
+            .regular.tint(Color.tronLavender.opacity(0.08)).interactive(),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var mediaIdentity: ChatMediaIdentity? {
+        guard let artifact = display.artifact, let sessionID else { return nil }
+        return model.chatMediaIdentity(blobID: artifact.id, sessionID: sessionID)
+    }
+
+    private func loadThumbnail() async {
+        guard transcriptReady, let identity = mediaIdentity else { return }
+        if loadedIdentity != identity {
+            image = nil
+            failed = false
+        } else if image != nil {
+            return
+        }
+        do {
+            image = try await model.chatMedia.thumbnail(for: identity)
+            loadedIdentity = identity
+        } catch is CancellationError {
+            return
+        } catch {
+            failed = true
+            loadedIdentity = identity
+        }
+    }
 }
 
 private struct DisplayInlineContainer: View {
@@ -210,6 +499,7 @@ private struct DisplayInlineContainer: View {
     let display: DisplayProjection
     let onCollapse: () -> Void
     let onOpenSheet: (() -> Void)?
+    @Environment(\.displayTranscriptReady) private var transcriptReady
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -249,10 +539,17 @@ private struct DisplayInlineContainer: View {
             .padding(.top, 8)
             .padding(.bottom, 2)
 
-            inlineContent
-                .frame(maxWidth: .infinity, alignment: .top)
-                .frame(maxHeight: DisplayInlineLayoutPolicy.maximumViewportHeight, alignment: .top)
-                .clipped()
+            Group {
+                if transcriptReady {
+                    inlineContent
+                } else {
+                    TronLoadingState(label: "Preparing display…", accent: .tronLavender)
+                        .frame(height: DisplayInlineLayoutPolicy.openingViewportHeight(for: display.kind))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .top)
+            .frame(maxHeight: DisplayInlineLayoutPolicy.maximumViewportHeight, alignment: .top)
+            .clipped()
         }
         .clipShape(RoundedRectangle(
             cornerRadius: DisplayInlineLayoutPolicy.cornerRadius,
@@ -630,7 +927,16 @@ private struct DisplayVideoArtifactView: View {
                     .frame(minHeight: 220)
             }
         }
-        .task(id: mediaIdentity) { await prepare() }
+        .task(id: PresentationActivityTaskID(
+            source: mediaIdentity,
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication else {
+                tearDown()
+                return
+            }
+            await prepare()
+        }
         .onChange(of: presentationActivity) { _, activity in
             if !activity.allowsPresentationPublication { player?.pause() }
         }
