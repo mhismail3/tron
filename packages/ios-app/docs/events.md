@@ -293,8 +293,13 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
 - stopping/restart topics enter the single `GatewayLifecycleCoordinator` reconnect loop with
   the exact delivered local connection identity. A scheduled administrative drain stays connected;
   only `system.stopping` starts `Restarting` and its monotonic 90-second replacement watchdog.
-  Connection Settings may temporarily poll bounded drain aggregates for the exact locally requested
-  restart/update, but that projection never declares success, disconnects transport, or starts reconnect.
+  An authenticated replacement handshake plus event activation returns the connection to `Connected`
+  immediately; session, terminal, settings, provider, device, and mounted-presentation reconciliation
+  remains subordinate and cannot strand a usable replacement in `Restarting`. Connection Settings
+  polls file-authoritative update progress under one exact command identity, ignores an older command
+  marker until the acknowledged helper publishes its own first state, and keeps that observer alive
+  across the planned socket replacement. Its bounded drain aggregate never declares success,
+  disconnects transport, or starts reconnect.
   Duplicate transport signals cannot replace the lifecycle owner or revive work after profile teardown. A supervised iOS device install intentionally emits no transport lifecycle event: receipt acknowledgement means only that the detached Mac helper was admitted, while the focused authorized-device sheet polls bounded `device.install.status` for its exact paired-device owner and stops at terminal state, focus replacement, backgrounding, or dismissal. The app overwrite may replace the socket and process; the next app launch performs an authoritative status read rather than replaying the install mutation. Its
   nominal 2-second, ×1.7 backoff is independently jittered within a bounded 80–120%
   window and never exceeds 15 seconds; foreground activation accelerates a pending delay

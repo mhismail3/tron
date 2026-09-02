@@ -381,7 +381,7 @@ struct AppModelReconnectTests {
         await client.close()
     }
 
-    @Test("paired Debug profile follows system stopping on 9848 with the same token and authoritative reconnect without prompt replay")
+    @Test("paired Debug profile publishes an authenticated replacement before projection refresh without prompt replay")
     func debugPlannedRestartReconnectsWithoutReplay() async throws {
         let suiteName = "GatewayDebugReconnectTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -432,7 +432,7 @@ struct AppModelReconnectTests {
         await replacement.enqueue(helloFrame(runtimeEpoch: "debug-epoch-2", machineID: "machine-debug", gatewayChannel: "dev"))
 
         try await replacement.waitUntilSent(count: 6)
-        #expect(model.connectionState == .restarting)
+        #expect(model.connectionState == .connected)
         let reconnectFrames = await replacement.sentFrames()
         var refreshedMethods = Set<String>()
         for frame in reconnectFrames.dropFirst() {

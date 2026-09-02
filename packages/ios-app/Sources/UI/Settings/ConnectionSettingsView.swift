@@ -343,6 +343,19 @@ enum AdministrativeDrainPresentation {
     }
 }
 
+enum GatewayUpdatePollingDecision: Equatable {
+    case waitingForCommand
+    case active
+    case terminal
+
+    static func decide(_ status: GatewayUpdateStatus, commandID: String) -> Self {
+        guard status.commandId == commandID else { return .waitingForCommand }
+        return ["ready", "failed", "failure", "rolled-back"].contains(status.state)
+            ? .terminal
+            : .active
+    }
+}
+
 enum GatewayConnectionDetailPresentation {
     static func technicalDetails(
         info: GatewayInfo?,
@@ -445,7 +458,6 @@ struct GatewayConnectionDetailView: View {
     @State private var updateIntent: GatewayUpdateIntent?
     @State private var confirmingRollback = false
     @State private var activeUpdateCommandID: String?
-    @State private var locallyRequestedUpdateCommandID: String?
     @State private var drainPollingOwner: AdministrativeDrainPollingOwner?
     @State private var drainSnapshot: AdministrativeDrainSnapshot?
     @State private var acceptedOperationLabel: String?
@@ -701,7 +713,6 @@ struct GatewayConnectionDetailView: View {
                             debugCandidate: request.debugCandidate
                         ) {
                             activeUpdateCommandID = commandID
-                            locallyRequestedUpdateCommandID = commandID
                             acceptedOperationLabel = "Update accepted · waiting for Gateway progress"
                         }
                         updateConfig = await model.loadGatewayUpdateConfig(for: currentProfile)
@@ -723,7 +734,6 @@ struct GatewayConnectionDetailView: View {
                     Task {
                         if let commandID = await model.requestGatewayRollback(for: currentProfile) {
                             activeUpdateCommandID = commandID
-                            locallyRequestedUpdateCommandID = commandID
                             acceptedOperationLabel = "Rollback accepted · waiting for Gateway progress"
                         }
                     }
@@ -754,7 +764,9 @@ struct GatewayConnectionDetailView: View {
     }
 
     private func gatewayUpdateStatusRow(_ updateStatus: GatewayUpdateStatus) -> some View {
-        let active = updateStatus.isActive
+        let active = activeUpdateCommandID.map {
+            GatewayUpdatePollingDecision.decide(updateStatus, commandID: $0) == .active
+        } ?? updateStatus.isActive
         let installed = updateStatus.state == "ready"
             && !updateStatus.candidateAvailable
             && updateStatus.error == nil
@@ -855,7 +867,7 @@ struct GatewayConnectionDetailView: View {
     }
 
     private var updatePollIdentity: String {
-        "\(detailLoadIdentity):\(status.label):\(activeUpdateCommandID ?? "none")"
+        "\(currentProfile.id):\(model.profiles.selected?.id ?? "none"):\(scenePhase):\(activeUpdateCommandID ?? "none")"
     }
 
     private var drainPollIdentity: String {
@@ -876,18 +888,21 @@ struct GatewayConnectionDetailView: View {
             updateConfig = nil
             updateStatus = nil
             activeUpdateCommandID = nil
-            locallyRequestedUpdateCommandID = nil
             drainPollingOwner = nil
             drainSnapshot = nil
             acceptedOperationLabel = nil
             return
         }
         updateConfig = await model.loadGatewayUpdateConfig(for: currentProfile)
+        guard generation == infoLoadGeneration else { return }
+        // While a command is tracked, the polling lane is the sole writer of
+        // update status. This prevents an older multi-await detail load from
+        // overwriting newer helper progress.
+        guard activeUpdateCommandID == nil else { return }
         let loadedStatus = await model.loadGatewayUpdateStatus(for: currentProfile)
+        guard generation == infoLoadGeneration, activeUpdateCommandID == nil else { return }
         updateStatus = loadedStatus
-        if activeUpdateCommandID == nil,
-           loadedStatus?.isActive == true,
-           let commandID = loadedStatus?.commandId {
+        if loadedStatus?.isActive == true, let commandID = loadedStatus?.commandId {
             // A sheet reopened during an accepted update adopts its bounded
             // command identity and resumes polling replacement truth.
             activeUpdateCommandID = commandID
@@ -899,31 +914,35 @@ struct GatewayConnectionDetailView: View {
         while !Task.isCancelled {
             guard let commandID = activeUpdateCommandID,
                   model.profiles.selected?.id == currentProfile.id,
-                  status == .connected else { return }
-            if let latest = await model.loadGatewayUpdateStatus(for: currentProfile) {
-                updateStatus = latest
-                acceptedOperationLabel = nil
-                guard latest.commandId == commandID else {
+                  scenePhase == .active,
+                  presentationActivity.allowsPresentationPublication else { return }
+            if status == .connected,
+               let latest = await model.loadGatewayUpdateStatus(for: currentProfile) {
+                switch GatewayUpdatePollingDecision.decide(latest, commandID: commandID) {
+                case .waitingForCommand:
+                    // Helper admission and its first durable progress write are
+                    // asynchronous. An older command marker must not cancel the
+                    // newly acknowledged observer before that write appears.
+                    break
+                case .active:
+                    updateStatus = latest
+                    acceptedOperationLabel = nil
+                    if latest.state == "draining", drainPollingOwner == nil {
+                        drainPollingOwner = .update(commandID: commandID, drainID: nil)
+                    }
+                case .terminal:
+                    updateStatus = latest
+                    acceptedOperationLabel = nil
                     activeUpdateCommandID = nil
-                    locallyRequestedUpdateCommandID = nil
                     drainPollingOwner = nil
                     drainSnapshot = nil
-                    return
-                }
-                if latest.state == "draining", locallyRequestedUpdateCommandID == commandID,
-                   drainPollingOwner == nil {
-                    drainPollingOwner = .update(commandID: commandID, drainID: nil)
-                }
-                if ["ready", "failed", "failure", "rolled-back"].contains(latest.state) {
-                    activeUpdateCommandID = nil
-                    locallyRequestedUpdateCommandID = nil
-                    drainPollingOwner = nil
-                    drainSnapshot = nil
-                    await loadInfo()
                     return
                 }
             }
-            do { try await Task.sleep(for: .seconds(1)) }
+            // Keep one view-owned observer alive through the planned socket
+            // replacement. It resumes authoritative reads as soon as the
+            // lifecycle owner admits the replacement connection.
+            do { try await Task.sleep(for: status == .connected ? .seconds(1) : .milliseconds(250)) }
             catch { return }
         }
     }

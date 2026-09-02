@@ -883,7 +883,12 @@ Package inventory/update discovery and provider login remain exact administrativ
 until their underlying asynchronous operation settles; retiring mobile UI does not infer
 provider settlement. Registry tokens are the normal drain authority. Exact-owned
 nonterminal extension artifacts are the sole compatibility exception until the pinned
-extension host exposes direct detached-work registration.
+extension host exposes direct detached-work registration. A logically resumable `paused`
+artifact remains nonterminal presentation/history, but it stops blocking administrative
+drain only after its exact-owned versioned `processTerminal` proof reports `observed` and
+validates the matching runner plus every writer process tree. Missing, pending, unknown,
+mismatched, or malformed proof remains conservative. Process exit never fabricates
+workflow completion, success, failure, or a terminal receipt.
 The pinned SDK exposes no disposal API for the retained administration resource loader or
 model runtime, so admission closure plus exact operation settlement is the truthful
 resource boundary; Tron does not pretend those SDK objects were explicitly disposed.

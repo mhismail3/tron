@@ -181,6 +181,44 @@ export function admitExtensionLifecycleArtifact(
   return admission.accepted ? admission.artifact : undefined;
 }
 
+/** A paused workflow is logically resumable but owns no live OS work after the
+ * producer has durably observed its exact runner and writer process trees exit.
+ * This proof affects administrative quiescence only; it never fabricates a
+ * terminal workflow lifecycle or success result. */
+export function hasObservedPausedProcessTerminal(
+  artifact: Record<string, unknown>,
+  runId: string,
+): boolean {
+  if (extensionLifecycleState(artifact.state ?? artifact.status) !== "paused") return false;
+  const proof = record(artifact.processTerminal);
+  if (!proof || proof.version !== 1 || proof.state !== "observed" || proof.runId !== runId
+    || typeof proof.runnerProcessInstanceId !== "string" || proof.runnerProcessInstanceId.length < 1
+    || Buffer.byteLength(proof.runnerProcessInstanceId) > 256
+    || number(proof.observedAt) === undefined || (proof.observedAt as number) < 0
+    || !Array.isArray(proof.instances) || proof.instances.length < 1 || proof.instances.length > 128) return false;
+  let matchingRunnerCount = 0;
+  for (const candidate of proof.instances) {
+    const instance = record(candidate);
+    if (!instance || (instance.kind !== "runner" && instance.kind !== "pi-writer")
+      || typeof instance.processInstanceId !== "string" || instance.processInstanceId.length < 1
+      || Buffer.byteLength(instance.processInstanceId) > 256
+      || number(instance.closeObservedAt) === undefined || (instance.closeObservedAt as number) < 0
+      || !(instance.exitCode === null || Number.isSafeInteger(instance.exitCode))
+      || !(instance.signal === null || typeof instance.signal === "string" && Buffer.byteLength(instance.signal) <= 64)) return false;
+    if (instance.kind === "runner") {
+      if (instance.processInstanceId !== proof.runnerProcessInstanceId || instance.attempt !== undefined) return false;
+      matchingRunnerCount += 1;
+      continue;
+    }
+    const tree = record(instance.processTree);
+    if (!Number.isSafeInteger(instance.attempt) || (instance.attempt as number) < 0
+      || !tree || tree.state !== "observed" || tree.mechanism !== "posix-process-group"
+      || !Number.isSafeInteger(tree.processGroupId) || (tree.processGroupId as number) < 1
+      || number(tree.verifiedAt) === undefined || (tree.verifiedAt as number) < 0) return false;
+  }
+  return matchingRunnerCount === 1;
+}
+
 /** Gateway sequence admission used by every producer projection. Producer
  * timestamps are intentionally absent from this decision. */
 export function admitExtensionRunActivity(previous: ExtensionRunActivity | undefined, candidate: ExtensionRunActivity): ExtensionRunActivity {

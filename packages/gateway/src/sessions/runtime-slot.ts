@@ -78,7 +78,7 @@ import {
 } from "./projection.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
@@ -404,6 +404,7 @@ export class RuntimeSlot {
     toolCallId: string;
     asyncDir?: string;
     terminal: boolean;
+    pausedProcessQuiescent?: boolean;
   }>();
   private readonly extensionActivityWatchers = new Map<string, {
     watcher: FSWatcher;
@@ -715,7 +716,11 @@ export class RuntimeSlot {
     const facts: RuntimeDrainBlockerFact[] = [];
     for (const activity of this.extensionActivities.values()) {
       const state = activity.lifecycle?.state;
-      if (state === "queued" || state === "running" || state === "paused") {
+      const ownership = activity.runId ? this.extensionRunOwnership.get(activity.runId) : undefined;
+      const pausedProcessIsQuiescent = state === "paused"
+        && ownership?.toolCallId === activity.toolCallId
+        && ownership.pausedProcessQuiescent === true;
+      if (state === "queued" || state === "running" || state === "paused" && !pausedProcessIsQuiescent) {
         facts.push({
           category: "detached-extension-run",
           key: activity.activityId ?? activity.toolCallId,
@@ -3049,7 +3054,8 @@ export class RuntimeSlot {
         && temporaryParts.length <= 4
         && temporaryParts[2] !== ""
         && (temporaryParts.length === 3 || temporaryParts[3] === "status.json"
-          || temporaryParts[3] === "events.jsonl" || temporaryParts[3] === "recovery-descriptor.json");
+          || temporaryParts[3] === "events.jsonl" || temporaryParts[3] === "recovery-descriptor.json"
+          || temporaryParts[3] === "process-terminal.json");
       if (temporaryRun) return true;
 
       const projectRelative = relative(projectRoot, value);
@@ -3060,7 +3066,8 @@ export class RuntimeSlot {
         && projectParts.length <= 2
         && projectParts[0] !== ""
         && (projectParts.length === 1 || projectParts[1] === "status.json"
-          || projectParts[1] === "events.jsonl" || projectParts[1] === "recovery-descriptor.json");
+          || projectParts[1] === "events.jsonl" || projectParts[1] === "recovery-descriptor.json"
+          || projectParts[1] === "process-terminal.json");
     };
     const candidate = resolve(asyncPath);
     // Validate the canonical target. The lexical segment check above rejects
@@ -3105,7 +3112,7 @@ export class RuntimeSlot {
 
   private async openOwnedExtensionArtifact(
     asyncDir: string,
-    name: "status.json" | "events.jsonl" | "recovery-descriptor.json",
+    name: "status.json" | "events.jsonl" | "recovery-descriptor.json" | "process-terminal.json",
     expectedDirectory?: ExtensionArtifactDirectoryIdentity,
   ): Promise<OpenedExtensionArtifact | undefined> {
     const canonicalAsyncDir = realpathSync(asyncDir);
@@ -3160,7 +3167,47 @@ export class RuntimeSlot {
       }
       const parsed: unknown = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-      return this.attachRecoverySessionOwner(asyncDir, parsed as Record<string, unknown>, opened.directory);
+      const recovered = await this.attachRecoverySessionOwner(
+        asyncDir,
+        parsed as Record<string, unknown>,
+        opened.directory,
+      );
+      return this.attachProcessTerminalProof(asyncDir, recovered, opened.directory);
+    } finally {
+      await opened.handle.close();
+    }
+  }
+
+  /** The producer persists process-terminal.json before best-effort status
+   * overlay. Read that exact-owned sidecar so an interrupted overlay cannot
+   * leave an exited paused runner blocking restart forever. */
+  private async attachProcessTerminalProof(
+    asyncDir: string,
+    status: Record<string, unknown>,
+    directoryIdentity: ExtensionArtifactDirectoryIdentity,
+  ): Promise<Record<string, unknown>> {
+    const withoutProof = (): Record<string, unknown> => {
+      const { processTerminal: _processTerminal, ...remaining } = status;
+      return remaining;
+    };
+    const runId = typeof status.runId === "string" ? status.runId : undefined;
+    if (!runId || Buffer.byteLength(runId) > 256 || /[\\/\0]/u.test(runId)) return withoutProof();
+    const opened = await this.openOwnedExtensionArtifact(
+      asyncDir,
+      "process-terminal.json",
+      directoryIdentity,
+    ).catch(() => undefined);
+    if (!opened) return status;
+    try {
+      const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
+      const { bytesRead } = await opened.handle.read(buffer, 0, buffer.length, 0);
+      if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) return withoutProof();
+      const parsed: unknown = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+        || (parsed as Record<string, unknown>).runId !== runId) return withoutProof();
+      return { ...status, processTerminal: parsed as Record<string, unknown> };
+    } catch {
+      return withoutProof();
     } finally {
       await opened.handle.close();
     }
@@ -3502,6 +3549,7 @@ export class RuntimeSlot {
         return;
       }
       const { status: state, startedAt, updatedAt, completedAt, durationMs } = normalized;
+      const pausedProcessIsQuiescent = hasObservedPausedProcessTerminal(raw, runId);
       // A terminal lifecycle event is authoritative; a late running artifact
       // enriches neither status nor ownership and must not resurrect the pill.
       if (ownership?.terminal && state === "running") return;
@@ -3549,6 +3597,7 @@ export class RuntimeSlot {
         toolCallId,
         asyncDir: realAsyncDir,
         terminal: activity.status !== "running" || Boolean(ownership?.terminal),
+        pausedProcessQuiescent: pausedProcessIsQuiescent,
       });
       if (!ownershipAccepted) {
         this.releaseExtensionReceiptOwnership(activityKey, terminalReceiptOwner);
@@ -3611,7 +3660,7 @@ export class RuntimeSlot {
 
   private bindExtensionRunOwnership(
     runId: string,
-    binding: { toolCallId: string; asyncDir?: string; terminal: boolean },
+    binding: { toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescent?: boolean },
   ): boolean {
     const existing = this.extensionRunOwnership.get(runId);
     if (existing && existing.toolCallId !== binding.toolCallId) {
@@ -3623,6 +3672,8 @@ export class RuntimeSlot {
       toolCallId: binding.toolCallId,
       ...(asyncDir ? { asyncDir } : {}),
       terminal: Boolean(existing?.terminal || binding.terminal),
+      pausedProcessQuiescent: binding.pausedProcessQuiescent
+        ?? (existing?.toolCallId === binding.toolCallId && existing.pausedProcessQuiescent === true),
     });
     return true;
   }
@@ -3766,6 +3817,7 @@ export class RuntimeSlot {
         return;
       }
       const { status: artifactState, updatedAt, completedAt, durationMs } = normalized;
+      const pausedProcessIsQuiescent = hasObservedPausedProcessTerminal(raw, runId);
       const terminalStates = ["completed", "failed", "stopped", "rejected"];
       if (ownership.terminal && artifactState === "running") return;
       if (terminalStates.includes(previous.lifecycle?.state ?? "") && artifactState !== "running") {
@@ -3822,6 +3874,7 @@ export class RuntimeSlot {
         toolCallId,
         asyncDir: realAsyncDir,
         terminal: activity.status !== "running" || Boolean(ownership.terminal),
+        pausedProcessQuiescent: pausedProcessIsQuiescent,
       });
       if (activity.status === "running") {
         const tracked = this.extensionActivityWatchers.get(toolCallId);
@@ -4063,6 +4116,8 @@ export class RuntimeSlot {
       toolCallId,
       ...(asyncDir === undefined ? {} : { asyncDir }),
       terminal: activity.status !== "running",
+      // Live tool frames do not carry the separately validated sidecar proof.
+      pausedProcessQuiescent: false,
     })) {
       this.releaseExtensionReceiptOwnership(activityKey, terminalReceiptOwner);
       return current;

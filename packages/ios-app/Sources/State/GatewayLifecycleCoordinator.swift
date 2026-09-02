@@ -877,11 +877,15 @@ final class GatewayLifecycleCoordinator {
                             connectionID: connection.id
                         )
                         self.gatewayInfo = connection.info
-                        // Transport readiness is authoritative at handshake +
-                        // event activation. Projection owners reconcile beneath
-                        // this usable socket and must not block opening another
-                        // session or make a healthy epoch look disconnected.
-                        if !self.restartRequested { self.connectionState = .connected }
+                        // Authenticated handshake plus event activation is the
+                        // connection boundary, including after system.stopping.
+                        // Projection owners reconcile beneath this usable socket;
+                        // slow or failed projection work cannot strand a healthy
+                        // replacement in Restarting.
+                        self.restartWatchdogTask?.cancel()
+                        self.restartWatchdogTask = nil
+                        self.restartRequested = false
+                        self.connectionState = .connected
                         reconciliationAggregateAdmission = admission
                         self.delegate?.lifecycleBeginReconciliationAggregate(admission: admission)
                         self.delegate?.lifecycleInvalidateSessionConnectionOwnership()

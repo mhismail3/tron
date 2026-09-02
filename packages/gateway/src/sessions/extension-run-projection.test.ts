@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasForegroundSubagentRunActivity, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, usesForegroundSubagentChildIdentity } from "./extension-run-projection.js";
+import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, usesForegroundSubagentChildIdentity } from "./extension-run-projection.js";
 
 const base = {
   id: "tool-call",
@@ -75,6 +75,41 @@ describe("projectExtensionRunActivity", () => {
     expect(inspectExtensionLifecycleArtifact({ ...valid, endedAt: undefined, completedAt: undefined })).toEqual({ accepted: false, reason: "missing-terminal-time" });
     expect(admitExtensionLifecycleArtifact({ ...valid, state: "running", endedAt: 50 })).toBeUndefined();
     expect(inspectExtensionLifecycleArtifact("not-an-artifact")).toEqual({ accepted: false, reason: "malformed-artifact" });
+  });
+
+  it("admits only exact observed process-terminal proof for paused quiescence", () => {
+    const proof = {
+      version: 1,
+      state: "observed",
+      runId: "paused-run",
+      runnerProcessInstanceId: "runner-instance",
+      observedAt: 300,
+      instances: [{
+        kind: "runner",
+        processInstanceId: "runner-instance",
+        closeObservedAt: 299,
+        exitCode: 0,
+        signal: null,
+      }],
+      resumeDisposition: "resumable",
+    };
+    const paused = { state: "paused", processTerminal: proof };
+    expect(hasObservedPausedProcessTerminal(paused, "paused-run")).toBe(true);
+    expect(hasObservedPausedProcessTerminal({ ...paused, state: "running" }, "paused-run")).toBe(false);
+    expect(hasObservedPausedProcessTerminal(paused, "other-run")).toBe(false);
+    expect(hasObservedPausedProcessTerminal({ ...paused, processTerminal: { ...proof, state: "pending" } }, "paused-run")).toBe(false);
+    expect(hasObservedPausedProcessTerminal({
+      ...paused,
+      processTerminal: { ...proof, instances: [{ ...proof.instances[0], processInstanceId: "other" }] },
+    }, "paused-run")).toBe(false);
+    expect(hasObservedPausedProcessTerminal({
+      ...paused,
+      processTerminal: { ...proof, instances: [...proof.instances, {
+        kind: "pi-writer", processInstanceId: "writer", closeObservedAt: 298,
+        exitCode: 0, signal: null, attempt: 0,
+        processTree: { state: "unknown", reason: "verification-failed" },
+      }] },
+    }, "paused-run")).toBe(false);
   });
 
   it("admits only explicit delegated-run conventions for ambient activity", () => {

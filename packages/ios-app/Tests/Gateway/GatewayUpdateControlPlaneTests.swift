@@ -91,6 +91,14 @@ struct GatewayUpdateControlPlaneTests {
         )
         #expect(draining.isActive)
         #expect(draining.presentationTitle == "Draining")
+        #expect(GatewayUpdatePollingDecision.decide(installed, commandID: "command-draining") == .waitingForCommand)
+        #expect(GatewayUpdatePollingDecision.decide(draining, commandID: "command-draining") == .active)
+        let installedForCommand = GatewayUpdateStatus(
+            state: "ready", channel: "stable", currentIdentity: installed.currentIdentity,
+            candidateIdentity: nil, candidateAvailable: false, error: nil,
+            updatedAt: "2026-01-01T00:00:03Z", commandId: "command-draining"
+        )
+        #expect(GatewayUpdatePollingDecision.decide(installedForCommand, commandID: "command-draining") == .terminal)
         let failed = GatewayUpdateStatus(
             state: "failed", channel: "stable", currentIdentity: nil, candidateIdentity: available.candidateIdentity,
             candidateAvailable: true, error: "health check failed", updatedAt: nil,
@@ -129,6 +137,7 @@ struct GatewayUpdateControlPlaneTests {
         #expect(debug.debugPromotionCandidate?.testedRuntimeEpoch == "tested-epoch")
         #expect(debug.debugPromotionCandidate?.candidateRuntimeEpoch == "candidate-epoch")
         #expect(debug.commandId == "debug-command")
+        #expect(GatewayUpdatePollingDecision.decide(debug, commandID: "debug-command") == .active)
 
         let capableInfo = GatewayInfo(
             gatewayVersion: "1", piVersion: "1", protocolVersion: 4, minProtocolVersion: 4,

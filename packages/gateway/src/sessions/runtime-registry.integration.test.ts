@@ -2647,6 +2647,100 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     if (receiptAppend) expect(receiptAppend.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("drains an exact-owned paused workflow only after observed process-terminal proof", async () => {
+    const fixture = await coldFixture("paused-process-terminal-drain");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const runId = "paused-process-terminal-run";
+    const toolCallId = "paused-process-terminal-tool";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
+    await mkdir(asyncDir, { recursive: true });
+    const started = Date.now() - 5_000;
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      extensionRunOwnership: Map<string, {
+        toolCallId: string; asyncDir?: string; terminal: boolean; pausedProcessQuiescent?: boolean;
+      }>;
+      stopExtensionActivityWatcher: (id: string) => void;
+    };
+    internal.extensionActivities.set(toolCallId, {
+      id: toolCallId,
+      activityId: "paused-process-terminal-activity",
+      runId,
+      toolCallId,
+      source: { source: "pi-subagents" },
+      title: "Pi Subagents",
+      status: "running",
+      startedAt: new Date(started).toISOString(),
+      updatedAt: new Date(started + 1_000).toISOString(),
+      children: [],
+      lifecycle: {
+        version: 1,
+        state: "paused",
+        attention: "needsAttention",
+        sequence: 1,
+        observedAt: new Date(started + 1_000).toISOString(),
+      },
+    });
+    internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    await Promise.all([
+      writeFile(join(asyncDir, "status.json"), JSON.stringify({
+        lifecycleArtifactVersion: 3,
+        runId,
+        state: "paused",
+        startedAt: started,
+        endedAt: started + 1_000,
+        lastUpdate: started + 1_001,
+      })),
+      writeFile(join(asyncDir, "process-terminal.json"), JSON.stringify({
+        version: 1,
+        state: "pending",
+        runId,
+        runnerProcessInstanceId: "runner-instance",
+      })),
+    ]);
+
+    const drain = fixture.registry.waitUntilIdle();
+    let drained = false;
+    void drain.then(() => { drained = true; });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    internal.stopExtensionActivityWatcher(toolCallId);
+    expect(drained).toBe(false);
+    expect(fixture.registry.administrativeDrainSnapshot()).toMatchObject({
+      phase: "waiting",
+      blockerCount: 1,
+      blockerCounts: { "detached-extension-run": 1 },
+    });
+
+    await writeFile(join(asyncDir, "process-terminal.json"), JSON.stringify({
+      version: 1,
+      state: "observed",
+      runId,
+      runnerProcessInstanceId: "runner-instance",
+      observedAt: started + 1_500,
+      instances: [{
+        kind: "runner",
+        processInstanceId: "runner-instance",
+        closeObservedAt: started + 1_500,
+        exitCode: 0,
+        signal: null,
+      }],
+      resumeDisposition: "resumable",
+    }));
+    await slot.discoverExtensionArtifact(asyncDir);
+    expect(internal.extensionRunOwnership.get(runId)?.pausedProcessQuiescent).toBe(true);
+
+    await drain;
+    expect(slot.isDrainBusy).toBe(false);
+    expect(fixture.registry.administrativeDrainSnapshot()).toMatchObject({
+      phase: "complete", blockerCount: 0, suspectProjectionCount: 0,
+    });
+    expect(slot.snapshot().extensionActivities).toMatchObject([{
+      toolCallId,
+      status: "running",
+      lifecycle: { state: "paused" },
+    }]);
+  });
+
   it("does not retain unwatched async launcher acknowledgements as running work", async () => {
     const fixture = await coldFixture("unwatched-async-launcher");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
