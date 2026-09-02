@@ -161,6 +161,25 @@ struct ExtensionActivityDelta: Codable, Hashable, Sendable {
     let extensionActivityAsOf: String
 }
 
+/// Device-local receipt time for a Gateway duration sample. It deliberately has
+/// no value identity and is excluded from Codable so authoritative snapshots,
+/// caches, and protocol round trips remain unchanged.
+struct ToolDurationSampleAnchor: Hashable, Sendable {
+    let uptime: TimeInterval
+
+    func advancing(_ milliseconds: Int, toUptime currentUptime: TimeInterval) -> Int {
+        let baseline = max(0, milliseconds)
+        let delta = (currentUptime - uptime) * 1_000
+        guard delta.isFinite, delta > 0 else { return baseline }
+        let rounded = delta.rounded()
+        guard rounded < Double(Int.max - baseline) else { return Int.max }
+        return baseline + Int(rounded)
+    }
+
+    static func == (_: Self, _: Self) -> Bool { true }
+    func hash(into _: inout Hasher) {}
+}
+
 struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     enum Status: String, Codable, Sendable { case running, completed, failed }
     let toolCallId: String
@@ -179,6 +198,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     let lastProgressAt: String?
     let completedAt: String?
     let durationMs: Int?
+    let durationSampleAnchor: ToolDurationSampleAnchor
     let progressSequence: Int?
     let extensionOrigin: ExtensionToolOrigin?
     let extensionActivity: ExtensionRunActivity?
@@ -197,7 +217,11 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         output: String? = nil, outputTruncated: Bool? = nil,
         isError: Bool, startedAt: String, updatedAt: String,
         lastProgressAt: String? = nil, completedAt: String? = nil,
-        durationMs: Int? = nil, progressSequence: Int? = nil,
+        durationMs: Int? = nil,
+        durationSampleAnchor: ToolDurationSampleAnchor = ToolDurationSampleAnchor(
+            uptime: ProcessInfo.processInfo.systemUptime
+        ),
+        progressSequence: Int? = nil,
         extensionOrigin: ExtensionToolOrigin? = nil, extensionActivity: ExtensionRunActivity? = nil,
         liveActivityRevision: Int? = nil, extensionActivityAsOf: String? = nil,
         toolSegmentId: String? = nil, groupId: String? = nil, groupIndex: Int? = nil,
@@ -219,6 +243,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         self.lastProgressAt = lastProgressAt
         self.completedAt = completedAt
         self.durationMs = durationMs
+        self.durationSampleAnchor = durationSampleAnchor
         self.progressSequence = progressSequence
         self.extensionOrigin = extensionOrigin
         self.extensionActivity = extensionActivity
@@ -257,6 +282,9 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         lastProgressAt = try values.decodeIfPresent(String.self, forKey: .lastProgressAt)
         completedAt = try values.decodeIfPresent(String.self, forKey: .completedAt)
         durationMs = try values.decodeIfPresent(Int.self, forKey: .durationMs)
+        durationSampleAnchor = ToolDurationSampleAnchor(
+            uptime: ProcessInfo.processInfo.systemUptime
+        )
         progressSequence = try values.decodeIfPresent(Int.self, forKey: .progressSequence)
         extensionOrigin = try values.decodeIfPresent(ExtensionToolOrigin.self, forKey: .extensionOrigin)
         extensionActivity = try values.decodeIfPresent(ExtensionRunActivity.self, forKey: .extensionActivity)

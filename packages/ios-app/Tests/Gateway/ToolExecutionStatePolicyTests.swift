@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import TronMobile
 
@@ -74,6 +75,18 @@ struct ToolExecutionStatePolicyTests {
 
         #expect(terminal.startedAt == "2026-01-01T00:00:00Z")
         #expect(terminal.durationMs == 2_400)
+
+        let firstRunning = tool(
+            id: "live", updatedAt: "1", sequence: 1,
+            durationMs: 1_000, durationSampledAtUptime: 10
+        )
+        let staleNewerFrame = tool(
+            id: "live", updatedAt: "2", sequence: 2,
+            durationMs: 500, durationSampledAtUptime: 14
+        )
+        let reconciled = ToolExecutionStatePolicy.newest(firstRunning, staleNewerFrame)
+        #expect(reconciled.durationMs == 5_000)
+        #expect(reconciled.durationSampleAnchor.uptime == 14)
     }
 
     @Test("terminal result wins while the selected latest frame stays bounded")
@@ -133,6 +146,7 @@ struct ToolExecutionStatePolicyTests {
         output: String? = nil,
         outputTruncated: Bool? = nil,
         durationMs: Int? = nil,
+        durationSampledAtUptime: TimeInterval = 0,
         toolSegmentId: String? = nil,
         groupIndex: Int? = nil
     ) -> ToolExecutionState {
@@ -150,6 +164,7 @@ struct ToolExecutionStatePolicyTests {
             startedAt: startedAt,
             updatedAt: updatedAt,
             durationMs: durationMs,
+            durationSampleAnchor: ToolDurationSampleAnchor(uptime: durationSampledAtUptime),
             progressSequence: sequence,
             toolSegmentId: toolSegmentId,
             groupId: groupIndex == nil ? nil : "group",

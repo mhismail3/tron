@@ -19,6 +19,7 @@ enum ToolExecutionStatePolicy {
         let outputTruncated = candidateOutput == nil
             ? current.outputTruncated
             : (candidate.outputTruncated == true || candidateWasLocallyTruncated ? true : nil)
+        let durationMs = reconciledDuration(current: current, candidate: candidate)
         return ToolExecutionState(
             toolCallId: candidate.toolCallId,
             toolName: candidate.toolName,
@@ -39,7 +40,8 @@ enum ToolExecutionStatePolicy {
             updatedAt: candidate.updatedAt,
             lastProgressAt: candidate.lastProgressAt ?? current.lastProgressAt,
             completedAt: candidate.completedAt ?? current.completedAt,
-            durationMs: maximumDuration(current.durationMs, candidate.durationMs),
+            durationMs: durationMs,
+            durationSampleAnchor: candidate.durationSampleAnchor,
             progressSequence: candidate.progressSequence,
             extensionOrigin: candidate.extensionOrigin ?? current.extensionOrigin,
             extensionActivity: candidate.extensionActivity ?? (candidate.status == .running ? current.extensionActivity : nil),
@@ -84,6 +86,21 @@ enum ToolExecutionStatePolicy {
     }
 
     private static let maximumLiveOutputBytes = 96 * 1_024
+
+    private static func reconciledDuration(
+        current: ToolExecutionState,
+        candidate: ToolExecutionState
+    ) -> Int? {
+        var currentDuration = current.durationMs
+        if current.status == .running, candidate.status == .running,
+           let sampled = currentDuration {
+            currentDuration = current.durationSampleAnchor.advancing(
+                sampled,
+                toUptime: candidate.durationSampleAnchor.uptime
+            )
+        }
+        return maximumDuration(currentDuration, candidate.durationMs)
+    }
 
     private static func maximumDuration(_ current: Int?, _ candidate: Int?) -> Int? {
         switch (current, candidate) {

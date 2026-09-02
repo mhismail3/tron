@@ -999,6 +999,7 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     let startedAt: String?
     let completedAt: String?
     let durationMs: Int?
+    let durationSampleAnchor: ToolDurationSampleAnchor?
     let lastProgressAt: String?
     let progressSequence: Int?
     let outputTruncated: Bool
@@ -1020,6 +1021,7 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
         startedAt = tool.startedAt
         completedAt = tool.completedAt
         durationMs = tool.durationMs
+        durationSampleAnchor = tool.durationSampleAnchor
         lastProgressAt = tool.lastProgressAt
         progressSequence = tool.progressSequence
         outputTruncated = tool.outputTruncated
@@ -1039,12 +1041,17 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     /// but must not accrue execution time before the Gateway starts the call.
     var isActivelyExecuting: Bool { subtitle == "Running" }
 
-    func elapsedMilliseconds(at date: Date = .now) -> Int? {
+    func elapsedMilliseconds(
+        at date: Date = .now,
+        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) -> Int? {
         if isActivelyExecuting {
             return ToolTiming.runningDuration(
                 sampledDuration: durationMs,
+                sampleAnchor: durationSampleAnchor,
                 startedAt: startedAt,
-                at: date
+                at: date,
+                uptime: uptime
             )
         }
         if isRunning { return durationMs.map { max(0, $0) } }
@@ -1094,6 +1101,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     let startedAt: String?
     let completedAt: String?
     let durationMs: Int?
+    let durationSampleAnchor: ToolDurationSampleAnchor?
     let lastProgressAt: String?
     let progressSequence: Int?
     let outputTruncated: Bool
@@ -1118,6 +1126,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         startedAt: String?,
         completedAt: String?,
         durationMs: Int?,
+        durationSampleAnchor: ToolDurationSampleAnchor? = nil,
         lastProgressAt: String?,
         progressSequence: Int?,
         outputTruncated: Bool = false,
@@ -1141,6 +1150,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         self.startedAt = startedAt
         self.completedAt = completedAt
         self.durationMs = durationMs
+        self.durationSampleAnchor = durationSampleAnchor
         self.lastProgressAt = lastProgressAt
         self.progressSequence = progressSequence
         self.outputTruncated = outputTruncated || response?.hasToolOutputTruncationMetadata == true
@@ -1166,6 +1176,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         startedAt = descriptor.startedAt
         completedAt = descriptor.completedAt
         durationMs = descriptor.durationMs
+        durationSampleAnchor = descriptor.durationSampleAnchor
         lastProgressAt = descriptor.lastProgressAt
         progressSequence = descriptor.progressSequence
         outputTruncated = descriptor.outputTruncated
@@ -1191,12 +1202,17 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     var isRunning: Bool { subtitle == "Running" || subtitle == "Invocation" }
     var isActivelyExecuting: Bool { subtitle == "Running" }
 
-    func elapsedMilliseconds(at date: Date = .now) -> Int? {
+    func elapsedMilliseconds(
+        at date: Date = .now,
+        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) -> Int? {
         if isActivelyExecuting {
             return ToolTiming.runningDuration(
                 sampledDuration: durationMs,
+                sampleAnchor: durationSampleAnchor,
                 startedAt: startedAt,
-                at: date
+                at: date,
+                uptime: uptime
             )
         }
         if isRunning { return durationMs.map { max(0, $0) } }
@@ -1246,10 +1262,15 @@ enum ToolTiming {
     /// local receive-time uptime anchor without comparing device/Gateway clocks.
     static func runningDuration(
         sampledDuration: Int?,
+        sampleAnchor: ToolDurationSampleAnchor?,
         startedAt: String?,
-        at date: Date
+        at date: Date,
+        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
     ) -> Int? {
-        if let sampledDuration { return max(0, sampledDuration) }
+        if let sampledDuration {
+            return sampleAnchor?.advancing(sampledDuration, toUptime: uptime)
+                ?? max(0, sampledDuration)
+        }
         guard let start = self.date(startedAt) else { return nil }
         return milliseconds(from: start, to: date)
     }

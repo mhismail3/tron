@@ -137,6 +137,7 @@ struct ToolCard: View {
             startedAt: timing?.startedAt,
             completedAt: timing?.completedAt,
             durationMs: timing?.durationMs,
+            durationSampleAnchor: timing?.durationSampleAnchor,
             lastProgressAt: timing?.lastProgressAt,
             progressSequence: timing?.progressSequence,
             outputTruncated: timing?.outputTruncated ?? outputTruncated,

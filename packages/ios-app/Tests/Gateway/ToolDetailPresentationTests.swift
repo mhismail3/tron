@@ -134,6 +134,25 @@ struct ToolDetailPresentationTests {
         )
         #expect(ToolStatusChipPresentation.make(tool: failed).text == "Failed · 1.0s")
         #expect(ToolStatusChipPresentation.make(tool: failed).icon == "exclamationmark.triangle.fill")
+
+        let running = ChatToolPresentation(
+            id: "running", title: "bash", subtitle: "Running",
+            request: nil, response: nil, content: "", fallbackContent: nil, error: false,
+            startedAt: "2026-01-01T00:00:00Z", completedAt: nil,
+            durationMs: 1_200,
+            durationSampleAnchor: ToolDurationSampleAnchor(uptime: 100),
+            lastProgressAt: "2026-01-01T00:00:01.200Z", progressSequence: 1
+        )
+        let remounted = ChatToolPresentation(descriptor: running.descriptor, payload: running.payload)
+        let elapsed = remounted.elapsedMilliseconds(
+            at: Date(timeIntervalSince1970: 0),
+            uptime: 145
+        )
+        #expect(elapsed == 46_200)
+        #expect(ToolStatusChipPresentation.make(
+            tool: remounted,
+            elapsedMilliseconds: elapsed
+        ).text == "Running · 46.2s")
     }
 
     @Test("file paths separate restrained directories from accented basenames")

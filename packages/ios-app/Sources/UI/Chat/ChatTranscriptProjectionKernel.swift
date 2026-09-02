@@ -1531,6 +1531,7 @@ enum ChatTranscriptProjectionKernel {
             // Canonical and live values are both monotonic Gateway samples when
             // present. Never let source handoff replace a larger accepted sample.
             durationMs: ToolTiming.maximum(canonical.durationMs, live.durationMs),
+            durationSampleAnchor: live.durationSampleAnchor,
             lastProgressAt: canonical.lastProgressAt ?? live.lastProgressAt ?? live.updatedAt,
             progressSequence: canonical.progressSequence ?? live.progressSequence,
             outputTruncated: live.outputTruncated == true || canonical.outputTruncated,
@@ -1555,7 +1556,8 @@ enum ChatTranscriptProjectionKernel {
             request: tool.arguments, response: response, content: tool.output ?? "",
             fallbackContent: tool.output == nil && response == nil ? tool.arguments : nil,
             error: tool.isError, startedAt: tool.startedAt, completedAt: tool.completedAt,
-            durationMs: tool.durationMs, lastProgressAt: tool.lastProgressAt ?? tool.updatedAt,
+            durationMs: tool.durationMs, durationSampleAnchor: tool.durationSampleAnchor,
+            lastProgressAt: tool.lastProgressAt ?? tool.updatedAt,
             progressSequence: tool.progressSequence, outputTruncated: tool.outputTruncated == true,
             extensionOrigin: tool.extensionOrigin, toolSegmentId: tool.toolSegmentId,
             groupId: tool.groupId, groupIndex: tool.groupIndex,
@@ -1579,7 +1581,8 @@ enum ChatTranscriptProjectionKernel {
             id: tool.id, title: tool.title, toolName: tool.toolName, subtitle: "Interrupted", request: tool.request,
             response: tool.response, content: tool.content, fallbackContent: tool.fallbackContent,
             error: true, startedAt: tool.startedAt, completedAt: tool.completedAt,
-            durationMs: tool.durationMs, lastProgressAt: tool.lastProgressAt,
+            durationMs: tool.durationMs, durationSampleAnchor: tool.durationSampleAnchor,
+            lastProgressAt: tool.lastProgressAt,
             progressSequence: tool.progressSequence, outputTruncated: tool.outputTruncated,
             display: tool.display,
             extensionOrigin: tool.extensionOrigin, toolSegmentId: tool.toolSegmentId,

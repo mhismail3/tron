@@ -2363,6 +2363,8 @@ struct PresentationStyleGuardTests {
         #expect(!sheet.contains("Complete result data is available in Technical details."))
         #expect(!sheet.contains("Request, response, timing, and raw JSON"))
         #expect(!sheet.contains("statusCard"))
+        #expect(!sheet.contains("ToolActivityChip"))
+        #expect(!sheet.contains("Updated now"))
         #expect(sheet.contains("showsRawDisclosure: false"))
         #expect(sheet.matches(#"ToolDetailPresentation\(tool: tool\)"#) == 1)
         #expect(!sheet.contains("presentation.kind == .generic, let request"))
@@ -2372,6 +2374,7 @@ struct PresentationStyleGuardTests {
                 .components(separatedBy: "enum ChatTokenCountPresentation {").first
         )
         #expect(timing.contains("value.flatMap(GatewayTimestamp.parse)"))
+        #expect(timing.contains("sampleAnchor?.advancing(sampledDuration, toUptime: uptime)"))
         #expect(timestamps.contains("Date.ISO8601FormatStyle(includingFractionalSeconds: true)"))
         #expect(timestamps.contains("Date.ISO8601FormatStyle(includingFractionalSeconds: false)"))
         #expect(!timing.contains("ISO8601DateFormatter"))
@@ -3048,6 +3051,7 @@ struct PresentationStyleGuardTests {
         let stableRow = (transcriptView.components(separatedBy: "private func stableRow").dropFirst().first ?? "")
             .components(separatedBy: "private var tailMarker").first ?? ""
         #expect(stableRow.contains(".padding(.horizontal, 16)"))
+        #expect(!transcriptView.contains("private func horizontalPadding(for item: ChatTranscriptRenderItem)"))
         #expect(stableRow.contains("entranceState == .pending ? installedTag : nil"))
         #expect(stableRow.contains("ChatEntranceGeometryAdmissionPolicy.admits"))
         #expect(stableRow.contains("installationTag: entranceTag"))

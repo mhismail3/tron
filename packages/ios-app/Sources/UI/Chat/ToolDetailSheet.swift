@@ -60,9 +60,6 @@ struct ToolDetailSheet: View {
             if tool.outputTruncated {
                 ToolStaticChip(icon: "text.badge.minus", text: "Bounded output", accent: .tronAmber)
             }
-            if tool.isRunning {
-                ToolActivityChip(tool: tool)
-            }
         }
         .accessibilityElement(children: .contain)
     }
@@ -499,47 +496,5 @@ struct ToolStaticChip: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 6)
         .glassEffect(.regular.tint(accent.opacity(0.10)), in: Capsule())
-    }
-}
-
-private struct ToolActivityChip: View {
-    let tool: ChatToolPresentation
-    @Environment(\.tronPresentationActivity) private var presentationActivity
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var isVisible = false
-
-    var body: some View {
-        Group {
-            if PresentationClockPolicy.runs(
-                surfaceActive: presentationActivity.allowsContinuousAnimation,
-                sceneActive: scenePhase == .active,
-                viewportVisible: isVisible
-            ) {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    activityContent(at: context.date)
-                }
-            } else {
-                activityContent(at: .now)
-            }
-        }
-        .onAppear { isVisible = true }
-        .onDisappear { isVisible = false }
-    }
-
-    @ViewBuilder
-    private func activityContent(at date: Date) -> some View {
-            if let update = ToolTiming.date(tool.lastProgressAt) {
-                let age = max(0, Int(date.timeIntervalSince(update)))
-                ToolStaticChip(
-                    icon: "waveform.path.ecg",
-                    text: age < 2 ? "Updated now" : "Updated \(ageLabel(age)) ago",
-                    accent: .tronAmber
-                )
-            }
-    }
-
-    private func ageLabel(_ seconds: Int) -> String {
-        if seconds < 60 { return "\(seconds)s" }
-        return "\(seconds / 60)m \(seconds % 60)s"
     }
 }
