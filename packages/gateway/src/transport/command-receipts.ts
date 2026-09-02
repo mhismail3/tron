@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { JsonValue } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { atomicWriteJson, readJson } from "../util/json.js";
+import { readJson } from "../util/json.js";
+import { durableAtomicWriteJson } from "../util/durable-json.js";
 import { GatewayError } from "../errors.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 
@@ -97,7 +98,7 @@ export class CommandReceiptStore {
 
   constructor(
     tronHome: string,
-    private readonly writeReceipt: (path: string, value: unknown, mode?: number) => Promise<void> = atomicWriteJson,
+    private readonly writeReceipt: (path: string, value: unknown, mode?: number) => Promise<void> = durableAtomicWriteJson,
     capacity: CommandReceiptCapacity = {},
   ) {
     this.directory = join(tronHome, "gateway", "command-receipts");
