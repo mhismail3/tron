@@ -1,5 +1,14 @@
 import SwiftUI
 
+enum UserPromptPresentationPolicy {
+    static func visibleText(_ text: String?, hasAttachments: Bool = false) -> String? {
+        guard let text,
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !(hasAttachments && ChatAttachmentEnvelopePolicy.isBounded(text)) else { return nil }
+        return text
+    }
+}
+
 struct TranscriptRow: View, Equatable {
     let item: TranscriptItem
     var streaming = false
@@ -98,11 +107,16 @@ struct TranscriptRow: View, Equatable {
                             if part.attachment != nil {
                                 EmptyView() // Presented together above the prompt text.
                             } else if item.role == .user {
-                                UserPromptText(text: part.text ?? "")
-                                    .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
-                                    .padding(.top, ChatPromptContainerStyle.topPadding)
-                                    .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
-                                    .modifier(UserPromptGlassModifier())
+                                if let text = UserPromptPresentationPolicy.visibleText(
+                                    part.text,
+                                    hasAttachments: !displayedAttachments.isEmpty
+                                ) {
+                                    UserPromptText(text: text)
+                                        .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
+                                        .padding(.top, ChatPromptContainerStyle.topPadding)
+                                        .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
+                                        .modifier(UserPromptGlassModifier())
+                                }
                             } else {
                                 MarkdownText(
                                     text: part.text ?? "",

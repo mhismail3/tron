@@ -62,6 +62,19 @@ struct ComposerResourceEntry: Identifiable, Hashable, Sendable {
             resourceOrigin: resourceOrigin
         )
     }
+
+    func invocation(arguments: String = "") -> ComposerResourceInvocation {
+        let invocationSource: ComposerResourceInvocation.Source = switch source {
+        case .skill: .skill
+        case .prompt: .prompt
+        case .extension: .extension
+        }
+        return ComposerResourceInvocation(
+            source: invocationSource,
+            name: source == .skill ? displayName : invocationName,
+            arguments: arguments
+        )
+    }
 }
 
 enum ComposerResourceContentPresentation {
@@ -79,23 +92,113 @@ enum ComposerResourceContentPresentation {
             )
             normalized = String(normalized.unicodeScalars[firstContentScalar...])
         }
-        normalized = normalized.replacingOccurrences(of: "\r\n", with: "\n")
-        guard let openingEnd = normalized.firstIndex(of: "\n") else { return content }
-        let opening = normalized[normalized.startIndex..<openingEnd].trimmingCharacters(in: .whitespacesAndNewlines)
-        guard opening == "---" else { return content }
+        normalized = normalized
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
 
-        var lineStart = normalized.index(after: openingEnd)
-        while lineStart < normalized.endIndex {
-            let lineEnd = normalized[lineStart...].firstIndex(of: "\n") ?? normalized.endIndex
-            let line = normalized[lineStart..<lineEnd].trimmingCharacters(in: .whitespacesAndNewlines)
-            if line == "---" || line == "..." {
-                guard lineEnd < normalized.endIndex else { return "" }
-                return String(normalized[normalized.index(after: lineEnd)...])
+        let markdown: String
+        if let openingEnd = normalized.firstIndex(of: "\n"),
+           normalized[normalized.startIndex..<openingEnd]
+            .trimmingCharacters(in: .whitespacesAndNewlines) == "---" {
+            var lineStart = normalized.index(after: openingEnd)
+            var bodyStart: String.Index?
+            while lineStart < normalized.endIndex {
+                let lineEnd = normalized[lineStart...].firstIndex(of: "\n") ?? normalized.endIndex
+                let line = normalized[lineStart..<lineEnd]
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if line == "---" || line == "..." {
+                    bodyStart = lineEnd < normalized.endIndex
+                        ? normalized.index(after: lineEnd)
+                        : normalized.endIndex
+                    break
+                }
+                guard lineEnd < normalized.endIndex else { break }
+                lineStart = normalized.index(after: lineEnd)
             }
-            guard lineEnd < normalized.endIndex else { break }
-            lineStart = normalized.index(after: lineEnd)
+            guard let bodyStart else { return content }
+            markdown = String(normalized[bodyStart...])
+        } else {
+            markdown = normalized
         }
-        return content
+        return normalizingSoftWraps(in: markdown)
+    }
+
+    /// Skill and prompt files are commonly hard-wrapped for source readability.
+    /// Preserve Markdown block boundaries and intentional hard breaks while
+    /// letting SwiftUI choose natural visual wrapping for ordinary prose and
+    /// list continuations.
+    private static func normalizingSoftWraps(in markdown: String) -> String {
+        let lines = markdown.components(separatedBy: "\n")
+        guard lines.count > 1 else { return markdown }
+
+        var result = lines[0]
+        var insideFence = isFence(lines[0])
+        for index in 1..<lines.count {
+            let previous = lines[index - 1]
+            let current = lines[index]
+            let currentIsFence = isFence(current)
+            let preservesLineBreak = insideFence
+                || currentIsFence
+                || previous.trimmingCharacters(in: .whitespaces).isEmpty
+                || current.trimmingCharacters(in: .whitespaces).isEmpty
+                || hasIntentionalHardBreak(previous)
+                || beginsIndependentBlock(current)
+                || endsStandaloneBlock(previous)
+
+            result.append(preservesLineBreak ? "\n" : " ")
+            result.append(contentsOf: preservesLineBreak
+                ? current
+                : current.trimmingCharacters(in: .whitespaces))
+
+            if currentIsFence { insideFence.toggle() }
+        }
+        return result
+    }
+
+    private static func isFence(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~")
+    }
+
+    private static func hasIntentionalHardBreak(_ line: String) -> Bool {
+        line.hasSuffix("  ") || line.hasSuffix("\\")
+    }
+
+    private static func beginsIndependentBlock(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return isHeading(trimmed)
+            || isListItem(line)
+            || trimmed.hasPrefix(">")
+            || isRule(trimmed)
+            || line.hasPrefix("    ")
+            || line.contains("|")
+    }
+
+    private static func endsStandaloneBlock(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return isHeading(trimmed)
+            || trimmed.hasPrefix(">")
+            || isRule(trimmed)
+            || line.hasPrefix("    ")
+            || line.contains("|")
+    }
+
+    private static func isHeading(_ line: String) -> Bool {
+        line.range(of: #"^#{1,6}\s+"#, options: .regularExpression) != nil
+    }
+
+    private static func isListItem(_ line: String) -> Bool {
+        line.range(
+            of: #"^\s*(?:[-+*]|\d+[.)])\s+"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static func isRule(_ line: String) -> Bool {
+        line.range(
+            of: #"^(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$"#,
+            options: .regularExpression
+        ) != nil
     }
 }
 

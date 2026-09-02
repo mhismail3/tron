@@ -40,6 +40,7 @@ enum ChatMorphFramePolicy {
 
 struct ChatMorphID: Hashable, Sendable, Identifiable {
     enum Element: Hashable, Sendable {
+        case resource
         case prompt
         case attachment(String)
     }
@@ -49,6 +50,7 @@ struct ChatMorphID: Hashable, Sendable, Identifiable {
 
     var id: String {
         switch element {
+        case .resource: "\(lifecycleID):resource"
         case .prompt: "\(lifecycleID):prompt"
         case .attachment(let attachmentID): "\(lifecycleID):attachment:\(attachmentID)"
         }
@@ -64,6 +66,7 @@ final class ChatMorphFrameRegistry {
     struct Element: Identifiable, Equatable, Sendable {
         let id: ChatMorphID
         let sourceFrame: CGRect
+        let resource: ComposerResourceInvocation?
         let text: String?
         let attachment: PendingAttachment?
     }
@@ -80,7 +83,7 @@ final class ChatMorphFrameRegistry {
         }
     }
 
-    static let maximumRememberedFrames = ComposerAttachmentPolicy.maximumCount + 1
+    static let maximumRememberedFrames = ComposerAttachmentPolicy.maximumCount + 2
 
     private(set) var flight: Flight?
     private(set) var readinessRevision = 0
@@ -90,8 +93,28 @@ final class ChatMorphFrameRegistry {
     private var activeElementIDs: Set<ChatMorphID> = []
     private var completedLifecycleID: String?
     private var abandonedGeneration: Int?
+    private struct ResourceKey: Hashable {
+        let source: ComposerResourceInvocation.Source
+        let name: String
+
+        init(_ resource: ComposerResourceInvocation) {
+            source = resource.source
+            name = resource.name
+        }
+    }
+
+    private var draftResourceFrames: [ResourceKey: CGRect] = [:]
     private var draftPromptFrame: CGRect?
     private var draftAttachmentFrames: [String: CGRect] = [:]
+
+    func recordDraftResource(_ resource: ComposerResourceInvocation, frame: CGRect) {
+        let key = ResourceKey(resource)
+        if Self.valid(frame) {
+            draftResourceFrames = [key: frame]
+        } else {
+            draftResourceFrames[key] = nil
+        }
+    }
 
     func recordDraftPrompt(frame: CGRect) {
         draftPromptFrame = Self.valid(frame) ? frame : nil
@@ -127,6 +150,17 @@ final class ChatMorphFrameRegistry {
         if completedLifecycleID != lifecycleID { completedLifecycleID = nil }
 
         var elements: [Element] = []
+        if let resource = submission.resourceInvocation, !resource.isExtensionCommand {
+            guard let sourceFrame = draftResourceFrames[ResourceKey(resource)],
+                  Self.valid(sourceFrame) else { return false }
+            elements.append(Element(
+                id: ChatMorphID(lifecycleID: lifecycleID, element: .resource),
+                sourceFrame: sourceFrame,
+                resource: resource,
+                text: nil,
+                attachment: nil
+            ))
+        }
         if !submission.outgoingText.isEmpty {
             guard let sourceFrame = draftPromptFrame,
                   ChatMorphAdmissionPolicy.admitsPrompt(
@@ -137,6 +171,7 @@ final class ChatMorphFrameRegistry {
             elements.append(Element(
                 id: ChatMorphID(lifecycleID: lifecycleID, element: .prompt),
                 sourceFrame: sourceFrame,
+                resource: nil,
                 text: submission.outgoingText,
                 attachment: nil
             ))
@@ -151,6 +186,7 @@ final class ChatMorphFrameRegistry {
                     element: .attachment(attachment.id)
                 ),
                 sourceFrame: sourceFrame,
+                resource: nil,
                 text: nil,
                 attachment: attachment
             ))
@@ -284,6 +320,19 @@ final class ChatMorphFrameRegistry {
     }
 }
 
+private struct ChatDraftResourceMorphSource: ViewModifier {
+    let resource: ComposerResourceInvocation
+    let registry: ChatMorphFrameRegistry
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGRect.self) { geometry in
+                geometry.frame(in: .global)
+            } action: { registry.recordDraftResource(resource, frame: $0) }
+            .onDisappear { registry.recordDraftResource(resource, frame: .null) }
+    }
+}
+
 private struct ChatDraftPromptMorphSource: ViewModifier {
     let registry: ChatMorphFrameRegistry
 
@@ -319,6 +368,13 @@ private struct ChatMorphDestination: ViewModifier {
 }
 
 extension View {
+    func chatDraftResourceMorphSource(
+        resource: ComposerResourceInvocation,
+        registry: ChatMorphFrameRegistry
+    ) -> some View {
+        modifier(ChatDraftResourceMorphSource(resource: resource, registry: registry))
+    }
+
     func chatDraftPromptMorphSource(registry: ChatMorphFrameRegistry) -> some View {
         modifier(ChatDraftPromptMorphSource(registry: registry))
     }
@@ -370,7 +426,9 @@ struct ChatMorphFlightLayer: View {
                             // surface below, avoiding a resized live backdrop
                             // filter while preserving exact, undistorted text.
                             .clipShape(RoundedRectangle(
-                                cornerRadius: element.text == nil ? 14 : 22,
+                                cornerRadius: element.resource != nil
+                                    ? ChatToolChipShapePolicy.cornerRadius
+                                    : (element.text == nil ? 14 : 22),
                                 style: .continuous
                             ))
                             .clipped()
@@ -414,7 +472,9 @@ struct ChatMorphFlightLayer: View {
     private func flightElement(
         _ element: ChatMorphFrameRegistry.Element
     ) -> some View {
-        if let text = element.text {
+        if let resource = element.resource {
+            ChatResourceFlightSurface(resource: resource)
+        } else if let text = element.text {
             ChatPromptFlightSurface(text: text)
         } else if let attachment = element.attachment {
             ChatAttachmentFlightSurface(attachment: attachment)
@@ -465,6 +525,29 @@ struct ChatMorphFlightLayer: View {
 /// third live backdrop filter while its bounds move forces an expensive blur
 /// recomposition every frame, so the short flight uses this visually matched
 /// opaque bridge and hands back to the destination at completion.
+private struct ChatResourceFlightSurface: View {
+    let resource: ComposerResourceInvocation
+
+    var body: some View {
+        let tone = CanonicalResourceChipPresentation.tone(for: resource)
+        ChatCompactPillSurface(
+            tone: tone,
+            material: .flat,
+            interactive: false,
+            cornerRadiusOverride: ChatToolChipShapePolicy.cornerRadius
+        ) {
+            ChatCompactPillLabel(
+                icon: CanonicalResourceChipPresentation.icon(for: resource),
+                title: CanonicalResourceChipPresentation.title(for: resource),
+                detail: CanonicalResourceChipPresentation.kindTitle(for: resource),
+                tone: tone,
+                iconSize: ChatCompactPillLayoutPolicy.toolIconSize,
+                titleWeight: .bold
+            )
+        }
+    }
+}
+
 private struct ChatPromptFlightSurface: View {
     let text: String
 

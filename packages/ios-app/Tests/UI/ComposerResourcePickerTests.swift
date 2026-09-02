@@ -144,6 +144,38 @@ struct ComposerResourcePickerTests {
         let prompt = "\u{FEFF}---\r\ndescription: Review carefully\r\n...\r\nReview $ARGUMENTS"
         #expect(ComposerResourceContentPresentation.body(prompt, source: .prompt) == "Review $ARGUMENTS")
 
+        let markdownHardBreak = String(repeating: " ", count: 2)
+        let hardWrapped = """
+        # Benchmark
+
+        Compare alternatives under a frozen contract. Correctness and task
+        completeness precede speed.
+
+        - Read repository instructions before creating any
+          temporary harness or dataset.
+        - Preserve intentional\(markdownHardBreak)
+          hard breaks.
+
+        ```text
+        keep
+        source wrapping
+        ```
+        """
+        #expect(ComposerResourceContentPresentation.body(hardWrapped, source: .skill) == """
+        # Benchmark
+
+        Compare alternatives under a frozen contract. Correctness and task completeness precede speed.
+
+        - Read repository instructions before creating any temporary harness or dataset.
+        - Preserve intentional\(markdownHardBreak)
+          hard breaks.
+
+        ```text
+        keep
+        source wrapping
+        ```
+        """)
+
         let malformed = "---\nname: council-mode\n# No closing delimiter"
         #expect(ComposerResourceContentPresentation.body(malformed, source: .skill) == malformed)
         #expect(ComposerResourceContentPresentation.body(skill, source: .extension) == skill)

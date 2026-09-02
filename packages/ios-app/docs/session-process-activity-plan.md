@@ -34,20 +34,19 @@ The orb appears when there is:
 
 Tapping the orb opens **Subagents**, with **Active** and **Recently finished** sections.
 Manage Session owns **Subagent History**, which adds canonical **Earlier** rows. Both sheets
-open at the large detent. Rows keep the orb leading, place compact Liquid Glass lifecycle
+open at the large detent. Rows omit per-row animated orbs, place compact Liquid Glass lifecycle
 and mode pills beneath the title, and right-align plain duration text. The bounded active
 sheet retains Liquid Glass card containers; history uses the provider-settings
-scroll-optimized container surface for long lists. The solving orb represents active work,
-the thinking ribbon represents terminal work, and longer canonical durations produce
-progressively slower bounded orb animation. Tool/path, counts, and bounded output remain
-distinct metadata when supplied. A row with a validated child session
+scroll-optimized container surface for long lists. The composer orb remains the single animated
+subagent activity affordance. Tool/path, counts, and bounded output remain distinct metadata
+when supplied. A row with a validated child session
 presents a standardized large-detent bottom sheet containing the canonical-live, read-only
 transcript viewer; it never pushes a second navigation route. Short or empty transcript
 content aligns to the top while overflowing newest pages retain tail-opening intent. Rows
 without a validated child session remain informative and expose no mutation controls.
 
 Accessibility uses “Subagents” and “Subagent History.” Reduce Motion uses the deterministic
-orb frame, and scene/offscreen state pauses animation.
+composer-orb frame, and scene/offscreen state pauses that animation.
 
 ## Authority and lifecycle
 

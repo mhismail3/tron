@@ -914,6 +914,31 @@ struct ChatTranscriptPresentationTests {
         #expect(ChatToolbarTitleLayout.width(containerWidth: 1_024) == 360)
     }
 
+    @Test("composer sends text, attachments, or a selected resource without empty prompt chrome")
+    func composerSendableContent() {
+        #expect(ChatComposerPolicy.hasSendableContent(
+            text: "message", attachmentCount: 0, hasResource: false
+        ))
+        #expect(ChatComposerPolicy.hasSendableContent(
+            text: "", attachmentCount: 1, hasResource: false
+        ))
+        #expect(ChatComposerPolicy.hasSendableContent(
+            text: "  \n", attachmentCount: 0, hasResource: true
+        ))
+        #expect(!ChatComposerPolicy.hasSendableContent(
+            text: "  \n", attachmentCount: 0, hasResource: false
+        ))
+        #expect(UserPromptPresentationPolicy.visibleText(nil) == nil)
+        #expect(UserPromptPresentationPolicy.visibleText(" \n ") == nil)
+        #expect(UserPromptPresentationPolicy.visibleText(
+            "[Attached photo context]", hasAttachments: true
+        ) == nil)
+        #expect(UserPromptPresentationPolicy.visibleText(
+            "[Attached photo context]", hasAttachments: false
+        ) == "[Attached photo context]")
+        #expect(UserPromptPresentationPolicy.visibleText("visible") == "visible")
+    }
+
     @Test("attachment menu availability is session scoped and independent of draft text")
     func attachmentAvailability() {
         #expect(!ChatAttachmentAvailabilityPolicy.actionsEnabled(

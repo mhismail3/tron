@@ -2200,8 +2200,11 @@ struct ChatView: View {
     private var composerTrailingMode: ComposerTrailingMode? {
         ChatComposerPolicy.trailingMode(
             phase: visibleSessionFacts?.phase,
-            hasContent: !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !pendingAttachments.isEmpty,
+            hasContent: ChatComposerPolicy.hasSendableContent(
+                text: composerText,
+                attachmentCount: pendingAttachments.count,
+                hasResource: selectedComposerResource != nil
+            ),
             isSending: sending
         )
     }
@@ -2607,19 +2610,10 @@ struct ChatView: View {
         let value = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         // The staged chip is the sole invocation authority. A slash typed into
         // its argument text is data, not an opportunity to replace the chip.
-        if let scope = composerScope, let resource = model.composerDrafts.selectedResource(for: scope) {
-            let source: ComposerResourceInvocation.Source = switch resource.source {
-            case .skill: .skill
-            case .prompt: .prompt
-            case .extension: .extension
-            }
-            return ComposerResourceInvocation(
-                source: source,
-                name: source == .skill && resource.name.hasPrefix("skill:")
-                    ? String(resource.name.dropFirst("skill:".count))
-                    : resource.name,
-                arguments: value
-            )
+        if let scope = composerScope,
+           let resource = model.composerDrafts.selectedResource(for: scope),
+           let entry = ComposerResourceEntry(command: resource) {
+            return entry.invocation(arguments: value)
         }
         return ComposerResourceInvocationPolicy.leadingInvocation(in: value, commands: model.commands)
     }

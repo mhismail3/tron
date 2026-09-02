@@ -999,6 +999,34 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
+    @Test("a selected skill sends without text or attachments")
+    func resourceOnlySkillSubmission() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "skill-session", generation: 41)
+            let scope = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: ""
+            )
+            let skill = CommandInfo(
+                name: "skill:review", description: "Review", argumentHint: nil,
+                source: .skill, sourcePath: nil
+            )
+            harness.coordinator.selectResource(skill, for: scope)
+
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
+            try await harness.waitForSends(1)
+            #expect(harness.sendCalls[0].text.isEmpty)
+            #expect(harness.sendCalls[0].resourceInvocation == ComposerResourceInvocation(
+                source: .skill, name: "review", arguments: ""
+            ))
+            #expect(harness.coordinator.outgoingSubmission(for: target)?.outgoingText.isEmpty == true)
+            harness.completeSend(index: 0, result: .failure(ComposerSyntheticError.current))
+            await #expect(throws: ComposerSyntheticError.self) { try await valueOfOwnedTask(sending) }
+            #expect(harness.coordinator.selectedResource(for: scope) == skill)
+        }
+    }
+
     @Test("a no-argument extension command retires on transport completion without canonical user input")
     func extensionCommandRetiresWithoutUserMessage() async throws {
         try await withTestWatchdog { @MainActor in

@@ -1835,10 +1835,10 @@ struct PresentationStyleGuardTests {
         #expect(processSheets.contains("SessionProcessRow(process: process, accent: accent, surfaceStyle: .scrollOptimized)"))
         #expect(processSheets.contains("TronGlassCard(accent: cardAccent, cornerRadius: 14, interactive: false"))
         #expect(processSheets.contains(".tronScrollSurface(accent: cardAccent, cornerRadius: 12"))
-        #expect(processSheets.contains("size: 24"))
+        #expect(!processSheets.contains("ProcessActivityOrb("))
         #expect(processSheets.contains("private struct SessionProcessPill: View"))
         #expect(processSheets.contains("LIVE ACTIVITY"))
-        #expect(processSheets.contains("durationSpeedScale(durationMs: process.durationMs)"))
+        #expect(!processSheets.contains("durationSpeedScale(durationMs: process.durationMs)"))
         #expect(!processSheets.contains("Canonical transcript ready"))
         #expect(processSheets.contains(".accessibilityAddTraits(.isHeader)"))
         #expect(processSheets.contains(".accessibilityValue(accessibilityValue)"))
@@ -2559,7 +2559,9 @@ struct PresentationStyleGuardTests {
             .components(separatedBy: "private var composer").first ?? ""
         #expect(!earlierMessagesChip.contains("TronActionButtonStyle(expands: false)"))
         #expect(chat.contains("scrollCoordinator.isPrependingHistory"))
-        #expect(earlierMessagesChip.contains(".disabled(isLoadingEarlierMessages)"))
+        #expect(earlierMessagesChip.contains(
+            ".disabled(isLoadingEarlierMessages || !scrollCoordinator.canRequestHistoryPage)"
+        ))
         #expect(chat.contains(".onChange(of: scrollCoordinator.layoutEpoch)"))
         #expect(chat.contains("transcriptHandoffCommit(snapshot:"))
         #expect(chat.contains("outgoingSubmission(for: target)"))

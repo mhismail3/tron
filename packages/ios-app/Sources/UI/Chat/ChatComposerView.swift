@@ -140,6 +140,10 @@ struct ChatComposerView: View {
                         resource: selectedResource,
                         onRemove: onRemoveResource
                     )
+                    .chatDraftResourceMorphSource(
+                        resource: selectedResource.invocation(),
+                        registry: morphRegistry
+                    )
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 2)

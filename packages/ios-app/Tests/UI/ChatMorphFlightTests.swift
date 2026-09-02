@@ -7,6 +7,7 @@ import Testing
 struct ChatMorphFlightTests {
     private let target = SessionPresentationIdentity(sessionID: "session", generation: 3)
     private let promptFrame = CGRect(x: 20, y: 600, width: 300, height: 44)
+    private let resourceFrame = CGRect(x: 160, y: 560, width: 150, height: 32)
     private let chipFrame = CGRect(x: 250, y: 540, width: 64, height: 64)
 
     @Test("lifecycle and attachment identity define stable unique endpoints")
@@ -19,8 +20,14 @@ struct ChatMorphFlightTests {
             lifecycleID: "outgoing-submission:session:3:2",
             element: .attachment("upload")
         )
+        let resource = ChatMorphID(
+            lifecycleID: "outgoing-submission:session:3:1",
+            element: .resource
+        )
         #expect(first != second)
+        #expect(first != resource)
         #expect(first.id.contains("upload"))
+        #expect(resource.id.hasSuffix(":resource"))
     }
 
     @Test("a complete measurement stages one bounded flight")
@@ -96,6 +103,25 @@ struct ChatMorphFlightTests {
             generation: 4,
             suppress: false
         ))
+    }
+
+    @Test("resource-only submissions use the same measured chip flight")
+    func resourceOnlyAdmission() throws {
+        let registry = ChatMorphFrameRegistry()
+        registry.recordDraftResource(resource, frame: resourceFrame)
+        #expect(registry.stage(
+            lifecycle: lifecycle(
+                nonce: 20,
+                attachment: nil,
+                text: "",
+                resourceInvocation: resource
+            ),
+            generation: 8,
+            suppress: false
+        ))
+        let element = try #require(registry.flight?.elements.first)
+        #expect(element.id.element == .resource)
+        #expect(element.resource == resource)
     }
 
     @Test("failed and completed flights resolve row entrance ownership exactly once")
@@ -215,6 +241,10 @@ struct ChatMorphFlightTests {
         #expect(registry.abandon() == nil)
     }
 
+    private var resource: ComposerResourceInvocation {
+        ComposerResourceInvocation(source: .skill, name: "review", arguments: "")
+    }
+
     private var attachment: PendingAttachment {
         PendingAttachment(
             id: "upload",
@@ -230,7 +260,8 @@ struct ChatMorphFlightTests {
         nonce: UInt64,
         attachment: PendingAttachment?,
         text: String = "Hello",
-        behavior: String? = nil
+        behavior: String? = nil,
+        resourceInvocation: ComposerResourceInvocation? = nil
     ) -> ChatSubmissionLifecycle {
         let attachments = attachment.map { [$0] } ?? []
         return ChatSubmissionLifecycle(
@@ -239,6 +270,7 @@ struct ChatMorphFlightTests {
                 target: target,
                 textRevision: 1,
                 outgoingText: text,
+                resourceInvocation: resourceInvocation,
                 attachmentIDs: attachments.compactMap(\.gatewayUploadID),
                 behavior: behavior,
                 localNonce: nonce

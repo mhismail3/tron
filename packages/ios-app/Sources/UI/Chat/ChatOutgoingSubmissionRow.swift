@@ -297,6 +297,10 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
     private var resourceChip: some View {
         if let resource = presentation.resourceInvocation, !resource.isExtensionCommand {
             CanonicalResourceChip(resource: resource)
+                .chatMorphDestination(
+                    id: ChatMorphID(lifecycleID: presentation.id, element: .resource),
+                    registry: morphRegistry
+                )
         }
     }
 

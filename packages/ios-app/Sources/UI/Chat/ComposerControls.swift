@@ -451,6 +451,16 @@ enum ComposerTrailingMode: Equatable {
 }
 
 enum ChatComposerPolicy {
+    static func hasSendableContent(
+        text: String,
+        attachmentCount: Int,
+        hasResource: Bool
+    ) -> Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || attachmentCount > 0
+            || hasResource
+    }
+
     static func isTextEditable(isTranscriptReady: Bool) -> Bool {
         // Drafting is local and remains available while authoritative opening
         // finishes; send and attachment mutations retain their own readiness gates.

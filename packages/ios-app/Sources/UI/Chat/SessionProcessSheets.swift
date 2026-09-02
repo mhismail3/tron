@@ -304,7 +304,6 @@ private struct SessionProcessRow: View {
     let accent: Color
     let surfaceStyle: SessionProcessRowSurfaceStyle
     let openTranscript: () -> Void
-    @State private var isVisible = false
 
     var body: some View {
         Button(action: openTranscript) { card }
@@ -314,8 +313,6 @@ private struct SessionProcessRow: View {
             .accessibilityLabel(process.title)
             .accessibilityValue(accessibilityValue)
             .accessibilityHint(accessibilityHint)
-            .onAppear { isVisible = true }
-            .onDisappear { isVisible = false }
     }
 
     @ViewBuilder
@@ -348,22 +345,12 @@ private struct SessionProcessRow: View {
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                 }
-                ZStack(alignment: .bottomTrailing) {
-                    ProcessActivityOrb(
-                        mode: orbMode,
-                        size: 24,
-                        isVisible: isVisible,
-                        animationSpeedScale: ProcessActivityOrbEngine.durationSpeedScale(durationMs: process.durationMs)
-                    )
-                    .frame(width: 28, height: 28)
-                    if process.lifecycle.state.isProblem {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(TronTypography.caption2)
-                            .foregroundStyle(Color.tronError)
-                            .background(Color.tronSurfaceElevated, in: Circle())
-                    }
+                if process.lifecycle.state.isProblem {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(TronTypography.caption2)
+                        .foregroundStyle(Color.tronError)
+                        .accessibilityHidden(true)
                 }
-                .accessibilityHidden(true)
             }
 
             ToolChipFlowLayout(spacing: 5) {
@@ -423,10 +410,6 @@ private struct SessionProcessRow: View {
 
     private var outputPreview: String? {
         SessionProcessRowPresentation.outputPreview(process.outputTail)
-    }
-
-    private var orbMode: ProcessActivityOrbMode {
-        process.lifecycle.state.isActive ? .solving : .thinking
     }
 
     private var cardAccent: Color {
@@ -558,6 +541,7 @@ struct ReadOnlySubagentSessionSheet: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var store: ReadOnlySubagentSessionStore?
     @State private var scrollPosition = ScrollPosition(idType: String.self)
     @State private var isNearTail = true
@@ -575,11 +559,15 @@ struct ReadOnlySubagentSessionSheet: View {
             .tronNavigationTitle(process.title)
             .toolbar {
                 if showsStopControl {
-                    ToolbarItem(placement: .cancellationAction) {
+                    ToolbarItem(placement: .topBarLeading) {
                         Button(action: requestStop) {
                             Image(systemName: "stop.fill")
                                 .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronError)
+                                .foregroundStyle(canStop ? Color.tronError : Color.tronTextMuted)
+                                .animation(
+                                    reduceMotion ? nil : .easeOut(duration: 0.2),
+                                    value: canStop
+                                )
                         }
                         .disabled(!canStop)
                         .accessibilityLabel("Stop Subagent")
@@ -714,12 +702,28 @@ struct ReadOnlySubagentSessionSheet: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if store.transcriptStart > 0 {
-                    Button(store.status == .loadingEarlier ? "Loading…" : "Load Earlier Messages") {
+                    Button {
                         store.loadEarlier()
+                    } label: {
+                        HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
+                            ChatCompactPillLeadingIcon(
+                                icon: "arrow.up",
+                                accent: .tronAccentText,
+                                showsProgress: store.status == .loadingEarlier
+                            )
+                            Text(store.status == .loadingEarlier
+                                ? "Loading earlier…"
+                                : "Load earlier messages")
+                        }
+                        .chatTranscriptPill()
                     }
-                    .frame(maxWidth: .infinity)
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, minHeight: 44)
                     .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
                     .disabled(!store.canLoadEarlier)
+                    .accessibilityLabel(store.status == .loadingEarlier
+                        ? "Loading earlier messages"
+                        : "Load earlier messages")
                 }
                 if store.presentation.timeline.items.isEmpty {
                     let isActive = store.liveActivity?.lifecycle.state.isActive == true
