@@ -857,7 +857,7 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("detached discrete insertion performs no automatic write")
+    @Test("detached discrete insertion freezes projection until manual tail return")
     func detachedDiscreteInsertion() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_191) { harness in
@@ -885,15 +885,124 @@ struct ChatViewScrollHarnessTests {
                 updated.revision += 1
                 updated.eventSequence += 1
                 harness.replaceAuthoritativeSnapshot(updated)
-                _ = try await harness.recorder.waitUntil {
+                try await harness.driveFrameBoundary()
+                #expect(harness.probeObservation.projectionInstallCount == installBaseline)
+                #expect(harness.probeObservation.automaticScrollCommandCount == commandBaseline)
+
+                harness.drivePhase(from: .idle, to: .interacting, geometry: away)
+                harness.driveNativeOwnership(true)
+                harness.driveGeometry(previous: away, current: bottom)
+                harness.drivePhase(from: .interacting, to: .idle, geometry: bottom)
+                harness.driveNativeOwnership(false)
+                let reconciled = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount > installBaseline
                 }
-                #expect(harness.probeObservation.automaticScrollCommandCount == commandBaseline)
+                #expect(!reconciled.observation.isDetached)
+                #expect(reconciled.observation.automaticScrollCommandCount == commandBaseline)
             }
         }
     }
 
-    @Test("streaming burst installs only its newest projection while detached scrolling stays writable")
+    @Test("catch-up keeps the frozen commit until its tail lease settles")
+    func catchUpReconcilesNewestProjection() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 1_196) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                }
+                let bottom = ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_000, containerHeight: 400
+                )
+                let away = ChatTranscriptGeometry(
+                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
+                )
+                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
+                harness.driveNativeOwnership(true)
+                harness.driveGeometry(previous: bottom, current: away)
+                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
+                harness.driveNativeOwnership(false)
+
+                let installBaseline = harness.probeObservation.projectionInstallCount
+                var newest = harness.snapshot
+                for offset in 1...3 {
+                    newest.eventSequence += 1
+                    newest.revision += 1
+                    newest.streaming = try harnessAssistantMessage(
+                        id: "catch-up-stream-\(offset)",
+                        presentationID: "catch-up-turn",
+                        text: "update \(offset)"
+                    )
+                    harness.replaceAuthoritativeSnapshot(newest)
+                }
+                try await harness.driveFrameBoundary()
+                #expect(harness.probeObservation.projectionInstallCount == installBaseline)
+
+                let commandBaseline = harness.probeObservation.scrollCommandCount
+                harness.driveCatchUp(reduceMotion: true)
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.scrollCommandCount > commandBaseline
+                }
+                #expect(harness.probeObservation.projectionInstallCount == installBaseline)
+                harness.driveGeometry(previous: away, current: bottom, viewport: true)
+                let reconciled = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount == installBaseline + 1
+                }
+                #expect(!reconciled.observation.isDetached)
+                #expect(reconciled.observation.installedProjectionRowCount > 0)
+            }
+        }
+    }
+
+    @Test("retained detached authority replacement preserves its installed cut")
+    func retainedDetachedAuthorityReplacement() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 1_197) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                }
+                let bottom = ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_000, containerHeight: 400
+                )
+                let away = ChatTranscriptGeometry(
+                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
+                )
+                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
+                harness.driveNativeOwnership(true)
+                harness.driveGeometry(previous: bottom, current: away)
+                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
+                harness.driveNativeOwnership(false)
+                #expect(harness.probeObservation.isDetached)
+
+                let installBaseline = harness.probeObservation.projectionInstallCount
+                var replacement = harness.snapshot
+                replacement.runtimeGeneration += "-replacement"
+                replacement.eventSequence = 1
+                replacement.revision += 1
+                replacement.transcript.append(try harnessMessage(id: "reopen-tail"))
+                replacement.transcriptTotal = (replacement.transcriptTotal
+                    ?? replacement.transcript.count - 1) + 1
+                await harness.reopenWithAuthoritativeSnapshot(replacement)
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 2
+                }
+                #expect(harness.probeObservation.isDetached)
+                #expect(harness.probeObservation.projectionInstallCount == installBaseline)
+
+                harness.drivePhase(from: .idle, to: .interacting, geometry: away)
+                harness.driveNativeOwnership(true)
+                harness.driveGeometry(previous: away, current: bottom, viewport: true)
+                harness.drivePhase(from: .interacting, to: .idle, geometry: bottom)
+                harness.driveNativeOwnership(false)
+                let reconciled = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount == installBaseline + 1
+                }
+                #expect(reconciled.observation.installedProjectionRowCount > 0)
+                #expect(!reconciled.observation.isDetached)
+            }
+        }
+    }
+
+    @Test("streaming burst stays deferred and reconciles only its newest projection at the tail")
     func streamingBurstLatestProjection() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 118) { harness in
@@ -923,6 +1032,8 @@ struct ChatViewScrollHarnessTests {
                     harness.probeObservation.installedProjectionSourceOrdinal
                 )
                 let initialProjectionInstalls = harness.probeObservation.projectionInstallCount
+                let initialProjectionWorkAdmissions =
+                    harness.probeObservation.projectionWorkAdmissionCount
                 let committedEvaluationBaseline =
                     harness.probeObservation.committedHistoryRowEvaluationCount
                 for offset in 1...30 {
@@ -932,28 +1043,45 @@ struct ChatViewScrollHarnessTests {
                     harness.replaceAuthoritativeSnapshot(newest)
                 }
 
-                harness.driveGeometry(
-                    previous: away,
-                    current: ChatTranscriptGeometry(
-                        offsetY: 300,
-                        contentHeight: 1_120,
-                        containerHeight: 320,
-                        bottomInset: 80
-                    ),
-                    viewport: true
+                try await harness.driveFrameBoundary()
+                #expect(
+                    harness.probeObservation.installedProjectionSourceOrdinal
+                        == initialProjectionOrdinal
                 )
+                #expect(
+                    harness.probeObservation.projectionInstallCount
+                        == initialProjectionInstalls
+                )
+                #expect(
+                    harness.probeObservation.projectionWorkAdmissionCount
+                        == initialProjectionWorkAdmissions
+                )
+                #expect(
+                    harness.probeObservation.committedHistoryRowEvaluationCount
+                        == committedEvaluationBaseline
+                )
+
+                harness.drivePhase(from: .idle, to: .interacting, geometry: away)
+                harness.driveNativeOwnership(true)
+                harness.driveGeometry(previous: away, current: bottom)
+                harness.drivePhase(from: .interacting, to: .idle, geometry: bottom)
+                harness.driveNativeOwnership(false)
                 let newestInstall = try await harness.recorder.waitUntil {
                     $0.observation.installedProjectionSourceOrdinal == initialProjectionOrdinal + 30
                 }
                 #expect(newestInstall.observation.installedProjectionRowCount > 0)
-                #expect(newestInstall.observation.isDetached)
+                #expect(!newestInstall.observation.isDetached)
                 #expect(
                     newestInstall.observation.projectionInstallCount
-                        <= initialProjectionInstalls + 2
+                        == initialProjectionInstalls + 1
+                )
+                #expect(
+                    newestInstall.observation.projectionWorkAdmissionCount
+                        == initialProjectionWorkAdmissions + 1
                 )
                 #expect(
                     newestInstall.observation.committedHistoryRowEvaluationCount
-                        == committedEvaluationBaseline
+                        <= committedEvaluationBaseline + 1
                 )
             }
         }
@@ -1335,6 +1463,11 @@ final class ChatViewScrollHarness {
 
     func replaceAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
         model.replaceHostedAuthoritativeSnapshot(snapshot)
+    }
+
+    func reopenWithAuthoritativeSnapshot(_ snapshot: SessionSnapshot) async {
+        model.installHostedAuthoritativeSnapshot(snapshot)
+        await probe.reopenPresentation()
     }
 
     func replaceOnNextProjectionInstall(

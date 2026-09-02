@@ -8,7 +8,9 @@ for frame hitches.
 
 - Seed: `401`.
 - Fixture: 10,000 deterministic mixed transcript entries installed through the
-  hosted authoritative-snapshot gate.
+  hosted authoritative-snapshot gate. This intentionally exceeds the production
+  512-item authoritative tail to characterize cold linear assembly and explicitly
+  retained history; it does not redefine or prove the production admission bound.
 - Boundary: mount the production `ChatView`/`LazyVStack`/native scroll view and
   wait for the latest semantic row, first ready frame, and practical-tail settle.
 - Cache: cold disposable cache with a unique empty root for every iteration.

@@ -108,9 +108,16 @@ final class ChatLayoutTransaction {
     private var keyboardTransition: ChatKeyboardTransition?
     private var reduceMotion = false
     @ObservationIgnored private var watchdogTask: Task<Void, Never>?
+    @ObservationIgnored private var interactionTrace: ChatInteractionTrace?
+    @ObservationIgnored private var interactionTraceContext: Int?
 
     init(clock: MonotonicClock = .continuous) {
         self.clock = clock
+    }
+
+    func configureInteractionTrace(_ trace: ChatInteractionTrace, context: Int) {
+        interactionTrace = trace
+        interactionTraceContext = context
     }
 
     func configure(keyboard: ChatKeyboardTransition?, reduceMotion: Bool) {
@@ -134,6 +141,13 @@ final class ChatLayoutTransaction {
             current.settled.remove(mutation)
             current.participantRevisions[mutation] = revision
             generation = current
+            trace(
+                .joined,
+                generation: current.id,
+                mutation: mutation,
+                joinedCount: current.joined.count,
+                settledCount: current.settled.count
+            )
             return ParticipantTicket(
                 generationID: current.id,
                 mutation: mutation,
@@ -149,6 +163,13 @@ final class ChatLayoutTransaction {
             clock: nil
         )
         generation = opened
+        trace(
+            .joined,
+            generation: opened.id,
+            mutation: mutation,
+            joinedCount: opened.joined.count,
+            settledCount: opened.settled.count
+        )
         armWatchdog(for: opened.id)
         return ParticipantTicket(
             generationID: opened.id,
@@ -181,6 +202,13 @@ final class ChatLayoutTransaction {
             return
         }
         current.settled.insert(source)
+        trace(
+            .participantSettled,
+            generation: current.id,
+            mutation: source,
+            joinedCount: current.joined.count,
+            settledCount: current.settled.count
+        )
         guard current.settled == current.joined else {
             generation = current
             return
@@ -199,6 +227,7 @@ final class ChatLayoutTransaction {
         guard let id = generation?.id else { return }
         abandonedGenerationID = id
         generation = nil
+        trace(.abandoned, generation: id)
         publishTerminal(.abandoned(id))
     }
 
@@ -218,7 +247,26 @@ final class ChatLayoutTransaction {
         watchdogTask = nil
         settledGenerationID = id
         generation = nil
+        trace(.settled, generation: id)
         publishTerminal(.settled(id))
+    }
+
+    private func trace(
+        _ stage: ChatInteractionTrace.LayoutStage,
+        generation: Int?,
+        mutation: ChatLayoutMutation? = nil,
+        joinedCount: Int? = nil,
+        settledCount: Int? = nil
+    ) {
+        guard let interactionTrace, let interactionTraceContext else { return }
+        interactionTrace.layout(
+            stage,
+            context: interactionTraceContext,
+            generation: generation,
+            mutation: mutation,
+            joinedCount: joinedCount,
+            settledCount: settledCount
+        )
     }
 
     private func publishTerminal(_ event: TerminalEvent) {
@@ -228,6 +276,7 @@ final class ChatLayoutTransaction {
         }
         if pendingTerminalEvents.count >= 32 {
             pendingTerminalEvents = [.overflow]
+            trace(.overflow, generation: generation?.id)
         } else {
             pendingTerminalEvents.append(event)
         }

@@ -194,6 +194,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             return (try? adapter.decode(SessionSummaryUpdate.self)).map(GatewayEventPreparation.sessionSummary) ?? .none
         case "session.snapshot":
             guard let snapshot = try? adapter.decode(SessionSnapshot.self),
+                  SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot),
                   SessionSnapshotQueueAdmissionPolicy.admit(snapshot),
                   ExtensionPresentationPolicy.admit(snapshot.extensionPresentation),
                   ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(snapshot),
@@ -201,7 +202,8 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             return .sessionSnapshot(snapshot)
         case "session.rebaseline":
             guard let payload = try? adapter.decode(RebaselinePayload.self),
-                  !payload.subscriptionToken.isEmpty,
+                  GatewayTokenAdmissionPolicy.admit(payload.subscriptionToken),
+                  SessionSnapshotTranscriptAdmissionPolicy.admit(payload.snapshot),
                   SessionSnapshotQueueAdmissionPolicy.admit(payload.snapshot),
                   ExtensionPresentationPolicy.admit(payload.snapshot.extensionPresentation),
                   ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(payload.snapshot),
@@ -221,11 +223,15 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             switch topic {
             case "session.progress":
                 if let message = envelope.data.objectValue?["message"], message != .null,
-                   let item = try? message.decode(TranscriptItem.self) { preparedData = .progress(item) }
+                   let item = try? message.decode(TranscriptItem.self),
+                   SessionSnapshotTranscriptAdmissionPolicy.admitsItem(item) {
+                    preparedData = .progress(item)
+                }
                 else { preparedData = .invalid }
             case "session.compaction":
                 if let value = envelope.data.objectValue?["item"], value != .null,
-                   let item = try? value.decode(TranscriptItem.self), item.kind == .compaction {
+                   let item = try? value.decode(TranscriptItem.self), item.kind == .compaction,
+                   SessionSnapshotTranscriptAdmissionPolicy.admitsItem(item) {
                     preparedData = .compaction(item)
                 } else {
                     preparedData = .invalid

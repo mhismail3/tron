@@ -223,7 +223,14 @@ enum ChatTextPreparationPolicy {
         // bounded tail is warmed; older lazily realized rows retain the exact
         // cold parser fallback and are never mirrored by this cache.
         for item in transcript { admit(item) }
-        if let streaming { admit(streaming) }
+        if let streaming,
+           !transcript.contains(where: {
+               $0.kind == .message
+                   && $0.role == streaming.role
+                   && $0.presentationId == streaming.presentationId
+           }) {
+            admit(streaming)
+        }
         return result
     }
 }

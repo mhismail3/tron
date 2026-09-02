@@ -2982,7 +2982,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     internal.extensionArtifactMissingSince.set(toolCallId, Date.now() - 31_000);
     internal.syncSubagentProcesses(activity);
     expect(slot.snapshot().processOverview).toMatchObject({ visibility: "active", activeCount: 1 });
-    expect(internal.ownedExtensionArtifactDirectories()).toContain(resolve(asyncDir));
+    expect(internal.ownedExtensionArtifactDirectories()).toContain(await realpath(asyncDir));
 
     internal.observeMissingExtensionArtifact(toolCallId);
 
@@ -6254,6 +6254,7 @@ export default function (pi) {
       toolMetadata: Map<string, unknown>;
       toolStartedAtMonotonicMs: Map<string, number>;
       activeOperationId?: string;
+      activeToolSegmentOwnerId?: string;
       onEvent: (event: unknown) => void;
       runtime: { session: { readonly isStreaming: boolean } };
     };
@@ -6369,6 +6370,7 @@ export default function (pi) {
       groupIndex: 0, groupCount: 1, groupFinalized: true,
     });
     internal.activeOperationId = "fresh-operation";
+    internal.activeToolSegmentOwnerId = "fresh-operation";
     internal.onEvent({
       type: "tool_execution_start", toolCallId: "reused-after-interruption",
       toolName: "read", args: { path: "fresh" },
@@ -6386,6 +6388,7 @@ export default function (pi) {
     internal.toolMetadata.delete("reused-after-interruption");
     internal.toolStartedAtMonotonicMs.delete("reused-after-interruption");
     internal.activeOperationId = undefined;
+    internal.activeToolSegmentOwnerId = undefined;
     streaming.mockRestore();
   });
 
@@ -6610,6 +6613,63 @@ export default function (pi) {
     expect(settled.transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "call-bash"))
       .toMatchObject({ durationMs: expect.any(Number), startedAt: expect.any(String), completedAt: expect.any(String) });
     expect(slot.sessionFile?.startsWith(sessionDir)).toBe(true);
+  });
+
+  it("keeps one tool display segment across tool-only agent continuations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-tool-segment-continuation-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(cwd)]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir }));
+    await writeFile(join(cwd, "one.txt"), "one\n");
+    await writeFile(join(cwd, "two.txt"), "two\n");
+
+    const faux = fauxProvider({ provider: "tron-tool-segment-continuation", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("read", { path: join(cwd, "one.txt") }, { id: "call-one" }),
+      ], { stopReason: "toolUse" }),
+      fauxAssistantMessage([
+        fauxToolCall("read", { path: join(cwd, "two.txt") }, { id: "call-two" }),
+      ], { stopReason: "toolUse" }),
+      fauxAssistantMessage("finished"),
+    ]);
+    const createModels = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const progress: Array<{ toolCallId: string; toolSegmentId?: string }> = [];
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: createModels,
+      trust: new TrustService(agentDir),
+      broadcast: (_sessionId, topic, payload) => {
+        if (topic === "session.toolProgress") progress.push(payload.data);
+      },
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("run sequential tools");
+    await waitUntil(() => !slot.isBusy);
+
+    const segmentByCall = new Map(progress.map(event => [event.toolCallId, event.toolSegmentId]));
+    expect(segmentByCall.get("call-one")).toMatch(/^tool-segment:/);
+    expect(segmentByCall.get("call-two")).toBe(segmentByCall.get("call-one"));
+    const canonicalSegments = slot.snapshot().transcript.flatMap(item =>
+      item.kind === "message" && item.role === "assistant"
+        ? item.content.flatMap(part => part.type === "toolCall" ? [part.toolSegmentId] : [])
+        : []
+    );
+    expect(new Set(canonicalSegments)).toEqual(new Set([segmentByCall.get("call-one")]));
   });
 
   it("permits one delayed agent start owned by an accepted extension command during drain", async () => {

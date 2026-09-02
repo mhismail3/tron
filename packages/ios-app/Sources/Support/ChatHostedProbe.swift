@@ -121,6 +121,7 @@ final class ChatHostedProbe {
     private var prependControl: (() -> Bool)?
     private var reapplyPinnedPositionControl: (() -> Void)?
     private var invalidatePresentationControl: (() -> Void)?
+    private var reopenPresentationControl: (() async -> Void)?
     private var cancelPresentationControl: (() -> Void)?
     private var nextProjectionInstallControl: (@MainActor (Int) -> Void)?
     private var prependPageContinuation: CheckedContinuation<Void, Error>?
@@ -407,6 +408,7 @@ final class ChatHostedProbe {
         prepend: @escaping () -> Bool,
         reapplyPinnedPosition: @escaping () -> Void,
         invalidatePresentation: @escaping () -> Void,
+        reopenPresentation: @escaping () async -> Void,
         cancelPresentation: @escaping () -> Void
     ) {
         geometryControl = geometry
@@ -419,6 +421,7 @@ final class ChatHostedProbe {
         prependControl = prepend
         reapplyPinnedPositionControl = reapplyPinnedPosition
         invalidatePresentationControl = invalidatePresentation
+        reopenPresentationControl = reopenPresentation
         cancelPresentationControl = cancelPresentation
         refreshControlledState()
     }
@@ -504,6 +507,13 @@ final class ChatHostedProbe {
     func drivePresentationInvalidation() {
         controlEventCount &+= 1
         invalidatePresentationControl?()
+        refreshControlledState()
+        revision &+= 1
+    }
+
+    func reopenPresentation() async {
+        controlEventCount &+= 1
+        await reopenPresentationControl?()
         refreshControlledState()
         revision &+= 1
     }

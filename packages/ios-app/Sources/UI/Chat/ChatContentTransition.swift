@@ -3,6 +3,16 @@ import SwiftUI
 /// The composer is one permanently mounted inset owner. Editor-only height
 /// changes remain atomic for UIKit caret ownership. Accessory insertion and
 /// removal receives one value-scoped smooth transition through that same owner.
+@MainActor
+final class ChatComposerHeightLedger {
+    private(set) var current: CGFloat = 0
+
+    func install(_ height: CGFloat) {
+        guard height.isFinite, height >= 0 else { return }
+        current = height
+    }
+}
+
 struct ChatComposerAccessoryLayoutIdentity: Equatable {
     let attachmentIDs: [String]
     let selectedResourceID: String?

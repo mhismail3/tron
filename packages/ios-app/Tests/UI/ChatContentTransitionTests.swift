@@ -127,6 +127,20 @@ struct ChatContentTransitionTests {
         #expect(centered.offsetX == 0)
     }
 
+    @MainActor
+    @Test("live composer height samples stay in a non-observable settlement ledger")
+    func composerHeightLedger() {
+        let ledger = ChatComposerHeightLedger()
+        ledger.install(44)
+        #expect(ledger.current == 44)
+        ledger.install(.infinity)
+        #expect(ledger.current == 44)
+        ledger.install(-1)
+        #expect(ledger.current == 44)
+        ledger.install(52)
+        #expect(ledger.current == 52)
+    }
+
     @Test("composer accessories animate through one structural owner")
     func composerChildMotion() {
         #expect(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: false)

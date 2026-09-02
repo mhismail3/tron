@@ -57,7 +57,7 @@ struct GatewaySessionOpenResponse: Decodable {
 
     private enum CodingKeys: String, CodingKey { case session, syncToken, subscriptionToken, completionRevision }
     private enum SessionDiagnosticKeys: String, CodingKey {
-        case extensionPresentation, extensionActivities, processOverview
+        case transcript, extensionPresentation, extensionActivities, processOverview
     }
 
     init(from decoder: Decoder) throws {
@@ -68,6 +68,9 @@ struct GatewaySessionOpenResponse: Decodable {
                 codingPath: container.codingPath + [CodingKeys.session, key],
                 debugDescription: description
             ))
+        }
+        guard SessionSnapshotTranscriptAdmissionPolicy.admit(session) else {
+            throw invalidSessionProjection(.transcript, "Invalid transcript snapshot")
         }
         guard ExtensionPresentationPolicy.admit(session.extensionPresentation) else {
             throw invalidSessionProjection(.extensionPresentation, "Invalid extension presentation snapshot")
@@ -191,6 +194,18 @@ final class SessionPresentationStore {
     private(set) var chatTimelineGeneration = 0
     private(set) var isAuthoritative = false
     @ObservationIgnored private var mountedTranscriptWindow: MountedTranscriptWindow?
+    private struct VisibleTranscriptProjection {
+        let timelineGeneration: Int
+        let items: [TranscriptItem]
+        let coverage: MountedTranscriptCoverage?
+        let start: Int?
+        let end: Int?
+        let total: Int?
+    }
+    @ObservationIgnored private var visibleTranscriptProjectionCache: VisibleTranscriptProjection?
+    #if HOSTED_TEST
+    @ObservationIgnored private(set) var hostedVisibleTranscriptProjectionBuildCount = 0
+    #endif
     private(set) var loadingEarlierTranscript = false
     private(set) var transcriptLoadState: SessionTranscriptLoadState = .idle
     @ObservationIgnored private var transcriptLoadTarget: SessionPresentationIdentity?
@@ -289,26 +304,33 @@ final class SessionPresentationStore {
 
     var mountedTranscriptCoverage: MountedTranscriptCoverage? {
         guard let snapshot else { return nil }
-        return mountedWindow(for: snapshot)?.coverage
+        return visibleTranscriptProjection(for: snapshot).coverage
     }
 
     var visibleTranscript: [TranscriptItem] {
         guard let snapshot else { return [] }
-        return visibleTranscriptItems(for: snapshot)
+        return visibleTranscriptProjection(for: snapshot).items
     }
 
-    var visibleTranscriptStart: Int? { mountedTranscriptCoverage?.start ?? snapshot?.transcriptStart }
-    var visibleTranscriptEnd: Int? { mountedTranscriptCoverage?.end ?? authorityTranscriptEnd(snapshot) }
-    var visibleTranscriptTotal: Int? { mountedTranscriptCoverage?.total ?? snapshot?.transcriptTotal }
+    var visibleTranscriptStart: Int? {
+        snapshot.map { visibleTranscriptProjection(for: $0).start } ?? nil
+    }
+    var visibleTranscriptEnd: Int? {
+        snapshot.map { visibleTranscriptProjection(for: $0).end } ?? nil
+    }
+    var visibleTranscriptTotal: Int? {
+        snapshot.map { visibleTranscriptProjection(for: $0).total } ?? nil
+    }
     var hasEarlierTranscript: Bool { (visibleTranscriptStart ?? 0) > 0 }
     var hasLoadedTranscriptPrefix: Bool { mountedTranscriptWindow?.prefixItems.isEmpty == false }
 
     func transcriptSnapshot(for sessionID: String) -> SessionSnapshot? {
         guard ownsSession(sessionID), let snapshot, snapshot.sessionId == sessionID else { return nil }
+        let visible = visibleTranscriptProjection(for: snapshot)
         var projection = snapshot
-        projection.transcript = visibleTranscriptItems(for: snapshot)
-        projection.transcriptStart = visibleTranscriptStart
-        projection.transcriptTotal = visibleTranscriptTotal
+        projection.transcript = visible.items
+        projection.transcriptStart = visible.start
+        projection.transcriptTotal = visible.total
         return projection
     }
 
@@ -583,9 +605,31 @@ final class SessionPresentationStore {
         return window
     }
 
+    private func visibleTranscriptProjection(
+        for authority: SessionSnapshot
+    ) -> VisibleTranscriptProjection {
+        if let cached = visibleTranscriptProjectionCache,
+           cached.timelineGeneration == chatTimelineGeneration {
+            return cached
+        }
+        let window = mountedWindow(for: authority)
+        #if HOSTED_TEST
+        hostedVisibleTranscriptProjectionBuildCount &+= 1
+        #endif
+        let projection = VisibleTranscriptProjection(
+            timelineGeneration: chatTimelineGeneration,
+            items: window.map { $0.prefixItems + authority.transcript } ?? authority.transcript,
+            coverage: window?.coverage,
+            start: window?.coverage.start ?? authority.transcriptStart,
+            end: window?.coverage.end ?? authorityTranscriptEnd(authority),
+            total: window?.coverage.total ?? authority.transcriptTotal
+        )
+        visibleTranscriptProjectionCache = projection
+        return projection
+    }
+
     private func visibleTranscriptItems(for authority: SessionSnapshot) -> [TranscriptItem] {
-        guard let window = mountedWindow(for: authority) else { return authority.transcript }
-        return window.prefixItems + authority.transcript
+        visibleTranscriptProjection(for: authority).items
     }
 
     private func coverage(for authority: SessionSnapshot, prefix: [TranscriptItem], start: Int? = nil) -> MountedTranscriptCoverage? {
@@ -865,7 +909,7 @@ final class SessionPresentationStore {
                     total: response.total,
                     itemCount: response.items.count,
                     visibleItemCount: self.visibleTranscript.count
-                ), Self.admitsTranscriptPage(response.items) else {
+                ), SessionSnapshotTranscriptAdmissionPolicy.admitsPage(response.items) else {
                     // Repeating the same malformed/stale page cannot converge.
                     // Retry only when the mounted canonical cursor itself moved.
                     updateTranscriptLoadState(
@@ -875,9 +919,7 @@ final class SessionPresentationStore {
                     return .stale
                 }
                 let existingIDs = Set(self.visibleTranscript.map(\.id))
-                let pageIDs = Set(response.items.map(\.id))
-                guard pageIDs.count == response.items.count,
-                      response.items.allSatisfy({ !existingIDs.contains($0.id) }) else {
+                guard response.items.allSatisfy({ !existingIDs.contains($0.id) }) else {
                     updateTranscriptLoadState(
                         .failed("The history branch changed. Tap to retry."),
                         for: loadTarget
@@ -996,16 +1038,6 @@ final class SessionPresentationStore {
         guard let expectedNextEntryID else { return true }
         guard let echoedNextEntryID else { return false }
         return echoedNextEntryID == expectedNextEntryID
-    }
-
-    private static func admitsTranscriptPage(_ items: [TranscriptItem]) -> Bool {
-        // Page order and adjacency belong to the Gateway's filtered projected
-        // branch. Raw canonical parent links can legitimately point through
-        // omitted session-info, hidden custom, or extension receipt entries,
-        // so they are not evidence that two displayed rows are noncontiguous.
-        // The request/response cursor, runtime, leaf, range, total, echoed next
-        // projected entry, and unique/non-overlapping IDs provide admission.
-        items.count <= ChatTranscriptPageRequest.maximumItemCount
     }
 
     func retireConnection() {
@@ -1614,10 +1646,11 @@ final class SessionPresentationStore {
                     details: nil
                 )
             }
-            guard SessionSnapshotQueueAdmissionPolicy.admit(response.session) else {
+            guard SessionSnapshotTranscriptAdmissionPolicy.admit(response.session),
+                  SessionSnapshotQueueAdmissionPolicy.admit(response.session) else {
                 throw GatewayFailure(
                     code: "invalid_response",
-                    message: "The Gateway returned an invalid queued-message projection.",
+                    message: "The Gateway returned an invalid session projection.",
                     retryable: false,
                     details: nil
                 )
@@ -1662,10 +1695,11 @@ final class SessionPresentationStore {
             } else {
                 authoritativeResponse = response.session
             }
-            guard SessionSnapshotQueueAdmissionPolicy.admit(authoritativeResponse) else {
+            guard SessionSnapshotTranscriptAdmissionPolicy.admit(authoritativeResponse),
+                  SessionSnapshotQueueAdmissionPolicy.admit(authoritativeResponse) else {
                 throw GatewayFailure(
                     code: "invalid_response",
-                    message: "The Gateway returned an invalid queued-message projection.",
+                    message: "The Gateway returned an invalid session projection.",
                     retryable: false,
                     details: nil
                 )
@@ -1728,6 +1762,7 @@ final class SessionPresentationStore {
             }
             let replayTailSequence = replay.last?.sessionCursor?.eventSequence ?? cursor.eventSequence
             guard !replayRequiresResynchronization,
+                  SessionSnapshotTranscriptAdmissionPolicy.admit(installed),
                   SessionSnapshotQueueAdmissionPolicy.admit(installed),
                   installed.eventSequence == replayTailSequence else {
                 if case .freshPresentation = mode { synchronization.requireFreshInstall(sessionID: sessionID) }

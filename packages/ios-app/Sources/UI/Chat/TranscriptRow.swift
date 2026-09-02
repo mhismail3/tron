@@ -362,14 +362,14 @@ private struct ThinkingBlock: View {
     }
 
     var body: some View {
+        let inline = preparedInline
         VStack(alignment: .leading, spacing: 0) {
             if let label, !label.isEmpty {
                 Text(label)
                     .font(TronFont.body(11, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
-            traceViewport
-                .frame(height: traceHeight)
+            traceViewport(inline: inline)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     guard isOverflowing else { return }
@@ -381,13 +381,13 @@ private struct ThinkingBlock: View {
         .accessibilityLabel(accessibleParagraph)
         .accessibilityAddTraits(isOverflowing ? .isButton : [])
         .accessibilityHint(isOverflowing ? "Double-tap to view the full thinking trace" : "")
-        .overlay(alignment: .topLeading) { measurementProbe }
+        .overlay(alignment: .topLeading) { measurementProbe(inline: inline) }
         .tronManagedSheet(
             isPresented: $showingDetails,
             identity: "chat.thinking-trace.\(traceIdentity)"
         ) {
             ThinkingTraceDetailSheet(
-                inline: preparedInline,
+                inline: inline,
                 identity: traceIdentity,
                 streaming: animatesInsertion
             )
@@ -407,9 +407,9 @@ private struct ThinkingBlock: View {
     /// The compact row is a tail projection, not a nested scroll surface:
     /// full content stays authoritative and measured while only the latest
     /// four measured lines are presented in the visible viewport.
-    private var traceViewport: some View {
+    private func traceViewport(inline: MarkdownPresentation.Inline) -> some View {
         ZStack(alignment: .topLeading) {
-            paragraph
+            paragraph(inline: inline)
                 .offset(y: -tailOffset)
         }
         .frame(height: traceHeight, alignment: .topLeading)
@@ -453,9 +453,9 @@ private struct ThinkingBlock: View {
         }
     }
 
-    private var paragraph: some View {
+    private func paragraph(inline: MarkdownPresentation.Inline) -> some View {
         ChatStreamingInlineText(
-            inline: preparedInline,
+            inline: inline,
             identity: traceIdentity,
             baseColor: Color.tronTextSecondary,
             streaming: animatesInsertion
@@ -490,17 +490,17 @@ private struct ThinkingBlock: View {
         return MarkdownPresentation.Inline(source: source)
     }
 
-    private var measurementText: some View {
-        Text(preparedInline.attributedString ?? AttributedString(preparedInline.source))
+    private func measurementText(inline: MarkdownPresentation.Inline) -> some View {
+        Text(inline.attributedString ?? AttributedString(inline.source))
             .font(TronFont.body(12))
             .italic()
             .lineSpacing(0)
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private var measurementProbe: some View {
+    private func measurementProbe(inline: MarkdownPresentation.Inline) -> some View {
         VStack(spacing: 0) {
-            measurementText
+            measurementText(inline: inline)
                 .background {
                     GeometryReader { geometry in
                         Color.clear.preference(
@@ -527,8 +527,18 @@ private struct ThinkingBlock: View {
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .onPreferenceChange(ChatThinkingTraceMetricsKey.self) { metrics in
-            contentHeight = metrics.contentHeight
-            maximumHeight = metrics.maximumHeight
+            if ChatThinkingTraceLayoutPolicy.admitsMeasurement(
+                current: contentHeight,
+                candidate: metrics.contentHeight
+            ) {
+                contentHeight = metrics.contentHeight
+            }
+            if ChatThinkingTraceLayoutPolicy.admitsMeasurement(
+                current: maximumHeight,
+                candidate: metrics.maximumHeight
+            ) {
+                maximumHeight = metrics.maximumHeight
+            }
         }
     }
 }

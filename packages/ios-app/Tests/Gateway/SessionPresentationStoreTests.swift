@@ -219,6 +219,11 @@ struct SessionPresentationStoreTests {
         #expect(store.visibleTranscriptEnd == tail.transcriptStart.map { $0 + tail.transcript.count })
         #expect(store.mountedTranscriptCoverage?.start == visible.transcriptStart)
         #expect(store.mountedTranscriptCoverage?.end == tail.transcriptStart.map { $0 + tail.transcript.count })
+
+        let projectionBuilds = store.hostedVisibleTranscriptProjectionBuildCount
+        _ = store.transcriptSnapshot(for: tail.sessionId)
+        _ = store.transcriptSnapshot(for: tail.sessionId)
+        #expect(store.hostedVisibleTranscriptProjectionBuildCount == projectionBuilds)
     }
 
     @Test("prefix reconciliation handles unchanged, sliding, and backward-expanded tails")
@@ -622,6 +627,34 @@ struct SessionPresentationStoreTests {
             Issue.record("Malformed status ownership unexpectedly passed session-open admission")
         } catch DecodingError.dataCorrupted(let context) {
             #expect(context.codingPath.map(\.stringValue) == ["session", "extensionPresentation"])
+        }
+    }
+
+    @Test("session-open diagnostics identify malformed transcript authority")
+    func sessionOpenTranscriptDiagnosticPath() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 8_814)
+            .openingTail(targetEncodedBytes: 4_096)
+        snapshot.transcript = [.message(MessageTranscriptItem(
+            id: "", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+            kind: .message, role: .assistant,
+            presentationId: "presentation", content: []
+        ))]
+        let snapshotValue = try JSONDecoder.gateway.decode(
+            JSONValue.self,
+            from: JSONEncoder.gateway.encode(snapshot)
+        )
+        let payload = try JSONEncoder.gateway.encode(JSONValue.object([
+            "session": snapshotValue,
+            "syncToken": .string("sync-token"),
+            "subscriptionToken": .string("subscription-token"),
+            "completionRevision": .number(0),
+        ]))
+
+        do {
+            _ = try JSONDecoder.gateway.decode(GatewaySessionOpenResponse.self, from: payload)
+            Issue.record("Malformed transcript unexpectedly passed session-open admission")
+        } catch DecodingError.dataCorrupted(let context) {
+            #expect(context.codingPath.map(\.stringValue) == ["session", "transcript"])
         }
     }
 

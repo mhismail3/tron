@@ -361,6 +361,10 @@ export class RuntimeSlot {
   /** Monotonic invocation starts keep duration independent of wall-clock changes. */
   private readonly toolStartedAtMonotonicMs = new Map<string, number>();
   private activeOperationId: string | undefined;
+  /** Display lineage survives tool-only agent continuations even when lifecycle
+   * settlement rotates the operation owner. Visible/user barriers retire it so
+   * live projection matches cold transcript derivation exactly. */
+  private activeToolSegmentOwnerId: string | undefined;
   private readonly operationWork = new Map<string, GatewayWorkHandle>();
   private activeExports = 0;
   private operation: SessionOperationState | undefined;
@@ -982,6 +986,7 @@ export class RuntimeSlot {
     if (!this.hasActiveAgentRun) return;
     if (this.phase === "idle" || this.phase === "interrupted") this.phase = "running";
     this.activeOperationId ??= randomUUID();
+    this.activeToolSegmentOwnerId ??= this.activeOperationId;
     this.operation ??= { id: this.activeOperationId, kind: "prompt", startedAt: new Date().toISOString() };
     this.beginDerivedOperationWork(this.activeOperationId, "foreground-agent-operation");
     if (!this.activityHeartbeat) this.startActivityHeartbeat();
@@ -1782,6 +1787,11 @@ export class RuntimeSlot {
     });
   }
 
+  private activeToolSegmentId(): string | undefined {
+    const owner = this.activeToolSegmentOwnerId ?? this.activeOperationId;
+    return owner ? toolSegmentId(owner) : undefined;
+  }
+
   private emitProgress(message: AgentMessage): void {
     this.pendingProgressMessage = message;
     if (this.progressFlushTimer !== undefined) return;
@@ -1810,7 +1820,7 @@ export class RuntimeSlot {
       false,
       this.toolLabels(),
       undefined,
-      this.activeOperationId ? toolSegmentId(this.activeOperationId) : undefined,
+      this.activeToolSegmentId(),
     );
     this.emit("session.progress", safeJson({
       message: projected === undefined ? undefined : boundStreamingProgressItem(projected),
@@ -1837,7 +1847,7 @@ export class RuntimeSlot {
       true,
       this.toolLabels(),
       undefined,
-      this.activeOperationId ? toolSegmentId(this.activeOperationId) : undefined,
+      this.activeToolSegmentId(),
     );
     if (!projected || projected.kind !== "message") return;
     this.finalizedStreamPresentationId = this.streamPresentationId;
@@ -1858,6 +1868,11 @@ export class RuntimeSlot {
       this.toolInvocationGroups.delete(oldest);
     }
     this.emit("session.progress", safeJson({ message: boundStreamingProgressItem(projected) }));
+    const lastToolIndex = projected.content.findLastIndex(part => part.type === "toolCall");
+    const lastBarrierIndex = projected.content.findLastIndex(part => part.type !== "toolCall");
+    if (lastToolIndex < 0 || lastBarrierIndex > lastToolIndex) {
+      this.activeToolSegmentOwnerId = undefined;
+    }
   }
 
   private captureStreamIdentity(message: AgentMessage, startsMessage = false): void {
@@ -2359,6 +2374,10 @@ export class RuntimeSlot {
         const preflightOwner = this.pendingExtensionCommand?.id
           ?? queuedOwner
           ?? this.activeOperationId;
+        const continuesToolSegment = continuationFromSettlement
+          && queuedOwner === undefined
+          && this.pendingExtensionCommand === undefined
+          && this.activeToolSegmentOwnerId !== undefined;
         const requiresDistinctAgentOwner = queuedOwner === undefined
           && (continuationFromSettlement || this.pendingExtensionCommand !== undefined);
         if (continuationFromSettlement) {
@@ -2411,6 +2430,7 @@ export class RuntimeSlot {
         this.toolStartedAtMonotonicMs.clear();
         this.nextToolOrder = 0;
         this.activeOperationId ??= requiresDistinctAgentOwner ? randomUUID() : (preflightOwner ?? randomUUID());
+        if (!continuesToolSegment) this.activeToolSegmentOwnerId = this.activeOperationId;
         const activeInvocation = this.invocationForOperation(this.activeOperationId);
         this.operation ??= {
           id: this.activeOperationId,
@@ -2450,6 +2470,7 @@ export class RuntimeSlot {
         this.phase = "idle";
         const settledOperationId = this.activeOperationId;
         this.activeOperationId = undefined;
+        this.activeToolSegmentOwnerId = undefined;
         this.operation = undefined;
         this.retry = undefined;
         this.toolExecutions.clear();
@@ -2635,6 +2656,9 @@ export class RuntimeSlot {
           this.flushPendingProgress();
           this.captureStreamIdentity(event.message, true);
         } else if (event.message.role === "user") {
+          // User input is a hard display-chain boundary even when lifecycle
+          // callbacks overlap a preceding completion.
+          this.activeToolSegmentOwnerId = this.activeOperationId;
           // Foreground admission is serialized. Claim the exact Pi object;
           // repeated text and crossing user callbacks cannot impersonate it.
           if (this.pendingPrompt && this.pendingPromptMessage === undefined) {
@@ -2725,7 +2749,7 @@ export class RuntimeSlot {
           lastProgressAt: now,
           durationMs,
           progressSequence,
-          toolSegmentId: toolSegmentId(this.activeOperationId!),
+          toolSegmentId: this.activeToolSegmentId()!,
           ...(this.toolInvocationGroups.get(event.toolCallId) ?? {}),
           ...(extensionOrigin ? { extensionOrigin } : {}),
           ...(extensionActivity ? { extensionActivity } : {}),
@@ -2775,7 +2799,7 @@ export class RuntimeSlot {
           lastProgressAt: now,
           durationMs,
           progressSequence: (existing?.progressSequence ?? 0) + 1,
-          toolSegmentId: existing?.toolSegmentId ?? toolSegmentId(this.activeOperationId!),
+          toolSegmentId: existing?.toolSegmentId ?? this.activeToolSegmentId()!,
           ...(this.toolInvocationGroups.get(event.toolCallId) ?? {}),
           ...(extensionOrigin ? { extensionOrigin } : {}),
           ...(extensionActivity ? { extensionActivity } : {}),
@@ -2843,7 +2867,7 @@ export class RuntimeSlot {
           completedAt: now,
           durationMs,
           progressSequence: Math.max(existing?.progressSequence ?? 0, retained?.progressSequence ?? 0) + 1,
-          toolSegmentId: existing?.toolSegmentId ?? retained?.toolSegmentId ?? toolSegmentId(this.activeOperationId!),
+          toolSegmentId: existing?.toolSegmentId ?? retained?.toolSegmentId ?? this.activeToolSegmentId()!,
           ...(retained?.groupId ? { groupId: retained.groupId } : {}),
           ...(retained?.groupIndex === undefined ? {} : { groupIndex: retained.groupIndex }),
           ...(retained?.groupCount === undefined ? {} : { groupCount: retained.groupCount }),
@@ -4663,7 +4687,7 @@ export class RuntimeSlot {
           this.finalizedStreamPresentationId === this.streamPresentationId,
           this.toolLabels(),
           undefined,
-          this.activeOperationId ? toolSegmentId(this.activeOperationId) : undefined,
+          this.activeToolSegmentId(),
         );
       })()
       : undefined;

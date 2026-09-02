@@ -314,13 +314,13 @@ clamped negative bottom distance, auxiliary rows, transient boundary geometry, a
 not settlement evidence. The native geometry observation identity includes the opening epoch and phase, so
 entering positioning replays current geometry even when SwiftUI would coalesce equal numeric fields. Exact-ID
 realization can proceed without a geometry sample. If physical proof still cannot settle within 750 milliseconds, the
-bounded bottom-edge binding remains owned and the authoritative transcript is revealed best-effort instead of failing
-conversation availability. The positioned transcript then fades/rises into view while the tail binding remains
-owned through animation completion and two unchanged display frames; best-effort positioning releases after those frames even when no later geometry arrives. Direct user or accessibility interaction
+bounded attempt fails closed and the opening surface presents its retry path; elapsed time never substitutes for
+viewport evidence. The positioned transcript then fades/rises into view while the tail binding remains
+owned through animation completion, current non-lifted post-reveal marker/geometry evidence, two unchanged display frames, and the exact target-release callback. A separate two-second post-reveal deadline can abandon a stale target back to target-free native pinning and bounded repair, but cannot certify missing evidence. Direct user or accessibility interaction
 cancels that arm. The composer
 remains visible throughout opening, while sending stays disabled until readiness. Opening tail
 positioning and post-reveal settlement are owned by the coordinator's mutually exclusive opening
-phase; ordinary pinned growth, shrink, streaming, and existing-row settlement create no command ownership. A genuinely new lazy physical row may own one stable-sentinel materialization lease until fresh row geometry arrives. Explicit
+phase. Automatic live projection intake remains coalesced through that phase and its applied target release, then submits only the newest desired cut. Ordinary pinned growth, shrink, streaming, and existing-row settlement create no command ownership. A genuinely new lazy physical row may own one stable-sentinel materialization lease until fresh row geometry arrives. Explicit
 opening, catch-up, semantic restore, prepend, retained resume, and the bounded physical-tail repair remain distinct command owners; after they release, pinned mode
 keeps `ScrollPosition` target-free and uses the native bottom size-change anchor with no recurring command stream. Repair is admitted only from current signed marker evidence and is cancelled by interaction or a newer layout epoch.
 Short-content alignment remains bottom-owned by the native anchor; blank space stays above the tail. Editor-only composer height changes install atomically;

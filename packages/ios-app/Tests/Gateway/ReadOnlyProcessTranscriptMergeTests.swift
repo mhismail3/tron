@@ -27,6 +27,35 @@ struct ReadOnlyProcessTranscriptMergeTests {
         #expect(result.retainedLoadedPrefix)
     }
 
+    @Test("page admission rejects empty duplicate and oversized item identities")
+    func pageItemAdmission() {
+        let valid = item(1)
+        let empty: TranscriptItem = .message(MessageTranscriptItem(
+            id: "", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+            kind: .message, role: .assistant,
+            presentationId: "empty-presentation", content: []
+        ))
+        #expect(throws: (any Error).self) {
+            _ = try ProcessTranscriptPage(
+                items: [empty], start: 0, end: 1, total: 1,
+                nextEntryId: nil, leafEntryId: nil
+            )
+        }
+        #expect(throws: (any Error).self) {
+            _ = try ProcessTranscriptPage(
+                items: [valid, valid], start: 0, end: 2, total: 2,
+                nextEntryId: nil, leafEntryId: nil
+            )
+        }
+        let oversized = (0...SessionSnapshot.maximumTranscriptItems).map(item)
+        #expect(throws: (any Error).self) {
+            _ = try ProcessTranscriptPage(
+                items: oversized, start: 0, end: oversized.count,
+                total: oversized.count, nextEntryId: nil, leafEntryId: nil
+            )
+        }
+    }
+
     @Test("branch replacement fails closed to the new canonical tail")
     func branchReplacementUsesNewTail() throws {
         let existing = (0..<4).map(item)
