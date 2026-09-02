@@ -59,10 +59,10 @@ struct SessionProcessesSheet: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 8) {
                 if !sections.active.isEmpty {
-                    processSection("Active", processes: sections.active, accent: .tronEmerald)
+                    processSection("Active", processes: sections.active)
                 }
                 if !sections.recent.isEmpty {
-                    processSection("Recently finished", processes: sections.recent, accent: .tronAmber)
+                    processSection("Recently finished", processes: sections.recent)
                 }
             }
             .padding(18)
@@ -71,10 +71,10 @@ struct SessionProcessesSheet: View {
     }
 
     @ViewBuilder
-    private func processSection(_ title: String, processes: [SessionProcessActivity], accent: Color) -> some View {
+    private func processSection(_ title: String, processes: [SessionProcessActivity]) -> some View {
         processSectionHeader(title)
         ForEach(processes) { process in
-            SessionProcessRow(process: process, accent: accent, surfaceStyle: .glass) {
+            SessionProcessRow(process: process, surfaceStyle: .glass) {
                 selectedProcess = process
             }
         }
@@ -163,13 +163,13 @@ struct ProcessHistorySheet: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 6) {
                 if !sections.active.isEmpty {
-                    section("Active", sections.active, accent: .tronEmerald)
+                    section("Active", sections.active)
                 }
                 if !sections.recent.isEmpty {
-                    section("Recently finished", sections.recent, accent: .tronAmber)
+                    section("Recently finished", sections.recent)
                 }
                 if !earlier.isEmpty {
-                    section("Earlier", earlier, accent: .tronCyan)
+                    section("Earlier", earlier)
                 }
 
                 switch store.status {
@@ -226,14 +226,14 @@ struct ProcessHistorySheet: View {
     }
 
     @ViewBuilder
-    private func section(_ title: String, _ processes: [SessionProcessActivity], accent: Color) -> some View {
+    private func section(_ title: String, _ processes: [SessionProcessActivity]) -> some View {
         Text(title)
             .font(TronTypography.caption)
             .foregroundStyle(Color.tronTextMuted)
             .padding(.top, 4)
             .accessibilityAddTraits(.isHeader)
         ForEach(processes) { process in
-            SessionProcessRow(process: process, accent: accent, surfaceStyle: .scrollOptimized) {
+            SessionProcessRow(process: process, surfaceStyle: .scrollOptimized) {
                 selectedProcess = process
             }
         }
@@ -301,7 +301,6 @@ private enum SessionProcessRowSurfaceStyle {
 
 private struct SessionProcessRow: View {
     let process: SessionProcessActivity
-    let accent: Color
     let surfaceStyle: SessionProcessRowSurfaceStyle
     let openTranscript: () -> Void
 
@@ -345,7 +344,7 @@ private struct SessionProcessRow: View {
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
                 }
-                if process.lifecycle.state.isProblem {
+                if tone == .unsuccessful {
                     Image(systemName: "exclamationmark.circle.fill")
                         .font(TronTypography.caption2)
                         .foregroundStyle(Color.tronError)
@@ -354,26 +353,22 @@ private struct SessionProcessRow: View {
             }
 
             ToolChipFlowLayout(spacing: 5) {
-                SessionProcessPill(icon: "circle.fill", text: statusText, accent: cardAccent)
                 if !process.executionMode.displayName.isEmpty {
                     SessionProcessPill(
                         icon: process.executionMode == .asynchronous ? "arrow.triangle.branch" : "arrow.right",
-                        text: process.executionMode.displayName,
-                        accent: .tronTextSecondary
+                        text: process.executionMode.displayName
                     )
                 }
                 if let toolCount = process.toolCount {
                     SessionProcessPill(
                         icon: "wrench.and.screwdriver",
-                        text: "\(toolCount) tools",
-                        accent: .tronTextSecondary
+                        text: SessionProcessRowPresentation.countLabel(toolCount, singular: "tool")
                     )
                 }
                 if let turnCount = process.turnCount {
                     SessionProcessPill(
                         icon: "arrow.triangle.2.circlepath",
-                        text: "\(turnCount) turns",
-                        accent: .tronTextSecondary
+                        text: SessionProcessRowPresentation.countLabel(turnCount, singular: "turn")
                     )
                 }
             }
@@ -382,7 +377,7 @@ private struct SessionProcessRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(process.lifecycle.state.isActive ? "LIVE ACTIVITY" : "RECENT ACTIVITY")
                         .font(TronTypography.caption)
-                        .foregroundStyle(process.lifecycle.state.isActive ? Color.tronEmerald : Color.tronTextMuted)
+                        .foregroundStyle(cardAccent)
                     if let latestAction {
                         Label(latestAction, systemImage: "hammer")
                             .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .semibold))
@@ -412,11 +407,20 @@ private struct SessionProcessRow: View {
         SessionProcessRowPresentation.outputPreview(process.outputTail)
     }
 
-    private var cardAccent: Color {
-        if process.lifecycle.state.isProblem { return .tronError }
-        return process.lifecycle.state.isActive ? .tronEmerald : accent
+    private var tone: SessionProcessRowTone {
+        SessionProcessRowPresentation.tone(for: process.lifecycle.state)
     }
 
+    private var cardAccent: Color {
+        switch tone {
+        case .inProgress: .tronAmber
+        case .succeeded: .tronSuccess
+        case .unsuccessful: .tronError
+        }
+    }
+
+    /// Lifecycle remains explicit for VoiceOver while container color is the
+    /// sole visible status treatment.
     private var statusText: String {
         if process.lifecycle.state.isActive { return "Live" }
         return process.lifecycle.state == .completed ? "Completed" : process.lifecycle.state.displayName
@@ -428,8 +432,8 @@ private struct SessionProcessRow: View {
             process.executionMode.displayName.isEmpty ? nil : process.executionMode.displayName,
             process.durationMs.map { ToolTiming.format(milliseconds: $0) },
             latestAction,
-            process.toolCount.map { "\($0) tools" },
-            process.turnCount.map { "\($0) turns" },
+            process.toolCount.map { SessionProcessRowPresentation.countLabel($0, singular: "tool") },
+            process.turnCount.map { SessionProcessRowPresentation.countLabel($0, singular: "turn") },
         ].compactMap { $0 }
     }
 
@@ -442,31 +446,37 @@ private struct SessionProcessRow: View {
     }
 }
 
+private enum SessionProcessPillMetrics {
+    static let iconWidth: CGFloat = 16
+}
+
 private struct SessionProcessPill: View {
     let icon: String
     let text: String
-    let accent: Color
 
     var body: some View {
-        HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
-            ChatCompactPillLeadingIcon(
-                icon: icon,
-                accent: accent,
-                iconSize: ChatCompactPillLayoutPolicy.standardIconSize
-            )
-            Text(text)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .lineLimit(1)
-        }
-        .foregroundStyle(accent)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .background(accent.opacity(0.10), in: Capsule())
-        .overlay {
-            Capsule().stroke(accent.opacity(0.24), lineWidth: 0.75)
+        ChatCompactPillSurface(tone: .neutral, material: .flat) {
+            HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
+                ChatCompactPillLeadingIcon(
+                    icon: icon,
+                    accent: ChatNotificationTone.neutral.primaryColor,
+                    iconSize: ChatCompactPillLayoutPolicy.standardIconSize
+                )
+                .frame(width: SessionProcessPillMetrics.iconWidth)
+                Text(text)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(ChatNotificationTone.neutral.primaryColor)
         }
         .accessibilityHidden(true)
     }
+}
+
+enum SessionProcessRowTone: Equatable, Sendable {
+    case inProgress
+    case succeeded
+    case unsuccessful
 }
 
 enum SessionProcessRowPresentation {
@@ -474,6 +484,18 @@ enum SessionProcessRowPresentation {
     private static let maximumActionCharacters = 96
     private static let maximumOutputLineCharacters = 180
     private static let absentValues: Set<String> = ["null", "undefined"]
+
+    static func tone(for state: SessionProcessLifecycleState) -> SessionProcessRowTone {
+        switch state {
+        case .queued, .running, .paused: .inProgress
+        case .completed: .succeeded
+        case .failed, .stopped, .rejected, .interrupted, .unknown: .unsuccessful
+        }
+    }
+
+    static func countLabel(_ count: Int, singular: String) -> String {
+        "\(count) \(count == 1 ? singular : "\(singular)s")"
+    }
 
     static func latestAction(for process: SessionProcessActivity) -> String? {
         let tool = normalized(process.currentTool)

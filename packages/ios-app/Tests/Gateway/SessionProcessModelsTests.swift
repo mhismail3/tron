@@ -88,6 +88,28 @@ struct SessionProcessModelsTests {
             currentTool: "bash",
             currentPathBasename: "null"
         )) == "bash")
+        #expect(SessionProcessRowPresentation.countLabel(1, singular: "tool") == "1 tool")
+        #expect(SessionProcessRowPresentation.countLabel(2, singular: "turn") == "2 turns")
+    }
+
+    @Test("subagent row tone gives lifecycle colors one standard meaning")
+    func rowTone() {
+        for state in [
+            SessionProcessLifecycleState.queued,
+            .running,
+            .paused,
+        ] {
+            #expect(SessionProcessRowPresentation.tone(for: state) == .inProgress)
+        }
+        #expect(SessionProcessRowPresentation.tone(for: .completed) == .succeeded)
+        for state in [
+            SessionProcessLifecycleState.failed,
+            .stopped,
+            .rejected,
+            .interrupted,
+        ] {
+            #expect(SessionProcessRowPresentation.tone(for: state) == .unsuccessful)
+        }
     }
 
     @Test("active and recent process rows are strictly admitted")

@@ -44,6 +44,17 @@ struct ProcessActivityOrbTests {
         })
     }
 
+    @Test("mode changes crossfade continuously between stable renderers")
+    func modeTransition() {
+        #expect(ProcessActivityOrbModeTransitionPolicy.weights(thinkingBlend: -1)
+            == ProcessActivityOrbModeWeights(solving: 1, thinking: 0))
+        #expect(ProcessActivityOrbModeTransitionPolicy.weights(thinkingBlend: 0.5)
+            == ProcessActivityOrbModeWeights(solving: 0.5, thinking: 0.5))
+        #expect(ProcessActivityOrbModeTransitionPolicy.weights(thinkingBlend: 2)
+            == ProcessActivityOrbModeWeights(solving: 0, thinking: 1))
+        #expect(ProcessActivityOrbModeTransitionPolicy.duration == 0.34)
+    }
+
     @Test("reduced motion and offscreen rendering pause deterministically")
     func lifecyclePausePolicy() {
         #expect(ProcessActivityOrbEngine.reducedMotionTime == 0.6)

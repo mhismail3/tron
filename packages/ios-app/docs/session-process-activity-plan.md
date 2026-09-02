@@ -34,10 +34,12 @@ The orb appears when there is:
 
 Tapping the orb opens **Subagents**, with **Active** and **Recently finished** sections.
 Manage Session owns **Subagent History**, which adds canonical **Earlier** rows. Both sheets
-open at the large detent. Rows omit per-row animated orbs, place compact Liquid Glass lifecycle
-and mode pills beneath the title, and right-align plain duration text. The bounded active
-sheet retains Liquid Glass card containers; history uses the provider-settings
-scroll-optimized container surface for long lists. The composer orb remains the single animated
+open at the large detent. Rows omit per-row animated orbs and redundant lifecycle pills,
+place standardized compact mode/tool/turn pills beneath the title, and right-align plain
+duration text. Container color alone carries lifecycle meaning: amber for in-progress, green
+for successful completion, and red for failure or interruption. The bounded active sheet
+retains Liquid Glass card containers; history uses the provider-settings scroll-optimized
+container surface for long lists. The composer orb remains the single animated
 subagent activity affordance. Tool/path, counts, and bounded output remain distinct metadata
 when supplied. A row with a validated child session
 presents a standardized large-detent bottom sheet containing the canonical-live, read-only

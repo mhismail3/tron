@@ -340,6 +340,20 @@ enum ProcessActivityOrbEngine {
     }
 }
 
+struct ProcessActivityOrbModeWeights: Equatable, Sendable {
+    let solving: Double
+    let thinking: Double
+}
+
+enum ProcessActivityOrbModeTransitionPolicy {
+    static let duration: TimeInterval = 0.34
+
+    static func weights(thinkingBlend: Double) -> ProcessActivityOrbModeWeights {
+        let thinking = min(1, max(0, thinkingBlend))
+        return ProcessActivityOrbModeWeights(solving: 1 - thinking, thinking: thinking)
+    }
+}
+
 struct ProcessActivityOrb: View {
     let mode: ProcessActivityOrbMode
     var size: CGFloat = 20
@@ -360,70 +374,124 @@ struct ProcessActivityOrb: View {
                 surfaceActive: presentationActivity.allowsContinuousAnimation
             )
         )) { _ in
-            Canvas(rendersAsynchronously: true) { context, canvasSize in
-                let time = reduceMotion
+            ProcessActivityOrbCanvas(
+                time: reduceMotion
                     ? ProcessActivityOrbEngine.reducedMotionTime
-                    : ProcessInfo.processInfo.systemUptime * speed
-                let frame = ProcessActivityOrbEngine.frame(mode: mode, time: time)
-                let scale = min(canvasSize.width, canvasSize.height) / 20
-                for stroke in frame.strokes {
-                    var path = Path()
-                    path.move(to: scaled(stroke.start, by: scale))
-                    path.addCurve(
-                        to: scaled(stroke.end, by: scale),
-                        control1: scaled(stroke.control1, by: scale),
-                        control2: scaled(stroke.control2, by: scale)
-                    )
-                    let top = scaled(stroke.start, by: scale)
-                    let bottom = scaled(stroke.end, by: scale)
-                    let ink = Color.tronEmerald
-                    context.stroke(
-                        path,
-                        with: .linearGradient(
-                            Gradient(stops: [
-                                .init(color: ink.opacity(stroke.opacity * 0.82), location: 0),
-                                .init(color: ink.opacity(stroke.opacity), location: 0.42),
-                                .init(color: ink.opacity(stroke.opacity * 0.3), location: 1),
-                            ]),
-                            startPoint: top,
-                            endPoint: bottom
-                        ),
-                        style: StrokeStyle(
-                            lineWidth: stroke.width * scale,
-                            lineCap: .round,
-                            lineJoin: .round
-                        )
-                    )
-                }
-                for dot in frame.dots {
-                    let radius = dot.radius * scale
-                    let center = scaled(dot.center, by: scale)
-                    let rect = CGRect(
-                        x: center.x - radius,
-                        y: center.y - radius,
-                        width: radius * 2,
-                        height: radius * 2
-                    )
-                    context.fill(
-                        Path(ellipseIn: rect),
-                        with: .color(Color.tronEmerald.opacity(dot.opacity))
-                    )
-                }
-            }
+                    : ProcessInfo.processInfo.systemUptime,
+                speedScale: max(0.1, animationSpeedScale),
+                usesFixedTime: reduceMotion,
+                thinkingBlend: mode == .thinking ? 1 : 0
+            )
         }
+        .animation(
+            reduceMotion
+                ? .easeOut(duration: 0.12)
+                : .smooth(duration: ProcessActivityOrbModeTransitionPolicy.duration),
+            value: mode
+        )
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+}
+
+private struct ProcessActivityOrbCanvas: View, @preconcurrency Animatable {
+    let time: Double
+    let speedScale: Double
+    let usesFixedTime: Bool
+    var thinkingBlend: Double
+
+    var animatableData: Double {
+        get { thinkingBlend }
+        set { thinkingBlend = newValue }
+    }
+
+    var body: some View {
+        Canvas(rendersAsynchronously: true) { context, canvasSize in
+            let weights = ProcessActivityOrbModeTransitionPolicy.weights(
+                thinkingBlend: thinkingBlend
+            )
+            if weights.solving > 0 {
+                draw(
+                    ProcessActivityOrbEngine.frame(
+                        mode: .solving,
+                        time: modeTime(speed: 1.95)
+                    ),
+                    opacity: weights.solving,
+                    context: &context,
+                    canvasSize: canvasSize
+                )
+            }
+            if weights.thinking > 0 {
+                draw(
+                    ProcessActivityOrbEngine.frame(
+                        mode: .thinking,
+                        time: modeTime(speed: 3.12)
+                    ),
+                    opacity: weights.thinking,
+                    context: &context,
+                    canvasSize: canvasSize
+                )
+            }
+        }
+    }
+
+    private func modeTime(speed: Double) -> Double {
+        usesFixedTime ? time : time * speed * speedScale
+    }
+
+    private func draw(
+        _ frame: ProcessActivityOrbFrame,
+        opacity: Double,
+        context: inout GraphicsContext,
+        canvasSize: CGSize
+    ) {
+        let scale = min(canvasSize.width, canvasSize.height) / 20
+        for stroke in frame.strokes {
+            var path = Path()
+            path.move(to: scaled(stroke.start, by: scale))
+            path.addCurve(
+                to: scaled(stroke.end, by: scale),
+                control1: scaled(stroke.control1, by: scale),
+                control2: scaled(stroke.control2, by: scale)
+            )
+            let top = scaled(stroke.start, by: scale)
+            let bottom = scaled(stroke.end, by: scale)
+            let ink = Color.tronEmerald
+            context.stroke(
+                path,
+                with: .linearGradient(
+                    Gradient(stops: [
+                        .init(color: ink.opacity(stroke.opacity * opacity * 0.82), location: 0),
+                        .init(color: ink.opacity(stroke.opacity * opacity), location: 0.42),
+                        .init(color: ink.opacity(stroke.opacity * opacity * 0.3), location: 1),
+                    ]),
+                    startPoint: top,
+                    endPoint: bottom
+                ),
+                style: StrokeStyle(
+                    lineWidth: stroke.width * scale,
+                    lineCap: .round,
+                    lineJoin: .round
+                )
+            )
+        }
+        for dot in frame.dots {
+            let radius = dot.radius * scale
+            let center = scaled(dot.center, by: scale)
+            let rect = CGRect(
+                x: center.x - radius,
+                y: center.y - radius,
+                width: radius * 2,
+                height: radius * 2
+            )
+            context.fill(
+                Path(ellipseIn: rect),
+                with: .color(Color.tronEmerald.opacity(dot.opacity * opacity))
+            )
+        }
     }
 
     private func scaled(_ point: ProcessActivityOrbPoint, by scale: CGFloat) -> CGPoint {
         CGPoint(x: CGFloat(point.x) * scale, y: CGFloat(point.y) * scale)
-    }
-
-    private var speed: Double {
-        let baseSpeed = switch mode {
-        case .solving: 1.95
-        case .thinking: 3.12
-        }
-        return baseSpeed * max(0.1, animationSpeedScale)
     }
 }
