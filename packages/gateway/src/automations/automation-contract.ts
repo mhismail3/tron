@@ -131,7 +131,7 @@ function terminalRunState(value: unknown): boolean {
 export function admitsAutomationRun(value: unknown): value is AutomationRun {
   const input = record(value);
   if (!input) return false;
-  const optional = ["reason", "claimedAt", "startedAt", "terminalAt", "retryAt", "hostEpoch", "claimId",
+  const optional = ["manual", "reason", "claimedAt", "startedAt", "terminalAt", "retryAt", "hostEpoch", "claimId",
     "operationId", "invocationId", "assistantCompletionId", "notificationAdmissionStatus", "error", "resolution"];
   const required = ["runId", "occurrenceId", "automationRevision", "scheduledFor", "triggerSnapshot",
     "actionSnapshot", "state", "createdAt", "preAdmissionAttemptCount"];
@@ -140,6 +140,7 @@ export function admitsAutomationRun(value: unknown): value is AutomationRun {
     || !required.every((key) => keys.includes(key))) return false;
   if (!bounded(input.runId, 64) || !uuid.test(input.runId)
     || !bounded(input.occurrenceId, 64) || !occurrenceId.test(input.occurrenceId)
+    || (input.manual !== undefined && input.manual !== true)
     || !Number.isSafeInteger(input.automationRevision) || (input.automationRevision as number) < 1
     || !timestamp(input.scheduledFor) || !timestamp(input.createdAt)
     || !admitsAutomationTrigger(input.triggerSnapshot) || !admitsAutomationAction(input.actionSnapshot)

@@ -44,6 +44,7 @@ export interface AutomationRunResolution {
 export interface AutomationRun {
   runId: string;
   occurrenceId: string;
+  manual?: true;
   automationRevision: number;
   scheduledFor: string;
   triggerSnapshot: AutomationTrigger;

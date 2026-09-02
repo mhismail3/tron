@@ -105,6 +105,7 @@ export class AutomationScheduler {
   private readonly settlementWaiters = new Map<string, { promise: Promise<void>; resolve: () => void }>();
   private timer: NodeJS.Timeout | undefined;
   private scanPromise: Promise<void> | undefined;
+  private nextScanNotBefore = 0;
   private started = false;
   private admissionOpen = false;
 
@@ -203,6 +204,13 @@ export class AutomationScheduler {
     this.scanPromise = this.performScan();
     try {
       await this.scanPromise;
+      this.nextScanNotBefore = 0;
+    } catch (error) {
+      this.nextScanNotBefore = this.now() + 1_000;
+      this.onDiagnostic(
+        `Automation scheduler pass failed and will retry: ${error instanceof Error ? error.message : String(error)}`,
+        "scheduler",
+      );
     } finally {
       this.scanPromise = undefined;
       this.arm();
@@ -219,7 +227,12 @@ export class AutomationScheduler {
       if (current.currentRun) throw new GatewayError("busy", "Automation already has an active run", true);
       if (current.activation === "blocked") throw new GatewayError("conflict", "Resolve the blocked automation before running it");
       const scheduledFor = new Date(this.now()).toISOString();
-      created = this.makeRun(current, scheduledFor, `manual:${randomUUID()}`);
+      created = this.makeRun(
+        current,
+        scheduledFor,
+        automationOccurrenceId(current.id, current.revision, `manual:${randomUUID()}`),
+        true,
+      );
       return { ...current, currentRun: created };
     });
     this.wake();
@@ -268,7 +281,7 @@ export class AutomationScheduler {
     await this.materializeDueRuns();
     const candidates = this.store.snapshot()
       .filter((record) => record.currentRun
-        && (record.activation === "enabled" || record.currentRun.occurrenceId.startsWith("manual:"))
+        && (record.activation === "enabled" || record.currentRun.manual === true)
         && (record.currentRun.state === "queued" || record.currentRun.state === "waiting")
         && (record.currentRun.retryAt === undefined || Date.parse(record.currentRun.retryAt) <= this.now()))
       .sort((left, right) => left.currentRun!.scheduledFor.localeCompare(right.currentRun!.scheduledFor) || left.id.localeCompare(right.id));
@@ -327,7 +340,9 @@ export class AutomationScheduler {
           skipped.state = "skipped";
           skipped.reason = "misfire";
           skipped.terminalAt = new Date(now).toISOString();
-          return settleAutomationRun(next, skipped, skipped.terminalAt);
+          const settled = settleAutomationRun(next, skipped, skipped.terminalAt);
+          if (settled.trigger.kind === "once") settled.activation = "completed";
+          return settled;
         }
         next.currentRun = this.makeRun(current, classified.dispatchAt,
           automationOccurrenceId(current.id, current.revision, classified.dispatchAt));
@@ -336,11 +351,12 @@ export class AutomationScheduler {
     }
   }
 
-  private makeRun(record: AutomationRecord, scheduledFor: string, occurrenceId: string): AutomationRun {
+  private makeRun(record: AutomationRecord, scheduledFor: string, occurrenceId: string, manual = false): AutomationRun {
     const runId = randomUUID();
     return {
       runId,
       occurrenceId,
+      ...(manual ? { manual: true as const } : {}),
       automationRevision: record.revision,
       scheduledFor,
       triggerSnapshot: clone(record.trigger),
@@ -358,7 +374,7 @@ export class AutomationScheduler {
     const claimedAt = new Date(this.now()).toISOString();
     const claimed = await this.store.mutateState(candidate.id, (current) => {
       if (current.currentRun?.runId !== run.runId
-        || current.activation !== "enabled" && !current.currentRun.occurrenceId.startsWith("manual:")
+        || current.activation !== "enabled" && current.currentRun.manual !== true
         || (current.currentRun.state !== "queued" && current.currentRun.state !== "waiting")) return current;
       const next = clone(current);
       next.currentRun = {
@@ -503,7 +519,10 @@ export class AutomationScheduler {
       const settled = await this.store.mutateState(automationId, (current) => {
         if (current.currentRun?.runId !== runId) return current;
         const terminal = terminalRun(current.currentRun, result, now);
+        const manual = current.currentRun.manual === true;
+        const previousActivation = current.activation;
         const next = settleAutomationRun(current, terminal, now);
+        if (manual && next.activation !== "blocked") next.activation = previousActivation;
         if (terminal.state === "outcomeUnknown") {
           next.activation = "blocked";
           next.blockedReason = "outcome-unknown";
@@ -515,7 +534,7 @@ export class AutomationScheduler {
           const scheduledFor = next.queuedLatestOccurrence;
           delete next.queuedLatestOccurrence;
           next.currentRun = this.makeRun(next, scheduledFor, automationOccurrenceId(next.id, next.revision, scheduledFor));
-        } else if (next.trigger.kind === "once" && !next.currentRun) {
+        } else if (!manual && next.trigger.kind === "once" && !next.currentRun) {
           next.activation = "completed";
         }
         return next;
@@ -633,7 +652,9 @@ export class AutomationScheduler {
     const dueTimes = this.store.snapshot().flatMap((record) => record.activation === "enabled" && record.nextOccurrenceAt
       ? [Date.parse(record.nextOccurrenceAt)] : []);
     const nearest = [...retryTimes, ...dueTimes].sort((left, right) => left - right)[0];
-    const delay = nearest === undefined ? MAXIMUM_TIMER_DELAY_MS : Math.max(0, Math.min(MAXIMUM_TIMER_DELAY_MS, nearest - this.now()));
+    const now = this.now();
+    const requestedDelay = nearest === undefined ? MAXIMUM_TIMER_DELAY_MS : nearest - now;
+    const delay = Math.max(0, Math.min(MAXIMUM_TIMER_DELAY_MS, Math.max(requestedDelay, this.nextScanNotBefore - now)));
     this.timer = this.setTimer(() => {
       this.timer = undefined;
       void this.scan();

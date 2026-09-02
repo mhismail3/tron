@@ -50,6 +50,47 @@ describe("AutomationScheduler", () => {
     expect(executor.start).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a draft one-time definition draft after a successful manual run", async () => {
+    const now = Date.parse("2026-01-01T00:00:00Z");
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-manual-draft-"));
+    const store = new AutomationStore(root, { now: () => now });
+    await store.initialize();
+    const record = await store.create({
+      name: "Draft", activation: "draft", targetSessionId: "session-one",
+      trigger: { kind: "once", at: "2026-01-02T00:00:00.000Z" },
+      action: { kind: "sessionPrompt", text: "Review" }, provenance: { kind: "local" },
+    });
+    const scheduler = new AutomationScheduler(store, {
+      start: async (_definition, run) => ({ operationId: run.operationId, completion: Promise.resolve({ state: "succeeded" }), cancel: async () => {} }),
+    }, { now: () => now, hostEpoch: "epoch-one", setTimer: (() => ({ unref() {} }) as unknown as NodeJS.Timeout), clearTimer: () => {} });
+    scheduler.start();
+    await scheduler.runNow(record.id, record.revision);
+    await scheduler.scan();
+    await eventually(() => expect(store.get(record.id).lastRun?.state).toBe("succeeded"));
+    expect(store.get(record.id).activation).toBe("draft");
+  });
+
+  it("completes a skipped one-time automation without dispatch", async () => {
+    const now = Date.parse("2026-01-02T00:00:00Z");
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-once-skip-"));
+    const store = new AutomationStore(root, { now: () => now });
+    await store.initialize();
+    const record = await store.create({
+      name: "Expired", activation: "enabled", targetSessionId: "session-one",
+      trigger: { kind: "once", at: "2026-01-01T00:00:00.000Z" }, misfirePolicy: "skip",
+      action: { kind: "sessionPrompt", text: "Review" }, provenance: { kind: "local" },
+    });
+    const start = vi.fn();
+    const scheduler = new AutomationScheduler(store, { start } as unknown as AutomationExecutor, {
+      now: () => now, hostEpoch: "epoch-one",
+      setTimer: (() => ({ unref() {} }) as unknown as NodeJS.Timeout), clearTimer: () => {},
+    });
+    scheduler.start();
+    await scheduler.scan();
+    expect(store.get(record.id)).toMatchObject({ activation: "completed", lastRun: { state: "skipped", reason: "misfire" } });
+    expect(start).not.toHaveBeenCalled();
+  });
+
   it("reserves global and per-session capacity before asynchronous admission settles", async () => {
     let now = Date.parse("2026-01-01T00:00:01Z");
     const root = await mkdtemp(join(tmpdir(), "tron-automation-capacity-"));

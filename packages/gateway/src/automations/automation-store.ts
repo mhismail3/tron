@@ -283,6 +283,7 @@ export class AutomationStore {
       next.overlapPolicy = input.overlapPolicy;
       next.executionDeadlineSeconds = input.executionDeadlineSeconds;
       next.action = clone(input.action);
+      delete next.queuedLatestOccurrence;
       if (current.activation === "enabled") {
         const occurrence = firstAutomationOccurrence(input.trigger, this.now());
         if (occurrence === undefined) delete next.nextOccurrenceAt;
