@@ -340,6 +340,15 @@ composer admission owner, and revocation makes any late error target-gated and s
 than allowing a retired view to surface stale UI state. Backgrounding cancels only disposable
 opening, paging, picker, and route work. A resumed open waits for an exact current transport connection rather than trusting the previous epoch's public connected label; a target-free background-retirement interval cancels silently, and the replacement connected transition retries through the same generation checks. Already-ready active and passive chats retain their complete installed projection while the lifecycle owner synchronizes in place.
 
+Gateway-owned automations advertise `automations.v1`. iOS admits typed bounded
+automation summaries, trigger/run states, and `automation.changed` invalidations,
+but does not infer execution state or build a local schedule engine. List pages omit
+action bodies, require one exact catalog revision, and cap the disposable projection
+at 1,024 definitions; authenticated detail reads remain the only path to prompt or
+notification content. Repeated invalidations coalesce in the connection event hub.
+Visual management, navigation, and persistent cache design remain deferred to the
+dedicated automation UI phase rather than creating unused production state now.
+
 Gateway restart uses a supervised drain contract. The request freezes new mutations,
 waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway
 process; active PTYs must be closed first because their process state is not restartable.

@@ -89,6 +89,7 @@ admits and reduces mounted-session topics:
   and expired continuation leases restart once from a nil cursor and then retain the previous catalog silently; this expected
   optimistic invalidation no longer creates the intrusive “Sessions changed while loading the
   dashboard” in-app notification or another routine synchronization notice;
+- `automation.changed` is a global, coalescible invalidation containing only the Gateway catalog revision and an optional opaque automation ID. It carries no name, prompt, notification text, target content, or run error. The typed client admits the payload bounds but does not create a local automation journal; the future automation surface must page `automation.list` under one exact revision and fetch full action content only through authenticated `automation.get`;
 - `notification.inbox.changed` is a global invalidation only. The selected lifecycle client and each admitted background dashboard connection reload that Gateway's bounded, revisioned notification pages; they never synthesize content or unread counts from the event. Mixed page revisions restart once, profile buckets aggregate newest-first, and Gateway command receipts own mark-one/mark-all read settlement. APNs taps may use their bounded request ID to mark the exact canonical row read, but that best-effort mutation never delays exact machine/session navigation;
 - session snapshot/change topics enter the store's composed synchronization quarantine and
   update only the currently subscribed mounted or synchronizing authority. Baseline plus the

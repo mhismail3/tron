@@ -100,6 +100,7 @@ private actor GatewayEventHub {
         case .sessionSummary(let update): return "summary:\(update.sessionId)"
         case .none where delivery.event.topic == "session.listChanged": return "listChanged"
         case .none where delivery.event.topic == "notification.inbox.changed": return "notificationInboxChanged"
+        case .automationChanged: return "automationChanged"
         default: return nil
         }
     }

@@ -338,6 +338,8 @@ enum AdministrativeDrainPresentation {
         case .terminalReceiptPersistence: singular = "completion receipt"
         case .extensionCommandPromptUI: singular = "extension interaction"
         case .administrativeProviderPackageOperation: singular = "administrative operation"
+        case .automationDispatch: singular = "automation dispatch"
+        case .automationTerminalPersistence: singular = "automation completion"
         }
         return "\(count) \(singular)\(count == 1 ? "" : "s")"
     }

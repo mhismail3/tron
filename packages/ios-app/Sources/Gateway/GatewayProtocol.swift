@@ -90,6 +90,7 @@ enum GatewayEventPreparation: Sendable, Equatable {
     case sessionRebaseline(PreparedSessionRebaseline)
     case sessionEvent(PreparedSessionEvent)
     case processTranscriptChanged(ProcessTranscriptChanged)
+    case automationChanged(AutomationChanged)
     case terminalEvent(PreparedTerminalEvent)
 }
 
@@ -148,7 +149,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
                 runtimeGeneration: event.envelope.runtimeGeneration,
                 eventSequence: event.envelope.eventSequence
             )
-        case .none, .sessionSummary, .processTranscriptChanged, .terminalEvent:
+        case .none, .sessionSummary, .processTranscriptChanged, .automationChanged, .terminalEvent:
             return nil
         }
     }
@@ -164,7 +165,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             return true
         case .none:
             return !topic.hasPrefix("session.")
-        case .sessionSummary, .processTranscriptChanged, .terminalEvent:
+        case .sessionSummary, .processTranscriptChanged, .automationChanged, .terminalEvent:
             return true
         }
     }
@@ -192,6 +193,8 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
         switch topic {
         case "session.summary":
             return (try? adapter.decode(SessionSummaryUpdate.self)).map(GatewayEventPreparation.sessionSummary) ?? .none
+        case "automation.changed":
+            return (try? adapter.decode(AutomationChanged.self)).map(GatewayEventPreparation.automationChanged) ?? .none
         case "session.snapshot":
             guard let snapshot = try? adapter.decode(SessionSnapshot.self),
                   SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot),

@@ -266,6 +266,8 @@ enum AdministrativeDrainBlockerCategory: String, Codable, Hashable, Sendable, Ca
     case terminalReceiptPersistence = "terminal-receipt-persistence"
     case extensionCommandPromptUI = "extension-command-prompt-ui"
     case administrativeProviderPackageOperation = "administrative-provider-package-operation"
+    case automationDispatch = "automation-dispatch"
+    case automationTerminalPersistence = "automation-terminal-persistence"
 }
 
 struct AdministrativeDrainSnapshot: Codable, Hashable, Sendable {
