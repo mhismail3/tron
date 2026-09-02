@@ -56,6 +56,7 @@ ALLOWLIST_PATHS=(
 # Full scans intentionally name every tracked source/documentation root so a
 # root can be added or removed only with a conscious scan-scope edit.
 SCAN_PATHS=(
+    '.agents'
     '.codex'
     '.github'
     '.gitignore'
