@@ -25,6 +25,8 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case first
         case sameSpine = "same-spine"
         case changedSpine = "changed-spine"
+        case deferred
+        case resumed
         case removed
     }
 

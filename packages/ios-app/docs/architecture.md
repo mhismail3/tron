@@ -290,8 +290,15 @@ spine still cannot prove the new tree. A visible pinned presentation therefore
 requires fresh, current-layout marker proof; overflow requires alignment, while
 underflow requires the eager marker to be visible. Row existence, forced underflow
 height alone, elapsed frames, or an abandoned layout generation are not proof. Ordinary
-pinned resizing then belongs to the native size-change anchor; detached readers remain
-unpositioned. Reconnect and responsive foreground refresh both freeze projection intake
+pinned resizing then belongs to the native size-change anchor. A detached reader owns one
+immutable installed render commit: direct takeover cancels pending derivation, automatic
+live projection intake stops, and only the scalar authoritative timeline generation is
+observed to mark unread work. Canonical session authority continues advancing without
+formatting, diffing, mounting, measuring, or correcting offscreen tail rows. Manual return
+to the physical tail resumes one newest coalesced projection; explicit catch-up retains
+the freeze through its old-tail command settlement and then admits that same newest cut
+under pinned native anchoring. Explicit earlier-page loading remains separately admitted
+because it is direct reader intent. Reconnect and responsive foreground refresh both freeze projection intake
 under one aggregate lifecycle admission and advance one completion generation after
 mounted restoration plus catalog refresh succeed. Detached readers retain their native
 viewport ownership.
@@ -307,7 +314,7 @@ composer remains mounted and visible throughout opening so transient synchroniza
 cannot remove the primary chat control; sending stays disabled until the authoritative
 baseline is ready. A failed transport/sync open shows an explicit retry surface. Once that mounted chat is ready, reconnect and
 resynchronization merge compatible live tails with history explicitly loaded in
-that viewport so a detached reader is not displaced. Explicit earlier-page loads
+that viewport; a detached reader keeps its frozen commit until returning to the tail. Explicit earlier-page loads
 remain request-only, are scoped to the exact mount generation/cursor, and restore the
 former visible anchor with bounded late-layout correction so the viewport does not jump.
 A gesture that begins during that correction cancels every remaining position write

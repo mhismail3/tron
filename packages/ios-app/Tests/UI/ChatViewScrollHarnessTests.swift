@@ -838,7 +838,7 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("detached discrete insertion performs no automatic write")
+    @Test("detached discrete insertion freezes projection until manual tail return")
     func detachedDiscreteInsertion() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_191) { harness in
@@ -866,15 +866,25 @@ struct ChatViewScrollHarnessTests {
                 updated.revision += 1
                 updated.eventSequence += 1
                 harness.replaceAuthoritativeSnapshot(updated)
-                _ = try await harness.recorder.waitUntil {
+                try await harness.driveFrameBoundary()
+                #expect(harness.probeObservation.projectionInstallCount == installBaseline)
+                #expect(harness.probeObservation.automaticScrollCommandCount == commandBaseline)
+
+                harness.drivePhase(from: .idle, to: .interacting, geometry: away)
+                harness.driveNativeOwnership(true)
+                harness.driveGeometry(previous: away, current: bottom)
+                harness.drivePhase(from: .interacting, to: .idle, geometry: bottom)
+                harness.driveNativeOwnership(false)
+                let reconciled = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount > installBaseline
                 }
-                #expect(harness.probeObservation.automaticScrollCommandCount == commandBaseline)
+                #expect(!reconciled.observation.isDetached)
+                #expect(reconciled.observation.automaticScrollCommandCount == commandBaseline)
             }
         }
     }
 
-    @Test("streaming burst installs only its newest projection while detached scrolling stays writable")
+    @Test("streaming burst stays deferred and reconciles only its newest projection at the tail")
     func streamingBurstLatestProjection() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 118) { harness in
@@ -904,6 +914,8 @@ struct ChatViewScrollHarnessTests {
                     harness.probeObservation.installedProjectionSourceOrdinal
                 )
                 let initialProjectionInstalls = harness.probeObservation.projectionInstallCount
+                let initialProjectionWorkAdmissions =
+                    harness.probeObservation.projectionWorkAdmissionCount
                 let committedEvaluationBaseline =
                     harness.probeObservation.committedHistoryRowEvaluationCount
                 for offset in 1...30 {
@@ -913,28 +925,45 @@ struct ChatViewScrollHarnessTests {
                     harness.replaceAuthoritativeSnapshot(newest)
                 }
 
-                harness.driveGeometry(
-                    previous: away,
-                    current: ChatTranscriptGeometry(
-                        offsetY: 300,
-                        contentHeight: 1_120,
-                        containerHeight: 320,
-                        bottomInset: 80
-                    ),
-                    viewport: true
+                try await harness.driveFrameBoundary()
+                #expect(
+                    harness.probeObservation.installedProjectionSourceOrdinal
+                        == initialProjectionOrdinal
                 )
+                #expect(
+                    harness.probeObservation.projectionInstallCount
+                        == initialProjectionInstalls
+                )
+                #expect(
+                    harness.probeObservation.projectionWorkAdmissionCount
+                        == initialProjectionWorkAdmissions
+                )
+                #expect(
+                    harness.probeObservation.committedHistoryRowEvaluationCount
+                        == committedEvaluationBaseline
+                )
+
+                harness.drivePhase(from: .idle, to: .interacting, geometry: away)
+                harness.driveNativeOwnership(true)
+                harness.driveGeometry(previous: away, current: bottom)
+                harness.drivePhase(from: .interacting, to: .idle, geometry: bottom)
+                harness.driveNativeOwnership(false)
                 let newestInstall = try await harness.recorder.waitUntil {
                     $0.observation.installedProjectionSourceOrdinal == initialProjectionOrdinal + 30
                 }
                 #expect(newestInstall.observation.installedProjectionRowCount > 0)
-                #expect(newestInstall.observation.isDetached)
+                #expect(!newestInstall.observation.isDetached)
                 #expect(
                     newestInstall.observation.projectionInstallCount
-                        <= initialProjectionInstalls + 2
+                        == initialProjectionInstalls + 1
+                )
+                #expect(
+                    newestInstall.observation.projectionWorkAdmissionCount
+                        == initialProjectionWorkAdmissions + 1
                 )
                 #expect(
                     newestInstall.observation.committedHistoryRowEvaluationCount
-                        == committedEvaluationBaseline
+                        <= committedEvaluationBaseline + 1
                 )
             }
         }

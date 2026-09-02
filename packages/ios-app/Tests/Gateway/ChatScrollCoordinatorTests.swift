@@ -88,6 +88,31 @@ struct ChatScrollCoordinatorTests {
         #expect(!coordinator.usesPinnedSizeChangeAnchor)
     }
 
+    @Test("detached and catch-up ownership defer automatic live projection intake")
+    func detachedProjectionDeferral() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        #expect(!coordinator.defersAutomaticLiveProjectionIntake)
+
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        coordinator.geometryChanged(previous: bottom, current: away)
+        coordinator.scrollPositionChanged(isPositionedByUser: false)
+        #expect(coordinator.viewportMode == .anchored)
+        #expect(coordinator.defersAutomaticLiveProjectionIntake)
+
+        coordinator.requestCatchUp(reduceMotion: true)
+        #expect(coordinator.viewportMode == .pinned)
+        #expect(coordinator.defersAutomaticLiveProjectionIntake)
+        let command = coordinator.command
+        #expect(command?.origin == .catchUp)
+        if let command { #expect(coordinator.commandApplied(command)) }
+        #expect(coordinator.defersAutomaticLiveProjectionIntake)
+
+        coordinator.geometryChanged(previous: away, current: bottom)
+        #expect(!coordinator.defersAutomaticLiveProjectionIntake)
+        #expect(coordinator.viewportMode == .pinned)
+    }
+
     @Test("an uncommanded status-bar retreat detaches from the pinned tail")
     func statusBarScrollToTopDetaches() {
         let coordinator = ChatScrollCoordinator()

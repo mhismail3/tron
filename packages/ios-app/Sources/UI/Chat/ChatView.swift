@@ -334,6 +334,9 @@ struct ChatView: View {
                 }
             }
         }
+        .onChange(of: scrollCoordinator.defersAutomaticLiveProjectionIntake) { _, deferred in
+            automaticLiveProjectionIntakeChanged(deferred: deferred)
+        }
         .task(id: presentationActivity.allowsPresentationPublication) {
             switch ChatOpeningSurfacePolicy.action(
                 surfaceActive: presentationActivity.allowsPresentationPublication,
@@ -504,6 +507,31 @@ struct ChatView: View {
                 hasMountedAuthority: hasMountedAuthority
             )
         )
+    }
+
+    private func automaticLiveProjectionIntakeChanged(deferred: Bool) {
+        guard sessionPresentation.open.phase == .ready,
+              presentationActivity.allowsDataPublication else { return }
+        let context = ensureInteractionTraceContext()
+        if deferred {
+            // Direct reader ownership retires any derivation admitted while the
+            // view was pinned. Keep the last complete commit physically fixed;
+            // canonical SessionPresentationStore authority continues advancing.
+            transcriptPresentation.suspendPendingWork()
+            transcriptPresentation.discardPendingEntrances()
+            model.chatInteractionTrace.projection(
+                .deferred,
+                context: context,
+                state: interactionTraceState()
+            )
+        } else {
+            model.chatInteractionTrace.projection(
+                .resumed,
+                context: context,
+                state: interactionTraceState()
+            )
+            intakeLatestTranscriptProjectionIfNeeded()
+        }
     }
 
     private func scenePhaseChanged(_ current: ScenePhase) {
@@ -769,6 +797,7 @@ struct ChatView: View {
         permitsQueueMutationDeferral: Bool = true
     ) {
         guard presentationActivity.allowsDataPublication,
+              !scrollCoordinator.defersAutomaticLiveProjectionIntake,
               !scrollCoordinator.isPrependingHistory,
               capture.tag.presentationGeneration == sessionPresentation.modelPresentationGeneration,
               transcriptProjectionSource == capture.tag else { return }
@@ -976,7 +1005,8 @@ struct ChatView: View {
                         reconcileInteractionDraftsIfAuthoritative()
                     }
             }
-            if presentationActivity.allowsDataPublication {
+            if presentationActivity.allowsDataPublication,
+               !scrollCoordinator.defersAutomaticLiveProjectionIntake {
                 Color.clear
                     .onChange(of: transcriptProjectionSource, initial: true) { _, source in
                         guard sessionPresentation.permitsExtensionInteractionPresentation else {
@@ -1003,6 +1033,15 @@ struct ChatView: View {
                         // generation; the newer exact source owns submission.
                         guard source == capture.tag else { return }
                         intakeTranscriptProjection(capture)
+                    }
+            } else if presentationActivity.allowsDataPublication {
+                // Detached readers observe only a scalar canonical revision.
+                // The immutable installed commit remains untouched until manual
+                // tail return or catch-up settlement re-enables projection intake.
+                Color.clear
+                    .onChange(of: deferredLiveProjectionRevision) { previous, current in
+                        guard previous != nil, current != nil, previous != current else { return }
+                        scrollCoordinator.semanticResponseArrived()
                     }
             }
         }
@@ -1040,6 +1079,23 @@ struct ChatView: View {
             return transcriptPresentation.installed?.tag.queueManagementCapability ?? false
         }
         return gatewayInfo.capabilities.contains(QueuedMessageManagementPolicy.capability)
+    }
+
+    private struct DeferredLiveProjectionRevision: Equatable {
+        let presentationGeneration: Int
+        let timelineGeneration: Int
+    }
+
+    private var deferredLiveProjectionRevision: DeferredLiveProjectionRevision? {
+        guard let generation = sessionPresentation.modelPresentationGeneration,
+              let projection = model.chatProjectionGenerations(
+                for: sessionID,
+                presentationGeneration: generation
+              ) else { return nil }
+        return DeferredLiveProjectionRevision(
+            presentationGeneration: generation,
+            timelineGeneration: projection.timeline
+        )
     }
 
     private var transcriptProjectionCapture: ChatTranscriptProjectionCapture? {
@@ -1592,22 +1648,13 @@ struct ChatView: View {
             // positioning. The composer can admit work before a large retained
             // transcript reaches its first ready frame.
             reconcileSessionPresentationVisibility()
-            let installed = try await installCurrentTranscriptProjection(
-                presentationGeneration: generation,
-                consistency: .firstCompletePresentationCommit
-            )
-            model.chatInteractionTrace.opening(
-                .projectionInstalled,
-                context: ensureInteractionTraceContext(),
-                retainedPresentation: retainsVisiblePresentation,
-                state: interactionTraceState(installed: installed)
-            )
             if retainsVisiblePresentation && !retainedPinnedRevalidation {
+                // A detached reader keeps the already-installed immutable cut.
+                // Rebinding canonical authority must not format or mount a live
+                // tail behind the user's viewport; returning to the tail admits
+                // one newest cut for this new presentation generation.
                 guard !Task.isCancelled,
-                      installedCommitBelongsToCurrentPresentation(
-                          installed,
-                          generation: generation
-                      ),
+                      transcriptPresentation.installed != nil,
                       sessionPresentation.open.epoch == epoch,
                       sessionPresentation.open.phase == .ready else {
                     performanceSignposts.end(interval, result: .discarded, metrics: .none)
@@ -1621,6 +1668,16 @@ struct ChatView: View {
                 _ = await completeFirstReadyFrame(interval, epoch: epoch)
                 return
             }
+            let installed = try await installCurrentTranscriptProjection(
+                presentationGeneration: generation,
+                consistency: .firstCompletePresentationCommit
+            )
+            model.chatInteractionTrace.opening(
+                .projectionInstalled,
+                context: ensureInteractionTraceContext(),
+                retainedPresentation: retainsVisiblePresentation,
+                state: interactionTraceState(installed: installed)
+            )
             if retainedPinnedRevalidation {
                 guard !Task.isCancelled,
                       installedCommitBelongsToCurrentPresentation(
@@ -1798,6 +1855,12 @@ struct ChatView: View {
             presentationGeneration,
             retainingVisibleViewport: retainsVisiblePresentation
         )
+        if retainsVisiblePresentation && !retainedPinnedRevalidation {
+            let presented = await completeFirstReadyFrame(interval, epoch: epoch)
+            if presented { probe.markReady() }
+            probe.recordReadyFrameCompletion()
+            return
+        }
         let installed: InstalledChatTranscript
         do {
             installed = try await installCurrentTranscriptProjection(
@@ -1904,12 +1967,6 @@ struct ChatView: View {
                 scrollCoordinator.cancel()
             }
         )
-        if retainsVisiblePresentation && !retainedPinnedRevalidation {
-            let presented = await completeFirstReadyFrame(interval, epoch: epoch)
-            if presented { probe.markReady() }
-            probe.recordReadyFrameCompletion()
-            return
-        }
         let positioned = await positionLatestTail(
             epoch: epoch,
             targetRenderedID: physicalOpeningTailID(for: installed)
@@ -1995,6 +2052,7 @@ struct ChatView: View {
     private func intakeLatestTranscriptProjectionIfNeeded() {
         guard scenePhase != .background,
               sessionPresentation.permitsExtensionInteractionPresentation,
+              !scrollCoordinator.defersAutomaticLiveProjectionIntake,
               !scrollCoordinator.isPrependingHistory,
               let capture = transcriptProjectionCapture,
               transcriptPresentation.installed?.tag != capture.tag else { return }
@@ -2781,6 +2839,8 @@ struct ChatView: View {
             // Admission and the local lifecycle graft are atomic. Row entrance
             // and morph views own their scoped animations.
             let installedBeforeSubmission = installed
+            let freezesDetachedProjection = scrollCoordinator
+                .defersAutomaticLiveProjectionIntake
             // A neutral root transaction preserves descendant-scoped composer
             // and flight animations.
             let admission = try withTransaction(Transaction()) {
@@ -2803,7 +2863,7 @@ struct ChatView: View {
                 let stagedMorph = morphRegistry.stage(
                     lifecycle: model.composerDrafts.submissionLifecycle(for: target),
                     generation: morphGeneration,
-                    suppress: reduceMotion || scenePhase != .active
+                    suppress: reduceMotion || scenePhase != .active || freezesDetachedProjection
                 )
                 if !stagedMorph {
                     layoutTransaction.settle(morphGeneration, source: .morphFlight)
@@ -2811,7 +2871,9 @@ struct ChatView: View {
                 // Exact extension commands do not create a canonical user
                 // message in Pi. Never graft a prompt bubble that can become a
                 // phantom row; the canonical invocation receipt owns its row.
-                let grafted = isExtensionCommand || !presentationActivity.allowsPresentationPublication
+                let grafted = isExtensionCommand
+                    || !presentationActivity.allowsPresentationPublication
+                    || freezesDetachedProjection
                     ? false
                     : transcriptPresentation.graftLocalLifecycle(
                     handoff: .outgoing(

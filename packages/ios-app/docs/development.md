@@ -546,7 +546,12 @@ retain intrinsic cards capped at the user-prompt bound, full-shape whole-card in
 leading-toolbar removal, an explicit legacy lock, and Tron surfaces instead of stock forms.
 Native bottom evidence compares `ScrollGeometry.visibleRect.maxY` with the physical
 content edge (`contentSize.height + contentInsets.bottom`); the hosted native helper retains signed
-UIKit offset evidence so past-bottom overshoot cannot pass as zero distance. Pinned structural shrink
+UIKit offset evidence so past-bottom overshoot cannot pass as zero distance. Direct detachment freezes
+the immutable installed transcript, cancels in-flight automatic projection derivation, and observes only
+the scalar authoritative timeline generation for unread state. Manual tail return installs one newest
+coalesced cut; catch-up keeps the freeze until its explicit old-tail command settles. Focused coordinator
+and hosted burst cases prove no detached projection install or repeated committed-row evaluation occurs.
+Pinned structural shrink
 and viewport expansion are handled by the one native bottom size-change anchor; ordinary pinned mode
 keeps `ScrollPosition` target-free, while anchored readers select top retention and remain native-owned.
 Explicit command targets remain installed until exact opening/catch-up/semantic settlement and are

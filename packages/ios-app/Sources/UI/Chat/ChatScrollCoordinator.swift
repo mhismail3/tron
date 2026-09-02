@@ -261,6 +261,12 @@ final class ChatScrollCoordinator {
     }
 
     var shouldShowCatchUpButton: Bool { viewportMode == .anchored }
+    /// Canonical session authority continues advancing while a detached reader
+    /// keeps one immutable render commit. Catch-up retains that freeze until its
+    /// explicit tail command settles, then admits one newest projection.
+    var defersAutomaticLiveProjectionIntake: Bool {
+        viewportMode == .anchored || catchUpPhase != .none
+    }
     var latestGeometry: ChatTranscriptGeometry { geometry }
     /// Native size-change anchoring is intent-based, not overflow-dependent.
     /// The bounded physical repair is the only explicit fallback.
