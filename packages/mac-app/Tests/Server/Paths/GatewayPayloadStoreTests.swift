@@ -47,6 +47,53 @@ struct GatewayPayloadStoreTests {
         }
     }
 
+    @Test("payload validation rejects internal directory symlinks")
+    func rejectsDirectorySymlinks() throws {
+        let temporary = try TemporaryPayloadDirectory()
+        defer { temporary.cleanup() }
+        let root = temporary.root.appendingPathComponent("payload", isDirectory: true)
+        try makePayload(root: root, channel: "dev", version: "directory-link", fingerprint: String(repeating: "a", count: 64))
+
+        let dependencies = root.appendingPathComponent("app/node_modules", isDirectory: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dependencies.path)
+        try FileManager.default.createSymbolicLink(
+            at: dependencies.appendingPathComponent("linked-directory"),
+            withDestinationURL: root.appendingPathComponent("app/dist", isDirectory: true)
+        )
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dependencies.path)
+
+        guard case .failure(.incomplete("writable payload entry")) = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: "dev") else {
+            Issue.record("an internal directory symlink was admitted")
+            return
+        }
+    }
+
+    @Test("payload validation rejects file links outside fingerprinted subtrees")
+    func rejectsUnfingerprintedFileSymlinks() throws {
+        let temporary = try TemporaryPayloadDirectory()
+        defer { temporary.cleanup() }
+        let root = temporary.root.appendingPathComponent("payload", isDirectory: true)
+        try makePayload(root: root, channel: "dev", version: "unfingerprinted-link", fingerprint: String(repeating: "a", count: 64))
+
+        let app = root.appendingPathComponent("app", isDirectory: true)
+        let unfingerprinted = root.appendingPathComponent("unfingerprinted.js")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: app.path)
+        try Data("hidden\n".utf8).write(to: unfingerprinted)
+        try FileManager.default.createSymbolicLink(
+            at: app.appendingPathComponent("linked-file"),
+            withDestinationURL: unfingerprinted
+        )
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: unfingerprinted.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: app.path)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+
+        guard case .failure(.incomplete("writable payload entry")) = GatewayPayloadValidator.validate(payloadRoot: root, expectedChannel: "dev") else {
+            Issue.record("a file link outside app/runtime fingerprint coverage was admitted")
+            return
+        }
+    }
+
     @Test("manifest fields admit launcher maxima and reject over-limit or unsupported values")
     func manifestBoundsAndChannels() throws {
         let temporary = try TemporaryPayloadDirectory()

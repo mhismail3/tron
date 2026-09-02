@@ -32,7 +32,7 @@ for tool in "$@"; do
       [[ "$(node --version 2>/dev/null || true)" == "v${TRON_NODE_VERSION}" ]] \
         || { echo "Node must be exactly ${TRON_NODE_VERSION}" >&2; exit 1; }
       workflow_count="$(grep -Rho 'node-version-file: \.node-version' "$ROOT/.github/workflows" 2>/dev/null | wc -l | tr -d ' ')"
-      [[ "$workflow_count" == 4 ]] || { echo "CI setup-node mirrors must use .node-version in all jobs" >&2; exit 1; }
+      [[ "$workflow_count" == 5 ]] || { echo "CI setup-node mirrors must use .node-version in all jobs" >&2; exit 1; }
       ! grep -RqsE 'node-version:[[:space:]]*[0-9]' "$ROOT/.github/workflows" \
         || { echo "CI contains a duplicated Node version literal" >&2; exit 1; }
       ! grep -qE '^NODE_VERSION="[0-9]' "$ROOT/packages/mac-app/scripts/bundle-gateway.sh" \

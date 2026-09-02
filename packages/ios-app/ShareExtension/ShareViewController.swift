@@ -21,6 +21,12 @@ struct ResponderChainShareAppOpener: ShareAppOpening {
 }
 
 final class ShareViewController: UIViewController {
+    private enum ExtractionResult {
+        case fragment(SharedContentFragment)
+        case unavailable
+        case rejected
+    }
+
     private let pendingShares: any PendingShareStoring
     private let appOpener: any ShareAppOpening
 
@@ -59,7 +65,8 @@ final class ShareViewController: UIViewController {
         }
 
         let providers = extensionItems.flatMap { $0.attachments ?? [] }
-        guard !providers.isEmpty else {
+        guard !providers.isEmpty,
+              providers.count <= SharedContentAdmissionPolicy.maximumProviderCount else {
             complete()
             return
         }
@@ -67,19 +74,28 @@ final class ShareViewController: UIViewController {
         Task {
             var fragments: [SharedContentFragment] = []
             for provider in providers {
-                if let fragment = await extractContent(from: provider) {
+                switch await extractContent(from: provider) {
+                case .fragment(let fragment):
                     fragments.append(fragment)
+                    guard SharedContentAdmissionPolicy.admits(fragments) else {
+                        complete()
+                        return
+                    }
+                case .unavailable:
+                    continue
+                case .rejected:
+                    complete()
+                    return
                 }
             }
             guard let content = SharedContentReducer.content(
                 from: fragments,
                 timestamp: Date()
-            ) else {
+            ), pendingShares.save(content) else {
                 complete()
                 return
             }
 
-            pendingShares.save(content)
             appOpener.openShareApp(from: self)
             complete()
         }
@@ -87,22 +103,22 @@ final class ShareViewController: UIViewController {
 
     // MARK: - Content Extraction
 
-    private func extractContent(from provider: NSItemProvider) async -> SharedContentFragment? {
+    private func extractContent(from provider: NSItemProvider) async -> ExtractionResult {
         // Try URL first (more specific than plain text)
-        if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
-            if let url = await loadURL(from: provider) {
-                return .url(url)
-            }
+        if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier),
+           let url = await loadURL(from: provider) {
+            let fragment = SharedContentFragment.url(url)
+            return SharedContentAdmissionPolicy.admits(fragment) ? .fragment(fragment) : .rejected
         }
 
         // Then try plain text
-        if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
-            if let text = await loadText(from: provider) {
-                return .text(text)
-            }
+        if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier),
+           let text = await loadText(from: provider) {
+            let fragment = SharedContentFragment.text(text)
+            return SharedContentAdmissionPolicy.admits(fragment) ? .fragment(fragment) : .rejected
         }
 
-        return nil
+        return .unavailable
     }
 
     private func loadURL(from provider: NSItemProvider) async -> String? {

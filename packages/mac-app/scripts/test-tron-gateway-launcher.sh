@@ -56,6 +56,35 @@ expected_bundle_fingerprint="$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*
 "$HELPER" --verify-payload "$BUNDLE" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 || {
   echo "launcher payload verification mode rejected the valid fixture" >&2; exit 1;
 }
+DIRECTORY_LINK="$TMP/invalid-directory-link"
+cp -R "$BUNDLE" "$DIRECTORY_LINK"
+chmod -R u+w "$DIRECTORY_LINK"
+ln -s dist "$DIRECTORY_LINK/app/linked-directory"
+chmod -R a-w "$DIRECTORY_LINK"
+if "$HASH" "$DIRECTORY_LINK" >/dev/null 2>&1; then
+  echo "canonical hash admitted an internal directory symlink" >&2; exit 1
+fi
+if "$HELPER" --fingerprint "$DIRECTORY_LINK" >/dev/null 2>&1; then
+  echo "launcher fingerprint admitted an internal directory symlink" >&2; exit 1
+fi
+if "$HELPER" --verify-payload "$DIRECTORY_LINK" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; then
+  echo "launcher payload validation admitted an internal directory symlink" >&2; exit 1
+fi
+UNFINGERPRINTED_LINK="$TMP/invalid-unfingerprinted-link"
+cp -R "$BUNDLE" "$UNFINGERPRINTED_LINK"
+chmod -R u+w "$UNFINGERPRINTED_LINK"
+printf 'hidden\n' > "$UNFINGERPRINTED_LINK/unfingerprinted.js"
+ln -s ../unfingerprinted.js "$UNFINGERPRINTED_LINK/app/linked-file"
+chmod -R a-w "$UNFINGERPRINTED_LINK"
+if "$HASH" "$UNFINGERPRINTED_LINK" >/dev/null 2>&1; then
+  echo "canonical hash admitted a link outside fingerprinted payload trees" >&2; exit 1
+fi
+if "$HELPER" --fingerprint "$UNFINGERPRINTED_LINK" >/dev/null 2>&1; then
+  echo "launcher fingerprint admitted a link outside fingerprinted payload trees" >&2; exit 1
+fi
+if "$HELPER" --verify-payload "$UNFINGERPRINTED_LINK" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; then
+  echo "launcher payload validation admitted a link outside fingerprinted payload trees" >&2; exit 1
+fi
 for invalid_kind in missing empty malformed symlink; do
   INVALID="$TMP/invalid-$invalid_kind"
   cp -R "$BUNDLE" "$INVALID"

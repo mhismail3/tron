@@ -956,12 +956,16 @@ configuration, so a late grant cannot restart a dismissed scanner. The first adm
 value stops capture and permanently closes that controller's callback gate. These seams
 make hardware-free boundary tests possible without creating another pairing owner.
 
-The share extension reduces provider results through pure ordered fragment logic, writes
-through `PendingShareStoring`, and opens the app through a responder-chain adapter. The app
-reads through the same store boundary. Phase 0 intentionally preserves the current single-slot,
-clear-before-send handoff; Phase 8 owns bounded entries, destination leases, acknowledged clear,
-and retained uncertain/failure behavior. Both packaged targets declare the required-reason
-UserDefaults privacy manifest, and archive verification fails if either manifest is absent.
+The share extension admits at most 32 providers, 64 KiB per UTF-8 fragment, and
+128 KiB across extracted fragments before pure ordered reduction. Prompt construction
+retains a 192 KiB ceiling aligned with Gateway admission, and `PendingShareStoring`
+rejects encoded documents above 256 KiB, removes malformed or oversized persisted data,
+and reports save failure so the extension opens the app only after a successful write.
+The app reads through the same store boundary. The current single-slot, clear-before-send
+handoff remains unchanged; a future multi-entry inbox still owns destination leases,
+acknowledged clear, and retained uncertain/failure behavior. Both packaged targets declare
+the required-reason UserDefaults privacy manifest, and archive verification fails if either
+manifest is absent.
 
 Provider credentials and the Mac wrapper credential are never decoded by iOS.
 Custom-model documents are validated through the pinned gateway runtime before

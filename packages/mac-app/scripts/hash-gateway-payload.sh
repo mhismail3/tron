@@ -44,8 +44,8 @@ for architecture in arm64 x64; do
 done
 
 # Validate links before hashing. realpath rejects dangling links, and the
-# target's type check rejects links to special entries while path matching
-# prevents links from escaping the payload root.
+# target checks permit only regular files inside app/ or runtime/, preventing
+# links from escaping either the payload root or deterministic coverage.
 while IFS= read -r entry; do
     if [[ -L "$entry" ]]; then
         target="$(realpath "$entry" 2>/dev/null)" || {
@@ -55,8 +55,12 @@ while IFS= read -r entry; do
             "$ROOT"|"$ROOT"/*) ;;
             *) echo "payload symlink escapes root: $entry" >&2; exit 2 ;;
         esac
-        [[ -f "$target" || -d "$target" ]] || {
-            echo "payload symlink targets a special entry: $entry" >&2; exit 2;
+        case "$target" in
+            "$ROOT/app"/*|"$ROOT/runtime"/*) ;;
+            *) echo "payload symlink target is outside fingerprinted payload trees: $entry" >&2; exit 2 ;;
+        esac
+        [[ -f "$target" ]] || {
+            echo "payload symlink target is not a regular file: $entry" >&2; exit 2;
         }
     fi
 done < <(find "$ROOT/app" "$ROOT/runtime" -print)

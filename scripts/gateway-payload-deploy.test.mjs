@@ -273,6 +273,19 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
     await assert.rejects(payloadFingerprint(versionRoot), /dangling|escapes root/);
 
     await rm(join(versionRoot, "app", "node_modules", ".bin", "escape"));
+    const directoryLink = join(versionRoot, "app", "node_modules", ".bin", "directory");
+    await symlink("../../dist", directoryLink);
+    await assert.rejects(payloadFingerprint(versionRoot), /symlink target is not a regular file/);
+    await rm(directoryLink);
+
+    const unfingerprintedFile = join(versionRoot, "unfingerprinted.js");
+    const unfingerprintedLink = join(versionRoot, "app", "node_modules", ".bin", "unfingerprinted");
+    await writeFile(unfingerprintedFile, "hidden\n");
+    await symlink("../../../unfingerprinted.js", unfingerprintedLink);
+    await assert.rejects(payloadFingerprint(versionRoot), /outside fingerprinted payload trees/);
+    await rm(unfingerprintedLink);
+    await rm(unfingerprintedFile);
+
     await symlink("../../dist/index.js", join(versionRoot, "app", "node_modules", ".bin", "tron"));
     const sourceFingerprint = await payloadFingerprint(versionRoot);
     await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify({

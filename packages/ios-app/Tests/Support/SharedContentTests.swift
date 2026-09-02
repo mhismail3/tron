@@ -24,6 +24,40 @@ struct SharedContentTests {
         #expect(SharedContentReducer.content(from: [], timestamp: timestamp) == nil)
     }
 
+    @Test("share admission limits are explicit UTF-8 byte ratchets")
+    func admissionLimits() {
+        #expect(SharedContentAdmissionPolicy.maximumProviderCount == 32)
+        #expect(SharedContentAdmissionPolicy.maximumFragmentBytes == 64 * 1_024)
+        #expect(SharedContentAdmissionPolicy.maximumAggregateBytes == 128 * 1_024)
+        #expect(SharedContentAdmissionPolicy.maximumPromptBytes == 192 * 1_024)
+        #expect(SharedContentAdmissionPolicy.maximumStoredDocumentBytes == 256 * 1_024)
+
+        let exactFragment = String(repeating: "a", count: SharedContentAdmissionPolicy.maximumFragmentBytes)
+        #expect(SharedContentAdmissionPolicy.admits(.text(exactFragment)))
+        #expect(!SharedContentAdmissionPolicy.admits(.text(exactFragment + "a")))
+    }
+
+    @Test("fragment count and aggregate bytes reject the whole share")
+    func reductionBounds() {
+        let exactCount = Array(
+            repeating: SharedContentFragment.text("a"),
+            count: SharedContentAdmissionPolicy.maximumProviderCount
+        )
+        #expect(SharedContentReducer.content(from: exactCount, timestamp: .distantPast) != nil)
+        #expect(SharedContentReducer.content(from: exactCount + [.text("a")], timestamp: .distantPast) == nil)
+
+        let withinAggregate = [
+            SharedContentFragment.url(String(repeating: "a", count: 40 * 1_024)),
+            .url(String(repeating: "b", count: 40 * 1_024)),
+            .url(String(repeating: "c", count: 40 * 1_024)),
+        ]
+        #expect(SharedContentReducer.content(from: withinAggregate, timestamp: .distantPast) != nil)
+        #expect(SharedContentReducer.content(
+            from: withinAggregate + [.url(String(repeating: "d", count: 9 * 1_024))],
+            timestamp: .distantPast
+        ) == nil)
+    }
+
     @Test("a later plain-text provider retains the current overwrite behavior")
     func laterText() {
         let content = SharedContentReducer.content(
@@ -65,19 +99,59 @@ struct SharedContentTests {
         )
 
         #expect(store.load() == nil)
-        store.save(content)
+        #expect(store.save(content))
         #expect(store.load() == content)
         store.clear()
         #expect(store.load() == nil)
     }
 
-    @Test("corrupt pending data is ignored without inventing content")
+    @Test("rejected pending shares do not replace an admitted value")
+    func rejectedStoreWrite() {
+        let suite = "SharedContentTests.rejected.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsPendingShareStore(defaults: defaults)
+        let admitted = SharedContent(text: "caption", url: nil, timestamp: .distantPast)
+        let oversized = SharedContent(
+            text: String(repeating: "x", count: SharedContentAdmissionPolicy.maximumAggregateBytes + 1),
+            url: nil,
+            timestamp: .distantPast
+        )
+
+        #expect(store.save(admitted))
+        #expect(!store.save(oversized))
+        #expect(store.load() == admitted)
+    }
+
+    @Test("encoded pending-share bytes are bounded before persistence")
+    func encodedStoreBound() {
+        let suite = "SharedContentTests.encoded.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = UserDefaultsPendingShareStore(defaults: defaults)
+        let escaped = SharedContent(
+            text: String(repeating: "\u{0001}", count: SharedContentAdmissionPolicy.maximumFragmentBytes),
+            url: nil,
+            timestamp: .distantPast
+        )
+
+        #expect(!store.save(escaped))
+        #expect(store.load() == nil)
+    }
+
+    @Test("corrupt or oversized pending data is removed without inventing content")
     func corruptStore() {
         let suite = "SharedContentTests.corrupt.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set(Data([0xFF]), forKey: "pendingShare")
+        let store = UserDefaultsPendingShareStore(defaults: defaults)
 
-        #expect(UserDefaultsPendingShareStore(defaults: defaults).load() == nil)
+        defaults.set(Data([0xFF]), forKey: "pendingShare")
+        #expect(store.load() == nil)
+        #expect(defaults.data(forKey: "pendingShare") == nil)
+
+        defaults.set(Data(repeating: 0, count: SharedContentAdmissionPolicy.maximumStoredDocumentBytes + 1), forKey: "pendingShare")
+        #expect(store.load() == nil)
+        #expect(defaults.data(forKey: "pendingShare") == nil)
     }
 }

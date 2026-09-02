@@ -505,9 +505,9 @@ enum GatewayPayloadValidator {
         if (info.st_mode & S_IFMT) == S_IFLNK {
             let resolved = url.resolvingSymlinksInPath().standardizedFileURL
             var targetInfo = stat()
-            guard isContained(resolved, under: root),
+            guard isFingerprintCovered(resolved, under: root),
                   lstat(resolved.path, &targetInfo) == 0,
-                  (targetInfo.st_mode & S_IFMT) == S_IFREG || (targetInfo.st_mode & S_IFMT) == S_IFDIR else { return false }
+                  (targetInfo.st_mode & S_IFMT) == S_IFREG else { return false }
             return true
         }
         guard isImmutable(info) else { return false }
@@ -536,8 +536,8 @@ enum GatewayPayloadValidator {
                       linkTarget.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7f }) else { return false }
                 let resolved = entry.resolvingSymlinksInPath().standardizedFileURL
                 var targetInfo = stat()
-                guard isContained(resolved, under: root), lstat(resolved.path, &targetInfo) == 0,
-                      (targetInfo.st_mode & S_IFMT) == S_IFREG || (targetInfo.st_mode & S_IFMT) == S_IFDIR else { return false }
+                guard isFingerprintCovered(resolved, under: root), lstat(resolved.path, &targetInfo) == 0,
+                      (targetInfo.st_mode & S_IFMT) == S_IFREG else { return false }
                 files.append((relative, entry, linkTarget))
             } else if (entryInfo.st_mode & S_IFMT) == S_IFDIR {
                 guard isImmutable(entryInfo), collectRegularFiles(entry, relativePrefix: relative, root: root, files: &files) else { return false }
@@ -580,6 +580,11 @@ enum GatewayPayloadValidator {
               directory ? (info.st_mode & S_IFMT) == S_IFDIR : (info.st_mode & S_IFMT) == S_IFREG,
               isContained(candidate.resolvingSymlinksInPath().standardizedFileURL, under: root) else { return nil }
         return candidate
+    }
+
+    private static func isFingerprintCovered(_ candidate: URL, under root: URL) -> Bool {
+        isContained(candidate, under: root.appendingPathComponent("app", isDirectory: true))
+            || isContained(candidate, under: root.appendingPathComponent("runtime", isDirectory: true))
     }
 
     private static func isContained(_ candidate: URL, under root: URL) -> Bool {

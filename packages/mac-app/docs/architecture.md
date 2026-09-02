@@ -185,8 +185,10 @@ may run concurrently. The pointer has schema `1`, kind
 runtime epoch, and the complete fingerprint coverage declaration. Staging,
 promotion, and the Swift payload validator verify every regular file and
 internal symlink under `app/` and `runtime/`; links must resolve to regular
-files/directories beneath the payload root, and their targets are covered by
-the deterministic fingerprint. The runtime `node` and technical `pi` aliases are stronger required entries:
+files inside those same fingerprinted subtrees. Directory links and links into
+unfingerprinted root content are rejected so executable bytes cannot sit outside
+traversal, while each admitted link's path and exact
+target text remain covered by the deterministic fingerprint. The runtime `node` and technical `pi` aliases are stronger required entries:
 every validator requires exact relative target text and exact resolution to the
 corresponding architecture runtime or payload CLI. Manifest schema 1 retains
 its historical `dependencyTreeCoverage` string so the immediately preceding

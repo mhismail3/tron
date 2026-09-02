@@ -162,8 +162,11 @@ async function validatePayloadSymlink(root, path, relativePath) {
   if (!targetText || /[\u0000-\u001f\u007f]/u.test(targetText)) throw new Error(`payload symlink target contains control bytes: ${relativePath}`);
   const target = await realpath(path).catch(() => { throw new Error(`payload contains a dangling symlink: ${relativePath}`); });
   if (!under(root, target)) throw new Error(`payload symlink escapes root: ${relativePath}`);
+  if (!under(join(root, "app"), target) && !under(join(root, "runtime"), target)) {
+    throw new Error(`payload symlink target is outside fingerprinted payload trees: ${relativePath}`);
+  }
   const targetInfo = await stat(target);
-  if (!targetInfo.isFile() && !targetInfo.isDirectory()) throw new Error(`payload symlink targets a special entry: ${relativePath}`);
+  if (!targetInfo.isFile()) throw new Error(`payload symlink target is not a regular file: ${relativePath}`);
   return readlink(path);
 }
 

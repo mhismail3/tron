@@ -210,10 +210,16 @@ static int path_is_under(const char *root, const char *candidate) {
     return strncmp(root, candidate, length) == 0 && (candidate[length] == '\0' || candidate[length] == '/');
 }
 
-/* The launcher deliberately does not claim to hash the full dependency tree.
- * Deployment and the Swift validator perform the deterministic fingerprint.
- * Internal links are permitted only when they resolve to a regular file or
- * directory under the immutable payload root. */
+static int path_is_fingerprint_covered(const char *root, const char *candidate) {
+    char app[PATH_MAX], runtime[PATH_MAX];
+    if (snprintf(app, sizeof(app), "%s/app", root) >= (int)sizeof(app)
+        || snprintf(runtime, sizeof(runtime), "%s/runtime", root) >= (int)sizeof(runtime)) return 0;
+    return path_is_under(app, candidate) || path_is_under(runtime, candidate);
+}
+
+/* The launcher recomputes the same deterministic dependency-tree fingerprint
+ * as deployment and the Swift validator. Internal links are permitted only
+ * when they resolve to a regular file inside app/ or runtime/. */
 static int immutable_tree(const char *path, const char *root) {
     struct stat info;
     if (lstat(path, &info) != 0) return -1;
@@ -221,7 +227,8 @@ static int immutable_tree(const char *path, const char *root) {
         char resolved[PATH_MAX];
         struct stat target;
         if (realpath(path, resolved) == NULL || !path_is_under(root, resolved)
-            || stat(resolved, &target) != 0 || (!S_ISREG(target.st_mode) && !S_ISDIR(target.st_mode))) return -1;
+            || !path_is_fingerprint_covered(root, resolved)
+            || stat(resolved, &target) != 0 || !S_ISREG(target.st_mode)) return -1;
         return 0;
     }
     if ((info.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)) != 0) return -1;
@@ -359,8 +366,9 @@ static int collect_finger_entries(const char *directory, const char *root,
             // explicitly terminating the bounded result.
             target[length] = '\0';
             if (!safe_name(target)) { result = -1; break; }
-            if (realpath(child, resolved) == NULL || !path_is_under(root, resolved) || stat(resolved, &targetInfo) != 0 ||
-                (!S_ISREG(targetInfo.st_mode) && !S_ISDIR(targetInfo.st_mode)) ||
+            if (realpath(child, resolved) == NULL || !path_is_under(root, resolved)
+                || !path_is_fingerprint_covered(root, resolved) || stat(resolved, &targetInfo) != 0 ||
+                !S_ISREG(targetInfo.st_mode) ||
                 append_finger_entry(entries, count, capacity, childRelative, target, 1) != 0) { result = -1; break; }
         } else { result = -1; break; }
     }

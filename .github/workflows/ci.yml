@@ -84,6 +84,26 @@ jobs:
       - run: npm audit --omit=dev
         working-directory: packages/gateway
 
+  push-relay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: packages/push-relay/package-lock.json
+      - run: npm ci
+        working-directory: packages/push-relay
+      - run: npm run check
+        working-directory: packages/push-relay
+      - run: npm test
+        working-directory: packages/push-relay
+      - run: npm audit --omit=dev
+        working-directory: packages/push-relay
+      - run: npm run build
+        working-directory: packages/push-relay
+
   ios:
     runs-on: macos-26
     steps:

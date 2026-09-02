@@ -162,7 +162,9 @@ npm run build:sandbox   # isolated sandbox-config dry-run only
 ```
 
 Tests run in the Workers Vitest pool and exercise the real SQLite Durable Object
-boundary. Outbound APNs requests are intercepted locally.
+boundary. Outbound APNs requests are intercepted locally. CI runs the pinned install,
+type check, tests, production dependency audit, and production-config Wrangler dry run;
+it never receives deployment credentials or deploys either environment.
 
 ## Manual deployment
 
