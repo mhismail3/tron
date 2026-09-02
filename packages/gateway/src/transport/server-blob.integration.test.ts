@@ -27,7 +27,10 @@ function makeServer(
     maxFrameBytes: 64 * 1_024,
     devices: { authenticate: async () => ({ id: "device" }) } as never,
     uploads: { acquire: acquireUpload } as never,
-    sessions: { acquireBlob } as never,
+    sessions: {
+      acquireBlob,
+      acquireDisplayArtifact: async () => { throw new GatewayError("not_found", "missing"); },
+    } as never,
     auth: {} as never,
     service: {} as never,
     logger: { log: () => {} } as never,
@@ -43,10 +46,9 @@ async function server(acquireBlob: (id: string, range?: BlobByteRange) => Promis
   return address.port;
 }
 
-function download(
+function getPath(
   port: number,
-  id: string,
-  route = "blobs",
+  path: string,
   headers: Record<string, string> = {},
 ): Promise<{
   status: number;
@@ -57,7 +59,7 @@ function download(
     const outgoing = request({
       host: "127.0.0.1",
       port,
-      path: `/v1/${route}/${encodeURIComponent(id)}`,
+      path,
       headers: { authorization: "Bearer paired", ...headers },
     }, (response) => {
       const chunks: Buffer[] = [];
@@ -72,6 +74,19 @@ function download(
     outgoing.on("error", reject);
     outgoing.end();
   });
+}
+
+function download(
+  port: number,
+  id: string,
+  route = "blobs",
+  headers: Record<string, string> = {},
+): Promise<{
+  status: number;
+  headers: Record<string, string | string[] | undefined>;
+  body: Buffer;
+}> {
+  return getPath(port, `/v1/${route}/${encodeURIComponent(id)}`, headers);
 }
 
 describe("Gateway blob HTTP leases", () => {
@@ -190,6 +205,93 @@ describe("Gateway blob HTTP leases", () => {
     expect(response.headers["content-length"]).toBe("5");
     expect(response.headers["content-disposition"]).toContain("notes.txt");
     expect(response.body.toString()).toBe("notes");
+  });
+
+  it("authorizes and range-streams immutable display artifacts by exact session", async () => {
+    const gateway = makeServer(async () => { throw new GatewayError("not_found", "missing"); });
+    const artifactID = "00000000-0000-4000-8000-000000000001";
+    (gateway as any).options.sessions.acquireDisplayArtifact = async (
+      sessionID: string,
+      id: string,
+      range?: BlobByteRange,
+    ) => {
+      expect(id).toBe(artifactID);
+      expect(sessionID).toBe("session-1");
+      expect(range).toEqual({ start: 2, end: 5 });
+      return {
+        mimeType: "image/png",
+        size: 4,
+        totalSize: 8,
+        rangeStart: 2,
+        rangeEnd: 5,
+        stream: Readable.from([Buffer.from("cdef")]),
+        release: async () => {},
+      };
+    };
+    servers.push(gateway);
+    await gateway.listen();
+    const address = (gateway as unknown as { server: { address(): AddressInfo | null } }).server.address();
+    if (!address) throw new Error("Gateway did not bind");
+    const response = await getPath(
+      address.port,
+      `/v1/sessions/session-1/display-artifacts/${artifactID}`,
+      { range: "bytes=2-5" },
+    );
+    expect(response.status).toBe(206);
+    expect(response.headers["content-range"]).toBe("bytes 2-5/8");
+    expect(response.headers.etag).toBe(`"display-${artifactID}"`);
+    expect(response.headers["cache-control"]).toContain("immutable");
+    expect(response.body.toString()).toBe("cdef");
+  });
+
+  it("returns 416 for malformed and unsatisfiable display ranges", async () => {
+    const gateway = makeServer(async () => { throw new GatewayError("not_found", "missing"); });
+    const artifactID = "00000000-0000-4000-8000-000000000001";
+    (gateway as any).options.sessions.acquireDisplayArtifact = async () => {
+      throw new GatewayError(
+        "invalid_request",
+        "Requested display artifact byte range is not satisfiable",
+        false,
+        { rangeUnsatisfiable: true, totalSize: 8 },
+      );
+    };
+    servers.push(gateway);
+    await gateway.listen();
+    const address = (gateway as unknown as { server: { address(): AddressInfo | null } }).server.address();
+    if (!address) throw new Error("Gateway did not bind");
+    const path = `/v1/sessions/session-1/display-artifacts/${artifactID}`;
+    const malformed = await getPath(address.port, path, { range: "bytes=broken" });
+    expect(malformed.status).toBe(416);
+    const outOfBounds = await getPath(address.port, path, { range: "bytes=8-9" });
+    expect(outOfBounds.status).toBe(416);
+    expect(outOfBounds.headers["content-range"]).toBe("bytes */8");
+  });
+
+  it("honors immutable display ETags and releases the admitted lease", async () => {
+    const gateway = makeServer(async () => { throw new GatewayError("not_found", "missing"); });
+    const artifactID = "00000000-0000-4000-8000-000000000001";
+    let releases = 0;
+    (gateway as any).options.sessions.acquireDisplayArtifact = async () => ({
+      mimeType: "image/png",
+      size: 8,
+      totalSize: 8,
+      rangeStart: 0,
+      rangeEnd: 7,
+      stream: Readable.from([Buffer.from("contents")]),
+      release: async () => { releases += 1; },
+    });
+    servers.push(gateway);
+    await gateway.listen();
+    const address = (gateway as unknown as { server: { address(): AddressInfo | null } }).server.address();
+    if (!address) throw new Error("Gateway did not bind");
+    const response = await getPath(
+      address.port,
+      `/v1/sessions/session-1/display-artifacts/${artifactID}`,
+      { "if-none-match": `"display-${artifactID}"` },
+    );
+    expect(response.status).toBe(304);
+    expect(response.body).toHaveLength(0);
+    expect(releases).toBe(1);
   });
 
   it("returns JSON before headers for an unavailable blob", async () => {

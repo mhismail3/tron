@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Floating HTML smoke test</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #101820;
+      color: #f6fbff;
+      font: 18px/1.45 system-ui, sans-serif;
+    }
+    .card {
+      width: min(100%, 520px);
+      padding: 24px;
+      border: 1px solid #59d8a0;
+      border-radius: 18px;
+      background: #17252f;
+    }
+    h1 { margin-top: 0; color: #59d8a0; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Floating HTML</h1>
+    <p id="script-status">JavaScript remained blocked.</p>
+    <p>This panel should remain draggable, edge-clamped, closable, and reopenable from its canonical pill.</p>
+  </main>
+  <script>
+    document.getElementById("script-status").textContent = "ERROR: JavaScript executed";
+  </script>
+</body>
+</html>

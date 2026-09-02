@@ -360,6 +360,25 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("completed inline Markdown display settles on cold reopen")
+    func inlineDisplayColdReopen() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            let snapshot = try harnessInlineMarkdownDisplaySnapshot()
+            for _ in 0..<2 {
+                try await withHarness(snapshot: snapshot) { harness in
+                    let ready = try await harness.recorder.waitUntil {
+                        $0.observation.readyFrameCompletionCount == 1
+                            && $0.observation.isReady
+                            && $0.observation.visibleRowIDs.contains("transcript-bottom")
+                    }
+                    #expect(ready.observation.geometry.isPlausibleOpeningViewport)
+                    #expect(ready.observation.geometry.distanceFromBottom
+                        <= ChatTranscriptGeometry.catchUpDistance)
+                }
+            }
+        }
+    }
+
     @Test("cancelled frame wait closes readiness exactly once")
     func cancelledReadyFrame() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
@@ -1103,6 +1122,27 @@ struct ChatViewScrollHarnessTests {
         }
         harness.cleanup()
     }
+}
+
+private func harnessInlineMarkdownDisplaySnapshot() throws -> SessionSnapshot {
+    var snapshot = try SessionScenarioBuilder(seed: 1_210).openingTail(targetEncodedBytes: 10_000)
+    snapshot.transcript = try decodeTranscriptFixture(
+        [TranscriptItem].self,
+        from: Data(#"""
+        [
+          {"id":"display-request","parentId":null,"presentationId":"display-request","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+            {"id":"display-call-content","ordinal":0,"type":"toolCall","toolCallId":"display-call","name":"display","arguments":{"presentation":{"surface":"inline"}}}
+          ]},
+          {"id":"display-result","parentId":"display-request","presentationId":"display-result","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"display-result-text","ordinal":0,"type":"text","text":"Displayed Inline Markdown."}],"toolCallId":"display-call","toolName":"display","isError":false,
+           "display":{"schema":"tron.display.v1","displayId":"inline-markdown","revision":1,"title":"Inline Markdown","altText":"An inline Markdown fixture.","kind":"markdown","presentation":{"requestedSurface":"inline","inlineTapAction":"sheet"},"eligibleSurfaces":["sheet","inline"],"fallbackText":"Inline Markdown fixture.","artifact":{"id":"6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc3b","name":"inline.md","mimeType":"text/markdown","size":335,"kind":"markdown"}}},
+          {"id":"display-answer","parentId":"display-result","presentationId":"display-answer","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"display-answer-text","ordinal":0,"type":"text","text":"Displayed Inline Markdown inline."}]}
+        ]
+        """#.utf8)
+    )
+    snapshot.transcriptStart = 0
+    snapshot.transcriptTotal = snapshot.transcript.count
+    snapshot.toolExecutions = []
+    return snapshot
 }
 
 private func harnessRuntimeTool(

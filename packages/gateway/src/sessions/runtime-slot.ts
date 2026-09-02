@@ -98,6 +98,9 @@ import type { ExtensionActivityHistoryPage } from "./extension-activity-history.
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { GatewayWorkHandle, GatewayWorkKind, GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { createTronNotifyExtension } from "../notifications/tron-notify-extension.js";
+import { createTronDisplayExtension } from "../display/tron-display-extension.js";
+import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
+import { displayArtifactIDs } from "../display/display-contract.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
@@ -261,6 +264,7 @@ export interface RuntimeSlotDependencies {
   trust: TrustService;
   blobs: BlobStore;
   exports: BlobStore;
+  displayArtifacts: DisplayArtifactStore;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
   processActivityRecency: ProcessActivityRecency;
@@ -308,6 +312,8 @@ export class RuntimeSlot {
   /** Canonical parent identity retained while a fresh fork has no JSONL yet. */
   private liveForkParentSessionId: string | undefined;
   private revision = 0;
+  private displayArtifactReferenceKey: string | undefined;
+  private displayArtifactReferences: string[] = [];
   private eventSequence = 0;
   private phase: SessionPhase;
   private disposed = false;
@@ -1025,6 +1031,22 @@ export class RuntimeSlot {
     return path && existsSync(path) ? path : undefined;
   }
 
+  displayArtifactIDs(): string[] {
+    const manager = this.runtime.session.sessionManager;
+    const leafID = manager.getLeafId();
+    const key = `${manager.getSessionId()}\0${leafID ?? "root"}`;
+    if (this.displayArtifactReferenceKey !== key) {
+      this.displayArtifactReferences = displayArtifactIDs(leafID ? manager.getBranch(leafID) : []);
+      this.displayArtifactReferenceKey = key;
+    }
+    return [...this.displayArtifactReferences];
+  }
+
+  referencesDisplayArtifact(artifactID: string): boolean {
+    this.displayArtifactIDs();
+    return this.displayArtifactReferences.includes(artifactID);
+  }
+
   sessionEnvironment(): Record<string, string> {
     this.assertNoTrustReload();
     const session = this.runtime.session;
@@ -1060,8 +1082,16 @@ export class RuntimeSlot {
         agentDir: this.dependencies.agentDir,
         modelRuntime,
         resourceLoaderOptions: {
-          ...(notifications ? {
-            extensionFactories: [{
+          extensionFactories: [
+            {
+              name: "tron-display",
+              factory: createTronDisplayExtension({
+                sessionId: () => this.id,
+                cwd: () => this.cwd,
+                artifacts: this.dependencies.displayArtifacts,
+              }),
+            },
+            ...(notifications ? [{
               name: "tron-notify",
               factory: createTronNotifyExtension({
                 sessionId: () => this.id,
@@ -1071,8 +1101,8 @@ export class RuntimeSlot {
                 suppressAutomatic: (input) => notifications.suppressAutomatic(input),
                 enqueue: (input) => notifications.enqueue(input),
               }),
-            }],
-          } : {}),
+            }] : []),
+          ],
           extensionsOverride: (base) => attributeExtensions(base),
         },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
@@ -1225,6 +1255,7 @@ export class RuntimeSlot {
     previousUnsubscribe?.();
     this.unsubscribe = nextUnsubscribe;
     this.hydrateCanonicalExtensionActivities();
+    this.reconcileCanonicalDisplayArtifacts();
     this.revision += 1;
     this.publishSnapshot();
   }
@@ -2845,6 +2876,7 @@ export class RuntimeSlot {
           // Keep this compatibility path for extension/custom persistence, but
           // ordinary Pi tool results arrive through message_end below.
           this.markCanonicalToolResultHandoff(event.entry.message.toolCallId);
+          if (event.entry.message.toolName === "display") this.reconcileCanonicalDisplayArtifacts();
         }
         this.emit("session.structureChanged", { branchChanged: false });
         this.scheduleSnapshot();
@@ -4264,7 +4296,24 @@ export class RuntimeSlot {
           && (entry.message === message || entry.message.toolCallId === message.toolCallId));
       if (!owned) return;
       this.markCanonicalToolResultHandoff(message.toolCallId);
+      if (message.toolName === "display") this.reconcileCanonicalDisplayArtifacts();
       this.scheduleSnapshot();
+    });
+  }
+
+  async reconcileDisplayArtifactOwnership(): Promise<void> {
+    const manager = this.runtime.session.sessionManager;
+    const references = new Set(displayArtifactIDs(manager.getEntries()));
+    await this.dependencies.displayArtifacts.reconcileSession(this.id, references);
+  }
+
+  private reconcileCanonicalDisplayArtifacts(): void {
+    void this.reconcileDisplayArtifactOwnership().catch((error) => {
+      this.emit("session.extensionError", safeJson({
+        message: error instanceof Error
+          ? error.message
+          : "Display artifact reconciliation failed",
+      }));
     });
   }
 

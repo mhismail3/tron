@@ -737,6 +737,7 @@ actor GatewayClient {
 
     func blob(
         id: String,
+        sessionID: String? = nil,
         profileID: String,
         maximumBytes: Int
     ) async throws -> (Data, String) {
@@ -748,12 +749,46 @@ actor GatewayClient {
         }
         let value = try await boundedBlob(
             id: id,
+            sessionID: sessionID,
             profile: profile,
             token: token,
             maximumBytes: maximumBytes
         )
         guard self.profile?.id == profileID else { throw CancellationError() }
         return value
+    }
+
+    func displayArtifactFile(
+        id: String,
+        sessionID: String,
+        profileID: String,
+        maximumBytes: Int,
+        expectedBytes: Int64
+    ) async throws -> URL {
+        guard let profile, profile.id == profileID, let token else { throw CancellationError() }
+        let downloaded = try await boundedBlobFile(
+            id: id,
+            sessionID: sessionID,
+            profile: profile,
+            token: token,
+            maximumBytes: maximumBytes
+        )
+        do {
+            guard downloaded.byteCount == expectedBytes else {
+                throw GatewayFailure(
+                    code: "blob_failed",
+                    message: "The display media changed while it was downloading.",
+                    retryable: true,
+                    details: nil
+                )
+            }
+            try Task.checkCancellation()
+            guard self.profile?.id == profileID else { throw CancellationError() }
+            return downloaded.url
+        } catch {
+            BoundedHTTPFileStaging.shared.discard(downloaded.url)
+            throw error
+        }
     }
 
     func blobFile(id: String, maximumBytes: Int, expectedBytes: Int64? = nil) async throws -> URL {
@@ -786,11 +821,12 @@ actor GatewayClient {
 
     private func boundedBlob(
         id: String,
+        sessionID: String? = nil,
         profile: GatewayProfile,
         token: String,
         maximumBytes: Int
     ) async throws -> (Data, String) {
-        guard let url = mediaURL(id: id, profile: profile) else {
+        guard let url = mediaURL(id: id, sessionID: sessionID, profile: profile) else {
             throw Self.invalidProfileEndpoint()
         }
         var request = URLRequest(url: url, timeoutInterval: 30)
@@ -807,11 +843,12 @@ actor GatewayClient {
 
     private func boundedBlobFile(
         id: String,
+        sessionID: String? = nil,
         profile: GatewayProfile,
         token: String,
         maximumBytes: Int
     ) async throws -> BoundedHTTPDownloadedFile {
-        guard let url = mediaURL(id: id, profile: profile) else {
+        guard let url = mediaURL(id: id, sessionID: sessionID, profile: profile) else {
             throw Self.invalidProfileEndpoint()
         }
         var request = URLRequest(url: url, timeoutInterval: 30)
@@ -827,11 +864,19 @@ actor GatewayClient {
         return downloaded
     }
 
-    private func mediaURL(id: String, profile: GatewayProfile) -> URL? {
-        Self.mediaPath(id: id).flatMap { profile.httpURL(path: $0) }
+    private func mediaURL(id: String, sessionID: String? = nil, profile: GatewayProfile) -> URL? {
+        Self.mediaPath(id: id, sessionID: sessionID).flatMap { profile.httpURL(path: $0) }
     }
 
-    nonisolated static func mediaPath(id: String) -> String? {
+    nonisolated static func mediaPath(id: String, sessionID: String? = nil) -> String? {
+        if let sessionID {
+            let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+            guard UUID(uuidString: id) != nil,
+                  !sessionID.isEmpty, sessionID.utf8.count <= 200,
+                  let encodedSession = sessionID.addingPercentEncoding(withAllowedCharacters: allowed),
+                  !encodedSession.isEmpty else { return nil }
+            return "/v1/sessions/\(encodedSession)/display-artifacts/\(id)"
+        }
         if id.hasPrefix("upload:") {
             let uploadID = String(id.dropFirst("upload:".count))
             guard UUID(uuidString: uploadID) != nil else { return nil }

@@ -7,6 +7,21 @@ struct ChatMediaIdentity: Hashable, Sendable {
     let profileID: String
     let lifecycleGeneration: Int
     let blobID: String
+    /// Required only for session-authorized durable display artifacts. Existing
+    /// transient blobs and prompt attachments retain their original route.
+    let sessionID: String?
+
+    init(
+        profileID: String,
+        lifecycleGeneration: Int,
+        blobID: String,
+        sessionID: String? = nil
+    ) {
+        self.profileID = profileID
+        self.lifecycleGeneration = lifecycleGeneration
+        self.blobID = blobID
+        self.sessionID = sessionID
+    }
 }
 
 struct ChatMediaPayload: Sendable {

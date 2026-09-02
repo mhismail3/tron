@@ -48,7 +48,7 @@ Gateway owns only mobile infrastructure:
 - one serialized mutation lane and one live runtime per canonical session;
 - detached run supervision, bounded idempotency receipts, and crash markers;
 - authoritative transcript snapshots projected from canonical JSONL;
-- filesystem/Git browsing, bounded uploads, and bounded PTY replay;
+- filesystem/Git browsing, bounded uploads, durable display artifacts, and bounded PTY replay;
 - settings, credentials, packages, trust, custom-model administration, generic
   extension UI forwarding, and bounded push-notification admission. Extension activity history revisions are
   derived from the globally sorted canonical receipt sequence; filters and
@@ -144,7 +144,12 @@ Outbound relay requests use one fixed `/v3/notifications` route, no redirects, a
 - `DELETE /v1/uploads/:id` — authenticated discard of unclaimed client staging; prompt-owned attachments fail closed
 - `GET /v1/uploads/:id` — authenticated stream for a prompt-owned canonical attachment
 - `GET /v1/blobs/:id` — authenticated transient projected blob
+- `GET /v1/sessions/:sessionId/display-artifacts/:id` — authenticated, session-authorized immutable display artifact with single-range resume/streaming
 - `GET /v1/socket` — authenticated protocol version 4 WebSocket
+
+The first-party reserved `display` tool advertises `display-artifacts.v1` and persists one ordinary `tron.display.v1` tool result in canonical Pi JSONL. The result carries bounded title, caption, alt/fallback text, semantic content kind, requested `sheet`/`inline`/`floating` surface, and an opaque artifact or public HTTPS URL reference—never workspace paths, bytes, credentials, cookies, dimensions, or screen coordinates. Gateway validates the closed shape into a typed transcript field before mobile rendering; malformed or non-`display` lookalikes remain ordinary tool output. Project sources are visible paths relative to the trusted session workspace, reject hidden/private components, traversal, and symlinks, open with no-follow semantics, are copied while hashing, and must preserve descriptor identity through publication. Magic/container signatures and UTF-8 validation fail closed for recognized types. Public URL display is credential-free HTTPS, rejects query/fragment persistence, local DNS suffixes, and local, private, reserved, link-local, or multicast IP literals; Gateway does not fetch or proxy it.
+
+Display bytes live under a separate durable Gateway store owned by `RuntimeRegistry`, not transient `BlobStore`. Random logical IDs reference immutable SHA-256 objects; logical session-owner links survive restart and are granted to a fork before its identity commit. Canonical display-result handoff and runtime binding reconcile session ownership against the complete JSONL tree, removing cancelled/provisional publications without deleting artifacts retained on reversible abandoned branches. Session deletion and catalog maintenance remove owner links, while shared objects remain until the last owner and active reader release them. The store bounds item/type bytes, logical bytes/count, concurrent ingestion/readers, owner fan-out, and a 1 GiB filesystem floor. Retention ownership alone never authorizes a read: the requested ID must also occur on the exact active canonical branch, so abandoned branches and deletion races fail closed. Downloads support one inclusive byte range, return 416 for malformed or unsatisfiable display ranges, honor a stable immutable ETag, send `nosniff`, and never enter WebSocket snapshots. Unknown, missing, or corrupt objects remain explicit unavailable displays with canonical text fallback rather than being regenerated.
 
 The pairing limiter keeps the exact rolling per-address window while retaining at most 4,096
 least-recently-used address keys and periodically deleting expired windows; address churn cannot

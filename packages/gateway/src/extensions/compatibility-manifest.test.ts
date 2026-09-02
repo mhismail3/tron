@@ -22,6 +22,10 @@ describe("pinned public Pi extension-host contract", () => {
     expect(pi.VERSION).toBe(PINNED_PI_VERSION);
     expect(EXTENSION_PRESENTATION_VERSION).toBe(3);
     expect(extensionToolAdapterCompatibility).toEqual({
+      tronDisplay: expect.objectContaining({
+        classification: "native-semantic",
+        capability: "display-artifacts.v1",
+      }),
       zhushanwenAskUserForm: expect.objectContaining({
         classification: "native-semantic",
         capability: "form.v1",

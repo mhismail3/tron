@@ -618,6 +618,60 @@ export class GatewayServer {
         }
         return;
       }
+      const displayRoute = /^\/v1\/sessions\/([^/]+)\/display-artifacts\/([^/]+)$/.exec(url.pathname);
+      if (request.method === "GET" && displayRoute) {
+        const sessionID = decodeURIComponent(displayRoute[1]!);
+        const artifactID = decodeURIComponent(displayRoute[2]!);
+        let requestedRange: BlobByteRange | undefined;
+        try {
+          requestedRange = parseBlobByteRange(request.headers.range);
+        } catch (error) {
+          if (!(error instanceof GatewayError) || error.code !== "invalid_request") throw error;
+          sendJson(response, 416, { error: publicError(error) });
+          return;
+        }
+        let lease: Awaited<ReturnType<RuntimeRegistry["acquireDisplayArtifact"]>>;
+        try {
+          lease = await this.options.sessions.acquireDisplayArtifact(sessionID, artifactID, requestedRange);
+        } catch (error) {
+          const details = error instanceof GatewayError && error.details && typeof error.details === "object"
+            ? error.details as { rangeUnsatisfiable?: unknown; totalSize?: unknown }
+            : undefined;
+          if (error instanceof GatewayError && error.code === "invalid_request"
+            && details?.rangeUnsatisfiable === true && Number.isSafeInteger(details.totalSize)) {
+            response.setHeader("content-range", `bytes */${details.totalSize}`);
+            sendJson(response, 416, { error: publicError(error) });
+            return;
+          }
+          throw error;
+        }
+        const etag = `\"display-${artifactID}\"`;
+        try {
+          if (request.headers["if-none-match"] === etag) {
+            response.writeHead(304, {
+              etag,
+              "cache-control": "private, immutable, max-age=31536000",
+            });
+            response.end();
+            return;
+          }
+          response.writeHead(requestedRange ? 206 : 200, {
+            "content-type": lease.mimeType,
+            "content-length": lease.size,
+            "accept-ranges": "bytes",
+            etag,
+            ...(requestedRange
+              ? { "content-range": `bytes ${lease.rangeStart}-${lease.rangeEnd}/${lease.totalSize}` }
+              : {}),
+            "cache-control": "private, immutable, max-age=31536000",
+            "x-content-type-options": "nosniff",
+          });
+          await pipeline(lease.stream, response);
+        } finally {
+          await lease.release();
+        }
+        return;
+      }
       if (request.method === "GET" && url.pathname.startsWith("/v1/blobs/")) {
         const id = decodeURIComponent(url.pathname.slice("/v1/blobs/".length));
         const requestedRange = parseBlobByteRange(request.headers.range);

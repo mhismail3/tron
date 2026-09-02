@@ -546,6 +546,16 @@ struct InstalledChatTranscript: Hashable, Sendable {
     var displayedItems: ChatDisplayedTranscriptItems {
         ChatDisplayedTranscriptItems(timeline: timeline.items, runtime: runtimeItems)
     }
+
+    var completedDisplayPresentations: [DisplayProjection] {
+        timeline.items.flatMap { item -> [DisplayProjection] in
+            guard case .toolRun(let run) = item else { return [] }
+            return run.tools.compactMap { tool in
+                guard !tool.isRunning, !tool.error else { return nil }
+                return tool.display
+            }
+        }
+    }
     var hasUniqueDisplayedIDs: Bool {
         guard timeline.isInternallyConsistent,
               displayedItemByID != nil,

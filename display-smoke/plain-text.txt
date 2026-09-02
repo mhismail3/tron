@@ -1,0 +1,4 @@
+Display plain-text smoke test
+
+This fixture should render as bounded native text when presented inline or in a sheet.
+The canonical transcript stores only display metadata and fallback text, not these file bytes.

@@ -61,6 +61,10 @@ final class ChatSessionPresentation {
     var showProcesses = false
     var showSettings = false
     var queuedMessageEditor: QueuedMessageEditorRoute?
+    var displaySheet: DisplayRoute?
+    var floatingDisplay: DisplayRoute?
+    var pendingFloatingDisplay: DisplayRoute?
+    var automaticallyPresentedDisplayIDs = BoundedChatIdentityLedger()
     var suppressedInteractionScope: ExtensionInteractionScope?
     var requestedInteractionScope: ExtensionInteractionScope?
     /// Turns true only after the mounted transcript has crossed its first ready
@@ -103,6 +107,9 @@ final class ChatSessionPresentation {
         attachmentDestination = nil
         queuedAttachmentDestination = nil
         cancelImports()
+        displaySheet = nil
+        floatingDisplay = nil
+        pendingFloatingDisplay = nil
     }
 
     /// Backgrounding retires only disposable UI work. An admitted composer

@@ -1,3 +1,5 @@
+import type { DisplayProjection } from "../display/display-contract.js";
+
 // Tron protocol v4 is a typed, bounded mobile contract. Pi objects must be
 // projected into these values rather than serialized directly; Pi JSONL and
 // configuration files remain canonical.
@@ -146,6 +148,9 @@ export type TranscriptItem =
       toolLabel?: string;
       isError?: boolean;
       details?: JsonValue;
+      /** Strictly admitted first-party display descriptor. Raw tool details
+       * remain available for technical inspection but never select a renderer. */
+      display?: DisplayProjection;
       usage?: JsonValue;
       /** Exact runtime timing when the owning Gateway observed this call. Older
        * canonical entries may omit it and clients derive an observed interval. */

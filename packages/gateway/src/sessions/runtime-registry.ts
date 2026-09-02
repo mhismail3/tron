@@ -51,6 +51,7 @@ import { ExtensionActivityRecency } from "./extension-activity-recency.js";
 import { ProcessActivityRecency } from "./process-activity-recency.js";
 import { admitExtensionLifecycleArtifact } from "./extension-run-projection.js";
 import type { NotificationService } from "../notifications/notification-service.js";
+import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { projectTranscriptPage, type TranscriptPage } from "./projection.js";
 import {
@@ -386,8 +387,11 @@ export class RuntimeRegistry {
   private catalogAcquisitionPromiseKey: string | undefined;
   /** Serializes attention membership checks with set/delete/rekey. */
   private readonly attentionLane = new AsyncMutex();
+  /** Linearizes display lease admission with canonical session deletion. */
+  private readonly displayArtifactLane = new AsyncMutex();
   private readonly blobs: BlobStore;
   private readonly exports: BlobStore;
+  private readonly displayArtifacts: DisplayArtifactStore;
   private readonly markers: RunMarkerStore;
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
   private readonly processActivityRecency = new ProcessActivityRecency();
@@ -457,6 +461,7 @@ export class RuntimeRegistry {
     },
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
+    this.displayArtifacts = new DisplayArtifactStore(options.tronHome);
     this.exports = new BlobStore({
       maximumItemBytes: SESSION_EXPORT_MAX_ITEM_BYTES,
       maximumItems: SESSION_EXPORT_MAX_ITEMS,
@@ -511,7 +516,21 @@ export class RuntimeRegistry {
   }
 
   async initializeBlobStorage(): Promise<void> {
-    await Promise.all([this.blobs.initialize(), this.exports.initialize()]);
+    const liveSessionIDs = new Set((await this.list("all")).map((session) => session.id));
+    await Promise.all([
+      this.blobs.initialize(),
+      this.exports.initialize(),
+      this.displayArtifacts.initialize(liveSessionIDs),
+    ]);
+    await Promise.all([...this.slots.values()].map((slot) => slot.reconcileDisplayArtifactOwnership()));
+  }
+
+  async maintainDisplayArtifacts(liveSessionIDs: ReadonlySet<string>): Promise<void> {
+    await this.displayArtifacts.maintain(liveSessionIDs);
+  }
+
+  async removeDisplayArtifacts(sessionID: string): Promise<void> {
+    await this.displayArtifactLane.run(() => this.displayArtifacts.removeSession(sessionID));
   }
 
   private async reconcileCanonicalAttention(
@@ -622,6 +641,12 @@ export class RuntimeRegistry {
         if (disposition === "migrate") await this.attention.rekey(previousId, nextId);
         if (disposition === "reset" || disposition === "discard") await this.attention.assertAbsent(nextId);
         if (disposition === "discard") await this.attention.remove(previousId);
+        // The forked branch already owns its exact canonical display references.
+        // Publish those owner links before committing the new session identity so
+        // a successful fork can never expose a dangling artifact reference.
+        for (const artifactID of slot.displayArtifactIDs()) {
+          await this.displayArtifacts.grant(artifactID, nextId, previousId);
+        }
         commitIdentity();
         if (this.slots.get(previousId) === slot) this.slots.delete(previousId);
         this.slots.set(nextId, slot);
@@ -792,6 +817,7 @@ export class RuntimeRegistry {
       trust: this.options.trust,
       blobs: this.blobs,
       exports: this.exports,
+      displayArtifacts: this.displayArtifacts,
       markers: this.markers,
       extensionActivityRecency: this.extensionActivityRecency,
       processActivityRecency: this.processActivityRecency,
@@ -3236,5 +3262,29 @@ export class RuntimeRegistry {
       if (!(error instanceof GatewayError) || error.code !== "not_found") throw error;
       return this.exports.acquire(id, range);
     }
+  }
+
+  private async authorizeDisplayArtifact(sessionID: string, artifactID: string): Promise<boolean> {
+    // Retention ownership is necessary but never sufficient: every read must
+    // also be backed by an exact reference on this session's canonical branch.
+    // Do not repair owner links from an arbitrary transcript reference; fork
+    // ownership is committed transactionally by the rekey path above.
+    if (!this.displayArtifacts.hasOwner(artifactID, sessionID)) return false;
+    const slot = await this.acquire(sessionID);
+    return slot.referencesDisplayArtifact(artifactID);
+  }
+
+  async acquireDisplayArtifact(
+    sessionID: string,
+    artifactID: string,
+    requestedRange?: import("./blob-store.js").BlobByteRange,
+  ) {
+    return this.displayArtifactLane.run(async () => {
+      if (this.deletingSessionIds.has(sessionID)
+        || !await this.authorizeDisplayArtifact(sessionID, artifactID)) {
+        throw new GatewayError("not_found", "Display artifact is unavailable");
+      }
+      return this.displayArtifacts.acquire(artifactID, sessionID, requestedRange);
+    });
   }
 }

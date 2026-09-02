@@ -47,6 +47,7 @@ struct ChatRoutes: ViewModifier {
     @Binding var filesPresented: Bool
     let onFileImport: (Result<[URL], Error>) -> Void
     @Binding var editorRequest: ComposerEditorRequest?
+    @Binding var displaySheet: DisplayRoute?
     let onUseEditorRequest: (ComposerEditorRequest) -> Void
     let onKeepEditorRequest: (ComposerEditorRequest) -> Void
     @Environment(AppModel.self) private var model
@@ -149,6 +150,12 @@ struct ChatRoutes: ViewModifier {
                 isPresented: $filesPresented,
                 identity: "chat.\(sessionID).files"
             )
+            .tronManagedSheet(
+                item: $displaySheet,
+                identity: { "chat.\(sessionID).display.\($0.display.displayId)" }
+            ) { route in
+                DisplaySheet(route: route)
+            }
             .tronManagedSheet(
                 item: $editorRequest,
                 identity: { "chat.\(sessionID).editor.\($0.id)" }

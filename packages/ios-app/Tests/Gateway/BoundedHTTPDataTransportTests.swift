@@ -348,6 +348,51 @@ struct BoundedHTTPDataTransportTests {
         }
     }
 
+    @Test("display media staging uses the exact authenticated session route")
+    func displayArtifactFileBoundary() async throws {
+        try await withTestWatchdog {
+            let profile = GatewayProfile(
+                id: "machine", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            let socket = ScriptedGatewaySocket()
+            let recorder = BoundedTransportRecorder()
+            let staged = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+            try Data("media".utf8).write(to: staged)
+            defer { BoundedHTTPFileStaging.shared.discard(staged) }
+            let fileTransport = BoundedHTTPFileTransport { request, maximumBytes in
+                await recorder.record(request: request, maximumBytes: maximumBytes)
+                return BoundedHTTPDownloadedFile(
+                    url: staged,
+                    response: HTTPURLResponse(
+                        url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "video/mp4"]
+                    )!,
+                    byteCount: 5
+                )
+            }
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                boundedHTTPFileTransport: fileTransport
+            )
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","display-artifacts.v1"]}"#.utf8))
+            _ = try await client.connectForLifecycle(profile: profile, token: "secret")
+            let id = "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc3b"
+            #expect(try await client.displayArtifactFile(
+                id: id,
+                sessionID: "session-1",
+                profileID: profile.id,
+                maximumBytes: 5,
+                expectedBytes: 5
+            ) == staged)
+            let recorded = try #require(await recorder.value)
+            #expect(recorded.maximumBytes == 5)
+            #expect(recorded.request.url?.path == "/v1/sessions/session-1/display-artifacts/\(id)")
+            #expect(recorded.request.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
+            await client.close()
+        }
+    }
+
     @Test("profile-bound blob reads survive a WebSocket epoch handoff")
     func gatewayBlobBoundary() async throws {
         try await withTestWatchdog {

@@ -70,6 +70,34 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(ChatTranscriptPresentation.timeline(in: snapshot) == candidate.timeline)
     }
 
+    @Test("display tools remain isolated from adjacent generic tool runs")
+    func displayRunIsolation() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"presentationId":"assistant","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+            {"id":"read","ordinal":0,"type":"toolCall","toolCallId":"read-call","name":"read","arguments":{}},
+            {"id":"display","ordinal":1,"type":"toolCall","toolCallId":"display-call","name":"display","arguments":{"presentation":{"surface":"inline"}}},
+            {"id":"write","ordinal":2,"type":"toolCall","toolCallId":"write-call","name":"write","arguments":{}}
+          ]},
+          {"id":"display-result","parentId":"assistant","presentationId":"display-result","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"text","ordinal":0,"type":"text","text":"Displayed."}],"toolCallId":"display-call","toolName":"display","isError":false,
+           "display":{"schema":"tron.display.v1","displayId":"display-id","revision":1,"title":"Preview","altText":"Preview image.","kind":"image","presentation":{"requestedSurface":"inline","inlineTapAction":"sheet"},"eligibleSurfaces":["sheet","inline","floating"],"fallbackText":"Preview image.","artifact":{"id":"6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc3b","name":"preview.png","mimeType":"image/png","size":128,"kind":"image"}}}
+        ]
+        """)
+        let projection = ChatTranscriptProjectionKernel.readOnlyTranscript(
+            snapshot.transcript,
+            transcriptStart: 0,
+            transcriptTotal: snapshot.transcript.count,
+            isActive: true
+        )
+        let runs = projection.timeline.items.compactMap { item -> ChatToolRunPresentation? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run
+        }
+        #expect(runs.map { $0.tools.map(\.id) } == [["read-call"], ["display-call"], ["write-call"]])
+        #expect(runs[1].tools.first?.display?.displayId == "display-id")
+        #expect(projection.isValid)
+    }
+
     @Test("read-only child transcript uses canonical tool and message assembly")
     func readOnlyChildAssembly() async throws {
         let snapshot = try fixture(transcript: """

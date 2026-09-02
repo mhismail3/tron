@@ -399,6 +399,7 @@ final class AppModel {
             fetch: { identity in
                 let value = try await client.blob(
                     id: identity.blobID,
+                    sessionID: identity.sessionID,
                     profileID: identity.profileID,
                     maximumBytes: ChatMediaPolicy.maximumEncodedBytes
                 )
@@ -485,13 +486,30 @@ final class AppModel {
         sessionPresentation.transcriptSnapshot(for: sessionID)
     }
 
-    func chatMediaIdentity(blobID: String) -> ChatMediaIdentity? {
+    func displayArtifactFile(
+        id: String,
+        sessionID: String,
+        profileID: String,
+        maximumBytes: Int,
+        expectedBytes: Int64
+    ) async throws -> URL {
+        try await client.displayArtifactFile(
+            id: id,
+            sessionID: sessionID,
+            profileID: profileID,
+            maximumBytes: maximumBytes,
+            expectedBytes: expectedBytes
+        )
+    }
+
+    func chatMediaIdentity(blobID: String, sessionID: String? = nil) -> ChatMediaIdentity? {
         guard let admission = lifecycle.generationAdmission,
               let profileID = lifecycle.selectedProfileID else { return nil }
         return ChatMediaIdentity(
             profileID: profileID,
             lifecycleGeneration: admission.generation,
-            blobID: blobID
+            blobID: blobID,
+            sessionID: sessionID
         )
     }
 

@@ -15,6 +15,12 @@ import { INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { RunMarkerCompletionConflictError } from "./run-markers.js";
 
+async function collectStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const value of stream) chunks.push(Buffer.isBuffer(value) ? value : Buffer.from(value));
+  return Buffer.concat(chunks);
+}
+
 async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
@@ -4913,6 +4919,70 @@ export default function (pi) {
     internal.onEvent({ type: "message_end", message: older });
     expect(internal.pendingPrompt?.id).toBe("newer-operation");
     expect(internal.pendingPromptMessage).toBe(newer);
+  });
+
+  it("authorizes display artifacts only from the exact active canonical branch", async () => {
+    const fixture = await coldFixture("active-display-artifact-branch");
+    await fixture.registry.initializeBlobStorage();
+    const store = (fixture.registry as unknown as { displayArtifacts: {
+      ingest: (cwd: string, path: string, sessionID: string) => Promise<{
+        id: string; name: string; mimeType: string; size: number; kind: string;
+      }>;
+    } }).displayArtifacts;
+    const png = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from("payload"),
+    ]);
+    await writeFile(join(fixture.cwd, "abandoned.png"), png);
+    await writeFile(join(fixture.cwd, "active.png"), Buffer.concat([png, Buffer.from("active")]));
+    const abandoned = await store.ingest(fixture.cwd, "abandoned.png", fixture.manager.getSessionId());
+    const active = await store.ingest(fixture.cwd, "active.png", fixture.manager.getSessionId());
+    fixture.manager.appendMessage({ role: "user", content: "root prompt", timestamp: Date.now() });
+    const rootEntry = fixture.manager.getEntries().at(-1)!;
+    const result = (toolCallId: string, artifact: typeof active) => ({
+      role: "toolResult" as const,
+      toolCallId,
+      toolName: "display",
+      isError: false,
+      timestamp: Date.now(),
+      content: [{ type: "text" as const, text: "Displayed." }],
+      details: { display: {
+        schema: "tron.display.v1",
+        displayId: `${toolCallId}-display`,
+        revision: 1,
+        title: "Preview",
+        altText: "Preview image.",
+        kind: "image",
+        presentation: { requestedSurface: "sheet", inlineTapAction: "sheet" },
+        eligibleSurfaces: ["sheet", "inline", "floating"],
+        fallbackText: "Preview image.",
+        artifact: {
+          id: artifact.id,
+          name: artifact.name,
+          mimeType: artifact.mimeType,
+          size: artifact.size,
+          kind: artifact.kind,
+        },
+      } },
+    });
+    fixture.manager.appendMessage(result("abandoned", abandoned));
+    fixture.manager.branch(rootEntry.id);
+    fixture.manager.appendMessage(result("active", active));
+
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    expect(slot.displayArtifactIDs()).toEqual([active.id]);
+    expect(slot.referencesDisplayArtifact(abandoned.id)).toBe(false);
+    expect(slot.referencesDisplayArtifact(active.id)).toBe(true);
+    await expect(fixture.registry.acquireDisplayArtifact(
+      fixture.manager.getSessionId(),
+      abandoned.id,
+    )).rejects.toMatchObject({ code: "not_found" });
+    const lease = await fixture.registry.acquireDisplayArtifact(
+      fixture.manager.getSessionId(),
+      active.id,
+    );
+    expect(await collectStream(lease.stream)).toEqual(Buffer.concat([png, Buffer.from("active")]));
+    await lease.release();
   });
 
   it("exports the complete canonical JSONL tree including abandoned branches", async () => {

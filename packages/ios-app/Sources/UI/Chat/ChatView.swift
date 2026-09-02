@@ -45,6 +45,7 @@ struct ChatView: View {
     /// every hidden tool-output update.
     @State private var deferredViewportProjectionBaseline: InstalledChatTranscript?
     @State private var hasDeferredViewportProjection = false
+    @State private var floatingDisplayCompletionTracker = DisplayFloatingCompletionTracker()
 
     #if HOSTED_TEST
     init(
@@ -116,6 +117,12 @@ struct ChatView: View {
                     reduceMotion: reduceMotion
                 )
             }
+            .overlay {
+                ChatFloatingDisplayHost(
+                    route: $sessionPresentation.floatingDisplay,
+                    onOpenSheet: { sessionPresentation.displaySheet = $0 }
+                )
+            }
         .onGeometryChange(for: CGFloat.self) { geometry in
             geometry.size.width
         } action: { width in
@@ -155,6 +162,7 @@ struct ChatView: View {
             filesPresented: attachmentPresentationBinding(for: .files),
             onFileImport: { result in Task { await importFiles(result) } },
             editorRequest: editorRequestBinding,
+            displaySheet: $sessionPresentation.displaySheet,
             onUseEditorRequest: { request in
                 guard let target = presentationTarget else { return }
                 model.disposeExtensionEditorRequest(request, disposition: .use, target: target)
@@ -243,11 +251,93 @@ struct ChatView: View {
                 .contains(where: { ExtensionInteractionScope($0) == ExtensionInteractionScope(interaction) }) == true else { return }
             sessionPresentation.requestInteractionPresentation(interaction)
         }
+        .environment(\.displayPresentationHandler) { command in
+            switch command {
+            case .showSheet(let route):
+                guard route.sessionID == sessionID else { return }
+                sessionPresentation.displaySheet = route
+            case .showFloating(let route):
+                guard route.sessionID == sessionID else { return }
+                sessionPresentation.floatingDisplay = route
+            }
+        }
+        .onChange(of: transcriptPresentation.installed?.tag) { _, _ in
+            reconcileFloatingDisplayCompletion()
+        }
+        .onChange(of: presentationActivity) { _, activity in
+            guard activity.allowsPresentationPublication else { return }
+            admitPendingFloatingDisplay()
+        }
+    }
+
+    private var completedDisplayPresentations: [DisplayProjection] {
+        transcriptPresentation.installed?.completedDisplayPresentations ?? []
+    }
+
+    private func reconcileFloatingDisplayCompletion() {
+        let current = transcriptPresentation.installed?.completedDisplayPresentations
+        guard let transition = floatingDisplayCompletionTracker.transition(to: current) else {
+            if current == nil { sessionPresentation.pendingFloatingDisplay = nil }
+            return
+        }
+        admitNewFloatingDisplay(previous: transition.previous, current: transition.current)
+    }
+
+    private func admitNewFloatingDisplay(
+        previous: [DisplayProjection],
+        current: [DisplayProjection]
+    ) {
+        let admission = DisplayFloatingAdmissionPolicy.admission(
+            previous: previous,
+            current: current,
+            sceneActive: scenePhase == .active,
+            presentationReady: isTranscriptReady,
+            allowsPresentation: presentationActivity.allowsPresentationPublication,
+            hasFloatingDisplay: sessionPresentation.floatingDisplay != nil,
+            consumedRevisionIDs: sessionPresentation.automaticallyPresentedDisplayIDs.ids
+        )
+        switch admission {
+        case .none:
+            break
+        case .deferred(let display):
+            if sessionPresentation.pendingFloatingDisplay == nil {
+                sessionPresentation.pendingFloatingDisplay = DisplayRoute(sessionID: sessionID, display: display)
+            }
+        case .present(let display):
+            let key = "\(display.displayId):\(display.revision)"
+            sessionPresentation.automaticallyPresentedDisplayIDs.formUnion([key])
+            sessionPresentation.floatingDisplay = DisplayRoute(sessionID: sessionID, display: display)
+        }
+    }
+
+    private func admitPendingFloatingDisplay() {
+        guard scenePhase == .active, isTranscriptReady,
+              sessionPresentation.floatingDisplay == nil,
+              let route = sessionPresentation.pendingFloatingDisplay else {
+            if scenePhase != .active { sessionPresentation.pendingFloatingDisplay = nil }
+            return
+        }
+        guard completedDisplayPresentations.contains(where: {
+            $0.displayId == route.display.displayId && $0.revision == route.display.revision
+        }) else {
+            sessionPresentation.pendingFloatingDisplay = nil
+            return
+        }
+        let key = "\(route.display.displayId):\(route.display.revision)"
+        sessionPresentation.pendingFloatingDisplay = nil
+        guard !sessionPresentation.automaticallyPresentedDisplayIDs.contains(key) else { return }
+        sessionPresentation.automaticallyPresentedDisplayIDs.formUnion([key])
+        sessionPresentation.floatingDisplay = route
     }
 
     var body: some View {
         contentSurface
         .onAppear {
+            if floatingDisplayCompletionTracker.baseline == nil {
+                _ = floatingDisplayCompletionTracker.transition(
+                    to: transcriptPresentation.installed?.completedDisplayPresentations
+                )
+            }
             keyboardObserver.setOwnerWindow(composerResponder.window)
             keyboardObserver.start()
             reconcileSessionPresentationVisibility()

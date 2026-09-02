@@ -194,12 +194,18 @@ struct ToolRunView: View {
     @State private var detailDetent: PresentationDetent = .medium
 
     var body: some View {
-        ToolActivityChip(
-            run: run,
-            installationTag: installationTag,
-            recordChip: recordChip,
-            action: openDetails
-        )
+        Group {
+            if run.tools.count == 1, let tool = run.tools.first, tool.toolName == "display" {
+                DisplayToolView(tool: tool, onOpenTechnicalDetails: openDetails)
+            } else {
+                ToolActivityChip(
+                    run: run,
+                    installationTag: installationTag,
+                    recordChip: recordChip,
+                    action: openDetails
+                )
+            }
+        }
             .tronManagedSheet(
                 isPresented: Binding(
                     get: { resolvedState != nil },

@@ -129,6 +129,49 @@ describe("transcript projection", () => {
     expect(projected).toMatchObject({ extensionOrigin: { source: "public-source" } });
   });
 
+  it("promotes only an exact reserved display result into the typed transcript field", () => {
+    const details = {
+      display: {
+        schema: "tron.display.v1",
+        displayId: "display-id",
+        revision: 1,
+        title: "Preview",
+        altText: "A preview image.",
+        kind: "image",
+        presentation: { requestedSurface: "inline", inlineTapAction: "sheet" },
+        eligibleSurfaces: ["sheet", "inline", "floating"],
+        fallbackText: "A preview image.",
+        artifact: {
+          id: "6ab02a1a-fd63-4196-a2e1-5fe9ebd6bc3b",
+          name: "preview.png",
+          mimeType: "image/png",
+          size: 128,
+          kind: "image",
+        },
+      },
+    };
+    const display = projectMessage(
+      "result", null, "2026-01-01T00:00:00Z",
+      {
+        role: "toolResult", toolCallId: "display-call", toolName: "display",
+        content: [{ type: "text", text: "Displayed." }], details,
+        isError: false, timestamp: 1,
+      },
+      new BlobStore(),
+    );
+    const spoof = projectMessage(
+      "spoof", null, "2026-01-01T00:00:00Z",
+      {
+        role: "toolResult", toolCallId: "other-call", toolName: "other",
+        content: [{ type: "text", text: "Displayed." }], details,
+        isError: false, timestamp: 1,
+      },
+      new BlobStore(),
+    );
+    expect(display).toMatchObject({ display: { schema: "tron.display.v1", kind: "image" } });
+    expect(spoof).not.toHaveProperty("display");
+  });
+
   it("projects extension-authored tool labels without replacing canonical tool names", () => {
     const labels = new Map([["subagent_wait", "Subagent Wait"]]);
     const assistant = projectMessage(

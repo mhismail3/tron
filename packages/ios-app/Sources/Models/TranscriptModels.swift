@@ -319,6 +319,7 @@ struct MessageTranscriptItem: TranscriptPayload {
     let toolLabel: String?
     let isError: Bool?
     let details: JSONValue?
+    let display: DisplayProjection?
     let usage: JSONValue?
     let startedAt: String?
     let completedAt: String?
@@ -331,7 +332,7 @@ struct MessageTranscriptItem: TranscriptPayload {
 
     private enum CodingKeys: String, CodingKey {
         case id, parentId, timestamp, kind, role, presentationId, content, provider, modelId, stopReason,
-             errorMessage, toolCallId, toolName, toolLabel, isError, details, usage, startedAt,
+             errorMessage, toolCallId, toolName, toolLabel, isError, details, display, usage, startedAt,
              completedAt, durationMs, lastProgressAt, progressSequence, toolSegmentId, semantic, extensionOrigin
     }
 
@@ -339,7 +340,8 @@ struct MessageTranscriptItem: TranscriptPayload {
         id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind, role: TranscriptItem.Role,
         presentationId: String, content: [ContentPart], provider: String? = nil, modelId: String? = nil,
         stopReason: String? = nil, errorMessage: String? = nil, toolCallId: String? = nil, toolName: String? = nil,
-        toolLabel: String? = nil, isError: Bool? = nil, details: JSONValue? = nil, usage: JSONValue? = nil, startedAt: String? = nil,
+        toolLabel: String? = nil, isError: Bool? = nil, details: JSONValue? = nil,
+        display: DisplayProjection? = nil, usage: JSONValue? = nil, startedAt: String? = nil,
         completedAt: String? = nil, durationMs: Int? = nil, lastProgressAt: String? = nil,
         progressSequence: Int? = nil, toolSegmentId: String? = nil,
         semantic: ChatSemanticMetadata? = nil,
@@ -348,7 +350,8 @@ struct MessageTranscriptItem: TranscriptPayload {
         self.id = id; self.parentId = parentId; self.timestamp = timestamp; self.kind = kind; self.role = role
         self.presentationId = presentationId; self.content = content; self.provider = provider; self.modelId = modelId
         self.stopReason = stopReason; self.errorMessage = errorMessage; self.toolCallId = toolCallId; self.toolName = toolName
-        self.toolLabel = toolLabel; self.isError = isError; self.details = details; self.usage = usage; self.startedAt = startedAt; self.completedAt = completedAt
+        self.toolLabel = toolLabel; self.isError = isError; self.details = details; self.display = display
+        self.usage = usage; self.startedAt = startedAt; self.completedAt = completedAt
         self.durationMs = durationMs; self.lastProgressAt = lastProgressAt; self.progressSequence = progressSequence
         self.toolSegmentId = toolSegmentId
         self.semantic = semantic
@@ -389,6 +392,14 @@ struct MessageTranscriptItem: TranscriptPayload {
         toolLabel = try values.decodeIfPresent(String.self, forKey: .toolLabel)
         isError = try values.decodeIfPresent(Bool.self, forKey: .isError)
         details = try values.decodeIfPresent(JSONValue.self, forKey: .details)
+        display = try values.decodeIfPresent(DisplayProjection.self, forKey: .display)
+        if display != nil, role != .toolResult || toolName != "display" {
+            throw DecodingError.dataCorruptedError(
+                forKey: .display,
+                in: values,
+                debugDescription: "Only the reserved display tool result may carry display metadata"
+            )
+        }
         usage = try values.decodeIfPresent(JSONValue.self, forKey: .usage)
         startedAt = try values.decodeIfPresent(String.self, forKey: .startedAt)
         completedAt = try values.decodeIfPresent(String.self, forKey: .completedAt)
@@ -626,6 +637,7 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
     var extensionOrigin: ExtensionToolOrigin? { if case .message(let value) = self { value.extensionOrigin } else { nil } }
     var toolSegmentId: String? { if case .message(let value) = self { value.toolSegmentId } else { nil } }
     var isError: Bool? { if case .message(let value) = self { value.isError } else { nil } }
+    var display: DisplayProjection? { if case .message(let value) = self { value.display } else { nil } }
     var details: JSONValue? {
         switch self {
         case .message(let value): value.details

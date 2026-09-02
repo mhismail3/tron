@@ -958,6 +958,15 @@ enum ChatTranscriptProjectionKernel {
             _ tool: PreparedTool,
             allowsLegacyContinuation: Bool
         ) {
+            // The reserved display tool owns a rich physical row. Isolate it
+            // from generic tool grouping so its pill may morph inline without
+            // changing or expanding neighboring tool calls.
+            if tool.presentation.toolName == "display" {
+                flushTools()
+                appendTools([tool])
+                flushTools()
+                return
+            }
             if let first = pendingTools.first {
                 let existingIsCanonical = first.classification == .canonical
                     && pendingTools.allSatisfy { $0.classification == .canonical }
@@ -1525,6 +1534,7 @@ enum ChatTranscriptProjectionKernel {
             lastProgressAt: canonical.lastProgressAt ?? live.lastProgressAt ?? live.updatedAt,
             progressSequence: canonical.progressSequence ?? live.progressSequence,
             outputTruncated: live.outputTruncated == true || canonical.outputTruncated,
+            display: canonical.display,
             extensionOrigin: canonical.extensionOrigin ?? live.extensionOrigin,
             toolSegmentId: canonical.toolSegmentId ?? live.toolSegmentId,
             groupId: canonical.groupId ?? live.groupId,
@@ -1571,6 +1581,7 @@ enum ChatTranscriptProjectionKernel {
             error: true, startedAt: tool.startedAt, completedAt: tool.completedAt,
             durationMs: tool.durationMs, lastProgressAt: tool.lastProgressAt,
             progressSequence: tool.progressSequence, outputTruncated: tool.outputTruncated,
+            display: tool.display,
             extensionOrigin: tool.extensionOrigin, toolSegmentId: tool.toolSegmentId,
             groupId: tool.groupId, groupIndex: tool.groupIndex,
             groupCount: tool.groupCount, groupFinalized: tool.groupFinalized
@@ -1609,6 +1620,7 @@ enum ChatTranscriptProjectionKernel {
                         // canonical call-to-result interval only as a fallback.
                         durationMs: result.durationMs,
                         lastProgressAt: result.lastProgressAt, progressSequence: result.progressSequence,
+                        display: result.display,
                         extensionOrigin: result.extensionOrigin,
                         toolSegmentId: part.toolSegmentId ?? result.toolSegmentId,
                         groupId: part.groupId, groupIndex: part.groupIndex,
@@ -1639,6 +1651,7 @@ enum ChatTranscriptProjectionKernel {
             error: item.isError == true, startedAt: item.startedAt,
             completedAt: item.completedAt ?? item.timestamp, durationMs: item.durationMs,
             lastProgressAt: item.lastProgressAt, progressSequence: item.progressSequence,
+            display: item.display,
             extensionOrigin: item.extensionOrigin, toolSegmentId: item.toolSegmentId
         )
     }

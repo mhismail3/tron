@@ -20,6 +20,7 @@ extension Color {
     static let tronInfo = Color(lightHex: "#0EA5E9", darkHex: "#38BDF8")
     static let tronAmber = Color(lightHex: "#D97706", darkHex: "#F59E0B")
     static let tronPurple = Color(lightHex: "#7C3AED", darkHex: "#8B5CF6")
+    static let tronLavender = Color(lightHex: "#8B5CF6", darkHex: "#C4B5FD")
     static let tronBlue = Color(lightHex: "#2563EB", darkHex: "#3B82F6")
     static let tronCyan = Color(lightHex: "#0891B2", darkHex: "#06B6D4")
     static let tronSky = Color(lightHex: "#0284C7", darkHex: "#38BDF8")

@@ -473,7 +473,8 @@ response admission, stale-identity and late-publication rejection, uncached one-
 and app-lifetime memory-pressure cleanup. Images and files share that single exact preview lease/priority slot;
 file bytes are fetched only after sheet intent and are never cached. The production row retains its 64-point
 loading/retry surface. Photos open the existing medium preview immediately from a nonoptional thumbnail-backed
-item route while full resolution loads. Every file chip opens a nonconditional loading/content/unavailable sheet:
+item route while full resolution loads; the thumbnail remains ordinary view input so the mounted zoom view receives
+the decoded full-resolution replacement instead of preserving the initial image as sheet-local state. Every file chip opens a nonconditional loading/content/unavailable sheet:
 Markdown uses the immutable document renderer, plain/code text uses native selectable TextKit, Unicode-safe
 rendering is capped at the existing 320,000-byte source bound with explicit omission, and PDFKit provides native
 multi-page scrolling up to the 512-page safety cap. Live composer files retain exact bytes within the existing

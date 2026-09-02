@@ -20,6 +20,7 @@ export function canonicalToolResultCallIDs(manager: TranscriptSessionReader): Re
 }
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
+import { admitDisplayProjection } from "../display/display-contract.js";
 import { trustedExtensionOriginKind } from "../extensions/owner-attribution.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { BlobStore } from "./blob-store.js";
@@ -1021,7 +1022,8 @@ export function projectMessage(
         usage: projectJson(message.usage),
         semantic: semanticForMessage("assistant"),
       };
-    case "toolResult":
+    case "toolResult": {
+      const display = admitDisplayProjection(message.toolName, message.details);
       return {
         id,
         parentId,
@@ -1035,6 +1037,7 @@ export function projectMessage(
         ...(toolLabels?.get(message.toolName) ? { toolLabel: toolLabels.get(message.toolName)! } : {}),
         isError: message.isError,
         ...(message.details === undefined ? {} : { details: projectJson(message.details) }),
+        ...(display ? { display } : {}),
         ...(message.usage === undefined ? {} : { usage: projectJson(message.usage) }),
         semantic: semanticForMessage("toolResult"),
         ...(toolMetadata ? {
@@ -1057,6 +1060,7 @@ export function projectMessage(
           completedAt: timestamp,
         }),
       };
+    }
     case "bashExecution":
       return {
         id,

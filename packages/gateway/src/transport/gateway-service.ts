@@ -25,6 +25,7 @@ import {
 } from "../machine/workspace-inspection-service.js";
 import { GitWorktreeService, type SessionSourceControlRequest } from "../machine/git-worktree-service.js";
 import type { UploadStore } from "../machine/upload-store.js";
+import { DISPLAY_CAPABILITY } from "../display/display-contract.js";
 import type { TerminalService } from "../machine/terminal-service.js";
 import type { TrustService } from "../admin/trust-service.js";
 import type { SettingsService } from "../admin/settings-service.js";
@@ -245,6 +246,7 @@ export class GatewayService {
         "workspace-history-diff.v1",
         "uploads.v1",
         "uploads-status.v2",
+        DISPLAY_CAPABILITY,
         "terminal.v1",
         "extension-presentation.v1",
         EXTENSION_ACTIVITY_HISTORY_CAPABILITY,
@@ -758,13 +760,15 @@ export class GatewayService {
           this.processTranscriptLeases.releaseSession(sessionId);
           await this.dependencies.sessions.delete(sessionId);
           this.dependencies.sessionDeleted(sessionId);
-          try {
-            await this.dependencies.uploads.removeSession(sessionId);
-          } catch {
+          const cleanup = await Promise.allSettled([
+            this.dependencies.uploads.removeSession(sessionId),
+            this.dependencies.sessions.removeDisplayArtifacts(sessionId),
+          ]);
+          if (cleanup.some((result) => result.status === "rejected")) {
             this.dependencies.logger?.log(
               "warning",
-              "A canonical session was deleted, but its attachment cleanup remains pending",
-              { event: "uploads.session-cleanup-pending", source: "uploads" },
+              "A canonical session was deleted, but owned artifact cleanup remains pending",
+              { event: "artifacts.session-cleanup-pending", source: "storage" },
             );
           }
           return { deleted: true };

@@ -74,6 +74,13 @@ export function attributeExtensions(base: LoadExtensionsResult): LoadExtensionsR
   if (notifyOwners.filter((extension) => extension.path === "<inline:tron-notify>").length > 1) {
     throw new GatewayError("conflict", "The first-party notify tool was registered more than once");
   }
+  const displayOwners = base.extensions.filter((extension) => extension.tools.has("display"));
+  if (displayOwners.some((extension) => extension.path !== "<inline:tron-display>")) {
+    throw new GatewayError("conflict", "The display tool name is reserved by Tron");
+  }
+  if (displayOwners.filter((extension) => extension.path === "<inline:tron-display>").length > 1) {
+    throw new GatewayError("conflict", "The first-party display tool was registered more than once");
+  }
   for (const extension of base.extensions) {
     const owner = extensionOwnerFor(extension);
     for (const [event, handlers] of extension.handlers) {

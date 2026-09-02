@@ -396,12 +396,14 @@ describe("session transcript paging", () => {
     ) => operation());
     const remove = vi.fn(async () => { throw new Error("cleanup failed"); });
     const removeSession = vi.fn(async () => { throw new Error("cleanup failed"); });
+    const removeDisplayArtifacts = vi.fn(async () => { throw new Error("cleanup failed"); });
     const releaseImport = vi.fn(async () => {});
     const sessionDeleted = vi.fn();
     const service = new GatewayService({
       sessions: {
         importFromJsonl: async () => ({ id: "imported" }),
         delete: async () => {},
+        removeDisplayArtifacts,
       },
       uploads: {
         prepareSessionImport: async () => ({
@@ -428,6 +430,7 @@ describe("session transcript paging", () => {
     expect(releaseImport).toHaveBeenCalledTimes(1);
     expect(sessionDeleted).toHaveBeenCalledWith("deleted");
     expect(removeSession).toHaveBeenCalledWith("deleted");
+    expect(removeDisplayArtifacts).toHaveBeenCalledWith("deleted");
   });
 
   it("releases bounded import staging after a definitive import failure", async () => {

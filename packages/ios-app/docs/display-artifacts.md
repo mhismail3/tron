@@ -1,0 +1,33 @@
+# Display artifacts
+
+Tron's reserved first-party `display` tool presents agent-selected project artifacts and public HTTPS references without making native UI an extension-owned capability. Canonical Pi JSONL records one ordinary `tron.display.v1` tool result; Gateway artifact bytes are immutable durable sidecars; every iOS value is a bounded disposable projection.
+
+## Surfaces
+
+The model requests a surface, but native policy resolves it by typed content kind and advertised eligibility:
+
+- **Sheet** is the default and universal fallback. The running pill settles to a completed pill; an explicit tap opens the centrally routed `DisplaySheet`.
+- **Inline** keeps the tool call's physical row identity. Its running pill and collapsed result share the normal left transcript edge. Expansion settles to a nearly full-width, rounded lavender Liquid Glass container, visually distinct from both user messages and generic tool pills. The viewport takes only the height short content needs and clips at a bounded maximum; inline Markdown remains part of the transcript's sole vertical scroll owner, and the card's tightly grouped compact circular Liquid Glass corner actions retain 44-point touch targets, and its reduced header-to-content inset keeps the preview visually connected while exposing the complete scrolling sheet or collapsing back to the canonical pill. Public web, HLS, generic documents, and interactive HTML do not become inline scroll children.
+- **Floating** keeps the completed pill and may publish one session-local overlay after an eligible live completion. The panel is dragged only by its header, remains clamped outside navigation/composer exclusion regions, has close and maximize controls, and is recoverable by tapping the canonical pill. It is not a second `UIWindow` or system Picture in Picture.
+
+Unsupported requested surfaces deterministically fall back to sheet. Audio/video larger than 50 MiB is sheet-only so an agent cannot trigger a large automatic inline or floating download. The agent cannot choose dimensions, coordinates, z-order, autoplay, permissions, or whether close controls exist.
+
+## Ownership and lifecycle
+
+`ChatTranscriptProjectionKernel` keeps a display invocation in an isolated one-tool run so generic neighboring tools never morph with it. `ChatToolDescriptor` carries the strictly decoded display projection and the bounded requested surface needed by the running pill. Live-to-canonical reconciliation retains the tool-call physical identity and canonical result wins.
+
+`ChatRoutes` owns the display sheet. `ChatSessionPresentation` owns only disposable selected-sheet, one floating route, one deferred floating route, and a bounded exact-revision auto-presentation ledger. `ChatFloatingDisplayHost` is mounted over the chat content surface rather than inside the transcript scroll view. Closing, dragging, collapsing, and maximizing do not mutate Gateway or JSONL.
+
+A floating panel appears automatically only for a completion added after the current installed-transcript baseline while the exact chat is ready, foreground-active, presentation publication is allowed, and no panel is already user-owned. The baseline resets rather than publishing when history or reconnect installs a transcript, so cache installation, foreground restoration, and background completion retain only the pill. A covering descendant may defer one candidate; route retirement clears all display presentation state.
+
+## Rendering and security
+
+Every display includes alt/fallback text and every renderer publishes that description to accessibility. Artifact requests use the selected profile plus exact session and opaque artifact identity. Image sheets reuse the exact historical photo-chip sheet—including its medium detent, concentric viewport, native pinch/double-tap zoom, overlay title, and glass confirmation control—while loading through `ChatMediaLoader`; local photo chips keep the thumbnail only as immediate presentation input and propagate the decoded full-resolution replacement into the mounted zoom view instead of trapping that thumbnail in sheet-local state. Inline images keep their bounded transcript renderer. Inline PDFs and bounded text also reuse existing native preview preparation, while unsupported generic documents stay sheet-only. Local audio/video is downloaded through the authenticated bounded file transport, validated against its advertised size, played from protected temporary storage without autoplay, and discarded on cancellation or teardown. Public webpage/HLS descriptors reject credentials, query/fragment persistence, private/reserved literals, and local DNS suffixes, then open as full-height, full-bleed `SFSafariViewController` sheets with one collapsible native browser bar and no duplicate Tron navigation chrome. Safari's close control dismisses the owning sheet, and Gateway credentials are never attached to remote redirects, playlists, segments, or keys.
+
+Generated HTML uses a nonpersistent `WKWebView`, disabled JavaScript, no base URL or file access, user-action media policy, blocked popup creation, navigation restricted to `about`, and a strict CSP that disables network, forms, frames, and script. SVG is classified with active HTML rather than inert image decoding. Renderer failure preserves the canonical fallback instead of hiding the transcript item.
+
+Inline rendering is lazy and bounded. Text/PDF payloads retain the existing 25 MiB encoded boundary and preparation limits. Images cap decoded dimensions through `ChatMediaLoader`. Media teardown pauses and clears AVFoundation state before deleting its staged file. Floating content is session-local and is retired on background or route teardown.
+
+## Accessibility
+
+Display pills remain one compact control with their destination in the accessibility label. Inline content has separate 44-point collapse and optional sheet controls. Floating panels expose close/maximize controls and named corner movement actions so drag is never the only input. Agent-opened floating content does not intentionally move VoiceOver focus. Reduce Motion replaces scale/geometry transitions with short fades.

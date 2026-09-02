@@ -4,26 +4,51 @@ import UIKit
 /// The historical chat photo preview: one medium-height, edge-to-edge media
 /// sheet with native pinch/double-tap zoom and concentric sheet corners.
 struct AttachmentImagePreviewSheet: View {
-    let image: UIImage
-    var title = "Photo"
+    private enum Source {
+        case local
+        case remote(identity: ChatMediaIdentity, leaseID: UUID)
+    }
 
+    private let source: Source
+    /// Local callers pass a thumbnail first and replace it with the decoded
+    /// full preview. This must remain ordinary input rather than `@State`, so
+    /// the higher-resolution replacement reaches the zoom view.
+    private let localImage: UIImage?
+    private let accessibilityLabel: String
+    var title: String
+
+    @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
+    @State private var remoteImage: UIImage?
+    @State private var failed = false
     @State private var isZoomed = false
+
+    init(image: UIImage, title: String = "Photo") {
+        source = .local
+        localImage = image
+        accessibilityLabel = "Preview photo"
+        self.title = title
+        _remoteImage = State(initialValue: nil)
+    }
+
+    init(
+        remote identity: ChatMediaIdentity,
+        leaseID: UUID,
+        title: String,
+        accessibilityLabel: String
+    ) {
+        source = .remote(identity: identity, leaseID: leaseID)
+        localImage = nil
+        self.accessibilityLabel = accessibilityLabel
+        self.title = title
+        _remoteImage = State(initialValue: nil)
+    }
 
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
-                AttachmentZoomableImagePreview(
-                    image: image,
-                    onZoomStateChange: { isZoomed = $0 }
-                )
-                .ignoresSafeArea(.container, edges: .all)
-                .clipShape(viewportShape)
-                .contentShape(viewportShape)
-                .padding(AttachmentImagePreviewLayout.viewportInset)
-                .accessibilityLabel("Preview photo")
-
+                previewViewport
                 previewChrome
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
@@ -36,6 +61,68 @@ struct AttachmentImagePreviewSheet: View {
         // fixed app radius that can diverge on different phones.
         .presentationCornerRadius(nil)
         .presentationContentInteraction(.scrolls)
+        .task(id: remoteIdentity) { await loadRemoteImage() }
+        .onDisappear { cancelRemoteLoad() }
+    }
+
+    @ViewBuilder
+    private var previewViewport: some View {
+        if let resolvedImage {
+            AttachmentZoomableImagePreview(
+                image: resolvedImage,
+                accessibilityLabel: accessibilityLabel,
+                onZoomStateChange: { isZoomed = $0 }
+            )
+            .ignoresSafeArea(.container, edges: .all)
+            .clipShape(viewportShape)
+            .contentShape(viewportShape)
+            .padding(AttachmentImagePreviewLayout.viewportInset)
+            .accessibilityLabel(accessibilityLabel)
+        } else if failed {
+            TronInfoCard(
+                icon: "photo.badge.exclamationmark",
+                text: "The photo is no longer available for preview.",
+                accent: .tronEmerald
+            )
+            .padding(AttachmentImagePreviewLayout.viewportInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityLabel(accessibilityLabel)
+        } else {
+            TronLoadingState(label: "Loading photo…", accent: .tronEmerald)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityLabel(accessibilityLabel)
+        }
+    }
+
+    private var resolvedImage: UIImage? {
+        switch source {
+        case .local: localImage
+        case .remote: remoteImage
+        }
+    }
+
+    private var remoteIdentity: ChatMediaIdentity? {
+        guard case .remote(let identity, _) = source else { return nil }
+        return identity
+    }
+
+    private func loadRemoteImage() async {
+        guard case .remote(let identity, let leaseID) = source else { return }
+        remoteImage = nil
+        failed = false
+        do {
+            remoteImage = try await model.chatMedia.fullPreview(for: identity, leaseID: leaseID)
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled else { return }
+            failed = true
+        }
+    }
+
+    private func cancelRemoteLoad() {
+        guard case .remote(let identity, let leaseID) = source else { return }
+        model.chatMedia.cancelFullPreview(for: identity, leaseID: leaseID)
     }
 
     private var viewportShape: ConcentricRectangle {
@@ -135,6 +222,7 @@ enum AttachmentImagePreviewLayout {
 
 private struct AttachmentZoomableImagePreview: UIViewRepresentable {
     let image: UIImage
+    let accessibilityLabel: String
     let onZoomStateChange: (Bool) -> Void
 
     func makeUIView(context: Context) -> AttachmentImageZoomScrollView {
@@ -143,7 +231,7 @@ private struct AttachmentZoomableImagePreview: UIViewRepresentable {
 
     func updateUIView(_ scrollView: AttachmentImageZoomScrollView, context: Context) {
         scrollView.onZoomStateChange = onZoomStateChange
-        scrollView.setImage(image)
+        scrollView.setImage(image, accessibilityLabel: accessibilityLabel)
     }
 }
 
@@ -196,7 +284,8 @@ private final class AttachmentImageZoomScrollView: UIScrollView, UIScrollViewDel
         addGestureRecognizer(doubleTap)
     }
 
-    func setImage(_ image: UIImage) {
+    func setImage(_ image: UIImage, accessibilityLabel: String) {
+        imageView.accessibilityLabel = accessibilityLabel
         guard imageView.image !== image else { return }
         setZoomScale(minimumZoomScale, animated: false)
         contentOffset = .zero

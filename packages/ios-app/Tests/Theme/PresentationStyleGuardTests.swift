@@ -1868,6 +1868,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/AttachmentImagePreviewSheet.swift"),
             encoding: .utf8
         )
+        let display = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatDisplayViews.swift"),
+            encoding: .utf8
+        )
         let transcript = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
             encoding: .utf8
@@ -1967,6 +1971,15 @@ struct PresentationStyleGuardTests {
         #expect(preview.contains(".presentationDetents([.medium])"))
         #expect(preview.contains("ConcentricRectangle("))
         #expect(preview.contains("maximumZoomScale = 5"))
+        #expect(preview.contains("remote identity: ChatMediaIdentity"))
+        #expect(preview.contains("private let localImage: UIImage?"))
+        #expect(preview.contains("case .local: localImage"))
+        #expect(!preview.contains("_previewImage = State(initialValue: image)"))
+        #expect(preview.contains("model.chatMedia.fullPreview(for: identity, leaseID: leaseID)"))
+        #expect(preview.contains("model.chatMedia.cancelFullPreview(for: identity, leaseID: leaseID)"))
+        #expect(display.contains("AttachmentImagePreviewSheet("))
+        #expect(display.contains("remote: identity"))
+        #expect(display.contains("accessibilityLabel: route.display.altText"))
         let sentImageChip = (transcript.components(separatedBy: "private struct TranscriptImageChip").dropFirst().first ?? "")
             .components(separatedBy: "private struct TranscriptFileChip").first ?? ""
         #expect(!sentImageChip.isEmpty)
@@ -1988,6 +2001,70 @@ struct PresentationStyleGuardTests {
         #expect(transcript.contains("struct TranscriptFileChip"))
         #expect(transcript.contains("model.chatMedia.fileThumbnail("))
         #expect(transcript.contains("AttachmentThumbnailSurface(image: currentThumbnail"))
+    }
+
+    @Test("inline displays use a stable inset lavender Liquid Glass container")
+    func inlineDisplayContainer() throws {
+        let source = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatDisplayViews.swift"),
+            encoding: .utf8
+        )
+        let container = try #require(
+            source.components(separatedBy: "private struct DisplayInlineContainer: View").dropFirst().first?
+                .components(separatedBy: "enum DisplayRenderContext").first
+        )
+        let transcript = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptScrollView.swift"),
+            encoding: .utf8
+        )
+        #expect(source.contains("static let maximumViewportHeight: CGFloat = 320"))
+        #expect(source.contains("static let cornerRadius: CGFloat = 22"))
+        #expect(source.contains("static let controlDiameter: CGFloat = 34"))
+        #expect(source.contains("static let controlTouchTarget: CGFloat = 44"))
+        #expect(source.contains("static let contentTopPadding: CGFloat = 4"))
+        #expect(container.contains(".frame(maxHeight: DisplayInlineLayoutPolicy.maximumViewportHeight"))
+        #expect(container.contains(".tronGlassSurface("))
+        #expect(container.contains("accent: .tronLavender"))
+        #expect(container.contains("tintOpacity: 0.10"))
+        #expect(container.contains("GlassEffectContainer(spacing: 2)"))
+        #expect(container.contains("HStack(spacing: 2)"))
+        #expect(container.contains("DisplayInlineHeaderButton("))
+        #expect(container.contains(".padding(.trailing, 8)"))
+        #expect(container.contains(".glassEffect("))
+        #expect(!container.contains("Divider()"))
+        #expect(!source.contains("completedInlineDisplay"))
+        let inlineMarkdown = try #require(
+            source.components(separatedBy: "if context == .inline {").dropFirst().first?
+                .components(separatedBy: "} else {").first
+        )
+        #expect(inlineMarkdown.contains("TronMarkdownView(document: document"))
+        #expect(inlineMarkdown.contains(".padding(.top, DisplayInlineLayoutPolicy.contentTopPadding)"))
+        #expect(!inlineMarkdown.contains("ScrollView"))
+        #expect(transcript.contains(".padding(.horizontal, 16)"))
+        #expect(!transcript.contains("private func horizontalPadding(for item: ChatTranscriptRenderItem)"))
+    }
+
+    @Test("display webpages use one full-height native browser sheet")
+    func displayWebpageSheet() throws {
+        let source = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatDisplayViews.swift"),
+            encoding: .utf8
+        )
+        let sheet = try #require(
+            source.components(separatedBy: "struct DisplaySheet: View").dropFirst().first
+        )
+        let remoteBranch = try #require(
+            sheet.components(separatedBy: "} else if let artifact = route.display.artifact,").first
+        )
+        #expect(remoteBranch.contains("route.display.kind == .webpage || route.display.kind == .hls"))
+        #expect(remoteBranch.contains("SafariDisplayView(url: url)"))
+        #expect(remoteBranch.contains(".ignoresSafeArea(.container, edges: .all)"))
+        #expect(remoteBranch.contains(".presentationDetents([.large])"))
+        #expect(!remoteBranch.contains("NavigationStack"))
+        #expect(!remoteBranch.contains("TronSheetTitle"))
+        #expect(source.contains("configuration.barCollapsingEnabled = true"))
+        #expect(source.contains("controller.delegate = context.coordinator"))
+        #expect(source.contains("func safariViewControllerDidFinish"))
     }
 
     @Test("transcript media is epoch-keyed, downsampled, bounded, and single-flight")
@@ -2017,7 +2094,7 @@ struct PresentationStyleGuardTests {
         #expect(loader.contains("CGImageSourceCreateThumbnailAtIndex"))
         #expect(loader.contains("thumbnailFlights[identity]"))
         #expect(loader.contains("previewFlight?.task.cancel()"))
-        #expect(model.contains("func chatMediaIdentity(blobID: String)"))
+        #expect(model.contains("func chatMediaIdentity(blobID: String, sessionID: String? = nil)"))
         #expect(model.contains("chatMedia.removeAll()"))
         #expect(client.contains("profile.id == profileID"))
         #expect(client.contains("connection?.id == connectionID"))

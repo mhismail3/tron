@@ -352,7 +352,7 @@ struct AttachmentFilePreviewSheet: View {
     }
 }
 
-private struct AttachmentPDFView: UIViewRepresentable {
+struct AttachmentPDFView: UIViewRepresentable {
     let document: PDFDocument
 
     func makeUIView(context: Context) -> PDFView {

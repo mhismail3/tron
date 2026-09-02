@@ -141,7 +141,7 @@ const packages = new PackageService(
 const legacyImport = new LegacyImportService(config.tronHome);
 
 let stopping = false;
-let uploadMaintenanceTimer: NodeJS.Timeout | undefined;
+let storageMaintenanceTimer: NodeJS.Timeout | undefined;
 let uploadStoragePressure: "normal" | "low" | "exhausted" = "normal";
 async function shutdown(reason: string, exitCode = 0): Promise<void> {
   if (stopping) return;
@@ -151,8 +151,8 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
   forced.unref();
   try {
     workRegistry.beginDrain();
-    if (uploadMaintenanceTimer) clearInterval(uploadMaintenanceTimer);
-    uploadMaintenanceTimer = undefined;
+    if (storageMaintenanceTimer) clearInterval(storageMaintenanceTimer);
+    storageMaintenanceTimer = undefined;
     await transport.close();
     await workRegistry.requestCancellation();
     // Administrative restart already waited without a deadline. Signal/error
@@ -279,10 +279,13 @@ await transport.listen(async () => {
   transport.setStartupPhase("storage-warming");
   await sessions.initializeBlobStorage();
 });
-const maintainUploads = async (): Promise<void> => {
+const maintainStorage = async (): Promise<void> => {
   try {
     const liveSessionIds = new Set((await sessions.list("all")).map((session) => session.id));
-    const status = await uploads.maintain(liveSessionIds);
+    const [status] = await Promise.all([
+      uploads.maintain(liveSessionIds),
+      sessions.maintainDisplayArtifacts(liveSessionIds),
+    ]);
     if (status.storagePressure !== uploadStoragePressure) {
       logger.log(
         status.storagePressure === "normal" ? "info" : "warning",
@@ -296,14 +299,14 @@ const maintainUploads = async (): Promise<void> => {
   } catch {
     logger.log(
       "warning",
-      "Bounded upload maintenance failed and will retry",
-      { event: "uploads.maintenance-failed", source: "uploads" },
+      "Bounded artifact maintenance failed and will retry",
+      { event: "storage.maintenance-failed", source: "storage" },
     );
   }
 };
-await maintainUploads();
-uploadMaintenanceTimer = setInterval(() => void maintainUploads(), 10 * 60_000);
-uploadMaintenanceTimer.unref();
+await maintainStorage();
+storageMaintenanceTimer = setInterval(() => void maintainStorage(), 10 * 60_000);
+storageMaintenanceTimer.unref();
 } catch (error) {
   await releaseRuntimeLock();
   throw error;

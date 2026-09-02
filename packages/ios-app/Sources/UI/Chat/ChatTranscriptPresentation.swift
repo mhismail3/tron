@@ -1002,6 +1002,8 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     let lastProgressAt: String?
     let progressSequence: Int?
     let outputTruncated: Bool
+    let display: DisplayProjection?
+    let requestedDisplaySurface: DisplaySurface?
     let extensionOrigin: ExtensionToolOrigin?
     let toolSegmentId: String?
     let groupId: String?
@@ -1021,6 +1023,9 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
         lastProgressAt = tool.lastProgressAt
         progressSequence = tool.progressSequence
         outputTruncated = tool.outputTruncated
+        display = tool.display
+        requestedDisplaySurface = tool.display.map(DisplayPresentationPolicy.effectiveSurface)
+            ?? DisplayPresentationPolicy.invocationSurface(toolName: tool.toolName, request: tool.request)
         extensionOrigin = tool.extensionOrigin
         toolSegmentId = tool.toolSegmentId
         groupId = tool.groupId
@@ -1092,6 +1097,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     let lastProgressAt: String?
     let progressSequence: Int?
     let outputTruncated: Bool
+    let display: DisplayProjection?
     let extensionOrigin: ExtensionToolOrigin?
     let toolSegmentId: String?
     let groupId: String?
@@ -1115,6 +1121,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         lastProgressAt: String?,
         progressSequence: Int?,
         outputTruncated: Bool = false,
+        display: DisplayProjection? = nil,
         extensionOrigin: ExtensionToolOrigin? = nil,
         toolSegmentId: String? = nil,
         groupId: String? = nil,
@@ -1137,6 +1144,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         self.lastProgressAt = lastProgressAt
         self.progressSequence = progressSequence
         self.outputTruncated = outputTruncated || response?.hasToolOutputTruncationMetadata == true
+        self.display = display
         self.extensionOrigin = extensionOrigin
         self.toolSegmentId = toolSegmentId
         self.groupId = groupId
@@ -1161,6 +1169,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         lastProgressAt = descriptor.lastProgressAt
         progressSequence = descriptor.progressSequence
         outputTruncated = descriptor.outputTruncated
+        display = descriptor.display
         extensionOrigin = descriptor.extensionOrigin
         toolSegmentId = descriptor.toolSegmentId
         groupId = descriptor.groupId
