@@ -170,6 +170,18 @@ const automationScheduler = new AutomationScheduler(automationStore, automationE
     message,
     { event: "automation.dispatch-failed", source: "automations" },
   ),
+  onBlocked: async (record, run) => {
+    await notifications.enqueue({
+      sessionId: record.targetSessionId,
+      sourceId: `automation-blocked:${run.runId}`,
+      kind: "explicit",
+      title: "Automation needs attention",
+      message: run.state === "outcomeUnknown"
+        ? "An automation stopped because its last outcome could not be confirmed."
+        : "An automation paused after repeated failures.",
+      route: { sessionId: record.targetSessionId, machineId: config.machineId },
+    });
+  },
 });
 automations = new AutomationService(automationStore, automationScheduler, sessions);
 automationToolOperations = new GatewayScheduleToolOperations(automations, receipts);

@@ -145,6 +145,7 @@ enum AutomationAdmissionPolicy {
         case "calendar":
             guard trigger.at == nil, trigger.everySeconds == nil, trigger.anchorAt == nil,
                   let timezone = trigger.timezone, bounded(timezone, maximum: 128),
+                  TimeZone(identifier: timezone) != nil,
                   let localTime = trigger.localTime,
                   localTime.range(of: #"^(?:[01]\d|2[0-3]):[0-5]\d$"#, options: .regularExpression) != nil,
                   let weekdays = trigger.weekdays,

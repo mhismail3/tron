@@ -94,6 +94,10 @@ export interface AutomationRecord {
   history: AutomationRun[];
 }
 
+export type AutomationRunSummary = Pick<AutomationRun,
+  "runId" | "state" | "scheduledFor" | "createdAt" | "startedAt" | "terminalAt" | "reason" | "preAdmissionAttemptCount" | "notificationAdmissionStatus"
+>;
+
 export interface AutomationSummary {
   id: string;
   revision: number;

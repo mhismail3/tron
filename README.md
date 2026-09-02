@@ -26,8 +26,10 @@ second product users must configure or operate.
 - **iOS** owns chat presentation, onboarding, settings, attachments, forks,
   context inspection, and SwiftTerm presentation.
 - **Gateway** owns enrollment, authentication, detached session supervision,
-  uploads, filesystem access, project trust, package administration, extension
-  interactions, and PTYs.
+  durable automations, uploads, filesystem access, project trust, package
+  administration, extension interactions, and PTYs. Its first-party `schedule`
+  tool can create bounded one-time, interval, and timezone calendar work for an
+  existing persisted session; uncertain accepted work is never replayed blindly.
 - **The embedded runtime** owns model/provider behavior, tools, extensions,
   settings, credentials, compaction, retries, and canonical session JSONL.
 - **The Mac app** installs and supervises the always-running gateway and emits

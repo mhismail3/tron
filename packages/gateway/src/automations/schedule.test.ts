@@ -32,6 +32,15 @@ describe("automation schedules", () => {
     expect(nextAutomationOccurrence(trigger, Date.parse("2026-11-01T05:30:00Z"))).toBe("2026-11-08T06:30:00.000Z");
   });
 
+  it("selects one latest calendar occurrence after long downtime", () => {
+    const trigger = { kind: "calendar", timezone: "UTC", localTime: "09:00", weekdays: [1, 2, 3, 4, 5] } as const;
+    expect(classifyDueOccurrence(trigger, "2025-01-01T09:00:00.000Z", Date.parse("2026-09-02T15:00:00Z"), "latest")).toEqual({
+      dispatchAt: "2026-09-02T09:00:00.000Z",
+      nextOccurrenceAt: "2026-09-03T09:00:00.000Z",
+      skipped: [],
+    });
+  });
+
   it("keeps occurrence identities stable and definition-revision specific", () => {
     const first = automationOccurrenceId("automation", 1, "2026-01-01T00:00:00.000Z");
     expect(first).toHaveLength(43);

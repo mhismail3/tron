@@ -13,7 +13,7 @@ import {
   MAXIMUM_AUTOMATIONS,
   admitsAutomationRecord,
 } from "./automation-contract.js";
-import { firstAutomationOccurrence } from "./schedule.js";
+import { firstAutomationOccurrence, nextAutomationOccurrence } from "./schedule.js";
 import type {
   AutomationCreateInput,
   AutomationRecord,
@@ -34,6 +34,16 @@ interface TargetRekeyIntent {
   nextSessionId: string;
   automationIds: string[];
 }
+
+interface TargetBlockIntent {
+  version: 1;
+  kind: "target-block";
+  sessionId: string;
+  reason: string;
+  automationIds: string[];
+}
+
+type MaintenanceIntent = TargetRekeyIntent | TargetBlockIntent;
 
 export interface AutomationStoreStatus {
   ready: boolean;
@@ -94,16 +104,28 @@ export function automationSummary(record: AutomationRecord): AutomationSummary {
   };
 }
 
-function isRekeyIntent(value: unknown): value is TargetRekeyIntent {
+function isAutomationIdList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= MAXIMUM_AUTOMATIONS
+    && value.every((id) => typeof id === "string" && canonicalName.test(`${id}.json`));
+}
+
+function isMaintenanceIntent(value: unknown): value is MaintenanceIntent {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const intent = value as Record<string, unknown>;
-  const keys = Object.keys(intent);
-  return keys.length === 5 && keys.every((key) => ["version", "kind", "previousSessionId", "nextSessionId", "automationIds"].includes(key))
-    && intent.version === 1 && intent.kind === "target-rekey"
-    && typeof intent.previousSessionId === "string" && Buffer.byteLength(intent.previousSessionId) > 0 && Buffer.byteLength(intent.previousSessionId) <= 200
-    && typeof intent.nextSessionId === "string" && Buffer.byteLength(intent.nextSessionId) > 0 && Buffer.byteLength(intent.nextSessionId) <= 200
-    && Array.isArray(intent.automationIds) && intent.automationIds.length <= MAXIMUM_AUTOMATIONS
-    && intent.automationIds.every((id) => typeof id === "string" && canonicalName.test(`${id}.json`));
+  if (intent.version !== 1 || !isAutomationIdList(intent.automationIds)) return false;
+  if (intent.kind === "target-rekey") {
+    const keys = Object.keys(intent);
+    return keys.length === 5 && keys.every((key) => ["version", "kind", "previousSessionId", "nextSessionId", "automationIds"].includes(key))
+      && typeof intent.previousSessionId === "string" && Buffer.byteLength(intent.previousSessionId) > 0 && Buffer.byteLength(intent.previousSessionId) <= 200
+      && typeof intent.nextSessionId === "string" && Buffer.byteLength(intent.nextSessionId) > 0 && Buffer.byteLength(intent.nextSessionId) <= 200;
+  }
+  if (intent.kind === "target-block") {
+    const keys = Object.keys(intent);
+    return keys.length === 5 && keys.every((key) => ["version", "kind", "sessionId", "reason", "automationIds"].includes(key))
+      && typeof intent.sessionId === "string" && Buffer.byteLength(intent.sessionId) > 0 && Buffer.byteLength(intent.sessionId) <= 200
+      && typeof intent.reason === "string" && Buffer.byteLength(intent.reason) > 0 && Buffer.byteLength(intent.reason) <= 256;
+  }
+  return false;
 }
 
 export class AutomationStore {
@@ -111,6 +133,9 @@ export class AutomationStore {
   private readonly mutex = new AsyncMutex();
   private readonly records = new Map<string, AutomationRecord>();
   private readonly bytes = new Map<string, number>();
+  private readonly occupiedIds = new Set<string>();
+  private readonly terminalReservations = new Map<string, number>();
+  private unavailableBytes = 0;
   private readonly now: () => number;
   private readonly changed: (automationId?: string) => void;
   private initialized = false;
@@ -142,6 +167,9 @@ export class AutomationStore {
         const match = canonicalName.exec(name);
         if (!match) continue;
         const id = match[1]!;
+        this.occupiedIds.add(id);
+        let physicalBytes = 0;
+        try { physicalBytes = (await lstat(join(this.directory, name))).size; } catch {}
         try {
           const stored = await readSecureJson<unknown>(join(this.directory, name), MAXIMUM_AUTOMATION_RECORD_BYTES);
           if (!stored.present || !admitsAutomationRecord(stored.value) || stored.value.id !== id) {
@@ -155,7 +183,9 @@ export class AutomationStore {
             continue;
           }
           this.records.set(id, clone(stored.value));
-          this.bytes.set(id, serializedBytes(stored.value));
+          const bytes = serializedBytes(stored.value);
+          this.bytes.set(id, bytes);
+          this.terminalReservations.set(id, this.terminalReservation(stored.value, bytes));
         } catch (error) {
           if (error instanceof SecureJsonFileError || error instanceof RangeError) {
             this.malformedRecordCount += 1;
@@ -163,9 +193,11 @@ export class AutomationStore {
             continue;
           }
           throw error;
+        } finally {
+          if (!this.records.has(id)) this.unavailableBytes += physicalBytes;
         }
       }
-      if (this.records.size > MAXIMUM_AUTOMATIONS || this.aggregateBytes() > MAXIMUM_AUTOMATION_AGGREGATE_BYTES) {
+      if (this.occupiedIds.size > MAXIMUM_AUTOMATIONS || this.aggregateBytes() + this.reservedTerminalBytes() > MAXIMUM_AUTOMATION_AGGREGATE_BYTES) {
         throw new GatewayError("conflict", "Automation storage exceeds its bounded capacity");
       }
       await this.resumeMaintenanceIntent();
@@ -179,7 +211,7 @@ export class AutomationStore {
       ready: this.initialized,
       degraded: this.degraded,
       automationCount: this.records.size,
-      aggregateBytes: this.aggregateBytes(),
+      aggregateBytes: this.aggregateBytes() + this.reservedTerminalBytes(),
       malformedRecordCount: this.malformedRecordCount,
       catalogRevision: this.catalogRevision,
     };
@@ -206,8 +238,9 @@ export class AutomationStore {
   async create(input: AutomationCreateInput): Promise<AutomationRecord> {
     return this.mutex.run(async () => {
       this.assertInitialized();
-      if (this.records.size >= MAXIMUM_AUTOMATIONS) throw new GatewayError("busy", "Automation capacity is full", true);
-      const id = randomUUID();
+      if (this.occupiedIds.size >= MAXIMUM_AUTOMATIONS) throw new GatewayError("busy", "Automation capacity is full", true);
+      let id = randomUUID();
+      while (this.occupiedIds.has(id)) id = randomUUID();
       const now = new Date(this.now()).toISOString();
       const record: AutomationRecord = {
         schemaVersion: 1,
@@ -266,6 +299,9 @@ export class AutomationStore {
       delete next.blockedReason;
       delete next.queuedLatestOccurrence;
       if (activation === "enabled") {
+        if (current.blockedReason === "outcome-unknown") {
+          throw new GatewayError("conflict", "Resolve the uncertain run before enabling this automation");
+        }
         next.consecutiveFailureCount = 0;
         const occurrence = firstAutomationOccurrence(current.trigger, this.now());
         if (occurrence === undefined) delete next.nextOccurrenceAt;
@@ -300,11 +336,12 @@ export class AutomationStore {
       next.activation = "enabled";
       next.consecutiveFailureCount = outcome === "failed" ? 1 : 0;
       delete next.blockedReason;
-      const occurrence = firstAutomationOccurrence(next.trigger, this.now());
-      if (occurrence === undefined) {
+      if (next.trigger.kind === "once") {
         delete next.nextOccurrenceAt;
         next.activation = "completed";
       } else {
+        const occurrence = nextAutomationOccurrence(next.trigger, this.now());
+        if (occurrence === undefined) throw new Error("Recurring automation did not produce a future occurrence");
         next.nextOccurrenceAt = occurrence;
       }
       return next;
@@ -320,6 +357,8 @@ export class AutomationStore {
       await durableRemove(this.path(id));
       this.records.delete(id);
       this.bytes.delete(id);
+      this.terminalReservations.delete(id);
+      this.occupiedIds.delete(id);
       this.didChange(id);
     });
   }
@@ -344,22 +383,16 @@ export class AutomationStore {
   async blockTarget(sessionId: string, reason = "target-session-deleted"): Promise<string[]> {
     return this.mutex.run(async () => {
       this.assertInitialized();
-      const affected: string[] = [];
-      for (const current of this.records.values()) {
-        if (current.targetSessionId !== sessionId || current.activation === "completed") continue;
-        const next = clone(current);
-        next.revision = current.revision + 1;
-        next.stateRevision = current.stateRevision + 1;
-        next.activation = "blocked";
-        next.blockedReason = reason;
-        delete next.nextOccurrenceAt;
-        delete next.queuedLatestOccurrence;
-        next.updatedAt = new Date(this.now()).toISOString();
-        await this.publishReplacement(current, next, false);
-        affected.push(current.id);
-      }
-      if (affected.length > 0) this.didChange();
-      return affected;
+      const automationIds = [...this.records.values()]
+        .filter((record) => record.targetSessionId === sessionId && record.activation !== "completed")
+        .map((record) => record.id);
+      if (automationIds.length === 0) return [];
+      const intent: TargetBlockIntent = { version: 1, kind: "target-block", sessionId, reason, automationIds };
+      await durableAtomicWriteJson(join(this.directory, MAINTENANCE_INTENT), intent);
+      await this.applyBlockIntent(intent);
+      await durableRemove(join(this.directory, MAINTENANCE_INTENT));
+      this.didChange();
+      return automationIds;
     });
   }
 
@@ -396,34 +429,73 @@ export class AutomationStore {
   }
 
   private async publishNew(record: AutomationRecord): Promise<void> {
+    this.trimHistoryToRecordBound(record);
     if (!admitsAutomationRecord(record)) throw new Error("Automation record failed its canonical contract");
     const bytes = serializedBytes(record);
-    this.requireCapacity(bytes, bytes);
+    this.requireCapacity(record, bytes);
     await durableAtomicWriteJson(this.path(record.id), record);
     this.records.set(record.id, clone(record));
     this.bytes.set(record.id, bytes);
+    this.terminalReservations.set(record.id, this.terminalReservation(record, bytes));
+    this.occupiedIds.add(record.id);
     this.didChange(record.id);
   }
 
   private async publishReplacement(current: AutomationRecord, next: AutomationRecord, notify = true): Promise<void> {
+    this.trimHistoryToRecordBound(next);
     if (!admitsAutomationRecord(next)) throw new Error("Automation record failed its canonical contract");
     const bytes = serializedBytes(next);
-    this.requireCapacity(bytes, bytes - (this.bytes.get(current.id) ?? 0));
+    this.requireCapacity(next, bytes);
     await durableAtomicWriteJson(this.path(next.id), next);
     this.records.set(next.id, clone(next));
     this.bytes.set(next.id, bytes);
+    this.terminalReservations.set(next.id, this.terminalReservation(next, bytes));
     if (notify) this.didChange(next.id);
   }
 
-  private requireCapacity(recordBytes: number, additionalBytes: number): void {
-    if (recordBytes > MAXIMUM_AUTOMATION_RECORD_BYTES
-      || this.aggregateBytes() + additionalBytes > MAXIMUM_AUTOMATION_AGGREGATE_BYTES) {
+  private requireCapacity(record: AutomationRecord, recordBytes: number): void {
+    const currentBytes = this.bytes.get(record.id) ?? 0;
+    const currentReservation = this.terminalReservations.get(record.id) ?? 0;
+    const reservation = this.terminalReservation(record, recordBytes);
+    const total = this.aggregateBytes() - currentBytes + recordBytes
+      + this.reservedTerminalBytes() - currentReservation + reservation;
+    if (recordBytes > MAXIMUM_AUTOMATION_RECORD_BYTES || total > MAXIMUM_AUTOMATION_AGGREGATE_BYTES) {
       throw new GatewayError("busy", "Automation storage capacity is full", true);
     }
   }
 
-  private aggregateBytes(): number {
+  private trimHistoryToRecordBound(record: AutomationRecord): void {
+    record.history = boundedHistory(record.history);
+    while (record.history.length > 0 && serializedBytes(record) > MAXIMUM_AUTOMATION_RECORD_BYTES) {
+      record.history.shift();
+    }
+  }
+
+  private terminalReservation(record: AutomationRecord, recordBytes: number): number {
+    const run = record.currentRun;
+    if (!run) return 0;
+    const projected = clone(record);
+    const terminal: AutomationRun = {
+      ...clone(run),
+      state: "outcomeUnknown",
+      terminalAt: run.terminalAt ?? new Date(this.now()).toISOString(),
+      reason: run.reason ?? "reserved-terminal-settlement",
+    };
+    delete projected.currentRun;
+    projected.lastRun = terminal;
+    projected.history = [...projected.history, terminal];
+    this.trimHistoryToRecordBound(projected);
+    return Math.max(0, serializedBytes(projected) - recordBytes);
+  }
+
+  private reservedTerminalBytes(): number {
     let total = 0;
+    for (const bytes of this.terminalReservations.values()) total += bytes;
+    return total;
+  }
+
+  private aggregateBytes(): number {
+    let total = this.unavailableBytes;
     for (const bytes of this.bytes.values()) total += bytes;
     return total;
   }
@@ -461,9 +533,42 @@ export class AutomationStore {
     const path = join(this.directory, MAINTENANCE_INTENT);
     const stored = await readSecureJson<unknown>(path, MAXIMUM_MAINTENANCE_INTENT_BYTES);
     if (!stored.present) return;
-    if (!isRekeyIntent(stored.value)) throw new GatewayError("conflict", "Automation maintenance intent is malformed");
-    await this.applyRekeyIntent(stored.value);
+    if (!isMaintenanceIntent(stored.value)) throw new GatewayError("conflict", "Automation maintenance intent is malformed");
+    if (stored.value.kind === "target-rekey") await this.applyRekeyIntent(stored.value);
+    else await this.applyBlockIntent(stored.value);
     await durableRemove(path);
+  }
+
+  private async applyBlockIntent(intent: TargetBlockIntent): Promise<void> {
+    for (const id of intent.automationIds) {
+      const current = this.records.get(id);
+      if (!current || current.activation === "blocked" && current.blockedReason === intent.reason) continue;
+      if (current.targetSessionId !== intent.sessionId) {
+        throw new GatewayError("conflict", "Automation target changed during target-block recovery");
+      }
+      const next = clone(current);
+      next.revision = current.revision + 1;
+      next.stateRevision = current.stateRevision + 1;
+      next.activation = "blocked";
+      next.blockedReason = intent.reason;
+      delete next.nextOccurrenceAt;
+      delete next.queuedLatestOccurrence;
+      if (next.currentRun) {
+        const uncertain = next.currentRun.state === "admitting" || next.currentRun.state === "running"
+          || next.currentRun.state === "cancelling";
+        const terminal: AutomationRun = {
+          ...next.currentRun,
+          state: uncertain ? "outcomeUnknown" : "cancelled",
+          reason: intent.reason,
+          terminalAt: new Date(this.now()).toISOString(),
+        };
+        delete next.currentRun;
+        next.lastRun = terminal;
+        next.history = boundedHistory([...next.history, terminal]);
+      }
+      next.updatedAt = new Date(this.now()).toISOString();
+      await this.publishReplacement(current, next, false);
+    }
   }
 
   private async applyRekeyIntent(intent: TargetRekeyIntent): Promise<void> {

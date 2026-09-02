@@ -124,6 +124,10 @@ function admitsRunError(value: unknown): boolean {
     && typeof input.retryable === "boolean";
 }
 
+function terminalRunState(value: unknown): boolean {
+  return ["succeeded", "failed", "cancelled", "skipped", "outcomeUnknown"].includes(value as string);
+}
+
 export function admitsAutomationRun(value: unknown): value is AutomationRun {
   const input = record(value);
   if (!input) return false;
@@ -153,6 +157,10 @@ export function admitsAutomationRun(value: unknown): value is AutomationRun {
   if (input.notificationAdmissionStatus !== undefined
     && !["queued", "suppressed", "rate_limited", "unavailable"].includes(input.notificationAdmissionStatus as string)) return false;
   if (input.error !== undefined && !admitsRunError(input.error)) return false;
+  const terminal = terminalRunState(input.state);
+  if (terminal !== (input.terminalAt !== undefined)) return false;
+  const claimFields = [input.claimedAt, input.hostEpoch, input.claimId].filter((field) => field !== undefined).length;
+  if (claimFields !== 0 && claimFields !== 3) return false;
   if (input.resolution !== undefined) {
     const resolution = record(input.resolution);
     if (!resolution || !exactKeys(resolution, ["outcome", "resolvedAt", "provenance"])
@@ -190,13 +198,13 @@ export function admitsAutomationRecord(value: unknown): value is AutomationRecor
     && (input.executionDeadlineSeconds as number) <= MAXIMUM_AUTOMATION_DEADLINE_SECONDS
     && admitsAutomationAction(input.action)
     && (input.nextOccurrenceAt === undefined || timestamp(input.nextOccurrenceAt))
-    && (input.currentRun === undefined || admitsAutomationRun(input.currentRun))
+    && (input.currentRun === undefined || (admitsAutomationRun(input.currentRun) && !terminalRunState(input.currentRun.state)))
     && (input.queuedLatestOccurrence === undefined || timestamp(input.queuedLatestOccurrence))
-    && (input.lastRun === undefined || admitsAutomationRun(input.lastRun))
+    && (input.lastRun === undefined || (admitsAutomationRun(input.lastRun) && terminalRunState(input.lastRun.state)))
     && Number.isSafeInteger(input.consecutiveFailureCount) && (input.consecutiveFailureCount as number) >= 0
     && (input.blockedReason === undefined || bounded(input.blockedReason, 256))
     && Array.isArray(input.history) && input.history.length <= MAXIMUM_AUTOMATION_HISTORY
-    && input.history.every(admitsAutomationRun);
+    && input.history.every((run) => admitsAutomationRun(run) && terminalRunState(run.state));
 }
 
 function requiredText(value: unknown, name: string, maximumBytes: number): string {

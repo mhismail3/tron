@@ -1361,6 +1361,23 @@ export class RuntimeRegistry {
   async clearAutomationMarker(sessionId: string, operationId: string): Promise<void> {
     if (!operationId.startsWith("automation:")) throw new Error("Only automation markers may be cleared through this boundary");
     await this.markers.clear(sessionId, operationId);
+    if ((await this.markers.evidenceFor(sessionId)).length === 0) this.interrupted.delete(sessionId);
+  }
+
+  async reconcileStoredAutomationMarkers(
+    terminalOperations: ReadonlyMap<string, ReadonlySet<string>>,
+  ): Promise<void> {
+    const evidence = await this.markers.evidence();
+    for (const [sessionId, markers] of evidence) {
+      const terminal = terminalOperations.get(sessionId);
+      if (!terminal) continue;
+      for (const marker of markers) {
+        if (marker.operationId.startsWith("automation:") && terminal.has(marker.operationId)) {
+          await this.markers.clear(sessionId, marker.operationId);
+        }
+      }
+      if ((await this.markers.evidenceFor(sessionId)).length === 0) this.interrupted.delete(sessionId);
+    }
   }
 
   private async attentionLiveOnlyStillAdmitted(sessionId: string): Promise<boolean> {

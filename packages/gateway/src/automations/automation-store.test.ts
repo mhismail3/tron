@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { AutomationStore } from "./automation-store.js";
+import { AutomationStore, settleAutomationRun } from "./automation-store.js";
 import type { AutomationCreateInput, AutomationRun } from "./types.js";
 import { automationOccurrenceId } from "./schedule.js";
 
@@ -64,6 +64,57 @@ describe("AutomationStore", () => {
     expect(updated.revision).toBe(1);
     expect(updated.stateRevision).toBe(2);
     await expect(store.setActivation(created.id, 1, "paused")).resolves.toMatchObject({ revision: 2 });
+  });
+
+  it("terminalizes queued target work before blocking a deleted session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-target-delete-"));
+    const store = new AutomationStore(root, { now: () => Date.parse("2026-01-01T00:00:01Z") });
+    await store.initialize();
+    const created = await store.create(input());
+    const scheduledFor = created.nextOccurrenceAt!;
+    const run: AutomationRun = {
+      runId: "10000000-0000-4000-8000-000000000009",
+      occurrenceId: automationOccurrenceId(created.id, created.revision, scheduledFor),
+      automationRevision: created.revision, scheduledFor, triggerSnapshot: created.trigger, actionSnapshot: created.action,
+      state: "queued", createdAt: "2026-01-01T00:00:01.000Z", preAdmissionAttemptCount: 0,
+      operationId: "automation:10000000-0000-4000-8000-000000000009",
+    };
+    await store.mutateState(created.id, (current) => ({ ...current, currentRun: run }));
+
+    await store.blockTarget("session-one");
+
+    const blocked = store.get(created.id);
+    expect(blocked).toMatchObject({ activation: "blocked", blockedReason: "target-session-deleted" });
+    expect(blocked.currentRun).toBeUndefined();
+    expect(blocked.lastRun).toMatchObject({ runId: run.runId, state: "cancelled" });
+  });
+
+  it("prunes large run snapshots by serialized bytes before terminal persistence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-automation-history-bytes-"));
+    let now = Date.parse("2026-01-01T00:00:01Z");
+    const store = new AutomationStore(root, { now: () => now });
+    await store.initialize();
+    const created = await store.create({ ...input(), action: { kind: "sessionPrompt", text: "x".repeat(64 * 1_024) } });
+    for (let index = 1; index <= 12; index += 1) {
+      const suffix = String(index).padStart(12, "0");
+      const run: AutomationRun = {
+        runId: `10000000-0000-4000-8000-${suffix}`,
+        occurrenceId: automationOccurrenceId(created.id, created.revision, new Date(now).toISOString()),
+        automationRevision: created.revision, scheduledFor: new Date(now).toISOString(),
+        triggerSnapshot: created.trigger, actionSnapshot: created.action, state: "queued",
+        createdAt: new Date(now).toISOString(), preAdmissionAttemptCount: 0,
+        operationId: `automation:10000000-0000-4000-8000-${suffix}`,
+      };
+      await store.mutateState(created.id, (current) => ({ ...current, currentRun: run }));
+      const terminal = { ...run, state: "succeeded" as const, terminalAt: new Date(now).toISOString() };
+      await store.mutateState(created.id, (current) => settleAutomationRun(current, terminal, terminal.terminalAt));
+      now += 60_000;
+    }
+    const retained = store.get(created.id);
+    const bytes = Buffer.byteLength(await readFile(join(root, "gateway", "automations", `${created.id}.json`), "utf8"));
+    expect(bytes).toBeLessThanOrEqual(512 * 1_024);
+    expect(retained.history.length).toBeLessThan(12);
+    expect(retained.lastRun?.runId).toBe("10000000-0000-4000-8000-000000000012");
   });
 
   it("fails closed on malformed owner state without replacing it", async () => {

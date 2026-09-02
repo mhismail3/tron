@@ -14,7 +14,7 @@ describe("Tron schedule extension", () => {
     const { tool, operations } = fixture();
     const result = await tool.execute("tool-call-one", {
       action: "create", name: "Review", prompt: "Review", everyMinutes: 60, activate: true,
-    });
+    }, undefined, undefined, { hasUI: true, ui: { confirm: vi.fn(async () => true) } });
     expect(tool.name).toBe("schedule");
     expect(tool.executionMode).toBe("sequential");
     expect(operations.execute).toHaveBeenCalledWith("session-one", "tool-call-one", expect.objectContaining({ action: "create" }));

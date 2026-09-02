@@ -60,6 +60,13 @@ describe("Gateway automation RPC", () => {
     })).rejects.toMatchObject({ code: "invalid_request" });
   });
 
+  it("does not advertise or admit automations before recovery completes", async () => {
+    const { service, automations } = fixture();
+    automations.status.mockReturnValue({ ready: false, degraded: false, automationCount: 0, aggregateBytes: 0, malformedRecordCount: 0, catalogRevision: 0 });
+    expect((service.info() as any).capabilities).not.toContain("automations.v1");
+    await expect(service.invoke(client(), "automation.list", {})).rejects.toMatchObject({ code: "busy", retryable: true });
+  });
+
   it("passes authenticated provenance into creation and resolution", async () => {
     const { service, automations, record } = fixture();
     await service.invoke(client(), "automation.create", {

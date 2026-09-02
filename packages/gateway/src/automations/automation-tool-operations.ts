@@ -61,6 +61,11 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
         omittedCount: Math.max(0, all.length - shown.length),
       });
     }
+    if (request.action === "show") {
+      const automation = this.service.get(requireField(request.automationId, "automationId"));
+      if (automation.targetSessionId !== sessionId) throw new GatewayError("not_found", "Automation does not belong to this session");
+      return result(`Automation “${automation.name}” is ${automation.activation}.`, automation);
+    }
 
     const receiptResult = await this.receipts.execute(
       `assistant:${sessionId}`,
@@ -103,7 +108,7 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
       return { message: `${request.action === "enable" ? "Enabled" : "Paused"} automation “${updated.name}”.`, details: updated as unknown as JsonValue };
     }
     if (request.action === "runNow") {
-      const run = await this.service.runNow(id);
+      const run = await this.service.runNow(id, requireField(request.expectedRevision, "expectedRevision"));
       return { message: `Queued automation “${current.name}” to run now.`, details: run as unknown as JsonValue };
     }
     if (request.action === "cancel") {

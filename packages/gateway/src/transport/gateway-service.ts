@@ -268,7 +268,7 @@ export class GatewayService {
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
-        ...(this.dependencies.automations ? [AUTOMATIONS_CAPABILITY] : []),
+        ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY] : []),
       ],
     };
   }
@@ -557,8 +557,11 @@ export class GatewayService {
         });
       case "automation.runNow":
         return this.mutation(client, method, params, async () => {
-          if (Object.keys(params).some((key) => !["commandId", "automationId"].includes(key))) throw new GatewayError("invalid_request", "Automation run-now contains unknown parameters");
-          return safeJson(await this.requireAutomations().runNow(string(params.automationId, "automationId", { max: 64 })));
+          if (Object.keys(params).some((key) => !["commandId", "automationId", "expectedRevision"].includes(key))) throw new GatewayError("invalid_request", "Automation run-now contains unknown parameters");
+          return safeJson(await this.requireAutomations().runNow(
+            string(params.automationId, "automationId", { max: 64 }),
+            integer(params.expectedRevision, "expectedRevision", 1, Number.MAX_SAFE_INTEGER),
+          ));
         });
       case "automation.run.cancel":
         return this.mutation(client, method, params, async () => {
@@ -1403,6 +1406,7 @@ export class GatewayService {
 
   private requireAutomations(): AutomationService {
     if (!this.dependencies.automations) throw new GatewayError("unsupported", "Automations are unavailable in this Gateway build");
+    if (!this.dependencies.automations.status().ready) throw new GatewayError("busy", "Automations are still recovering", true);
     return this.dependencies.automations;
   }
 

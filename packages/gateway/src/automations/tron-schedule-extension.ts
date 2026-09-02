@@ -5,7 +5,7 @@ import { currentInvocationContext } from "../extensions/owner-attribution.js";
 import type { JsonValue } from "../protocol/types.js";
 
 export interface ScheduleToolRequest {
-  action: "list" | "create" | "enable" | "pause" | "delete" | "runNow" | "cancel" | "resolve";
+  action: "list" | "show" | "create" | "enable" | "pause" | "delete" | "runNow" | "cancel" | "resolve";
   name?: string;
   prompt?: string;
   notificationMessage?: string;
@@ -31,7 +31,7 @@ export interface ScheduleToolOperations {
 }
 
 const parameters = Type.Object({
-  action: StringEnum(["list", "create", "enable", "pause", "delete", "runNow", "cancel", "resolve"] as const),
+  action: StringEnum(["list", "show", "create", "enable", "pause", "delete", "runNow", "cancel", "resolve"] as const),
   name: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   prompt: Type.Optional(Type.String({ minLength: 1, maxLength: 65_536 })),
   notificationMessage: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
@@ -64,10 +64,23 @@ export function createTronScheduleExtension(input: {
       ],
       parameters,
       executionMode: "sequential",
-      execute: async (toolCallId, request) => {
+      execute: async (toolCallId, request, _signal, _onUpdate, ctx) => {
         const context = currentInvocationContext();
-        if (request.action !== "list" && context?.operationId?.startsWith("automation:")) {
+        if (request.action !== "list" && request.action !== "show"
+          && context?.operationId?.startsWith("automation:")) {
           throw new Error("Scheduled automation turns cannot mutate automations");
+        }
+        if (request.action !== "list" && request.action !== "show") {
+          if (!ctx.hasUI) throw new Error("Automation mutations require an interactive user confirmation");
+          const confirmed = await ctx.ui.confirm(
+            "Confirm automation change",
+            request.action === "create" && request.activate !== true
+              ? "Create this automation as a disabled draft?"
+              : `Allow Tron to ${request.action} this durable automation?`,
+          );
+          if (!confirmed) {
+            return { content: [{ type: "text", text: "Automation change cancelled by the user." }], details: { cancelled: true } };
+          }
         }
         const result = await input.operations.execute(input.sessionId(), toolCallId, request);
         return {

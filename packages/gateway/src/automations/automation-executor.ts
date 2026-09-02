@@ -195,7 +195,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
     const invocation = evidence.invocation;
     const marker = evidence.marker;
     if (marker?.assistantCompletionId) {
-      if (invocation && invocation.lifecycle !== "completed" && invocation.lifecycle !== "settling") {
+      if (invocation && ["failed", "interrupted", "outcomeUnknown"].includes(invocation.lifecycle)) {
         return { state: "outcomeUnknown", reason: "conflicting-terminal-evidence" };
       }
       return {
@@ -211,9 +211,27 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
     }
     if (invocation?.lifecycle === "interrupted") return { state: "cancelled", reason: "recovered-interruption", invocationId: invocation.invocationId };
     if (invocation?.lifecycle === "outcomeUnknown") return { state: "outcomeUnknown", reason: "recovered-outcome-unknown", invocationId: invocation.invocationId };
-    if (!invocation && !marker) return { state: "requeue", reason: "no-admission-evidence" };
-    return { state: "outcomeUnknown", reason: "accepted-without-terminal-evidence",
+    if (!invocation && !marker) {
+      return run.state === "cancelling"
+        ? { state: "cancelled", reason: "cancelled-before-admission" }
+        : { state: "requeue", reason: "no-admission-evidence" };
+    }
+    return { state: "outcomeUnknown", reason: run.state === "cancelling"
+      ? "cancellation-outcome-unknown" : "accepted-without-terminal-evidence",
       ...(invocation ? { invocationId: invocation.invocationId } : {}) };
+  }
+
+  async reconcileStoredTerminals(records: readonly AutomationRecord[]): Promise<void> {
+    const terminalOperations = new Map<string, Set<string>>();
+    for (const record of records) {
+      for (const run of record.history) {
+        if (!run.operationId) continue;
+        const operations = terminalOperations.get(record.targetSessionId) ?? new Set<string>();
+        operations.add(run.operationId);
+        terminalOperations.set(record.targetSessionId, operations);
+      }
+    }
+    await this.sessions.reconcileStoredAutomationMarkers(terminalOperations);
   }
 
   async acknowledgeRecovery(record: AutomationRecord, run: AutomationRun): Promise<void> {

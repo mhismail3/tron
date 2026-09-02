@@ -1195,14 +1195,33 @@ export class RuntimeSlot {
       : { resolveProjectTrust: async () => override };
   }
 
+  private assertAutomationMayNotReplaceSession(): void {
+    if (currentInvocationContext()?.operationId?.startsWith("automation:")) {
+      throw new GatewayError("conflict", "Scheduled automation turns cannot replace or navigate their target session");
+    }
+  }
+
   private commandActions(): ExtensionCommandContextActions {
     return {
       waitForIdle: () => this.runtime.session.waitForIdle(),
-      newSession: (options) => this.withRebindAttentionDisposition("reset", () => this.runtime.newSession(options)),
-      fork: (entryId, options) => this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, options)),
-      navigateTree: (targetId, options) => this.runtime.session.navigateTree(targetId, options),
-      switchSession: (sessionPath, options) => this.withRebindAttentionDisposition("preserve", () => this.runtime.switchSession(sessionPath, options)),
+      newSession: (options) => {
+        this.assertAutomationMayNotReplaceSession();
+        return this.withRebindAttentionDisposition("reset", () => this.runtime.newSession(options));
+      },
+      fork: (entryId, options) => {
+        this.assertAutomationMayNotReplaceSession();
+        return this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, options));
+      },
+      navigateTree: (targetId, options) => {
+        this.assertAutomationMayNotReplaceSession();
+        return this.runtime.session.navigateTree(targetId, options);
+      },
+      switchSession: (sessionPath, options) => {
+        this.assertAutomationMayNotReplaceSession();
+        return this.withRebindAttentionDisposition("preserve", () => this.runtime.switchSession(sessionPath, options));
+      },
       reload: async () => {
+        this.assertAutomationMayNotReplaceSession();
         await this.reloadBoundSession();
         if (this.projectTrustReloadOverride === undefined) this.commitReload();
       },
@@ -6624,6 +6643,22 @@ export class RuntimeSlot {
     this.extensionRunOwnership.clear();
     this.unsubscribe?.();
     this.ui.cancelAll();
+    // An admitted automation must never lose its terminal waiter when runtime
+    // teardown wins a callback race. Persist uncertainty while the canonical
+    // manager is still writable; recovery can then block instead of replaying.
+    for (const operationId of [...this.automationTerminalObservers.keys()]) {
+      const invocation = this.invocationForOperation(operationId);
+      if (invocation) {
+        await this.terminalizeInvocation(operationId, "outcomeUnknown", "runtime-disposed");
+      } else {
+        await this.notifyAutomationTerminal({
+          lifecycle: "outcomeUnknown",
+          operationId,
+          invocationId: operationId,
+          errorCode: "runtime-disposed",
+        });
+      }
+    }
     // Pi owns session_shutdown before its extension context is invalidated.
     // Keep semantic presentation live through that bounded callback; the
     // disposal grace still force-retires a blocking third-party cleanup.

@@ -2,7 +2,7 @@ import { GatewayError } from "../errors.js";
 import { admitAutomationCreateInput, admitAutomationUpdateInput } from "./automation-contract.js";
 import { AutomationScheduler } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
-import type { AutomationProvenance, AutomationRecord, AutomationRun, AutomationSummary } from "./types.js";
+import type { AutomationProvenance, AutomationRecord, AutomationRun, AutomationRunSummary, AutomationSummary } from "./types.js";
 
 export interface AutomationTargetValidator {
   requirePersistedUserSession(sessionId: string): Promise<void>;
@@ -41,16 +41,27 @@ export class AutomationService {
 
   get(id: string): AutomationRecord { return this.store.get(id); }
 
-  runList(id: string): AutomationRun[] {
+  runList(id: string): AutomationRunSummary[] {
     const record = this.store.get(id);
     return [
       ...(record.currentRun ? [record.currentRun] : []),
       ...record.history.slice().reverse(),
-    ];
+    ].map((run) => ({
+      runId: run.runId,
+      state: run.state,
+      scheduledFor: run.scheduledFor,
+      createdAt: run.createdAt,
+      preAdmissionAttemptCount: run.preAdmissionAttemptCount,
+      ...(run.startedAt === undefined ? {} : { startedAt: run.startedAt }),
+      ...(run.terminalAt === undefined ? {} : { terminalAt: run.terminalAt }),
+      ...(run.reason === undefined ? {} : { reason: run.reason }),
+      ...(run.notificationAdmissionStatus === undefined ? {} : { notificationAdmissionStatus: run.notificationAdmissionStatus }),
+    }));
   }
 
   runGet(id: string, runId: string): AutomationRun {
-    const run = this.runList(id).find((candidate) => candidate.runId === runId);
+    const record = this.store.get(id);
+    const run = [record.currentRun, ...record.history].find((candidate) => candidate?.runId === runId);
     if (!run) throw new GatewayError("not_found", "Automation run was not found");
     return structuredClone(run);
   }
@@ -90,10 +101,11 @@ export class AutomationService {
     this.scheduler.wake();
   }
 
-  async runNow(id: string): Promise<AutomationRun> {
+  async runNow(id: string, expectedRevision: number): Promise<AutomationRun> {
     const current = this.store.get(id);
+    if (current.revision !== expectedRevision) throw new GatewayError("conflict", "Automation changed. Review it before running it.", true);
     await this.targets.requirePersistedUserSession(current.targetSessionId);
-    return this.scheduler.runNow(id);
+    return this.scheduler.runNow(id, expectedRevision);
   }
 
   async cancel(id: string, runId: string): Promise<AutomationRun> {

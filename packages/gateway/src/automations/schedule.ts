@@ -102,6 +102,23 @@ function calendarOccurrenceAfter(trigger: Extract<AutomationTrigger, { kind: "ca
   throw new Error("Calendar trigger did not produce a bounded next occurrence");
 }
 
+function calendarOccurrenceAtOrBefore(
+  trigger: Extract<AutomationTrigger, { kind: "calendar" }>,
+  boundaryMs: number,
+): number {
+  const [hour, minute] = trigger.localTime.split(":").map(Number) as [number, number];
+  const local = localParts(boundaryMs, trigger.timezone);
+  for (let dayOffset = 0; dayOffset >= -14; dayOffset -= 1) {
+    const date = addLocalDays(local, dayOffset);
+    const noon = localMinuteToInstant({ ...date, hour: 12, minute: 0 }, trigger.timezone);
+    const weekday = localParts(noon, trigger.timezone).weekday;
+    if (!trigger.weekdays.includes(weekday)) continue;
+    const candidate = localMinuteToInstant({ ...date, hour, minute }, trigger.timezone);
+    if (candidate <= boundaryMs) return candidate;
+  }
+  throw new Error("Calendar trigger did not produce a bounded prior occurrence");
+}
+
 export function nextAutomationOccurrence(trigger: AutomationTrigger, afterMs: number): string | undefined {
   if (!Number.isFinite(afterMs)) throw new Error("Schedule boundary is invalid");
   if (trigger.kind === "once") {
@@ -143,8 +160,7 @@ export function classifyDueOccurrence(
     return policy === "latest" ? { dispatchAt: nextOccurrenceAt, skipped: [] } : { skipped: [nextOccurrenceAt] };
   }
 
-  let cursor = nextOccurrenceAt;
-  let latest = cursor;
+  let latest = nextOccurrenceAt;
   const skipped: string[] = [];
   // The result retains at most one materialized skipped occurrence. Advancing
   // remains bounded even after long downtime by interval arithmetic below.
@@ -157,17 +173,12 @@ export function classifyDueOccurrence(
     return { dispatchAt: latest, nextOccurrenceAt: next, skipped: [] };
   }
 
-  for (let count = 0; count < 16 && Date.parse(cursor) <= nowMs; count += 1) {
-    latest = cursor;
-    const next = advanceAfterOccurrence(trigger, cursor);
-    if (!next) break;
-    cursor = next;
-  }
-  if (Date.parse(cursor) <= nowMs) throw new Error("Calendar catch-up exceeded its bounded horizon");
+  latest = new Date(calendarOccurrenceAtOrBefore(trigger, nowMs)).toISOString();
+  const next = nextAutomationOccurrence(trigger, nowMs)!;
   if (policy === "skip") skipped.push(latest);
   return policy === "latest"
-    ? { dispatchAt: latest, nextOccurrenceAt: cursor, skipped: [] }
-    : { nextOccurrenceAt: cursor, skipped };
+    ? { dispatchAt: latest, nextOccurrenceAt: next, skipped: [] }
+    : { nextOccurrenceAt: next, skipped };
 }
 
 export function automationOccurrenceId(automationId: string, revision: number, scheduledFor: string): string {
