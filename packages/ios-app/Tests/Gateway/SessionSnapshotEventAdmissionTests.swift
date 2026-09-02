@@ -85,6 +85,55 @@ struct SessionSnapshotEventAdmissionTests {
         #expect(admission(current: installed, incoming: stale) == .resynchronize(current.sessionId))
     }
 
+    @Test("transcript admission enforces identity count and canonical ranges")
+    func transcriptAdmission() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 5_510)
+            .openingTail(targetEncodedBytes: 8_192)
+        #expect(SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+
+        snapshot.transcriptStart = 10
+        snapshot.transcriptTotal = 10 + snapshot.transcript.count
+        #expect(SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+
+        snapshot.transcriptTotal = nil
+        #expect(!SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+        snapshot.transcriptTotal = 10 + snapshot.transcript.count - 1
+        #expect(!SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+        snapshot.transcriptTotal = 10 + snapshot.transcript.count + 1
+        #expect(!SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+        snapshot.transcriptStart = -1
+        snapshot.transcriptTotal = snapshot.transcript.count
+        #expect(!SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+
+        let valid = try #require(snapshot.transcript.first)
+        snapshot.transcript = [valid, valid]
+        snapshot.transcriptStart = 0
+        snapshot.transcriptTotal = 2
+        #expect(!SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+
+        snapshot.transcript = [.message(MessageTranscriptItem(
+            id: "", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+            kind: .message, role: .assistant, presentationId: "presentation",
+            content: []
+        ))]
+        snapshot.transcriptTotal = 1
+        #expect(!SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+
+        snapshot.transcript = [.message(MessageTranscriptItem(
+            id: String(repeating: "x", count: 513), parentId: nil,
+            timestamp: "2026-01-01T00:00:00Z", kind: .message,
+            role: .assistant, presentationId: "presentation", content: []
+        ))]
+        #expect(!SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+
+        snapshot.transcript = SessionScenarioBuilder(seed: 5_511).historyPage(
+            count: SessionSnapshot.maximumTranscriptItems + 1,
+            longRowBytes: 0
+        )
+        snapshot.transcriptTotal = snapshot.transcript.count
+        #expect(!SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+    }
+
     @Test("queue admission is bounded and rejects duplicate or empty identities")
     func queueAdmission() throws {
         var snapshot = try SessionScenarioBuilder(seed: 55).openingTail(targetEncodedBytes: 8_192)

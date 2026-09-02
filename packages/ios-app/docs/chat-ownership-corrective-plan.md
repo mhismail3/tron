@@ -130,10 +130,10 @@ Exit: every transcript item is stored once in the mounted reducer, visible cover
 
 - Complete for the current boundary: layout transactions publish bounded settled/abandoned terminal events, overflow cancels transient leases, watchdog abandonment releases only its exact materialization lease, pending work is promoted safely, repeating participants use exact revision tickets, and entrance completion is order-independent with local lifecycle admission.
 - Complete for the current boundary: anchored and anchorless history share one coordinator-owned operation and deadline, background cancellation retires both, and the retired view-owned fallback task and production compatibility API are removed. Disposable source churn is coalesced during the exact page transaction; an exact prior window, including a monotonic canonical suffix append, may restore, then newest authority installs immediately after settlement.
-- Complete for opening churn: automatic intake pauses behind the opaque surface, the first complete same-runtime commit may reveal, and the newest desired source is coalesced immediately after the first ready frame.
-- Projection intake never stops during prepend; newer desired commits coalesce and install immediately after the exact prepend transaction.
-- Every prepend, automatic-tail command, opening settlement, and layout mutation ends by physical acknowledgement, supersession, direct interaction, cancellation, or deadline.
-- Projection installation emits an explicit receipt with transition classification and semantic mapping; scroll does not observe its own epoch through SwiftUI to manufacture acknowledgement.
+- Complete for opening churn: automatic intake pauses behind the opaque surface, the first complete same-runtime commit may reveal, and the newest desired source remains coalesced through current non-lifted post-reveal physical evidence and exact target release.
+- During prepend, newer desired commits remain in canonical authority and coalesce; the newest source installs immediately after the exact prepend transaction.
+- Every prepend, automatic-tail command, opening settlement, and layout mutation ends by physical acknowledgement, supersession, direct interaction, cancellation, or its bounded failure path.
+- Projection installation is observed through the immutable installed-tag boundary; transition classification and semantic mapping come from that complete commit, while exact layout/command tokens own acknowledgement.
 - Wire keyboard/focus transition start to the real viewport transition. Composer and extension-pill geometry provide layout facts, not separate scroll authority.
 
 Exit: no spinner/command can wedge; streaming during prepend is not lost; keyboard and composer changes retain pinned/detached intent without jitter.

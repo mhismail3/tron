@@ -29,6 +29,37 @@ struct ChatInteractionTraceTests {
         })
     }
 
+    @Test("diagnostic priority survives routine ring pressure")
+    func priorityRetention() {
+        let trace = ChatInteractionTrace()
+        trace.resetForTesting()
+        let context = trace.beginContext(retainedPresentation: false)
+        for index in 0..<(ChatInteractionTrace.maximumRecords - 2) {
+            trace.submission(
+                .checkpoint,
+                context: context,
+                state: .init(presentationEpoch: index)
+            )
+        }
+        trace.anomaly(
+            .openingLostProjection,
+            context: context,
+            state: .init(canonicalRows: 10)
+        )
+        for index in 0..<40 {
+            trace.geometry(
+                .meaningfulChange,
+                context: context,
+                state: .init(layoutEpoch: index)
+            )
+        }
+
+        let records = trace.diagnosticRecords(limit: 1_000)
+        #expect(records.count == ChatInteractionTrace.maximumRecords)
+        #expect(records.contains { $0.record.event == "chat.anomaly.opening-lost-projection" })
+        #expect(records.contains { $0.record.message.contains("layout=39") })
+    }
+
     @Test("opening target identity and content cannot enter command diagnostics")
     func commandIdentityIsRedacted() {
         let trace = ChatInteractionTrace()

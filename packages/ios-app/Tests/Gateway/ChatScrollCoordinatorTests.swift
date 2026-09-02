@@ -113,17 +113,22 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.viewportMode == .pinned)
     }
 
-    @Test("an uncommanded status-bar retreat detaches from the pinned tail")
+    @Test("only a native viewport retreat can represent status-bar reader takeover")
     func statusBarScrollToTopDetaches() {
-        let coordinator = ChatScrollCoordinator()
-        coordinator.geometryChanged(previous: .zero, current: bottom)
+        let layoutOnly = ChatScrollCoordinator()
+        layoutOnly.geometryChanged(previous: .zero, current: bottom)
         let top = ChatTranscriptGeometry(
             offsetY: 0, contentHeight: 1_000, containerHeight: 400
         )
-        coordinator.geometryChanged(previous: bottom, current: top)
-        #expect(coordinator.viewportMode == .anchored)
-        #expect(!coordinator.isAtBottom)
-        #expect(coordinator.userScrolledAway)
+        layoutOnly.geometryChanged(previous: bottom, current: top)
+        #expect(layoutOnly.viewportMode == .pinned)
+
+        let viewport = ChatScrollCoordinator()
+        viewport.geometryChanged(previous: .zero, current: bottom)
+        viewport.viewportChanged(previous: bottom, current: top)
+        #expect(viewport.viewportMode == .anchored)
+        #expect(!viewport.isAtBottom)
+        #expect(viewport.userScrolledAway)
     }
 
     @Test("composer layout changes cannot impersonate a status-bar retreat")
@@ -1118,6 +1123,39 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.canInstallPersistentBottomPosition)
     }
 
+    @Test("foreground revalidation is idempotent for one native activation")
+    func foregroundRevalidationIsIdempotent() {
+        let coordinator = ChatScrollCoordinator()
+        let initialEpoch = coordinator.layoutEpoch
+        coordinator.foregroundViewportBecameActive(activation: 7)
+        #expect(coordinator.layoutEpoch == initialEpoch + 1)
+
+        coordinator.foregroundViewportBecameActive(activation: 7)
+        #expect(coordinator.layoutEpoch == initialEpoch + 1)
+
+        coordinator.foregroundViewportBecameActive(activation: 8)
+        #expect(coordinator.layoutEpoch == initialEpoch + 2)
+    }
+
+    @Test("an applied target lease rejects paging until explicit release")
+    func pagingRejectsAppliedTargetLeaseOverlap() throws {
+        let coordinator = ChatScrollCoordinator()
+        #expect(coordinator.discreteTailInserted(renderedID: "new-row"))
+        let command = try #require(coordinator.command)
+        #expect(coordinator.commandApplied(command))
+        #expect(!coordinator.canRequestHistoryPage)
+
+        var completion: PerformanceResult?
+        let admitted = coordinator.beginHistoryPageLoad(
+            anchor: nil,
+            load: { _ in .installed(nil) },
+            completion: { completion = $0 }
+        )
+        #expect(!admitted)
+        #expect(completion == .discarded)
+        coordinator.cancel()
+    }
+
     @Test("foreground interruption clears the catch-up owner")
     func foregroundInterruptionClearsCatchUp() throws {
         let coordinator = detachedCoordinator(at: away)
@@ -1215,9 +1253,94 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
+    @Test("post-reveal requires fresh physical evidence and defers projection through release")
+    func openingPostRevealSettlementOwnsProjectionIntake() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let positioning = Task {
+                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
+            }
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(coordinator.commandApplied(command))
+            coordinator.geometryChanged(previous: .zero, current: bottom)
+            coordinator.semanticFrameChanged(
+                renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 396, width: 100, height: 12)
+            )
+            #expect(await positioning.value)
+            #expect(coordinator.blocksAutomaticLiveProjectionIntake)
+
+            coordinator.openingRevealCompleted()
+            await frames.waitForRequest(count: 2)
+            frames.releaseNext()
+            await Task.yield()
+            #expect(coordinator.targetReleaseGeneration == 0)
+            #expect(coordinator.blocksAutomaticLiveProjectionIntake)
+
+            // The lifted eight-point positioning sample is no longer valid in
+            // post-reveal; the settled tree must publish aligned evidence.
+            coordinator.geometryChanged(previous: bottom, current: bottom)
+            coordinator.semanticFrameChanged(
+                renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            )
+            var nextRequest = 3
+            while coordinator.targetReleaseGeneration == 0, nextRequest <= 8 {
+                await frames.waitForRequest(count: nextRequest)
+                frames.releaseNext()
+                await Task.yield()
+                nextRequest += 1
+            }
+            #expect(coordinator.targetReleaseGeneration == 1)
+            #expect(coordinator.blocksAutomaticLiveProjectionIntake)
+            var waiterFinished = false
+            let waiter = Task { @MainActor in
+                await coordinator.waitForOpeningTailSettlement()
+                waiterFinished = true
+            }
+            await Task.yield()
+            #expect(!waiterFinished)
+            #expect(coordinator.consumeTargetRelease())
+            await waiter.value
+            #expect(waiterFinished)
+            #expect(!coordinator.blocksAutomaticLiveProjectionIntake)
+        }
+    }
+
+    @Test("post-reveal deadline abandons rather than certifies missing evidence")
+    func openingPostRevealDeadlineIsTerminal() async throws {
+        try await withTestWatchdog { @MainActor in
+            let clock = ManualClock()
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(
+                frameScheduler: frames.scheduler,
+                clock: clock.clock
+            )
+            let positioning = Task {
+                await coordinator.positionOpeningTail(targetRenderedID: "transcript-bottom")
+            }
+            admitAlignedTail(coordinator)
+            #expect(await positioning.value)
+            coordinator.openingRevealCompleted()
+            #expect(coordinator.blocksAutomaticLiveProjectionIntake)
+            try await clock.waitUntilSleeping(count: 1)
+            clock.advance(by: ChatScrollCoordinator.defaultOpeningPostRevealTimeout)
+            for _ in 0..<8 where coordinator.blocksAutomaticLiveProjectionIntake {
+                await Task.yield()
+            }
+            #expect(!coordinator.blocksAutomaticLiveProjectionIntake)
+            #expect(coordinator.canRequestHistoryPage)
+            #expect(coordinator.command == nil)
+        }
+    }
+
     @Test("opening tail opaque fallback defaults to 750 milliseconds")
     func openingTailDefaultTimeout() {
         #expect(ChatScrollCoordinator.defaultOpeningTailTimeout == .milliseconds(750))
+        #expect(ChatScrollCoordinator.defaultOpeningPostRevealTimeout == .seconds(2))
     }
 
     @Test("opening timeout fails without physical marker proof")

@@ -46,6 +46,10 @@ struct ChatView: View {
     /// every hidden tool-output update.
     @State private var deferredViewportProjectionBaseline: InstalledChatTranscript?
     @State private var hasDeferredViewportProjection = false
+    /// One native viewport activation can surface through scene, coverage, and
+    /// reconciliation callbacks. They share this identity so physical evidence
+    /// is rebased exactly once for the replacement tree.
+    @State private var viewportActivation = 0
 
     #if HOSTED_TEST
     init(
@@ -312,6 +316,10 @@ struct ChatView: View {
                 abandonLayoutTransaction()
             }
             if previous.allowsViewportObservation,
+               !current.allowsViewportObservation {
+                viewportActivation &+= 1
+            }
+            if previous.allowsViewportObservation,
                !current.allowsViewportObservation,
                current.allowsDataPublication,
                !hasDeferredViewportProjection {
@@ -326,12 +334,14 @@ struct ChatView: View {
             }
             if !previous.allowsViewportObservation,
                current.allowsViewportObservation {
-                reconcileDeferredViewportProjectionIfNeeded()
                 if scenePhase == .active,
                    !sessionPresentation.needsOpeningResume,
                    transcriptPresentation.installed != nil {
-                    scrollCoordinator.foregroundViewportBecameActive()
+                    scrollCoordinator.foregroundViewportBecameActive(
+                        activation: viewportActivation
+                    )
                 }
+                reconcileDeferredViewportProjectionIfNeeded()
             }
         }
         .onChange(of: scrollCoordinator.defersAutomaticLiveProjectionIntake) { _, deferred in
@@ -537,6 +547,7 @@ struct ChatView: View {
     private func scenePhaseChanged(_ current: ScenePhase) {
         reconcileSessionPresentationVisibility(sceneActive: current == .active)
         if current == .background {
+            viewportActivation &+= 1
             abandonLayoutTransaction()
             // Retire page/opening/correction tasks and native target leases;
             // durable pinned/detached intent remains in the coordinator.
@@ -548,8 +559,10 @@ struct ChatView: View {
                   presentationActivity.allowsPresentationPublication,
                   !sessionPresentation.needsOpeningResume,
                   transcriptPresentation.installed != nil {
+            scrollCoordinator.foregroundViewportBecameActive(
+                activation: viewportActivation
+            )
             intakeLatestTranscriptProjectionIfNeeded()
-            scrollCoordinator.foregroundViewportBecameActive()
         }
     }
 
@@ -561,7 +574,9 @@ struct ChatView: View {
             || transcriptPresentation.installed == nil {
             beginOpeningAfterForegroundWhenConnected()
         } else {
-            scrollCoordinator.foregroundViewportBecameActive()
+            scrollCoordinator.foregroundViewportBecameActive(
+                activation: viewportActivation
+            )
         }
     }
 
@@ -975,6 +990,7 @@ struct ChatView: View {
             onExecuteCommand: executePendingScrollCommand,
             onReleaseCommandTarget: releaseScrollPositionTarget,
             onApplyViewportMode: applyViewportMode,
+            onAutomaticProjectionIntakeAvailable: intakeLatestTranscriptProjectionIfNeeded,
             hostedRecorder: transcriptHostedRecorder
         )
     }
@@ -1031,7 +1047,8 @@ struct ChatView: View {
                         }
                         // Ignore a callback captured before opening installed its mounted
                         // generation; the newer exact source owns submission.
-                        guard source == capture.tag else { return }
+                        guard source == capture.tag,
+                              !scrollCoordinator.blocksAutomaticLiveProjectionIntake else { return }
                         intakeTranscriptProjection(capture)
                     }
             } else if presentationActivity.allowsDataPublication {
@@ -1701,13 +1718,11 @@ struct ChatView: View {
                     retainedPresentation: true,
                     state: interactionTraceState(installed: installed)
                 )
-                let positioned = await positionLatestTail(
-                    epoch: epoch,
-                    targetRenderedID: physicalOpeningTailID(for: installed)
-                )
-                guard positioned,
-                      revealPositionedTranscript(epoch: epoch) else {
-                    performanceSignposts.end(interval, result: .discarded, metrics: .none)
+                guard await completePositionedOpening(
+                    installed: installed,
+                    interval: interval,
+                    epoch: epoch
+                ) == .ready else {
                     await retireOpeningGeneration(
                         generation,
                         retainingVisiblePresentation: true
@@ -1715,7 +1730,6 @@ struct ChatView: View {
                     return
                 }
                 openedGeneration = nil
-                _ = await completeFirstReadyFrame(interval, epoch: epoch)
                 return
             }
             guard !Task.isCancelled,
@@ -1737,20 +1751,13 @@ struct ChatView: View {
                 retainedPresentation: false,
                 state: interactionTraceState(installed: installed)
             )
-            let positioned = await positionLatestTail(
-                epoch: epoch,
-                targetRenderedID: physicalOpeningTailID(for: installed)
+            let completion = await completePositionedOpening(
+                installed: installed,
+                interval: interval,
+                epoch: epoch
             )
-            guard positioned else {
-                let isCurrentTimeout = !Task.isCancelled
-                    && sessionPresentation.open.epoch == epoch
-                    && sessionPresentation.open.phase == .positioning
-                performanceSignposts.end(
-                    interval,
-                    result: isCurrentTimeout ? .failure : .discarded,
-                    metrics: .none
-                )
-                if isCurrentTimeout {
+            guard completion == .ready else {
+                if completion == .positioningFailed {
                     model.chatInteractionTrace.opening(
                         .failed,
                         context: ensureInteractionTraceContext(),
@@ -1769,17 +1776,7 @@ struct ChatView: View {
                 )
                 return
             }
-            guard !Task.isCancelled,
-                  revealPositionedTranscript(epoch: epoch) else {
-                performanceSignposts.end(interval, result: .discarded, metrics: .none)
-                await retireOpeningGeneration(
-                    generation,
-                    retainingVisiblePresentation: false
-                )
-                return
-            }
             openedGeneration = nil
-            _ = await completeFirstReadyFrame(interval, epoch: epoch)
         } catch {
             if let generation = openedGeneration {
                 await retireOpeningGeneration(
@@ -1839,6 +1836,12 @@ struct ChatView: View {
             retainingVisiblePresentation: retainsVisiblePresentation
                 && !retainedPinnedRevalidation
         )
+        model.chatInteractionTrace.opening(
+            .attemptBegan,
+            context: ensureInteractionTraceContext(),
+            retainedPresentation: retainsVisiblePresentation,
+            state: interactionTraceState()
+        )
         let interval = performanceSignposts.begin(.firstReadyFrame)
         guard selectedAuthoritativeSnapshot != nil,
               let presentationGeneration = model.presentationGeneration(for: sessionID) else {
@@ -1851,6 +1854,12 @@ struct ChatView: View {
             return
         }
         sessionPresentation.modelPresentationGeneration = presentationGeneration
+        model.chatInteractionTrace.opening(
+            .authorityOpened,
+            context: ensureInteractionTraceContext(),
+            retainedPresentation: retainsVisiblePresentation,
+            state: interactionTraceState()
+        )
         scrollCoordinator.resetForPresentation(
             presentationGeneration,
             retainingVisibleViewport: retainsVisiblePresentation
@@ -1876,6 +1885,12 @@ struct ChatView: View {
             )
             return
         }
+        model.chatInteractionTrace.opening(
+            .projectionInstalled,
+            context: ensureInteractionTraceContext(),
+            retainedPresentation: retainsVisiblePresentation,
+            state: interactionTraceState(installed: installed)
+        )
         if !retainsVisiblePresentation || retainedPinnedRevalidation {
             guard sessionPresentation.open.installAuthoritativeBaseline(
                 sessionID: sessionID,
@@ -1884,6 +1899,12 @@ struct ChatView: View {
                 performanceSignposts.end(interval, result: .discarded, metrics: .none)
                 return
             }
+            model.chatInteractionTrace.opening(
+                .baselineInstalled,
+                context: ensureInteractionTraceContext(),
+                retainedPresentation: retainsVisiblePresentation,
+                state: interactionTraceState(installed: installed)
+            )
         }
         probe.installScrollControls(
             geometry: { previous, current, viewport in
@@ -1963,30 +1984,43 @@ struct ChatView: View {
             invalidatePresentation: {
                 scrollCoordinator.resetForPresentation()
             },
+            reopenPresentation: {
+                await beginHostedPresentation(probe: probe)
+            },
             cancelPresentation: {
                 scrollCoordinator.cancel()
             }
         )
-        let positioned = await positionLatestTail(
-            epoch: epoch,
-            targetRenderedID: physicalOpeningTailID(for: installed)
+        let completion = await completePositionedOpening(
+            installed: installed,
+            interval: interval,
+            epoch: epoch
         )
-        guard positioned,
-              revealPositionedTranscript(epoch: epoch) else {
-            performanceSignposts.end(interval, result: .discarded, metrics: .none)
+        guard completion == .ready else {
+            probe.recordReadyFrameCompletion()
+            if completion == .positioningFailed {
+                model.chatInteractionTrace.opening(
+                    .failed,
+                    context: ensureInteractionTraceContext(),
+                    positioningSucceeded: false,
+                    state: interactionTraceState()
+                )
+                _ = sessionPresentation.open.fail(
+                    sessionID: sessionID,
+                    epoch: epoch,
+                    message: "Hosted conversation layout did not settle"
+                )
+            }
             return
         }
-        let presented = await completeFirstReadyFrame(interval, epoch: epoch)
-        if presented {
-            // Hosted readiness means the reveal has actually crossed one
-            // presented frame, not merely that the phase flag changed.
-            probe.markReady()
-            let geometry = scrollCoordinator.latestGeometry
-            if geometry.isAtCatchUpBoundary {
-                probe.recordScrollSettle(distanceFromBottom: geometry.distanceFromBottom)
-            }
-            await scrollCoordinator.waitForOpeningTailSettlement()
+        // Hosted readiness means the reveal has actually crossed one
+        // presented frame, not merely that the phase flag changed.
+        probe.markReady()
+        let geometry = scrollCoordinator.latestGeometry
+        if geometry.isAtCatchUpBoundary {
+            probe.recordScrollSettle(distanceFromBottom: geometry.distanceFromBottom)
         }
+        await scrollCoordinator.waitForOpeningTailSettlement()
         probe.recordReadyFrameCompletion()
     }
     #endif
@@ -2052,7 +2086,7 @@ struct ChatView: View {
     private func intakeLatestTranscriptProjectionIfNeeded() {
         guard scenePhase != .background,
               sessionPresentation.permitsExtensionInteractionPresentation,
-              !scrollCoordinator.defersAutomaticLiveProjectionIntake,
+              !scrollCoordinator.blocksAutomaticLiveProjectionIntake,
               !scrollCoordinator.isPrependingHistory,
               let capture = transcriptProjectionCapture,
               transcriptPresentation.installed?.tag != capture.tag else { return }
@@ -2063,6 +2097,42 @@ struct ChatView: View {
         // The marker is always mounted, including empty and queue-only
         // presentations, so opening never falls back to an implicit top offset.
         "transcript-bottom"
+    }
+
+    private enum PositionedOpeningCompletion: Equatable {
+        case ready
+        case positioningFailed
+        case discarded
+    }
+
+    /// Shared production/hosted post-authority path. Authority setup differs,
+    /// but baseline positioning, reveal, and first-frame proof must not drift.
+    @MainActor
+    private func completePositionedOpening(
+        installed: InstalledChatTranscript,
+        interval: PerformanceInterval,
+        epoch: Int
+    ) async -> PositionedOpeningCompletion {
+        let positioned = await positionLatestTail(
+            epoch: epoch,
+            targetRenderedID: physicalOpeningTailID(for: installed)
+        )
+        guard positioned else {
+            let isCurrentFailure = !Task.isCancelled
+                && sessionPresentation.open.epoch == epoch
+                && sessionPresentation.open.phase == .positioning
+            performanceSignposts.end(
+                interval,
+                result: isCurrentFailure ? .failure : .discarded,
+                metrics: .none
+            )
+            return isCurrentFailure ? .positioningFailed : .discarded
+        }
+        guard !Task.isCancelled, revealPositionedTranscript(epoch: epoch) else {
+            performanceSignposts.end(interval, result: .discarded, metrics: .none)
+            return .discarded
+        }
+        return await completeFirstReadyFrame(interval, epoch: epoch) ? .ready : .discarded
     }
 
     @MainActor
@@ -2826,15 +2896,6 @@ struct ChatView: View {
         _ = layoutTransaction.join(.transcriptGrowth)
         let composerHeightBeforeSubmission = composerHeightLedger.current
         let keyboardRevision = keyboardObserver.revision
-        composerFocused = false
-        _ = composerResponder.resignFirstResponder()
-        layoutTransaction.configure(
-            keyboard: keyboardObserver.transition,
-            reduceMotion: reduceMotion
-        )
-        if keyboardObserver.transitionArrived(after: keyboardRevision) {
-            _ = layoutTransaction.join(.keyboard)
-        }
         do {
             // Admission and the local lifecycle graft are atomic. Row entrance
             // and morph views own their scoped animations.
@@ -2852,6 +2913,18 @@ struct ChatView: View {
                     canonicalTranscript: model.transcriptSnapshot(for: sessionID)?.transcript ?? [],
                     queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? []
                 )
+                // Only an admitted submission may change responder state. The
+                // layout owner is armed beforehand so composer clearing, graft,
+                // morph, and keyboard settlement still share one generation.
+                composerFocused = false
+                _ = composerResponder.resignFirstResponder()
+                layoutTransaction.configure(
+                    keyboard: keyboardObserver.transition,
+                    reduceMotion: reduceMotion
+                )
+                if keyboardObserver.transitionArrived(after: keyboardRevision) {
+                    _ = layoutTransaction.join(.keyboard)
+                }
                 let submittedAttachments = model.composerDrafts.submittedAttachments(for: target)
                     .filter { attachment in
                         attachment.gatewayUploadID.map(submission.attachmentIDs.contains) == true

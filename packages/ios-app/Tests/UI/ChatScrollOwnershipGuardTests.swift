@@ -47,4 +47,22 @@ struct ChatScrollOwnershipGuardTests {
         #expect(!chat.contains("tailFollowTask"))
         #expect(!chat.contains("ScrollViewReader"))
     }
+
+    @Test("submission changes responder state only after draft admission")
+    func submissionAdmissionPrecedesResponderMutation() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let chat = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        let admission = try #require(chat.range(of: "let submission = try model.beginComposerSubmission("))
+        let focus = try #require(chat.range(of: "composerFocused = false", range: admission.lowerBound..<chat.endIndex))
+        #expect(admission.lowerBound < focus.lowerBound)
+        let preceding = chat[..<admission.lowerBound]
+        #expect(!preceding.suffix(2_000).contains("composerFocused = false"))
+        #expect(!preceding.suffix(2_000).contains("resignFirstResponder()"))
+    }
 }

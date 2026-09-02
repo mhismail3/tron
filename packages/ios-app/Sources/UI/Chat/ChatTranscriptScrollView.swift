@@ -391,6 +391,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let onExecuteCommand: () -> Void
     let onReleaseCommandTarget: () -> Void
     let onApplyViewportMode: (ChatViewportMode) -> Void
+    let onAutomaticProjectionIntakeAvailable: () -> Void
     let hostedRecorder: (any ChatTranscriptHostedRecording)?
 
     var body: some View {
@@ -504,9 +505,11 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         .onChange(of: scrollCoordinator.targetReleaseGeneration) { _, _ in
             guard scrollCoordinator.consumeTargetRelease() else { return }
             onReleaseCommandTarget()
+            onAutomaticProjectionIntakeAvailable()
         }
         .onChange(of: scrollCoordinator.tailSettlementGeneration) { _, _ in
             onApplyViewportMode(.pinned)
+            onAutomaticProjectionIntakeAvailable()
         }
         .onChange(of: scrollCoordinator.pinnedPositionRevision) { _, _ in
             onApplyViewportMode(.pinned)

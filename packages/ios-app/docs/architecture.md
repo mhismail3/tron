@@ -232,19 +232,21 @@ the exact page build. A complete same-runtime commit with the same mounted start
 edge IDs at their original ordinals may restore the anchor even if a canonical suffix appended;
 branch replacement and window movement fail closed. The newest desired source is submitted
 immediately on settlement. Background cancellation clears prepend ownership before its terminal
-callback; projection work stays suspended, and active foreground reconciliation submits the latest
-coalesced source before viewport revalidation.
+callback; projection work stays suspended, and active foreground reconciliation retires stale
+native target ownership before submitting the latest coalesced source.
 Ordinary projection updates do not relabel or disable the pill. It installs only an exact tag
 containing session, mounted presentation, runtime, canonical/timeline generations, and paging
-bounds/edge identity. It retains at most one installed, one building, and one pending immutable
-snapshot/timeline; it is disposable projection state, not a session mirror or event journal.
+bounds/edge identity. It retains at most one installed, one frame-gated ready candidate, one building,
+and one pending immutable snapshot/timeline; every slot is disposable projection state, not a session
+mirror or event journal.
 One deterministic `ChatTranscriptProjectionKernel` converts exact canonical entries into ordered
 raw atoms and then globally assembles call/result joins, bootstrap filtering, barriers, grouping,
 and semantic maps. Message presentation IDs and required content/thinking-run ordinals arrive from
 the Gateway and are never rewritten: the same semantic row, thinking run, and prepared-text source
 therefore survive live-to-canonical settlement even though the canonical entry ID changes. When one
 snapshot briefly retains a streaming assistant after its matching presentation ID becomes canonical,
-canonical ownership wins for every row shape, including finalized tool groups. Exact nonempty tool-call
+canonical ownership wins for every row shape, including finalized tool groups. Text preparation applies
+the same role-and-presentation precedence, so a stale live source cannot evict the canonical row's warm value. Exact nonempty tool-call
 membership is a second settlement proof for the narrow frame where canonical persistence precedes its
 presentation binding. The Gateway additionally refuses to project Pi's briefly retained
 `streamingMessage` after the explicit live identity retires. Other duplicate render IDs remain invalid
@@ -259,7 +261,9 @@ equality and never reslice the transcript-wide cache. `ToolExecutionStatePolicy`
 rules cannot drift between canonical event reduction and sparse rendering. Timestamps are freshness
 metadata only and never establish identity, membership, or placement. Raw fragments retain the complete
 currently visible disposable history—even beyond one 512-item page—because explicitly loaded
-history cannot be evicted until forward reload exists. Projection instrumentation reports only a closed privacy-safe mode (`cold`, `fragmentReuse`,
+history cannot be evicted until forward reload exists. The mounted reducer caches one validated visible
+transcript projection per timeline generation, and semantic-anchor selection is one indexed pass; cold
+or structurally changed full-history assembly remains linear in the explicitly retained history. Projection instrumentation reports only a closed privacy-safe mode (`cold`, `fragmentReuse`,
 `toolPayloadPatch`, or `isolatedStreamingSuffix`) and aggregate entry/fragment/tool/atom/rendered
 counts; it carries no identifiers or content. A pure tool patch reports zero source entries and atoms,
 counts every runtime membership state examined in `toolsInspected`, and reports only the distinct
@@ -272,13 +276,13 @@ after transcript and queue rows. Rows remain fully realizable beneath that opaqu
 an opacity-zero lazy stack is never used as a layout gate. Only then does the cover fade
 while the positioned transcript rises eight points (opacity only under Reduce Motion).
 The first-ready performance interval closes after the next display-link frame proves
-that ready state was presented. While the opening cover is opaque, automatic projection intake is
-coalesced: the first complete same-session/presentation/runtime commit may position and reveal even
-if streaming has advanced its payload, and the newest desired source is submitted immediately after
-the first ready frame. Runtime or presentation replacement still fails closed. Opening uses one exact eager-marker `ScrollPosition`
-command when the marker is not yet realized, rejects native overflow overshoot as a
-bottom boundary, and retains that command through animation completion plus two
-unchanged presented frames before releasing the binding. Its bounded deadline only
+that ready state was presented. Automatic projection intake remains coalesced through opaque positioning,
+reveal, current non-lifted marker and geometry evidence, two unchanged presented frames, and consumption
+of the exact opening-target release. The first complete same-session/presentation/runtime commit may
+position and reveal even if streaming has advanced its payload; only the newest desired source is submitted
+after that lease ends. Runtime or presentation replacement still fails closed. Opening uses one exact
+eager-marker `ScrollPosition` command when the marker is not yet realized, rejects native overflow
+overshoot as a bottom boundary, and never uses the lifted reveal frame or elapsed time as settlement proof. A separate two-second post-reveal deadline abandons a stale target back to target-free native pinning and bounded physical repair; it never certifies readiness. Its bounded deadline only
 retries or fails positioning; it never certifies an unverified ready frame. A retained
 pinned presentation re-enters this same physical-marker positioning gate on resume;
 a retained detached reader remains anchored and is never repinned. Foreground
@@ -323,7 +327,9 @@ content-free in-memory chat trace correlates opening, projection-spine replaceme
 layout participants, viewport intent, explicit scroll commands, submission lifecycle,
 and thresholded geometry changes with local context/generation numbers. It emits
 automatic anomalies when a ready opening loses its installed rows or a pinned opening or
-submission becomes substantially displaced. Records are merged into the existing Logs
+submission becomes substantially displaced. Under ring pressure, informational records are evicted
+before warning/error evidence; the ring remains globally bounded and becomes FIFO when every retained
+record is diagnostic priority. Records are merged into the existing Logs
 destination on demand and also enter Unified Logging; they never contain session or row
 IDs, prompts, transcript content, paths, filenames, model/provider names, or error payloads,
 and disappear when the app process exits. The UIKit composer keeps focus reconciliation deferred but resolves internal overflow and caret visibility only from final post-layout TextKit geometry, preventing speculative SwiftUI measurement or keyboard/safe-area callbacks from changing the editor offset.
@@ -388,8 +394,9 @@ without another open handshake; stale/revoked owners ignore it and no fitted bas
 `transport.resyncRequired` fallback. Same-runtime snapshots and rebaselines must preserve both the
 aggregate authority revision and the live-activity revision; a negative or regressed revision re-enters
 bounded synchronization instead of installing over newer state. Malformed owned snapshot/rebaseline
-frames and authoritative queue projections with more than 32,
-empty, or duplicate identities fail closed into this same bounded synchronization path rather than advancing
+frames, transcript tails above 512 items or with invalid bounds/nonempty unique identities, and
+authoritative queue projections with more than 32, empty, or duplicate identities fail closed into this
+same bounded synchronization path rather than advancing
 a partial cursor or leaving the installed transcript stale. Outside that explicit install, a full `session.snapshot` hint requires the
 current subscription plus either mounted authority or its active synchronization lease, the same runtime generation, and exactly
 the next event sequence. Equal/lower cursors are discarded without merge, summary write,
@@ -606,8 +613,9 @@ work. `ChatView.body` never constructs the timeline. `ChatView` is the compositi
 `ChatTranscriptScrollView` is the one physical transcript/semantic-geometry owner; native geometry is admitted directly to the scroll coordinator and is never mirrored into root view state,
 `ChatComposerView` renders value inputs and emits intents through the root's sole safe-area inset,
 and `ChatRoutes` contains modal routing without mirrored authority. `ChatSessionPresentation`
-groups disposable opening, import, queue-deferral, and entrance-ledger state while canonical facts
-remain in `AppModel` and `ChatTranscriptPresentationStore`. Typing, focus, geometry, toolbar, and
+groups disposable opening, import, queue-deferral, and entrance-ledger state. Canonical truth remains
+in Gateway/Pi; `SessionPresentationStore` owns the admitted mounted iOS authority, `AppModel` is its
+cross-domain façade, and `ChatTranscriptPresentationStore` owns only immutable disposable rendering. Typing, focus, geometry, toolbar, and
 sheet invalidations reuse the installed immutable value, while streaming revisions are
 serialized/coalesced off-main and observable installs are limited to a display-frame boundary. Exact-tag waiters let prepend retain
 its existing semantic-alias and layout-epoch transaction. This adopts the useful
@@ -720,8 +728,9 @@ tail anchors; a bottom-starting pull that remains within the tail boundary or na
 rubber band stays pinned and never exposes catch-up. A physically observed direct return, catch-up, or opening pins; submission and prepend preserve
 the current mode; a fresh presentation reset pins while a retained same-session reset preserves
 reader authority. `ChatScrollCoordinator` owns the reducer, raw geometry and semantic frames,
-unread state, and five bounded command purposes only: exact opening-tail realization, catch-up,
-semantic-anchor correction, prepend correction, and a token-guarded physical-tail repair. Automatic growth follow, tail-correction arbitration, and callback-order compatibility flags no longer exist.
+unread state, and six bounded command purposes only: exact opening-tail realization, catch-up,
+semantic-anchor correction, prepend correction, lazy tail materialization, and a token-guarded
+physical-tail repair. Automatic growth follow, tail-correction arbitration, and callback-order compatibility flags no longer exist.
 
 Opening still keeps the opaque surface until the exact physical marker after transcript and
 queue rows is positioned. It permits bounded exact-marker realization attempts; the

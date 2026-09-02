@@ -1,3 +1,38 @@
+enum SessionSnapshotTranscriptAdmissionPolicy {
+    static let maximumItemIdentityUTF8Bytes = 512
+
+    static func admit(_ snapshot: SessionSnapshot) -> Bool {
+        guard admitsItems(snapshot.transcript),
+              snapshot.streaming.map(admitsItem) ?? true else { return false }
+        switch (snapshot.transcriptStart, snapshot.transcriptTotal) {
+        case (nil, nil):
+            // Legacy/test projections without paging metadata remain valid. A
+            // partial pair cannot establish a canonical range.
+            return true
+        case let (start?, total?):
+            guard start >= 0, total >= start else { return false }
+            let (end, overflow) = start.addingReportingOverflow(snapshot.transcript.count)
+            return !overflow && end == total
+        default:
+            return false
+        }
+    }
+
+    static func admitsPage(_ items: [TranscriptItem]) -> Bool {
+        admitsItems(items)
+    }
+
+    static func admitsItem(_ item: TranscriptItem) -> Bool {
+        !item.id.isEmpty && item.id.utf8.count <= maximumItemIdentityUTF8Bytes
+    }
+
+    private static func admitsItems(_ items: [TranscriptItem]) -> Bool {
+        guard items.count <= SessionSnapshot.maximumTranscriptItems,
+              items.allSatisfy(admitsItem) else { return false }
+        return Set(items.map(\.id)).count == items.count
+    }
+}
+
 enum SessionSnapshotQueueAdmissionPolicy {
     static func admit(_ snapshot: SessionSnapshot) -> Bool {
         let displayed = snapshot.displayedQueuedMessages
@@ -42,6 +77,7 @@ enum SessionRebaselineAdmission: Equatable, Sendable {
         incoming: SessionSnapshot
     ) -> SessionRebaselineAdmission {
         guard incoming.revision >= 0,
+              SessionSnapshotTranscriptAdmissionPolicy.admit(incoming),
               SessionSnapshotQueueAdmissionPolicy.admit(incoming) else {
             return .resynchronize
         }
@@ -74,6 +110,7 @@ enum SessionSnapshotEventAdmission: Equatable, Sendable {
     ) -> SessionSnapshotEventAdmission {
         guard hasLiveAuthority, let eventSessionID else { return .ignore }
         guard incoming.revision >= 0,
+              SessionSnapshotTranscriptAdmissionPolicy.admit(incoming),
               SessionSnapshotQueueAdmissionPolicy.admit(incoming) else {
             return .resynchronize(eventSessionID)
         }

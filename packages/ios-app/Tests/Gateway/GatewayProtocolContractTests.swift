@@ -198,6 +198,46 @@ struct GatewayProtocolContractTests {
         }
     }
 
+    @Test("snapshot and rebaseline preparation share transcript and token admission")
+    func authoritativeSnapshotPreparationAdmission() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 9_301)
+            .openingTail(targetEncodedBytes: 8_192)
+        let validPayload = JSONValue.object([
+            "snapshot": try JSONValue.encode(snapshot),
+            "subscriptionToken": .string("bounded-token"),
+        ])
+        let valid = GatewayEvent(
+            type: "event", topic: "session.rebaseline",
+            sessionId: snapshot.sessionId, payload: validPayload
+        )
+        guard case .sessionRebaseline = valid.preparation else {
+            Issue.record("valid rebaseline did not prepare")
+            return
+        }
+
+        for token in ["", String(repeating: "x", count: 201), "control\u{1}token"] {
+            let event = GatewayEvent(
+                type: "event", topic: "session.rebaseline",
+                sessionId: snapshot.sessionId,
+                payload: .object([
+                    "snapshot": try JSONValue.encode(snapshot),
+                    "subscriptionToken": .string(token),
+                ])
+            )
+            #expect(event.preparation == .none)
+        }
+
+        snapshot.transcript = SessionScenarioBuilder(seed: 9_302).historyPage(
+            count: SessionSnapshot.maximumTranscriptItems + 1,
+            longRowBytes: 0
+        )
+        let malformed = GatewayEvent(
+            type: "event", topic: "session.snapshot",
+            sessionId: snapshot.sessionId, payload: try JSONValue.encode(snapshot)
+        )
+        #expect(malformed.preparation == .none)
+    }
+
     @Test("compaction completion prepares only an exact canonical compaction item")
     func compactionCompletionPreparation() throws {
         let item: JSONValue = .object([

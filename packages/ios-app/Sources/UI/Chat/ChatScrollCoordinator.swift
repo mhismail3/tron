@@ -61,6 +61,7 @@ enum ChatHistoryPageLoadResult: Equatable, Sendable {
 @MainActor
 final class ChatScrollCoordinator {
     static let defaultOpeningTailTimeout: Duration = .milliseconds(750)
+    static let defaultOpeningPostRevealTimeout: Duration = .seconds(2)
     static let liveGrowthAnimationDuration = 0.16
 
     private struct SemanticFrameSample: Equatable {
@@ -100,14 +101,11 @@ final class ChatScrollCoordinator {
         var commandSemanticRevision: Int?
         var commandGeometryRevision: Int?
         var commandAttemptCount: Int
-        var positionedBestEffort: Bool
     }
 
     private struct OpeningTailPostRevealContext: Equatable {
         var base: OpeningTailContext
         var stableFrameCount = 0
-        var stableSemanticRevision: Int?
-        var stableGeometryRevision: Int?
     }
 
     private enum OpeningTailPhase: Equatable {
@@ -165,7 +163,10 @@ final class ChatScrollCoordinator {
     private(set) var isUserInteracting = false
     var isPrependingHistory: Bool { prepend != nil }
     var canRequestHistoryPage: Bool {
-        prepend == nil && catchUpPhase == .none && !openingTailSettlementPending
+        let hasCompatiblePendingCommand = command == nil || command?.origin == .layout
+        return prepend == nil && catchUpPhase == .none && !openingTailSettlementPending
+            && hasCompatiblePendingCommand && appliedTargetCommandToken == nil
+            && targetReleaseToken == nil && physicalTailRepairCommandToken == nil
     }
     private(set) var command: ChatScrollCommand?
     private(set) var commandRevision = 0
@@ -188,6 +189,7 @@ final class ChatScrollCoordinator {
     private var openingTailPhase: OpeningTailPhase = .idle
     private var openingTailContinuation: CheckedContinuation<Bool, Never>?
     private var openingTailFinalWaiters: [OpeningTailFinalWaiter] = []
+    private var pendingOpeningReleaseWaiterToken: Int?
     private var nextOpeningTailFinalWaiterID = 0
     private var openingTailFrameTaskGeneration = 0
     private var appliedTargetCommandToken: Int?
@@ -223,10 +225,12 @@ final class ChatScrollCoordinator {
     @ObservationIgnored private var prependTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private var openingTailFrameTask: Task<Void, Never>?
     @ObservationIgnored private var openingTailTimeoutTask: Task<Void, Never>?
+    @ObservationIgnored private var openingTailPostRevealTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private var physicalTailRepairTask: Task<Void, Never>?
     @ObservationIgnored private var targetReleaseTask: Task<Void, Never>?
     @ObservationIgnored private var tailMaterializationSettlementTask: Task<Void, Never>?
     @ObservationIgnored private var directPositionOwnership = false
+    @ObservationIgnored private var lastForegroundActivation: Int?
     @ObservationIgnored private var interactionTrace: ChatInteractionTrace?
     @ObservationIgnored private var interactionTraceContext: Int?
 
@@ -267,6 +271,10 @@ final class ChatScrollCoordinator {
     var defersAutomaticLiveProjectionIntake: Bool {
         viewportMode == .anchored || catchUpPhase != .none
     }
+    var blocksAutomaticLiveProjectionIntake: Bool {
+        defersAutomaticLiveProjectionIntake
+            || openingTailPhase.isActive || appliedTargetOrigin == .presentation
+    }
     var latestGeometry: ChatTranscriptGeometry { geometry }
     /// Native size-change anchoring is intent-based, not overflow-dependent.
     /// The bounded physical repair is the only explicit fallback.
@@ -305,6 +313,7 @@ final class ChatScrollCoordinator {
         physicalTailRepairAttempts = 0
         installedPhysicalRowSpine = nil
         self.presentation = presentation ?? (self.presentation &+ 1)
+        lastForegroundActivation = nil
         reduceViewport(.presentationReset(retainingViewport: retainingVisibleViewport))
         retainedViewportReconciliationPending = retainingVisibleViewport
         clearCommand()
@@ -360,24 +369,25 @@ final class ChatScrollCoordinator {
     }
 
     func semanticAnchor(in timeline: ChatTranscriptTimeline) -> ChatSemanticAnchor? {
-        let candidates = timeline.ids.compactMap { renderedID -> (String, String, CGRect)? in
+        let selected = timeline.ids.enumerated().compactMap { indexed
+            -> (index: Int, renderedID: String, semanticID: String, frame: CGRect)? in
+            let (index, renderedID) = indexed
             guard let semanticID = timeline.preferredSemanticIDByRenderedID[renderedID],
                   let sample = semanticFrames[renderedID],
                   sample.layoutEpoch == layoutEpoch,
                   sample.frame.maxY > 0,
                   sample.frame.minY < geometry.containerHeight else { return nil }
-            return (renderedID, semanticID, sample.frame)
+            return (index, renderedID, semanticID, sample.frame)
+        }.min { lhs, rhs in
+            if lhs.frame.minY != rhs.frame.minY { return lhs.frame.minY < rhs.frame.minY }
+            return lhs.index < rhs.index
         }
-        guard let selected = candidates.min(by: { lhs, rhs in
-            if lhs.2.minY != rhs.2.minY { return lhs.2.minY < rhs.2.minY }
-            return (timeline.ids.firstIndex(of: lhs.0) ?? 0)
-                < (timeline.ids.firstIndex(of: rhs.0) ?? 0)
-        }) else { return nil }
+        guard let selected else { return nil }
         return ChatSemanticAnchor(
-            semanticID: selected.1,
-            renderedID: selected.0,
+            semanticID: selected.semanticID,
+            renderedID: selected.renderedID,
             layoutEpoch: layoutEpoch,
-            viewportOffsetY: selected.2.minY
+            viewportOffsetY: selected.frame.minY
         )
     }
 
@@ -449,15 +459,22 @@ final class ChatScrollCoordinator {
         evaluatePrependIfReady()
     }
 
+    /// Admits a layout-only geometry sample. Size/inset churn cannot establish
+    /// direct reader ownership without a native viewport movement callback.
     func geometryChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
-        admitGeometry(current)
+        admitGeometry(current, mayRepresentDirectViewportMovement: false)
     }
 
+    /// Admits a sample whose visible viewport moved independently of content
+    /// layout, including UIKit's status-bar scroll-to-top path.
     func viewportChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
-        admitGeometry(current)
+        admitGeometry(current, mayRepresentDirectViewportMovement: true)
     }
 
-    private func admitGeometry(_ current: ChatTranscriptGeometry) {
+    private func admitGeometry(
+        _ current: ChatTranscriptGeometry,
+        mayRepresentDirectViewportMovement: Bool = true
+    ) {
         // SwiftUI may deliver the same native geometry more than once in one
         // display frame while an observed anchor role settles. Re-publishing an
         // identical fact feeds that callback back into layout and can create an
@@ -482,7 +499,8 @@ final class ChatScrollCoordinator {
         // unmistakable retreat from the tail as direct ownership before a
         // layout update can re-apply the pinned bottom anchor.
         let hasAutomaticViewportTarget = command != nil || appliedTargetOrigin != nil
-        if !openingTailSettlementPending,
+        if mayRepresentDirectViewportMovement,
+           !openingTailSettlementPending,
            !hasAutomaticViewportTarget,
            viewportMode == .pinned,
            previousGeometry.isAtCatchUpBoundary,
@@ -613,6 +631,8 @@ final class ChatScrollCoordinator {
         }
         targetReleaseToken = nil
         targetReleaseEvidenceRevision = nil
+        let releasedOrigin = appliedTargetOrigin
+        completeOpeningTargetReleaseIfNeeded(releasedOrigin)
         let pending = pendingTailMaterialization
         pendingTailMaterialization = nil
         if let pending, canAutomaticallyFollow {
@@ -639,16 +659,18 @@ final class ChatScrollCoordinator {
         guard case .positioned(let context) = openingTailPhase,
               context.presentation == presentation else { return }
         openingTailPhase = .postReveal(.init(base: context))
+        scheduleOpeningPostRevealTimeout(token: context.token, presentation: context.presentation)
         scheduleOpeningTailFrame()
     }
 
     func waitForOpeningTailSettlement() async {
-        guard let token = openingTailToken else { return }
+        guard let token = openingTailToken ?? pendingOpeningReleaseWaiterToken else { return }
         let id = nextOpeningTailFinalWaiterID
         nextOpeningTailFinalWaiterID &+= 1
         await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                if openingTailSettlementPending, openingTailToken == token {
+                if (openingTailSettlementPending && openingTailToken == token)
+                    || pendingOpeningReleaseWaiterToken == token {
                     openingTailFinalWaiters.append(.init(id: id, token: token, continuation: continuation))
                 } else {
                     continuation.resume()
@@ -765,8 +787,12 @@ final class ChatScrollCoordinator {
 
     /// Retains native viewport ownership and admits bounded repair from current
     /// same-presentation or fresh resumed marker evidence.
-    func foregroundViewportBecameActive() {
+    func foregroundViewportBecameActive(activation: Int? = nil) {
         guard viewportMode == .pinned, !isUserInteracting else { return }
+        if let activation {
+            guard lastForegroundActivation != activation else { return }
+            lastForegroundActivation = activation
+        }
         retainedViewportReconciliationPending = true
         if catchUpPhase != .none {
             // Background suspension can interrupt before command application;
@@ -1245,8 +1271,7 @@ final class ChatScrollCoordinator {
             commandToken: nil,
             commandSemanticRevision: nil,
             commandGeometryRevision: nil,
-            commandAttemptCount: 0,
-            positionedBestEffort: false
+            commandAttemptCount: 0
         )
         openingTailPhase = .positioning(context)
         openingTailContinuation = continuation
@@ -1364,7 +1389,7 @@ final class ChatScrollCoordinator {
             guard case .postReveal(var value) = self.openingTailPhase else { return }
             let stable = self.semanticFrameRevision == semanticRevision
                 && self.geometryRevision == admittedGeometryRevision
-                && (value.base.positionedBestEffort || self.openingTailViewportIsPhysicallySettled)
+                && self.openingTailViewportIsPhysicallySettled
             if stable {
                 value.stableFrameCount &+= 1
                 self.openingTailPhase = .postReveal(value)
@@ -1387,7 +1412,11 @@ final class ChatScrollCoordinator {
               evidence.presentationEpoch == presentation,
               evidence.layoutEpoch == layoutEpoch else { return false }
         if evidence.classification == .aligned { return true }
-        return openingTailPhase.isActive && abs(evidence.signedDisplacement - 8) <= 2
+        let acceptsLiftedRevealEvidence: Bool = switch openingTailPhase {
+        case .positioning, .positioned: true
+        case .idle, .postReveal: false
+        }
+        return acceptsLiftedRevealEvidence && abs(evidence.signedDisplacement - 8) <= 2
     }
 
     private var openingTailViewportIsPhysicallySettled: Bool {
@@ -1406,6 +1435,8 @@ final class ChatScrollCoordinator {
     private func finishOpeningTailSettlement() {
         let token = openingTailToken
         let commandToken = appliedTargetCommandToken
+        openingTailPostRevealTimeoutTask?.cancel()
+        openingTailPostRevealTimeoutTask = nil
         openingTailTimeoutTask?.cancel()
         openingTailTimeoutTask = nil
         openingTailFrameTaskGeneration &+= 1
@@ -1415,7 +1446,13 @@ final class ChatScrollCoordinator {
         openingTailPhase = .idle
         openingTailContinuation?.resume(returning: true)
         openingTailContinuation = nil
-        if let token { resumeOpeningTailFinalWaiters(token: token) }
+        if let token {
+            if commandToken == nil {
+                resumeOpeningTailFinalWaiters(token: token)
+            } else {
+                pendingOpeningReleaseWaiterToken = token
+            }
+        }
         reduceViewport(.opened)
         isAtBottom = true
         tailSettlementGeneration &+= 1
@@ -1439,6 +1476,8 @@ final class ChatScrollCoordinator {
         if let expectedToken, openingTailToken != expectedToken { return }
         if let expectedPresentation, openingTailPresentation != expectedPresentation { return }
         let token = openingTailToken
+        openingTailPostRevealTimeoutTask?.cancel()
+        openingTailPostRevealTimeoutTask = nil
         openingTailTimeoutTask?.cancel()
         openingTailTimeoutTask = nil
         openingTailFrameTaskGeneration &+= 1
@@ -1451,6 +1490,41 @@ final class ChatScrollCoordinator {
         openingTailContinuation?.resume(returning: positioningSucceeded)
         openingTailContinuation = nil
         if let token { resumeOpeningTailFinalWaiters(token: token) }
+    }
+
+    private func scheduleOpeningPostRevealTimeout(token: Int, presentation: Int) {
+        openingTailPostRevealTimeoutTask?.cancel()
+        openingTailPostRevealTimeoutTask = Task { [weak self, clock] in
+            do {
+                try await clock.sleep(Self.defaultOpeningPostRevealTimeout)
+                try Task.checkCancellation()
+            } catch { return }
+            guard let self, case .postReveal(let context) = self.openingTailPhase,
+                  context.base.token == token,
+                  context.base.presentation == presentation else { return }
+
+            // A deadline never certifies the viewport. Abandon only the stale
+            // target lease, return to target-free native pinning, and let the
+            // bounded physical repair owner act on any later marker evidence.
+            self.openingTailPostRevealTimeoutTask = nil
+            self.openingTailFrameTaskGeneration &+= 1
+            self.openingTailFrameTask?.cancel()
+            self.openingTailFrameTask = nil
+            self.retireAppliedTargetWithoutCallback()
+            self.pendingOpeningReleaseWaiterToken = nil
+            self.openingTailPhase = .idle
+            if let continuation = self.openingTailContinuation {
+                self.openingTailContinuation = nil
+                continuation.resume(returning: false)
+            }
+            self.resumeOpeningTailFinalWaiters(token: token)
+            self.reduceViewport(.opened)
+            self.isAtBottom = true
+            self.tailSettlementGeneration &+= 1
+            self.pinnedPositionRevision &+= 1
+            self.physicalTailRepairBlockedUntilEvidenceRevision = self.semanticFrameRevision
+            self.schedulePhysicalTailRepairIfNeeded()
+        }
     }
 
     private func scheduleOpeningTailTimeout(token: Int, presentation: Int) {
@@ -1472,6 +1546,8 @@ final class ChatScrollCoordinator {
 
     private func failOpeningTailPositioning() {
         let token = openingTailToken
+        openingTailPostRevealTimeoutTask?.cancel()
+        openingTailPostRevealTimeoutTask = nil
         openingTailTimeoutTask?.cancel()
         openingTailTimeoutTask = nil
         openingTailFrameTaskGeneration &+= 1
@@ -1716,6 +1792,7 @@ final class ChatScrollCoordinator {
     }
 
     private func retireAppliedTargetWithoutCallback() {
+        let retiredOrigin = appliedTargetOrigin
         targetReleaseTask?.cancel()
         targetReleaseTask = nil
         targetReleaseToken = nil
@@ -1723,6 +1800,16 @@ final class ChatScrollCoordinator {
         appliedTargetCommandToken = nil
         appliedTargetOrigin = nil
         clearTailMaterializationState()
+        completeOpeningTargetReleaseIfNeeded(retiredOrigin)
+    }
+
+    private func completeOpeningTargetReleaseIfNeeded(
+        _ origin: ChatScrollCommand.Origin?
+    ) {
+        guard origin == .presentation,
+              let token = pendingOpeningReleaseWaiterToken else { return }
+        pendingOpeningReleaseWaiterToken = nil
+        resumeOpeningTailFinalWaiters(token: token)
     }
 
     private func reduceViewport(_ intent: ChatViewportIntent) {

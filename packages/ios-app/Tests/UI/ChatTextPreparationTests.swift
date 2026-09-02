@@ -125,10 +125,16 @@ struct ChatTextPreparationTests {
         )])
         let firstSlice = firstSnapshot.slice(for: .transcript(first))
 
-        let secondSnapshot = await cache.prepare([.init(
-            identity: .init(kind: .markdown, value: "second:content:0"),
-            source: "two"
-        )])
+        let secondSnapshot = await cache.prepare([
+            .init(
+                identity: .init(kind: .markdown, value: "first:content:0"),
+                source: "one"
+            ),
+            .init(
+                identity: .init(kind: .markdown, value: "second:content:0"),
+                source: "two"
+            ),
+        ])
         let secondSlice = secondSnapshot.slice(for: .transcript(first))
         #expect(firstSlice.revision == secondSlice.revision)
         #expect(firstSlice == secondSlice)
@@ -153,8 +159,29 @@ struct ChatTextPreparationTests {
 
         let sources = ChatTextPreparationPolicy.sources(in: snapshot)
         #expect(sources.map(\.identity.kind) == [.thinking, .thinking, .markdown, .markdown])
-        #expect(sources.map(\.source) == ["first…", "second…", "**answer**", "live"])
+        #expect(sources.map(\.source) == ["first", "second", "**answer**", "live"])
         #expect(!sources.contains { $0.source == "do not cache" })
+    }
+
+    @Test("canonical text preparation wins a matching live handoff")
+    func canonicalHandoffPreparation() async throws {
+        var snapshot = try SessionScenarioBuilder(seed: 6_203)
+            .openingTail(targetEncodedBytes: 4_096)
+        let canonical = try message(
+            id: "canonical", role: "assistant", presentationID: "shared-turn",
+            parts: [#"{"id":"canonical:0","type":"text","text":"canonical"}"#]
+        )
+        snapshot.transcript = [canonical]
+        snapshot.streaming = try message(
+            id: "streaming", role: "assistant", presentationID: "shared-turn",
+            parts: [#"{"id":"streaming:0","type":"text","text":"stale live"}"#]
+        )
+
+        let sources = ChatTextPreparationPolicy.sources(in: snapshot)
+        #expect(sources.map(\.source) == ["canonical"])
+        let prepared = await ChatTextPreparationCache().prepare(sources)
+        let slice = prepared.slice(for: .transcript(canonical))
+        #expect(slice.markdownDocument(identity: "content:0", source: "canonical") != nil)
     }
 
     @Test("preparation scans only the bounded render-critical transcript tail")
@@ -212,15 +239,20 @@ struct ChatTextPreparationTests {
         )
 
         let slice = snapshot.slice(for: .transcript(first))
-        #expect(Set(slice.markdown.keys) == ["first:content:0"])
+        #expect(Set(slice.markdown.keys) == ["content:0"])
         #expect(slice.revision == [7])
-        #expect(slice.markdownDocument(identity: "first:content:0", source: "one") != nil)
-        #expect(slice.markdownDocument(identity: "second:content:0", source: "two") == nil)
+        #expect(slice.markdownDocument(identity: "content:0", source: "one") != nil)
+        #expect(slice.markdownDocument(identity: "content:0", source: "two") == nil)
     }
 
-    private func message(id: String, role: String, parts: [String]) throws -> TranscriptItem {
+    private func message(
+        id: String,
+        role: String,
+        presentationID: String? = nil,
+        parts: [String]
+    ) throws -> TranscriptItem {
         let data = Data("""
-        {"id":"\(id)","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"\(role)","content":[\(parts.joined(separator: ","))]}
+        {"id":"\(id)","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"\(role)","presentationId":"\(presentationID ?? id)","content":[\(parts.joined(separator: ","))]}
         """.utf8)
         return try decodeTranscriptFixture(TranscriptItem.self, from: data)
     }

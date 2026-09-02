@@ -42,8 +42,7 @@ struct ProcessTranscriptPage: Codable, Hashable, Sendable {
         nextEntryId: String?, leafEntryId: String?
     ) -> Bool {
         start >= 0 && end >= start && total >= end && end - start == items.count
-            && items.count <= ChatTranscriptPageRequest.maximumItemCount
-            && Set(items.map(\.id)).count == items.count
+            && SessionSnapshotTranscriptAdmissionPolicy.admitsPage(items)
             && (nextEntryId.map { !$0.isEmpty && $0.utf8.count <= 512 } ?? true)
             && (leafEntryId.map { !$0.isEmpty && $0.utf8.count <= 512 } ?? true)
     }

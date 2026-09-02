@@ -328,8 +328,13 @@ final class ChatInteractionTrace: @unchecked Sendable {
             message: message
         )
         records.append(record)
-        if records.count > Self.maximumRecords {
-            records.removeFirst(records.count - Self.maximumRecords)
+        while records.count > Self.maximumRecords {
+            // Preserve sparse warnings/errors across routine geometry and
+            // lifecycle traffic. The ring remains globally bounded and falls
+            // back to FIFO once every retained record is diagnostic priority.
+            let evictionIndex = records.firstIndex { $0.level == "info" }
+                ?? records.startIndex
+            records.remove(at: evictionIndex)
         }
         lock.unlock()
         switch level {
