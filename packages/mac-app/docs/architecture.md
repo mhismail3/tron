@@ -39,15 +39,15 @@ sessions, credentials, and runtime markers remain separate.
 
 ## Source owners
 
-- `App/` — wrapper modes, lifecycle, single-instance ownership
-- `Wizard/` — location, installation, permissions, Tailscale, pairing, finish
-- `MenuBar/` — status poller, controls, pairing window, gateway logs
-- `Server/LaunchAgent/` — the retained internal name for SMAppService ownership
-- `Server/Health/` — authenticated `system.info` gateway probe
-- `Server/Paths/` — canonical wrapper identities and filesystem paths
-- `Support/Pairing/` — strict invitation URL and QR generation
-- `Sources/Resources/Library/` — tracked Login Item and LaunchAgent skeletons
-- `scripts/bundle-gateway.sh` — generated gateway payload owner
+- `packages/mac-app/Sources/App/` — wrapper modes, lifecycle, single-instance ownership
+- `packages/mac-app/Sources/Wizard/` — location, installation, permissions, Tailscale, pairing, finish
+- `packages/mac-app/Sources/MenuBar/` — status poller, controls, pairing window, gateway logs
+- `packages/mac-app/Sources/Server/LaunchAgent/` — the retained internal name for SMAppService ownership
+- `packages/mac-app/Sources/Server/Health/` — authenticated `system.info` gateway probe
+- `packages/mac-app/Sources/Server/Paths/` — canonical wrapper identities and filesystem paths
+- `packages/mac-app/Sources/Support/Pairing/` — strict invitation URL and QR generation
+- `packages/mac-app/Sources/Resources/Library/` — tracked Login Item and LaunchAgent skeletons
+- `packages/mac-app/scripts/bundle-gateway.sh` — generated gateway payload owner
 
 The retired Mac Operator accessibility/socket bridge is absent. The agent uses
 its normal filesystem, terminal, extensions, and tools; the wrapper is not a
@@ -264,6 +264,8 @@ nested Login Items before resealing the outer app. The shared gateway payload is
 in `Contents/Resources/Gateway`; its Node runtimes are signed with
 `TronNode.entitlements` so V8 JIT execution remains permitted under the
 hardened runtime, while native modules remain minimally entitled. Release
-validation must inspect the helper launcher, execute both runtime binaries,
-verify the production dependency tree, outer signature, and notarization
-ticket.
+validation must inspect the helper launcher, execute the host-native runtime,
+statically validate the foreign-architecture runtime's checksum, signature,
+architecture, aliases, and entitlements, and verify the production dependency
+tree, outer signature, and notarization ticket. Foreign-runtime execution is not
+required because Rosetta may be unavailable.

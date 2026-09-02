@@ -294,7 +294,6 @@ self_test() {
     [[ "$TRON_DMG_NAME" =~ ^tron-v[0-9]+\.[0-9]+\.[0-9]+(-beta[1-9][0-9]*)?\.dmg$ ]] || die "DMG name has unexpected format: $TRON_DMG_NAME"
     "$PROJECT_DIR/scripts/tron" version check >/dev/null
     "$PROJECT_DIR/scripts/verify-ci-toolchain.sh" node >/dev/null
-    bash "$PROJECT_DIR/packages/ios-app/scripts/test-source-policy.sh" >/dev/null
     ! "$PROJECT_DIR/scripts/tron" version sync --check >/dev/null 2>&1 || die "sync --check alias remains accepted"
 
     local invalid

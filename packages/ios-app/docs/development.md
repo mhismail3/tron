@@ -33,7 +33,7 @@ scripts/tron-ios-simulator install
 ```
 
 The generated Xcode project is not architectural truth; edit `project.yml` and
-source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `scripts/test-source-policy.sh` to guard this boundary and the bundled notification sound.
+source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `packages/ios-app/scripts/test-source-policy.sh` from the repository root to guard this boundary and the bundled notification sound.
 
 ### Build matrix
 
@@ -96,6 +96,24 @@ scripts/tron-ios-test status
 scripts/tron-ios-test diagnose --only-testing TronMobileTests/<Suite>
 scripts/tron-ios-test clean
 ```
+
+### Test runner safety contract
+
+- Provisioning resolves the exact pinned runtime and device type, proves the
+  repository ownership marker, and passes only
+  `platform=iOS Simulator,id=<exact-udid>` to Xcode. It never selects, erases, or
+  deletes the persistent Development simulator.
+- `scripts/ios-test-process.py` owns each Xcode process group, streams the full
+  log, enforces overall and no-output deadlines, captures bounded process and
+  partial-result evidence, then terminates only that owned group. Product
+  failures are never converted into infrastructure retries.
+- The `HOSTED_TEST` app entry remains inert: it starts no Gateway, push,
+  dashboard, artifact-pruning, or other ambient production owner. Tests create
+  only the exact model or presentation boundary they exercise.
+- CI uses the same runner core, uploads complete or partial logs, metadata,
+  metrics, results, and timeout evidence unconditionally, and deletes only its
+  exact owned simulator in final cleanup. UI E2E retains its distinct Gateway
+  fixture while sharing the simulator lease and process owner.
 
 Gateway transport tests inject `ManualClock`, `SequenceUUIDSource`, and
 `ScriptedGatewaySocket` below `GatewayClient`. Pairing generates a local UUID for

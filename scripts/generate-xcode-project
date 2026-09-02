@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Generate a disposable native Xcode project with the repository-pinned XcodeGen.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+case "${1:-}" in
+  ios) PROJECT_DIR="$ROOT/packages/ios-app" ;;
+  mac) PROJECT_DIR="$ROOT/packages/mac-app" ;;
+  *)
+    echo "Usage: scripts/generate-xcode-project ios|mac [xcodegen options]" >&2
+    exit 64
+    ;;
+esac
+shift
+TOOLS_DIR="${TRON_CI_TOOLS_DIR:-$ROOT/.ci-tools}"
+export PATH="$TOOLS_DIR/bin:/opt/homebrew/bin:$PATH"
+command -v xcodegen >/dev/null || {
+  echo "error: pinned XcodeGen is missing; run scripts/install-ci-tools.sh xcodegen" >&2
+  exit 74
+}
+"$ROOT/scripts/verify-ci-toolchain.sh" xcodegen
+(cd "$PROJECT_DIR" && exec xcodegen generate "$@")

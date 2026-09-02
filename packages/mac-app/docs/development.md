@@ -3,11 +3,13 @@
 ## Stage the gateway
 
 A fresh clone has neither Gateway dependencies/build output nor generated Mac
-payloads. The Mac Xcode target automatically runs
-`ensure-gateway-bundle.sh` before compiling when the payload is missing. This
-stages the Gateway's locked production dependencies, embedded Node runtimes,
-and checksum-pinned universal XcodeGen toolchain; it does not require Pi or
-XcodeGen to be installed globally on the destination Mac.
+payloads. Install the repository-pinned project generator once with
+`scripts/install-ci-tools.sh xcodegen`; `scripts/tron mac generate` verifies that
+exact tool before generating the disposable project. The Mac Xcode target then
+automatically runs `ensure-gateway-bundle.sh` before compiling when the payload
+is missing. This stages the Gateway's locked production dependencies, embedded
+Node runtimes, and checksum-pinned universal XcodeGen toolchain inside the app;
+the resulting destination Mac needs no global Pi, Node, or XcodeGen installation.
 
 For an explicit preflight or to refresh an existing payload:
 
@@ -143,8 +145,8 @@ packages/mac-app/scripts/test-update-payload-fingerprint.sh
 ## Generate and build
 
 ```bash
+scripts/tron mac generate
 cd packages/mac-app
-xcodegen generate
 xcodebuild build -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64'
 ```
@@ -226,8 +228,8 @@ mutates Debug lifecycle. Then build a
 Release app with an explicit derived-data directory:
 
 ```bash
+scripts/tron mac generate
 cd packages/mac-app
-xcodegen generate
 xcodebuild -project TronMac.xcodeproj -scheme TronMac \
   -configuration Release -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath /tmp/tron-mac-release build

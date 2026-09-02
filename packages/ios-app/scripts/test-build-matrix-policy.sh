@@ -92,7 +92,7 @@ PY
 generated_root="$(mktemp -d "${TMPDIR:-/tmp}/tron-ios-matrix.XXXXXX")"
 cleanup() { rm -rf "$generated_root"; }
 trap cleanup EXIT
-PATH="$ROOT/../../.ci-tools/bin:/opt/homebrew/bin:$PATH" xcodegen generate --spec "$PROJECT" \
+"$ROOT/../../scripts/generate-xcode-project" ios --spec "$PROJECT" \
   --project "$generated_root" --project-root "$ROOT" --quiet
 python3 - "$generated_root/TronMobile.xcodeproj/xcshareddata/xcschemes" "$ROOT" \
   "$generated_root/TronMobile.xcodeproj/project.pbxproj" <<'PY'

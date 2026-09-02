@@ -18,8 +18,8 @@ Commands:
                                     Attach terminal chat to the Gateway-owned runtime
   ci [check|test|all]               Validate the gateway and repository policy
   bundle gateway                    Stage the Mac gateway payload and Node runtimes
-  ios generate                      Regenerate the iOS Xcode project
-  mac generate                      Regenerate the macOS Xcode project
+  ios generate                      Regenerate iOS with pinned XcodeGen
+  mac generate                      Regenerate macOS with pinned XcodeGen
   mac verify                        Verify installed app, payload, LaunchAgent, and PID
   version                           Print the canonical Tron version
 
@@ -62,12 +62,12 @@ case "$cmd" in
     ;;
   ios)
     [[ "${1:-}" == generate ]] || { usage >&2; exit 64; }
-    exec "$ROOT/scripts/generate-ios-project" "${@:2}"
+    exec "$ROOT/scripts/generate-xcode-project" ios "${@:2}"
     ;;
   mac)
     case "${1:-}" in
       generate)
-        (cd "$ROOT/packages/mac-app" && xcodegen generate)
+        exec "$ROOT/scripts/generate-xcode-project" mac "${@:2}"
         ;;
       verify)
         exec "$ROOT/scripts/verify-mac-install.sh"

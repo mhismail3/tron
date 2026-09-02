@@ -222,7 +222,7 @@ run_process() {
 }
 
 build_products() {
-  "$ROOT/scripts/generate-ios-project"
+  "$ROOT/scripts/generate-xcode-project" ios
   run_process build "${TRON_IOS_TEST_BUILD_TIMEOUT_SECONDS:-1800}" \
     "${TRON_IOS_TEST_BUILD_NO_OUTPUT_SECONDS:-300}" "$DERIVED_DATA/Build/Products" \
     xcodebuild build-for-testing \

@@ -30,13 +30,15 @@ jobs:
             scripts/ios-test-lock.py \
             scripts/ios-test-process.py \
             scripts/ios-test-simulator.py \
+            scripts/test-documentation-policy.py \
             scripts/test-ios-test-infrastructure.py
       - name: Test iOS runner infrastructure without hardware
         run: python3 scripts/test-ios-test-infrastructure.py
+      - run: python3 scripts/test-documentation-policy.py
       - name: Check shell syntax
         run: |
           bash -n \
-            scripts/generate-ios-project \
+            scripts/generate-xcode-project \
             scripts/install-ci-tools.sh \
             scripts/ios-ci-test.sh \
             scripts/ios-gateway-e2e-test \
@@ -56,10 +58,12 @@ jobs:
             packages/ios-app/scripts/test-verify-archive-privacy.sh \
             packages/ios-app/scripts/verify-archive-privacy.sh \
             scripts/test-agent-policy.sh \
+            scripts/test-generate-xcode-project.sh \
             scripts/test-ios-artifact-validator.sh \
             scripts/tron-ios-device-test \
             scripts/tron-ios-simulator \
             scripts/tron-ios-test
+      - run: scripts/test-generate-xcode-project.sh
       - run: scripts/ios-release-toolchain-doctor.sh --self-test
 
   gateway:
@@ -142,8 +146,7 @@ jobs:
       - run: packages/mac-app/scripts/bundle-gateway.sh
       - run: packages/mac-app/scripts/test-tron-gateway-launcher.sh
       - run: packages/mac-app/scripts/test-gateway-payload-verifier.sh
-      - run: xcodegen generate
-        working-directory: packages/mac-app
+      - run: scripts/tron mac generate
       - name: Build Mac test products
         working-directory: packages/mac-app
         run: |

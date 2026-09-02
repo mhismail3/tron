@@ -115,7 +115,7 @@ install_development() {
     boot_simulator "$simulator_id"
     (
         cd "$IOS_DIR"
-        "$ROOT_DIR/scripts/generate-ios-project"
+        "$ROOT_DIR/scripts/generate-xcode-project" ios
         xcodebuild build \
             -project TronMobile.xcodeproj \
             -scheme "Tron Development" \

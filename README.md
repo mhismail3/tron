@@ -94,23 +94,28 @@ cd packages/gateway
 npm ci
 npm run build
 npm test
+cd ../..
 
-# Developer-owned gateway, loopback on port 9848
-scripts/tron dev start
-
-# Expose the Debug gateway on the detected Tailscale address
-scripts/tron dev start --tailscale
-
-# Generate native projects
+# Install the repository-pinned native project generator
+scripts/install-ci-tools.sh xcodegen
 scripts/tron ios generate
 scripts/tron mac generate
+
+# Developer-owned gateway; requires the installed signed Tron app
+scripts/tron dev start              # loopback on port 9848
+scripts/tron dev start --tailscale  # reachable from iPhone
 ```
 
-A fresh clone contains no generated Xcode projects or staged Mac gateway.
-Run `npm ci` before direct Gateway development and `xcodegen generate` before
-either native build. The Mac Xcode target automatically stages the bundled
-Gateway, its production dependencies, and pinned Node runtimes when the
-payload is missing; a global Pi installation is not required.
+A fresh clone contains no generated Xcode projects or staged Mac gateway. The
+native generation commands verify the repository-pinned XcodeGen. The Mac Xcode
+target automatically stages the bundled Gateway, its production dependencies,
+and pinned Node runtimes when the payload is missing; a global Pi installation
+is not required.
+
+Debug Gateway lifecycle uses the signed launcher from `/Applications/Tron.app`.
+Install the Mac app first; source-built local replacements must follow the
+manual [local Release reinstall runbook](packages/mac-app/docs/development.md#reinstall-a-local-release-build).
+Gateway lifecycle transitions remain user-initiated.
 
 The iOS matrix has five configurations: Development for simulator work,
 Test for the isolated hosted test host, LocalDevice for ordinary development
@@ -148,9 +153,11 @@ packages/mac-app/scripts/ensure-gateway-bundle.sh
 
 The build preflight and this script stage the Gateway, a separate
 production-only dependency tree, checksum-pinned Node runtimes matching
-`.node-version` (arm64/x64), and a universal launcher for both Login Item variants. The resulting
-Mac app runs without a global Pi or Node installation. Generated payloads are
-ignored; use `bundle-gateway.sh` when you explicitly need to refresh them.
+`.node-version` (arm64/x64), and the architecture-universal launcher for the
+single Stable Login Item. Debug remains CLI-supervised and registers no Login
+Item. The resulting Mac app runs without a global Pi or Node installation.
+Generated payloads are ignored; use `bundle-gateway.sh` when you explicitly need
+to refresh them.
 
 ## Legacy session migration
 

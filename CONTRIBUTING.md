@@ -47,8 +47,12 @@ Start with the smallest owner and expand only after it passes.
 
 Node is pinned exactly by `.node-version`; CI and Mac packaging read that file.
 Use `scripts/verify-ci-toolchain.sh node` to verify the current executable and
-reject duplicated version mirrors. Xcode version literals remain intentional
-Apple-toolchain pins.
+reject duplicated version mirrors. Install native project generation with
+`scripts/install-ci-tools.sh xcodegen`; both `scripts/tron ios generate` and
+`scripts/tron mac generate` reject a mismatched XcodeGen. Xcode version literals
+remain intentional Apple-toolchain pins. Run
+`python3 scripts/test-documentation-policy.py` after changing documentation
+navigation, commands, or repository paths.
 
 ### Gateway
 
@@ -120,8 +124,8 @@ Stage generated gateway payloads only when a build/archive needs them:
 
 ```bash
 packages/mac-app/scripts/bundle-gateway.sh
+scripts/tron mac generate
 cd packages/mac-app
-xcodegen generate
 xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64'
 xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \

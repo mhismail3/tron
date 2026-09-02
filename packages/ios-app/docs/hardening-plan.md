@@ -420,7 +420,7 @@ Deliverables:
 
 Final validation ladder:
 
-1. `xcodegen generate` and generated-project/resource verification.
+1. `scripts/tron ios generate` and generated-project/resource verification.
 2. Focused owner build/tests after each milestone.
 3. Complete `TronMobileTests` only after focused owners pass.
 4. `scripts/ios-ci-test.sh` fresh-clone checkpoint.

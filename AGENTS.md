@@ -83,7 +83,8 @@ scripts/tron-ios-test build
 scripts/tron-ios-test run --only-testing TronMobileTests/<Suite>
 
 # Mac
-cd packages/mac-app && xcodegen generate
+scripts/tron mac generate
+cd packages/mac-app
 xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64'
 xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \

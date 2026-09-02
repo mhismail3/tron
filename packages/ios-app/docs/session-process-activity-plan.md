@@ -1,7 +1,8 @@
 # Session Subagent Activity
 
-Status: Implemented; focused Gateway/iOS validation and physical-device deployment passed.
-The Gateway must be rebuilt from the committed source revision before device acceptance.
+Status: Implemented with focused Gateway/iOS validation complete. Physical-device
+acceptance against the current committed Gateway remains pending; a user or maintainer
+must initiate the required Gateway rebuild before running the acceptance sequence below.
 
 ## Product contract
 
