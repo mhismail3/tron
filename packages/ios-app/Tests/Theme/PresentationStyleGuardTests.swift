@@ -2701,7 +2701,8 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains("struct ChatPhysicalTranscriptRows: RandomAccessCollection"))
         #expect(chat.contains("guard !candidates.isEmpty,"))
         #expect(!chat.contains("var rows: [ChatPhysicalTranscriptRow]"))
-        #expect(chat.contains(".id(physicalID)"))
+        #expect(chat.components(separatedBy: ".id(row.id)").count - 1 == 1)
+        #expect(!chat.contains(".id(physicalID)"))
         #expect(chat.contains("renderedID: semanticID"))
         #expect(chat.contains("id: semanticID, frame: sample.frame"))
         #expect(chat.contains("seedCanonicalMediaPreviews(from: receipt, in: snapshot)"))
@@ -2721,7 +2722,7 @@ struct PresentationStyleGuardTests {
             chat.range(of: "if deferQueueMutationProjectionIfNeeded(capture)"),
             "deferred projection branch missing"
         )
-        let deferredInstallTail = String(chat[deferredInstall.lowerBound...].prefix(900))
+        let deferredInstallTail = String(chat[deferredInstall.lowerBound...].prefix(1_400))
         let resolutionWait = try #require(
             deferredInstallTail.range(of: "queueMutationResolution.wait(for: token)")
         )

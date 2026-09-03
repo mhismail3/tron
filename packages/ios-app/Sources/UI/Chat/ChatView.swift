@@ -352,16 +352,10 @@ struct ChatView: View {
             layoutTransaction.configure(keyboard: transition, reduceMotion: reduceMotion)
             guard layoutTransaction.generation != nil else { return }
             let participant = layoutTransaction.joinParticipant(.keyboard)
-            guard let animation = layoutTransaction.animation else {
-                layoutTransaction.settle(participant)
-                return
-            }
-            withAnimation(animation, completionCriteria: .logicallyComplete) {
-                // UIKit owns the inset interpolation. This participant keeps its
-                // settlement on the same resolved generation clock.
-            } completion: {
-                layoutTransaction.settle(participant)
-            }
+            // UIKit owns the inset interpolation. Keep only the participant
+            // lease on the frozen structural clock; an empty SwiftUI animation
+            // is not physical keyboard-completion evidence.
+            layoutTransaction.settleAfterResolvedClock(participant)
         }
         .onChange(of: reduceMotion) { _, enabled in
             layoutTransaction.configure(keyboard: keyboardObserver.transition, reduceMotion: enabled)
@@ -755,8 +749,18 @@ struct ChatView: View {
         installed: InstalledChatTranscript?
     ) {
         guard presentationActivity.allowsViewportObservation else { return }
+        let admittedPhysicalRowIDs = installed.map {
+            ChatPhysicalTranscriptRowPolicy.admittedPhysicalIDs(
+                installed: $0,
+                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
+            )
+        } ?? []
+        // Validate against the exact physical spine rendered by
+        // ChatTranscriptScrollView. The store's canonical namespace does not
+        // include display-only prompt/tool aliases, so validating it directly
+        // can retire a still-mounted materialization target during handoff.
         scrollCoordinator.reconcileMaterializationRows { renderedID in
-            installed?.containsPhysicalRowID(renderedID) == true
+            admittedPhysicalRowIDs.contains(renderedID)
         }
         let projectionLayoutChanged = previousTag.map { previousTag in
             installed.map { !previousTag.matchesProjectionPayload(of: $0.tag) } ?? true
@@ -1291,13 +1295,19 @@ struct ChatView: View {
             guard presentationActivity.allowsPresentationPublication else {
                 throw CancellationError()
             }
-            transcriptPresentation.submit(
-                snapshot: snapshot,
-                handoff: capture.handoff,
-                queuePresentationIDByOperationID: capture.queuePresentationIDByOperationID,
-                tag: tag
-            )
             do {
+                let startedWork = transcriptPresentation.submit(
+                    snapshot: snapshot,
+                    handoff: capture.handoff,
+                    queuePresentationIDByOperationID: capture.queuePresentationIDByOperationID,
+                    tag: tag
+                )
+                guard startedWork || transcriptPresentation.hasInstallWork(for: tag) else {
+                    // A rejected source cannot satisfy a waiter. Fail closed so
+                    // this exact capture receives one bounded authoritative
+                    // recovery instead of spinning on `.superseded`.
+                    throw ChatTranscriptPresentationStoreError.invalidProjection
+                }
                 let installed = try await transcriptPresentation.waitForInstall(of: tag)
                 guard presentationActivity.allowsPresentationPublication,
                       sessionPresentation.modelPresentationGeneration == presentationGeneration else {

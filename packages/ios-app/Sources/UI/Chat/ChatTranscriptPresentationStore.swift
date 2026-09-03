@@ -1336,13 +1336,13 @@ final class ChatTranscriptPresentationStore {
            installed.queueRevision == snapshot.queueRevision,
            installed.supportsQueueManagement == tag.queueManagementCapability,
            installed.runtimeItems == ChatTranscriptProjectionKernel.runtimeItems(in: snapshot) {
-            desiredTag = tag
             let replacement = installed.replacingLifecycle(
                 tag: tag,
                 handoff: frozenHandoff,
                 queuePresentationIDByOperationID: queuePresentationIDByOperationID
             )
             guard replacement.hasUniqueDisplayedIDs else { return false }
+            desiredTag = tag
             let installedReplacement = install(replacement)
             resumeWaiters(with: installedReplacement)
             failWaiters(except: tag, error: .superseded)
@@ -1413,6 +1413,17 @@ final class ChatTranscriptPresentationStore {
         failHostedCompletionWaiters(except: tag, error: .superseded)
         #endif
         return true
+    }
+
+    /// Whether this tag can still satisfy an installation waiter. A rejected
+    /// submission must not be mistaken for pending work by the presentation
+    /// loop, otherwise it can retry synchronously forever.
+    func hasInstallWork(for tag: ChatTranscriptProjectionTag) -> Bool {
+        installed?.tag == tag
+            || desiredTag == tag
+            || pending?.tag == tag
+            || buildingTag == tag
+            || readyToInstall?.tag == tag
     }
 
     func waitForInstall(of tag: ChatTranscriptProjectionTag) async throws -> InstalledChatTranscript {

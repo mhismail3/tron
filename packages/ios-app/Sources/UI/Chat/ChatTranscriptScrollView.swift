@@ -244,6 +244,24 @@ enum ChatPhysicalTranscriptRowPolicy {
         )
     }
 
+    /// The exact physical namespace installed in the lazy collection. Scroll
+    /// target leases must validate against this rendered spine rather than the
+    /// canonical semantic namespace, which intentionally excludes aliases.
+    static func admittedPhysicalIDs(
+        installed: InstalledChatTranscript,
+        canonicalAliases: [String: String]
+    ) -> Set<String> {
+        var ids = Set(rows(
+            installed: installed,
+            canonicalAliases: canonicalAliases
+        ).map(\.id))
+        ids.insert("transcript-bottom")
+        if (installed.sourceWindow.originalStart ?? 0) > 0 {
+            ids.insert("earlier-messages")
+        }
+        return ids
+    }
+
     /// Empty aliases take the O(1) path. Nonempty aliases are page-bounded and
     /// validated through the installed projection's prebuilt identity indexes.
     static func admittedAliases(
@@ -443,7 +461,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     if let installed, let physicalRows {
                         if (installed.sourceWindow.originalStart ?? 0) > 0 {
                             stableRow(
-                                physicalID: "earlier-messages",
                                 semanticID: "earlier-messages",
                                 installedTag: installed.tag,
                                 entranceState: .none
@@ -451,6 +468,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                                 earlierRow(installed)
                                     .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
                             }
+                            .id("earlier-messages")
                         }
                         ForEach(physicalRows) { row in
                             let promptEntrance = promptEntrance(
@@ -703,7 +721,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         case .transcript(let item, let isCommitted):
             transcriptRow(
                 item,
-                physicalID: row.id,
                 semanticID: row.semanticID,
                 installed: installed,
                 isCommitted: isCommitted
@@ -729,7 +746,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     ) -> some View {
         let entranceSuppressed = transcriptPresentation.suppressesEntrances(for: installed.tag)
         return stableRow(
-            physicalID: renderedID,
             semanticID: renderedID,
             installedTag: installed.tag,
             entranceState: .none
@@ -764,7 +780,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         installed: InstalledChatTranscript
     ) -> some View {
         stableRow(
-            physicalID: renderedID,
             semanticID: renderedID,
             installedTag: installed.tag,
             entranceState: .none
@@ -794,7 +809,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             hasAuthoritativeItems: installed.supportsQueueManagement
         )
         return stableRow(
-            physicalID: renderedID,
             semanticID: renderedID,
             installedTag: installed.tag,
             entranceState: .none
@@ -831,7 +845,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
 
     private func transcriptRow(
         _ item: ChatTranscriptRenderItem,
-        physicalID: String,
         semanticID: String,
         installed: InstalledChatTranscript,
         isCommitted: Bool
@@ -842,7 +855,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             ? .none
             : transcriptPresentation.entranceState(for: semanticID)
         return stableRow(
-            physicalID: physicalID,
             semanticID: semanticID,
             installedTag: installed.tag,
             entranceState: state,
@@ -933,7 +945,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     }
 
     private func stableRow<Content: View>(
-        physicalID: String,
         semanticID: String,
         installedTag: ChatTranscriptProjectionTag?,
         entranceState: ChatTranscriptEntranceState,
@@ -945,7 +956,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         return content()
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .id(physicalID)
             .onGeometryChange(for: ChatSemanticFrameObservation.self) { value in
                 ChatSemanticFrameObservation(
                     layoutEpoch: rowLayoutEpoch,

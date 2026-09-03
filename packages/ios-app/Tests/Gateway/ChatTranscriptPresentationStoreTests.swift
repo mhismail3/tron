@@ -37,6 +37,32 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("rejected handoff does not strand installation work")
+    func rejectedHandoffDoesNotStrandWork() throws {
+        let snapshot = try SessionScenarioBuilder(seed: 1_200)
+            .openingTail(targetEncodedBytes: 8_000)
+        let tag = ChatTranscriptProjectionTag(
+            snapshot: snapshot,
+            presentationGeneration: 7
+        )
+        let submission = ComposerSubmissionSnapshot(
+            target: .init(sessionID: snapshot.sessionId, generation: 7),
+            textRevision: 1,
+            outgoingText: "rejected",
+            attachmentIDs: [],
+            behavior: nil,
+            localNonce: 1
+        )
+        let handoff = ChatTranscriptHandoffCommit.outgoing(
+            presentation: .init(snapshot: submission, transportActive: true),
+            attachments: []
+        )
+        let store = ChatTranscriptPresentationStore()
+
+        #expect(!store.submit(snapshot: snapshot, handoff: handoff, tag: tag))
+        #expect(!store.hasInstallWork(for: tag))
+    }
+
     @Test("same exact source coalesces to one detached build")
     func sameSourceCoalesces() async throws {
         try await withTestWatchdog { @MainActor in
@@ -1585,6 +1611,13 @@ struct ChatTranscriptPresentationStoreTests {
                 canonicalAliases: [:]
             )
             #expect(localRows.contains { $0.id == submission.presentationID })
+            let coordinator = ChatScrollCoordinator()
+            #expect(coordinator.discreteTailInserted(
+                renderedID: submission.presentationID,
+                layoutTransactionID: 44
+            ))
+            let materialization = try #require(coordinator.command)
+            #expect(coordinator.commandApplied(materialization))
 
             let canonicalID = "canonical-owned"
             let canonical = try decodeTranscriptFixture(
@@ -1615,6 +1648,18 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(item.id == canonicalID)
             #expect(replacement.semanticID == canonicalID)
             #expect(replacement.id == submission.presentationID)
+            let admittedPhysicalIDs = ChatPhysicalTranscriptRowPolicy.admittedPhysicalIDs(
+                installed: settled,
+                canonicalAliases: [canonicalID: submission.presentationID]
+            )
+            #expect(admittedPhysicalIDs.contains(submission.presentationID))
+            #expect(!admittedPhysicalIDs.contains(canonicalID))
+            #expect(admittedPhysicalIDs.contains("transcript-bottom"))
+            coordinator.reconcileMaterializationRows { admittedPhysicalIDs.contains($0) }
+            #expect(coordinator.ownsTailMaterializationTarget(
+                renderedID: submission.presentationID
+            ))
+            #expect(!coordinator.consumeTargetRelease())
             let outgoingPhysical = try #require(
                 localRows.first { $0.id == submission.presentationID }
             )
@@ -1677,6 +1722,7 @@ struct ChatTranscriptPresentationStoreTests {
             )
             #expect(earlierCollision.contains { $0.id == canonicalID })
             #expect(!earlierCollision.contains { $0.id == "earlier-messages" })
+            coordinator.cancel()
         }
     }
 
@@ -1924,6 +1970,10 @@ struct ChatTranscriptPresentationStoreTests {
             ).first { $0.semanticID == "tool-run-producer-group" })
             #expect(completedRow.id == runningRow.id)
             #expect(completedRow.semanticID == "tool-run-producer-group")
+            #expect(ChatPhysicalTranscriptRowPolicy.admittedPhysicalIDs(
+                installed: completed,
+                canonicalAliases: [:]
+            ).contains(runningRow.id))
             #expect(completed.hasUniqueDisplayedIDs)
             #expect(store.entranceState(for: runningRow.semanticID) == .none)
             #expect(store.entranceState(for: completedRow.semanticID) == .admitted)

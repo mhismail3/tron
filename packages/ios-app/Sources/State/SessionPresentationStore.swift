@@ -656,6 +656,48 @@ final class SessionPresentationStore {
         )
     }
 
+    /// A replacement tail may legitimately cover the entire mounted window,
+    /// in which case `reconcilePrefix` returns nil because no prefix remains.
+    /// Event admission still needs to distinguish that safe replacement from a
+    /// gap or identity conflict, which must retain the prior visible commit.
+    private func replacementCoversMountedWindow(
+        _ window: MountedTranscriptWindow?,
+        from oldAuthority: SessionSnapshot?,
+        into authority: SessionSnapshot
+    ) -> Bool {
+        guard let window, let oldAuthority,
+              window.coverage.start >= 0,
+              window.coverage.end >= window.coverage.start,
+              let newStart = authority.transcriptStart,
+              let newEnd = authorityTranscriptEnd(authority),
+              newStart >= 0,
+              newEnd >= newStart,
+              oldAuthority.sessionId == authority.sessionId,
+              oldAuthority.runtimeGeneration == authority.runtimeGeneration,
+              window.coverage.sessionID == oldAuthority.sessionId,
+              window.coverage.runtimeGeneration == oldAuthority.runtimeGeneration,
+              window.coverage.leafEntryID == oldAuthority.leafEntryId,
+              window.coverage.structureRevision == structureRevision,
+              window.coverage.end == authorityTranscriptEnd(oldAuthority) else {
+            return false
+        }
+        let oldStart = window.coverage.start
+        let oldEnd = window.coverage.end
+        guard newStart <= oldStart, newEnd >= oldEnd else { return false }
+        let oldVisible = window.prefixItems + oldAuthority.transcript
+        let oldVisibleStart = oldStart
+        guard oldVisible.count == oldEnd - oldVisibleStart,
+              Set(oldVisible.map(\.id)).count == oldVisible.count else { return false }
+        let overlapStart = max(oldStart, newStart)
+        let overlapEnd = min(oldEnd, newEnd)
+        guard overlapStart < overlapEnd else { return oldVisible.isEmpty }
+        for index in overlapStart..<overlapEnd {
+            guard oldVisible[index - oldVisibleStart].id
+                == authority.transcript[index - newStart].id else { return false }
+        }
+        return true
+    }
+
     private func reconcilePrefix(
         _ window: MountedTranscriptWindow?,
         from oldAuthority: SessionSnapshot?,
@@ -1129,12 +1171,29 @@ final class SessionPresentationStore {
                 pendingRebaselines[authoritative.sessionId] = rebaseline
                 return
             }
-            let replacedRuntime = prepareSecondaryProjectionForRuntimeInstallation(authoritative)
-            mountedTranscriptWindow = reconcilePrefix(
+            let reconciledPrefix = reconcilePrefix(
                 mountedTranscriptWindow,
                 from: snapshot,
                 into: authoritative
             )
+            guard mountedTranscriptWindow == nil
+                || reconciledPrefix != nil
+                || replacementCoversMountedWindow(
+                    mountedTranscriptWindow,
+                    from: snapshot,
+                    into: authoritative
+                ) else {
+                // Keep the last complete visible commit until a synchronized
+                // authority proves continuity. Installing an incompatible
+                // sparse tail would shrink the mounted transcript and make the
+                // scrollbar jump upward during resume/send.
+                if hasInstalledSubscription(for: authoritative.sessionId) {
+                    _ = await synchronize(authoritative.sessionId, operation: .sessionResync)
+                }
+                return
+            }
+            let replacedRuntime = prepareSecondaryProjectionForRuntimeInstallation(authoritative)
+            mountedTranscriptWindow = reconciledPrefix
             snapshot = authoritative
             if replacedRuntime {
                 Task { [weak self] in await self?.loadCommands(sessionID: authoritative.sessionId) }
@@ -1234,7 +1293,8 @@ final class SessionPresentationStore {
         } catch {
             guard !(error is CancellationError),
                   generation == commandLoadGeneration,
-                  ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+                  ownsSubscription(sessionID: sessionID, requestedToken: token),
+                  subscriptionTarget == requestedTarget else { return }
             delegate?.sessionPresentationStoreSurface(error)
         }
     }
@@ -2715,11 +2775,24 @@ final class SessionPresentationStore {
                 preserving: snapshot?.processActivities ?? [],
                 previousOverview: snapshot?.processOverview
             )
-            mountedTranscriptWindow = reconcilePrefix(
+            let reconciledPrefix = reconcilePrefix(
                 mountedTranscriptWindow,
                 from: snapshot,
                 into: admitted
             )
+            guard mountedTranscriptWindow == nil
+                || reconciledPrefix != nil
+                || replacementCoversMountedWindow(
+                    mountedTranscriptWindow,
+                    from: snapshot,
+                    into: admitted
+                ) else {
+                // Exact-next sequencing is not sufficient to prove that a
+                // retained loaded prefix still joins this tail. Preserve the
+                // visible commit and request the authoritative resync path.
+                return event.sessionId
+            }
+            mountedTranscriptWindow = reconciledPrefix
             snapshot = admitted
             advanceChatProjection(canonical: true)
             if admitted.transcriptStart == incoming.transcriptStart,

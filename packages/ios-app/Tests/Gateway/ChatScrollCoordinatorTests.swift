@@ -24,6 +24,33 @@ struct ChatScrollCoordinatorTests {
         )
     }
 
+    @Test("duplicate geometry and semantic frames do not advance physical evidence")
+    func duplicateEvidenceIsIdempotent() {
+        let coordinator = ChatScrollCoordinator()
+        let frame = CGRect(x: 0, y: 388, width: 100, height: 12)
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        coordinator.semanticFrameChanged(
+            renderedID: "transcript-bottom",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: frame
+        )
+        let geometryRevision = coordinator.hostedGeometryEvidenceRevision
+        let semanticRevision = coordinator.hostedSemanticEvidenceRevision
+        let commandRevision = coordinator.commandRevision
+
+        coordinator.geometryChanged(previous: bottom, current: bottom)
+        coordinator.semanticFrameChanged(
+            renderedID: "transcript-bottom",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: frame
+        )
+
+        #expect(coordinator.hostedGeometryEvidenceRevision == geometryRevision)
+        #expect(coordinator.hostedSemanticEvidenceRevision == semanticRevision)
+        #expect(coordinator.commandRevision == commandRevision)
+        coordinator.cancel()
+    }
+
     @Test("stale command application cannot authorize a target release")
     func staleCommandCannotApply() throws {
         let coordinator = ChatScrollCoordinator()

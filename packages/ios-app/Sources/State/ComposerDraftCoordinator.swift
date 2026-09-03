@@ -807,9 +807,36 @@ final class ComposerDraftCoordinator {
         guard let scope = scope(for: target),
               let admission = submissionByScope[scope] else { return false }
         if let operationID = admission.operationID { return operationID == pending.id }
-        return admission.snapshot.outgoingText == pending.text
-            && admission.snapshot.attachmentIDs.count == pending.attachmentCount
-            && admission.snapshot.behavior == pending.behavior?.rawValue
+        guard admission.snapshot.outgoingText == pending.text,
+              admission.snapshot.attachmentIDs.count == pending.attachmentCount,
+              admission.snapshot.behavior == pending.behavior?.rawValue,
+              admission.snapshot.resourceInvocation == pending.resourceInvocation else {
+            return false
+        }
+        let photoCount = admission.submittedAttachments.reduce(into: 0) { count, attachment in
+            if attachment.mimeType.lowercased().hasPrefix("image/") { count += 1 }
+        }
+        if let pendingPhotoCount = pending.photoCount,
+           pendingPhotoCount != photoCount { return false }
+        if let pendingFileCount = pending.fileAttachmentCount,
+           pendingFileCount != admission.submittedAttachments.count - photoCount { return false }
+        if let pendingAttachments = pending.attachments {
+            let submitted = admission.submittedAttachments.compactMap { attachment
+                -> SessionSnapshot.PromptAttachment? in
+                guard let uploadID = attachment.gatewayUploadID else { return nil }
+                return SessionSnapshot.PromptAttachment(
+                    id: uploadID,
+                    name: attachment.name,
+                    mimeType: attachment.mimeType,
+                    size: attachment.size
+                )
+            }
+            guard submitted.count == admission.submittedAttachments.count,
+                  Set(submitted).count == submitted.count,
+                  Set(pendingAttachments).count == pendingAttachments.count,
+                  Set(submitted) == Set(pendingAttachments) else { return false }
+        }
+        return true
     }
 
     func hasPendingSubmission(target: SessionPresentationIdentity) -> Bool {
@@ -1078,9 +1105,17 @@ final class ComposerDraftCoordinator {
             // later upload; transport failure never discards user input.
             throw error
         }
-        try require(admission)
+        do {
+            try require(admission)
+        } catch {
+            // The Gateway completed after this local chip/presentation lost
+            // ownership. Its unclaimed staging blob has one cleanup owner.
+            discardUpload(uploadID)
+            throw error
+        }
         guard var attachments = attachmentsByScope[scope],
               let index = attachments.firstIndex(where: { $0.id == localID }) else {
+            discardUpload(uploadID)
             throw CancellationError()
         }
         attachments[index] = attachments[index].replacingGatewayUploadID(uploadID)
@@ -1190,7 +1225,10 @@ final class ComposerDraftCoordinator {
                           var attachments = attachmentsByScope[scope],
                           let attachmentIndex = attachments.firstIndex(where: {
                               $0.id == localID
-                          }) else { continue }
+                          }) else {
+                        discardUpload(uploadID)
+                        continue
+                    }
                     attachments[attachmentIndex] = attachments[attachmentIndex]
                         .replacingGatewayUploadID(uploadID)
                     attachmentsByScope[scope] = attachments
@@ -1321,9 +1359,15 @@ final class ComposerDraftCoordinator {
             try require(admission)
             throw error
         }
-        try require(admission)
+        do {
+            try require(admission)
+        } catch {
+            discardUpload(uploadID)
+            throw error
+        }
         guard var attachments = attachmentsByScope[scope],
               let index = attachments.firstIndex(where: { $0.id == localID }) else {
+            discardUpload(uploadID)
             throw CancellationError()
         }
         attachments[index] = attachments[index].replacingGatewayUploadID(uploadID)
@@ -1349,10 +1393,14 @@ final class ComposerDraftCoordinator {
     }
 
     func hasActiveUploads(for target: SessionPresentationIdentity) -> Bool {
-        admits(target) && (
-            uploadAdmissions.contains { $0.target == target }
-                || restoredUploadTasks[target] != nil
-        )
+        guard admits(target), let scope = scope(for: target) else { return false }
+        if uploadAdmissions.contains(where: { $0.target == target }) { return true }
+        // A newly scheduled restored upload may not have registered its first
+        // per-attachment admission yet. Keep send closed only while an
+        // unresolved chip still exists; removing the last chip releases it
+        // synchronously even if a non-cooperative request completes later.
+        return restoredUploadTasks[target] != nil
+            && attachmentsByScope[scope]?.contains(where: { $0.gatewayUploadID == nil }) == true
     }
 
     func send(
@@ -1614,27 +1662,73 @@ final class ComposerDraftCoordinator {
                 $0.gatewayUploadID == nil ? $0.id : nil
             } ?? []
             for identity in identities {
-                guard !Task.isCancelled, self.admits(target), self.lease?.scope == scope,
-                      let attachment = self.attachmentsByScope[scope]?.first(where: { $0.id == identity }),
-                      let data = attachment.fullPreviewData else { continue }
-                do {
-                    let uploadID = try await self.uploadOperation(
-                        attachment.name,
-                        attachment.mimeType,
-                        data
-                    )
-                    guard !Task.isCancelled, self.admits(target), self.lease?.scope == scope,
-                          let index = self.attachmentsByScope[scope]?.firstIndex(where: {
-                              $0.id == identity && $0.gatewayUploadID == nil
-                          }) else { continue }
-                    self.attachmentsByScope[scope]?[index] = attachment.replacingGatewayUploadID(uploadID)
-                } catch {
-                    // Payload and chip remain durable. A later exact mount retries;
-                    // no restored draft is ever sent automatically.
-                }
+                guard !Task.isCancelled else { break }
+                await self.uploadRestoredAttachment(
+                    identity: identity,
+                    scope: scope,
+                    target: target
+                )
             }
             if self.lease?.target == target { self.restoredUploadTasks[target] = nil }
         }
+    }
+
+    private func uploadRestoredAttachment(
+        identity: String,
+        scope: ComposerDraftScope,
+        target: SessionPresentationIdentity
+    ) async {
+        guard !Task.isCancelled, let lease, lease.scope == scope, admits(target),
+              let attachment = attachmentsByScope[scope]?.first(where: {
+                  $0.id == identity && $0.gatewayUploadID == nil
+              }), let data = attachment.fullPreviewData else { return }
+        sequence &+= 1
+        let admission = UploadAdmission(
+            id: sequence,
+            target: target,
+            lifecycleGeneration: lease.lifecycleGeneration,
+            bytes: attachment.size
+        )
+        uploadAdmissions.insert(admission)
+        uploadAdmissionByAttachmentID[identity] = admission
+        let task = Task {
+            try await uploadOperation(attachment.name, attachment.mimeType, data)
+        }
+        uploadTasks[admission] = task
+        defer {
+            uploadAdmissions.remove(admission)
+            uploadTasks[admission] = nil
+            if uploadAdmissionByAttachmentID[identity] == admission {
+                uploadAdmissionByAttachmentID[identity] = nil
+            }
+        }
+        let uploadID: String
+        do {
+            uploadID = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+        } catch {
+            // Payload and chip remain durable. A later exact mount retries;
+            // no restored draft is ever sent automatically.
+            return
+        }
+        do {
+            try require(admission)
+        } catch {
+            discardUpload(uploadID)
+            return
+        }
+        guard self.lease?.scope == scope,
+              let index = attachmentsByScope[scope]?.firstIndex(where: {
+                  $0.id == identity && $0.gatewayUploadID == nil
+              }) else {
+            discardUpload(uploadID)
+            return
+        }
+        attachmentsByScope[scope]?[index] = attachment.replacingGatewayUploadID(uploadID)
+        schedulePersistence(for: scope)
     }
 
     private func discardUpload(_ uploadID: String) {

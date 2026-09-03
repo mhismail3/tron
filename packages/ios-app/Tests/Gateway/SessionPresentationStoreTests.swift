@@ -202,6 +202,146 @@ struct SessionPresentationStoreTests {
         #expect(store.contextPresentation(for: snapshot.sessionId)?.cwd == snapshot.cwd)
     }
 
+    @Test("exact-next snapshots retain the mounted commit across a continuity gap")
+    func exactNextSnapshotGapRetainsMountedCommit() async throws {
+        let builder = SessionScenarioBuilder(seed: 8_810)
+        let entries = builder.pagedMixedSession(totalEntries: 14).page(before: 14, count: 14)
+        var tail = try builder.openingTail(targetEncodedBytes: 4_096)
+        tail.transcript = Array(entries[7..<10])
+        tail.transcriptStart = 7
+        tail.transcriptTotal = 10
+        var visible = tail
+        visible.transcript = Array(entries[2..<10])
+        visible.transcriptStart = 2
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        store.installHostedSubscription(snapshot: tail, token: "token")
+        store.installHostedLoadedHistory(visible: visible, authoritativeTail: tail)
+
+        var gap = tail
+        gap.eventSequence += 1
+        gap.revision += 1
+        gap.transcript = Array(entries[11..<14])
+        gap.transcriptStart = 11
+        gap.transcriptTotal = 14
+        await store.admit(GatewayEvent(
+            type: "event",
+            topic: "session.snapshot",
+            sessionId: tail.sessionId,
+            payload: try JSONValue.encode(gap)
+        ))
+
+        #expect(store.authoritativeSnapshot(for: tail.sessionId) == tail)
+        #expect(store.visibleTranscript.map(\.id) == visible.transcript.map(\.id))
+        #expect(store.mountedTranscriptCoverage?.start == 2)
+        #expect(store.mountedTranscriptCoverage?.end == 10)
+    }
+
+    @Test("discontinuous rebaseline retains the mounted commit")
+    func discontinuousRebaselineRetainsMountedCommit() async throws {
+        let builder = SessionScenarioBuilder(seed: 8_813)
+        let entries = builder.pagedMixedSession(totalEntries: 14).page(before: 14, count: 14)
+        var tail = try builder.openingTail(targetEncodedBytes: 4_096)
+        tail.transcript = Array(entries[7..<10])
+        tail.transcriptStart = 7
+        tail.transcriptTotal = 10
+        var visible = tail
+        visible.transcript = Array(entries[2..<10])
+        visible.transcriptStart = 2
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        store.installHostedSubscription(snapshot: tail, token: "token")
+        store.installHostedLoadedHistory(visible: visible, authoritativeTail: tail)
+
+        var gap = tail
+        gap.eventSequence += 10
+        gap.revision += 10
+        gap.transcript = Array(entries[11..<14])
+        gap.transcriptStart = 11
+        gap.transcriptTotal = 14
+        await store.admit(GatewayEvent(
+            type: "event",
+            topic: "session.rebaseline",
+            sessionId: tail.sessionId,
+            payload: .object([
+                "reason": .string("subscription catch-up overflow"),
+                "subscriptionToken": .string("token"),
+                "snapshot": try JSONValue.encode(gap),
+            ])
+        ))
+
+        #expect(store.authoritativeSnapshot(for: tail.sessionId) == tail)
+        #expect(store.visibleTranscript.map(\.id) == visible.transcript.map(\.id))
+        #expect(store.mountedTranscriptCoverage?.start == 2)
+        #expect(store.mountedTranscriptCoverage?.end == 10)
+    }
+
+    @Test("complete replacement window may retire an obsolete mounted prefix")
+    func completeReplacementWindowRetiresPrefix() async throws {
+        let builder = SessionScenarioBuilder(seed: 8_814)
+        let entries = builder.pagedMixedSession(totalEntries: 14).page(before: 14, count: 14)
+        var tail = try builder.openingTail(targetEncodedBytes: 4_096)
+        tail.transcript = Array(entries[7..<10])
+        tail.transcriptStart = 7
+        tail.transcriptTotal = 10
+        var visible = tail
+        visible.transcript = Array(entries[2..<10])
+        visible.transcriptStart = 2
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        store.installHostedSubscription(snapshot: tail, token: "token")
+        store.installHostedLoadedHistory(visible: visible, authoritativeTail: tail)
+
+        var replacement = tail
+        replacement.eventSequence += 1
+        replacement.revision += 1
+        replacement.transcript = Array(entries[2..<14])
+        replacement.transcriptStart = 2
+        replacement.transcriptTotal = 14
+        await store.admit(GatewayEvent(
+            type: "event",
+            topic: "session.snapshot",
+            sessionId: tail.sessionId,
+            payload: try JSONValue.encode(replacement)
+        ))
+
+        #expect(store.authoritativeSnapshot(for: tail.sessionId) == replacement)
+        #expect(store.visibleTranscript.map(\.id) == replacement.transcript.map(\.id))
+        #expect(store.mountedTranscriptCoverage == nil)
+    }
+
+    @Test("tail-only exact-next snapshot installs without prefix reconciliation")
+    func tailOnlyExactNextSnapshotInstalls() async throws {
+        var tail = try SessionScenarioBuilder(seed: 8_812)
+            .openingTail(targetEncodedBytes: 4_096)
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        store.installHostedSubscription(snapshot: tail, token: "token")
+        #expect(store.mountedTranscriptCoverage == nil)
+
+        tail.eventSequence += 1
+        tail.revision += 1
+        tail.phase = .running
+        await store.admit(GatewayEvent(
+            type: "event",
+            topic: "session.snapshot",
+            sessionId: tail.sessionId,
+            payload: try JSONValue.encode(tail)
+        ))
+
+        #expect(store.authoritativeSnapshot(for: tail.sessionId) == tail)
+        #expect(store.visibleTranscript.map(\.id) == tail.transcript.map(\.id))
+        #expect(store.mountedTranscriptCoverage == nil)
+    }
+
     @Test("mounted transcript window retains only an exact prefix while authority stays unchanged")
     func mountedTranscriptWindowUsesExactCoverage() throws {
         var tail = try SessionScenarioBuilder(seed: 8_811).openingTail(targetEncodedBytes: 4_096)
