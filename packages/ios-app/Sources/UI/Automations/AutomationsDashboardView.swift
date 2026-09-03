@@ -188,7 +188,7 @@ struct AutomationsDashboardView: View {
         .tronManagedSheet(isPresented: $showingFilters, identity: "automation.filters") {
             automationFilterSheet
                 .tronTopBlur(.sheet)
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.medium])
                 .presentationDragIndicator(.hidden)
         }
         .tronManagedSheet(isPresented: $datePickerPresented, identity: "automation.date-picker") {
@@ -467,157 +467,101 @@ struct AutomationsDashboardView: View {
     }
 
     private var automationFilterSheet: some View {
-        NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
+        TronDashboardFilterSheet(
+            title: "View Automations",
+            accent: .tronCoral,
+            onDone: { showingFilters = false }
+        ) {
+            TronDashboardFilterSectionTitle(
+                title: "View",
+                detail: "Choose the dashboard projection to display."
+            )
+            ForEach(AutomationDashboardViewMode.allCases) { option in
+                TronDashboardFilterOption(
+                    title: option.rawValue,
+                    detail: option == .upcoming
+                        ? "Chronological schedule from connected Gateways."
+                        : "Search and manage every available Automation.",
+                    selected: mode == option,
+                    accent: .tronCoral,
+                    inactiveAccent: .tronSlate
+                ) {
+                    mode = option
+                }
+            }
+
+            if AutomationTimelinePresentationPolicy.showsInventoryFilters(mode: mode) {
                 VStack(alignment: .leading, spacing: TronSpacing.md) {
-                    filterSectionTitle("View", detail: "Choose the dashboard projection to display.")
-                    ForEach(AutomationDashboardViewMode.allCases) { option in
-                        filterOption(
+                    TronDashboardFilterSectionTitle(
+                        title: "Status",
+                        detail: "Limit the inventory by lifecycle state."
+                    )
+                    .padding(.top, TronSpacing.md)
+                    ForEach(AutomationInventoryFilter.allCases) { option in
+                        TronDashboardFilterOption(
                             title: option.rawValue,
-                            detail: option == .upcoming
-                                ? "Chronological schedule from connected Gateways."
-                                : "Search and manage every available Automation.",
-                            selected: mode == option
+                            selected: filter == option,
+                            accent: .tronCoral,
+                            inactiveAccent: .tronSlate
                         ) {
-                            withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
-                                mode = option
-                            }
+                            filter = option
                         }
                     }
 
-                    if AutomationTimelinePresentationPolicy.showsInventoryFilters(mode: mode) {
-                        VStack(alignment: .leading, spacing: TronSpacing.md) {
-                            filterSectionTitle("Status", detail: "Limit the inventory by lifecycle state.")
-                                .padding(.top, TronSpacing.md)
-                            ForEach(AutomationInventoryFilter.allCases) { option in
-                                filterOption(
-                                    title: option.rawValue,
-                                    detail: nil,
-                                    selected: filter == option
-                                ) {
-                                    filter = option
-                                }
-                            }
-
-                            filterSectionTitle("Action", detail: "Show prompts, notifications, or both.")
-                                .padding(.top, TronSpacing.md)
-                            filterOption(
-                                title: "All action types",
-                                detail: nil,
-                                selected: actionFilter == nil
-                            ) {
-                                actionFilter = nil
-                            }
-                            ForEach(AutomationActionKind.allCases, id: \.self) { action in
-                                filterOption(
-                                    title: action.label,
-                                    detail: nil,
-                                    selected: actionFilter == action
-                                ) {
-                                    actionFilter = action
-                                }
-                            }
-                        }
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                    TronDashboardFilterSectionTitle(
+                        title: "Action",
+                        detail: "Show prompts, notifications, or both."
+                    )
+                    .padding(.top, TronSpacing.md)
+                    TronDashboardFilterOption(
+                        title: "All action types",
+                        selected: actionFilter == nil,
+                        accent: .tronCoral,
+                        inactiveAccent: .tronSlate
+                    ) {
+                        actionFilter = nil
                     }
-
-                    if availableBuckets.count > 1 {
-                        filterSectionTitle("Gateway", detail: "Show Automations from one connected Gateway or all of them.")
-                            .padding(.top, TronSpacing.md)
-                        filterOption(
-                            title: "All Gateways",
-                            detail: nil,
-                            selected: serverFilter == nil
+                    ForEach(AutomationActionKind.allCases, id: \.self) { action in
+                        TronDashboardFilterOption(
+                            title: action.label,
+                            selected: actionFilter == action,
+                            accent: .tronCoral,
+                            inactiveAccent: .tronSlate
                         ) {
-                            serverFilter = nil
-                        }
-                        ForEach(availableBuckets) { bucket in
-                            filterOption(
-                                title: bucket.profile.label,
-                                detail: "Connected",
-                                selected: serverFilter == bucket.profile.id
-                            ) {
-                                serverFilter = bucket.profile.id
-                            }
+                            actionFilter = action
                         }
                     }
                 }
-                .padding(.horizontal, TronSpacing.xlarge)
-                .padding(.vertical, TronSpacing.large)
+                .transition(.opacity)
             }
-            .defaultScrollAnchor(.top, for: .initialOffset)
-            .defaultScrollAnchor(.top, for: .alignment)
-            .defaultScrollAnchor(.top, for: .sizeChanges)
-            .tronScrollEdgeChrome()
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "View Automations", accent: .tronCoral)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { showingFilters = false } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronCoral)
-                    }
-                    .accessibilityLabel("Done")
-                }
-            }
-        }
-        .tronSettingsVisualTheme(accent: .tronCoral)
-    }
 
-    private func filterSectionTitle(_ title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: TronSpacing.xs) {
-            Text(title)
-                .font(TronTypography.sheetSectionHeader)
-                .foregroundStyle(Color.tronTextPrimary)
-                .accessibilityAddTraits(.isHeader)
-            Text(detail)
-                .font(TronTypography.secondaryDescription)
-                .foregroundStyle(Color.tronTextMuted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func filterOption(
-        title: String,
-        detail: String?,
-        selected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: TronSpacing.xl) {
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(selected ? Color.tronCoral : Color.tronTextMuted)
-                    .frame(width: 20, height: 20)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                    if let detail {
-                        Text(detail)
-                            .font(TronTypography.bodySM)
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+            if availableBuckets.count > 1 {
+                TronDashboardFilterSectionTitle(
+                    title: "Gateway",
+                    detail: "Show Automations from one connected Gateway or all of them."
+                )
+                .padding(.top, TronSpacing.md)
+                TronDashboardFilterOption(
+                    title: "All Gateways",
+                    selected: serverFilter == nil,
+                    accent: .tronCoral,
+                    inactiveAccent: .tronSlate
+                ) {
+                    serverFilter = nil
+                }
+                ForEach(availableBuckets) { bucket in
+                    TronDashboardFilterOption(
+                        title: bucket.profile.label,
+                        detail: "Connected",
+                        selected: serverFilter == bucket.profile.id,
+                        accent: .tronCoral,
+                        inactiveAccent: .tronSlate
+                    ) {
+                        serverFilter = bucket.profile.id
                     }
                 }
-                Spacer(minLength: TronSpacing.md)
             }
-            .padding(.horizontal, TronSpacing.xl)
-            .padding(.vertical, TronSpacing.md)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .buttonStyle(.plain)
-        .tronGlassSurface(
-            accent: selected ? .tronCoral : .tronSlate,
-            cornerRadius: 12,
-            tintOpacity: selected ? 0.18 : 0.06,
-            interactive: true,
-            respectsSettingsTheme: false
-        )
-        .accessibilityValue(selected ? "Selected" : "Not selected")
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {

@@ -17,10 +17,11 @@ The top-left Tron logo on the session dashboard is a native `UIButton`/`UIMenu`
 selector. It switches between the independent Sessions and Automations root
 projections; it does not replace session navigation state. Automations uses one
 `.tronCoral` visual theme across its dashboard and managed sheets. The top-right
-filter action presents a native Tron sheet that owns the Upcoming/All view choice,
-status/action filters, and connected-Gateway selection. Its bounded content stays top-anchored
-at every detent, and the All-only status/action controls animate into place without moving the
-opening View section. All-mode search uses the same
+filter action presents the same shared medium-height dashboard filter sheet used by Sessions;
+it owns the Upcoming/All view choice, status/action filters, and connected-Gateway selection.
+The shared sheet forces short and long content into the same top-aligned frame, padding, title,
+selection transition, and scroll behavior. All-only controls fade into that stable layout rather
+than entering through a separate motion path. All-mode search uses the same
 bottom-left reveal/close interaction as the Sessions dashboard rather than permanently
 occupying dashboard space. Upcoming retains its current agenda or neutral empty state while
 refreshing; only a refresh that outlasts the short presentation delay adds a compact activity

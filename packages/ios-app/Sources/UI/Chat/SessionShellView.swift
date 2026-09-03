@@ -397,65 +397,48 @@ struct SessionShellView: View {
     }
 
     private var serverFilterSheet: some View {
-        NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: TronSpacing.md) {
-                    Text("View")
-                        .font(TronTypography.sheetSectionHeader)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .accessibilityAddTraits(.isHeader)
-                    ForEach(DashboardSessionSortMode.allCases) { mode in
-                        filterOption(
-                            title: mode.rawValue,
-                            detail: mode.detail,
-                            selected: serverFilter.sortMode == mode
-                        ) {
-                            setSortMode(mode)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                        Text("Servers")
-                            .font(TronTypography.sheetSectionHeader)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .accessibilityAddTraits(.isHeader)
-                        Text("Choose one or more servers to show in your session history.")
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronTextMuted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.top, TronSpacing.md)
-                    filterOption(
-                        title: "All servers",
-                        detail: "Show sessions from every paired server.",
-                        selected: serverFilter.isAllSelected
-                    ) {
-                        updateServerFilter { $0.selectAll() }
-                    }
-
-                    ForEach(model.dashboardServerSources) { source in
-                        filterOption(
-                            title: source.label,
-                            detail: "\(source.sessionCount) session\(source.sessionCount == 1 ? "" : "s") · \(source.state.label)",
-                            selected: serverFilter.isSelected(source.profileID)
-                        ) {
-                            updateServerFilter { $0.toggle(source.profileID) }
-                        }
-                    }
+        TronDashboardFilterSheet(
+            title: "Filter Servers",
+            accent: .tronEmerald,
+            onDone: { showingServerFilter = false }
+        ) {
+            TronDashboardFilterSectionTitle(title: "View")
+            ForEach(DashboardSessionSortMode.allCases) { mode in
+                TronDashboardFilterOption(
+                    title: mode.rawValue,
+                    detail: mode.detail,
+                    selected: serverFilter.sortMode == mode,
+                    accent: .tronEmerald,
+                    inactiveAccent: .tronCyan
+                ) {
+                    setSortMode(mode)
                 }
-                .padding(.horizontal, TronSpacing.xlarge)
-                .padding(.vertical, TronSpacing.large)
             }
-            .tronScrollEdgeChrome()
-            .tronNavigationTitle("Filter Servers")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { showingServerFilter = false } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
-                    }
-                    .accessibilityLabel("Done")
+
+            TronDashboardFilterSectionTitle(
+                title: "Servers",
+                detail: "Choose one or more servers to show in your session history."
+            )
+            .padding(.top, TronSpacing.md)
+            TronDashboardFilterOption(
+                title: "All servers",
+                detail: "Show sessions from every paired server.",
+                selected: serverFilter.isAllSelected,
+                accent: .tronEmerald,
+                inactiveAccent: .tronCyan
+            ) {
+                updateServerFilter { $0.selectAll() }
+            }
+
+            ForEach(model.dashboardServerSources) { source in
+                TronDashboardFilterOption(
+                    title: source.label,
+                    detail: "\(source.sessionCount) session\(source.sessionCount == 1 ? "" : "s") · \(source.state.label)",
+                    selected: serverFilter.isSelected(source.profileID),
+                    accent: .tronEmerald,
+                    inactiveAccent: .tronCyan
+                ) {
+                    updateServerFilter { $0.toggle(source.profileID) }
                 }
             }
         }
@@ -468,48 +451,6 @@ struct SessionShellView: View {
     private func updateServerFilter(_ update: (inout DashboardServerFilterState) -> Void) {
         update(&serverFilter)
         DashboardServerFilterPreferences.save(serverFilter)
-    }
-
-    private func filterOption(
-        title: String,
-        detail: String?,
-        selected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: TronSpacing.xl) {
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(selected ? Color.tronEmerald : Color.tronTextMuted)
-                    .frame(width: 20, height: 20, alignment: .center)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .lineLimit(1)
-                    if let detail {
-                        Text(detail)
-                            .font(TronTypography.bodySM)
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .lineLimit(1)
-                    }
-                }
-                .layoutPriority(1)
-                Spacer(minLength: TronSpacing.md)
-            }
-            .padding(.horizontal, TronSpacing.xl)
-            .padding(.vertical, TronSpacing.md)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .tronGlassSurface(
-            accent: selected ? .tronEmerald : .tronCyan,
-            cornerRadius: 12,
-            tintOpacity: selected ? 0.18 : 0.08,
-            interactive: true
-        )
-        .accessibilityValue(selected ? "Selected" : "Not selected")
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var newSessionButton: some View {

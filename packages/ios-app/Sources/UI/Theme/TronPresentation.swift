@@ -748,6 +748,125 @@ struct TronSheetTitle: View {
     }
 }
 
+struct TronDashboardFilterSheet<Content: View>: View {
+    let title: String
+    let accent: Color
+    let onDone: () -> Void
+    private let content: Content
+
+    init(
+        title: String,
+        accent: Color,
+        onDone: @escaping () -> Void,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.accent = accent
+        self.onDone = onDone
+        self.content = content()
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: TronSpacing.md) {
+                    content
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, TronSpacing.xlarge)
+                .padding(.vertical, TronSpacing.large)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .tronScrollEdgeChrome()
+            .tronNavigationTitle(title, accent: accent)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(action: onDone) {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(accent)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
+        }
+        .tronSettingsVisualTheme(accent: accent)
+    }
+}
+
+struct TronDashboardFilterSectionTitle: View {
+    let title: String
+    var detail: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: TronSpacing.xs) {
+            Text(title)
+                .font(TronTypography.sheetSectionHeader)
+                .foregroundStyle(Color.tronTextPrimary)
+                .accessibilityAddTraits(.isHeader)
+            if let detail {
+                Text(detail)
+                    .font(TronTypography.secondaryDescription)
+                    .foregroundStyle(Color.tronTextMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+struct TronDashboardFilterOption: View {
+    let title: String
+    var detail: String? = nil
+    let selected: Bool
+    let accent: Color
+    let inactiveAccent: Color
+    let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button {
+            withAnimation(reduceMotion ? nil : .smooth(duration: 0.18)) {
+                action()
+            }
+        } label: {
+            HStack(spacing: TronSpacing.xl) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected ? accent : Color.tronTextMuted)
+                    .frame(width: 20, height: 20, alignment: .center)
+                    .contentTransition(.symbolEffect(.replace))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .lineLimit(1)
+                    if let detail {
+                        Text(detail)
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .lineLimit(1)
+                    }
+                }
+                .layoutPriority(1)
+                Spacer(minLength: TronSpacing.md)
+            }
+            .padding(.horizontal, TronSpacing.xl)
+            .padding(.vertical, TronSpacing.md)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .tronGlassSurface(
+            accent: selected ? accent : inactiveAccent,
+            cornerRadius: 12,
+            tintOpacity: selected ? 0.18 : 0.08,
+            interactive: true,
+            respectsSettingsTheme: false
+        )
+        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
 enum TronConfirmationActionPlacement: Equatable, Sendable {
     case toolbar
     case content
