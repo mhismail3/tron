@@ -198,6 +198,25 @@ final class ChatLayoutTransaction {
         settle(ticket.generationID, source: ticket.mutation)
     }
 
+    /// Settles a participant from the one frozen structural clock. This does
+    /// not animate content; it merely prevents an empty SwiftUI animation from
+    /// being mistaken for UIKit keyboard completion.
+    func settleAfterResolvedClock(_ ticket: ParticipantTicket) {
+        guard generation?.id == ticket.generationID,
+              generation?.participantRevisions[ticket.mutation] == ticket.revision else { return }
+        _ = animation
+        let duration = generation?.clock?.duration ?? 0
+        guard duration > 0 else {
+            settle(ticket)
+            return
+        }
+        Task { @MainActor [weak self, clock] in
+            do { try await clock.sleep(.seconds(duration)) }
+            catch { return }
+            self?.settle(ticket)
+        }
+    }
+
     func settle(_ id: Int, source: ChatLayoutMutation) {
         guard var current = generation, current.id == id, current.joined.contains(source) else {
             return

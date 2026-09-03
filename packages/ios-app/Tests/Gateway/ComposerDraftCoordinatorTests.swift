@@ -93,6 +93,54 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
+    @Test("removing a restored upload discards a late Gateway staging blob")
+    func removedRestoredUploadDiscardsLateSuccess() async throws {
+        try await withTestWatchdog { @MainActor in
+            let root = FileManager.default.temporaryDirectory.appending(
+                path: "composer-restored-removal-\(UUID().uuidString)",
+                directoryHint: .isDirectory
+            )
+            defer { try? FileManager.default.removeItem(at: root) }
+            let store = ComposerDraftStore(root: root)
+            let scope = ComposerDraftScope(profileID: "profile", sessionID: "session")
+            await store.save(.init(
+                text: "",
+                attachments: [.init(
+                    name: "notes.txt",
+                    mimeType: "text/plain",
+                    data: Data("notes".utf8)
+                )]
+            ), for: scope)
+            let gate = ComposerLateUploadGate()
+            var discarded: [String] = []
+            let coordinator = ComposerDraftCoordinator(
+                upload: { _, _, _ in try await gate.upload() },
+                discardUpload: { discarded.append($0) },
+                fileUpload: { _, _, _, _ in "unused" },
+                draftStore: store,
+                send: { _, _, _, _, _ in "unused" },
+                admitsLifecycleGeneration: { $0 == 1 }
+            )
+            let target = SessionPresentationIdentity(sessionID: scope.sessionID, generation: 1)
+            _ = await coordinator.installHostedRestoredPresentation(
+                profileID: scope.profileID,
+                target: target,
+                lifecycleGeneration: 1
+            )
+            await gate.waitUntilPending()
+            let localID = try #require(coordinator.pendingAttachments(for: target).first?.id)
+            #expect(coordinator.hasActiveUploads(for: target))
+
+            coordinator.removeAttachment(localID, target: target)
+            #expect(coordinator.pendingAttachments(for: target).isEmpty)
+            #expect(!coordinator.hasActiveUploads(for: target))
+            await gate.complete(with: "late-restored-upload")
+            for _ in 0..<20 where discarded.isEmpty { await Task.yield() }
+
+            #expect(discarded == ["late-restored-upload"])
+        }
+    }
+
     @Test("newer text waits for delayed durable load and preserves restored attachment bytes")
     func textEditDuringDelayedLoad() async throws {
         try await withTestWatchdog { @MainActor in
@@ -682,6 +730,8 @@ struct ComposerDraftCoordinatorTests {
             )
             harness.completeUpload(index: 0, result: .success("stale"))
             await #expect(throws: CancellationError.self) { try await valueOfOwnedTask(success) }
+            for _ in 0..<20 where harness.discardedUploadIDs.isEmpty { await Task.yield() }
+            #expect(harness.discardedUploadIDs == ["stale"])
             let retainedOld = try #require(
                 harness.coordinator.pendingAttachments(for: currentTarget).first
             )
@@ -722,6 +772,8 @@ struct ComposerDraftCoordinatorTests {
             await #expect(throws: CancellationError.self) {
                 try await valueOfOwnedTask(uploading)
             }
+            for _ in 0..<20 where harness.discardedUploadIDs.isEmpty { await Task.yield() }
+            #expect(harness.discardedUploadIDs == ["cancelled-upload"])
             #expect(harness.coordinator.hostedUploadAdmissionCount == 0)
             #expect(harness.coordinator.admits(target))
             let retained = try #require(harness.coordinator.pendingAttachments(for: target).first)
@@ -760,6 +812,8 @@ struct ComposerDraftCoordinatorTests {
             await #expect(throws: CancellationError.self) {
                 try await valueOfOwnedTask(first)
             }
+            for _ in 0..<20 where harness.discardedUploadIDs.isEmpty { await Task.yield() }
+            #expect(harness.discardedUploadIDs == ["removed-upload"])
 
             let second = Task {
                 try await harness.coordinator.upload(
@@ -1111,6 +1165,93 @@ struct ComposerDraftCoordinatorTests {
                 canonicalTranscript: [historical, user("new"), exact]
             )
             #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+        }
+    }
+
+    @Test("provisional pending prompt requires exact resource and typed attachments")
+    func provisionalPendingPromptRequiresExactShape() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 43)
+            let scope = harness.coordinator.installHostedPresentation(
+                profileID: "profile",
+                target: target,
+                lifecycleGeneration: 1,
+                initialText: "same"
+            )
+            harness.coordinator.installHostedAttachment(.init(
+                id: "photo-upload",
+                name: "photo.jpg",
+                mimeType: "image/jpeg",
+                size: 4,
+                previewData: nil
+            ), target: target)
+            harness.coordinator.installHostedAttachment(.init(
+                id: "file-upload",
+                name: "notes.txt",
+                mimeType: "text/plain",
+                size: 5,
+                previewData: nil
+            ), target: target)
+            harness.coordinator.selectResource(CommandInfo(
+                name: "skill:review",
+                description: "Review",
+                argumentHint: nil,
+                source: .skill,
+                sourcePath: nil
+            ), for: scope)
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
+            try await harness.waitForSends(1)
+
+            var pending = SessionSnapshot.PendingPrompt(
+                id: "pending",
+                createdAt: "2026-01-01T00:00:00Z",
+                behavior: nil,
+                text: "same",
+                attachmentCount: 2
+            )
+            pending.photoCount = 1
+            pending.fileAttachmentCount = 1
+            pending.attachments = [
+                .init(id: "photo-upload", name: "photo.jpg", mimeType: "image/jpeg", size: 4),
+                .init(id: "file-upload", name: "notes.txt", mimeType: "text/plain", size: 5),
+            ]
+            pending.resourceInvocation = ComposerResourceInvocation(
+                source: .skill,
+                name: "review",
+                arguments: "same"
+            )
+            #expect(harness.coordinator.matchesPendingPrompt(target: target, pending: pending))
+            var reordered = pending
+            reordered.attachments?.reverse()
+            #expect(harness.coordinator.matchesPendingPrompt(target: target, pending: reordered))
+
+            var wrongResource = pending
+            wrongResource.resourceInvocation = nil
+            #expect(!harness.coordinator.matchesPendingPrompt(
+                target: target,
+                pending: wrongResource
+            ))
+            var wrongKinds = pending
+            wrongKinds.photoCount = 0
+            wrongKinds.fileAttachmentCount = 2
+            #expect(!harness.coordinator.matchesPendingPrompt(target: target, pending: wrongKinds))
+            var wrongDescriptor = pending
+            wrongDescriptor.attachments?[0] = .init(
+                id: "other-upload",
+                name: "photo.jpg",
+                mimeType: "image/jpeg",
+                size: 4
+            )
+            #expect(!harness.coordinator.matchesPendingPrompt(
+                target: target,
+                pending: wrongDescriptor
+            ))
+
+            harness.completeSend(index: 0, result: .failure(ComposerSyntheticError.current))
+            await #expect(throws: ComposerSyntheticError.self) {
+                try await valueOfOwnedTask(sending)
+            }
         }
     }
 
@@ -2663,6 +2804,29 @@ private actor ComposerPreviewPreparationGate {
     }
 }
 
+private actor ComposerLateUploadGate {
+    private var continuation: CheckedContinuation<String, Error>?
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func upload() async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+            waiters.forEach { $0.resume() }
+            waiters.removeAll()
+        }
+    }
+
+    func waitUntilPending() async {
+        if continuation != nil { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func complete(with uploadID: String) {
+        continuation?.resume(returning: uploadID)
+        continuation = nil
+    }
+}
+
 private actor ComposerFileUploadGate {
     private struct Pending {
         let id: UUID
@@ -2759,6 +2923,7 @@ private final class ComposerAdmissionState {
 private final class ComposerHarness {
     let admission = ComposerAdmissionState()
     private(set) var uploadCalls: [ComposerUploadCall] = []
+    private(set) var discardedUploadIDs: [String] = []
     private(set) var sendCalls: [ComposerSendCall] = []
     private var uploadContinuations: [CheckedContinuation<String, Error>] = []
     private var sendContinuations: [CheckedContinuation<Void, Error>] = []
@@ -2784,6 +2949,9 @@ private final class ComposerHarness {
             return try await withCheckedThrowingContinuation { continuation in
                 self.uploadContinuations.append(continuation)
             }
+        },
+        discardUpload: { [weak self] uploadID in
+            self?.discardedUploadIDs.append(uploadID)
         },
         fileUpload: { _, _, _, _ in
             Issue.record("unexpected file upload")

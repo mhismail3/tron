@@ -136,7 +136,7 @@ Exit: every transcript item is stored once in the mounted reducer, visible cover
 - Projection installation is observed through the immutable installed-tag boundary; transition classification and semantic mapping come from that complete commit, while exact layout/command tokens own acknowledgement.
 - Wire keyboard/focus transition start to the real viewport transition. Composer and extension-pill geometry provide layout facts, not separate scroll authority.
 
-Exit: no spinner/command can wedge; streaming during prepend is not lost; keyboard and composer changes retain pinned/detached intent without jitter.
+Exit: no spinner/command can wedge; streaming during prepend is not lost; keyboard and composer changes retain pinned/detached intent without jitter. Duplicate geometry callbacks are observationally idempotent outside an exact owner awaiting later native evidence, each rendered row exposes exactly one physical scroll-target identity, and materialization membership is checked against that admitted physical row spine so canonical handoff aliases cannot retire a mounted target.
 
 ### 5 — Normalize queue and steering settlement
 

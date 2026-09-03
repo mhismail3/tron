@@ -37,6 +37,8 @@ struct ChatScrollOwnershipGuardTests {
         #expect(!chat.contains("case .renderedID"))
         #expect(chat.components(separatedBy: "target.scrollTo(id: renderedID, anchor: .bottom)").count - 1 == 1)
         #expect(!transcript.contains(".id(displayed."))
+        #expect(transcript.components(separatedBy: ".id(row.id)").count - 1 == 1)
+        #expect(!transcript.contains(".id(physicalID)"))
         #expect(chat.components(separatedBy: "scrollTo(id: \"transcript-bottom\", anchor: .bottom)").count - 1 == 1)
         #expect(chat.components(separatedBy: "scrollTo(edge: .bottom)").count - 1 == 1)
         #expect(chat.contains("layoutTransactionID: layoutGeneration"))

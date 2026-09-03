@@ -193,6 +193,10 @@ final class ChatScrollCoordinator {
     private(set) var tailSettlementGeneration = 0
     private(set) var pinnedPositionRevision = 0
     private(set) var maximumPrependSemanticExcursion: CGFloat = 0
+    #if HOSTED_TEST
+    var hostedGeometryEvidenceRevision: Int { geometryRevision }
+    var hostedSemanticEvidenceRevision: Int { semanticFrameRevision }
+    #endif
 
     private let frameScheduler: DisplayFrameScheduler
     private let clock: MonotonicClock
@@ -384,6 +388,21 @@ final class ChatScrollCoordinator {
 
     func semanticFrameChanged(renderedID: String, layoutEpoch: Int, frame: CGRect) {
         guard layoutEpoch == self.layoutEpoch else { return }
+        // SwiftUI can invoke an observation action again with the same frame
+        // while the row tree settles. Such callbacks are inert unless an exact
+        // active owner is awaiting later temporal evidence from that row.
+        let previous = semanticFrames[renderedID]
+        let changed = previous?.layoutEpoch != layoutEpoch || previous?.frame != frame
+        let hasOwnedWaiter = layoutRestore != nil
+            || prepend != nil
+            || openingTailPhase.context?.targetRenderedID == renderedID
+            || (appliedTargetOrigin == .tailMaterialization
+                && (tailMaterialization?.renderedID == renderedID
+                    || renderedID == "transcript-bottom"))
+        // Ordinary duplicate callbacks are inert. An exact active owner may
+        // still require the later native callback as temporal evidence after
+        // its command/layout epoch, even when the frame value is unchanged.
+        guard changed || hasOwnedWaiter else { return }
         semanticFrameRevision &+= 1
         semanticFrames[renderedID] = SemanticFrameSample(
             layoutEpoch: layoutEpoch,
@@ -540,14 +559,19 @@ final class ChatScrollCoordinator {
         // identical fact feeds that callback back into layout and can create an
         // OnScrollGeometryChange cycle without adding any evidence.
         if current == geometry {
+            let hasOwnedWaiter = layoutRestore != nil
+                || prepend != nil
+                || openingTailSettlementPending
+                || retainedViewportReconciliationPending
+                || appliedTargetOrigin != nil
+            // Identical callbacks are inert unless an exact active owner is
+            // waiting for a later native sample after its command/layout epoch.
+            guard hasOwnedWaiter else { return }
+            geometryRevision &+= 1
             if let marker = semanticFrames["transcript-bottom"], marker.layoutEpoch == layoutEpoch {
                 refreshPhysicalTailEvidence(markerFrame: marker.frame)
             }
             reconcileRetainedViewport(with: current)
-            // Owned semantic restore/prepend transactions may require a fresh
-            // sample revision even when the native values are unchanged. Do
-            // not assign the observed geometry again.
-            geometryRevision &+= 1
             evaluateLayoutRestoreIfReady()
             evaluatePrependIfReady()
             evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)

@@ -103,6 +103,32 @@ struct ChatLayoutTransactionTests {
         #expect(transaction.consumeTerminalEvents() == [.settled(generation)])
     }
 
+    @Test("keyboard settlement waits for the frozen clock instead of an empty animation")
+    func keyboardSettlementUsesFrozenClock() async throws {
+        let clock = ManualClock()
+        let transaction = ChatLayoutTransaction(clock: clock.clock)
+        transaction.configure(
+            keyboard: ChatKeyboardTransition(
+                targetHeight: 0,
+                duration: 0.27,
+                curve: .easeOut
+            ),
+            reduceMotion: false
+        )
+        let participant = transaction.joinParticipant(.keyboard)
+        transaction.settleAfterResolvedClock(participant)
+        try await clock.waitUntilSleeping(count: 2)
+
+        clock.advance(by: .milliseconds(200))
+        await Task.yield()
+        #expect(transaction.generation != nil)
+        clock.advance(by: .milliseconds(100))
+        for _ in 0..<100 where transaction.generation != nil { await Task.yield() }
+
+        #expect(transaction.generation == nil)
+        #expect(transaction.consumeTerminalEvents() == [.settled(participant.generationID)])
+    }
+
     @Test("settlement is idempotent and waits for every participant")
     func settlement() throws {
         let transaction = ChatLayoutTransaction()
