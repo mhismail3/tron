@@ -46,6 +46,18 @@ struct AutomationCoordinatorTests {
     func timelineLoadingPresentation() {
         #expect(AutomationTimelinePresentationPolicy.showsEmptyState(visibleDayCount: 0))
         #expect(!AutomationTimelinePresentationPolicy.showsEmptyState(visibleDayCount: 1))
+        #expect(AutomationTimelinePresentationPolicy.emptyStateHeight(
+            viewportHeight: 800,
+            hasAttentionBanner: false
+        ) == 696)
+        #expect(AutomationTimelinePresentationPolicy.emptyStateHeight(
+            viewportHeight: 800,
+            hasAttentionBanner: true
+        ) == 280)
+        #expect(AutomationTimelinePresentationPolicy.emptyStateHeight(
+            viewportHeight: 300,
+            hasAttentionBanner: false
+        ) == 280)
         #expect(!AutomationTimelinePresentationPolicy.showsRefreshIndicator(
             isLoading: true,
             delayElapsed: false

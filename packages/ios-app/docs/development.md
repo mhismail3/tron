@@ -27,8 +27,9 @@ selection transition, and scroll behavior. All-only controls fade into that stab
 than entering through a separate motion path. All-mode search uses the same
 bottom-left reveal/close interaction as the Sessions dashboard rather than permanently
 occupying dashboard space. Upcoming retains its current agenda or neutral empty state while
-refreshing; only a refresh that outlasts the short presentation delay adds a compact activity
-badge, so transient reloads never replace the dashboard content. Upcoming extends in canonical
+refreshing; its no-occurrence placeholder stays centered in the available dashboard viewport
+above the bottom controls. Only a refresh that outlasts the short presentation delay adds a compact
+activity badge, so transient reloads never replace the dashboard content. Upcoming extends in canonical
 seven-day Gateway-generated windows, retains at most eight windows/8,192 presentation items, and requires
 `automations.timeline.v1`. Drafts remain inventory-only until enabled, so they appear in All but do not
 produce Upcoming occurrences. Only currently connected Gateways advertising

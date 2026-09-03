@@ -28,8 +28,20 @@ enum AutomationInventoryFilter: String, CaseIterable, Identifiable {
 }
 
 enum AutomationTimelinePresentationPolicy {
+    static let agendaVerticalPadding: CGFloat = 12
+    static let bottomControlClearance: CGFloat = 80
+    static let minimumEmptyStateHeight: CGFloat = 280
+
     static func showsEmptyState(visibleDayCount: Int) -> Bool {
         visibleDayCount == 0
+    }
+
+    static func emptyStateHeight(viewportHeight: CGFloat, hasAttentionBanner: Bool) -> CGFloat {
+        guard !hasAttentionBanner else { return minimumEmptyStateHeight }
+        return max(
+            minimumEmptyStateHeight,
+            viewportHeight - (agendaVerticalPadding * 2) - bottomControlClearance
+        )
     }
 
     static func showsRefreshIndicator(isLoading: Bool, delayElapsed: Bool) -> Bool {
@@ -235,47 +247,53 @@ struct AutomationsDashboardView: View {
     }
 
     private var upcomingContent: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: TronSpacing.md, pinnedViews: [.sectionHeaders]) {
-                if attentionCount > 0 { attentionBanner }
-                if AutomationTimelinePresentationPolicy.showsEmptyState(
-                    visibleDayCount: visibleTimelineDays.count
-                ) {
-                    upcomingEmptyState
-                } else {
-                    ForEach(visibleTimelineDays) { day in
-                        Section {
-                            ForEach(day.items) { item in occurrenceRow(item) }
-                        } header: {
-                            dayHeader(
-                                day.date,
-                                count: day.items.reduce(0) { $0 + ($1.occurrence.count ?? 1) }
-                            )
+        GeometryReader { geometry in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: TronSpacing.md, pinnedViews: [.sectionHeaders]) {
+                    if attentionCount > 0 { attentionBanner }
+                    if AutomationTimelinePresentationPolicy.showsEmptyState(
+                        visibleDayCount: visibleTimelineDays.count
+                    ) {
+                        upcomingEmptyState
+                            .frame(minHeight: AutomationTimelinePresentationPolicy.emptyStateHeight(
+                                viewportHeight: geometry.size.height,
+                                hasAttentionBanner: attentionCount > 0
+                            ))
+                    } else {
+                        ForEach(visibleTimelineDays) { day in
+                            Section {
+                                ForEach(day.items) { item in occurrenceRow(item) }
+                            } header: {
+                                dayHeader(
+                                    day.date,
+                                    count: day.items.reduce(0) { $0 + ($1.occurrence.count ?? 1) }
+                                )
+                            }
+                            .onAppear {
+                                if day.id == visibleTimelineDays.last?.id { timeline?.loadNext() }
+                            }
                         }
-                        .onAppear {
-                            if day.id == visibleTimelineDays.last?.id { timeline?.loadNext() }
+                        if timeline?.isLoadingMore == true {
+                            TronLoadingState(label: "Loading later dates…", accent: .tronAutomation)
+                                .frame(minHeight: 80)
+                        } else if timeline?.canLoadMore == false {
+                            Text("Choose another date to continue beyond this bounded agenda window.")
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronTextMuted)
+                                .frame(maxWidth: .infinity)
                         }
-                    }
-                    if timeline?.isLoadingMore == true {
-                        TronLoadingState(label: "Loading later dates…", accent: .tronAutomation)
-                            .frame(minHeight: 80)
-                    } else if timeline?.canLoadMore == false {
-                        Text("Choose another date to continue beyond this bounded agenda window.")
-                            .font(TronTypography.secondaryDescription)
-                            .foregroundStyle(Color.tronTextMuted)
-                            .frame(maxWidth: .infinity)
                     }
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, AutomationTimelinePresentationPolicy.agendaVerticalPadding)
+                .padding(.bottom, AutomationTimelinePresentationPolicy.bottomControlClearance)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .padding(.bottom, 80)
+            .refreshable {
+                model.automationCatalog.reload()
+                timeline?.load(start: selectedDate)
+            }
+            .tronScrollEdgeChrome()
         }
-        .refreshable {
-            model.automationCatalog.reload()
-            timeline?.load(start: selectedDate)
-        }
-        .tronScrollEdgeChrome()
     }
 
     private func occurrenceTime(_ value: String) -> String {
