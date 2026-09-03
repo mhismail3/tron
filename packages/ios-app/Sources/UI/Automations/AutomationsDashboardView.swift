@@ -7,26 +7,6 @@ struct AutomationSummarySelection: Hashable, Identifiable {
     var id: String { "\(profileID):\(summary.id)" }
 }
 
-enum AutomationDashboardViewMode: String, CaseIterable, Identifiable {
-    case upcoming = "Upcoming", all = "All"
-    var id: String { rawValue }
-}
-
-enum AutomationInventoryFilter: String, CaseIterable, Identifiable {
-    case all = "All", active = "Active", attention = "Needs attention", drafts = "Drafts", paused = "Paused", completed = "Completed"
-    var id: String { rawValue }
-    func matches(_ summary: GatewayAutomationSummary) -> Bool {
-        switch self {
-        case .all: true
-        case .active: summary.activation == .enabled
-        case .attention: summary.isAttentionRequired
-        case .drafts: summary.activation == .draft
-        case .paused: summary.activation == .paused
-        case .completed: summary.activation == .completed
-        }
-    }
-}
-
 enum AutomationTimelinePresentationPolicy {
     static let agendaVerticalPadding: CGFloat = 12
     static let bottomControlClearance: CGFloat = 80
@@ -59,10 +39,7 @@ struct AutomationsDashboardView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var mode: AutomationDashboardViewMode = .upcoming
-    @State private var filter: AutomationInventoryFilter = .all
-    @State private var actionFilter: AutomationActionKind?
-    @State private var serverFilter: String?
+    @State private var viewPreferences: AutomationDashboardViewPreferences
     @State private var search = ""
     @State private var showingSearch = false
     @State private var showingFilters = false
@@ -73,12 +50,25 @@ struct AutomationsDashboardView: View {
     @State private var timeline: AutomationTimelineCoordinator?
     @State private var timelineRefreshIndicatorVisible = false
 
+    init(onSelectSessions: @escaping () -> Void, onOpenSettings: @escaping () -> Void) {
+        self.onSelectSessions = onSelectSessions
+        self.onOpenSettings = onOpenSettings
+        _viewPreferences = State(initialValue: AutomationDashboardPreferences.load())
+    }
+
     private var eligibleProfileIDs: Set<String> {
         Set(model.automationCatalog.allEndpoints().map(\.id))
     }
 
     private var availableBuckets: [AutomationProfileCatalog] {
         model.automationCatalog.buckets.filter { eligibleProfileIDs.contains($0.id) }
+    }
+
+    private var mode: AutomationDashboardViewMode { viewPreferences.mode }
+    private var filter: AutomationInventoryFilter { viewPreferences.inventoryFilter }
+    private var actionFilter: AutomationActionKind? { viewPreferences.actionFilter }
+    private var serverFilter: String? {
+        viewPreferences.effectiveProfileID(eligibleProfileIDs: eligibleProfileIDs)
     }
 
     private var summaries: [(profile: AutomationDashboardProfile, summary: GatewayAutomationSummary)] {
@@ -138,13 +128,14 @@ struct AutomationsDashboardView: View {
         .tronSettingsVisualTheme(accent: .tronAutomation)
         .task(id: presentationActivity.allowsPresentationPublication) {
             guard presentationActivity.allowsPresentationPublication else { return }
+            reconcileViewPreferences()
             model.automationCatalog.activate()
             if timeline == nil {
                 let coordinator = AutomationTimelineCoordinator(endpoints: { @MainActor in
                     model.automationCatalog.allEndpoints()
                 })
                 timeline = coordinator
-                coordinator.load(start: selectedDate)
+                if mode == .upcoming { coordinator.load(start: selectedDate) }
             }
         }
         .task(id: timeline?.isLoading == true) {
@@ -166,11 +157,7 @@ struct AutomationsDashboardView: View {
                 timelineRefreshIndicatorVisible = true
             }
         }
-        .onChange(of: model.automationCatalog.buckets) { _, buckets in
-            if let serverFilter,
-               !buckets.contains(where: { $0.profile.id == serverFilter && eligibleProfileIDs.contains($0.id) }) {
-                self.serverFilter = nil
-            }
+        .onChange(of: model.automationCatalog.buckets) { _, _ in
             if mode == .upcoming { timeline?.load(start: selectedDate) }
         }
         .onChange(of: mode) { _, nextMode in
@@ -180,6 +167,7 @@ struct AutomationsDashboardView: View {
             }
         }
         .onChange(of: model.profileRevision) { _, _ in
+            reconcileViewPreferences()
             model.automationCatalog.reload()
         }
         .onChange(of: model.connectionState) { _, _ in
@@ -362,9 +350,11 @@ struct AutomationsDashboardView: View {
     private var attentionBanner: some View {
         Button {
             dismissAutomationSearch()
-            actionFilter = nil
-            filter = .attention
-            mode = .all
+            updateViewPreferences {
+                $0.actionFilter = nil
+                $0.inventoryFilter = .attention
+                $0.mode = .all
+            }
         } label: {
             TronInfoCard(
                 icon: "exclamationmark.triangle.fill",
@@ -484,6 +474,27 @@ struct AutomationsDashboardView: View {
         }
     }
 
+    private func updateViewPreferences(
+        _ update: (inout AutomationDashboardViewPreferences) -> Void
+    ) {
+        var next = viewPreferences
+        update(&next)
+        guard next != viewPreferences else { return }
+        viewPreferences = next
+        AutomationDashboardPreferences.save(next)
+    }
+
+    private func reconcileViewPreferences() {
+        var next = viewPreferences
+        next.reconcile(knownProfileIDs: model.profiles.profiles.compactMap { profile in
+            guard profile.isEnabled, model.profiles.token(for: profile) != nil else { return nil }
+            return profile.id
+        })
+        guard next != viewPreferences else { return }
+        viewPreferences = next
+        AutomationDashboardPreferences.save(next)
+    }
+
     private var automationFilterSheet: some View {
         TronDashboardFilterSheet(
             title: "View Automations",
@@ -504,7 +515,7 @@ struct AutomationsDashboardView: View {
                     accent: .tronAutomation,
                     inactiveAccent: .tronSlate
                 ) {
-                    mode = option
+                    updateViewPreferences { $0.mode = option }
                 }
             }
 
@@ -522,7 +533,7 @@ struct AutomationsDashboardView: View {
                             accent: .tronAutomation,
                             inactiveAccent: .tronSlate
                         ) {
-                            filter = option
+                            updateViewPreferences { $0.inventoryFilter = option }
                         }
                     }
 
@@ -537,7 +548,7 @@ struct AutomationsDashboardView: View {
                         accent: .tronAutomation,
                         inactiveAccent: .tronSlate
                     ) {
-                        actionFilter = nil
+                        updateViewPreferences { $0.actionFilter = nil }
                     }
                     ForEach(AutomationActionKind.allCases, id: \.self) { action in
                         TronDashboardFilterOption(
@@ -546,7 +557,7 @@ struct AutomationsDashboardView: View {
                             accent: .tronAutomation,
                             inactiveAccent: .tronSlate
                         ) {
-                            actionFilter = action
+                            updateViewPreferences { $0.actionFilter = action }
                         }
                     }
                 }
@@ -565,7 +576,7 @@ struct AutomationsDashboardView: View {
                     accent: .tronAutomation,
                     inactiveAccent: .tronSlate
                 ) {
-                    serverFilter = nil
+                    updateViewPreferences { $0.selectedProfileID = nil }
                 }
                 ForEach(availableBuckets) { bucket in
                     TronDashboardFilterOption(
@@ -575,7 +586,7 @@ struct AutomationsDashboardView: View {
                         accent: .tronAutomation,
                         inactiveAccent: .tronSlate
                     ) {
-                        serverFilter = bucket.profile.id
+                        updateViewPreferences { $0.selectedProfileID = bucket.profile.id }
                     }
                 }
             }

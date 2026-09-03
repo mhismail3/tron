@@ -607,6 +607,48 @@ struct DashboardStateOwnerTests {
         #expect(DashboardServerFilterPreferences.load(from: defaults) == DashboardServerFilterState())
     }
 
+    @Test("Automation view and filters persist and reconcile known Gateways")
+    func automationPreferencePersistence() {
+        let suiteName = "DashboardStateOwnerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        var stored = AutomationDashboardPreferences.load(from: defaults)
+        #expect(stored == AutomationDashboardViewPreferences())
+        stored.mode = .all
+        stored.inventoryFilter = .paused
+        stored.actionFilter = .notification
+        stored.selectedProfileID = "profile-one"
+        AutomationDashboardPreferences.save(stored, to: defaults)
+
+        var restored = AutomationDashboardPreferences.load(from: defaults)
+        #expect(restored == stored)
+        #expect(restored.effectiveProfileID(eligibleProfileIDs: ["profile-one"]) == "profile-one")
+        #expect(restored.effectiveProfileID(eligibleProfileIDs: []) == nil)
+        restored.reconcile(knownProfileIDs: [])
+        #expect(restored.selectedProfileID == "profile-one")
+        restored.reconcile(knownProfileIDs: ["profile-two"])
+        #expect(restored.selectedProfileID == nil)
+    }
+
+    @Test("malformed or oversized Automation preferences fail closed")
+    func invalidAutomationPreferences() {
+        let suiteName = "DashboardStateOwnerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(
+            Data(#"{"version":1,"mode":"All","inventoryFilter":"Paused","actionFilter":"unknown"}"#.utf8),
+            forKey: AutomationDashboardPreferences.documentKey
+        )
+        #expect(AutomationDashboardPreferences.load(from: defaults) == AutomationDashboardViewPreferences())
+        defaults.set(
+            Data(repeating: 0x41, count: 4 * 1024 + 1),
+            forKey: AutomationDashboardPreferences.documentKey
+        )
+        #expect(AutomationDashboardPreferences.load(from: defaults) == AutomationDashboardViewPreferences())
+    }
+
     @Test("direct navigation invalidates pending asynchronous navigation")
     func navigationInvalidation() {
         var owner = DashboardNavigationOwner()

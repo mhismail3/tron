@@ -358,7 +358,9 @@ advertise `automations.timeline.v1`. The dashboard Tron logo opens a native Sess
 each choice retains independent root state. The Automations root provides a chronological Upcoming
 agenda and a searchable/filterable All inventory across identity-qualified paired Gateways. Its one
 managed filter sheet owns the view, status, action, and Gateway choices, while All-mode search reuses
-the Sessions dashboard's bottom reveal/close interaction. Only currently connected profiles with an
+the Sessions dashboard's bottom reveal/close interaction. Those four choices persist together in one
+bounded versioned `UserDefaults` document; ephemeral search and agenda-date state remain presentation-only,
+and no Automation action content or journal enters the preference. Only currently connected profiles with an
 authenticated `automations.v1` capability enter this projection; disconnected and incompatible profiles
 remain absent and cannot publish warning copy over the dashboard's neutral empty state. iOS admits
 typed bounded automation summaries, trigger/run/detail states, and `automation.changed` invalidations,

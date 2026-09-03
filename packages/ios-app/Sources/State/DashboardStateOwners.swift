@@ -177,6 +177,111 @@ enum DashboardSessionSortMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum AutomationDashboardViewMode: String, CaseIterable, Identifiable, Sendable {
+    case upcoming = "Upcoming"
+    case all = "All"
+
+    var id: String { rawValue }
+}
+
+enum AutomationInventoryFilter: String, CaseIterable, Identifiable, Sendable {
+    case all = "All"
+    case active = "Active"
+    case attention = "Needs attention"
+    case drafts = "Drafts"
+    case paused = "Paused"
+    case completed = "Completed"
+
+    var id: String { rawValue }
+
+    func matches(_ summary: GatewayAutomationSummary) -> Bool {
+        switch self {
+        case .all: true
+        case .active: summary.activation == .enabled
+        case .attention: summary.isAttentionRequired
+        case .drafts: summary.activation == .draft
+        case .paused: summary.activation == .paused
+        case .completed: summary.activation == .completed
+        }
+    }
+}
+
+struct AutomationDashboardViewPreferences: Equatable, Sendable {
+    var mode: AutomationDashboardViewMode = .upcoming
+    var inventoryFilter: AutomationInventoryFilter = .all
+    var actionFilter: AutomationActionKind?
+    var selectedProfileID: String?
+
+    func effectiveProfileID(eligibleProfileIDs: Set<String>) -> String? {
+        guard let selectedProfileID, eligibleProfileIDs.contains(selectedProfileID) else { return nil }
+        return selectedProfileID
+    }
+
+    mutating func reconcile(knownProfileIDs: [String]) {
+        let known = Set(knownProfileIDs)
+        guard !known.isEmpty,
+              let selectedProfileID,
+              !known.contains(selectedProfileID) else { return }
+        self.selectedProfileID = nil
+    }
+}
+
+enum AutomationDashboardPreferences {
+    private struct Document: Codable {
+        let version: Int
+        let mode: String
+        let inventoryFilter: String
+        let actionFilter: String?
+        let selectedProfileID: String?
+    }
+
+    static let documentKey = "dashboard.automations.preferences.v1"
+    private static let version = 1
+    private static let maximumProfileIDBytes = 160
+    private static let maximumDocumentBytes = 4 * 1024
+
+    static func load(from defaults: UserDefaults = .standard) -> AutomationDashboardViewPreferences {
+        guard let data = defaults.data(forKey: documentKey),
+              data.count <= maximumDocumentBytes,
+              let document = try? JSONDecoder().decode(Document.self, from: data),
+              document.version == version,
+              let mode = AutomationDashboardViewMode(rawValue: document.mode),
+              let inventoryFilter = AutomationInventoryFilter(rawValue: document.inventoryFilter),
+              let actionFilter = document.actionFilter.flatMap(AutomationActionKind.init(rawValue:)),
+              document.actionFilter == nil || actionFilter != nil,
+              document.selectedProfileID.map(admitsProfileID) ?? true else {
+            return AutomationDashboardViewPreferences()
+        }
+        return AutomationDashboardViewPreferences(
+            mode: mode,
+            inventoryFilter: inventoryFilter,
+            actionFilter: actionFilter,
+            selectedProfileID: document.selectedProfileID
+        )
+    }
+
+    static func save(
+        _ preferences: AutomationDashboardViewPreferences,
+        to defaults: UserDefaults = .standard
+    ) {
+        guard preferences.selectedProfileID.map(admitsProfileID) ?? true else { return }
+        let document = Document(
+            version: version,
+            mode: preferences.mode.rawValue,
+            inventoryFilter: preferences.inventoryFilter.rawValue,
+            actionFilter: preferences.actionFilter?.rawValue,
+            selectedProfileID: preferences.selectedProfileID
+        )
+        guard let data = try? JSONEncoder().encode(document),
+              data.count <= maximumDocumentBytes else { return }
+        defaults.set(data, forKey: documentKey)
+    }
+
+    private static func admitsProfileID(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= maximumProfileIDBytes
+    }
+}
+
 enum DashboardServerFilterPreferences {
     private struct Document: Codable {
         let version: Int
