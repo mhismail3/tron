@@ -16,9 +16,9 @@ scripts/tron ios generate
 The top-left Tron logo on the session dashboard is a native `UIButton`/`UIMenu`
 selector. It switches between the independent Sessions and Automations root
 projections; it does not replace session navigation state. Its template tint comes
-from the selected dashboard mode—emerald for Sessions and coral for Automations—and
-adding a future mode requires declaring its matching accent. Automations uses one
-`.tronCoral` visual theme across its dashboard and managed sheets. The top-right
+from the selected dashboard mode—emerald for Sessions and automation blue (`#B4D3D9`)
+for Automations—and adding a future mode requires declaring its matching accent. Automations
+uses the `.tronAutomation` visual theme across its dashboard and managed sheets. The top-right
 filter action presents the same shared medium-height dashboard filter sheet used by Sessions;
 it owns the Upcoming/All view choice, status/action filters, and connected-Gateway selection.
 The shared sheet forces short and long content into the same top-aligned frame, padding, title,

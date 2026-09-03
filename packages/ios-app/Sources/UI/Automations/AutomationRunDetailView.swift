@@ -30,7 +30,7 @@ struct AutomationRunDetailView: View {
                             if let invocation = run.actionSnapshot.resourceInvocation {
                                 Label("\(invocation.source.rawValue.capitalized): \(invocation.name)", systemImage: "sparkles")
                                     .font(TronTypography.secondaryDescription)
-                                    .foregroundStyle(Color.tronCoral)
+                                    .foregroundStyle(Color.tronAutomation)
                             }
                         }
                         .padding(14)
@@ -61,19 +61,19 @@ struct AutomationRunDetailView: View {
             .tronScrollEdgeChrome()
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Run Details", accent: .tronCoral)
+                    TronSheetTitle(title: "Run Details", accent: .tronAutomation)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronCoral)
+                            .foregroundStyle(Color.tronAutomation)
                     }
                     .accessibilityLabel("Done")
                 }
             }
         }
-        .tronSettingsVisualTheme(accent: .tronCoral)
+        .tronSettingsVisualTheme(accent: .tronAutomation)
         .tronTopBlur(.sheet).presentationDetents([.large]).presentationDragIndicator(.hidden)
         .alert("Resolve uncertain run?", isPresented: $confirmingResolution) { ForEach(["succeeded", "failed", "cancelled"], id: \.self) { outcome in Button(outcome.capitalized) { Task { await resolve(outcome) } } }; Button("Cancel", role: .cancel) {} } message: { Text("This decision is permanent and the run will never be replayed automatically.") }
         .tronManagedSystemPresentation(
@@ -82,7 +82,7 @@ struct AutomationRunDetailView: View {
         )
     }
     private var runHeader: some View {
-        TronGlassCard(accent: .tronCoral) {
+        TronGlassCard(accent: .tronAutomation) {
             HStack(alignment: .top, spacing: TronSpacing.xl) {
                 Image(systemName: AutomationStatusPresentation.icon(.enabled, run: run.state))
                     .font(TronTypography.sans(size: 24, weight: .semibold))
@@ -102,7 +102,7 @@ struct AutomationRunDetailView: View {
                 if run.manual == true {
                     Text("Manual")
                         .font(TronTypography.secondaryCodeDescription)
-                        .foregroundStyle(Color.tronCoral)
+                        .foregroundStyle(Color.tronAutomation)
                 }
             }
             .padding(16)
@@ -137,7 +137,7 @@ struct AutomationRunDetailView: View {
             .padding(14)
         }
     }
-    private func section(_ title: String, icon: String, @ViewBuilder content: () -> some View) -> some View { TronSettingsGroup(title, accent: .tronCoral) { content() } }
+    private func section(_ title: String, icon: String, @ViewBuilder content: () -> some View) -> some View { TronSettingsGroup(title, accent: .tronAutomation) { content() } }
     private func info(_ label: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
             Text(label)

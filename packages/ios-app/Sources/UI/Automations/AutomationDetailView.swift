@@ -26,7 +26,7 @@ struct AutomationDetailView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    if isLoading { TronLoadingState(label: "Loading Automation…", accent: .tronCoral).frame(minHeight: 220) }
+                    if isLoading { TronLoadingState(label: "Loading Automation…", accent: .tronAutomation).frame(minHeight: 220) }
                     else if let errorMessage { errorState(errorMessage) }
                     else if let record { detail(record) }
                 }
@@ -37,19 +37,19 @@ struct AutomationDetailView: View {
             .tronScrollEdgeChrome()
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: selection.summary.name, accent: .tronCoral)
+                    TronSheetTitle(title: selection.summary.name, accent: .tronAutomation)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronCoral)
+                            .foregroundStyle(Color.tronAutomation)
                     }
                     .accessibilityLabel("Done")
                 }
             }
         }
-        .tronSettingsVisualTheme(accent: .tronCoral)
+        .tronSettingsVisualTheme(accent: .tronAutomation)
         .tronTopBlur(.sheet).presentationDetents([.large]).presentationDragIndicator(.hidden)
         .task { await load() }
         .onChange(of: currentRevisionTag) { _, _ in
@@ -88,7 +88,7 @@ struct AutomationDetailView: View {
             TronInfoCard(
                 icon: "calendar.badge.clock",
                 text: "Selected occurrence: \(AutomationDateFormatting.date(highlightedOccurrence))",
-                accent: .tronCoral,
+                accent: .tronAutomation,
                 usesSemanticAccent: true
             )
         }
@@ -115,7 +115,7 @@ struct AutomationDetailView: View {
                 if let invocation = record.action.resourceInvocation {
                     Label("\(invocation.source.rawValue.capitalized): \(invocation.name)", systemImage: "sparkles")
                         .font(TronTypography.secondaryDescription)
-                        .foregroundStyle(Color.tronCoral)
+                        .foregroundStyle(Color.tronAutomation)
                 }
             }
             .padding(14)
@@ -143,14 +143,14 @@ struct AutomationDetailView: View {
                     icon: "clock.arrow.circlepath",
                     title: "No runs yet",
                     subtitle: "Scheduled and manual runs will appear here.",
-                    accent: .tronCoral
+                    accent: .tronAutomation
                 )
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(runs.enumerated()), id: \.element.id) { index, run in
                         Button { Task { await selectRun(run) } } label: { runSummary(run) }
                             .buttonStyle(.plain)
-                        if index < runs.count - 1 { TronSettingsDivider(accent: .tronCoral) }
+                        if index < runs.count - 1 { TronSettingsDivider(accent: .tronAutomation) }
                     }
                 }
             }
@@ -160,7 +160,7 @@ struct AutomationDetailView: View {
     }
 
     private func statusHeader(_ record: GatewayAutomationRecord) -> some View {
-        TronGlassCard(accent: .tronCoral) {
+        TronGlassCard(accent: .tronAutomation) {
             HStack(alignment: .top, spacing: TronSpacing.xl) {
                 Image(systemName: AutomationStatusPresentation.icon(record.activation, run: record.currentRun?.state))
                     .font(TronTypography.sans(size: 24, weight: .semibold))
@@ -196,7 +196,7 @@ struct AutomationDetailView: View {
         TronSettingsGroup(
             "Controls",
             detail: "Every change is revision-fenced on the owning Gateway.",
-            accent: .tronCoral
+            accent: .tronAutomation
         ) {
             VStack(spacing: TronSpacing.md) {
                 HStack(spacing: TronSpacing.md) {
@@ -227,7 +227,7 @@ struct AutomationDetailView: View {
         .disabled(!ownsMutationGateway)
         .opacity(ownsMutationGateway ? 1 : 0.55)
     }
-    private func section(_ title: String, icon: String, @ViewBuilder content: () -> some View) -> some View { TronSettingsGroup(title, accent: .tronCoral) { content() } }
+    private func section(_ title: String, icon: String, @ViewBuilder content: () -> some View) -> some View { TronSettingsGroup(title, accent: .tronAutomation) { content() } }
     private func info(_ label: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
             Text(label)

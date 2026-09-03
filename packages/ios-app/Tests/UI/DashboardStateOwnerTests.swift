@@ -2,14 +2,21 @@ import Foundation
 import Observation
 import Synchronization
 import Testing
+import UIKit
 @testable import TronMobile
 
 @Suite("Dashboard state ownership")
 struct DashboardStateOwnerTests {
+    @MainActor
     @Test("each dashboard owns the matching logo accent")
     func dashboardLogoAccent() {
         #expect(DashboardMode.sessions.accent == .tronEmerald)
-        #expect(DashboardMode.automations.accent == .tronCoral)
+        #expect(DashboardMode.automations.accent == .tronAutomation)
+
+        let expected = UIColor(hex: "#B4D3D9")
+        let automation = UIColor(DashboardMode.automations.accent)
+        #expect(automation.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light)) == expected)
+        #expect(automation.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark)) == expected)
     }
 
     @Test("a newer navigation intent rejects an older asynchronous completion")

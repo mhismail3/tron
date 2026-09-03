@@ -17,7 +17,7 @@ enum DashboardMode: String, CaseIterable, Identifiable {
     var accent: Color {
         switch self {
         case .sessions: .tronEmerald
-        case .automations: .tronCoral
+        case .automations: .tronAutomation
         }
     }
 }

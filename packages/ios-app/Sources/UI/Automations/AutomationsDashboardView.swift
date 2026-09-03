@@ -123,7 +123,7 @@ struct AutomationsDashboardView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbar }
         .tronPresentation()
-        .tronSettingsVisualTheme(accent: .tronCoral)
+        .tronSettingsVisualTheme(accent: .tronAutomation)
         .task(id: presentationActivity.allowsPresentationPublication) {
             guard presentationActivity.allowsPresentationPublication else { return }
             model.automationCatalog.activate()
@@ -196,7 +196,7 @@ struct AutomationsDashboardView: View {
                 DatePicker("Start date", selection: $selectedDate, in: Date.now..., displayedComponents: .date)
                     .datePickerStyle(.graphical)
                     .padding()
-                    .tronNavigationTitle("Jump to date", accent: .tronCoral)
+                    .tronNavigationTitle("Jump to date", accent: .tronAutomation)
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
                             Button { datePickerPresented = false; timeline?.load(start: selectedDate) } label: { Image(systemName: "checkmark") }
@@ -205,7 +205,7 @@ struct AutomationsDashboardView: View {
                     }
             }
             .presentationDetents([.medium])
-            .tronSettingsVisualTheme(accent: .tronCoral)
+            .tronSettingsVisualTheme(accent: .tronAutomation)
         }
     }
 
@@ -217,7 +217,7 @@ struct AutomationsDashboardView: View {
         ScrollView {
             LazyVStack(spacing: TronSpacing.md) {
                 if model.automationCatalog.isLoading && summaries.isEmpty {
-                    TronLoadingState(label: "Loading Automations…", accent: .tronCoral).frame(minHeight: 240)
+                    TronLoadingState(label: "Loading Automations…", accent: .tronAutomation).frame(minHeight: 240)
                 } else if summaries.isEmpty {
                     inventoryEmptyState
                 } else {
@@ -257,7 +257,7 @@ struct AutomationsDashboardView: View {
                         }
                     }
                     if timeline?.isLoadingMore == true {
-                        TronLoadingState(label: "Loading later dates…", accent: .tronCoral)
+                        TronLoadingState(label: "Loading later dates…", accent: .tronAutomation)
                             .frame(minHeight: 80)
                     } else if timeline?.canLoadMore == false {
                         Text("Choose another date to continue beyond this bounded agenda window.")
@@ -286,7 +286,7 @@ struct AutomationsDashboardView: View {
     private func dayHeader(_ date: Date, count: Int) -> some View {
         let calendar = Calendar.current
         let title = calendar.isDateInToday(date) ? "Today" : calendar.isDateInTomorrow(date) ? "Tomorrow" : date.formatted(.dateTime.weekday(.wide).month(.wide).day())
-        return HStack { Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronCoral); Spacer(); Text("\(count) trigger\(count == 1 ? "" : "s")").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted) }
+        return HStack { Text(title).font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronAutomation); Spacer(); Text("\(count) trigger\(count == 1 ? "" : "s")").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted) }
             .padding(.vertical, 6).background(Color.tronBackground.opacity(0.96))
     }
 
@@ -302,8 +302,8 @@ struct AutomationsDashboardView: View {
             }
         } label: {
             HStack(alignment: .top, spacing: 12) {
-                Text(occurrenceTime(occurrence.presentationTimestamp)).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronCoral).frame(width: 64, alignment: .leading)
-                Image(systemName: occurrence.isSeries ? "repeat" : "circle.fill").foregroundStyle(Color.tronCoral).padding(.top, 3)
+                Text(occurrenceTime(occurrence.presentationTimestamp)).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronAutomation).frame(width: 64, alignment: .leading)
+                Image(systemName: occurrence.isSeries ? "repeat" : "circle.fill").foregroundStyle(Color.tronAutomation).padding(.top, 3)
                 VStack(alignment: .leading, spacing: 3) {
                     if let match = model.automationCatalog.summaries.first(where: { $0.profile.id == item.profileID && $0.summary.id == occurrence.automationId }) {
                         Text(match.summary.name).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronTextPrimary).lineLimit(1)
@@ -314,20 +314,20 @@ struct AutomationsDashboardView: View {
                 }
                 Spacer(minLength: 0)
             }.padding(TronSpacing.lg)
-        }.buttonStyle(.plain).tronGlassSurface(accent: .tronCoral, cornerRadius: 14, tintOpacity: 0.08, interactive: true)
+        }.buttonStyle(.plain).tronGlassSurface(accent: .tronAutomation, cornerRadius: 14, tintOpacity: 0.08, interactive: true)
             .accessibilityLabel("Scheduled automation")
     }
 
     private func automationCard(_ profile: AutomationDashboardProfile, _ summary: GatewayAutomationSummary) -> some View {
         Button { selected = AutomationSummarySelection(profileID: profile.id, summary: summary) } label: {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: summary.typedActionKind?.icon ?? "clock").foregroundStyle(Color.tronCoral).frame(width: 24)
+                Image(systemName: summary.typedActionKind?.icon ?? "clock").foregroundStyle(Color.tronAutomation).frame(width: 24)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack { Text(summary.name).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronTextPrimary).lineLimit(1); Spacer(); AutomationStatusBadge(activation: summary.activation, run: summary.currentRun?.state) }
                     Text(summary.trigger.summary).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
                     Text("\(summary.typedActionKind?.label ?? summary.actionKind) · \(targetLabel(profileID: profile.id, sessionID: summary.targetSessionId))").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted).lineLimit(1)
                     if let next = summary.nextOccurrenceAt {
-                        Text("Next: \(AutomationDateFormatting.date(next))").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronCoral)
+                        Text("Next: \(AutomationDateFormatting.date(next))").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronAutomation)
                     } else if let last = summary.lastRun {
                         Text("Last: \(last.state.label) · \(AutomationDateFormatting.date(last.terminalAt ?? last.scheduledFor))")
                             .font(TronTypography.secondaryCodeDescription)
@@ -337,7 +337,7 @@ struct AutomationsDashboardView: View {
                 }
                 Spacer(minLength: 0)
             }.padding(TronSpacing.lg)
-        }.buttonStyle(.plain).tronGlassSurface(accent: summary.isAttentionRequired ? .tronError : .tronCoral, cornerRadius: 14, tintOpacity: summary.isAttentionRequired ? 0.13 : 0.08, interactive: true)
+        }.buttonStyle(.plain).tronGlassSurface(accent: summary.isAttentionRequired ? .tronError : .tronAutomation, cornerRadius: 14, tintOpacity: summary.isAttentionRequired ? 0.13 : 0.08, interactive: true)
             .accessibilityLabel(AutomationStatusPresentation.accessible(summary))
     }
 
@@ -411,20 +411,20 @@ struct AutomationsDashboardView: View {
                     Image(systemName: "magnifyingglass")
                         .font(TronTypography.sans(size: 22, weight: .semibold))
                 }
-                .buttonStyle(TronIconButtonStyle(accent: .tronCoral, size: 56))
+                .buttonStyle(TronIconButtonStyle(accent: .tronAutomation, size: 56))
                 .accessibilityLabel("Search Automations")
             } else {
                 Button { datePickerPresented = true } label: {
                     Image(systemName: "calendar")
                 }
-                .buttonStyle(TronIconButtonStyle(accent: .tronCoral, size: 56))
+                .buttonStyle(TronIconButtonStyle(accent: .tronAutomation, size: 56))
                 .accessibilityLabel("Choose agenda date")
             }
             Spacer(minLength: 12)
             Button { createPresented = true } label: {
                 Image(systemName: "plus")
             }
-            .buttonStyle(TronIconButtonStyle(accent: .tronCoral, size: 56))
+            .buttonStyle(TronIconButtonStyle(accent: .tronAutomation, size: 56))
             .accessibilityLabel("Create Automation")
         }
         .padding(.horizontal, 20)
@@ -435,7 +435,7 @@ struct AutomationsDashboardView: View {
         TronSearchBar(
             text: $search,
             prompt: "Search Automations",
-            accent: .tronCoral,
+            accent: .tronAutomation,
             focusOnAppear: true,
             onClose: dismissAutomationSearch,
             onFocusChange: { focused in
@@ -469,7 +469,7 @@ struct AutomationsDashboardView: View {
     private var automationFilterSheet: some View {
         TronDashboardFilterSheet(
             title: "View Automations",
-            accent: .tronCoral,
+            accent: .tronAutomation,
             onDone: { showingFilters = false }
         ) {
             TronDashboardFilterSectionTitle(
@@ -483,7 +483,7 @@ struct AutomationsDashboardView: View {
                         ? "Chronological schedule from connected Gateways."
                         : "Search and manage every available Automation.",
                     selected: mode == option,
-                    accent: .tronCoral,
+                    accent: .tronAutomation,
                     inactiveAccent: .tronSlate
                 ) {
                     mode = option
@@ -501,7 +501,7 @@ struct AutomationsDashboardView: View {
                         TronDashboardFilterOption(
                             title: option.rawValue,
                             selected: filter == option,
-                            accent: .tronCoral,
+                            accent: .tronAutomation,
                             inactiveAccent: .tronSlate
                         ) {
                             filter = option
@@ -516,7 +516,7 @@ struct AutomationsDashboardView: View {
                     TronDashboardFilterOption(
                         title: "All action types",
                         selected: actionFilter == nil,
-                        accent: .tronCoral,
+                        accent: .tronAutomation,
                         inactiveAccent: .tronSlate
                     ) {
                         actionFilter = nil
@@ -525,7 +525,7 @@ struct AutomationsDashboardView: View {
                         TronDashboardFilterOption(
                             title: action.label,
                             selected: actionFilter == action,
-                            accent: .tronCoral,
+                            accent: .tronAutomation,
                             inactiveAccent: .tronSlate
                         ) {
                             actionFilter = action
@@ -544,7 +544,7 @@ struct AutomationsDashboardView: View {
                 TronDashboardFilterOption(
                     title: "All Gateways",
                     selected: serverFilter == nil,
-                    accent: .tronCoral,
+                    accent: .tronAutomation,
                     inactiveAccent: .tronSlate
                 ) {
                     serverFilter = nil
@@ -554,7 +554,7 @@ struct AutomationsDashboardView: View {
                         title: bucket.profile.label,
                         detail: "Connected",
                         selected: serverFilter == bucket.profile.id,
-                        accent: .tronCoral,
+                        accent: .tronAutomation,
                         inactiveAccent: .tronSlate
                     ) {
                         serverFilter = bucket.profile.id
@@ -571,10 +571,10 @@ struct AutomationsDashboardView: View {
         ToolbarItem(placement: .principal) {
             Text("Automations")
                 .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
-                .foregroundStyle(Color.tronCoral)
+                .foregroundStyle(Color.tronAutomation)
                 .overlay(alignment: .trailing) {
                     if mode == .upcoming && timelineRefreshIndicatorVisible {
-                        TronPulseLoadingIndicator(accent: .tronCoral, size: 14)
+                        TronPulseLoadingIndicator(accent: .tronAutomation, size: 14)
                             .offset(x: 22)
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel("Refreshing upcoming Automations")
@@ -586,11 +586,11 @@ struct AutomationsDashboardView: View {
             Button { showingFilters = true } label: {
                 Image(systemName: "line.3.horizontal.decrease")
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                    .foregroundStyle(Color.tronCoral)
+                    .foregroundStyle(Color.tronAutomation)
             }
             .accessibilityLabel("View and filter Automations, \(mode.rawValue)")
             Button(action: onOpenSettings) {
-                Image(systemName: "gearshape").foregroundStyle(Color.tronCoral)
+                Image(systemName: "gearshape").foregroundStyle(Color.tronAutomation)
             }
             .accessibilityLabel("Settings")
         }

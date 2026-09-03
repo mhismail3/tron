@@ -107,26 +107,26 @@ struct AutomationFormView: View {
                     Button { dismiss() } label: {
                         Image(systemName: "xmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronCoral)
+                            .foregroundStyle(Color.tronAutomation)
                     }
                     .accessibilityLabel("Cancel")
                 }
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(
                         title: isEditing ? "Edit Automation" : "New Automation",
-                        accent: .tronCoral
+                        accent: .tronAutomation
                     )
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { requestSave() } label: {
                         TronToolbarTextLabel(saveTitle, systemImage: "checkmark", isWorking: isSaving)
                     }
-                    .tronToolbarAction(accent: canSave && ownsMutationGateway ? .tronCoral : .tronTextMuted)
+                    .tronToolbarAction(accent: canSave && ownsMutationGateway ? .tronAutomation : .tronTextMuted)
                     .disabled(isSaving || !canSave || !ownsMutationGateway)
                 }
             }
         }
-        .tronSettingsVisualTheme(accent: .tronCoral)
+        .tronSettingsVisualTheme(accent: .tronAutomation)
         .tronTopBlur(.sheet)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
@@ -160,18 +160,18 @@ struct AutomationFormView: View {
         section("Basics", detail: "Name the Automation and choose where its definition lives.") {
             VStack(spacing: 0) {
                 nameField
-                TronSettingsDivider(accent: .tronCoral)
+                TronSettingsDivider(accent: .tronAutomation)
                 descriptionField
                 if let profile = selectedEndpoint?.profile {
-                    TronSettingsDivider(accent: .tronCoral)
+                    TronSettingsDivider(accent: .tronAutomation)
                     TronValueRow(
                         icon: "desktopcomputer",
                         title: "Gateway",
                         value: profile.label,
-                        accent: .tronCoral
+                        accent: .tronAutomation
                     ) {
                         if !isEditing, endpoints.count > 1 {
-                            TronInlineMenu("Change", accent: .tronCoral) {
+                            TronInlineMenu("Change", accent: .tronAutomation) {
                                 ForEach(endpoints) { endpoint in
                                     Button(endpoint.profile.label) {
                                         selectedProfileID = endpoint.profile.id
@@ -183,12 +183,12 @@ struct AutomationFormView: View {
                     }
                 }
                 if !isEditing {
-                    TronSettingsDivider(accent: .tronCoral)
+                    TronSettingsDivider(accent: .tronAutomation)
                     TronToggleRow(
                         icon: "bolt.circle",
                         title: "Enable immediately",
                         detail: "Otherwise this is saved as a draft.",
-                        accent: .tronCoral,
+                        accent: .tronAutomation,
                         isOn: $enabledOnSave
                     )
                 }
@@ -207,22 +207,22 @@ struct AutomationFormView: View {
                 TronSegmentedControl(
                     options: AutomationActionKind.allCases.map { ($0.label, $0) },
                     selection: $actionKind,
-                    accent: .tronCoral
+                    accent: .tronAutomation
                 )
                 .padding(14)
-                TronSettingsDivider(accent: .tronCoral)
+                TronSettingsDivider(accent: .tronAutomation)
                 actionEditor
                 if actionKind == .sessionPrompt {
-                    TronSettingsDivider(accent: .tronCoral)
+                    TronSettingsDivider(accent: .tronAutomation)
                     TronToggleRow(
                         icon: "sparkles",
                         title: "Invoke a resource",
                         detail: "Use an installed skill or prompt.",
-                        accent: .tronCoral,
+                        accent: .tronAutomation,
                         isOn: $includesResource
                     )
                     if includesResource {
-                        TronSettingsDivider(accent: .tronCoral)
+                        TronSettingsDivider(accent: .tronAutomation)
                         resourceEditor
                     }
                 }
@@ -240,16 +240,16 @@ struct AutomationFormView: View {
                     icon: "bubble.left",
                     title: "No sessions available",
                     subtitle: "Create or connect a persisted session before saving.",
-                    accent: .tronCoral
+                    accent: .tronAutomation
                 )
             } else {
                 TronValueRow(
                     icon: "bubble.left",
                     title: "Session",
                     value: selectedSessionTitle,
-                    accent: .tronCoral
+                    accent: .tronAutomation
                 ) {
-                    TronInlineMenu(targetSessionID.isEmpty ? "Choose" : "Change", accent: .tronCoral) {
+                    TronInlineMenu(targetSessionID.isEmpty ? "Choose" : "Change", accent: .tronAutomation) {
                         ForEach(sessions) { session in
                             Button(session.title) { targetSessionID = session.id }
                         }
@@ -265,10 +265,10 @@ struct AutomationFormView: View {
                 TronSegmentedControl(
                     options: AutomationTriggerKind.allCases.map { ($0.label, $0) },
                     selection: $scheduleKind,
-                    accent: .tronCoral
+                    accent: .tronAutomation
                 )
                 .padding(14)
-                TronSettingsDivider(accent: .tronCoral)
+                TronSettingsDivider(accent: .tronAutomation)
                 switch scheduleKind {
                 case .once:
                     dateRow(
@@ -303,7 +303,7 @@ struct AutomationFormView: View {
                     }
                     .buttonStyle(.plain)
                     .glassEffect(
-                        .regular.tint(Color.tronCoral.opacity(selected ? 0.28 : 0.06)).interactive(),
+                        .regular.tint(Color.tronAutomation.opacity(selected ? 0.28 : 0.06)).interactive(),
                         in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                     )
                     .accessibilityLabel(isoWeekdayName(day))
@@ -325,32 +325,32 @@ struct AutomationFormView: View {
                     icon: "clock.arrow.circlepath",
                     title: "After downtime",
                     value: misfirePolicy == "latest" ? "Run latest" : "Skip missed",
-                    accent: .tronCoral
+                    accent: .tronAutomation
                 ) {
-                    TronInlineMenu("Change", accent: .tronCoral) {
+                    TronInlineMenu("Change", accent: .tronAutomation) {
                         Button("Run latest") { misfirePolicy = "latest" }
                         Button("Skip missed") { misfirePolicy = "skip" }
                     }
                 }
-                TronSettingsDivider(accent: .tronCoral)
+                TronSettingsDivider(accent: .tronAutomation)
                 TronValueRow(
                     icon: "rectangle.stack.badge.play",
                     title: "While running",
                     value: overlapPolicy == "queueLatest" ? "Queue latest" : "Skip",
-                    accent: .tronCoral
+                    accent: .tronAutomation
                 ) {
-                    TronInlineMenu("Change", accent: .tronCoral) {
+                    TronInlineMenu("Change", accent: .tronAutomation) {
                         Button("Skip") { overlapPolicy = "skip" }
                         Button("Queue latest") { overlapPolicy = "queueLatest" }
                     }
                 }
-                TronSettingsDivider(accent: .tronCoral)
+                TronSettingsDivider(accent: .tronAutomation)
                 TronSettingsRow(
                     icon: "timer",
                     title: "Deadline",
                     subtitle: "\(deadlineMinutes) minutes",
                     subtitleRole: .dynamicValue,
-                    accent: .tronCoral
+                    accent: .tronAutomation
                 ) {
                     Stepper("Deadline", value: $deadlineMinutes, in: 5...1_440, step: 5)
                         .labelsHidden()
@@ -362,14 +362,14 @@ struct AutomationFormView: View {
     private var previewSection: some View {
         section("Next Occurrences") {
             if isPreviewing {
-                TronLoadingState(label: "Calculating schedule…", accent: .tronCoral)
+                TronLoadingState(label: "Calculating schedule…", accent: .tronAutomation)
                     .padding(14)
             } else if preview.isEmpty {
                 TronSettingsRow(
                     icon: "calendar.badge.minus",
                     title: "No future occurrence",
                     subtitle: "Adjust the schedule to calculate another date.",
-                    accent: .tronCoral
+                    accent: .tronAutomation
                 )
             } else {
                 VStack(spacing: 0) {
@@ -377,10 +377,10 @@ struct AutomationFormView: View {
                         TronSettingsRow(
                             icon: index == 0 ? "clock.badge.checkmark" : "clock",
                             title: AutomationDateFormatting.date(occurrence),
-                            accent: .tronCoral
+                            accent: .tronAutomation
                         )
                         if index < preview.count - 1 {
-                            TronSettingsDivider(accent: .tronCoral)
+                            TronSettingsDivider(accent: .tronAutomation)
                         }
                     }
                 }
@@ -440,7 +440,7 @@ struct AutomationFormView: View {
                     ("Prompt", ComposerResourceInvocation.Source.prompt),
                 ],
                 selection: $resourceSource,
-                accent: .tronCoral
+                accent: .tronAutomation
             )
             VStack(alignment: .leading, spacing: TronSpacing.sm) {
                 Label(
@@ -473,7 +473,7 @@ struct AutomationFormView: View {
                 title: "Interval",
                 subtitle: "Every \(intervalAmount) \(intervalUnit.rawValue.lowercased())",
                 subtitleRole: .dynamicValue,
-                accent: .tronCoral
+                accent: .tronAutomation
             ) {
                 Stepper(
                     "Interval",
@@ -482,20 +482,20 @@ struct AutomationFormView: View {
                 )
                 .labelsHidden()
             }
-            TronSettingsDivider(accent: .tronCoral)
+            TronSettingsDivider(accent: .tronAutomation)
             TronValueRow(
                 icon: "clock.arrow.2.circlepath",
                 title: "Unit",
                 value: intervalUnit.rawValue,
-                accent: .tronCoral
+                accent: .tronAutomation
             ) {
-                TronInlineMenu("Change", accent: .tronCoral) {
+                TronInlineMenu("Change", accent: .tronAutomation) {
                     ForEach(AutomationIntervalUnit.allCases) { unit in
                         Button(unit.rawValue) { selectIntervalUnit(unit) }
                     }
                 }
             }
-            TronSettingsDivider(accent: .tronCoral)
+            TronSettingsDivider(accent: .tronAutomation)
             dateRow(
                 icon: "calendar.badge.clock",
                 title: "Anchor",
@@ -508,22 +508,22 @@ struct AutomationFormView: View {
     private var calendarRows: some View {
         VStack(spacing: 0) {
             weekdayPicker
-            TronSettingsDivider(accent: .tronCoral)
+            TronSettingsDivider(accent: .tronAutomation)
             dateRow(
                 icon: "clock",
                 title: "Local time",
                 selection: $localTime,
                 components: [.hourAndMinute]
             )
-            TronSettingsDivider(accent: .tronCoral)
+            TronSettingsDivider(accent: .tronAutomation)
             timezoneField
-            TronSettingsDivider(accent: .tronCoral)
+            TronSettingsDivider(accent: .tronAutomation)
             Button { timezone = TimeZone.current.identifier } label: {
                 TronSettingsRow(
                     icon: "location",
                     title: "Use current timezone",
                     subtitle: TimeZone.current.identifier,
-                    accent: .tronCoral
+                    accent: .tronAutomation
                 )
             }
             .buttonStyle(.plain)
@@ -549,7 +549,7 @@ struct AutomationFormView: View {
         selection: Binding<Date>,
         components: DatePickerComponents
     ) -> some View {
-        TronSettingsRow(icon: icon, title: title, accent: .tronCoral) {
+        TronSettingsRow(icon: icon, title: title, accent: .tronAutomation) {
             DatePicker("", selection: selection, displayedComponents: components)
                 .labelsHidden()
         }
@@ -558,7 +558,7 @@ struct AutomationFormView: View {
     private func fieldHeader(title: String, icon: String, count: Int, limit: Int) -> some View {
         HStack(spacing: TronSpacing.sm) {
             Image(systemName: icon)
-                .foregroundStyle(Color.tronCoral)
+                .foregroundStyle(Color.tronAutomation)
                 .frame(width: 22)
             Text(title)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
@@ -792,6 +792,6 @@ struct AutomationFormView: View {
         detail: String? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        TronSettingsGroup(title, detail: detail, accent: .tronCoral) { content() }
+        TronSettingsGroup(title, detail: detail, accent: .tronAutomation) { content() }
     }
 }

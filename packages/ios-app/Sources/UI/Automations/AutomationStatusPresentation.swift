@@ -5,9 +5,9 @@ enum AutomationStatusPresentation {
         if run == .outcomeUnknown || activation == .blocked { return .tronError }
         if run == .failed { return .tronError }
         if run == .succeeded { return .tronTeal }
-        if run == .running || run == .admitting || run == .queued || run == .waiting || run == .cancelling { return .tronCoral }
+        if run == .running || run == .admitting || run == .queued || run == .waiting || run == .cancelling { return .tronAutomation }
         switch activation {
-        case .enabled: return .tronCoral
+        case .enabled: return .tronAutomation
         case .paused, .draft, .completed: return .tronTextMuted
         case .blocked: return .tronError
         }
