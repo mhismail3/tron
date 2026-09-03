@@ -16,11 +16,11 @@ struct AutomationProtocolTests {
             "name":"Daily review",
             "activation":"enabled",
             "actionKind":"sessionPrompt",
-            "targetSessionId":"10000000-0000-4000-8000-000000000002",
+            "target":{"kind":"existingSession","sessionId":"10000000-0000-4000-8000-000000000002"},
             "trigger":{"kind":"calendar","timezone":"America/New_York","localTime":"09:30","weekdays":[1,2,3,4,5]},
             "nextOccurrenceAt":"2026-01-02T14:30:00.000Z",
             "currentRun":null,
-            "lastRun":{"runId":"10000000-0000-4000-8000-000000000003","state":"succeeded","scheduledFor":"2026-01-01T14:30:00.000Z","terminalAt":"2026-01-01T14:31:00.000Z"},
+            "lastRun":{"runId":"10000000-0000-4000-8000-000000000003","state":"succeeded","scheduledFor":"2026-01-01T14:30:00.000Z","terminalAt":"2026-01-01T14:31:00.000Z","targetSnapshot":{"kind":"existingSession","sessionId":"10000000-0000-4000-8000-000000000002"},"executionSessionId":"10000000-0000-4000-8000-000000000002"},
             "consecutiveFailureCount":0,
             "createdAt":"2026-01-01T00:00:00.000Z",
             "updatedAt":"2026-01-01T14:31:00.000Z"
@@ -35,6 +35,33 @@ struct AutomationProtocolTests {
         #expect(page.items.first?.lastRun?.state == .succeeded)
     }
 
+    @Test("target union is exact, bounded, and action-compatible")
+    func targetAdmission() throws {
+        let decoder = JSONDecoder.gateway
+        let workspace = try decoder.decode(
+            GatewayAutomationTarget.self,
+            from: Data(#"{"kind":"workspace","cwd":"/workspace/project","sessionPolicy":"newPerRun"}"#.utf8)
+        )
+        #expect(workspace.isWorkspace)
+        #expect(AutomationAdmissionPolicy.admitsActionTarget(actionKind: .sessionPrompt, target: workspace))
+        #expect(!AutomationAdmissionPolicy.admitsActionTarget(actionKind: .notification, target: workspace))
+        #expect(throws: DecodingError.self) {
+            _ = try decoder.decode(GatewayAutomationTarget.self, from: Data(#"{"kind":"workspace","cwd":"/workspace/project","sessionPolicy":"newPerRun","extra":true}"#.utf8))
+        }
+        #expect(throws: DecodingError.self) {
+            _ = try decoder.decode(GatewayAutomationTarget.self, from: Data(#"{"kind":"existingSession","sessionId":""}"#.utf8))
+        }
+        #expect(!AutomationAdmissionPolicy.validWorkspacePath(String(repeating: "/", count: 4_097)))
+    }
+
+    @Test("new-session intervals require one full day")
+    func newSessionIntervalMinimum() {
+        let target = GatewayAutomationTarget.workspace(cwd: "/workspace/project", sessionPolicy: .newPerRun)
+        #expect(!AutomationAdmissionPolicy.admitsActionTarget(actionKind: .notification, target: target))
+        #expect(!AutomationAdmissionPolicy.admitsNewSessionInterval(GatewayAutomationTrigger(kind: "interval", everySeconds: 86_399, anchorAt: "2026-01-01T00:00:00Z")))
+        #expect(AutomationAdmissionPolicy.admitsNewSessionInterval(GatewayAutomationTrigger(kind: "interval", everySeconds: 86_400, anchorAt: "2026-01-01T00:00:00Z")))
+    }
+
     @Test("malformed trigger fails closed")
     func invalidTriggerFails() throws {
         let data = Data(#"""
@@ -43,7 +70,7 @@ struct AutomationProtocolTests {
           "items":[{
             "id":"10000000-0000-4000-8000-000000000001","revision":1,"stateRevision":1,
             "name":"Bad","activation":"enabled","actionKind":"sessionPrompt",
-            "targetSessionId":"10000000-0000-4000-8000-000000000002",
+            "target":{"kind":"existingSession","sessionId":"10000000-0000-4000-8000-000000000002"},
             "trigger":{"kind":"calendar","timezone":"UTC","localTime":"25:00","weekdays":[1]},
             "consecutiveFailureCount":0,
             "createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"
@@ -109,12 +136,13 @@ struct AutomationProtocolTests {
     @Test("automation drafts encode exact trigger and action keys")
     func draftWireShape() throws {
         let draft = AutomationDefinitionDraft(
-            name: "Review", description: nil, activation: "enabled", targetSessionId: "session",
+            name: "Review", description: nil, activation: "enabled", target: .existingSession(sessionID: "session"),
             trigger: GatewayAutomationTrigger(kind: "once", at: "2026-01-01T00:00:00Z"),
             misfirePolicy: "latest", overlapPolicy: "skip", executionDeadlineSeconds: 3600,
             action: GatewayAutomationAction(kind: "notification", message: "Done")
         )
         let value = try JSONValue.encode(draft)
+        #expect(value.objectValue?["target"]?.objectValue?.keys.sorted() == ["kind", "sessionId"])
         #expect(value.objectValue?["trigger"]?.objectValue?.keys.sorted() == ["at", "kind"])
         #expect(value.objectValue?["action"]?.objectValue?.keys.sorted() == ["kind", "message"])
         #expect(value.objectValue?["activation"] == .string("enabled"))

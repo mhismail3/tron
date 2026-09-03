@@ -353,8 +353,10 @@ composer admission owner, and revocation makes any late error target-gated and s
 than allowing a retired view to surface stale UI state. Backgrounding cancels only disposable
 opening, paging, picker, and route work. A resumed open waits for an exact current transport connection rather than trusting the previous epoch's public connected label; a target-free background-retirement interval cancels silently, and the replacement connected transition retries through the same generation checks. Already-ready active and passive chats retain their complete installed projection while the lifecycle owner synchronizes in place.
 
-Gateway-owned automations advertise `automations.v1`; canonical agenda/preview reads additionally
-advertise `automations.timeline.v1`. The dashboard Tron logo opens a native mode menu and routes every
+Gateway-owned automations advertise `automations.v2`; canonical agenda/preview reads additionally
+advertise `automations.timeline.v1`. Automation targets are a strict union of an existing persisted
+session or a workspace with `newPerRun` policy. Workspace targets support prompts only; each run's
+Gateway-assigned execution session is an ordinary user-visible session and is never a subagent. The dashboard Tron logo opens a native mode menu and routes every
 selection through one generic dashboard-selection callback; the persistent shell uses an exhaustive
 `DashboardMode` switch, so adding a mode cannot compile while silently falling back to Sessions. Each
 choice retains independent root state. The Automations root provides a chronological Upcoming
@@ -365,7 +367,7 @@ switches, owns those four choices through `AutomationDashboardPreferencesOwner`.
 every accepted child mutation into one bounded versioned `UserDefaults` document and restores that value
 when the shell is created; ephemeral search and agenda-date state remain presentation-only,
 and no Automation action content or journal enters the preference. Only currently connected profiles with an
-authenticated `automations.v1` capability enter this projection; disconnected and incompatible profiles
+authenticated `automations.v2` capability enter this projection; disconnected and incompatible profiles
 remain absent and cannot publish warning copy over the dashboard's neutral empty state. iOS admits
 typed bounded automation summaries, trigger/run/detail states, and `automation.changed` invalidations,
 but does not infer execution state or build a local schedule engine. List pages omit action bodies,
@@ -373,8 +375,10 @@ require one exact catalog revision, and cap each disposable Gateway projection a
 authenticated, surface-scoped detail reads remain the only path to prompt or notification content.
 Repeated invalidations coalesce in the connection event hub and become one dirty catalog refresh only
 while the dashboard is active. Create/edit supports only session prompts, optional skill/prompt resource
-invocations, and notifications; shell, webhook, extension-command, attachment, deployment, and Gateway
-lifecycle actions have no UI or wire path. Run-now, enable, cancellation, deletion, and uncertain-outcome
+invocations, and notifications; workspace targets are prompt-only, while notifications require an
+existing session. New-session interval schedules are limited to one run per 24 hours by Gateway
+policy. Shell, webhook, extension-command, attachment, deployment, and Gateway lifecycle actions have
+no UI or wire path. Run-now, enable, cancellation, deletion, and uncertain-outcome
 resolution require explicit confirmation and retain optimistic definition revision fences.
 
 Gateway restart uses a supervised drain contract. The request freezes new mutations,

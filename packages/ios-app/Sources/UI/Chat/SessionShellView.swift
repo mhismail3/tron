@@ -196,7 +196,8 @@ struct SessionShellView: View {
             AutomationsDashboardView(
                 viewPreferences: automationViewPreferencesBinding,
                 onSelectDashboard: selectDashboard,
-                onOpenSettings: { showSettings = true }
+                onOpenSettings: { showSettings = true },
+                onOpenSession: openAutomationSession
             )
         }
     }
@@ -210,6 +211,25 @@ struct SessionShellView: View {
 
     private func selectDashboard(_ mode: DashboardMode) {
         dashboardMode = mode
+    }
+
+    private func openAutomationSession(profileID: String, sessionID: String) {
+        guard openingSessionID == nil else { return }
+        openingSessionID = "\(profileID):\(sessionID)"
+        let navigationIntent = navigationOwner.begin()
+        Task { @MainActor in
+            defer { openingSessionID = nil }
+            do {
+                let route = try await model.navigationRoute(profileID: profileID, sessionID: sessionID)
+                guard navigationOwner.admit(navigationIntent), model.ownsNavigationRoute(route) else { return }
+                dashboardMode = .sessions
+                present(route)
+            } catch is CancellationError {
+                return
+            } catch {
+                model.presentError(error)
+            }
+        }
     }
 
     private var sessionDashboardScreen: some View {

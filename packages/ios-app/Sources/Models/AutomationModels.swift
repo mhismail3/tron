@@ -1,5 +1,12 @@
 import Foundation
 
+private struct AutomationCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int?
+    init?(stringValue: String) { self.stringValue = stringValue; self.intValue = nil }
+    init?(intValue: Int) { self.stringValue = String(intValue); self.intValue = intValue }
+}
+
 // Gateway-owned automation projections. These are disposable iOS values; the
 // Gateway remains the authority for definitions, occurrences, and run state.
 enum AutomationActivation: String, Codable, Hashable, Sendable, CaseIterable {
@@ -87,6 +94,79 @@ struct GatewayAutomationTrigger: Codable, Hashable, Sendable {
     }
 }
 
+enum GatewayAutomationTarget: Codable, Hashable, Sendable {
+    enum SessionPolicy: String, Codable, Hashable, Sendable { case newPerRun }
+
+    case existingSession(sessionID: String)
+    case workspace(cwd: String, sessionPolicy: SessionPolicy)
+
+    var sessionID: String? {
+        if case let .existingSession(sessionID) = self { return sessionID }
+        return nil
+    }
+
+    var cwd: String? {
+        if case let .workspace(cwd, _) = self { return cwd }
+        return nil
+    }
+
+    var sessionPolicy: SessionPolicy? {
+        if case let .workspace(_, sessionPolicy) = self { return sessionPolicy }
+        return nil
+    }
+
+    var isWorkspace: Bool { if case .workspace = self { return true }; return false }
+
+    var displayName: String {
+        switch self {
+        case let .existingSession(sessionID): return "Session \(sessionID)"
+        case let .workspace(cwd, _):
+            let name = URL(fileURLWithPath: cwd).lastPathComponent
+            return name.isEmpty ? "Workspace" : name
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: AutomationCodingKey.self)
+        let keys = Set(values.allKeys.map(\.stringValue))
+        let kind = try values.decode(String.self, forKey: AutomationCodingKey(stringValue: "kind")!)
+        switch kind {
+        case "existingSession":
+            guard keys == ["kind", "sessionId"] else { throw Self.invalid() }
+            let sessionID = try values.decode(String.self, forKey: AutomationCodingKey(stringValue: "sessionId")!)
+            guard AutomationAdmissionPolicy.validSessionID(sessionID) else { throw Self.invalid() }
+            self = .existingSession(sessionID: sessionID)
+        case "workspace":
+            guard keys == ["kind", "cwd", "sessionPolicy"] else { throw Self.invalid() }
+            let cwd = try values.decode(String.self, forKey: AutomationCodingKey(stringValue: "cwd")!)
+            let policy = try values.decode(SessionPolicy.self, forKey: AutomationCodingKey(stringValue: "sessionPolicy")!)
+            guard AutomationAdmissionPolicy.validWorkspacePath(cwd) else { throw Self.invalid() }
+            self = .workspace(cwd: cwd, sessionPolicy: policy)
+        default:
+            throw Self.invalid()
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .existingSession(sessionID):
+            try values.encode("existingSession", forKey: .kind)
+            try values.encode(sessionID, forKey: .sessionId)
+        case let .workspace(cwd, policy):
+            try values.encode("workspace", forKey: .kind)
+            try values.encode(cwd, forKey: .cwd)
+            try values.encode(policy, forKey: .sessionPolicy)
+        }
+    }
+
+    private static func invalid() -> DecodingError {
+        DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Invalid Automation target"))
+    }
+
+    private enum CodingKeys: String, CodingKey { case kind, sessionId, cwd, sessionPolicy }
+}
+
 struct GatewayAutomationRunSummary: Codable, Hashable, Identifiable, Sendable {
     let runId: String
     let state: AutomationRunState
@@ -106,7 +186,7 @@ struct GatewayAutomationSummary: Codable, Hashable, Identifiable, Sendable {
     let name: String
     let activation: AutomationActivation
     let actionKind: String
-    let targetSessionId: String
+    let target: GatewayAutomationTarget
     let trigger: GatewayAutomationTrigger
     let nextOccurrenceAt: String?
     let currentRun: GatewayAutomationRunSummary?
@@ -144,7 +224,7 @@ struct GatewayAutomationRecord: Codable, Hashable, Identifiable, Sendable {
     let createdAt: String
     let updatedAt: String
     let provenance: GatewayAutomationProvenance
-    let targetSessionId: String
+    let target: GatewayAutomationTarget
     let trigger: GatewayAutomationTrigger
     let misfirePolicy: String
     let overlapPolicy: String
@@ -167,10 +247,31 @@ extension GatewayAutomationTrigger {
 }
 extension GatewayAutomationAction {
     enum CodingKeys: String, CodingKey { case kind, text, message, resourceInvocation }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: AutomationCodingKey.self)
+        let kind = try values.decode(String.self, forKey: AutomationCodingKey(stringValue: "kind")!)
+        let keys = Set(values.allKeys.map(\.stringValue))
+        switch kind {
+        case "sessionPrompt":
+            guard keys.isSubset(of: ["kind", "text", "resourceInvocation"]), !keys.contains("message") else { throw Self.invalid() }
+            self.init(kind: kind, text: try values.decodeIfPresent(String.self, forKey: AutomationCodingKey(stringValue: "text")!), resourceInvocation: try values.decodeIfPresent(ComposerResourceInvocation.self, forKey: AutomationCodingKey(stringValue: "resourceInvocation")!))
+        case "notification":
+            guard keys.isSubset(of: ["kind", "message"]), !keys.contains("text") else { throw Self.invalid() }
+            self.init(kind: kind, message: try values.decodeIfPresent(String.self, forKey: AutomationCodingKey(stringValue: "message")!))
+        default:
+            throw Self.invalid()
+        }
+    }
+
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self); try values.encode(kind, forKey: .kind)
         if kind == "sessionPrompt" { try values.encodeIfPresent(text, forKey: .text); try values.encodeIfPresent(resourceInvocation, forKey: .resourceInvocation) }
         else { try values.encodeIfPresent(message, forKey: .message) }
+    }
+
+    private static func invalid() -> DecodingError {
+        DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Invalid Automation action"))
     }
 }
 
@@ -202,6 +303,8 @@ struct GatewayAutomationRun: Codable, Hashable, Identifiable, Sendable {
     let invocationId: String?
     let assistantCompletionId: String?
     let notificationAdmissionStatus: String?
+    let targetSnapshot: GatewayAutomationTarget
+    let executionSessionId: String
     let error: GatewayAutomationError?
     let resolution: GatewayAutomationResolution?
     var id: String { runId }
@@ -400,7 +503,8 @@ struct GatewayAutomationRuns: Codable, Hashable, Sendable { let runs: [GatewayAu
 struct GatewayAutomationDeleteResponse: Codable, Hashable, Sendable { let deleted: Bool }
 
 enum AutomationAdmissionPolicy {
-    static let capability = "automations.v1"
+    static let capability = "automations.v2"
+    static let minimumNewSessionIntervalSeconds = 86_400
     static let timelineCapability = "automations.timeline.v1"
     static let maximumPageCount = 100
     static let maximumTimelinePageCount = 200
@@ -413,7 +517,8 @@ enum AutomationAdmissionPolicy {
             && summary.revision >= 1 && summary.stateRevision >= 1
             && bounded(summary.name, maximum: 256)
             && AutomationActionKind(rawValue: summary.actionKind) != nil
-            && sessionID(summary.targetSessionId)
+            && admits(summary.target)
+            && admitsActionTarget(actionKind: summary.typedActionKind, target: summary.target)
             && admits(summary.trigger)
             && summary.consecutiveFailureCount >= 0
             && (summary.blockedReason.map({ bounded($0, maximum: 256) }) ?? true)
@@ -458,6 +563,18 @@ enum AutomationAdmissionPolicy {
             && (run.terminalAt.map({ GatewayTimestamp.parse($0) != nil }) ?? true)
             && (run.reason.map({ bounded($0, maximum: 256) }) ?? true)
             && (run.preAdmissionAttemptCount.map({ $0 >= 0 }) ?? true)
+    }
+
+    static func admits(_ target: GatewayAutomationTarget) -> Bool {
+        switch target {
+        case let .existingSession(sessionID): return validSessionID(sessionID)
+        case let .workspace(cwd, policy): return validWorkspacePath(cwd) && policy == .newPerRun
+        }
+    }
+
+    static func admitsActionTarget(actionKind: AutomationActionKind?, target: GatewayAutomationTarget) -> Bool {
+        guard let actionKind else { return false }
+        return actionKind == .sessionPrompt || !target.isWorkspace
     }
 
     static func admits(_ action: GatewayAutomationAction) -> Bool {
@@ -507,7 +624,11 @@ enum AutomationAdmissionPolicy {
             && GatewayTimestamp.parse(run.createdAt) != nil
             && admits(run.triggerSnapshot)
             && admits(run.actionSnapshot)
+            && admitsActionTarget(actionKind: run.actionSnapshot.typedKind, target: run.targetSnapshot)
             && run.preAdmissionAttemptCount >= 0
+            && admits(run.targetSnapshot)
+            && validSessionID(run.executionSessionId)
+            && (run.targetSnapshot.sessionID == run.executionSessionId || run.targetSnapshot.isWorkspace)
             && (run.claimedAt.map({ GatewayTimestamp.parse($0) != nil }) ?? true)
             && (run.startedAt.map({ GatewayTimestamp.parse($0) != nil }) ?? true)
             && (run.terminalAt.map({ GatewayTimestamp.parse($0) != nil }) ?? true)
@@ -523,14 +644,16 @@ enum AutomationAdmissionPolicy {
     }
 
     static func admits(_ record: GatewayAutomationRecord) -> Bool {
-        record.schemaVersion == 1
+        record.schemaVersion == 2
             && opaqueID(record.id)
             && record.revision >= 1 && record.stateRevision >= 1
             && bounded(record.name, maximum: 256)
             && (record.description.map({ boundedText($0, maximum: 2_048) }) ?? true)
             && admits(record.provenance)
-            && sessionID(record.targetSessionId)
+            && admits(record.target)
+            && admitsActionTarget(actionKind: record.action.typedKind, target: record.target)
             && admits(record.trigger)
+            && (record.target.isWorkspace ? admitsNewSessionInterval(record.trigger) : true)
             && ["latest", "skip"].contains(record.misfirePolicy)
             && ["skip", "queueLatest"].contains(record.overlapPolicy)
             && (300...86_400).contains(record.executionDeadlineSeconds)
@@ -552,10 +675,19 @@ enum AutomationAdmissionPolicy {
         }
     }
 
-    private static func sessionID(_ value: String) -> Bool {
+    static func validSessionID(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= 200 && value.unicodeScalars.allSatisfy {
             CharacterSet.alphanumerics.contains($0) || "-_:".unicodeScalars.contains($0)
         }
+    }
+
+    static func validWorkspacePath(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= 4_096 && value.hasPrefix("/")
+            && !value.unicodeScalars.contains(where: { $0.value == 0 || CharacterSet.controlCharacters.contains($0) })
+    }
+
+    static func admitsNewSessionInterval(_ trigger: GatewayAutomationTrigger) -> Bool {
+        trigger.kind != "interval" || (trigger.everySeconds ?? 0) >= minimumNewSessionIntervalSeconds
     }
 
     private static func bounded(_ value: String, maximum: Int) -> Bool {

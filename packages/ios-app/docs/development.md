@@ -39,14 +39,17 @@ activity badge, so transient reloads never replace the dashboard content. Upcomi
 seven-day Gateway-generated windows, retains at most eight windows/8,192 presentation items, and requires
 `automations.timeline.v1`. Drafts remain inventory-only until enabled, so they appear in All but do not
 produce Upcoming occurrences. Only currently connected Gateways advertising
-`automations.v1` enter the catalog; disconnected or incompatible profiles stay absent
+`automations.v2` enter the catalog; disconnected or incompatible profiles stay absent
 instead of publishing warning rows or replacing the neutral empty state. Catalog rows
 are summary-only and action content is fetched only for a visible detail/run surface.
 A secondary Gateway is read-only until **Use This Gateway** transfers focused lifecycle
 ownership; mutations then remain revision-fenced and use the existing command-receipt
 reconciler. Validate changes with `AutomationProtocolTests` and
-`AutomationCoordinatorTests`. Do not add recurrence calculation,
-prompt/notification text to caches, or local automation journals in iOS.
+`AutomationCoordinatorTests`. Workspace targets are selected through the existing focused-Gateway WorkspaceBrowser and trust
+flow, and their paths remain transient form state. Every workspace run creates and retains a new
+ordinary session; Run Details offers Open Session only through the owning profile/session route.
+Do not add recurrence calculation, workspace mirrors, prompt/notification text to caches, or local
+automation journals in iOS.
 
 ## UI motion and loading surfaces
 

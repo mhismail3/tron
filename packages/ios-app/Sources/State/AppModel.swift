@@ -2064,6 +2064,20 @@ final class AppModel {
         )
     }
 
+    /// Opens an authoritative session returned by an Automation run. The
+    /// profile is part of the route identity because the same session ID may
+    /// exist on multiple Gateways; no dashboard cache lookup is used here.
+    func navigationRoute(profileID: String, sessionID: String) async throws -> SessionNavigationRoute {
+        let owner = try await activateDashboardProfile(profileID)
+        guard !sessionID.isEmpty else { throw CancellationError() }
+        return SessionNavigationRoute(
+            sessionID: sessionID,
+            editorText: nil,
+            gatewayProfileID: owner.profileID,
+            gatewayLifecycleGeneration: owner.lifecycleGeneration
+        )
+    }
+
     func navigationRoute(for tap: PushNotificationTap) async throws -> SessionNavigationRoute {
         guard let route = tap.route else { throw CancellationError() }
         guard let profile = pushNavigationProfile(machineID: route.machineID) else {

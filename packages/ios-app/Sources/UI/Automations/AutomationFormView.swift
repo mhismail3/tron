@@ -1,5 +1,11 @@
 import SwiftUI
 
+private enum AutomationTargetMode: String, CaseIterable, Identifiable {
+    case existingSession, workspace
+    var id: String { rawValue }
+    var title: String { self == .existingSession ? "Existing Session" : "New Session in Workspace" }
+}
+
 private enum AutomationIntervalUnit: String, CaseIterable, Identifiable {
     case seconds = "Seconds"
     case minutes = "Minutes"
@@ -30,7 +36,14 @@ struct AutomationFormView: View {
     @State private var description = ""
     @State private var actionKind: AutomationActionKind = .sessionPrompt
     @State private var actionContent = ""
+    @State private var targetMode: AutomationTargetMode = .existingSession
     @State private var targetSessionID = ""
+    // Workspace paths are transient form state only. They are sent to the
+    // owning Gateway and are never written to iOS preferences or caches.
+    @State private var workspacePath = ""
+    @State private var workspaceTrustInspection: JSONValue?
+    @State private var showingWorkspaceBrowser = false
+    @State private var confirmingWorkspaceTrust = false
     @State private var includesResource = false
     @State private var resourceSource: ComposerResourceInvocation.Source = .skill
     @State private var resourceName = ""
@@ -131,10 +144,36 @@ struct AutomationFormView: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
         .task { await loadExisting() }
+        .tronManagedSheet(isPresented: $showingWorkspaceBrowser, identity: "automation.workspace-browser") {
+            WorkspaceBrowser(shortcuts: recentWorkspaces, initialPath: workspacePath) { value in
+                workspacePath = value
+                workspaceTrustInspection = nil
+                Task { await inspectWorkspaceTrust(value) }
+            }
+        }
+        .tronManagedSheet(isPresented: $confirmingWorkspaceTrust, identity: "automation.workspace-trust") {
+            TronConfirmationSheet(
+                title: "Trust this project?",
+                message: "Trusting allows project-local settings, extensions, skills, prompts, packages, and system prompt files to load when each new session runs. Trust is not a sandbox.",
+                confirmTitle: "Trust",
+                icon: "checkmark.shield",
+                onConfirm: { Task { await setWorkspaceTrust(true) } }
+            )
+        }
         .task(id: trigger) {
             guard initialized else { return }
             do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
             await loadPreview()
+        }
+        .onChange(of: actionKind) { _, next in
+            if next == .notification {
+                targetMode = .existingSession
+                workspacePath = ""
+                workspaceTrustInspection = nil
+            }
+        }
+        .onChange(of: targetMode) { _, _ in
+            intervalAmount = min(max(intervalAmount, minimumIntervalAmount), maximumIntervalAmount)
         }
         .onChange(of: model.profileRevision) { _, _ in
             if !selectedProfileID.isEmpty,
@@ -176,6 +215,9 @@ struct AutomationFormView: View {
                                     Button(endpoint.profile.label) {
                                         selectedProfileID = endpoint.profile.id
                                         targetSessionID = sessions.first?.id ?? ""
+                                        targetMode = .existingSession
+                                        workspacePath = ""
+                                        workspaceTrustInspection = nil
                                     }
                                 }
                             }
@@ -200,7 +242,7 @@ struct AutomationFormView: View {
         section(
             "Action",
             detail: actionKind == .sessionPrompt
-                ? "Send text to the selected session."
+                ? (targetMode == .workspace ? "Send text to a new session in the selected workspace." : "Send text to the selected session.")
                 : "Queue a notification associated with the selected session."
         ) {
             VStack(spacing: 0) {
@@ -232,9 +274,32 @@ struct AutomationFormView: View {
 
     private var targetSection: some View {
         section(
-            actionKind == .notification ? "Associated Session" : "Target Session",
-            detail: "Automations run only against persisted user sessions on their owning Gateway."
+            actionKind == .notification ? "Associated Session" : "Target",
+            detail: actionKind == .notification
+                ? "Notifications are associated with an existing persisted session."
+                : "Choose an existing session or create a new ordinary session for every run."
         ) {
+            VStack(spacing: 0) {
+                if actionKind == .sessionPrompt {
+                    TronSegmentedControl(
+                        options: AutomationTargetMode.allCases.map { ($0.title, $0) },
+                        selection: $targetMode,
+                        accent: .tronAutomation
+                    )
+                    .padding(14)
+                    TronSettingsDivider(accent: .tronAutomation)
+                }
+                if targetMode == .existingSession || actionKind == .notification {
+                    existingSessionTarget
+                } else {
+                    workspaceTarget
+                }
+            }
+        }
+    }
+
+    private var existingSessionTarget: some View {
+        Group {
             if sessions.isEmpty {
                 TronSettingsRow(
                     icon: "bubble.left",
@@ -255,6 +320,43 @@ struct AutomationFormView: View {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    private var workspaceTarget: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            TronValueRow(
+                icon: "folder",
+                title: "Workspace",
+                value: workspaceName,
+                accent: .tronAutomation
+            ) {
+                Button(workspacePath.isEmpty ? "Choose" : "Change") {
+                    guard ownsMutationGateway else { return }
+                    showingWorkspaceBrowser = true
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.tronAutomation)
+            }
+            TronSettingsRow(
+                icon: "plus.bubble",
+                title: "New session per run",
+                subtitle: "Every occurrence creates and retains a new ordinary session.",
+                accent: .tronAutomation
+            )
+            if let inspection = workspaceTrustInspection,
+               NewSessionTrustPolicy.requiresDecision(inspection) {
+                TronSettingsDivider(accent: .tronAutomation)
+                Button { confirmingWorkspaceTrust = true } label: {
+                    TronSettingsRow(
+                        icon: "checkmark.shield",
+                        title: "Project Trust",
+                        subtitle: "Trust is required before project resources can run.",
+                        accent: .tronAmber
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -466,6 +568,49 @@ struct AutomationFormView: View {
         sessions.first(where: { $0.id == targetSessionID })?.title ?? "Choose a session"
     }
 
+    private var workspaceName: String {
+        guard !workspacePath.isEmpty else { return "Choose a workspace" }
+        let name = URL(fileURLWithPath: workspacePath).lastPathComponent
+        return name.isEmpty ? "Workspace" : name
+    }
+
+    private var recentWorkspaces: [WorkspaceShortcut] {
+        var seen = Set<String>()
+        return sessions.compactMap { session in
+            guard seen.insert(session.cwd).inserted else { return nil }
+            return WorkspaceShortcut(path: session.cwd, title: session.workspaceName, icon: "clock.arrow.circlepath")
+        }
+    }
+
+    private var target: GatewayAutomationTarget {
+        switch targetMode {
+        case .existingSession: return .existingSession(sessionID: targetSessionID)
+        case .workspace: return .workspace(cwd: workspacePath, sessionPolicy: .newPerRun)
+        }
+    }
+
+    private func inspectWorkspaceTrust(_ path: String) async {
+        guard let trustTarget = TrustTarget(cwd: path), ownsMutationGateway else { return }
+        do {
+            let inspection = try await model.inspectTrust(target: trustTarget)
+            guard workspacePath == path, ownsMutationGateway else { return }
+            workspaceTrustInspection = inspection
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = (error as? GatewayFailure)?.message ?? "Project trust is unavailable."
+        }
+    }
+
+    private func setWorkspaceTrust(_ value: Bool) async {
+        guard let trustTarget = TrustTarget(cwd: workspacePath), ownsMutationGateway else { return }
+        do {
+            workspaceTrustInspection = try await model.setTrust(target: trustTarget, decision: value)
+        } catch {
+            errorMessage = (error as? GatewayFailure)?.message ?? "Unable to update project trust."
+        }
+    }
+
     private var intervalRows: some View {
         VStack(spacing: 0) {
             TronSettingsRow(
@@ -594,7 +739,9 @@ struct AutomationFormView: View {
     }
 
     private var minimumIntervalAmount: Int {
-        intervalUnit == .seconds ? 60 : 1
+        if targetMode == .workspace && intervalUnit == .seconds { return 86_400 }
+        if targetMode == .workspace { return max(1, (86_400 + intervalUnit.seconds - 1) / intervalUnit.seconds) }
+        return intervalUnit == .seconds ? 60 : 1
     }
 
     private var maximumIntervalAmount: Int {
@@ -614,14 +761,21 @@ struct AutomationFormView: View {
         )
         let scheduleIsValid = scheduleKind != .calendar
             || (!weekdays.isEmpty && TimeZone(identifier: timezone) != nil)
+        let targetIsValid = switch target {
+        case let .existingSession(sessionID): AutomationAdmissionPolicy.validSessionID(sessionID)
+        case let .workspace(cwd, _): AutomationAdmissionPolicy.validWorkspacePath(cwd)
+        }
+        let intervalIsValid = targetMode == .existingSession
+            || AutomationAdmissionPolicy.admitsNewSessionInterval(trigger)
         return !trimmedName.isEmpty
             && trimmedName.utf8.count <= 256
             && description.utf8.count <= 2_048
             && !actionContent.isEmpty
             && actionContent.utf8.count <= actionContentByteLimit
-            && !targetSessionID.isEmpty
+            && targetIsValid
             && resourceIsValid
             && scheduleIsValid
+            && intervalIsValid
             && AutomationAdmissionPolicy.admits(trigger)
     }
 
@@ -661,7 +815,7 @@ struct AutomationFormView: View {
             name: name.trimmingCharacters(in: .whitespacesAndNewlines),
             description: description.isEmpty ? nil : description,
             activation: isEditing ? nil : (enabledOnSave ? "enabled" : "draft"),
-            targetSessionId: targetSessionID,
+            target: target,
             trigger: trigger,
             misfirePolicy: misfirePolicy,
             overlapPolicy: overlapPolicy,
@@ -696,7 +850,17 @@ struct AutomationFormView: View {
             loadedActivation = record.activation
             name = record.name
             description = record.description ?? ""
-            targetSessionID = record.targetSessionId
+            switch record.target {
+            case let .existingSession(sessionID):
+                targetMode = .existingSession
+                targetSessionID = sessionID
+                workspacePath = ""
+            case let .workspace(cwd, _):
+                targetMode = .workspace
+                workspacePath = cwd
+                targetSessionID = ""
+                await inspectWorkspaceTrust(cwd)
+            }
             actionKind = record.action.typedKind ?? .sessionPrompt
             actionContent = record.action.content
             if let invocation = record.action.resourceInvocation {

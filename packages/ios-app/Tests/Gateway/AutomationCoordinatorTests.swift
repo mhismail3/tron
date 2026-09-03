@@ -200,7 +200,7 @@ struct AutomationCoordinatorTests {
         .object([
             "id": .string(id), "revision": .number(1), "stateRevision": .number(1),
             "name": .string(name), "activation": .string("enabled"), "actionKind": .string("sessionPrompt"),
-            "targetSessionId": .string("session-one"),
+            "target": .object(["kind": .string("existingSession"), "sessionId": .string("session-one")]),
             "trigger": .object(["kind": .string("once"), "at": .string("2026-12-01T12:00:00.000Z")]),
             "nextOccurrenceAt": .string("2026-12-01T12:00:00.000Z"),
             "consecutiveFailureCount": .number(0),

@@ -3,12 +3,31 @@ import SwiftUI
 struct AutomationRunDetailView: View {
     let automation: AutomationSummarySelection
     let run: GatewayAutomationRun
+    let target: GatewayAutomationTarget
     let automationRevision: Int
+    let onOpenSession: (@MainActor (String) -> Void)?
     let onResolved: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var resolution: String?
     @State private var confirmingResolution = false
+
+    init(
+        automation: AutomationSummarySelection,
+        run: GatewayAutomationRun,
+        target: GatewayAutomationTarget,
+        automationRevision: Int,
+        onOpenSession: (@MainActor (String) -> Void)? = nil,
+        onResolved: @escaping () -> Void
+    ) {
+        self.automation = automation
+        self.run = run
+        self.target = target
+        self.automationRevision = automationRevision
+        self.onOpenSession = onOpenSession
+        self.onResolved = onResolved
+    }
+
     private var client: AutomationRPCClient? { model.automationCatalog.endpoint(for: automation.profileID)?.client }
     private var ownsMutationGateway: Bool {
         model.profiles.selected?.id == automation.profileID && model.connectionState == .connected
@@ -19,6 +38,22 @@ struct AutomationRunDetailView: View {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     runHeader
                     section("Timing", icon: "clock") { info("Scheduled", AutomationDateFormatting.date(run.scheduledFor)); info("Created", AutomationDateFormatting.date(run.createdAt)); info("Claimed", AutomationDateFormatting.date(run.claimedAt)); info("Started", AutomationDateFormatting.date(run.startedAt)); info("Finished", AutomationDateFormatting.date(run.terminalAt)); info("Attempts", "\(run.preAdmissionAttemptCount)") }
+                    section("Execution Session", icon: "bubble.left.and.bubble.right") {
+                        info("Target", target.displayName)
+                        info("Session ID", run.executionSessionId)
+                        if run.state != .outcomeUnknown,
+                           run.startedAt != nil || run.state.isTerminal {
+                            Button("Open Session") { onOpenSession?(run.executionSessionId) }
+                                .buttonStyle(TronActionButtonStyle(role: .primary))
+                                .disabled(onOpenSession == nil)
+                                .padding(14)
+                        } else if run.targetSnapshot.isWorkspace {
+                            Text("The execution session will be available when this run starts.")
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronTextMuted)
+                                .padding(14)
+                        }
+                    }
                     section("Trigger Snapshot", icon: "calendar") { info("Pattern", run.triggerSnapshot.summary); info("Timezone", run.triggerSnapshot.timezone ?? TimeZone.current.identifier) }
                     section("Action Snapshot", icon: run.actionSnapshot.typedKind?.icon ?? "bolt") {
                         VStack(alignment: .leading, spacing: TronSpacing.md) {

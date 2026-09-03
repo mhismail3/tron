@@ -50,10 +50,12 @@ final class AutomationRPCClient {
         }
         return value
     }
-    func run(id: String, runId: String) async throws -> GatewayAutomationRun {
+    func run(id: String, runId: String, target: GatewayAutomationTarget) async throws -> GatewayAutomationRun {
         struct Params: Encodable { let automationId: String; let runId: String }
         let value: GatewayAutomationRun = try await request("automation.run.get", Params(automationId: id, runId: runId))
-        guard AutomationAdmissionPolicy.admits(value) else {
+        guard AutomationAdmissionPolicy.admits(value),
+              value.runId == runId,
+              value.targetSnapshot == target else {
             throw GatewayFailure(code: "invalid_response", message: "The Automation run is invalid.", retryable: false, details: nil)
         }
         return value
@@ -92,7 +94,8 @@ final class AutomationRPCClient {
               record.name == definition.name,
               record.description == definition.description,
               record.activation.rawValue == (definition.activation ?? "draft"),
-              record.targetSessionId == definition.targetSessionId,
+              record.target == definition.target,
+              AutomationAdmissionPolicy.admitsActionTarget(actionKind: definition.action.typedKind, target: record.target),
               record.trigger == definition.trigger,
               record.misfirePolicy == definition.misfirePolicy,
               record.overlapPolicy == definition.overlapPolicy,
@@ -108,7 +111,8 @@ final class AutomationRPCClient {
         let record = try admittedRecord(value, expectedID: id, expectedRevision: revision + 1)
         guard record.name == definition.name,
               record.description == definition.description,
-              record.targetSessionId == definition.targetSessionId,
+              record.target == definition.target,
+              AutomationAdmissionPolicy.admitsActionTarget(actionKind: definition.action.typedKind, target: record.target),
               record.trigger == definition.trigger,
               record.misfirePolicy == definition.misfirePolicy,
               record.overlapPolicy == definition.overlapPolicy,
@@ -125,20 +129,25 @@ final class AutomationRPCClient {
         guard record.activation == (enabled ? .enabled : .paused) else { throw invalidMutationResponse() }
         return record
     }
-    func runNow(id: String, revision: Int) async throws -> GatewayAutomationRun {
+    func runNow(id: String, revision: Int, target: GatewayAutomationTarget) async throws -> GatewayAutomationRun {
         struct Params: Encodable { let automationId: String; let expectedRevision: Int }
         let value = try await mutate(method: "automation.runNow", parameters: Params(automationId: id, expectedRevision: revision))
         let run = try value.decode(GatewayAutomationRun.self)
-        guard AutomationAdmissionPolicy.admits(run), run.automationRevision == revision else {
+        guard AutomationAdmissionPolicy.admits(run),
+              run.automationRevision == revision,
+              run.targetSnapshot == target,
+              AutomationAdmissionPolicy.admitsActionTarget(actionKind: run.actionSnapshot.typedKind, target: run.targetSnapshot) else {
             throw invalidMutationResponse()
         }
         return run
     }
-    func cancel(id: String, runId: String) async throws -> GatewayAutomationRun {
+    func cancel(id: String, runId: String, target: GatewayAutomationTarget) async throws -> GatewayAutomationRun {
         struct Params: Encodable { let automationId: String; let runId: String }
         let value = try await mutate(method: "automation.run.cancel", parameters: Params(automationId: id, runId: runId))
         let run = try value.decode(GatewayAutomationRun.self)
-        guard AutomationAdmissionPolicy.admits(run), run.runId == runId else {
+        guard AutomationAdmissionPolicy.admits(run),
+              run.runId == runId,
+              run.targetSnapshot == target else {
             throw invalidMutationResponse()
         }
         return run
@@ -188,7 +197,7 @@ struct AutomationDefinitionDraft: Codable, Hashable, Sendable {
     var name: String
     var description: String?
     var activation: String? = nil
-    var targetSessionId: String
+    var target: GatewayAutomationTarget
     var trigger: GatewayAutomationTrigger
     var misfirePolicy: String
     var overlapPolicy: String

@@ -36,6 +36,7 @@ enum AutomationTimelinePresentationPolicy {
 struct AutomationsDashboardView: View {
     let onSelectDashboard: @MainActor (DashboardMode) -> Void
     let onOpenSettings: () -> Void
+    let onOpenSession: @MainActor (String, String) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -53,11 +54,13 @@ struct AutomationsDashboardView: View {
     init(
         viewPreferences: Binding<AutomationDashboardViewPreferences>,
         onSelectDashboard: @escaping @MainActor (DashboardMode) -> Void,
-        onOpenSettings: @escaping () -> Void
+        onOpenSettings: @escaping () -> Void,
+        onOpenSession: @escaping @MainActor (String, String) -> Void
     ) {
         _viewPreferences = viewPreferences
         self.onSelectDashboard = onSelectDashboard
         self.onOpenSettings = onOpenSettings
+        self.onOpenSession = onOpenSession
     }
 
     private var eligibleProfileIDs: Set<String> {
@@ -184,7 +187,7 @@ struct AutomationsDashboardView: View {
             timelineRefreshIndicatorVisible = false
         }
         .tronManagedSheet(item: $selected, identity: { "automation.detail.\($0.id)" }) { selection in
-            AutomationDetailView(selection: selection)
+            AutomationDetailView(selection: selection, onOpenSession: onOpenSession)
         }
         .tronManagedSheet(isPresented: $createPresented, identity: "automation.create") {
             AutomationFormView(selection: nil, onSaved: { createPresented = false })
@@ -317,7 +320,7 @@ struct AutomationsDashboardView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     if let match = model.automationCatalog.summaries.first(where: { $0.profile.id == item.profileID && $0.summary.id == occurrence.automationId }) {
                         Text(match.summary.name).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronTextPrimary).lineLimit(1)
-                        Text("\(match.summary.typedActionKind?.label ?? "Action") · \(targetLabel(profileID: item.profileID, sessionID: match.summary.targetSessionId))").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary).lineLimit(1)
+                        Text("\(match.summary.typedActionKind?.label ?? "Action") · \(targetLabel(profileID: item.profileID, target: match.summary.target))").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary).lineLimit(1)
                         Text(match.profile.label + (match.summary.trigger.kind == "calendar" ? " · \(match.summary.trigger.timezone ?? "")" : "")).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted).lineLimit(1)
                     } else { Text("Automation \(occurrence.automationId)").foregroundStyle(Color.tronTextSecondary) }
                     if occurrence.isSeries { Text("\(occurrence.count ?? 0) triggers · \(AutomationDateFormatting.date(occurrence.firstAt))–\(AutomationDateFormatting.date(occurrence.lastAt))").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted) }
@@ -335,7 +338,7 @@ struct AutomationsDashboardView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack { Text(summary.name).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronTextPrimary).lineLimit(1); Spacer(); AutomationStatusBadge(activation: summary.activation, run: summary.currentRun?.state) }
                     Text(summary.trigger.summary).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
-                    Text("\(summary.typedActionKind?.label ?? summary.actionKind) · \(targetLabel(profileID: profile.id, sessionID: summary.targetSessionId))").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted).lineLimit(1)
+                    Text("\(summary.typedActionKind?.label ?? summary.actionKind) · \(targetLabel(profileID: profile.id, target: summary.target))").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted).lineLimit(1)
                     if let next = summary.nextOccurrenceAt {
                         Text("Next: \(AutomationDateFormatting.date(next))").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronAutomation)
                     } else if let last = summary.lastRun {
@@ -410,10 +413,16 @@ struct AutomationsDashboardView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func targetLabel(profileID: String, sessionID: String) -> String {
-        model.visibleSessions.first(where: {
-            $0.id == sessionID && ($0.gatewayProfileID == profileID || ($0.gatewayProfileID == nil && profileID == model.profiles.selected?.id))
-        })?.title ?? "Session \(sessionID)"
+    private func targetLabel(profileID: String, target: GatewayAutomationTarget) -> String {
+        switch target {
+        case let .existingSession(sessionID):
+            return model.visibleSessions.first(where: {
+                $0.id == sessionID && ($0.gatewayProfileID == profileID || ($0.gatewayProfileID == nil && profileID == model.profiles.selected?.id))
+            })?.title ?? "Session \(sessionID)"
+        case let .workspace(cwd, _):
+            let name = URL(fileURLWithPath: cwd).lastPathComponent
+            return "New session per run · \(name.isEmpty ? "Workspace" : name)"
+        }
     }
 
     private var dashboardBottomControls: some View {

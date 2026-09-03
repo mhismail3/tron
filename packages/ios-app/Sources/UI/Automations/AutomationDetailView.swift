@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AutomationDetailView: View {
     let selection: AutomationSummarySelection
+    let onOpenSession: (@MainActor (String, String) -> Void)?
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var record: GatewayAutomationRecord?
@@ -11,6 +12,11 @@ struct AutomationDetailView: View {
     @State private var errorMessage: String?
     @State private var formPresented = false
     @State private var confirmation: AutomationDetailConfirmation?
+
+    init(selection: AutomationSummarySelection, onOpenSession: (@MainActor (String, String) -> Void)? = nil) {
+        self.selection = selection
+        self.onOpenSession = onOpenSession
+    }
 
     private var client: AutomationRPCClient? { model.automationCatalog.endpoint(for: selection.profileID)?.client }
     private var ownsMutationGateway: Bool {
@@ -66,7 +72,9 @@ struct AutomationDetailView: View {
             AutomationRunDetailView(
                 automation: selection,
                 run: run,
+                target: record?.target ?? selection.summary.target,
                 automationRevision: record?.revision ?? selection.summary.revision,
+                onOpenSession: { sessionID in openExecutionSession(sessionID) },
                 onResolved: { Task { await load() } }
             )
         }
@@ -130,7 +138,7 @@ struct AutomationDetailView: View {
             if let next = record.nextOccurrenceAt { info("Next", AutomationDateFormatting.date(next)) }
         }
         section("Target", icon: "bubble.left") {
-            info("Session", targetLabel(record.targetSessionId))
+            info("Target", targetLabel(record.target))
             if let gateway = model.profiles.profiles.first(where: { $0.id == selection.profileID })?.label {
                 info("Gateway", gateway)
             }
@@ -262,7 +270,7 @@ struct AutomationDetailView: View {
         .padding(.vertical, 11)
     }
     private func errorState(_ message: String) -> some View { VStack(spacing: 12) { Image(systemName: "exclamationmark.triangle").font(TronTypography.sans(size: 30, weight: .semibold)).foregroundStyle(Color.tronAmber); Text(message).font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary); Button("Retry") { Task { await load() } }.buttonStyle(TronActionButtonStyle(role: .primary)) }.frame(maxWidth: .infinity, minHeight: 220) }
-    private func selectRun(_ summary: GatewayAutomationRunSummary) async { guard let client else { return }; do { selectedRun = try await client.run(id: selection.summary.id, runId: summary.runId) } catch { errorMessage = (error as? GatewayFailure)?.message ?? "Unable to load run." } }
+    private func selectRun(_ summary: GatewayAutomationRunSummary) async { guard let client else { return }; do { selectedRun = try await client.run(id: selection.summary.id, runId: summary.runId, target: record?.target ?? selection.summary.target) } catch { errorMessage = (error as? GatewayFailure)?.message ?? "Unable to load run." } }
     private func load() async {
         guard let client else { errorMessage = "This Gateway is unavailable."; isLoading = false; return }
         isLoading = record == nil
@@ -281,9 +289,9 @@ struct AutomationDetailView: View {
         do {
             switch action.kind {
             case .run:
-                _ = try await client.runNow(id: selection.summary.id, revision: action.revision)
+                _ = try await client.runNow(id: selection.summary.id, revision: action.revision, target: record?.target ?? selection.summary.target)
             case .cancel:
-                if let runID = action.runID { _ = try await client.cancel(id: selection.summary.id, runId: runID) }
+                if let runID = action.runID { _ = try await client.cancel(id: selection.summary.id, runId: runID, target: record?.target ?? selection.summary.target) }
             case .activation:
                 _ = try await client.setActivation(id: selection.summary.id, revision: action.revision, enabled: action.enable)
             case .delete:
@@ -299,12 +307,24 @@ struct AutomationDetailView: View {
         }
     }
 
-    private func targetLabel(_ sessionID: String) -> String {
-        model.visibleSessions.first(where: {
-            $0.id == sessionID
-                && ($0.gatewayProfileID == selection.profileID
-                    || ($0.gatewayProfileID == nil && selection.profileID == model.profiles.selected?.id))
-        })?.title ?? sessionID
+    private func targetLabel(_ target: GatewayAutomationTarget) -> String {
+        switch target {
+        case let .existingSession(sessionID):
+            return model.visibleSessions.first(where: {
+                $0.id == sessionID
+                    && ($0.gatewayProfileID == selection.profileID
+                        || ($0.gatewayProfileID == nil && selection.profileID == model.profiles.selected?.id))
+            })?.title ?? "Session \(sessionID)"
+        case let .workspace(cwd, _):
+            let name = URL(fileURLWithPath: cwd).lastPathComponent
+            return "New session per run · \(name.isEmpty ? "Workspace" : name)"
+        }
+    }
+
+    private func openExecutionSession(_ sessionID: String) {
+        // The parent dashboard owns navigation. This view only forwards the
+        // exact Gateway/profile/session identity from the authoritative run.
+        onOpenSession?(selection.profileID, sessionID)
     }
 
     private func provenanceLabel(_ provenance: GatewayAutomationProvenance) -> String {
@@ -322,7 +342,7 @@ private struct AutomationDetailConfirmation: Identifiable {
     let kind: Kind; let revision: Int; let runID: String?; let enable: Bool
     var id: String { title }
     var title: String { switch kind { case .run: "Run automation now?"; case .cancel: "Cancel this run?"; case .activation: enable ? "Enable automation?" : "Pause automation?"; case .delete: "Delete automation?" } }
-    var message: String { switch kind { case .run: "This will send the exact saved action to its target session."; case .cancel: "Accepted work may take a moment to settle. Nothing will be replayed automatically."; case .activation: enable ? "A missed occurrence may become due immediately." : "Pausing stops future triggers but does not cancel active work."; case .delete: "This permanently deletes the definition and its retained run history." } }
+    var message: String { switch kind { case .run: "This will run the exact saved action. Workspace targets create a new ordinary session."; case .cancel: "Accepted work may take a moment to settle. Nothing will be replayed automatically."; case .activation: enable ? "A missed occurrence may become due immediately." : "Pausing stops future triggers but does not cancel active work."; case .delete: "This permanently deletes the definition and its retained run history." } }
     var confirmTitle: String { switch kind { case .run: "Run"; case .cancel: "Cancel"; case .activation: enable ? "Enable" : "Pause"; case .delete: "Delete" } }
     func alertButton(action: @escaping () -> Void) -> Alert.Button {
         switch kind {
