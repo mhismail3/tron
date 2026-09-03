@@ -27,11 +27,22 @@ enum AutomationInventoryFilter: String, CaseIterable, Identifiable {
     }
 }
 
+enum AutomationTimelinePresentationPolicy {
+    static func showsEmptyState(visibleDayCount: Int) -> Bool {
+        visibleDayCount == 0
+    }
+
+    static func showsRefreshIndicator(isLoading: Bool, delayElapsed: Bool) -> Bool {
+        isLoading && delayElapsed
+    }
+}
+
 struct AutomationsDashboardView: View {
     let onSelectSessions: () -> Void
     let onOpenSettings: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var mode: AutomationDashboardViewMode = .upcoming
     @State private var filter: AutomationInventoryFilter = .all
     @State private var actionFilter: AutomationActionKind?
@@ -44,6 +55,7 @@ struct AutomationsDashboardView: View {
     @State private var selectedDate = Date.now
     @State private var datePickerPresented = false
     @State private var timeline: AutomationTimelineCoordinator?
+    @State private var timelineRefreshIndicatorVisible = false
 
     private var eligibleProfileIDs: Set<String> {
         Set(model.automationCatalog.allEndpoints().map(\.id))
@@ -112,11 +124,31 @@ struct AutomationsDashboardView: View {
             guard presentationActivity.allowsPresentationPublication else { return }
             model.automationCatalog.activate()
             if timeline == nil {
-                timeline = AutomationTimelineCoordinator(endpoints: { @MainActor in
+                let coordinator = AutomationTimelineCoordinator(endpoints: { @MainActor in
                     model.automationCatalog.allEndpoints()
                 })
+                timeline = coordinator
+                coordinator.load(start: selectedDate)
             }
-            timeline?.load(start: selectedDate)
+        }
+        .task(id: timeline?.isLoading == true) {
+            guard timeline?.isLoading == true else {
+                timelineRefreshIndicatorVisible = false
+                return
+            }
+            do {
+                try await Task.sleep(for: .milliseconds(350))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled,
+                  AutomationTimelinePresentationPolicy.showsRefreshIndicator(
+                    isLoading: timeline?.isLoading == true,
+                    delayElapsed: true
+                  ) else { return }
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
+                timelineRefreshIndicatorVisible = true
+            }
         }
         .onChange(of: model.automationCatalog.buckets) { _, buckets in
             if let serverFilter,
@@ -140,6 +172,8 @@ struct AutomationsDashboardView: View {
         .onDisappear {
             model.automationCatalog.deactivate()
             timeline?.cancel()
+            timeline = nil
+            timelineRefreshIndicatorVisible = false
         }
         .tronManagedSheet(item: $selected, identity: { "automation.detail.\($0.id)" }) { selection in
             AutomationDetailView(selection: selection)
@@ -200,9 +234,9 @@ struct AutomationsDashboardView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: TronSpacing.md, pinnedViews: [.sectionHeaders]) {
                 if attentionCount > 0 { attentionBanner }
-                if timeline?.isLoading == true && visibleTimelineDays.isEmpty {
-                    TronLoadingState(label: "Loading upcoming triggers…", accent: .tronCoral).frame(minHeight: 220)
-                } else if visibleTimelineDays.isEmpty {
+                if AutomationTimelinePresentationPolicy.showsEmptyState(
+                    visibleDayCount: visibleTimelineDays.count
+                ) {
                     upcomingEmptyState
                 } else {
                     ForEach(visibleTimelineDays) { day in
@@ -233,7 +267,10 @@ struct AutomationsDashboardView: View {
             .padding(.vertical, 12)
             .padding(.bottom, 80)
         }
-        .refreshable { model.automationCatalog.reload(); timeline?.load(start: selectedDate) }
+        .refreshable {
+            model.automationCatalog.reload()
+            timeline?.load(start: selectedDate)
+        }
         .tronScrollEdgeChrome()
     }
 
@@ -428,7 +465,7 @@ struct AutomationsDashboardView: View {
     private var automationFilterSheet: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
+                VStack(alignment: .leading, spacing: TronSpacing.md) {
                     filterSectionTitle("View", detail: "Choose the dashboard projection to display.")
                     ForEach(AutomationDashboardViewMode.allCases) { option in
                         filterOption(
@@ -497,7 +534,7 @@ struct AutomationsDashboardView: View {
                     }
                 }
                 .padding(.horizontal, TronSpacing.xlarge)
-                .padding(.vertical, TronSpacing.large)
+                .padding(.bottom, TronSpacing.large)
             }
             .tronScrollEdgeChrome()
             .toolbar {
@@ -575,7 +612,20 @@ struct AutomationsDashboardView: View {
         ToolbarItem(placement: .topBarLeading) {
             DashboardModeMenuButton(mode: .automations) { selected in if selected == .sessions { onSelectSessions() } }.frame(width: 34, height: 34)
         }
-        ToolbarItem(placement: .principal) { Text("Automations").font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold)).foregroundStyle(Color.tronCoral) }
+        ToolbarItem(placement: .principal) {
+            Text("Automations")
+                .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
+                .foregroundStyle(Color.tronCoral)
+                .overlay(alignment: .trailing) {
+                    if mode == .upcoming && timelineRefreshIndicatorVisible {
+                        TronPulseLoadingIndicator(accent: .tronCoral, size: 14)
+                            .offset(x: 22)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Refreshing upcoming Automations")
+                            .transition(.opacity)
+                    }
+                }
+        }
         ToolbarItemGroup(placement: .primaryAction) {
             Button { showingFilters = true } label: {
                 Image(systemName: "line.3.horizontal.decrease")

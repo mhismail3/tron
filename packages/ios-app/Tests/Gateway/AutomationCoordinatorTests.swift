@@ -42,6 +42,24 @@ struct AutomationCoordinatorTests {
         #expect(!AutomationEndpointAdmissionPolicy.admitsTimeline(outdated))
     }
 
+    @Test("timeline loading retains stable content and delays compact refresh activity")
+    func timelineLoadingPresentation() {
+        #expect(AutomationTimelinePresentationPolicy.showsEmptyState(visibleDayCount: 0))
+        #expect(!AutomationTimelinePresentationPolicy.showsEmptyState(visibleDayCount: 1))
+        #expect(!AutomationTimelinePresentationPolicy.showsRefreshIndicator(
+            isLoading: true,
+            delayElapsed: false
+        ))
+        #expect(AutomationTimelinePresentationPolicy.showsRefreshIndicator(
+            isLoading: true,
+            delayElapsed: true
+        ))
+        #expect(!AutomationTimelinePresentationPolicy.showsRefreshIndicator(
+            isLoading: false,
+            delayElapsed: true
+        ))
+    }
+
     @Test("no eligible Gateway produces a neutral empty projection")
     func emptyProjectionIsNeutral() async throws {
         let catalog = AutomationCatalogCoordinator(endpoints: { [] })

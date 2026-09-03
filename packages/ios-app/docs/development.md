@@ -20,9 +20,12 @@ projections; it does not replace session navigation state. Automations uses one
 filter action presents a native Tron sheet that owns the Upcoming/All view choice,
 status/action filters, and connected-Gateway selection. All-mode search uses the same
 bottom-left reveal/close interaction as the Sessions dashboard rather than permanently
-occupying dashboard space. Upcoming extends in canonical seven-day Gateway-generated
-windows, retains at most eight windows/8,192 presentation items, and requires
-`automations.timeline.v1`. Only currently connected Gateways advertising
+occupying dashboard space. Upcoming retains its current agenda or neutral empty state while
+refreshing; only a refresh that outlasts the short presentation delay adds a compact activity
+badge, so transient reloads never replace the dashboard content. Upcoming extends in canonical
+seven-day Gateway-generated windows, retains at most eight windows/8,192 presentation items, and requires
+`automations.timeline.v1`. Drafts remain inventory-only until enabled, so they appear in All but do not
+produce Upcoming occurrences. Only currently connected Gateways advertising
 `automations.v1` enter the catalog; disconnected or incompatible profiles stay absent
 instead of publishing warning rows or replacing the neutral empty state. Catalog rows
 are summary-only and action content is fetched only for a visible detail/run surface.
