@@ -107,13 +107,13 @@ struct ChatLayoutTransactionTests {
     func settlement() throws {
         let transaction = ChatLayoutTransaction()
         let generation = transaction.join(.submission)
-        _ = transaction.join(.morphFlight)
+        _ = transaction.join(.transcriptGrowth)
 
         transaction.settle(generation, source: .submission)
         transaction.settle(generation, source: .submission)
         #expect(transaction.generation != nil)
 
-        transaction.settle(generation, source: .morphFlight)
+        transaction.settle(generation, source: .transcriptGrowth)
         #expect(transaction.generation == nil)
     }
 

@@ -11,8 +11,7 @@ struct ChatInteractionStormTests {
         let generation = transaction.join(.submission)
         #expect(transaction.join(.keyboard) == generation)
         #expect(transaction.join(.transcriptGrowth) == generation)
-        #expect(transaction.join(.morphFlight) == generation)
-        #expect(transaction.generation?.joined.count == 4)
+        #expect(transaction.generation?.joined.count == 3)
     }
 
     @Test("composer settlement and transcript entrance share the send generation")
@@ -66,7 +65,7 @@ struct ChatInteractionStormTests {
     @Test("Reduce Motion resolves the storm to an immediate clock")
     func reduceMotion() {
         let clock = ChatLayoutClock.resolve(
-            joined: [.submission, .keyboard, .morphFlight],
+            joined: [.submission, .keyboard, .transcriptGrowth],
             keyboard: ChatKeyboardTransition(
                 targetHeight: 300,
                 duration: 0.32,

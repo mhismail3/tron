@@ -153,124 +153,6 @@ struct ChatIncrementalContentGrowthHost<Identity: Equatable, Content: View>: Vie
     }
 }
 
-enum ChatPromptReplacementLayoutPolicy {
-    static let maximumAnimatedHeightDelta: CGFloat = 2_000
-
-    static func shouldAnimate(
-        currentHeight: CGFloat?,
-        targetHeight: CGFloat,
-        replacementChanged: Bool,
-        reduceMotion: Bool
-    ) -> Bool {
-        guard let currentHeight,
-              currentHeight.isFinite,
-              targetHeight.isFinite,
-              replacementChanged,
-              !reduceMotion else { return false }
-        return abs(targetHeight - currentHeight) <= maximumAnimatedHeightDelta
-    }
-}
-
-private struct ChatPromptReplacementMeasurement: Equatable {
-    let revision: Int
-    let height: CGFloat
-}
-
-private struct ChatPromptReplacementClipShape: Shape {
-    let active: Bool
-
-    func path(in rect: CGRect) -> Path {
-        Path(active
-            ? rect.insetBy(dx: 0, dy: ChatEntranceGrowthPolicy.effectOverflow)
-            : rect)
-    }
-}
-
-private struct ChatPromptReplacementClipModifier: ViewModifier {
-    let active: Bool
-
-    func body(content: Content) -> some View {
-        // Keep one modifier identity for the entire physical row. The outer
-        // gutter preserves settled glass effects; the active shape clips only
-        // to the original vertical frame while a replacement height changes.
-        content
-            .padding(ChatEntranceGrowthPolicy.effectOverflow)
-            .clipShape(ChatPromptReplacementClipShape(active: active))
-            .padding(-ChatEntranceGrowthPolicy.effectOverflow)
-    }
-}
-
-/// Keeps one physical prompt host while queued/pending/outgoing presentation
-/// becomes canonical. Its authoritative payload installs atomically while only
-/// a bounded height delta animates; identity and geometry gain no second owner.
-struct ChatPromptReplacementLayoutHost<Content: View>: View {
-    let revision: Int
-    let reduceMotion: Bool
-    @ViewBuilder let content: Content
-
-    @State private var presentedHeight: CGFloat?
-    @State private var installedRevision: Int?
-    @State private var heightTransitionRevision = 0
-    @State private var clipsAnimatedHeight = false
-
-    var body: some View {
-        let replacementClipActive = !reduceMotion && revision > 0
-            && (clipsAnimatedHeight || installedRevision != revision)
-        content
-            .fixedSize(horizontal: false, vertical: true)
-            .onGeometryChange(for: ChatPromptReplacementMeasurement.self) { geometry in
-                ChatPromptReplacementMeasurement(revision: revision, height: geometry.size.height)
-            } action: { measurement in
-                install(measurement)
-            }
-            // Revision zero is the row's own entrance owner. Observe its final
-            // natural height without constraining it through a second frame.
-            // Once a lifecycle replacement occurs, preserve that final height
-            // and animate only the replacement delta.
-            .frame(
-                height: !reduceMotion && revision > 0 ? presentedHeight : nil,
-                alignment: .bottom
-            )
-            .modifier(ChatPromptReplacementClipModifier(active: replacementClipActive))
-    }
-
-    @MainActor
-    private func install(_ measurement: ChatPromptReplacementMeasurement) {
-        guard measurement.height.isFinite, measurement.height >= 0 else { return }
-        let animates = ChatPromptReplacementLayoutPolicy.shouldAnimate(
-            currentHeight: presentedHeight,
-            targetHeight: measurement.height,
-            replacementChanged: installedRevision.map { $0 != measurement.revision } ?? false,
-            reduceMotion: reduceMotion
-        )
-        installedRevision = measurement.revision
-        heightTransitionRevision &+= 1
-        let transitionRevision = heightTransitionRevision
-        if animates, let animation = ChatPromptReplacementAnimationPolicy.animation(
-            reduceMotion: false
-        ) {
-            clipsAnimatedHeight = true
-            var transaction = Transaction()
-            transaction.admitsChatPromptReplacementAnimation = true
-            withTransaction(transaction) {
-                withAnimation(animation, completionCriteria: .logicallyComplete) {
-                    presentedHeight = measurement.height
-                } completion: {
-                    guard heightTransitionRevision == transitionRevision else { return }
-                    clipsAnimatedHeight = false
-                }
-            }
-        } else {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                presentedHeight = measurement.height
-                clipsAnimatedHeight = false
-            }
-        }
-    }
-}
-
 enum ChatTranscriptEntrancePresentationPolicy {
     static func initiallyRevealed(state: ChatTranscriptEntranceState) -> Bool {
         state == .none
@@ -474,26 +356,14 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
     }
 }
 
-enum ChatOutgoingEntranceLayoutPolicy {
-    static func progress(
-        ownership: ChatMorphFrameRegistry.EntranceOwnership,
-        revealed: Bool,
-        reduceMotion: Bool
-    ) -> CGFloat {
-        ownership == .completed || revealed || reduceMotion ? 1 : 0
-    }
-}
-
-/// The ephemeral submission is the visual handoff from the composer. It owns
-/// one insertion animation while it waits for canonical reconciliation; later
-/// transcript snapshots update the same bubble without replaying that motion.
+/// The ephemeral submission occupies its complete final layout immediately.
+/// Only the already-sized row fades and translates straight up; later canonical
+/// replacements reuse the same physical host without replaying the entrance.
 struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
+    static var hiddenOffset: CGFloat { 14 }
+
     let reduceMotion: Bool
     let animatesEntrance: Bool
-    let morphOwnership: ChatMorphFrameRegistry.EntranceOwnership
-    let morphFlightPhase: ChatMorphFrameRegistry.FlightPhase?
-    let submissionAnimation: Animation?
-    let kind: ChatContentEntranceKind
     let onEntranceConsumed: () -> Void
     let onEntranceSettled: () -> Void
     @ViewBuilder let content: Content
@@ -503,132 +373,45 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
     init(
         reduceMotion: Bool,
         animatesEntrance: Bool = true,
-        morphOwnership: ChatMorphFrameRegistry.EntranceOwnership = .ordinary,
-        morphFlightPhase: ChatMorphFrameRegistry.FlightPhase? = nil,
-        submissionAnimation: Animation? = nil,
-        kind: ChatContentEntranceKind = .userPrompt,
         onEntranceConsumed: @escaping () -> Void = {},
         onEntranceSettled: @escaping () -> Void = {},
         @ViewBuilder content: () -> Content
     ) {
         self.reduceMotion = reduceMotion
         self.animatesEntrance = animatesEntrance
-        self.morphOwnership = morphOwnership
-        self.morphFlightPhase = morphFlightPhase
-        self.submissionAnimation = submissionAnimation
-        self.kind = kind
         self.onEntranceConsumed = onEntranceConsumed
         self.onEntranceSettled = onEntranceSettled
         self.content = content()
-        switch morphOwnership {
-        case .ordinary:
-            _revealed = State(initialValue: !animatesEntrance)
-        case .flight:
-            // The natural destination is measured inside the bottom-aligned
-            // zero-height layout. Its row height joins the shared submission
-            // clock only when the flight begins.
-            _revealed = State(initialValue: false)
-        case .completed:
-            _revealed = State(initialValue: true)
-        }
+        _revealed = State(initialValue: !animatesEntrance)
     }
 
     var body: some View {
-        let hidden = morphOwnership == .flight
-            ? ChatContentEntranceTransform.identity
-            : ChatContentTransitionPolicy.hiddenTransform(
-                for: kind,
-                reduceMotion: reduceMotion
-            )
-        let progress = ChatOutgoingEntranceLayoutPolicy.progress(
-            ownership: morphOwnership,
-            revealed: revealed,
-            reduceMotion: reduceMotion
-        )
-        ChatEntranceGrowthLayout(progress: progress) {
-            content
-                .opacity(revealed ? 1 : 0)
-                .scaleEffect(
-                    revealed ? 1 : hidden.scale,
-                    anchor: hidden.anchor.unitPoint
-                )
-                .offset(
-                    x: revealed ? 0 : hidden.offsetX,
-                    y: revealed ? 0 : hidden.offsetY
-                )
-        }
-        .chatEntranceGrowthClip(progress: progress)
-        .onAppear {
-            onEntranceConsumed()
-            switch morphOwnership {
-            case .ordinary:
-                revealOrdinaryEntranceIfNeeded()
-            case .flight:
-                // Begin row growth on the same first presented transaction as
-                // composer collapse. Destination elements remain hidden until
-                // the overlay reaches its handoff phase.
-                revealFlightEntranceIfNeeded()
-            case .completed:
+        content
+            .opacity(revealed ? 1 : 0)
+            .offset(y: revealed || reduceMotion ? 0 : Self.hiddenOffset)
+            .onAppear {
+                onEntranceConsumed()
+                revealIfNeeded()
+            }
+            .onChange(of: animatesEntrance) { _, enabled in
+                guard !enabled else { return }
+                installRevealed()
                 reportSettlementOnce()
             }
-        }
-        .onChange(of: morphFlightPhase) { _, phase in
-            guard morphOwnership == .flight, phase == .animating else { return }
-            revealFlightEntranceIfNeeded()
-        }
-        .onChange(of: morphOwnership) { previous, current in
-            switch current {
-            case .flight:
-                break
-            case .completed:
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { revealed = true }
-                reportSettlementOnce()
-            case .ordinary:
-                // A staged flight that failed before completion falls back
-                // to the same bounded row entrance as a non-morphed send.
-                if previous == .flight { revealOrdinaryEntranceIfNeeded() }
-            }
-        }
-        .onChange(of: animatesEntrance) { _, enabled in
-            guard !enabled, morphOwnership == .ordinary else { return }
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) { revealed = true }
-            reportSettlementOnce()
-        }
     }
 
-    private func revealFlightEntranceIfNeeded() {
-        guard !revealed else { return }
-        guard let animation = submissionAnimation
-            ?? ChatContentTransitionPolicy.promptFlightAnimation(reduceMotion: reduceMotion) else {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) { revealed = true }
-            return
-        }
-        var transaction = Transaction(animation: animation)
-        transaction.admitsChatEntranceAnimation = true
-        withTransaction(transaction) { revealed = true }
-    }
-
-    private func revealOrdinaryEntranceIfNeeded() {
+    private func revealIfNeeded() {
         guard !revealed else {
             reportSettlementOnce()
             return
         }
-        guard animatesEntrance, !reduceMotion else {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) { revealed = true }
+        guard animatesEntrance else {
+            installRevealed()
             reportSettlementOnce()
             return
         }
-        let animation = submissionAnimation ?? ChatContentTransitionPolicy.revealAnimation(
-            for: kind,
-            reduceMotion: reduceMotion
+        let animation = Animation.easeOut(
+            duration: reduceMotion ? 0.12 : ChatContentTransitionPolicy.promptEntranceDuration
         )
         withAnimation(animation, completionCriteria: .logicallyComplete) {
             var transaction = Transaction(animation: animation)
@@ -637,6 +420,12 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
         } completion: {
             reportSettlementOnce()
         }
+    }
+
+    private func installRevealed() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { revealed = true }
     }
 
     private func reportSettlementOnce() {

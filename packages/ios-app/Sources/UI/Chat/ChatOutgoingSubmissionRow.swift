@@ -224,7 +224,6 @@ struct ChatPendingPromptRow: View, Equatable {
 struct ChatOutgoingSubmissionRow: View, Equatable {
     let presentation: ChatOutgoingSubmissionPresentation
     let attachments: [PendingAttachment]
-    let morphRegistry: ChatMorphFrameRegistry
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.presentation == rhs.presentation && lhs.attachments == rhs.attachments
@@ -244,10 +243,6 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                         attachmentContent: { queuedAttachmentChips },
                         statusContent: { EmptyView() }
                     )
-                    .chatMorphDestination(
-                        id: ChatMorphID(lifecycleID: presentation.id, element: .prompt),
-                        registry: morphRegistry
-                    )
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -265,13 +260,6 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                             .padding(.top, ChatPromptContainerStyle.topPadding)
                             .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
                             .modifier(UserPromptGlassModifier())
-                            .chatMorphDestination(
-                                id: ChatMorphID(
-                                    lifecycleID: presentation.id,
-                                    element: .prompt
-                                ),
-                                registry: morphRegistry
-                            )
                     }
                 }
             }
@@ -298,10 +286,6 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
     private var resourceChip: some View {
         if let resource = presentation.resourceInvocation, !resource.isExtensionCommand {
             CanonicalResourceChip(resource: resource)
-                .chatMorphDestination(
-                    id: ChatMorphID(lifecycleID: presentation.id, element: .resource),
-                    registry: morphRegistry
-                )
         }
     }
 
@@ -311,24 +295,9 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
         if !chips.isEmpty {
             QueuedMessageAttachmentChipRow(
                 chips: chips,
-                accent: presentation.cardBehavior == .followUp ? .tronPurple : .tronEmerald,
-                morphDestinationIDs: queuedMorphDestinationIDs,
-                morphRegistry: morphRegistry
+                accent: presentation.cardBehavior == .followUp ? .tronPurple : .tronEmerald
             )
         }
-    }
-
-    private var queuedMorphDestinationIDs: [String: ChatMorphID] {
-        Dictionary(uniqueKeysWithValues: attachments.compactMap { attachment in
-            guard let blobID = attachment.transportBlobID else { return nil }
-            return (
-                "attachment-\(blobID)",
-                ChatMorphID(
-                    lifecycleID: presentation.id,
-                    element: .attachment(attachment.id)
-                )
-            )
-        })
     }
 
     @ViewBuilder
@@ -343,13 +312,6 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                                 name: attachment.name,
                                 mimeType: attachment.mimeType
                             )
-                            .chatMorphDestination(
-                                id: ChatMorphID(
-                                    lifecycleID: presentation.id,
-                                    element: .attachment(attachment.id)
-                                ),
-                                registry: morphRegistry
-                            )
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel("Attachment \(attachment.name)")
                         } else if let blobID = attachment.transportBlobID {
@@ -358,13 +320,6 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                                 mimeType: attachment.mimeType,
                                 size: attachment.size,
                                 blobID: blobID
-                            )
-                            .chatMorphDestination(
-                                id: ChatMorphID(
-                                    lifecycleID: presentation.id,
-                                    element: .attachment(attachment.id)
-                                ),
-                                registry: morphRegistry
                             )
                         }
                     }

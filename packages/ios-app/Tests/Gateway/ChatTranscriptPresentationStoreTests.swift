@@ -1621,7 +1621,15 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(ChatPhysicalTranscriptReplacementPolicy.replacement(
                 from: outgoingPhysical,
                 to: replacement
-            ) == .prompt)
+            ) == .none)
+            #expect(ChatPromptEntranceRetirementPolicy.retires(
+                from: outgoingPhysical,
+                to: replacement
+            ))
+            #expect(!ChatPromptEntranceRetirementPolicy.retires(
+                from: outgoingPhysical,
+                to: outgoingPhysical
+            ))
             let queuedMessage = SessionSnapshot.QueuedMessage(
                 id: "operation-owned",
                 behavior: .steer,
@@ -1640,10 +1648,11 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(ChatPhysicalTranscriptReplacementPolicy.replacement(
                 from: outgoingPhysical,
                 to: queuedPhysical
-            ) == .prompt)
-            #expect(ChatPromptReplacementAnimationPolicy.animates(reduceMotion: false))
-            #expect(!ChatPromptReplacementAnimationPolicy.animates(reduceMotion: true))
-
+            ) == .none)
+            #expect(ChatPromptEntranceRetirementPolicy.retires(
+                from: outgoingPhysical,
+                to: queuedPhysical
+            ))
             let existingPhysicalID = try #require(
                 settled.committedLedger.items.first { $0.id != canonicalID }?.id
             )

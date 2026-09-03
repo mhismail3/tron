@@ -750,12 +750,8 @@ struct PresentationStyleGuardTests {
         #expect(reveal.contains("initialViewportHeight"))
     }
 
-    @Test("chat motion stays local to compact morphs and composer child surfaces")
+    @Test("outgoing prompts use one full-size straight entrance")
     func chatScopedMotionOwnership() throws {
-        let morph = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatMorphFlightLayer.swift"),
-            encoding: .utf8
-        )
         let composer = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatComposerView.swift"),
             encoding: .utf8
@@ -768,6 +764,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatEntranceRows.swift"),
             encoding: .utf8
         )
+        let outgoing = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatOutgoingSubmissionRow.swift"),
+            encoding: .utf8
+        )
         let chatView = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
             encoding: .utf8
@@ -776,54 +776,46 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptScrollView.swift"),
             encoding: .utf8
         )
-        #expect(morph.contains("maximumPromptBytes = 240"))
-        #expect(morph.contains("maximumPromptHeight: CGFloat = 112"))
-        #expect(morph.contains(".clipShape(RoundedRectangle("))
-        #expect(morph.contains("ChatPromptFlightSurface(text: text)"))
-        #expect(morph.contains("ChatAttachmentFlightSurface(attachment: attachment)"))
-        #expect(morph.contains("shape.fill(Color.tronSurfaceElevated)"))
-        #expect(!morph.contains("TranscriptFileChip("))
-        #expect(!morph.contains("AttachmentThumbnailSurface("))
-        #expect(morph.contains("activeLifecycleID"))
-        #expect(morph.contains("activeElementIDs"))
-        #expect(!morph.contains(".drawingGroup("))
-        #expect(morph.contains("flight.destinationFrames[element.id] ?? element.sourceFrame"))
-        #expect(morph.contains("ChatContentTransitionPolicy.promptFlightAnimation("))
-        #expect(morph.contains("Freeze only after the bridge"))
-        #expect(morph.contains("guard flight.phase != .handingOff else { return }"))
-        #expect(morph.contains("func failOpen(lifecycleID:"))
-        #expect(morph.contains("beginHandoff(lifecycleID:"))
-        #expect(morph.contains("overlayOpacity = 0"))
-        #expect(morph.contains("recordDraftPrompt(frame: .null)"))
-        #expect(morph.contains("recordDraftAttachment(id: id, frame: .null)"))
-        #expect(!morph.contains("milliseconds(80)"))
+        let retiredMorphPath = packageRoot.appending(
+            path: "Sources/UI/Chat/ChatMorphFlightLayer.swift"
+        )
+        let outgoingEntrance = (entrances.components(
+            separatedBy: "struct ChatOutgoingSubmissionEntranceRow"
+        ).dropFirst().first ?? "").components(
+            separatedBy: "struct ChatQueuedMessageEntranceRow"
+        ).first ?? ""
+
+        #expect(!FileManager.default.fileExists(atPath: retiredMorphPath.path))
         #expect(entrances.contains("private struct ChatEntranceGrowthLayout: Layout, Animatable"))
         #expect(entrances.contains("struct ChatIncrementalContentGrowthHost"))
         #expect(entrances.contains("transaction.admitsChatIncrementalGrowthAnimation = true"))
         #expect(entrances.contains("contentChanged && layoutStable"))
         #expect(entrances.contains("struct Cache"))
         #expect(entrances.contains("cache.proposedWidth == width"))
-        #expect(entrances.contains("ChatEntranceGrowthLayout(progress:"))
-        #expect(entrances.contains("ownership == .completed || revealed || reduceMotion"))
-        #expect(entrances.contains("morphFlightPhase: ChatMorphFrameRegistry.FlightPhase?"))
-        #expect(entrances.contains("submissionAnimation ?? ChatContentTransitionPolicy.revealAnimation"))
-        #expect(entrances.contains("struct ChatPromptReplacementLayoutHost"))
-        #expect(entrances.contains("!reduceMotion && revision > 0 ? presentedHeight : nil"))
-        #expect(entrances.contains("ChatPromptReplacementClipShape"))
-        #expect(!entrances.contains(".contentTransition(reduceMotion ? .opacity : .interpolate)"))
+        #expect(outgoingEntrance.contains("static var hiddenOffset: CGFloat { 14 }"))
+        #expect(outgoingEntrance.contains(".opacity(revealed ? 1 : 0)"))
+        #expect(outgoingEntrance.contains(".offset(y: revealed || reduceMotion ? 0 : Self.hiddenOffset)"))
+        #expect(outgoingEntrance.contains("Animation.easeOut("))
+        #expect(!outgoingEntrance.contains("submissionAnimation"))
+        #expect(!outgoingEntrance.contains("ChatEntranceGrowthLayout"))
+        #expect(!outgoingEntrance.contains("scaleEffect"))
+        #expect(!outgoingEntrance.contains("offset(x:"))
+        #expect(!outgoingEntrance.contains(".onDisappear"))
+        #expect(transcript.contains("onPromptEntranceRetired: onEntranceSettled"))
+        #expect(transcript.contains("enum ChatPromptEntranceRetirementPolicy"))
+        #expect(!entrances.contains("ChatPromptReplacementLayoutHost"))
+        #expect(!entrances.contains("ChatOutgoingEntranceLayoutPolicy"))
         #expect(entrances.contains("ChatEntranceGrowthClipShape"))
-        #expect(entrances.contains(".chatEntranceGrowthClip(progress: progress)"))
-        #expect(entrances.contains("ChatEntranceGrowthPolicy.requiresClip(progress: progress)"))
         #expect(entrances.contains("onEntranceSettled"))
-        #expect(entrances.contains("completionCriteria: .logicallyComplete"))
-        #expect(entrances.contains("padding(ChatEntranceGrowthPolicy.effectOverflow)"))
-        #expect(entrances.contains("Once admission settles, remove the clipping node entirely"))
-        #expect(entrances.contains(".padding(-ChatEntranceGrowthPolicy.effectOverflow)"))
-        #expect(!entrances.contains(".clipped()"))
         #expect(chatView.contains("let admission = try withTransaction(Transaction())"))
-        #expect(!chatView.contains("deferredMorphSubmissionLifecycleID"))
-        #expect(!chatView.contains("holdsSubmissionHeight"))
-        #expect(!chatView.contains("settleUnchangedComposerAfterDisplayFrames"))
+        #expect(!chatView.contains("ChatMorph"))
+        #expect(!chatView.contains("morphRegistry"))
+        #expect(!composer.contains("chatDraftPromptMorphSource"))
+        #expect(!composer.contains("chatDraftAttachmentMorphSource"))
+        #expect(!composer.contains("chatDraftResourceMorphSource"))
+        #expect(!outgoing.contains("chatMorphDestination"))
+        #expect(!transcript.contains("promptReplacementRevision"))
+        #expect(transcript.contains("withTransaction(transaction) { displayed = next }"))
         #expect(transcript.contains("tailTargetHeight: CGFloat = 0.5"))
         #expect(transcript.contains("terminalRowBottomPadding"))
         #expect(composer.contains("ChatContentTransitionPolicy.attachmentTransition("))
@@ -832,18 +824,15 @@ struct PresentationStyleGuardTests {
         #expect(structural.contains("transaction.disablesAnimations = true"))
         #expect(structural.contains("accessoryDuration: TimeInterval = 0.24"))
         #expect(structural.contains("transcriptEntranceDuration: TimeInterval = 0.18"))
-        #expect(structural.contains("promptFlightDuration: TimeInterval = 0.18"))
         #expect(structural.contains("notificationReplacementDuration: TimeInterval = 0.16"))
-        #expect(!structural.contains(".spring(response: 0.34"))
+        #expect(!structural.contains("promptFlight"))
+        #expect(!structural.contains("PromptReplacementAnimation"))
         #expect(structural.contains(".smooth(duration: ChatComposerStructuralTransitionPolicy.accessoryDuration)"))
         #expect(structural.contains("completionCriteria: .logicallyComplete"))
         #expect(structural.contains("onHeightSettled?(measurement.height)"))
-        #expect(!structural.contains("holdsSubmissionHeight"))
         #expect(structural.contains("heightTransitionRevision"))
         #expect(structural.contains("installedAccessoryIdentity"))
         #expect(structural.contains("!transaction.admitsChatIncrementalGrowthAnimation"))
-        #expect(!structural.contains("installedPanelPresented"))
-        #expect(!structural.contains(".clipped()"))
         #expect(!composer.contains("safeAreaInset"))
     }
 
@@ -2692,8 +2681,8 @@ struct PresentationStyleGuardTests {
         #expect(!entranceRows.contains("ChatPromptLifecycleReplacementEntranceRow"))
         #expect(!outgoingRows.contains("ChatPromptLifecycleCrossfadeRow"))
         #expect(!outgoingRows.contains("ChatPromptLifecycleTransitionSourceCard"))
-        #expect(motion.contains("ChatPromptReplacementAnimationPolicy"))
-        #expect(motion.contains("admitsChatPromptReplacementAnimation"))
+        #expect(!motion.contains("ChatPromptReplacementAnimationPolicy"))
+        #expect(motion.contains("admitsChatNotificationReplacementAnimation"))
         #expect(chat.contains("ChatPhysicalTranscriptReplacementHost"))
         #expect(!replacementHost.contains(".contentTransition("))
         #expect(replacementHost.contains("withTransaction(transaction)"))

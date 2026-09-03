@@ -6,7 +6,6 @@ enum ChatLayoutMutation: Hashable, Sendable {
     case keyboard
     case submission
     case transcriptGrowth
-    case morphFlight
 }
 
 struct ChatLayoutClock: Equatable, Sendable {
@@ -33,8 +32,7 @@ struct ChatLayoutClock: Equatable, Sendable {
         }
         if joined.contains(.submission) {
             // Submission geometry must be monotonic. A spring can overshoot the
-            // outgoing row, morph endpoint, and composer inset, producing a
-            // visible down/up correction even when every participant shares it.
+            // composer inset and produce a visible down/up correction.
             return Self(
                 duration: ChatContentTransitionPolicy.transcriptEntranceDuration,
                 curve: .smooth

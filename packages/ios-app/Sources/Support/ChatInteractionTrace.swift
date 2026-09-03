@@ -436,7 +436,6 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case .keyboard: "keyboard"
         case .submission: "submission"
         case .transcriptGrowth: "transcript-growth"
-        case .morphFlight: "morph-flight"
         }
     }
 }

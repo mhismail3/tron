@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import TronMobile
 
@@ -26,10 +27,6 @@ struct ChatContentTransitionTests {
 
     @Test("prompt lifecycle selects kind before first frame and aliases without replay")
     func promptLifecycleSelection() {
-        #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: .ordinary) == .userPrompt)
-        #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: .unknown) == .userPrompt)
-        #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: .steer) == .queuedPrompt)
-        #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: .followUp) == .queuedPrompt)
         #expect(ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
             isReady: true, entranceSuppressed: false, hasIdentityAlias: false
         ))
@@ -166,56 +163,9 @@ struct ChatContentTransitionTests {
         ))
     }
 
-    @Test("measured flights grow the outgoing row on the shared clock")
-    func flightDestinationLayout() {
-        #expect(ChatOutgoingEntranceLayoutPolicy.progress(
-            ownership: .flight,
-            revealed: false,
-            reduceMotion: false
-        ) == 0)
-        #expect(ChatOutgoingEntranceLayoutPolicy.progress(
-            ownership: .flight,
-            revealed: true,
-            reduceMotion: false
-        ) == 1)
-        #expect(ChatOutgoingEntranceLayoutPolicy.progress(
-            ownership: .ordinary,
-            revealed: false,
-            reduceMotion: false
-        ) == 0)
-        #expect(ChatOutgoingEntranceLayoutPolicy.progress(
-            ownership: .completed,
-            revealed: false,
-            reduceMotion: false
-        ) == 1)
-    }
-
-    @Test("queued-to-canonical replacement animates only bounded height changes")
-    func promptReplacementHeight() {
-        #expect(ChatPromptReplacementLayoutPolicy.shouldAnimate(
-            currentHeight: 120,
-            targetHeight: 80,
-            replacementChanged: true,
-            reduceMotion: false
-        ))
-        #expect(!ChatPromptReplacementLayoutPolicy.shouldAnimate(
-            currentHeight: 120,
-            targetHeight: 80,
-            replacementChanged: false,
-            reduceMotion: false
-        ))
-        #expect(!ChatPromptReplacementLayoutPolicy.shouldAnimate(
-            currentHeight: 120,
-            targetHeight: 80,
-            replacementChanged: true,
-            reduceMotion: true
-        ))
-        #expect(!ChatPromptReplacementLayoutPolicy.shouldAnimate(
-            currentHeight: 0,
-            targetHeight: ChatPromptReplacementLayoutPolicy.maximumAnimatedHeightDelta + 1,
-            replacementChanged: true,
-            reduceMotion: false
-        ))
+    @Test("outgoing prompts use a short straight-up visual offset")
+    func outgoingPromptEntrance() {
+        #expect(ChatOutgoingSubmissionEntranceRow<EmptyView>.hiddenOffset == 14)
     }
 
     @Test("user and queue content rises from the trailing composer edge")
@@ -240,9 +190,6 @@ struct ChatContentTransitionTests {
         #expect(queued.offsetY == 12)
         #expect(ChatContentTransitionPolicy.transcriptEntranceDuration == 0.18)
         #expect(ChatContentTransitionPolicy.promptEntranceDuration == 0.18)
-        #expect(ChatContentTransitionPolicy.promptFlightDuration == 0.18)
-        #expect(ChatContentTransitionPolicy.promptFlightHandoffDuration == 0.08)
-        #expect(ChatContentTransitionPolicy.promptReplacementDuration == 0.14)
         #expect(ChatContentTransitionPolicy.notificationReplacementDuration == 0.16)
     }
 
@@ -313,8 +260,6 @@ struct ChatContentTransitionTests {
         #expect(ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: false)
             != ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: true))
         #expect(ChatContentTransitionPolicy.composerSurfaceRemovalEdge == .bottom)
-        #expect(ChatContentTransitionPolicy.promptFlightAnimation(reduceMotion: false) != nil)
-        #expect(ChatContentTransitionPolicy.promptFlightAnimation(reduceMotion: true) == nil)
         #expect(ChatContentTransitionPolicy.notificationReplacementAnimation(reduceMotion: false) != nil)
         #expect(ChatComposerStructuralTransitionPolicy.admitsHeightChange(
             current: 44,
