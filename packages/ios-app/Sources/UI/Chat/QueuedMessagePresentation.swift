@@ -254,14 +254,17 @@ enum QueuedMessageAttachmentPresentation {
 
     static func chips(for attachments: [PendingAttachment]) -> [QueuedMessageAttachmentChip] {
         // Match the Gateway's bounded typed-count projection exactly: photos
-        // precede files, and slot IDs remain stable when the source attachment
-        // order differs between optimistic and canonical states.
-        let photos = attachments.filter { $0.mimeType.hasPrefix("image/") }
-        let files = attachments.filter { !$0.mimeType.hasPrefix("image/") }
-        return photos.enumerated().compactMap { index, attachment in
+        // precede files, while exact upload identities survive reordering and
+        // optimistic → authoritative replacement.
+        let admitted = attachments.filter { $0.transportBlobID != nil }
+        guard admitted.count == attachments.count,
+              Set(admitted.compactMap(\.transportBlobID)).count == admitted.count else { return [] }
+        let photos = admitted.filter { $0.mimeType.lowercased().hasPrefix("image/") }
+        let files = admitted.filter { !$0.mimeType.lowercased().hasPrefix("image/") }
+        return photos.enumerated().compactMap { _, attachment in
             guard let blobID = attachment.transportBlobID else { return nil }
             return QueuedMessageAttachmentChip(
-                id: "photo-\(index)",
+                id: "attachment-\(blobID)",
                 kind: .photo,
                 attachment: .init(
                     id: blobID,
@@ -270,10 +273,10 @@ enum QueuedMessageAttachmentPresentation {
                     size: attachment.size
                 )
             )
-        } + files.enumerated().compactMap { index, attachment in
+        } + files.enumerated().compactMap { _, attachment in
             guard let blobID = attachment.transportBlobID else { return nil }
             return QueuedMessageAttachmentChip(
-                id: "file-\(index)",
+                id: "attachment-\(blobID)",
                 kind: .file,
                 attachment: .init(
                     id: blobID,
@@ -291,13 +294,15 @@ enum QueuedMessageAttachmentPresentation {
         fileAttachmentCount: Int?,
         attachments: [SessionSnapshot.PromptAttachment]? = nil
     ) -> [QueuedMessageAttachmentChip] {
-        if let attachments, attachments.count == attachmentCount {
+        if let attachments,
+           attachments.count == attachmentCount,
+           Set(attachments.map(\.id)).count == attachments.count {
             let photos = attachments.filter { $0.mimeType.lowercased().hasPrefix("image/") }
             let files = attachments.filter { !$0.mimeType.lowercased().hasPrefix("image/") }
-            return photos.enumerated().map { index, attachment in
-                .init(id: "photo-\(index)", kind: .photo, attachment: attachment)
-            } + files.enumerated().map { index, attachment in
-                .init(id: "file-\(index)", kind: .file, attachment: attachment)
+            return photos.enumerated().map { _, attachment in
+                .init(id: "attachment-\(attachment.id)", kind: .photo, attachment: attachment)
+            } + files.enumerated().map { _, attachment in
+                .init(id: "attachment-\(attachment.id)", kind: .file, attachment: attachment)
             }
         }
         let typedCountsAvailable = photoCount != nil || fileAttachmentCount != nil

@@ -312,19 +312,24 @@ enum ChatPhysicalTranscriptReplacementPolicy {
 private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     let row: ChatPhysicalTranscriptRow
     let reduceMotion: Bool
+    let morphRegistry: ChatMorphFrameRegistry
     let hostedRecorder: (any ChatTranscriptHostedRecording)?
     @ViewBuilder let content: (ChatPhysicalTranscriptRow) -> Content
 
     @State private var displayed: ChatPhysicalTranscriptRow
+    @State private var deferredReplacement: ChatPhysicalTranscriptRow?
+    @State private var promptReplacementRevision = 0
 
     init(
         row: ChatPhysicalTranscriptRow,
         reduceMotion: Bool,
+        morphRegistry: ChatMorphFrameRegistry,
         hostedRecorder: (any ChatTranscriptHostedRecording)? = nil,
         @ViewBuilder content: @escaping (ChatPhysicalTranscriptRow) -> Content
     ) {
         self.row = row
         self.reduceMotion = reduceMotion
+        self.morphRegistry = morphRegistry
         self.hostedRecorder = hostedRecorder
         self.content = content
         _displayed = State(initialValue: row)
@@ -333,17 +338,50 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     var body: some View {
         // `row.id` owns structural continuity. Descendants animate admitted
         // lifecycle and payload values within this persistent host.
-        content(displayed)
+        renderedContent
             .onAppear { hostedRecorder?.recordPhysicalRowAppearance(id: displayed.id) }
             .onDisappear { hostedRecorder?.recordPhysicalRowDisappearance(id: displayed.id) }
             .onChange(of: row) { _, next in retarget(next) }
+            .onChange(of: morphRegistry.readinessRevision) { _, _ in
+                guard let deferredReplacement,
+                      morphRegistry.flight?.lifecycleID != displayed.id else { return }
+                self.deferredReplacement = nil
+                retarget(deferredReplacement, permitsFlightDeferral: false)
+            }
     }
 
-    private func retarget(_ next: ChatPhysicalTranscriptRow) {
+    @ViewBuilder
+    private var renderedContent: some View {
+        if displayed.isPromptLifecycle || promptReplacementRevision > 0 {
+            ChatPromptReplacementLayoutHost(
+                revision: promptReplacementRevision,
+                reduceMotion: reduceMotion
+            ) {
+                content(displayed)
+            }
+        } else {
+            content(displayed)
+        }
+    }
+
+    private func retarget(
+        _ next: ChatPhysicalTranscriptRow,
+        permitsFlightDeferral: Bool = true
+    ) {
         let kind = ChatPhysicalTranscriptReplacementPolicy.replacement(
             from: displayed,
             to: next
         )
+        if permitsFlightDeferral,
+           kind == .prompt,
+           morphRegistry.flight?.lifecycleID == displayed.id {
+            // Canonical authority may arrive during the visual flight. Keep the
+            // aliased outgoing destination mounted and hidden until the overlay
+            // hands off, then install only the newest canonical replacement.
+            deferredReplacement = next
+            return
+        }
+        deferredReplacement = nil
         let animation: Animation? = switch kind {
         case .none:
             nil
@@ -358,8 +396,12 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
         }
         var transaction = Transaction(animation: animation)
         transaction.admitsChatPromptReplacementAnimation = kind != .none
-        // Type-specific descendants animate shallow values in place.
-        withTransaction(transaction) { displayed = next }
+        // Type-specific descendants animate shallow values in place. Prompt
+        // replacement also advances one bounded height interpolation owner.
+        withTransaction(transaction) {
+            displayed = next
+            if kind == .prompt { promptReplacementRevision &+= 1 }
+        }
     }
 }
 
@@ -378,6 +420,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let frameScheduler: DisplayFrameScheduler
     let minimumUnderflowContentHeight: CGFloat
     let reduceMotion: Bool
+    let submissionAnimation: Animation?
     let presentationEpoch: Int
     let presentationPhase: ChatOpenPresentationPhase
     let admitsGeometryCallbacks: Bool
@@ -422,6 +465,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             ChatPhysicalTranscriptReplacementHost(
                                 row: row,
                                 reduceMotion: reduceMotion,
+                                morphRegistry: morphRegistry,
                                 hostedRecorder: hostedRecorder
                             ) { displayed in
                                 physicalRow(displayed, installed: installed)
@@ -706,7 +750,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         entranceSuppressed: entranceSuppressed
                     )) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
                 morphOwnership: morphRegistry.entranceOwnership(for: outgoing.id),
-                morphFlightPhase: morphRegistry.flightPhase(for: outgoing.id),
+                submissionAnimation: submissionAnimation,
                 kind: ChatPromptLifecycleTransitionPolicy.entranceKind(for: outgoing.promptBehavior),
                 onEntranceConsumed: {
                     transcriptPresentation.consumeLifecycleEntrance(id: renderedID)

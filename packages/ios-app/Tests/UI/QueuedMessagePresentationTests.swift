@@ -339,14 +339,14 @@ struct QueuedMessagePresentationTests {
     @Test("frozen submission attachments use typed queue chips and labels")
     func frozenAttachmentChips() {
         let chips = QueuedMessageAttachmentPresentation.chips(for: [
-            PendingAttachment(id: "photo", name: "one.jpg", mimeType: "image/jpeg", size: 1, previewData: nil),
+            PendingAttachment(id: "photo", name: "one.jpg", mimeType: "IMAGE/JPEG", size: 1, previewData: nil),
             PendingAttachment(id: "file", name: "notes.txt", mimeType: "text/plain", size: 2, previewData: nil),
         ])
         #expect(chips.map(\.kind) == [.photo, .file])
         #expect(QueuedMessageAttachmentPresentation.accessibilityLabel(chips: chips) == "1 photo, 1 file")
     }
 
-    @Test("optimistic mixed attachments use canonical photo-then-file slot IDs")
+    @Test("exact mixed attachments preserve upload identity across canonical ordering")
     func mixedAttachmentOrderingMatchesCanonicalCounts() {
         let attachments = [
             PendingAttachment(id: "file", name: "notes.txt", mimeType: "text/plain", size: 1, previewData: nil),
@@ -354,9 +354,31 @@ struct QueuedMessagePresentationTests {
             PendingAttachment(id: "file-2", name: "data.json", mimeType: "application/json", size: 1, previewData: nil),
         ]
         let chips = QueuedMessageAttachmentPresentation.chips(for: attachments)
-        #expect(chips.map(\.id) == ["photo-0", "file-0", "file-1"])
+        #expect(chips.map(\.id) == [
+            "attachment-upload:photo",
+            "attachment-upload:file",
+            "attachment-upload:file-2",
+        ])
         #expect(chips.map(\.kind) == [.photo, .file, .file])
         #expect(chips.compactMap(\.attachment?.id) == ["upload:photo", "upload:file", "upload:file-2"])
+    }
+
+    @Test("duplicate authoritative attachment identities fail back to typed slots")
+    func duplicateAttachmentIdentitiesUsePlaceholders() {
+        let duplicate = SessionSnapshot.PromptAttachment(
+            id: "upload:duplicate",
+            name: "same.txt",
+            mimeType: "text/plain",
+            size: 4
+        )
+        let chips = QueuedMessageAttachmentPresentation.chips(
+            attachmentCount: 2,
+            photoCount: 0,
+            fileAttachmentCount: 2,
+            attachments: [duplicate, duplicate]
+        )
+        #expect(chips.map(\.id) == ["file-0", "file-1"])
+        #expect(chips.allSatisfy { $0.attachment == nil })
     }
 
     @Test("transport chips use Gateway upload identity while preserving local chip identity")
@@ -372,6 +394,7 @@ struct QueuedMessagePresentationTests {
         #expect(attachment.id == "local-chip")
         #expect(attachment.transportBlobID == "upload:gateway-upload")
         let chip = try #require(QueuedMessageAttachmentPresentation.chips(for: [attachment]).first)
+        #expect(chip.id == "attachment-upload:gateway-upload")
         #expect(chip.attachment?.id == "upload:gateway-upload")
         #expect(QueuedMessageAttachmentPresentation.chips(for: [attachment.requiringUpload()]).isEmpty)
     }

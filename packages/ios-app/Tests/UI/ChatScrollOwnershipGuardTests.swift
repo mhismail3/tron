@@ -59,8 +59,11 @@ struct ChatScrollOwnershipGuardTests {
             encoding: .utf8
         )
         let admission = try #require(chat.range(of: "let submission = try model.beginComposerSubmission("))
-        let focus = try #require(chat.range(of: "composerFocused = false", range: admission.lowerBound..<chat.endIndex))
-        #expect(admission.lowerBound < focus.lowerBound)
+        let dismissal = try #require(chat.range(
+            of: "dismissComposerForAdmittedSubmission()",
+            range: admission.lowerBound..<chat.endIndex
+        ))
+        #expect(admission.lowerBound < dismissal.lowerBound)
         let preceding = chat[..<admission.lowerBound]
         #expect(!preceding.suffix(2_000).contains("composerFocused = false"))
         #expect(!preceding.suffix(2_000).contains("resignFirstResponder()"))

@@ -136,8 +136,16 @@ final class ChatLayoutTransaction {
     @discardableResult
     func joinParticipant(_ mutation: ChatLayoutMutation) -> ParticipantTicket {
         if var current = generation {
+            let wasAlreadyJoined = current.joined.contains(mutation)
             let revision = (current.participantRevisions[mutation] ?? 0) &+ 1
             current.joined.insert(mutation)
+            if mutation == .keyboard, !wasAlreadyJoined, keyboardTransition != nil {
+                // A keyboard notification may arrive just after submission
+                // opened its fallback clock. The first exact UIKit participant
+                // supersedes that provisional clock; later frame revisions keep
+                // the already-frozen keyboard clock.
+                current.clock = nil
+            }
             current.settled.remove(mutation)
             current.participantRevisions[mutation] = revision
             generation = current
@@ -177,6 +185,13 @@ final class ChatLayoutTransaction {
             revision: 1
         )
     }
+
+    var activeSubmissionGenerationID: Int? {
+        guard let generation, generation.joined.contains(.submission) else { return nil }
+        return generation.id
+    }
+
+    var resolvedAnimation: Animation? { generation?.clock?.animation }
 
     var animation: Animation? {
         guard var current = generation else { return nil }

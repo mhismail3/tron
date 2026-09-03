@@ -45,6 +45,48 @@ struct ChatLayoutTransactionTests {
         #expect(transaction.generation?.clock == resolved)
     }
 
+    @Test("a late first keyboard participant replaces only the provisional submission clock")
+    func lateKeyboardOwnsClock() {
+        let transaction = ChatLayoutTransaction()
+        _ = transaction.join(.submission)
+        _ = transaction.animation
+        #expect(transaction.generation?.clock?.curve == .spring(
+            response: 0.40,
+            dampingFraction: 0.86,
+            blendDuration: 0.08
+        ))
+        transaction.configure(
+            keyboard: ChatKeyboardTransition(
+                targetHeight: 0,
+                duration: 0.27,
+                curve: .easeOut
+            ),
+            reduceMotion: false
+        )
+        _ = transaction.join(.keyboard)
+        #expect(transaction.resolvedAnimation == nil)
+        _ = transaction.animation
+        #expect(transaction.generation?.clock == ChatLayoutClock(
+            duration: 0.27,
+            curve: .keyboard(UIView.AnimationCurve.easeOut.rawValue)
+        ))
+    }
+
+    @Test("submission generation exposes only its one frozen structural clock")
+    func submissionClockProjection() {
+        let transaction = ChatLayoutTransaction()
+        #expect(transaction.activeSubmissionGenerationID == nil)
+        #expect(transaction.resolvedAnimation == nil)
+        let generation = transaction.join(.submission)
+        #expect(transaction.activeSubmissionGenerationID == generation)
+        #expect(transaction.resolvedAnimation == nil)
+        _ = transaction.animation
+        #expect(transaction.resolvedAnimation != nil)
+        transaction.settle(generation, source: .submission)
+        #expect(transaction.activeSubmissionGenerationID == nil)
+        #expect(transaction.resolvedAnimation == nil)
+    }
+
     @Test("a repeated settled participant reopens in the active generation")
     func repeatedParticipantReopens() throws {
         let transaction = ChatLayoutTransaction()
