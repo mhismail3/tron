@@ -15,16 +15,22 @@ scripts/tron ios generate
 
 The top-left Tron logo on the session dashboard is a native `UIButton`/`UIMenu`
 selector. It switches between the independent Sessions and Automations root
-projections; it does not replace session navigation state. Automations uses
-`.tronCoral` and has Upcoming and All modes. Upcoming extends in canonical seven-day
-Gateway-generated windows, retains at most eight windows/8,192 presentation items,
-and requires `automations.timeline.v1`; All remains available with `automations.v1`
-alone. Catalog rows are summary-only and action content is fetched only for a visible
-detail/run surface. A secondary Gateway is read-only until **Use This Gateway**
-transfers focused lifecycle ownership; mutations then remain revision-fenced and use
-the existing command-receipt reconciler. Validate changes with
-`AutomationProtocolTests` and `AutomationCoordinatorTests`. Do not add recurrence
-calculation, prompt/notification text to caches, or local automation journals in iOS.
+projections; it does not replace session navigation state. Automations uses one
+`.tronCoral` visual theme across its dashboard and managed sheets. The top-right
+filter action presents a native Tron sheet that owns the Upcoming/All view choice,
+status/action filters, and connected-Gateway selection. All-mode search uses the same
+bottom-left reveal/close interaction as the Sessions dashboard rather than permanently
+occupying dashboard space. Upcoming extends in canonical seven-day Gateway-generated
+windows, retains at most eight windows/8,192 presentation items, and requires
+`automations.timeline.v1`. Only currently connected Gateways advertising
+`automations.v1` enter the catalog; disconnected or incompatible profiles stay absent
+instead of publishing warning rows or replacing the neutral empty state. Catalog rows
+are summary-only and action content is fetched only for a visible detail/run surface.
+A secondary Gateway is read-only until **Use This Gateway** transfers focused lifecycle
+ownership; mutations then remain revision-fenced and use the existing command-receipt
+reconciler. Validate changes with `AutomationProtocolTests` and
+`AutomationCoordinatorTests`. Do not add recurrence calculation,
+prompt/notification text to caches, or local automation journals in iOS.
 
 ## UI motion and loading surfaces
 

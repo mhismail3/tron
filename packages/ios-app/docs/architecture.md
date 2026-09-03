@@ -356,7 +356,11 @@ opening, paging, picker, and route work. A resumed open waits for an exact curre
 Gateway-owned automations advertise `automations.v1`; canonical agenda/preview reads additionally
 advertise `automations.timeline.v1`. The dashboard Tron logo opens a native Sessions/Automations menu;
 each choice retains independent root state. The Automations root provides a chronological Upcoming
-agenda and a searchable/filterable All inventory across identity-qualified paired Gateways. iOS admits
+agenda and a searchable/filterable All inventory across identity-qualified paired Gateways. Its one
+managed filter sheet owns the view, status, action, and Gateway choices, while All-mode search reuses
+the Sessions dashboard's bottom reveal/close interaction. Only currently connected profiles with an
+authenticated `automations.v1` capability enter this projection; disconnected and incompatible profiles
+remain absent and cannot publish warning copy over the dashboard's neutral empty state. iOS admits
 typed bounded automation summaries, trigger/run/detail states, and `automation.changed` invalidations,
 but does not infer execution state or build a local schedule engine. List pages omit action bodies,
 require one exact catalog revision, and cap each disposable Gateway projection at 1,024 definitions;

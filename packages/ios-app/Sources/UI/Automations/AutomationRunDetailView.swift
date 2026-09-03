@@ -10,52 +10,151 @@ struct AutomationRunDetailView: View {
     @State private var resolution: String?
     @State private var confirmingResolution = false
     private var client: AutomationRPCClient? { model.automationCatalog.endpoint(for: automation.profileID)?.client }
+    private var ownsMutationGateway: Bool {
+        model.profiles.selected?.id == automation.profileID && model.connectionState == .connected
+    }
     var body: some View {
         NavigationStack {
-            ScrollView { VStack(alignment: .leading, spacing: TronSpacing.lg) {
-                TronGlassCard(accent: .tronCoral) { VStack(alignment: .leading, spacing: 8) { HStack { Image(systemName: run.state == .succeeded ? "checkmark.circle.fill" : "exclamationmark.circle.fill").foregroundStyle(run.state == .succeeded ? Color.tronTeal : Color.tronAmber); Text(run.state.label).font(TronTypography.headline).foregroundStyle(Color.tronTextPrimary); Spacer(); if run.manual == true { Text("Manual").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronCoral) } }; Text("Run \(run.runId)").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted) }.padding(4) }
-                section("Timing", icon: "clock") { info("Scheduled", AutomationDateFormatting.date(run.scheduledFor)); info("Created", AutomationDateFormatting.date(run.createdAt)); info("Claimed", AutomationDateFormatting.date(run.claimedAt)); info("Started", AutomationDateFormatting.date(run.startedAt)); info("Finished", AutomationDateFormatting.date(run.terminalAt)); info("Attempts", "\(run.preAdmissionAttemptCount)") }
-                section("Trigger snapshot", icon: "calendar") { info("Pattern", run.triggerSnapshot.summary); info("Timezone", run.triggerSnapshot.timezone ?? TimeZone.current.identifier) }
-                section("Action snapshot", icon: run.actionSnapshot.typedKind?.icon ?? "bolt") {
-                    Text(run.actionSnapshot.content)
-                        .font(TronTypography.body)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let invocation = run.actionSnapshot.resourceInvocation {
-                        info("Resource", "\(invocation.source.rawValue) · \(invocation.name)")
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    runHeader
+                    section("Timing", icon: "clock") { info("Scheduled", AutomationDateFormatting.date(run.scheduledFor)); info("Created", AutomationDateFormatting.date(run.createdAt)); info("Claimed", AutomationDateFormatting.date(run.claimedAt)); info("Started", AutomationDateFormatting.date(run.startedAt)); info("Finished", AutomationDateFormatting.date(run.terminalAt)); info("Attempts", "\(run.preAdmissionAttemptCount)") }
+                    section("Trigger Snapshot", icon: "calendar") { info("Pattern", run.triggerSnapshot.summary); info("Timezone", run.triggerSnapshot.timezone ?? TimeZone.current.identifier) }
+                    section("Action Snapshot", icon: run.actionSnapshot.typedKind?.icon ?? "bolt") {
+                        VStack(alignment: .leading, spacing: TronSpacing.md) {
+                            Text(run.actionSnapshot.content)
+                                .font(TronTypography.body)
+                                .foregroundStyle(Color.tronTextPrimary)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let invocation = run.actionSnapshot.resourceInvocation {
+                                Label("\(invocation.source.rawValue.capitalized): \(invocation.name)", systemImage: "sparkles")
+                                    .font(TronTypography.secondaryDescription)
+                                    .foregroundStyle(Color.tronCoral)
+                            }
+                        }
+                        .padding(14)
                     }
-                }
-                if let error = run.error { section("Result", icon: "exclamationmark.triangle") { info("Code", error.code); Text(error.message).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError); info("Retryable", error.retryable ? "Yes" : "No") } }
-                if let reason = run.reason { section("Reason", icon: "text.alignleft") { Text(reason).font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary) } }
-                if let status = run.notificationAdmissionStatus { section("Notification", icon: "bell") { info("Admission", status) } }
-                if let settled = run.resolution {
-                    section("Resolution", icon: "checkmark.seal") {
-                        info("Outcome", settled.outcome.capitalized)
-                        info("Resolved", AutomationDateFormatting.date(settled.resolvedAt))
-                        info("Resolved by", settled.provenance.kind == "mobile" ? "iPhone" : settled.provenance.kind)
+                    if let error = run.error { section("Result", icon: "exclamationmark.triangle") { info("Code", error.code); Text(error.message).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError).padding(14); info("Retryable", error.retryable ? "Yes" : "No") } }
+                    if let reason = run.reason { section("Reason", icon: "text.alignleft") { Text(reason).font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary).padding(14) } }
+                    if let status = run.notificationAdmissionStatus { section("Notification", icon: "bell") { info("Admission", status) } }
+                    if let settled = run.resolution {
+                        section("Resolution", icon: "checkmark.seal") {
+                            info("Outcome", settled.outcome.capitalized)
+                            info("Resolved", AutomationDateFormatting.date(settled.resolvedAt))
+                            info("Resolved by", settled.provenance.kind == "mobile" ? "iPhone" : settled.provenance.kind)
+                        }
                     }
+                    if run.state == .outcomeUnknown {
+                        if ownsMutationGateway { resolutionActions }
+                        else { gatewayAdmission }
+                    }
+                    if let resolution {
+                        TronInfoCard(icon: "exclamationmark.triangle", text: resolution, accent: .tronError, usesSemanticAccent: true)
+                    }
+                    section("Technical Details", icon: "wrench.and.screwdriver") { info("Operation", run.operationId ?? "—"); info("Invocation", run.invocationId ?? "—"); info("Completion", run.assistantCompletionId ?? "—"); info("Host epoch", run.hostEpoch ?? "—") }
                 }
-                if run.state == .outcomeUnknown { resolutionActions }
-                if let resolution {
-                    Label(resolution, systemImage: "exclamationmark.triangle")
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronError)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
+                .padding(.bottom, 30)
+            }
+            .tronScrollEdgeChrome()
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: "Run Details", accent: .tronCoral)
                 }
-                section("Technical details", icon: "wrench.and.screwdriver") { info("Operation", run.operationId ?? "—"); info("Invocation", run.invocationId ?? "—"); info("Completion", run.assistantCompletionId ?? "—"); info("Host epoch", run.hostEpoch ?? "—") }
-            }.padding(20).padding(.bottom, 30) }.tronScrollEdgeChrome().tronNavigationTitle("Run details", accent: .tronCoral).toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Image(systemName: "checkmark") }.accessibilityLabel("Done") } }
-        }.tronTopBlur(.sheet).presentationDetents([.large]).presentationDragIndicator(.hidden)
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronCoral)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
+        }
+        .tronSettingsVisualTheme(accent: .tronCoral)
+        .tronTopBlur(.sheet).presentationDetents([.large]).presentationDragIndicator(.hidden)
         .alert("Resolve uncertain run?", isPresented: $confirmingResolution) { ForEach(["succeeded", "failed", "cancelled"], id: \.self) { outcome in Button(outcome.capitalized) { Task { await resolve(outcome) } } }; Button("Cancel", role: .cancel) {} } message: { Text("This decision is permanent and the run will never be replayed automatically.") }
         .tronManagedSystemPresentation(
             isPresented: $confirmingResolution,
             identity: "automation.outcome-resolution"
         )
     }
-    private var resolutionActions: some View { VStack(alignment: .leading, spacing: 10) { Text("Needs attention").font(TronTypography.sheetSectionHeader).foregroundStyle(Color.tronError); Text("Gateway accepted this work but cannot prove how it finished. Choose the authoritative outcome once.").font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary); Button("Resolve outcome") { confirmingResolution = true }.buttonStyle(TronActionButtonStyle(role: .destructive)) } }
+    private var runHeader: some View {
+        TronGlassCard(accent: .tronCoral) {
+            HStack(alignment: .top, spacing: TronSpacing.xl) {
+                Image(systemName: AutomationStatusPresentation.icon(.enabled, run: run.state))
+                    .font(TronTypography.sans(size: 24, weight: .semibold))
+                    .foregroundStyle(AutomationStatusPresentation.color(.enabled, run: run.state))
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                    Text(run.state.label)
+                        .font(TronTypography.headline)
+                        .foregroundStyle(Color.tronTextPrimary)
+                    Text("Run \(run.runId)")
+                        .font(TronTypography.secondaryCodeDescription)
+                        .foregroundStyle(Color.tronTextMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: TronSpacing.md)
+                if run.manual == true {
+                    Text("Manual")
+                        .font(TronTypography.secondaryCodeDescription)
+                        .foregroundStyle(Color.tronCoral)
+                }
+            }
+            .padding(16)
+        }
+    }
+    private var gatewayAdmission: some View {
+        VStack(alignment: .leading, spacing: TronSpacing.md) {
+            TronInfoCard(
+                icon: "arrow.triangle.2.circlepath",
+                text: "Use the owning Gateway before resolving this uncertain run.",
+                accent: .tronSlate
+            )
+            if let profile = model.profiles.profiles.first(where: { $0.id == automation.profileID }) {
+                Button("Use This Gateway") { Task { await model.switchGateway(profile) } }
+                    .buttonStyle(TronActionButtonStyle(role: .primary))
+            }
+        }
+    }
+    private var resolutionActions: some View {
+        TronSettingsGroup(
+            "Needs Attention",
+            detail: "The Gateway accepted this work but cannot prove how it finished.",
+            accent: .tronError
+        ) {
+            VStack(alignment: .leading, spacing: TronSpacing.md) {
+                Text("Choose the authoritative outcome once. This run will never be replayed automatically.")
+                    .font(TronTypography.bodySM)
+                    .foregroundStyle(Color.tronTextSecondary)
+                Button("Resolve Outcome") { confirmingResolution = true }
+                    .buttonStyle(TronActionButtonStyle(role: .destructive))
+            }
+            .padding(14)
+        }
+    }
     private func section(_ title: String, icon: String, @ViewBuilder content: () -> some View) -> some View { TronSettingsGroup(title, accent: .tronCoral) { content() } }
-    private func info(_ label: String, _ value: String) -> some View { HStack(alignment: .firstTextBaseline) { Text(label).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted); Spacer(); Text(value).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextPrimary).multilineTextAlignment(.trailing).lineLimit(3) } }
+    private func info(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
+            Text(label)
+                .font(TronTypography.secondaryDescription)
+                .foregroundStyle(Color.tronTextMuted)
+            Spacer(minLength: TronSpacing.md)
+            Text(value)
+                .font(TronTypography.secondaryCodeDescription)
+                .foregroundStyle(Color.tronTextPrimary)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(3)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
     private func resolve(_ outcome: String) async {
-        guard let client else { return }
+        guard let client, ownsMutationGateway else { return }
         do {
             _ = try await client.resolve(
                 id: automation.summary.id,

@@ -576,6 +576,18 @@ struct AutomationDashboardProfile: Identifiable, Hashable, Sendable {
     let capabilities: Set<String>
 }
 
+enum AutomationEndpointAdmissionPolicy {
+    static func admits(_ profile: AutomationDashboardProfile) -> Bool {
+        profile.state == .connected
+            && profile.capabilities.contains(AutomationAdmissionPolicy.capability)
+    }
+
+    static func admitsTimeline(_ profile: AutomationDashboardProfile) -> Bool {
+        admits(profile)
+            && profile.capabilities.contains(AutomationAdmissionPolicy.timelineCapability)
+    }
+}
+
 struct AutomationProfileCatalog: Identifiable, Hashable, Sendable {
     let profile: AutomationDashboardProfile
     var catalogRevision: Int = 0

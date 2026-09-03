@@ -69,7 +69,7 @@ final class AutomationCatalogCoordinator {
                 self.buckets = []
                 self.hasLoaded = true
                 self.isLoading = false
-                self.errorMessage = "Pair and enable a Gateway to use Automations."
+                self.errorMessage = nil
                 return
             }
             var next: [AutomationProfileCatalog] = []
@@ -276,10 +276,23 @@ final class AutomationTimelineCoordinator {
         isLoading = reset
         isLoadingMore = !reset
         errorMessage = nil
-        let requestedEndpoints = Array(endpoints().prefix(128))
+        let requestedEndpoints = Array(
+            endpoints()
+                .filter { AutomationEndpointAdmissionPolicy.admitsTimeline($0.profile) }
+                .prefix(128)
+        )
         let existing = reset ? [] : days.flatMap(\.items)
         loadTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            guard !requestedEndpoints.isEmpty else {
+                if reset { self.days = [] }
+                self.canLoadMore = false
+                self.isStale = false
+                self.errorMessage = nil
+                self.isLoading = false
+                self.isLoadingMore = false
+                return
+            }
             var additions: [AutomationTimelineItem] = []
             var failures: [String] = []
             var loadedAny = false
@@ -287,10 +300,6 @@ final class AutomationTimelineCoordinator {
             for endpoint in requestedEndpoints {
                 guard !Task.isCancelled else { return }
                 stale = stale || endpoint.profile.state != .connected
-                guard endpoint.profile.capabilities.contains(AutomationAdmissionPolicy.timelineCapability) else {
-                    failures.append("\(endpoint.profile.label) requires a Gateway update for Upcoming.")
-                    continue
-                }
                 do {
                     let values = try await self.loadWindow(endpoint: endpoint, from: start, through: end)
                     additions.append(contentsOf: values)

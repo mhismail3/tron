@@ -20,6 +20,44 @@ private final class AutomationRequestScript {
 @Suite("Automation catalog ownership")
 @MainActor
 struct AutomationCoordinatorTests {
+    @Test("only connected compatible Gateways enter Automation projections")
+    func endpointAdmission() {
+        let connected = profile()
+        let disconnected = AutomationDashboardProfile(
+            id: "profile-two",
+            label: "Offline",
+            state: .offline,
+            capabilities: [AutomationAdmissionPolicy.capability, AutomationAdmissionPolicy.timelineCapability]
+        )
+        let outdated = AutomationDashboardProfile(
+            id: "profile-three",
+            label: "Outdated",
+            state: .connected,
+            capabilities: []
+        )
+        #expect(AutomationEndpointAdmissionPolicy.admits(connected))
+        #expect(AutomationEndpointAdmissionPolicy.admitsTimeline(connected))
+        #expect(!AutomationEndpointAdmissionPolicy.admits(disconnected))
+        #expect(!AutomationEndpointAdmissionPolicy.admits(outdated))
+        #expect(!AutomationEndpointAdmissionPolicy.admitsTimeline(outdated))
+    }
+
+    @Test("no eligible Gateway produces a neutral empty projection")
+    func emptyProjectionIsNeutral() async throws {
+        let catalog = AutomationCatalogCoordinator(endpoints: { [] })
+        catalog.activate()
+        try await eventually { catalog.hasLoaded && !catalog.isLoading }
+        #expect(catalog.buckets.isEmpty)
+        #expect(catalog.errorMessage == nil)
+
+        let timeline = AutomationTimelineCoordinator(endpoints: { [] })
+        timeline.load()
+        try await eventually { !timeline.isLoading }
+        #expect(timeline.days.isEmpty)
+        #expect(timeline.errorMessage == nil)
+        #expect(!timeline.canLoadMore)
+    }
+
     @Test("inactive invalidations defer reads and activation traverses one exact catalog revision")
     func deferredInvalidationAndTraversal() async throws {
         let first = automationSummary(id: "automation-one", name: "One")

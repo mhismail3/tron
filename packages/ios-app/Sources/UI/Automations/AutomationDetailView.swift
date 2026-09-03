@@ -25,14 +25,31 @@ struct AutomationDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: TronSpacing.lg) {
-                    if isLoading { TronLoadingState(label: "Loading automation…", accent: .tronCoral).frame(minHeight: 220) }
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    if isLoading { TronLoadingState(label: "Loading Automation…", accent: .tronCoral).frame(minHeight: 220) }
                     else if let errorMessage { errorState(errorMessage) }
                     else if let record { detail(record) }
-                }.padding(20).padding(.bottom, 32)
-            }.tronScrollEdgeChrome().tronNavigationTitle(selection.summary.name, accent: .tronCoral)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button { dismiss() } label: { Image(systemName: "checkmark") }.accessibilityLabel("Done") } }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
+                .padding(.bottom, 32)
+            }
+            .tronScrollEdgeChrome()
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: selection.summary.name, accent: .tronCoral)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronCoral)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
         }
+        .tronSettingsVisualTheme(accent: .tronCoral)
         .tronTopBlur(.sheet).presentationDetents([.large]).presentationDragIndicator(.hidden)
         .task { await load() }
         .onChange(of: currentRevisionTag) { _, _ in
@@ -76,10 +93,7 @@ struct AutomationDetailView: View {
             )
         }
         if let description = record.description {
-            Text(description)
-                .font(TronTypography.bodySM)
-                .foregroundStyle(Color.tronTextSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+            TronInfoCard(icon: "text.alignleft", text: description, accent: .tronSlate)
         }
         if !ownsMutationGateway {
             Button {
@@ -91,10 +105,20 @@ struct AutomationDetailView: View {
             .buttonStyle(TronActionButtonStyle(role: .standard))
             .accessibilityHint("Selects this Gateway before allowing changes")
         }
-        section("What happens", icon: record.action.typedKind?.icon ?? "bolt") {
-            Text(record.action.content.isEmpty ? "No action content returned." : record.action.content)
-                .font(TronTypography.body).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-            if let invocation = record.action.resourceInvocation { Label("Resource: \(invocation.name)", systemImage: "sparkles").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronCoral) }
+        section("Action", icon: record.action.typedKind?.icon ?? "bolt") {
+            VStack(alignment: .leading, spacing: TronSpacing.md) {
+                Text(record.action.content.isEmpty ? "No action content returned." : record.action.content)
+                    .font(TronTypography.body)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let invocation = record.action.resourceInvocation {
+                    Label("\(invocation.source.rawValue.capitalized): \(invocation.name)", systemImage: "sparkles")
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronCoral)
+                }
+            }
+            .padding(14)
         }
         section("Schedule", icon: "calendar") {
             info("Pattern", record.trigger.summary)
@@ -113,16 +137,48 @@ struct AutomationDetailView: View {
             if record.activation == .blocked, let reason = record.blockedReason { Text(reason).foregroundStyle(Color.tronError) }
         }
         if let run = record.currentRun { currentRun(run, record: record) }
-        section("Recent runs", icon: "clock.arrow.circlepath") {
-            if runs.isEmpty { Text("No runs yet").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted) }
-            ForEach(runs) { run in Button { Task { await selectRun(run) } } label: { runSummary(run) }.buttonStyle(.plain) }
+        section("Recent Runs", icon: "clock.arrow.circlepath") {
+            if runs.isEmpty {
+                TronSettingsRow(
+                    icon: "clock.arrow.circlepath",
+                    title: "No runs yet",
+                    subtitle: "Scheduled and manual runs will appear here.",
+                    accent: .tronCoral
+                )
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(runs.enumerated()), id: \.element.id) { index, run in
+                        Button { Task { await selectRun(run) } } label: { runSummary(run) }
+                            .buttonStyle(.plain)
+                        if index < runs.count - 1 { TronSettingsDivider(accent: .tronCoral) }
+                    }
+                }
+            }
         }
         section("About", icon: "info.circle") { info("Created", AutomationDateFormatting.date(record.createdAt)); info("Updated", AutomationDateFormatting.date(record.updatedAt)); info("Created by", provenanceLabel(record.provenance)); info("Revision", "\(record.revision)") }
         actions(record)
     }
 
     private func statusHeader(_ record: GatewayAutomationRecord) -> some View {
-        TronGlassCard(accent: .tronCoral) { VStack(alignment: .leading, spacing: 8) { HStack { Image(systemName: AutomationStatusPresentation.icon(record.activation, run: record.currentRun?.state)).foregroundStyle(AutomationStatusPresentation.color(record.activation, run: record.currentRun?.state)); Text(record.name).font(TronTypography.headline).foregroundStyle(Color.tronTextPrimary); Spacer(); AutomationStatusBadge(activation: record.activation, run: record.currentRun?.state) }; Text(record.trigger.summary).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary) }.padding(4) }
+        TronGlassCard(accent: .tronCoral) {
+            HStack(alignment: .top, spacing: TronSpacing.xl) {
+                Image(systemName: AutomationStatusPresentation.icon(record.activation, run: record.currentRun?.state))
+                    .font(TronTypography.sans(size: 24, weight: .semibold))
+                    .foregroundStyle(AutomationStatusPresentation.color(record.activation, run: record.currentRun?.state))
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                    Text(record.name)
+                        .font(TronTypography.headline)
+                        .foregroundStyle(Color.tronTextPrimary)
+                    Text(record.trigger.summary)
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronTextSecondary)
+                }
+                Spacer(minLength: TronSpacing.md)
+                AutomationStatusBadge(activation: record.activation, run: record.currentRun?.state)
+            }
+            .padding(16)
+        }
     }
     private func currentRun(_ run: GatewayAutomationRun, record: GatewayAutomationRecord) -> some View {
         section("Current run", icon: "play.circle") {
@@ -132,33 +188,79 @@ struct AutomationDetailView: View {
             Button("Cancel run") { confirmation = .cancel(record, run) }
                 .buttonStyle(TronActionButtonStyle(role: .standard))
                 .disabled(!ownsMutationGateway)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 14)
         }
     }
     private func actions(_ record: GatewayAutomationRecord) -> some View {
-        VStack(spacing: 10) {
-            HStack {
-                Button("Edit") { formPresented = true }.buttonStyle(TronActionButtonStyle(role: .primary))
-                Button("Run Now") { confirmation = .run(record) }.buttonStyle(TronActionButtonStyle(role: .standard))
-            }
-            HStack {
-                Button(record.activation == .enabled ? "Pause" : "Enable") { confirmation = .activation(record) }
+        TronSettingsGroup(
+            "Controls",
+            detail: "Every change is revision-fenced on the owning Gateway.",
+            accent: .tronCoral
+        ) {
+            VStack(spacing: TronSpacing.md) {
+                HStack(spacing: TronSpacing.md) {
+                    Button("Edit") { formPresented = true }
+                        .buttonStyle(TronActionButtonStyle(role: .primary))
+                    Button("Run Now") { confirmation = .run(record) }
+                        .buttonStyle(TronActionButtonStyle(role: .standard))
+                }
+                HStack(spacing: TronSpacing.md) {
+                    Button(record.activation == .enabled ? "Pause" : "Enable") {
+                        confirmation = .activation(record)
+                    }
                     .buttonStyle(TronActionButtonStyle(role: .standard))
                     .disabled(record.blockedReason == "outcome-unknown")
-                Button("Delete") { confirmation = .delete(record) }.buttonStyle(TronActionButtonStyle(role: .destructive))
+                    Button("Delete") { confirmation = .delete(record) }
+                        .buttonStyle(TronActionButtonStyle(role: .destructive))
+                }
+                if record.blockedReason == "outcome-unknown" {
+                    Text("Resolve the uncertain run in Recent Runs before enabling this Automation.")
+                        .font(TronTypography.secondaryDescription)
+                        .foregroundStyle(Color.tronError)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            if record.blockedReason == "outcome-unknown" {
-                Text("Resolve the uncertain run in Recent runs before enabling this Automation.")
-                    .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(Color.tronAmber)
-            }
+            .padding(14)
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
         .disabled(!ownsMutationGateway)
         .opacity(ownsMutationGateway ? 1 : 0.55)
     }
     private func section(_ title: String, icon: String, @ViewBuilder content: () -> some View) -> some View { TronSettingsGroup(title, accent: .tronCoral) { content() } }
-    private func info(_ label: String, _ value: String) -> some View { HStack(alignment: .firstTextBaseline) { Text(label).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted); Spacer(); Text(value).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextPrimary).multilineTextAlignment(.trailing).lineLimit(3) } }
-    private func runSummary(_ run: GatewayAutomationRunSummary) -> some View { HStack { Image(systemName: run.state == .succeeded ? "checkmark.circle.fill" : run.state == .failed || run.state == .outcomeUnknown ? "exclamationmark.circle.fill" : "circle").foregroundStyle(run.state == .succeeded ? Color.tronTeal : run.state == .failed || run.state == .outcomeUnknown ? Color.tronError : Color.tronTextMuted); VStack(alignment: .leading) { Text(run.state.label).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextPrimary); Text(AutomationDateFormatting.date(run.scheduledFor)).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted) }; Spacer() }.padding(.vertical, 5) }
+    private func info(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
+            Text(label)
+                .font(TronTypography.secondaryDescription)
+                .foregroundStyle(Color.tronTextMuted)
+            Spacer(minLength: TronSpacing.md)
+            Text(value)
+                .font(TronTypography.secondaryCodeDescription)
+                .foregroundStyle(Color.tronTextPrimary)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(3)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
+    private func runSummary(_ run: GatewayAutomationRunSummary) -> some View {
+        HStack(spacing: TronSpacing.xl) {
+            Image(systemName: run.state == .succeeded ? "checkmark.circle.fill" : run.state == .failed || run.state == .outcomeUnknown ? "exclamationmark.circle.fill" : "circle")
+                .foregroundStyle(run.state == .succeeded ? Color.tronTeal : run.state == .failed || run.state == .outcomeUnknown ? Color.tronError : Color.tronTextMuted)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(run.state.label)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(Color.tronTextPrimary)
+                Text(AutomationDateFormatting.date(run.scheduledFor))
+                    .font(TronTypography.secondaryCodeDescription)
+                    .foregroundStyle(Color.tronTextMuted)
+            }
+            Spacer(minLength: TronSpacing.md)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+    }
     private func errorState(_ message: String) -> some View { VStack(spacing: 12) { Image(systemName: "exclamationmark.triangle").font(TronTypography.sans(size: 30, weight: .semibold)).foregroundStyle(Color.tronAmber); Text(message).font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary); Button("Retry") { Task { await load() } }.buttonStyle(TronActionButtonStyle(role: .primary)) }.frame(maxWidth: .infinity, minHeight: 220) }
     private func selectRun(_ summary: GatewayAutomationRunSummary) async { guard let client else { return }; do { selectedRun = try await client.run(id: selection.summary.id, runId: summary.runId) } catch { errorMessage = (error as? GatewayFailure)?.message ?? "Unable to load run." } }
     private func load() async {

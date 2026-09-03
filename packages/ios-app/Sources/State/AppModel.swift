@@ -400,7 +400,7 @@ final class AppModel {
         )
         let gatewayDiagnostics = GatewayDiagnosticsService(client: client)
         let automationCatalog = AutomationCatalogCoordinator(endpoints: { @MainActor in
-            profiles.profiles.filter { $0.isEnabled && profiles.token(for: $0) != nil }.map { profile in
+            profiles.profiles.filter { $0.isEnabled && profiles.token(for: $0) != nil }.compactMap { profile in
                 let state: DashboardServerConnectionState
                 let capabilities: Set<String>
                 if profile.id == lifecycle.selectedProfileID {
@@ -420,6 +420,13 @@ final class AppModel {
                     // advertise a background Gateway capability.
                     capabilities = Set(dashboardConnections.infoSnapshot(for: profile.id)?.capabilities ?? [])
                 }
+                let dashboardProfile = AutomationDashboardProfile(
+                    id: profile.id,
+                    label: profile.label,
+                    state: state,
+                    capabilities: capabilities
+                )
+                guard AutomationEndpointAdmissionPolicy.admits(dashboardProfile) else { return nil }
                 let request: AutomationRPCClient.Request = { method, params, timeout in
                     if profile.id == lifecycle.selectedProfileID {
                         return try await client.requestValue(method, params, timeout: timeout)
@@ -427,8 +434,11 @@ final class AppModel {
                     return try await dashboardConnections.request(profileID: profile.id, method: method, params: params, timeout: timeout)
                 }
                 return AutomationGatewayEndpoint(
-                    profile: AutomationDashboardProfile(id: profile.id, label: profile.label, state: state, capabilities: capabilities),
-                    client: AutomationRPCClient(request: request, mutationExecutor: profile.id == lifecycle.selectedProfileID ? mutationExecutor : nil)
+                    profile: dashboardProfile,
+                    client: AutomationRPCClient(
+                        request: request,
+                        mutationExecutor: profile.id == lifecycle.selectedProfileID ? mutationExecutor : nil
+                    )
                 )
             }
         })
