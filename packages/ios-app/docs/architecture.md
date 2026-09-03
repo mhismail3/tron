@@ -91,12 +91,17 @@ valid saved source checkout. The supervised installer receives the signed
 Gateway payload's pinned XcodeGen path and never depends on a Homebrew or
 checkout-local tool installation.
 
-`AutomationCatalogCoordinator` owns only a bounded, disposable summary projection for each
-identity-verified Gateway profile. `AutomationTimelineCoordinator` groups canonical Gateway-generated
-occurrences by the device timezone and never calculates recurrence or DST locally. Full action text,
-run snapshots, and errors are fetched only while their managed detail surface is visible. Automation
-mutations use command IDs and the focused profile's `ConfirmedMutationExecutor`; an unavailable
-background profile is read-only rather than silently switching the selected session Gateway.
+`AutomationCatalogCoordinator` owns only a bounded, in-memory disposable summary projection for each
+identity-verified Gateway profile. It pages one exact catalog revision, rejects duplicate identities,
+cursor cycles, mixed revisions, and aggregate overflow, retains an existing shallow bucket as visibly
+stale during a partial outage, and defers invalidation reads while the Automations dashboard is not
+mounted. `AutomationTimelineCoordinator` pages canonical Gateway-generated seven-day occurrence windows,
+groups them by the device timezone, extends the agenda on bounded scroll demand, and never calculates
+recurrence, dense-series counts, or DST locally. Full action text, run snapshots, and errors are fetched
+only while their managed detail surface is visible and are neither cached nor placed in global events.
+Automation mutations use command IDs and the focused profile's `ConfirmedMutationExecutor`; a background
+profile remains read-only until the explicit **Use This Gateway** action gives the existing lifecycle and
+receipt owner authority. No second mutation-reconciliation algorithm or Automation event journal exists.
 `SessionCatalogCoordinator` owns the focused profile's summaries, while the dashboard pool owns
 profile-qualified shallow catalogs for non-focused profiles. `SessionSummary` carries dashboard-only
 profile ownership and the dashboard aggregates by `(profileID, sessionID)`; equal bare session IDs from
@@ -346,14 +351,19 @@ composer admission owner, and revocation makes any late error target-gated and s
 than allowing a retired view to surface stale UI state. Backgrounding cancels only disposable
 opening, paging, picker, and route work. A resumed open waits for an exact current transport connection rather than trusting the previous epoch's public connected label; a target-free background-retirement interval cancels silently, and the replacement connected transition retries through the same generation checks. Already-ready active and passive chats retain their complete installed projection while the lifecycle owner synchronizes in place.
 
-Gateway-owned automations advertise `automations.v1`. iOS admits typed bounded
-automation summaries, trigger/run states, and `automation.changed` invalidations,
-but does not infer execution state or build a local schedule engine. List pages omit
-action bodies, require one exact catalog revision, and cap the disposable projection
-at 1,024 definitions; authenticated detail reads remain the only path to prompt or
-notification content. Repeated invalidations coalesce in the connection event hub.
-Visual management, navigation, and persistent cache design remain deferred to the
-dedicated automation UI phase rather than creating unused production state now.
+Gateway-owned automations advertise `automations.v1`; canonical agenda/preview reads additionally
+advertise `automations.timeline.v1`. The dashboard Tron logo opens a native Sessions/Automations menu;
+each choice retains independent root state. The Automations root provides a chronological Upcoming
+agenda and a searchable/filterable All inventory across identity-qualified paired Gateways. iOS admits
+typed bounded automation summaries, trigger/run/detail states, and `automation.changed` invalidations,
+but does not infer execution state or build a local schedule engine. List pages omit action bodies,
+require one exact catalog revision, and cap each disposable Gateway projection at 1,024 definitions;
+authenticated, surface-scoped detail reads remain the only path to prompt or notification content.
+Repeated invalidations coalesce in the connection event hub and become one dirty catalog refresh only
+while the dashboard is active. Create/edit supports only session prompts, optional skill/prompt resource
+invocations, and notifications; shell, webhook, extension-command, attachment, deployment, and Gateway
+lifecycle actions have no UI or wire path. Run-now, enable, cancellation, deletion, and uncertain-outcome
+resolution require explicit confirmation and retain optimistic definition revision fences.
 
 Gateway restart uses a supervised drain contract. The request freezes new mutations,
 waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway

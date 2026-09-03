@@ -119,11 +119,30 @@ function calendarOccurrenceAtOrBefore(
   throw new Error("Calendar trigger did not produce a bounded prior occurrence");
 }
 
-/** Returns the UTC instant at the start of the local calendar day containing the instant. */
-export function automationLocalDayStart(instantMs: number, timezone: string): string {
+/** Returns the UTC boundaries of the local calendar day containing the instant. */
+export function automationLocalDayBounds(instantMs: number, timezone: string): { start: number; end: number } {
   if (!Number.isFinite(instantMs)) throw new Error("Schedule boundary is invalid");
   const local = localParts(instantMs, timezone);
-  return new Date(localMinuteToInstant({ year: local.year, month: local.month, day: local.day, hour: 0, minute: 0 }, timezone)).toISOString();
+  const date = { year: local.year, month: local.month, day: local.day };
+  const start = localMinuteToInstant({ ...date, hour: 0, minute: 0 }, timezone);
+  // A timezone transition can skip an entire civil date. Advance to the next
+  // representable local day instead of treating a valid IANA window as an
+  // internal scheduling failure.
+  for (let offset = 1; offset <= 8; offset += 1) {
+    const next = addLocalDays(date, offset);
+    try {
+      const end = localMinuteToInstant({ ...next, hour: 0, minute: 0 }, timezone);
+      if (end > start) return { start, end };
+    } catch {
+      // Continue across a fully skipped civil date.
+    }
+  }
+  throw new Error("Schedule local-day boundary did not advance");
+}
+
+/** Returns the UTC instant at the start of the local calendar day containing the instant. */
+export function automationLocalDayStart(instantMs: number, timezone: string): string {
+  return new Date(automationLocalDayBounds(instantMs, timezone).start).toISOString();
 }
 
 /** Returns the local calendar day key for deterministic grouping and tests. */

@@ -16,12 +16,15 @@ scripts/tron ios generate
 The top-left Tron logo on the session dashboard is a native `UIButton`/`UIMenu`
 selector. It switches between the independent Sessions and Automations root
 projections; it does not replace session navigation state. Automations uses
-`.tronCoral` and has Upcoming and All modes. Upcoming is a seven-day,
-Gateway-generated timeline and requires `automations.timeline.v1`; All remains
-available with `automations.v1` alone. Catalog rows are summary-only and action
-content is fetched only for a visible detail/run surface. Mutations remain
-revision-fenced and command-receipt backed. Do not add recurrence calculation,
-prompt/notification text to caches, or local automation journals in iOS.
+`.tronCoral` and has Upcoming and All modes. Upcoming extends in canonical seven-day
+Gateway-generated windows, retains at most eight windows/8,192 presentation items,
+and requires `automations.timeline.v1`; All remains available with `automations.v1`
+alone. Catalog rows are summary-only and action content is fetched only for a visible
+detail/run surface. A secondary Gateway is read-only until **Use This Gateway**
+transfers focused lifecycle ownership; mutations then remain revision-fenced and use
+the existing command-receipt reconciler. Validate changes with
+`AutomationProtocolTests` and `AutomationCoordinatorTests`. Do not add recurrence
+calculation, prompt/notification text to caches, or local automation journals in iOS.
 
 ## UI motion and loading surfaces
 

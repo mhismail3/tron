@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { GatewayError } from "../errors.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
-import { automationLocalDayStart, automationOccurrenceId, nextAutomationOccurrence } from "./schedule.js";
+import { automationLocalDayBounds, automationLocalDayStart, automationOccurrenceId, nextAutomationOccurrence } from "./schedule.js";
 import type { AutomationSummary } from "./types.js";
 
 export const MAXIMUM_TIMELINE_DAYS = 7;
@@ -100,8 +100,72 @@ export function buildAutomationTimeline(
   }>();
   let rawOccurrences = 0;
 
+  const appendBucket = (
+    summary: AutomationSummary,
+    dayStart: string,
+    firstAt: string,
+    lastAt: string,
+    count: number,
+    occurrences: string[],
+  ): void => {
+    const key = `${summary.id}\0${dayStart}`;
+    const bucket = buckets.get(key) ?? {
+      automationId: summary.id,
+      automationRevision: summary.revision,
+      dayStart,
+      firstAt,
+      lastAt,
+      count: 0,
+      occurrences: [],
+    };
+    bucket.count += count;
+    if (firstAt < bucket.firstAt) bucket.firstAt = firstAt;
+    if (lastAt > bucket.lastAt) bucket.lastAt = lastAt;
+    if (bucket.occurrences.length <= 12) {
+      for (const scheduledFor of occurrences) {
+        if (bucket.occurrences.length > 12) break;
+        bucket.occurrences.push({
+          occurrenceId: automationOccurrenceId(summary.id, summary.revision, scheduledFor),
+          scheduledFor,
+        });
+      }
+    }
+    buckets.set(key, bucket);
+  };
+
   for (const summary of summaries) {
     if (summary.activation !== "enabled") continue;
+    if (summary.trigger.kind === "interval") {
+      const anchor = Date.parse(summary.trigger.anchorAt);
+      const interval = summary.trigger.everySeconds * 1_000;
+      let dayCursor = fromMs;
+      while (dayCursor < throughMs) {
+        const day = automationLocalDayBounds(dayCursor, displayTimezone);
+        const rangeStart = Math.max(fromMs, day.start);
+        const rangeEnd = Math.min(throughMs, day.end);
+        const period = Math.max(0, Math.ceil((rangeStart - anchor) / interval));
+        const first = anchor + period * interval;
+        if (first < rangeEnd) {
+          const count = Math.floor((rangeEnd - 1 - first) / interval) + 1;
+          const last = first + (count - 1) * interval;
+          const occurrences = count > 12
+            ? []
+            : Array.from({ length: count }, (_, index) => new Date(first + index * interval).toISOString());
+          appendBucket(
+            summary,
+            new Date(day.start).toISOString(),
+            new Date(first).toISOString(),
+            new Date(last).toISOString(),
+            count,
+            occurrences,
+          );
+        }
+        if (day.end <= dayCursor) throw new Error("Timeline local-day traversal did not advance");
+        dayCursor = day.end;
+      }
+      continue;
+    }
+
     let afterMs = fromMs - 1;
     while (true) {
       const scheduledFor = nextAutomationOccurrence(summary.trigger, afterMs);
@@ -109,7 +173,6 @@ export function buildAutomationTimeline(
       const scheduledMs = Date.parse(scheduledFor);
       if (!Number.isFinite(scheduledMs) || scheduledMs >= throughMs) break;
       if (scheduledMs < fromMs) {
-        // Defensive progress guard for a malformed future schedule.
         afterMs = Math.max(afterMs + 1, scheduledMs);
         continue;
       }
@@ -121,27 +184,14 @@ export function buildAutomationTimeline(
           true,
         );
       }
-      const dayStart = automationLocalDayStart(scheduledMs, displayTimezone);
-      const key = `${summary.id}\0${dayStart}`;
-      const bucket = buckets.get(key) ?? {
-        automationId: summary.id,
-        automationRevision: summary.revision,
-        dayStart,
-        firstAt: scheduledFor,
-        lastAt: scheduledFor,
-        count: 0,
-        occurrences: [],
-      };
-      bucket.count += 1;
-      bucket.firstAt = bucket.firstAt < scheduledFor ? bucket.firstAt : scheduledFor;
-      bucket.lastAt = bucket.lastAt > scheduledFor ? bucket.lastAt : scheduledFor;
-      if (bucket.occurrences.length <= 12) {
-        bucket.occurrences.push({
-          occurrenceId: automationOccurrenceId(summary.id, summary.revision, scheduledFor),
-          scheduledFor,
-        });
-      }
-      buckets.set(key, bucket);
+      appendBucket(
+        summary,
+        automationLocalDayStart(scheduledMs, displayTimezone),
+        scheduledFor,
+        scheduledFor,
+        1,
+        [scheduledFor],
+      );
       afterMs = scheduledMs;
     }
   }
@@ -190,6 +240,7 @@ export function buildAutomationTimeline(
 interface TimelineLease extends AutomationTimelineSource {
   id: string;
   clientId: string;
+  queryKey: string;
   offset: number;
   expiresAt: number;
 }
@@ -200,7 +251,13 @@ export class AutomationTimelinePaginationStore {
 
   constructor(private readonly now: () => number = Date.now) {}
 
-  page(clientId: string, source: AutomationTimelineSource, cursor: string | undefined, limit: number): AutomationTimelinePage {
+  page(
+    clientId: string,
+    source: AutomationTimelineSource,
+    cursor: string | undefined,
+    limit: number,
+    queryKey = "",
+  ): AutomationTimelinePage {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAXIMUM_TIMELINE_PAGE_SIZE) {
       throw new GatewayError("invalid_request", "Timeline limit must be between 1 and 200");
     }
@@ -218,6 +275,10 @@ export class AutomationTimelinePaginationStore {
         this.leases.delete(cursor);
         throw new GatewayError("conflict", "Timeline changed while loading; reload from the first page", true);
       }
+      if (existing.queryKey !== queryKey) {
+        this.leases.delete(cursor);
+        throw new GatewayError("conflict", "Timeline cursor does not match the requested window; reload", true);
+      }
       this.leases.delete(cursor);
       lease = existing;
     } else {
@@ -225,6 +286,7 @@ export class AutomationTimelinePaginationStore {
         ...source,
         id: randomUUID(),
         clientId,
+        queryKey,
         offset: 0,
         expiresAt: this.now() + TIMELINE_LEASE_TTL_MS,
       };

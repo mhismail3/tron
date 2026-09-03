@@ -188,7 +188,10 @@ struct SessionShellView: View {
     private var dashboardScreen: some View {
         Group {
             if dashboardMode == .automations {
-                AutomationsDashboardView(onSelectSessions: { dashboardMode = .sessions })
+                AutomationsDashboardView(
+                    onSelectSessions: { dashboardMode = .sessions },
+                    onOpenSettings: { showSettings = true }
+                )
             } else {
                 sessionDashboardScreen
             }

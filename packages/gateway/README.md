@@ -188,25 +188,28 @@ Authenticated automation reads are `automation.status`, `automation.list`,
 state advances a separate state revision so a running occurrence does not
 invalidate an unrelated definition edit. List responses omit action bodies and
 page under an opaque exact catalog lease. Get returns the full authenticated
- definition. `automation.schedule.preview` accepts `{trigger, after?, limit?}`
- where the trigger is the strict one-time, anchored-interval, or calendar
- contract, `after` is a Gateway timestamp (defaulting to now), and `limit` is
- 1–20 (default 5); it returns canonical future timestamps only and never writes
- state. `automation.timeline.list` accepts `{from, through, displayTimezone,
- cursor?, limit?}`. It admits a positive, at-most-seven-day timestamp window,
- an IANA display timezone, and a page size from 1–200 (default 100). Its
- revision-fenced opaque cursor is bound to the authenticated client and expires
- after one minute; continuations cannot cross clients or catalog revisions.
- Enabled definitions are expanded into canonical occurrence IDs in the
- half-open window and grouped by display-timezone local day. More than twelve
- occurrences from one automation on one day become one `series` item with
- `dayStart`, `firstAt`, `lastAt`, and `count`; other entries are `occurrence`
- items. Items sort by first instant and automation ID. Timeline materialization,
- raw occurrence generation, source bytes, page bytes, global leases, and
- per-client leases are all bounded; capacity overflow is an explicit retryable
- error and never silently drops occurrences. The timeline capability is
- advertised as `automations.timeline.v1` alongside `automations.v1` only after
- automation recovery is ready. The first-party schedule tool is restricted to its
+definition. `automation.schedule.preview` accepts `{trigger, after?, limit?}`
+where the trigger is the strict one-time, anchored-interval, or calendar
+contract, `after` is a Gateway timestamp (defaulting to now), and `limit` is
+1–20 (default 5); it returns canonical future timestamps only and never writes
+state. `automation.timeline.list` accepts `{from, through, displayTimezone,
+cursor?, limit?}`. It admits a positive, at-most-seven-day timestamp window,
+an IANA display timezone, and a page size from 1–200 (default 100). Its
+revision-fenced opaque cursor is bound to the authenticated client and exact
+requested window/timezone and expires after one minute; continuations cannot
+cross clients, query windows, or catalog revisions. Enabled definitions are
+expanded into canonical occurrence IDs in the half-open window and grouped by
+display-timezone local day. More than twelve occurrences from one automation on
+one day become one `series` item with `dayStart`, `firstAt`, `lastAt`, and
+`count`; dense anchored intervals are counted analytically across local-day/DST
+boundaries, including fully skipped civil dates, rather than expanded into
+unbounded minute entries. Other entries are `occurrence` items. Items sort by
+first instant and automation ID. Timeline materialization, iterative occurrence
+generation, source bytes, page bytes, global leases, and per-client leases are
+all bounded; capacity overflow is an explicit retryable error and never silently
+drops occurrences. The timeline capability is advertised as
+`automations.timeline.v1` alongside `automations.v1` only after automation
+recovery is ready. The first-party schedule tool is restricted to its
  current persisted user session, deduplicates mutations by canonical tool-call
  identity, and rejects mutations from an automation-originated turn to prevent
  self-replication. Paired Gateway credentials are machine-administrator

@@ -35,6 +35,7 @@ final class DashboardGatewayConnectionPool {
         let token: String
         let client: GatewayClient
         var connectionID: Int?
+        var gatewayInfo: GatewayInfo?
         var state: DashboardServerConnectionState
         var catalog: SessionCatalogCoordinator
         var task: Task<Void, Never>?
@@ -111,6 +112,10 @@ final class DashboardGatewayConnectionPool {
 
     func state(for profileID: String) -> DashboardServerConnectionState? {
         entries[profileID]?.state
+    }
+
+    func infoSnapshot(for profileID: String) -> GatewayInfo? {
+        entries[profileID]?.gatewayInfo
     }
 
     func request(
@@ -226,6 +231,7 @@ final class DashboardGatewayConnectionPool {
             token: token,
             client: client,
             connectionID: nil,
+            gatewayInfo: nil,
             state: .connecting,
             catalog: SessionCatalogCoordinator(),
             task: nil,
@@ -253,6 +259,7 @@ final class DashboardGatewayConnectionPool {
                 guard let self, let connectionID,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
                 self.entries[profile.id]?.connectionID = connectionID
+                self.entries[profile.id]?.gatewayInfo = info
                 self.entries[profile.id]?.state = .connecting
                 self.publish(profileID: profile.id)
                 self.scheduleRefresh(
@@ -279,6 +286,7 @@ final class DashboardGatewayConnectionPool {
                 await client.close()
                 guard let self,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
+                self.entries[profile.id]?.gatewayInfo = nil
                 self.entries[profile.id]?.state = .identityMismatch
                 self.publish(profileID: profile.id)
             } catch {
@@ -344,6 +352,7 @@ final class DashboardGatewayConnectionPool {
         case "notification.inbox.changed":
             delegate?.dashboardPoolNotificationInboxChanged(profileID: profileID)
         case "automation.changed":
+            guard case .automationChanged = event.preparation else { return }
             delegate?.dashboardPoolAutomationChanged(profileID: profileID)
         case "transport.disconnected":
             retireConnectionEpoch(profileID: profileID, generation: generation, state: .reconnecting)
@@ -372,8 +381,17 @@ final class DashboardGatewayConnectionPool {
                       let entry = self.entries[profileID],
                       entry.generation == generation else { return }
                 do {
-                    _ = try await entry.client.reconnect()
+                    let info = try await entry.client.reconnect()
+                    guard Self.admitsIdentity(info, for: entry.profile) else {
+                        throw GatewayFailure(
+                            code: "identity_mismatch",
+                            message: "The paired server identity no longer matches this endpoint.",
+                            retryable: false,
+                            details: nil
+                        )
+                    }
                     guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
+                    self.entries[profileID]?.gatewayInfo = info
                     self.entries[profileID]?.state = .connecting
                     self.publish(profileID: profileID)
                     let connectionID = await entry.client.activeConnectionID()
@@ -384,6 +402,11 @@ final class DashboardGatewayConnectionPool {
                     self.scheduleRefresh(profileID: profileID, generation: generation, delay: .zero)
                     return
                 } catch is CancellationError {
+                    return
+                } catch let failure as GatewayFailure where failure.code == "identity_mismatch" {
+                    self.entries[profileID]?.gatewayInfo = nil
+                    self.entries[profileID]?.state = .identityMismatch
+                    self.publish(profileID: profileID)
                     return
                 } catch {
                     self.entries[profileID]?.state = .reconnecting

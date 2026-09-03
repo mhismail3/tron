@@ -3,7 +3,9 @@ import SwiftUI
 enum AutomationStatusPresentation {
     static func color(_ activation: AutomationActivation, run: AutomationRunState? = nil) -> Color {
         if run == .outcomeUnknown || activation == .blocked { return .tronError }
-        if run == .running || run == .admitting || run == .queued { return .tronCoral }
+        if run == .failed { return .tronError }
+        if run == .succeeded { return .tronTeal }
+        if run == .running || run == .admitting || run == .queued || run == .waiting || run == .cancelling { return .tronCoral }
         switch activation {
         case .enabled: return .tronCoral
         case .paused, .draft, .completed: return .tronTextMuted
@@ -13,11 +15,17 @@ enum AutomationStatusPresentation {
     static func icon(_ activation: AutomationActivation, run: AutomationRunState? = nil) -> String {
         if run == .outcomeUnknown || activation == .blocked { return "exclamationmark.triangle.fill" }
         if run == .running { return "play.circle.fill" }
+        if run == .queued || run == .waiting || run == .admitting { return "hourglass.circle.fill" }
+        if run == .cancelling { return "xmark.circle" }
+        if run == .succeeded { return "checkmark.circle.fill" }
+        if run == .failed { return "xmark.circle.fill" }
+        if run == .cancelled { return "slash.circle" }
+        if run == .skipped { return "arrow.right.circle" }
         switch activation { case .enabled: return "checkmark.circle.fill"; case .paused: return "pause.circle.fill"; case .draft: return "pencil.circle"; case .completed: return "checkmark.seal"; case .blocked: return "exclamationmark.triangle.fill" }
     }
     static func accessible(_ summary: GatewayAutomationSummary) -> String {
         var result = "\(summary.name), \(summary.activation.label), \(summary.typedActionKind?.label ?? summary.actionKind), \(summary.trigger.summary)"
-        if let next = summary.nextOccurrenceAt { result += ", next \(next)" }
+        if let next = summary.nextOccurrenceAt { result += ", next \(AutomationDateFormatting.date(next))" }
         if summary.consecutiveFailureCount > 0 { result += ", \(summary.consecutiveFailureCount) consecutive failures" }
         if let blocked = summary.blockedReason { result += ", blocked: \(blocked)" }
         return result

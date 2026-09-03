@@ -3,6 +3,7 @@ import SwiftUI
 struct AutomationSummarySelection: Hashable, Identifiable {
     let profileID: String
     let summary: GatewayAutomationSummary
+    var highlightedOccurrence: String? = nil
     var id: String { "\(profileID):\(summary.id)" }
 }
 
@@ -28,6 +29,7 @@ enum AutomationInventoryFilter: String, CaseIterable, Identifiable {
 
 struct AutomationsDashboardView: View {
     let onSelectSessions: () -> Void
+    let onOpenSettings: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.scenePhase) private var scenePhase
@@ -57,15 +59,32 @@ struct AutomationsDashboardView: View {
         }
     }
 
+    private var visibleTimelineDays: [AutomationAgendaDay] {
+        (timeline?.days ?? []).compactMap { day in
+            let items = day.items.filter { serverFilter == nil || $0.profileID == serverFilter }
+            return items.isEmpty ? nil : AutomationAgendaDay(date: day.date, items: items)
+        }
+    }
+
+    private var attentionCount: Int {
+        model.automationCatalog.summaries.count { $0.summary.isAttentionRequired }
+    }
+
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack(alignment: .bottom) {
             content
-            Button { createPresented = true } label: {
-                Image(systemName: "plus")
+            HStack(alignment: .bottom) {
+                if mode == .upcoming {
+                    Button { datePickerPresented = true } label: { Image(systemName: "calendar") }
+                        .buttonStyle(TronIconButtonStyle(accent: .tronCoral, size: 56))
+                        .accessibilityLabel("Choose agenda date")
+                }
+                Spacer(minLength: 12)
+                Button { createPresented = true } label: { Image(systemName: "plus") }
+                    .buttonStyle(TronIconButtonStyle(accent: .tronCoral, size: 56))
+                    .accessibilityLabel("Create automation")
             }
-            .buttonStyle(TronIconButtonStyle(size: 56))
-            .accessibilityLabel("Create automation")
-            .padding(.trailing, 20)
+            .padding(.horizontal, 20)
             .padding(.bottom, 12)
         }
         .background(Color.tronBackground)
@@ -75,7 +94,7 @@ struct AutomationsDashboardView: View {
         .tronPresentation()
         .task(id: presentationActivity.allowsPresentationPublication) {
             guard presentationActivity.allowsPresentationPublication else { return }
-            model.automationCatalog.reload()
+            model.automationCatalog.activate()
             if timeline == nil {
                 timeline = AutomationTimelineCoordinator(endpoints: { @MainActor in
                     model.automationCatalog.allEndpoints()
@@ -83,11 +102,23 @@ struct AutomationsDashboardView: View {
             }
             timeline?.load(start: selectedDate)
         }
-        .onChange(of: model.automationCatalog.buckets) { _, _ in
+        .onChange(of: model.automationCatalog.buckets) { _, buckets in
+            if let serverFilter, !buckets.contains(where: { $0.profile.id == serverFilter }) {
+                self.serverFilter = nil
+            }
             if mode == .upcoming { timeline?.load(start: selectedDate) }
         }
+        .onChange(of: mode) { _, nextMode in
+            if nextMode == .upcoming { timeline?.load(start: selectedDate) }
+        }
+        .onChange(of: model.profileRevision) { _, _ in
+            model.automationCatalog.reload()
+        }
+        .onChange(of: model.connectionState) { _, _ in
+            model.automationCatalog.reload()
+        }
         .onDisappear {
-            model.automationCatalog.cancel()
+            model.automationCatalog.deactivate()
             timeline?.cancel()
         }
         .tronManagedSheet(item: $selected, identity: { "automation.detail.\($0.id)" }) { selection in
@@ -98,7 +129,7 @@ struct AutomationsDashboardView: View {
         }
         .tronManagedSheet(isPresented: $datePickerPresented, identity: "automation.date-picker") {
             NavigationStack {
-                DatePicker("Start date", selection: $selectedDate, displayedComponents: .date)
+                DatePicker("Start date", selection: $selectedDate, in: Date.now..., displayedComponents: .date)
                     .datePickerStyle(.graphical)
                     .padding()
                     .tronNavigationTitle("Jump to date", accent: .tronCoral)
@@ -166,19 +197,24 @@ struct AutomationsDashboardView: View {
                 } else if summaries.isEmpty {
                     automationEmptyState
                 } else {
-                    ForEach(Array(summaries.enumerated()), id: \.offset) { _, item in automationCard(item.profile, item.summary) }
+                    ForEach(summaries.map { AutomationSummarySelection(profileID: $0.profile.id, summary: $0.summary) }) { item in
+                        if let profile = model.automationCatalog.buckets.first(where: { $0.profile.id == item.profileID })?.profile {
+                            automationCard(profile, item.summary)
+                        }
+                    }
                 }
                 failureView
             }
             .padding(.horizontal, 20).padding(.vertical, 16).padding(.bottom, 80)
         }
+        .refreshable { model.automationCatalog.reload() }
         .tronScrollEdgeChrome()
     }
 
     @ViewBuilder private var upcomingContent: some View {
-        if let timeline, timeline.errorMessage != nil && timeline.days.isEmpty {
+        if let timeline, timeline.errorMessage != nil && visibleTimelineDays.isEmpty {
             VStack(spacing: TronSpacing.lg) {
-                Image(systemName: "calendar.badge.exclamationmark").font(.system(size: 42)).foregroundStyle(Color.tronAmber)
+                Image(systemName: "calendar.badge.exclamationmark").font(TronTypography.sans(size: 42)).foregroundStyle(Color.tronAmber)
                 Text(timeline.errorMessage ?? "Upcoming is unavailable").font(TronTypography.headline).foregroundStyle(Color.tronTextPrimary).multilineTextAlignment(.center)
                 Text("The All view remains available while this Gateway is updated or reconnects.").font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary).multilineTextAlignment(.center)
                 Button("Open All") { mode = .all }.buttonStyle(TronActionButtonStyle(role: .primary))
@@ -186,18 +222,41 @@ struct AutomationsDashboardView: View {
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: TronSpacing.md, pinnedViews: [.sectionHeaders]) {
-                    if timeline?.isLoading == true && timeline?.days.isEmpty == true { TronLoadingState(label: "Loading upcoming triggers…", accent: .tronCoral).frame(minHeight: 220) }
-                    else if timeline?.days.isEmpty == true { upcomingEmptyState }
-                    else {
-                        ForEach(timeline?.days ?? []) { day in
+                    if attentionCount > 0 { attentionBanner }
+                    if let failure = timeline?.errorMessage, !visibleTimelineDays.isEmpty {
+                        Label(failure, systemImage: "exclamationmark.triangle")
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronAmber)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if timeline?.isLoading == true && visibleTimelineDays.isEmpty {
+                        TronLoadingState(label: "Loading upcoming triggers…", accent: .tronCoral).frame(minHeight: 220)
+                    } else if visibleTimelineDays.isEmpty {
+                        upcomingEmptyState
+                    } else {
+                        ForEach(visibleTimelineDays) { day in
                             Section {
                                 ForEach(day.items) { item in occurrenceRow(item) }
-                            } header: { dayHeader(day.date, count: day.items.count) }
+                            } header: { dayHeader(day.date, count: day.items.reduce(0) { $0 + ($1.occurrence.count ?? 1) }) }
+                            .onAppear {
+                                if day.id == visibleTimelineDays.last?.id { timeline?.loadNext() }
+                            }
+                        }
+                        if timeline?.isLoadingMore == true {
+                            TronLoadingState(label: "Loading later dates…", accent: .tronCoral)
+                                .frame(minHeight: 80)
+                        } else if timeline?.canLoadMore == false {
+                            Text("Choose another date to continue beyond this bounded agenda window.")
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronTextMuted)
+                                .frame(maxWidth: .infinity)
                         }
                     }
                 }
                 .padding(.horizontal, 20).padding(.vertical, 12).padding(.bottom, 80)
-            }.tronScrollEdgeChrome()
+            }
+            .refreshable { model.automationCatalog.reload(); timeline?.load(start: selectedDate) }
+            .tronScrollEdgeChrome()
         }
     }
 
@@ -217,21 +276,25 @@ struct AutomationsDashboardView: View {
         let occurrence = item.occurrence
         return Button {
             if let summary = model.automationCatalog.summaries.first(where: { $0.profile.id == item.profileID && $0.summary.id == occurrence.automationId }) {
-                selected = AutomationSummarySelection(profileID: summary.profile.id, summary: summary.summary)
+                selected = AutomationSummarySelection(
+                    profileID: summary.profile.id,
+                    summary: summary.summary,
+                    highlightedOccurrence: occurrence.presentationTimestamp
+                )
             }
         } label: {
             HStack(alignment: .top, spacing: 12) {
-                Text(occurrenceTime(occurrence.scheduledFor)).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronCoral).frame(width: 64, alignment: .leading)
+                Text(occurrenceTime(occurrence.presentationTimestamp)).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronCoral).frame(width: 64, alignment: .leading)
                 Image(systemName: occurrence.isSeries ? "repeat" : "circle.fill").foregroundStyle(Color.tronCoral).padding(.top, 3)
                 VStack(alignment: .leading, spacing: 3) {
                     if let match = model.automationCatalog.summaries.first(where: { $0.profile.id == item.profileID && $0.summary.id == occurrence.automationId }) {
                         Text(match.summary.name).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronTextPrimary).lineLimit(1)
-                        Text("\(match.summary.typedActionKind?.label ?? "Action") · Session \(match.summary.targetSessionId)").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary).lineLimit(1)
+                        Text("\(match.summary.typedActionKind?.label ?? "Action") · \(targetLabel(profileID: item.profileID, sessionID: match.summary.targetSessionId))").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary).lineLimit(1)
                         Text(match.profile.label + (match.summary.trigger.kind == "calendar" ? " · \(match.summary.trigger.timezone ?? "")" : "")).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted).lineLimit(1)
                     } else { Text("Automation \(occurrence.automationId)").foregroundStyle(Color.tronTextSecondary) }
                     if occurrence.isSeries { Text("\(occurrence.count ?? 0) triggers · \(AutomationDateFormatting.date(occurrence.firstAt))–\(AutomationDateFormatting.date(occurrence.lastAt))").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted) }
                 }
-                Spacer(minLength: 0); Image(systemName: "chevron.right").foregroundStyle(Color.tronTextMuted)
+                Spacer(minLength: 0)
             }.padding(TronSpacing.lg)
         }.buttonStyle(.plain).tronGlassSurface(accent: .tronCoral, cornerRadius: 14, tintOpacity: 0.08, interactive: true)
             .accessibilityLabel("Scheduled automation")
@@ -244,23 +307,82 @@ struct AutomationsDashboardView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack { Text(summary.name).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronTextPrimary).lineLimit(1); Spacer(); AutomationStatusBadge(activation: summary.activation, run: summary.currentRun?.state) }
                     Text(summary.trigger.summary).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
-                    Text("\(summary.typedActionKind?.label ?? summary.actionKind) · Session \(summary.targetSessionId)").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted).lineLimit(1)
+                    Text("\(summary.typedActionKind?.label ?? summary.actionKind) · \(targetLabel(profileID: profile.id, sessionID: summary.targetSessionId))").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted).lineLimit(1)
                     if profile.state != .connected { Label("Cached · \(profile.state.label)", systemImage: "wifi.slash").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronAmber) }
-                    if let next = summary.nextOccurrenceAt { Text("Next: \(AutomationDateFormatting.date(next))").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronCoral) }
+                    if let next = summary.nextOccurrenceAt {
+                        Text("Next: \(AutomationDateFormatting.date(next))").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronCoral)
+                    } else if let last = summary.lastRun {
+                        Text("Last: \(last.state.label) · \(AutomationDateFormatting.date(last.terminalAt ?? last.scheduledFor))")
+                            .font(TronTypography.secondaryCodeDescription)
+                            .foregroundStyle(last.state == .failed || last.state == .outcomeUnknown ? Color.tronError : Color.tronTextMuted)
+                    }
                     if let reason = summary.blockedReason { Text(reason).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronError).lineLimit(2) }
                 }
-                Image(systemName: "chevron.right").foregroundStyle(Color.tronTextMuted).padding(.top, 4)
+                Spacer(minLength: 0)
             }.padding(TronSpacing.lg)
         }.buttonStyle(.plain).tronGlassSurface(accent: summary.isAttentionRequired ? .tronError : .tronCoral, cornerRadius: 14, tintOpacity: summary.isAttentionRequired ? 0.13 : 0.08, interactive: true)
             .accessibilityLabel(AutomationStatusPresentation.accessible(summary))
     }
 
+    private var attentionBanner: some View {
+        Button { mode = .all; filter = .attention } label: {
+            TronInfoCard(
+                icon: "exclamationmark.triangle.fill",
+                text: "\(attentionCount) Automation\(attentionCount == 1 ? "" : "s") need\(attentionCount == 1 ? "s" : "") attention.",
+                accent: .tronError,
+                usesSemanticAccent: true
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Shows Automations that need attention")
+    }
+
     @ViewBuilder private var failureView: some View {
-        if let failure = model.automationCatalog.errorMessage { Label(failure, systemImage: "exclamationmark.triangle").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronAmber).padding() }
+        let failures = model.automationCatalog.buckets.compactMap { bucket in
+            bucket.failure.map { "\(bucket.profile.label): \($0)" }
+        }
+        if let failure = model.automationCatalog.errorMessage {
+            Label(failure, systemImage: "exclamationmark.triangle")
+                .font(TronTypography.secondaryDescription)
+                .foregroundStyle(Color.tronAmber)
+                .padding()
+        } else if !failures.isEmpty {
+            Label(failures.joined(separator: " "), systemImage: "exclamationmark.triangle")
+                .font(TronTypography.secondaryDescription)
+                .foregroundStyle(Color.tronAmber)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding()
+        }
     }
     private var automationEmptyState: some View { emptyState(icon: "clock.badge.checkmark", title: "No Automations", message: "Create a durable prompt or notification schedule for a persisted session.") }
     private var upcomingEmptyState: some View { emptyState(icon: "calendar", title: "Nothing upcoming", message: "Enable an automation or create a new repeating schedule to see it here.") }
-    private func emptyState(icon: String, title: String, message: String) -> some View { VStack(spacing: 12) { Image(systemName: icon).font(.system(size: 42)).foregroundStyle(Color.tronTextMuted); Text(title).font(TronTypography.headline).foregroundStyle(Color.tronTextPrimary); Text(message).font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary).multilineTextAlignment(.center) }.frame(maxWidth: .infinity, minHeight: 280).padding(24) }
+    private func emptyState(icon: String, title: String, message: String) -> some View { VStack(spacing: 12) { Image(systemName: icon).font(TronTypography.sans(size: 42)).foregroundStyle(Color.tronTextMuted); Text(title).font(TronTypography.headline).foregroundStyle(Color.tronTextPrimary); Text(message).font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary).multilineTextAlignment(.center) }.frame(maxWidth: .infinity, minHeight: 280).padding(24) }
+
+    private func targetLabel(profileID: String, sessionID: String) -> String {
+        model.visibleSessions.first(where: {
+            $0.id == sessionID && ($0.gatewayProfileID == profileID || ($0.gatewayProfileID == nil && profileID == model.profiles.selected?.id))
+        })?.title ?? "Session \(sessionID)"
+    }
+
+    private var serverFilterMenu: some View {
+        Menu {
+            Button("All servers") { serverFilter = nil }
+            ForEach(model.automationCatalog.buckets) { bucket in
+                Button {
+                    serverFilter = bucket.profile.id
+                } label: {
+                    Label(
+                        bucket.profile.label,
+                        systemImage: serverFilter == bucket.profile.id ? "checkmark" : "desktopcomputer"
+                    )
+                }
+            }
+        } label: {
+            Image(systemName: "line.3.horizontal.decrease")
+                .foregroundStyle(Color.tronCoral)
+        }
+        .accessibilityLabel(serverFilter == nil ? "Filter Automations, all servers" : "Filter Automations by server")
+    }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
@@ -268,8 +390,11 @@ struct AutomationsDashboardView: View {
         }
         ToolbarItem(placement: .principal) { Text("Automations").font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold)).foregroundStyle(Color.tronCoral) }
         ToolbarItemGroup(placement: .primaryAction) {
-            if mode == .upcoming { Button { datePickerPresented = true } label: { Image(systemName: "calendar") }.accessibilityLabel("Choose agenda date") }
-            Button { model.automationCatalog.reload() } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel("Refresh automations")
+            serverFilterMenu
+            Button(action: onOpenSettings) {
+                Image(systemName: "gearshape").foregroundStyle(Color.tronCoral)
+            }
+            .accessibilityLabel("Settings")
         }
     }
 }

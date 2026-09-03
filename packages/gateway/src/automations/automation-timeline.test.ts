@@ -49,6 +49,23 @@ describe("Automation timeline projection", () => {
     });
   });
 
+  it("counts dense interval series across display-timezone DST day boundaries", () => {
+    const result = buildAutomationTimeline([
+      trigger({ kind: "interval", everySeconds: 60, anchorAt: "2026-03-08T00:00:00.000Z" }),
+    ], 4, "2026-03-08T05:00:00.000Z", "2026-03-09T04:00:00.000Z", "America/New_York");
+    expect(result.items).toEqual([expect.objectContaining({
+      kind: "series", dayStart: "2026-03-08T05:00:00.000Z", count: 1_380,
+      firstAt: "2026-03-08T05:00:00.000Z", lastAt: "2026-03-09T03:59:00.000Z",
+    })]);
+  });
+
+  it("does not project interval occurrences before a future anchor", () => {
+    const result = buildAutomationTimeline([
+      trigger({ kind: "interval", everySeconds: 60, anchorAt: "2026-01-02T00:00:00.000Z" }),
+    ], 4, "2026-01-01T00:00:00.000Z", "2026-01-02T00:00:00.000Z", "UTC");
+    expect(result.items).toEqual([]);
+  });
+
   it("groups by display timezone day and preserves DST-resolved instants", () => {
     const result = buildAutomationTimeline([
       trigger({ kind: "calendar", timezone: "America/New_York", localTime: "09:00", weekdays: [7] }),
@@ -66,14 +83,16 @@ describe("Automation timeline projection", () => {
       .toThrow(/seven days/);
   });
 
-  it("fails explicitly at the raw occurrence safety ceiling", () => {
+  it("counts many dense intervals analytically without exhausting raw traversal", () => {
     const dense = Array.from({ length: 11 }, (_, index) => ({
       ...trigger({ kind: "interval", everySeconds: 60, anchorAt: "2026-01-01T00:00:00.000Z" }),
       id: `automation-${index}`,
     }));
-    expect(() => buildAutomationTimeline(
+    const result = buildAutomationTimeline(
       dense, 1, "2026-01-01T00:00:00.000Z", "2026-01-08T00:00:00.000Z", "UTC",
-    )).toThrow(/too many occurrences/);
+    );
+    expect(result.items).toHaveLength(77);
+    expect(result.items.every((item) => item.kind === "series" && item.count === 1_440)).toBe(true);
     expect(MAXIMUM_TIMELINE_RAW_OCCURRENCES).toBeGreaterThan(0);
   });
 });
@@ -86,6 +105,13 @@ describe("Automation timeline pagination", () => {
     expect(first.nextCursor).toBeTruthy();
     expect(() => pages.page("client-two", source(), first.nextCursor, 1)).toThrow(/another client/);
     expect(() => pages.page("client-one", { ...source(), catalogRevision: 8 }, first.nextCursor, 1)).toThrow(/changed/);
+  });
+
+  it("rejects a continuation reused for a different timeline query", () => {
+    const pages = new AutomationTimelinePaginationStore();
+    const first = pages.page("client-one", source(), undefined, 1, "window-one");
+    expect(() => pages.page("client-one", source(), first.nextCursor, 1, "window-two"))
+      .toThrow(/does not match/);
   });
 
   it("expires cursors and bounds per-client lease retention", () => {

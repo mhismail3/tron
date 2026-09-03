@@ -19,7 +19,7 @@ struct DashboardModeMenuButton: UIViewRepresentable {
         let button = UIButton(type: .custom)
         button.showsMenuAsPrimaryAction = true
         button.accessibilityLabel = "Switch dashboard"
-        button.setImage(UIImage(named: "TronLogoVector"), for: .normal)
+        button.setImage(UIImage(named: "TronLogoVector")?.withRenderingMode(.alwaysTemplate), for: .normal)
         button.imageView?.contentMode = .scaleAspectFit
         return button
     }
@@ -38,7 +38,10 @@ struct DashboardModeMenuButton: UIViewRepresentable {
             UIMenu(title: "Dashboard", children: DashboardMode.allCases.map { mode in
                 let action = UIAction(title: mode.rawValue, image: UIImage(systemName: mode.systemImage), state: mode == parent.mode ? .on : .off) { [weak self] _ in
                     guard let self else { return }
-                    Task { @MainActor in self.parent.onSelect(mode) }
+                    Task { @MainActor in
+                        await Task.yield()
+                        self.parent.onSelect(mode)
+                    }
                 }
                 return action
             })

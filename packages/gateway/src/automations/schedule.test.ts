@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advanceAfterOccurrence, automationOccurrenceId, classifyDueOccurrence, firstAutomationOccurrence, nextAutomationOccurrence } from "./schedule.js";
+import { advanceAfterOccurrence, automationLocalDayBounds, automationOccurrenceId, classifyDueOccurrence, firstAutomationOccurrence, nextAutomationOccurrence } from "./schedule.js";
 
 describe("automation schedules", () => {
   it("anchors intervals rather than drifting from completion", () => {
@@ -30,6 +30,13 @@ describe("automation schedules", () => {
     const trigger = { kind: "calendar", timezone: "America/New_York", localTime: "01:30", weekdays: [7] } as const;
     expect(nextAutomationOccurrence(trigger, Date.parse("2026-11-01T04:00:00Z"))).toBe("2026-11-01T05:30:00.000Z");
     expect(nextAutomationOccurrence(trigger, Date.parse("2026-11-01T05:30:00Z"))).toBe("2026-11-08T06:30:00.000Z");
+  });
+
+  it("advances local-day bounds across a fully skipped civil date", () => {
+    expect(automationLocalDayBounds(Date.parse("2011-12-29T22:00:00.000Z"), "Pacific/Apia")).toEqual({
+      start: Date.parse("2011-12-29T10:00:00.000Z"),
+      end: Date.parse("2011-12-30T10:00:00.000Z"),
+    });
   });
 
   it("selects one latest calendar occurrence after long downtime", () => {

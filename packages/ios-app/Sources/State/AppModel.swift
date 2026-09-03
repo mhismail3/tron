@@ -416,10 +416,9 @@ final class AppModel {
                     capabilities = Set(lifecycle.gatewayInfo?.capabilities ?? [])
                 } else {
                     state = dashboardConnections.state(for: profile.id) ?? .stale
-                    // The pool validates the authenticated Gateway identity. A
-                    // missing info projection remains a stale, read-only row;
-                    // the client will fail closed when the capability is absent.
-                    capabilities = Set([AutomationAdmissionPolicy.capability, AutomationAdmissionPolicy.timelineCapability])
+                    // Only an authenticated, identity-checked pool handshake may
+                    // advertise a background Gateway capability.
+                    capabilities = Set(dashboardConnections.infoSnapshot(for: profile.id)?.capabilities ?? [])
                 }
                 let request: AutomationRPCClient.Request = { method, params, timeout in
                     if profile.id == lifecycle.selectedProfileID {
@@ -3199,6 +3198,7 @@ final class AppModel {
         case "notification.inbox.changed":
             if let profile = profiles.selected { await refreshNotificationInbox(profile: profile) }
         case "automation.changed":
+            guard case .automationChanged = event.preparation else { return }
             automationCatalog.invalidate()
         case "packages.progress", "packages.completed":
             postNotice(
@@ -3449,6 +3449,9 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
         // stop callback must not erase that newly authoritative projection.
         guard profileID != profiles.selected?.id,
               profiles.profiles.contains(where: { $0.id == profileID }) else { return }
+        if dashboardStatesByProfile[profileID] != state {
+            automationCatalog.invalidate(profileID: profileID)
+        }
         let existingCount = dashboardSessionsByProfile[profileID]?.count ?? 0
         if DashboardProjectionRetentionPolicy.retainsExistingBucket(
             profileExists: true,

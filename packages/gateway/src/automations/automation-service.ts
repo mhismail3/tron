@@ -102,7 +102,7 @@ export class AutomationService {
     validateTimelineWindow(from, through, displayTimezone);
     const sourcePage = this.list();
     const source = buildAutomationTimeline(sourcePage.items, sourcePage.catalogRevision, from, through, displayTimezone);
-    return this.timelinePages.page(clientId, source, cursor, limit);
+    return this.timelinePages.page(clientId, source, cursor, limit, `${from}\0${through}\0${displayTimezone}`);
   }
 
   runGet(id: string, runId: string): AutomationRun {
