@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { chmod, cp, mkdir, mkdtemp, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -19,7 +19,6 @@ import {
   validateApplyRequest,
   applyPayload,
   sourceBuildCommands,
-  resolveNpmCommand,
   validateUpdateConfigDocument,
   validatePushServiceConfigurationText,
   validatePayload,
@@ -27,7 +26,8 @@ import {
   buildSourcePayload,
   resolveSourcePayloadBase,
   copyValidatedPayloadBase,
-  preserveSignedNativeArtifacts,
+  captureReusableSourcePackage,
+  withGatewaySourceBuildLock,
   preflightPayload,
   proveDebugHandoffIdentity,
   handoffDebugCandidate,
@@ -319,7 +319,7 @@ test("payload fingerprints include safe internal node_modules symlinks", async (
 });
 
 test("source build failure leaves active selection and deployment state unchanged", async () => {
-  const root = await mkdtemp(join(tmpdir(), "tron-source-failure-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-failure-")));
   try {
     const store = await paths(root);
     const versionRoot = join(store.versionsRoot, "active");
@@ -327,9 +327,10 @@ test("source build failure leaves active selection and deployment state unchange
     await mkdir(join(versionRoot, "app", "scripts"), { recursive: true });
     await mkdir(join(versionRoot, "app", "node_modules"), { recursive: true });
     await mkdir(join(versionRoot, "runtime"), { recursive: true });
+    const emptyLock = `${JSON.stringify({ lockfileVersion: 3, packages: { "": {} } })}\n`;
     await writeFile(join(versionRoot, "app", "dist", "index.js"), `${"x".repeat(1_024)}\n`);
     await writeFile(join(versionRoot, "app", "package.json"), "{}\n");
-    await writeFile(join(versionRoot, "app", "package-lock.json"), "{}\n");
+    await writeFile(join(versionRoot, "app", "package-lock.json"), emptyLock);
     await writeFile(join(versionRoot, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
     await writeFile(join(versionRoot, "app", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
     await writeFile(join(versionRoot, "app", "scripts", "gateway-payload-deploy.mjs"), "// updater\n");
@@ -343,6 +344,10 @@ test("source build failure leaves active selection and deployment state unchange
     await writeFile(join(versionRoot, "manifest.json"), `${JSON.stringify(manifest)}\n`);
     await mkdir(store.channelRoot, { recursive: true });
     await writeFile(store.current, `${JSON.stringify(selection("active", fingerprint))}\n`);
+    await mkdir(join(root, "packages", "gateway"), { recursive: true });
+    await mkdir(join(root, "packages", "mac-app", "Sources", "Resources"), { recursive: true });
+    await writeFile(join(root, "packages", "gateway", "package.json"), "{}\n");
+    await writeFile(join(root, "packages", "gateway", "package-lock.json"), emptyLock);
     const before = `${JSON.stringify({ untouched: true })}\n`;
     await writeFile(store.state, before);
     await assert.rejects(buildSourcePayload({ paths: store, config: { sourceRoot: root }, runCommand: async () => { throw new Error("build failed"); } }), /build failed/);
@@ -414,7 +419,7 @@ test("source runtime base copy rejects a projection changed after admission", as
 });
 
 test("source builds compile privately and leave the trusted source tree unchanged", async () => {
-  const root = await mkdtemp(join(tmpdir(), "tron-source-private-build-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-private-build-")));
   try {
     const store = await paths(root);
     const sourceRoot = join(root, "source");
@@ -422,11 +427,12 @@ test("source builds compile privately and leave the trusted source tree unchange
     await mkdir(join(gatewayRoot, "src"), { recursive: true });
     await mkdir(join(sourceRoot, "scripts"), { recursive: true });
     await mkdir(join(gatewayRoot, "scripts"), { recursive: true });
+    await mkdir(join(sourceRoot, "packages", "mac-app", "Sources", "Resources"), { recursive: true });
     await writeFile(join(sourceRoot, "scripts", "gateway-payload-deploy.mjs"), "// trusted updater\n");
     await writeFile(join(gatewayRoot, "scripts", "ensure-node-pty-helper.mjs"), "// trusted helper\n");
     const sourceFiles = {
       "package.json": JSON.stringify({ version: "1.0.0" }),
-      "package-lock.json": "{}\n",
+      "package-lock.json": `${JSON.stringify({ lockfileVersion: 3, packages: { "": { version: "1.0.0" } } })}\n`,
       "tsconfig.json": "{}\n",
       "src/index.ts": "export const source = true;\n",
     };
@@ -439,11 +445,12 @@ test("source builds compile privately and leave the trusted source tree unchange
     await mkdir(join(versionRoot, "app", "node_modules"), { recursive: true });
     await mkdir(join(versionRoot, "runtime"), { recursive: true });
     await writeFile(join(versionRoot, "app", "dist", "index.js"), `${"x".repeat(1_024)}\n`);
-    await writeFile(join(versionRoot, "app", "package.json"), "{}\n");
-    await writeFile(join(versionRoot, "app", "package-lock.json"), "{}\n");
+    await writeFile(join(versionRoot, "app", "package.json"), sourceFiles["package.json"]);
+    await writeFile(join(versionRoot, "app", "package-lock.json"), sourceFiles["package-lock.json"]);
     await writeFile(join(versionRoot, "app", "PushService.xcconfig"), "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n");
     await writeFile(join(versionRoot, "app", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
     await writeFile(join(versionRoot, "app", "scripts", "gateway-payload-deploy.mjs"), "// updater\n");
+    await writeFile(join(versionRoot, "app", "node_modules", "dependency-marker"), "validated active dependency tree\n");
     await writeFile(join(versionRoot, "runtime", "node-arm64"), "n".repeat(1_048_576));
     await writeFile(join(versionRoot, "runtime", "node-x64"), "n".repeat(1_048_576));
     await chmod(join(versionRoot, "runtime", "node-arm64"), 0o755);
@@ -463,21 +470,18 @@ test("source builds compile privately and leave the trusted source tree unchange
         if (tool === process.execPath && args[0].endsWith("/tsc")) {
           await mkdir(args.at(-1), { recursive: true });
           await writeFile(join(args.at(-1), "index.js"), `${"c".repeat(1_024)}\n`);
-        } else {
-          const piCli = join(options.cwd, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
-          await mkdir(dirname(piCli), { recursive: true });
-          await writeFile(piCli, "#!/usr/bin/env node\n");
-          await chmod(piCli, 0o755);
-        }
+        } else throw new Error("source build invoked an unexpected external command");
       },
     });
     assert.equal(result.manifest.version, "candidate");
+    assert.equal(commands.length, 1);
     assert.equal(commands[0].tool, process.execPath);
     assert.equal(commands[0].args.includes("run"), false);
     assert.equal(await readFile(join(gatewayRoot, "dist", "index.js")).catch(() => undefined), undefined);
     for (const [path, content] of before) assert.deepEqual(await readFile(join(gatewayRoot, path)), content);
     assert.equal(await readFile(join(result.root, "app", "scripts", "gateway-payload-deploy.mjs"), "utf8"), "// trusted updater\n");
     assert.equal(await readFile(join(result.root, "app", "scripts", "ensure-node-pty-helper.mjs"), "utf8"), "// trusted helper\n");
+    assert.equal(await readFile(join(result.root, "app", "node_modules", "dependency-marker"), "utf8"), "validated active dependency tree\n");
     assert.equal(
       await readFile(join(result.root, "app", "PushService.xcconfig"), "utf8"),
       "TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test\n",
@@ -567,31 +571,56 @@ test("promotion recovery admits a launcher-rejected external selection as bundle
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("source rebuild preserves signed native artifacts only with an unchanged dependency lock", async () => {
-  const root = await mkdtemp(join(tmpdir(), "tron-source-native-signatures-"));
+test("source rebuild reuses active dependencies only with unchanged lock and manifests", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-source-dependency-reuse-"));
   try {
     const active = join(root, "active");
-    const candidate = join(root, "candidate");
-    const nativePaths = [
-      "app/node_modules/node-pty/prebuilds/darwin-arm64/pty.node",
-      "app/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper",
-      "app/node_modules/example/prebuilds/darwin-x64/addon.node",
-    ];
-    for (const payload of [active, candidate]) {
-      await mkdir(join(payload, "app", "node_modules"), { recursive: true });
-      await writeFile(join(payload, "app", "package-lock.json"), "same-lock\n");
-      for (const path of nativePaths) {
-        await mkdir(dirname(join(payload, path)), { recursive: true });
-        await writeFile(join(payload, path), payload === active ? `signed:${path}\n` : `adhoc:${path}\n`);
-      }
-    }
-    assert.deepEqual(await preserveSignedNativeArtifacts(active, candidate), nativePaths.sort());
-    for (const path of nativePaths) assert.equal(await readFile(join(candidate, path), "utf8"), `signed:${path}\n`);
-    await writeFile(join(candidate, "app", "package-lock.json"), "changed-lock\n");
-    await assert.rejects(
-      preserveSignedNativeArtifacts(active, candidate),
-      /dependency lock changed/,
-    );
+    const gateway = join(root, "source", "packages", "gateway");
+    await mkdir(join(active, "app"), { recursive: true });
+    await mkdir(gateway, { recursive: true });
+    const packageText = `${JSON.stringify({ name: "gateway", version: "1", dependencies: { ws: "1" }, devDependencies: { typescript: "1" } })}\n`;
+    const lock = `${JSON.stringify({ lockfileVersion: 3, packages: { "": { name: "gateway", version: "1", dependencies: { ws: "1" }, devDependencies: { typescript: "1" } } } })}\n`;
+    await writeFile(join(active, "app", "package.json"), packageText);
+    await writeFile(join(active, "app", "package-lock.json"), lock);
+    await writeFile(join(gateway, "package.json"), packageText);
+    await writeFile(join(gateway, "package-lock.json"), lock);
+
+    const captured = await captureReusableSourcePackage(active, gateway);
+    assert.equal(captured.sourcePackage.version, "1");
+    assert.equal(captured.packageBytes.toString("utf8"), packageText);
+    assert.equal(captured.lockBytes.toString("utf8"), lock);
+
+    await writeFile(join(gateway, "package-lock.json"), "changed-lock\n");
+    await assert.rejects(captureReusableSourcePackage(active, gateway), /dependency lock changed/);
+    await writeFile(join(gateway, "package-lock.json"), lock);
+    const inconsistentLock = `${JSON.stringify({ lockfileVersion: 3, packages: { "": { name: "gateway", version: "1", dependencies: { ws: "2" }, devDependencies: { typescript: "1" } } } })}\n`;
+    await writeFile(join(active, "app", "package-lock.json"), inconsistentLock);
+    await writeFile(join(gateway, "package-lock.json"), inconsistentLock);
+    await assert.rejects(captureReusableSourcePackage(active, gateway), /package lock does not match/);
+    await writeFile(join(active, "app", "package-lock.json"), lock);
+    await writeFile(join(gateway, "package-lock.json"), lock);
+    await writeFile(join(gateway, "package.json"), `${JSON.stringify({ name: "gateway", version: "1", dependencies: { ws: "2" }, devDependencies: { typescript: "1" } })}\n`);
+    await assert.rejects(captureReusableSourcePackage(active, gateway), /dependency manifest changed/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("source builds share the bundle dependency-tree lock and recover dead owners", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "tron-source-build-lock-")));
+  try {
+    const resources = join(root, "packages", "mac-app", "Sources", "Resources");
+    const lock = join(resources, ".tron-gateway-bundle.lock");
+    await mkdir(lock, { recursive: true });
+    await writeFile(join(lock, "pid"), `${process.pid}\n`);
+    await assert.rejects(withGatewaySourceBuildLock(root, async () => {}), /another Gateway bundle build is active/);
+
+    await writeFile(join(lock, "pid"), "2147483647\n");
+    let owned = false;
+    await withGatewaySourceBuildLock(root, async () => {
+      owned = true;
+      assert.equal((await readFile(join(lock, "pid"), "utf8")).trim(), String(process.pid));
+    });
+    assert.equal(owned, true);
+    await assert.rejects(lstat(lock), /ENOENT/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -704,28 +733,17 @@ test("preflight imports candidate protocol values and rejects incompatible range
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("source npm resolution uses the exact Node runtime", () => {
-  const command = resolveNpmCommand({
-    HOME: process.env.HOME,
-    PATH: process.env.PATH,
-    NVM_DIR: process.env.NVM_DIR,
-  });
-  assert.equal(command.tool, process.execPath);
-  assert.match(command.script, /npm-cli\.js$/u);
-});
-
 test("trusted source policy is stored-only and source commands are bounded", async () => {
   const sourceRoot = join(tmpdir(), "trusted-gateway-source");
   const config = { schema: 1, kind: "tron-gateway-update-config", sourceRoot, updatedAt: "2026-04-27T00:00:00Z" };
   assert.equal(validateUpdateConfigDocument(config), true);
   assert.equal(validateUpdateConfigDocument({ ...config, sourceRoot: "relative" }), false);
   const commands = sourceBuildCommands(sourceRoot);
-  assert.equal(commands.length, 2);
+  assert.equal(commands.length, 1);
   assert.equal(commands[0].tool, process.execPath);
   assert.equal(commands[0].args[0], join(sourceRoot, "packages", "gateway", "node_modules", "typescript", "bin", "tsc"));
   assert.deepEqual(commands[0].args.slice(1, 3), ["-p", join(sourceRoot, "packages", "gateway", "tsconfig.json")]);
   assert.equal(commands[0].cwd, join(sourceRoot, "packages", "gateway"));
-  assert.deepEqual(commands[1], { tool: "npm", args: ["ci", "--omit=dev", "--ignore-scripts=false"], cwd: "<candidate>/app" });
 });
 
 test("Debug handoff pins authenticated dev-channel pre/post identity to the selected manifest", () => {

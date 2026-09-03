@@ -166,7 +166,7 @@ Stable staging, promotion, rollback, launcher selection, Swift validation, and
 packaging require its one exact non-empty public HTTPS origin; dev may carry one
 explicit empty assignment. Stable source builds preserve this validated file
 from the active immutable payload and never accept a source-tree or environment
-replacement. Installed-app verification compares the selected stable file with the signed bundled product and fails on origin drift, rather than reporting a stale sandbox/production selection as healthy. Notification state remains outside payload versions under the
+replacement. A source-only rebuild also requires an exact dependency-lock and dependency-manifest match, then reuses the selected payload's already validated dependency tree without launching npm or contacting a registry; dependency changes require a newly signed payload. Installed-app verification compares the selected stable file with the signed bundled product and fails on origin drift, rather than reporting a stale sandbox/production selection as healthy. Notification state remains outside payload versions under the
 canonical Tron home.
 `promote` records expected identity, atomically publishes `current.json` while
 retaining `previous.json`, and invokes authenticated `gateway.restart`. It waits
@@ -204,10 +204,11 @@ artifact promotion is wired, and source builds read only the validated
 `gateway/update-config.json` projection. Source mode compiles with the repository's
 local TypeScript compiler into a private temporary output directory, never the trusted
 repository's `packages/gateway/dist`, and copies only verified output into the candidate.
-It admits source-only dependency reuse when the active and source lockfiles are
-byte-identical, replaces npm's ad-hoc Darwin native binaries with the active
-team-signed artifacts, and load-tests all host native modules before publishing
-the selection. A dependency-lock change requires a newly signed Tron build. If
+It shares the source dependency-tree lock with Gateway bundle assembly, requires the
+active/source package locks and dependency manifests to match exactly, verifies the
+lock root against `package.json`, and reuses the active payload's complete fingerprinted
+`node_modules` tree without invoking npm. Preflight load-tests all host native modules
+before publishing the selection. A dependency change requires a newly signed Tron build. If
 the bundled payload was active before the first external promotion, failed
 promotion recovery restores that bundled fallback directly.
 The existing trusted Gateway postinstall helper also supplies the exact runtime

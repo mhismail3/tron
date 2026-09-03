@@ -362,8 +362,12 @@ being stored in `gateway/update-config.json`. It invokes no client-supplied comm
 path. The LaunchAgent-owned helper reads that projection only: source mode invokes the
 repository's local TypeScript compiler with its checked-in config and a private temporary
 `outDir` (it never writes the trusted repository's `packages/gateway/dist`), then stages
-only verified output; artifact mode only promotes a verified candidate, and auto prefers
-staged artifacts before source. A successful RPC acknowledges helper launch, not eventual
+only verified output. Source-only updates require the package lock and dependency declarations
+to match the selected validated payload exactly and reuse that payload's complete fingerprinted
+`node_modules` tree. They never invoke npm or depend on registry availability, package-manager
+shutdown, or fresh native-module signatures; dependency changes require a newly signed app or
+artifact. Artifact mode only promotes a verified candidate, and auto prefers staged artifacts
+before source. A successful RPC acknowledges helper launch, not eventual
 build or promotion success; asynchronous helper failures are reported in update progress. A
 planned restart publishes a distinct `draining` phase and may wait without a startup deadline
 for already-accepted runs; only after the exact captured old PID/start identity disappears or
@@ -1034,10 +1038,12 @@ the bundled payload root exported by the signed launcher, then the prepared Gate
 bundle under the already-admitted source checkout. The copied base is revalidated
 against the exact admitted manifest before any candidate file changes, closing the
 mutable-projection race. No historical version scan or unvalidated runtime fallback
-is allowed. Source updates preserve that base's product configuration and team-signed
-Darwin native modules rather than consulting environment configuration. Source
-rebuilds require a byte-identical dependency lock; dependency changes require a newly
-signed app or artifact. Preflight loads every host-architecture native module before
+is allowed. Source updates preserve that base's product configuration and complete
+fingerprinted dependency tree rather than consulting environment configuration or npm.
+They share the bundle assembly lock while reading source dependencies and compiling,
+require byte-identical active/source locks and dependency declarations, and verify the
+lock root against `package.json`; dependency changes require a newly signed app or
+artifact. Preflight loads every host-architecture native module before
 pointer publication, and a failed first external candidate restores the validated
 bundled fallback rather than requiring a `previous.json` pointer. Notification state stays
 outside payload version directories. Payload staging,

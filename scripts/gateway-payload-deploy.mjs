@@ -7,12 +7,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { createRequire } from "node:module";
-import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isIP } from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import {
   access,
   chmod,
@@ -866,48 +867,13 @@ async function gitRevision(cwd) {
   } catch { return "unknown"; }
 }
 
-export function sourceBuildCommands(sourceRoot, compilerOutput = "<private-output>", npmCommand = { tool: "npm", script: undefined }) {
+export function sourceBuildCommands(sourceRoot, compilerOutput = "<private-output>") {
   const gatewayRoot = join(sourceRoot, "packages", "gateway");
-  const npm = npmCommand.script ? { tool: npmCommand.tool, args: [npmCommand.script, "ci", "--omit=dev", "--ignore-scripts=false"] } : { tool: npmCommand.tool, args: ["ci", "--omit=dev", "--ignore-scripts=false"] };
-  return [
-    {
-      tool: process.execPath,
-      args: [join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"), "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput],
-      cwd: gatewayRoot,
-    },
-    { ...npm, cwd: "<candidate>/app" },
-  ];
-}
-
-/** Resolve npm without trusting launchd's usually-minimal PATH. The returned
- * command always invokes npm's JS CLI through this exact Node runtime. */
-export function resolveNpmCommand(environment = process.env) {
-  const candidates = [];
-  const configured = environment.TRON_NPM_BIN;
-  if (configured) candidates.push(configured);
-  if (environment.PATH) candidates.push(...environment.PATH.split(":").filter((value) => value.startsWith("/")).map((value) => join(value, "npm")));
-  const home = environment.HOME ?? homedir();
-  for (const root of [join(environment.NVM_DIR ?? join(home, ".nvm"), "versions", "node"), "/opt/homebrew/bin", "/usr/local/bin"]) {
-    if (root.endsWith("/node")) {
-      try { candidates.push(...readdirSync(root).map((version) => join(root, version, "bin", "npm"))); } catch { /* unavailable */ }
-    } else candidates.push(join(root, "npm"));
-  }
-  for (const candidate of candidates) {
-    if (!candidate.startsWith("/") || /[\u0000-\u001f\u007f]/u.test(candidate)) continue;
-    let resolvedCandidate;
-    try {
-      resolvedCandidate = realpathSync(candidate);
-      const candidateInfo = lstatSync(resolvedCandidate);
-      if (!candidateInfo.isFile() || (candidateInfo.mode & 0o111) === 0) continue;
-    } catch { continue; }
-    const prefix = dirname(dirname(candidate));
-    const script = join(prefix, "lib", "node_modules", "npm", "bin", "npm-cli.js");
-    try {
-      const scriptInfo = lstatSync(script);
-      if (scriptInfo.isFile() && !scriptInfo.isSymbolicLink()) return { tool: process.execPath, script, bin: candidate };
-    } catch { /* next candidate */ }
-  }
-  throw new Error("npm is unavailable under the sanitized launchd PATH; configure TRON_NPM_BIN or install npm with Node");
+  return [{
+    tool: process.execPath,
+    args: [join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"), "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput],
+    cwd: gatewayRoot,
+  }];
 }
 
 async function copyTrustedSourceScripts(sourceRoot, candidateRoot) {
@@ -932,39 +898,112 @@ async function verifiedSourceCompilerOutput(root) {
   return root;
 }
 
-function signedNativeArtifact(entry) {
-  return entry.target === undefined
-    && (entry.path.endsWith(".node") || entry.path.endsWith("/spawn-helper"));
+const DEPENDENCY_FIELDS = [
+  "dependencies", "devDependencies", "optionalDependencies", "peerDependencies",
+  "bundleDependencies", "bundledDependencies",
+];
+
+function dependencyManifest(value, name) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Gateway ${name} package manifest is malformed`);
+  }
+  const result = {};
+  for (const field of DEPENDENCY_FIELDS) {
+    const entry = value[field];
+    if (entry !== undefined) result[field] = entry;
+  }
+  return result;
+}
+
+function lockRootPackage(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || value.lockfileVersion !== 3 || !value.packages || typeof value.packages !== "object"
+    || Array.isArray(value.packages) || !value.packages[""] || typeof value.packages[""] !== "object"
+    || Array.isArray(value.packages[""])) {
+    throw new Error("Gateway package lock is malformed");
+  }
+  return value.packages[""];
+}
+
+function processIsAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (error) { return error?.code === "EPERM"; }
+}
+
+/** Share the source dependency-tree lock with bundle-gateway.sh. */
+export async function withGatewaySourceBuildLock(sourceRoot, operation) {
+  const parent = await noSymlinkDirectory(join(sourceRoot, "packages", "mac-app", "Sources", "Resources"));
+  const lockPath = join(parent, ".tron-gateway-bundle.lock");
+  const quarantine = `${lockPath}.stale-${process.pid}-${randomUUID()}`;
+  while (true) {
+    try {
+      await mkdir(lockPath, { mode: 0o700 });
+      await writeFile(join(lockPath, "pid"), `${process.pid}\n`, { mode: 0o600, flag: "wx" });
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        await rm(lockPath, { recursive: true, force: true }).catch(() => {});
+        throw error;
+      }
+      const info = await lstat(lockPath).catch(() => undefined);
+      if (!info?.isDirectory() || info.isSymbolicLink()) throw new Error("Gateway bundle build lock is malformed");
+      const pidPath = join(lockPath, "pid");
+      const pidInfo = await lstat(pidPath).catch(() => undefined);
+      let owner;
+      if (pidInfo?.isFile() && !pidInfo.isSymbolicLink() && pidInfo.size <= 32) {
+        const text = await readFile(pidPath, "utf8").catch(() => "");
+        if (/^[1-9][0-9]{0,9}\n?$/u.test(text)) owner = Number(text.trim());
+      }
+      if (owner !== undefined && processIsAlive(owner)) throw new Error(`another Gateway bundle build is active (pid ${owner})`);
+      if (owner === undefined && info?.isDirectory() && Date.now() - info.mtimeMs < 30_000) {
+        throw new Error("Gateway bundle build lock owner is not settled; retry shortly");
+      }
+      try { await rename(lockPath, quarantine); } catch (renameError) {
+        if (renameError?.code === "ENOENT") continue;
+        throw renameError;
+      }
+      await rm(quarantine, { recursive: true, force: true });
+    }
+  }
+  try { return await operation(); } finally { await rm(lockPath, { recursive: true, force: true }); }
 }
 
 /**
- * npm publishes Darwin native modules with ad-hoc or linker signatures. They
- * cannot be loaded by the Developer-ID-signed hardened Node runtime because
- * library validation requires the same signing team. A source-only rebuild is
- * therefore permitted to reuse the active payload's signed native artifacts
- * only when the dependency lock is byte-for-byte unchanged. Dependency
- * changes require a newly signed application/artifact build.
+ * Source-only updates cannot change dependencies because the active payload is
+ * the sole authority for signed native artifacts. Reuse its already validated
+ * dependency tree rather than invoking a package manager or network service in
+ * the supervised update path.
  */
-export async function preserveSignedNativeArtifacts(activeRoot, candidateRoot) {
-  const activeLock = await readFile(join(activeRoot, "app", "package-lock.json"));
-  const candidateLock = await readFile(join(candidateRoot, "app", "package-lock.json"));
-  if (!activeLock.equals(candidateLock)) {
+export async function captureReusableSourcePackage(activeRoot, gatewayRoot) {
+  const [activeLock, sourceLock, activePackageBytes, sourcePackageBytes] = await Promise.all([
+    readFile(join(activeRoot, "app", "package-lock.json")),
+    readFile(join(gatewayRoot, "package-lock.json")),
+    readFile(join(activeRoot, "app", "package.json")),
+    readFile(join(gatewayRoot, "package.json")),
+  ]);
+  if (!activeLock.equals(sourceLock)) {
     throw new Error("Gateway dependency lock changed; install a newly signed Tron build before rebuilding from source");
   }
-  const active = (await regularFiles(activeRoot, "app/node_modules"))
-    .filter(signedNativeArtifact).map((entry) => entry.path).sort();
-  const candidate = (await regularFiles(candidateRoot, "app/node_modules"))
-    .filter(signedNativeArtifact).map((entry) => entry.path).sort();
-  if (active.length !== candidate.length
-    || active.some((path, index) => path !== candidate[index])) {
-    throw new Error("Gateway native dependency artifacts do not match the active signed payload");
+  let activePackage;
+  let sourcePackage;
+  let sourceLockDocument;
+  try {
+    activePackage = JSON.parse(activePackageBytes.toString("utf8"));
+    sourcePackage = JSON.parse(sourcePackageBytes.toString("utf8"));
+    sourceLockDocument = JSON.parse(sourceLock.toString("utf8"));
+  } catch {
+    throw new Error("Gateway source package or lock manifest is malformed");
   }
-  for (const path of active) {
-    await cp(join(activeRoot, path), join(candidateRoot, path), {
-      force: true, errorOnExist: false, preserveTimestamps: true,
-    });
+  const sourceDependencies = dependencyManifest(sourcePackage, "source");
+  if (!isDeepStrictEqual(dependencyManifest(activePackage, "active"), sourceDependencies)) {
+    throw new Error("Gateway dependency manifest changed; install a newly signed Tron build before rebuilding from source");
   }
-  return active;
+  const lockedRoot = lockRootPackage(sourceLockDocument);
+  if (!isDeepStrictEqual(dependencyManifest(lockedRoot, "locked root"), sourceDependencies)
+    || sourcePackage.name !== lockedRoot.name || sourcePackage.version !== lockedRoot.version
+    || activePackage.name !== lockedRoot.name || activePackage.version !== lockedRoot.version) {
+    throw new Error("Gateway package lock does not match the active and source package manifests");
+  }
+  return { sourcePackage, packageBytes: sourcePackageBytes, lockBytes: sourceLock };
 }
 
 export function runBounded(tool, args, options = {}) {
@@ -1861,7 +1900,7 @@ async function stageConfiguredArtifact(paths, config, requestedVersion) {
   return result.manifest.version;
 }
 
-export async function buildSourcePayload({ paths, config, candidateVersion, timeoutMs = 120_000, runCommand = runBounded, npmCommand = resolveNpmCommand(), environment = process.env }) {
+export async function buildSourcePayload({ paths, config, candidateVersion, timeoutMs = 120_000, runCommand = runBounded, environment = process.env }) {
   const active = await resolveSourcePayloadBase(paths, config, environment);
   const gatewayRoot = join(config.sourceRoot, "packages", "gateway");
   // Compile into a private temporary directory. In particular, never invoke
@@ -1870,19 +1909,24 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
   const compilerOutput = await mkdtemp(join(tmpdir(), "tron-gateway-source-build-"));
   let privateStaging;
   try {
-    await runCommand(process.execPath, [
-      join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"),
-      "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput,
-    ], { cwd: gatewayRoot, timeoutMs });
-    const sourcePackage = JSON.parse(await readFile(join(gatewayRoot, "package.json"), "utf8"));
+    let source;
+    await withGatewaySourceBuildLock(config.sourceRoot, async () => {
+      // Capture dependency authority while bundle-gateway.sh cannot replace
+      // source node_modules, then hold that same lock through compilation.
+      source = await captureReusableSourcePackage(active.root, gatewayRoot);
+      await runCommand(process.execPath, [
+        join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"),
+        "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput,
+      ], { cwd: gatewayRoot, timeoutMs });
+    });
     // Source updates inherit the exact validated product configuration from
     // the selected immutable payload. The source checkout and environment are
     // never alternate configuration owners.
     const activePushConfiguration = await validatePayloadPushConfiguration(active.root, paths.channel);
-    const version = candidateVersion ?? `${sourcePackage.version}-source-${Date.now()}`;
+    const version = candidateVersion ?? `${source.sourcePackage.version}-source-${Date.now()}`;
     if (!validComponent(version, 128)) throw new Error("source build produced an invalid candidate version");
     const target = join(paths.versionsRoot, version);
-    // Keep the expensive private install outside the channel projection. A
+    // Keep the expensive private copy outside the channel projection. A
     // staging directory under versionsRoot would be visible to retention and
     // could be removed by a concurrent updater.
     const temporaryParent = await mkdtemp(join(tmpdir(), "tron-gateway-source-staging-"));
@@ -1893,38 +1937,26 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
       await rm(join(temporary, "app", "dist"), { recursive: true, force: true });
       await verifiedSourceCompilerOutput(compilerOutput);
       await cp(compilerOutput, join(temporary, "app", "dist"), { recursive: true, errorOnExist: true, force: false });
-      await cp(join(gatewayRoot, "package.json"), join(temporary, "app", "package.json"));
-      await cp(join(gatewayRoot, "package-lock.json"), join(temporary, "app", "package-lock.json"));
+      await writeFile(join(temporary, "app", "package.json"), source.packageBytes);
+      await writeFile(join(temporary, "app", "package-lock.json"), source.lockBytes);
       if (await validatePayloadPushConfiguration(temporary, paths.channel) !== activePushConfiguration) {
         throw new Error("source update changed the active product PushService.xcconfig");
       }
       // The updater and helper are part of the trusted source revision, not
       // stale files inherited from whichever payload happened to be active.
       await copyTrustedSourceScripts(config.sourceRoot, temporary);
-      await rm(join(temporary, "app", "node_modules"), { recursive: true, force: true });
-      await runCommand(npmCommand.tool, [
-        ...(npmCommand.script ? [npmCommand.script] : []),
-        "ci", "--omit=dev", "--ignore-scripts=false",
-      ], {
-        cwd: join(temporary, "app"), timeoutMs,
-        env: {
-          ...process.env,
-          PATH: npmCommand.bin ? `${dirname(npmCommand.bin)}:/usr/bin:/bin` : process.env.PATH,
-        },
-      });
-      await preserveSignedNativeArtifacts(active.root, temporary);
       const fingerprint = await payloadFingerprint(temporary);
       const manifest = {
         ...active.manifest,
         schema: SCHEMA, kind: KIND, channel: paths.channel, version,
-        gatewayVersion: sourcePackage.version, sourceRevision: await gitRevision(config.sourceRoot),
+        gatewayVersion: source.sourcePackage.version, sourceRevision: await gitRevision(config.sourceRoot),
         runtimeEpoch: randomUUID(), payloadFingerprint: fingerprint,
       };
       payloadManifest(manifest, { channel: paths.channel, version });
       await atomicJson(join(temporary, "manifest.json"), manifest);
       await validatePayload(temporary, { channel: paths.channel, version, payloadFingerprint: fingerprint }, true);
-      // Compilation and dependency installation above are private and do not
-      // hold the channel lock. Publication is one serialized transaction:
+      // Compilation and payload copying above are private and do not hold the
+      // channel lock. Publication is one serialized transaction:
       // immutable finalization, rename, candidate state, and retention all
       // observe the same channel snapshot. applyPayload holds only the
       // distinct operation lock, so this cannot recursively deadlock it.
