@@ -21,6 +21,8 @@ implementation detail; all user-facing language calls the agent Tron.
 | `Sources/UI/Theme` | historical Tron colors and descriptor-based bundled typography |
 | `ShareExtension` | app-group share handoff |
 
+The dashboard selector's template logo has a bounded 24-point intrinsic size in its source asset; the full-resolution SVG view box must never become UIKit toolbar layout authority.
+
 `Sources/Models` keeps wire-compatible value types grouped by authority rather than in one DTO
 monolith: gateway connection, session catalog, transcript, session runtime, resource catalog,
 workspace, and terminal files. Cross-file references remain plain value composition; no split model becomes a
