@@ -336,20 +336,6 @@ enum QueuedMessageCardLayout {
 struct QueuedMessageAttachmentChipRow: View {
     let chips: [QueuedMessageAttachmentChip]
     let accent: Color
-    let morphDestinationIDs: [String: ChatMorphID]
-    let morphRegistry: ChatMorphFrameRegistry?
-
-    init(
-        chips: [QueuedMessageAttachmentChip],
-        accent: Color,
-        morphDestinationIDs: [String: ChatMorphID] = [:],
-        morphRegistry: ChatMorphFrameRegistry? = nil
-    ) {
-        self.chips = chips
-        self.accent = accent
-        self.morphDestinationIDs = morphDestinationIDs
-        self.morphRegistry = morphRegistry
-    }
 
     @Environment(AppModel.self) private var model
     @State private var previewRequest: FilePreviewRequest?
@@ -364,27 +350,21 @@ struct QueuedMessageAttachmentChipRow: View {
         ToolChipFlowLayout(spacing: 4) {
             ForEach(chips) { chip in
                 if chip.kind == .file {
-                    morphDestination(
-                        Button {
-                            previewRequest = FilePreviewRequest(
-                                attachment: chip.attachment,
-                                identity: chip.attachment.flatMap {
-                                    model.chatMediaIdentity(blobID: $0.id)
-                                }
-                            )
-                        } label: {
-                            chipSurface(chip)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(chip.attachment.map { "File attachment, \($0.name)" } ?? "File attachment")
-                        .accessibilityHint("Opens the file preview"),
-                        for: chip
-                    )
+                    Button {
+                        previewRequest = FilePreviewRequest(
+                            attachment: chip.attachment,
+                            identity: chip.attachment.flatMap {
+                                model.chatMediaIdentity(blobID: $0.id)
+                            }
+                        )
+                    } label: {
+                        chipSurface(chip)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(chip.attachment.map { "File attachment, \($0.name)" } ?? "File attachment")
+                    .accessibilityHint("Opens the file preview")
                 } else {
-                    morphDestination(
-                        chipSurface(chip).accessibilityHidden(true),
-                        for: chip
-                    )
+                    chipSurface(chip).accessibilityHidden(true)
                 }
             }
         }
@@ -401,18 +381,6 @@ struct QueuedMessageAttachmentChipRow: View {
                     .remote(identity: $0, leaseID: request.id)
                 } ?? .unavailable
             )
-        }
-    }
-
-    @ViewBuilder
-    private func morphDestination<Content: View>(
-        _ content: Content,
-        for chip: QueuedMessageAttachmentChip
-    ) -> some View {
-        if let id = morphDestinationIDs[chip.id], let morphRegistry {
-            content.chatMorphDestination(id: id, registry: morphRegistry)
-        } else {
-            content
         }
     }
 

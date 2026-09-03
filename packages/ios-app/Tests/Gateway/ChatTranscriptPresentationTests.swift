@@ -85,9 +85,6 @@ struct ChatTranscriptPresentationTests {
         #expect(preflight.cardBehavior == .steer)
         #expect(preflight.cardTitle == "Message")
         #expect(preflight.cardDetail == "After compaction")
-        #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: behavior("steer")) == .queuedPrompt)
-        #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: behavior("followUp")) == .queuedPrompt)
-        #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: behavior(nil)) == .userPrompt)
     }
     @Test("pending direct prompts consume canonical entrance entitlement exactly once")
     func pendingCanonicalReplacementSuppressesSecondEntrance() throws {

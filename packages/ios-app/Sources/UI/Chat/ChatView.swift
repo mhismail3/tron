@@ -37,7 +37,6 @@ struct ChatView: View {
     @State private var composerResponder = ChatComposerResponder()
     @State private var keyboardObserver = ChatKeyboardObserver()
     @State private var layoutTransaction = ChatLayoutTransaction()
-    @State private var morphRegistry = ChatMorphFrameRegistry()
     @State private var composerResourceCatalog = ComposerResourceCatalog(commands: [])
     @State private var composerResourcePicker: ComposerResourcePickerSource?
     @State private var composerResourceResults: [ComposerResourceEntry] = []
@@ -115,13 +114,6 @@ struct ChatView: View {
                 composer
             }
             .overlay(alignment: .top) { topBlur }
-            .overlay {
-                ChatMorphFlightLayer(
-                    registry: morphRegistry,
-                    layoutTransaction: layoutTransaction,
-                    reduceMotion: reduceMotion
-                )
-            }
             .overlay {
                 ChatFloatingDisplayHost(
                     route: $sessionPresentation.floatingDisplay,
@@ -717,7 +709,6 @@ struct ChatView: View {
     }
 
     private func abandonLayoutTransaction() {
-        morphRegistry.abandon()
         layoutTransaction.abandon()
     }
 
@@ -766,25 +757,6 @@ struct ChatView: View {
         guard presentationActivity.allowsViewportObservation else { return }
         scrollCoordinator.reconcileMaterializationRows { renderedID in
             installed?.containsPhysicalRowID(renderedID) == true
-        }
-        if presentationActivity.allowsContinuousAnimation {
-            let outgoingPresentation = installed?.handoff.outgoingPresentation
-            let activeFlightLifecycleID = morphRegistry.flight?.lifecycleID
-            let retainedFlightLifecycleID = activeFlightLifecycleID.flatMap { lifecycleID in
-                let retainedByInstalledLifecycle = installed?.containsPhysicalRowID(lifecycleID) == true
-                let retainedByCanonicalAlias = sessionPresentation.canonicalSubmissionAliases.aliases
-                    .contains { canonicalID, physicalID in
-                        physicalID == lifecycleID
-                            && installed?.containsDisplayedID(canonicalID) == true
-                    }
-                return retainedByInstalledLifecycle || retainedByCanonicalAlias ? lifecycleID : nil
-            }
-            if let generation = morphRegistry.reconcile(
-                installedLifecycleID: outgoingPresentation?.id ?? retainedFlightLifecycleID,
-                permitsFlight: outgoingPresentation?.usesQueuedCardVisual != true
-            ) {
-                layoutTransaction.settle(generation, source: .morphFlight)
-            }
         }
         let projectionLayoutChanged = previousTag.map { previousTag in
             installed.map { !previousTag.matchesProjectionPayload(of: $0.tag) } ?? true
@@ -1094,14 +1066,12 @@ struct ChatView: View {
             frameScheduler: displayFrameScheduler,
             minimumUnderflowContentHeight: minimumUnderflowContentHeight,
             reduceMotion: reduceMotion,
-            submissionAnimation: layoutTransaction.resolvedAnimation,
             presentationEpoch: sessionPresentation.open.epoch,
             presentationPhase: sessionPresentation.open.phase,
             admitsGeometryCallbacks: admitsScrollGeometryCallbacks,
             admitsNativeCallbacks: admitsNativeScrollCallbacks,
             responseState: responseState,
             mutatingQueuedMessageIDs: sessionPresentation.mutatingQueuedMessageIDs,
-            morphRegistry: morphRegistry,
             scrollPosition: $transcriptScrollPosition,
             earlierRow: { installed in earlierMessagesChip(installed: installed) },
             openingSurface: { openingSurface },
@@ -2553,7 +2523,6 @@ struct ChatView: View {
             selectedResource: selectedComposerResource,
             resourcePicker: composerResourcePicker,
             resourceResults: composerResourceResults,
-            morphRegistry: morphRegistry,
             submissionTransitionID: layoutTransaction.activeSubmissionGenerationID,
             submissionAnimation: layoutTransaction.resolvedAnimation,
             reduceMotion: reduceMotion,
@@ -3126,7 +3095,7 @@ struct ChatView: View {
                 // Transfer an applied sentinel lease directly to the outgoing
                 // row while preserving detached-reader ownership.
                 scrollCoordinator.submitted()
-                // Submission, row growth, composer height, morph, and keyboard
+                // Submission, composer height, row admission, and keyboard
                 // changes join one settlement generation only after admission.
                 let layoutGeneration = layoutTransaction.join(.submission)
                 _ = layoutTransaction.join(.transcriptGrowth)
@@ -3137,18 +3106,8 @@ struct ChatView: View {
                     .prefix(ComposerAttachmentPolicy.maximumCount)
                     .map { $0.frozenForHandoff() }
                 let isExtensionCommand = submission.resourceInvocation?.isExtensionCommand == true
-                let morphGeneration = layoutTransaction.join(.morphFlight)
-                let stagedMorph = morphRegistry.stage(
-                    lifecycle: model.composerDrafts.submissionLifecycle(for: target),
-                    generation: morphGeneration,
-                    suppress: reduceMotion || scenePhase != .active || freezesDetachedProjection
-                )
-                if !stagedMorph {
-                    layoutTransaction.settle(morphGeneration, source: .morphFlight)
-                }
-                // Responder, composer, row entrance, and morph begin from this
-                // same admitted transaction. UIKit publishes its keyboard clock
-                // synchronously when available before the outgoing graft.
+                // UIKit publishes its keyboard clock synchronously when
+                // available before the already-sized outgoing row is grafted.
                 dismissComposerForAdmittedSubmission()
                 // Exact extension commands do not create a canonical user
                 // message in Pi. Never graft a prompt bubble that can become a
@@ -3184,12 +3143,10 @@ struct ChatView: View {
                 return (
                     submission: submission,
                     grafted: grafted,
-                    materialized: materializationAdmitted,
-                    layoutGeneration: layoutGeneration
+                    materialized: materializationAdmitted
                 )
             }
             let submission = admission.submission
-            let layoutGeneration = admission.layoutGeneration
             model.chatInteractionTrace.submission(
                 .lifecycleGrafted,
                 context: traceContext,

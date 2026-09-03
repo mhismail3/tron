@@ -168,10 +168,6 @@ enum ChatContentEntranceKind: Hashable, Sendable {
 }
 
 enum ChatPromptLifecycleTransitionPolicy {
-    static func entranceKind(for behavior: ChatPromptBehavior) -> ChatContentEntranceKind {
-        behavior.isQueuedKind ? .queuedPrompt : .userPrompt
-    }
-
     static func shouldAnimateQueueEntrance(
         isReady: Bool,
         entranceSuppressed: Bool,
@@ -220,9 +216,6 @@ enum ChatContentTransitionPolicy {
     /// clamped to layout bounds and can otherwise settle through visible stalls.
     static let transcriptEntranceDuration: TimeInterval = 0.18
     static let promptEntranceDuration: TimeInterval = transcriptEntranceDuration
-    static let promptFlightDuration: TimeInterval = 0.18
-    static let promptFlightHandoffDuration: TimeInterval = 0.08
-    static let promptReplacementDuration: TimeInterval = 0.14
     static let notificationReplacementDuration: TimeInterval = 0.16
     static let attachmentHiddenScale: CGFloat = 0.5
     static let attachmentStaggerInterval: TimeInterval = 0.04
@@ -293,10 +286,6 @@ enum ChatContentTransitionPolicy {
             : .smooth(duration: 0.22)
     }
 
-    static func promptFlightAnimation(reduceMotion: Bool) -> Animation? {
-        reduceMotion ? nil : .smooth(duration: promptFlightDuration)
-    }
-
     static func notificationReplacementAnimation(reduceMotion: Bool) -> Animation? {
         reduceMotion ? .linear(duration: 0.10) : .smooth(duration: notificationReplacementDuration)
     }
@@ -346,7 +335,7 @@ private enum ChatEntranceAnimationTransactionKey: TransactionKey {
     static let defaultValue = false
 }
 
-private enum ChatPromptReplacementAnimationTransactionKey: TransactionKey {
+private enum ChatNotificationReplacementAnimationTransactionKey: TransactionKey {
     static let defaultValue = false
 }
 
@@ -365,23 +354,14 @@ extension Transaction {
         set { self[ChatEntranceAnimationTransactionKey.self] = newValue }
     }
 
-    var admitsChatPromptReplacementAnimation: Bool {
-        get { self[ChatPromptReplacementAnimationTransactionKey.self] }
-        set { self[ChatPromptReplacementAnimationTransactionKey.self] = newValue }
+    var admitsChatNotificationReplacementAnimation: Bool {
+        get { self[ChatNotificationReplacementAnimationTransactionKey.self] }
+        set { self[ChatNotificationReplacementAnimationTransactionKey.self] = newValue }
     }
 
     var admitsChatIncrementalGrowthAnimation: Bool {
         get { self[ChatIncrementalGrowthAnimationTransactionKey.self] }
         set { self[ChatIncrementalGrowthAnimationTransactionKey.self] = newValue }
-    }
-}
-
-enum ChatPromptReplacementAnimationPolicy {
-    static func animates(reduceMotion: Bool) -> Bool { !reduceMotion }
-
-    static func animation(reduceMotion: Bool) -> Animation? {
-        guard animates(reduceMotion: reduceMotion) else { return nil }
-        return .smooth(duration: ChatContentTransitionPolicy.promptReplacementDuration)
     }
 }
 
@@ -396,7 +376,7 @@ private struct ChatStableTranscriptUpdateModifier<ProjectionIdentity: Equatable>
             // transaction transform was erasing that first animation.
             if !transaction.admitsChatToolChipAnimation,
                !transaction.admitsChatEntranceAnimation,
-               !transaction.admitsChatPromptReplacementAnimation,
+               !transaction.admitsChatNotificationReplacementAnimation,
                !transaction.admitsChatIncrementalGrowthAnimation {
                 transaction.animation = nil
             }

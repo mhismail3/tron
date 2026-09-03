@@ -10,7 +10,6 @@ struct ChatComposerView: View {
     let selectedResource: ComposerResourceEntry?
     let resourcePicker: ComposerResourcePickerSource?
     let resourceResults: [ComposerResourceEntry]
-    let morphRegistry: ChatMorphFrameRegistry
     let submissionTransitionID: Int?
     let submissionAnimation: Animation?
     let reduceMotion: Bool
@@ -126,7 +125,6 @@ struct ChatComposerView: View {
     private var attachmentStrip: some View {
         ChatPendingAttachmentStrip(
             attachments: pendingAttachments,
-            morphRegistry: morphRegistry,
             reduceMotion: reduceMotion,
             submissionTransitionActive: submissionTransitionID != nil,
             onRemove: onRemoveAttachment
@@ -142,10 +140,6 @@ struct ChatComposerView: View {
                         sessionID: sessionFacts?.sessionID,
                         resource: selectedResource,
                         onRemove: onRemoveResource
-                    )
-                    .chatDraftResourceMorphSource(
-                        resource: selectedResource.invocation(),
-                        registry: morphRegistry
                     )
                 }
                 .padding(.horizontal, 16)
@@ -207,7 +201,6 @@ struct ChatComposerView: View {
                 .padding(.vertical, 10)
             }
             .frame(minHeight: 40)
-            .chatDraftPromptMorphSource(registry: morphRegistry)
 
             SessionContextProgressButton(presentation: contextProgress, onTap: onShowContext)
 
@@ -294,7 +287,6 @@ struct ChatComposerView: View {
 
 private struct ChatPendingAttachmentStrip: View {
     let attachments: [PendingAttachment]
-    let morphRegistry: ChatMorphFrameRegistry
     let reduceMotion: Bool
     let submissionTransitionActive: Bool
     let onRemove: (String) -> Void
@@ -304,13 +296,11 @@ private struct ChatPendingAttachmentStrip: View {
 
     init(
         attachments: [PendingAttachment],
-        morphRegistry: ChatMorphFrameRegistry,
         reduceMotion: Bool,
         submissionTransitionActive: Bool,
         onRemove: @escaping (String) -> Void
     ) {
         self.attachments = attachments
-        self.morphRegistry = morphRegistry
         self.reduceMotion = reduceMotion
         self.submissionTransitionActive = submissionTransitionActive
         self.onRemove = onRemove
@@ -326,7 +316,6 @@ private struct ChatPendingAttachmentStrip: View {
                             PendingAttachmentChip(attachment: attachment) {
                                 onRemove(attachment.id)
                             }
-                            .chatDraftAttachmentMorphSource(id: attachment.id, registry: morphRegistry)
                             .transition(
                                 presentedAttachments.count == 1
                                     ? .identity

@@ -98,22 +98,6 @@ struct ChatPhysicalTranscriptRow: Identifiable, Hashable {
     let id: String
     let semanticID: String
     let content: Content
-
-    var isPromptLifecycle: Bool {
-        switch content {
-        case .pending, .outgoing, .queued: true
-        case .transcript: false
-        }
-    }
-
-    var isCanonicalUser: Bool {
-        guard case .transcript(let item, _) = content else { return false }
-        return switch item {
-        case .transcript(let transcript): transcript.role == .user
-        case .message(let message): message.item.role == .user
-        case .toolRun, .notification: false
-        }
-    }
 }
 
 /// Zero-copy row spine. Ordinary body evaluation constructs only this small
@@ -299,8 +283,25 @@ enum ChatPhysicalTranscriptRowPolicy {
 
 enum ChatPhysicalTranscriptReplacementKind: Equatable {
     case none
-    case prompt
     case notification
+}
+
+enum ChatPromptEntranceRetirementPolicy {
+    static func retires(
+        from previous: ChatPhysicalTranscriptRow,
+        to next: ChatPhysicalTranscriptRow
+    ) -> Bool {
+        switch previous.content {
+        case .outgoing:
+            if case .outgoing = next.content { return false }
+            return true
+        case .pending(let prompt) where !prompt.promptBehavior.isQueuedKind:
+            if case .pending = next.content { return false }
+            return true
+        case .pending, .queued, .transcript:
+            return false
+        }
+    }
 }
 
 enum ChatPhysicalTranscriptReplacementPolicy {
@@ -309,10 +310,6 @@ enum ChatPhysicalTranscriptReplacementPolicy {
         to next: ChatPhysicalTranscriptRow
     ) -> ChatPhysicalTranscriptReplacementKind {
         guard previous.id == next.id else { return .none }
-        if previous.isPromptLifecycle,
-           next.isPromptLifecycle || next.isCanonicalUser {
-            return .prompt
-        }
         if case .transcript(.notification(let old), _) = previous.content,
            case .transcript(.notification(let new), _) = next.content,
            old.showsProgress,
@@ -328,25 +325,23 @@ enum ChatPhysicalTranscriptReplacementPolicy {
 private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     let row: ChatPhysicalTranscriptRow
     let reduceMotion: Bool
-    let morphRegistry: ChatMorphFrameRegistry
     let hostedRecorder: (any ChatTranscriptHostedRecording)?
+    let onPromptEntranceRetired: (String) -> Void
     @ViewBuilder let content: (ChatPhysicalTranscriptRow) -> Content
 
     @State private var displayed: ChatPhysicalTranscriptRow
-    @State private var deferredReplacement: ChatPhysicalTranscriptRow?
-    @State private var promptReplacementRevision = 0
 
     init(
         row: ChatPhysicalTranscriptRow,
         reduceMotion: Bool,
-        morphRegistry: ChatMorphFrameRegistry,
         hostedRecorder: (any ChatTranscriptHostedRecording)? = nil,
+        onPromptEntranceRetired: @escaping (String) -> Void,
         @ViewBuilder content: @escaping (ChatPhysicalTranscriptRow) -> Content
     ) {
         self.row = row
         self.reduceMotion = reduceMotion
-        self.morphRegistry = morphRegistry
         self.hostedRecorder = hostedRecorder
+        self.onPromptEntranceRetired = onPromptEntranceRetired
         self.content = content
         _displayed = State(initialValue: row)
     }
@@ -354,72 +349,38 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
     var body: some View {
         // `row.id` owns structural continuity. Descendants animate admitted
         // lifecycle and payload values within this persistent host.
-        renderedContent
+        content(displayed)
             .onAppear { hostedRecorder?.recordPhysicalRowAppearance(id: displayed.id) }
             .onDisappear { hostedRecorder?.recordPhysicalRowDisappearance(id: displayed.id) }
             .onChange(of: row) { _, next in retarget(next) }
-            .onChange(of: morphRegistry.readinessRevision) { _, _ in
-                guard let deferredReplacement,
-                      morphRegistry.flight?.lifecycleID != displayed.id else { return }
-                self.deferredReplacement = nil
-                retarget(deferredReplacement, permitsFlightDeferral: false)
-            }
     }
 
-    @ViewBuilder
-    private var renderedContent: some View {
-        if displayed.isPromptLifecycle || promptReplacementRevision > 0 {
-            ChatPromptReplacementLayoutHost(
-                revision: promptReplacementRevision,
-                reduceMotion: reduceMotion
-            ) {
-                content(displayed)
-            }
-        } else {
-            content(displayed)
-        }
-    }
-
-    private func retarget(
-        _ next: ChatPhysicalTranscriptRow,
-        permitsFlightDeferral: Bool = true
-    ) {
+    private func retarget(_ next: ChatPhysicalTranscriptRow) {
+        let retiredEntranceID = ChatPromptEntranceRetirementPolicy.retires(
+            from: displayed,
+            to: next
+        ) ? displayed.id : nil
         let kind = ChatPhysicalTranscriptReplacementPolicy.replacement(
             from: displayed,
             to: next
         )
-        if permitsFlightDeferral,
-           kind == .prompt,
-           morphRegistry.flight?.lifecycleID == displayed.id {
-            // Canonical authority may arrive during the visual flight. Keep the
-            // aliased outgoing destination mounted and hidden until the overlay
-            // hands off, then install only the newest canonical replacement.
-            deferredReplacement = next
-            return
-        }
-        deferredReplacement = nil
         switch kind {
-        case .prompt:
-            // Install the new prompt payload atomically. The persistent prompt
-            // host animates only its bounded measured height; interpolating the
-            // entire Liquid Glass subtree creates overlapping container images.
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                displayed = next
-                promptReplacementRevision &+= 1
-            }
         case .notification:
             var transaction = Transaction(animation:
                 ChatContentTransitionPolicy.notificationReplacementAnimation(
                     reduceMotion: reduceMotion
                 ))
-            transaction.admitsChatPromptReplacementAnimation = true
+            transaction.admitsChatNotificationReplacementAnimation = true
             withTransaction(transaction) { displayed = next }
         case .none:
+            // Canonical prompt payload replaces the lifecycle row atomically.
+            // Its stable physical identity prevents a second entrance.
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction) { displayed = next }
+        }
+        if let retiredEntranceID {
+            onPromptEntranceRetired(retiredEntranceID)
         }
     }
 }
@@ -439,14 +400,12 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let frameScheduler: DisplayFrameScheduler
     let minimumUnderflowContentHeight: CGFloat
     let reduceMotion: Bool
-    let submissionAnimation: Animation?
     let presentationEpoch: Int
     let presentationPhase: ChatOpenPresentationPhase
     let admitsGeometryCallbacks: Bool
     let admitsNativeCallbacks: Bool
     let responseState: ChatResponseState?
     let mutatingQueuedMessageIDs: Set<String>
-    let morphRegistry: ChatMorphFrameRegistry
     @Binding var scrollPosition: ScrollPosition
     let earlierRow: (InstalledChatTranscript) -> Earlier
     let openingSurface: () -> Opening
@@ -491,8 +450,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             ChatPhysicalTranscriptReplacementHost(
                                 row: row,
                                 reduceMotion: reduceMotion,
-                                morphRegistry: morphRegistry,
-                                hostedRecorder: hostedRecorder
+                                hostedRecorder: hostedRecorder,
+                                onPromptEntranceRetired: onEntranceSettled
                             ) { displayed in
                                 physicalRow(displayed, installed: installed)
                             }
@@ -751,7 +710,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     animatesEntrance: admitsGeometryCallbacks
                         && !entranceSuppressed
                         && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
-                    kind: ChatPromptLifecycleTransitionPolicy.entranceKind(for: pending.promptBehavior),
                     onEntranceConsumed: {
                         transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
                     },
@@ -790,10 +748,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         isReady: isReady,
                         entranceSuppressed: entranceSuppressed
                     )) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
-                morphOwnership: morphRegistry.entranceOwnership(for: outgoing.id),
-                morphFlightPhase: morphRegistry.flightPhase(for: outgoing.id),
-                submissionAnimation: submissionAnimation,
-                kind: ChatPromptLifecycleTransitionPolicy.entranceKind(for: outgoing.promptBehavior),
                 onEntranceConsumed: {
                     transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
                 },
@@ -801,8 +755,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             ) {
                 ChatOutgoingSubmissionRow(
                     presentation: outgoing,
-                    attachments: attachments,
-                    morphRegistry: morphRegistry
+                    attachments: attachments
                 )
                 .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
             }
