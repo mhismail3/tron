@@ -39,7 +39,7 @@ struct AutomationsDashboardView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var viewPreferences: AutomationDashboardViewPreferences
+    @Binding private var viewPreferences: AutomationDashboardViewPreferences
     @State private var search = ""
     @State private var showingSearch = false
     @State private var showingFilters = false
@@ -50,10 +50,14 @@ struct AutomationsDashboardView: View {
     @State private var timeline: AutomationTimelineCoordinator?
     @State private var timelineRefreshIndicatorVisible = false
 
-    init(onSelectSessions: @escaping () -> Void, onOpenSettings: @escaping () -> Void) {
+    init(
+        viewPreferences: Binding<AutomationDashboardViewPreferences>,
+        onSelectSessions: @escaping () -> Void,
+        onOpenSettings: @escaping () -> Void
+    ) {
+        _viewPreferences = viewPreferences
         self.onSelectSessions = onSelectSessions
         self.onOpenSettings = onOpenSettings
-        _viewPreferences = State(initialValue: AutomationDashboardPreferences.load())
     }
 
     private var eligibleProfileIDs: Set<String> {

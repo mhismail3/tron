@@ -25,8 +25,9 @@ it owns the Upcoming/All view choice, status/action filters, and connected-Gatew
 The shared sheet forces short and long content into the same top-aligned frame, padding, title,
 selection transition, and scroll behavior. All-only controls fade into that stable layout rather
 than entering through a separate motion path. The selected Upcoming/All mode, inventory status,
-action type, and Gateway are stored as one bounded versioned preference and restored after relaunch;
-transient search text and the agenda date are not persisted. All-mode search uses the same
+action type, and Gateway are stored as one bounded versioned preference owned by the persistent dashboard
+shell, so they survive both dashboard switching and app relaunch; transient search text and the agenda date
+are not persisted. All-mode search uses the same
 bottom-left reveal/close interaction as the Sessions dashboard rather than permanently
 occupying dashboard space. Upcoming retains its current agenda or neutral empty state while
 refreshing; its no-occurrence placeholder stays centered in the available dashboard viewport
