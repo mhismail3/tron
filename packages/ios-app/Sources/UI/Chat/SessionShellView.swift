@@ -57,7 +57,7 @@ struct SessionShellView: View {
     @State private var mountedSessionRouteToken: PresentationSurfaceToken?
     @State private var profileRouteOwner = SessionShellProfileRouteOwner()
     @State private var serverFilter = DashboardServerFilterState()
-    @State private var automationViewPreferences = AutomationDashboardViewPreferences()
+    @State private var automationPreferences = AutomationDashboardPreferencesOwner()
     @State private var showingServerFilter = false
     @State private var openingSessionID: String?
     @State private var dashboardPresentation = DashboardPresentationSnapshot()
@@ -66,7 +66,7 @@ struct SessionShellView: View {
 
     init() {
         _serverFilter = State(initialValue: DashboardServerFilterPreferences.load())
-        _automationViewPreferences = State(initialValue: AutomationDashboardPreferences.load())
+        _automationPreferences = State(initialValue: AutomationDashboardPreferencesOwner())
     }
 
     var body: some View {
@@ -194,11 +194,18 @@ struct SessionShellView: View {
             sessionDashboardScreen
         case .automations:
             AutomationsDashboardView(
-                viewPreferences: $automationViewPreferences,
+                viewPreferences: automationViewPreferencesBinding,
                 onSelectDashboard: selectDashboard,
                 onOpenSettings: { showSettings = true }
             )
         }
+    }
+
+    private var automationViewPreferencesBinding: Binding<AutomationDashboardViewPreferences> {
+        Binding(
+            get: { automationPreferences.value },
+            set: { automationPreferences.set($0) }
+        )
     }
 
     private func selectDashboard(_ mode: DashboardMode) {

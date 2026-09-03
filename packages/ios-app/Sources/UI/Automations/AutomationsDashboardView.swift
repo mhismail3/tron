@@ -485,7 +485,6 @@ struct AutomationsDashboardView: View {
         update(&next)
         guard next != viewPreferences else { return }
         viewPreferences = next
-        AutomationDashboardPreferences.save(next)
     }
 
     private func reconcileViewPreferences() {
@@ -496,7 +495,6 @@ struct AutomationsDashboardView: View {
         })
         guard next != viewPreferences else { return }
         viewPreferences = next
-        AutomationDashboardPreferences.save(next)
     }
 
     private var automationFilterSheet: some View {

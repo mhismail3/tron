@@ -246,12 +246,24 @@ enum AutomationDashboardPreferences {
               let document = try? JSONDecoder().decode(Document.self, from: data),
               document.version == version,
               let mode = AutomationDashboardViewMode(rawValue: document.mode),
-              let inventoryFilter = AutomationInventoryFilter(rawValue: document.inventoryFilter),
-              let actionFilter = document.actionFilter.flatMap(AutomationActionKind.init(rawValue:)),
-              document.actionFilter == nil || actionFilter != nil,
-              document.selectedProfileID.map(admitsProfileID) ?? true else {
+              let inventoryFilter = AutomationInventoryFilter(rawValue: document.inventoryFilter) else {
             return AutomationDashboardViewPreferences()
         }
+
+        let actionFilter: AutomationActionKind?
+        if let storedActionFilter = document.actionFilter {
+            guard let decoded = AutomationActionKind(rawValue: storedActionFilter) else {
+                return AutomationDashboardViewPreferences()
+            }
+            actionFilter = decoded
+        } else {
+            actionFilter = nil
+        }
+        if let selectedProfileID = document.selectedProfileID,
+           !admitsProfileID(selectedProfileID) {
+            return AutomationDashboardViewPreferences()
+        }
+
         return AutomationDashboardViewPreferences(
             mode: mode,
             inventoryFilter: inventoryFilter,
@@ -279,6 +291,21 @@ enum AutomationDashboardPreferences {
 
     private static func admitsProfileID(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= maximumProfileIDBytes
+    }
+}
+
+struct AutomationDashboardPreferencesOwner {
+    private let defaults: UserDefaults
+    private(set) var value: AutomationDashboardViewPreferences
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        value = AutomationDashboardPreferences.load(from: defaults)
+    }
+
+    mutating func set(_ value: AutomationDashboardViewPreferences) {
+        self.value = value
+        AutomationDashboardPreferences.save(value, to: defaults)
     }
 }
 

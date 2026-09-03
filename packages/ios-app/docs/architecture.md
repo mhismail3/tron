@@ -361,8 +361,9 @@ choice retains independent root state. The Automations root provides a chronolog
 agenda and a searchable/filterable All inventory across identity-qualified paired Gateways. Its one
 managed filter sheet owns the view, status, action, and Gateway choices, while All-mode search reuses
 the Sessions dashboard's bottom reveal/close interaction. `SessionShellView`, which survives dashboard
-switches, owns those four choices and restores them from one bounded versioned `UserDefaults` document;
-ephemeral search and agenda-date state remain presentation-only,
+switches, owns those four choices through `AutomationDashboardPreferencesOwner`. Its root binding persists
+every accepted child mutation into one bounded versioned `UserDefaults` document and restores that value
+when the shell is created; ephemeral search and agenda-date state remain presentation-only,
 and no Automation action content or journal enters the preference. Only currently connected profiles with an
 authenticated `automations.v1` capability enter this projection; disconnected and incompatible profiles
 remain absent and cannot publish warning copy over the dashboard's neutral empty state. iOS admits

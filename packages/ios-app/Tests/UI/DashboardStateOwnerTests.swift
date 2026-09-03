@@ -615,15 +615,20 @@ struct DashboardStateOwnerTests {
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        var stored = AutomationDashboardPreferences.load(from: defaults)
-        #expect(stored == AutomationDashboardViewPreferences())
+        var owner = AutomationDashboardPreferencesOwner(defaults: defaults)
+        #expect(owner.value == AutomationDashboardViewPreferences())
+
+        var stored = owner.value
         stored.mode = .all
+        owner.set(stored)
+        #expect(AutomationDashboardPreferencesOwner(defaults: defaults).value == stored)
+
         stored.inventoryFilter = .paused
         stored.actionFilter = .notification
         stored.selectedProfileID = "profile-one"
-        AutomationDashboardPreferences.save(stored, to: defaults)
+        owner.set(stored)
 
-        var restored = AutomationDashboardPreferences.load(from: defaults)
+        var restored = AutomationDashboardPreferencesOwner(defaults: defaults).value
         #expect(restored == stored)
         #expect(restored.effectiveProfileID(eligibleProfileIDs: ["profile-one"]) == "profile-one")
         #expect(restored.effectiveProfileID(eligibleProfileIDs: []) == nil)
