@@ -2939,6 +2939,14 @@ final class AppModel {
         guard ownsPresentation(target),
               let presentation = authoritativeSnapshot(for: target.sessionID)?.extensionPresentation,
               !presentation.hostEpoch.isEmpty else { return }
+        // The editor and ordinary prompt RPCs share the Gateway's 192 KiB
+        // UTF-8 boundary. Do not enqueue a request the Gateway must reject;
+        // retain the complete local draft so the user can shorten it.
+        guard SharedContentAdmissionPolicy.admitsPrompt(text) else {
+            extensionEditorPendingText[target] = nil
+            extensionEditorPendingRevisions[target] = nil
+            return
+        }
         extensionEditorPendingText[target] = text
         extensionEditorPendingRevisions[target, default: 0] &+= 1
         guard extensionEditorSyncTasks[target] == nil else { return }

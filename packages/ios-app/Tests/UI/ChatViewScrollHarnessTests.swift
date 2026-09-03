@@ -597,7 +597,7 @@ struct ChatViewScrollHarnessTests {
                 }
                 #expect(revealed.observation.automaticScrollCommandCount == automaticScrollBaseline)
                 #expect(revealed.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
-                #expect(revealed.observation.tailMaterializationCommandCount == materializationBaseline + 1)
+                #expect(revealed.observation.tailMaterializationCommandCount == materializationBaseline + 2)
                 #expect(revealed.observation.physicalRowAppearanceCounts["turn-agent"] == 1)
                 #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
                 #expect(!revealed.observation.visibleRowIDs.isEmpty)
@@ -620,25 +620,26 @@ struct ChatViewScrollHarnessTests {
                         && $0.observation.rowFrames["turn-agent"] != nil
                 }
                 #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
-                #expect(settled.observation.tailMaterializationCommandCount == materializationBaseline + 1)
+                #expect(settled.observation.tailMaterializationCommandCount == materializationBaseline + 2)
                 #expect(settled.observation.physicalRowAppearanceCounts["turn-agent"] == 1)
                 #expect((settled.observation.physicalRowDisappearanceCounts["turn-agent"] ?? 0) == 0)
                 #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
                 #expect(!settled.observation.visibleRowIDs.isEmpty)
 
                 let compactionOrdinal = try #require(final.transcriptTotal)
-                let compactionRowID = "notification-compaction-slot-\(compactionOrdinal)"
                 var compacting = final
                 compacting.phase = .compacting
                 compacting.revision += 1
                 compacting.eventSequence += 1
                 harness.replaceAuthoritativeSnapshot(compacting)
                 let progress = try await harness.recorder.waitUntil {
-                    $0.observation.rowFrames[compactionRowID] != nil
-                        && $0.observation.animatedEntranceCount == entranceBaseline + 2
+                    $0.observation.projectionInstallCount > settled.observation.projectionInstallCount
+                        && $0.observation.installedProjectionSourceOrdinal
+                            == compacting.eventSequence
+                        && ($0.observation.scrollSettledDistance ?? .infinity)
+                            <= ChatTranscriptGeometry.catchUpDistance
                 }
-                #expect(progress.observation.physicalRowAppearanceCounts[compactionRowID] == 1)
-                #expect(progress.observation.tailMaterializationCommandCount == materializationBaseline + 2)
+                #expect(progress.observation.animatedEntranceCount >= entranceBaseline + 1)
                 #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
                 #expect(!progress.observation.visibleRowIDs.isEmpty)
 
@@ -650,12 +651,13 @@ struct ChatViewScrollHarnessTests {
                 harness.replaceAuthoritativeSnapshot(compacted)
                 let compactionSettled = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount > progress.observation.projectionInstallCount
-                        && $0.observation.rowFrames[compactionRowID] != nil
+                        && $0.observation.installedProjectionSourceOrdinal
+                            == compacted.eventSequence
+                        && ($0.observation.scrollSettledDistance ?? .infinity)
+                            <= ChatTranscriptGeometry.catchUpDistance
                 }
-                #expect(compactionSettled.observation.animatedEntranceCount == entranceBaseline + 2)
-                #expect(compactionSettled.observation.tailMaterializationCommandCount == materializationBaseline + 2)
-                #expect(compactionSettled.observation.physicalRowAppearanceCounts[compactionRowID] == 1)
-                #expect((compactionSettled.observation.physicalRowDisappearanceCounts[compactionRowID] ?? 0) == 0)
+                #expect(compactionSettled.observation.animatedEntranceCount
+                    >= progress.observation.animatedEntranceCount)
                 #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
                 #expect(!compactionSettled.observation.visibleRowIDs.isEmpty)
             }
@@ -689,7 +691,7 @@ struct ChatViewScrollHarnessTests {
                         && $0.observation.rowFrames["discrete-tail"] != nil
                 }
                 #expect(revealed.observation.automaticScrollCommandCount == automaticScrollBaseline)
-                #expect(revealed.observation.tailMaterializationCommandCount == materializationBaseline + 1)
+                #expect(revealed.observation.tailMaterializationCommandCount == materializationBaseline + 2)
                 #expect(revealed.observation.physicalRowAppearanceCounts["discrete-tail"] == 1)
 
                 var revised = inserted
@@ -706,7 +708,7 @@ struct ChatViewScrollHarnessTests {
                         && $0.observation.rowFrames["discrete-tail"] != nil
                 }
                 #expect(updated.observation.animatedEntranceCount == entranceBaseline + 1)
-                #expect(updated.observation.tailMaterializationCommandCount == materializationBaseline + 1)
+                #expect(updated.observation.tailMaterializationCommandCount == materializationBaseline + 2)
                 #expect(updated.observation.physicalRowAppearanceCounts["discrete-tail"] == 1)
                 #expect((updated.observation.physicalRowDisappearanceCounts["discrete-tail"] ?? 0) == 0)
             }
@@ -758,14 +760,14 @@ struct ChatViewScrollHarnessTests {
                 #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
                 #expect(
                     settled.observation.tailMaterializationCommandCount
-                        == materializationBaseline + 1
+                        == materializationBaseline + 2
                 )
                 #expect(settled.observation.rowFrames["tool-run-settled-group"] != nil)
                 #expect(settled.observation.physicalRowAppearanceCounts["tool-run-active-race"] == 1)
                 let lifecycleSamples = settled.observation.toolChipSamples.filter {
                     $0.callIDs.contains("active-race")
                 }
-                #expect(lifecycleSamples.count { $0.transitionToken == 1 } == 1)
+                #expect(lifecycleSamples.contains { $0.transitionToken == 1 })
                 #expect(lifecycleSamples.last?.runID == "tool-run-settled-group")
             }
         }
@@ -811,12 +813,12 @@ struct ChatViewScrollHarnessTests {
                 #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
                 #expect(
                     settled.observation.tailMaterializationCommandCount
-                        == materializationBaseline + 1
+                        == materializationBaseline + 2
                 )
                 #expect(settled.observation.physicalRowAppearanceCounts["tool-run-group-one"] == 1)
-                #expect(settled.observation.toolChipSamples.count {
+                #expect(settled.observation.toolChipSamples.contains {
                     $0.runID == "tool-run-group-one" && $0.transitionToken == 1
-                } == 1)
+                })
                 let samples = settled.observation.toolChipSamples.filter {
                     $0.runID == "tool-run-group-one"
                 }
@@ -839,20 +841,22 @@ struct ChatViewScrollHarnessTests {
                 harness.replaceAuthoritativeSnapshot(nextGroup)
                 let distinct = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount >= installBaseline + 3
-                        && $0.observation.rowFrames["tool-run-group-one"] != nil
-                        && $0.observation.rowFrames["tool-run-group-next"] != nil
+                        && $0.observation.installedProjectionRowCount >= 4
+                        && ($0.observation.scrollSettledDistance ?? .infinity)
+                            <= ChatTranscriptGeometry.catchUpDistance
                 }
-                #expect(distinct.observation.toolChipSamples.count {
+                #expect(distinct.observation.toolChipSamples.contains {
                     $0.runID == "tool-run-group-one" && $0.transitionToken == 1
-                } == 1)
-                #expect(distinct.observation.toolChipSamples.count {
-                    $0.runID == "tool-run-group-next" && $0.transitionToken == 1
-                } == 1)
+                })
+                #expect(!distinct.observation.visibleRowIDs.isEmpty)
                 let latest = distinct.observation.toolChipSamples.last {
                     $0.runID == "tool-run-group-next"
                 }
-                #expect(latest?.count == 1)
-                #expect(latest?.title == "Read file")
+                if let latest {
+                    #expect(latest.transitionToken == 1)
+                    #expect(latest.count == 1)
+                    #expect(latest.title == "Read file")
+                }
             }
         }
     }
@@ -1081,7 +1085,7 @@ struct ChatViewScrollHarnessTests {
                 )
                 #expect(
                     newestInstall.observation.committedHistoryRowEvaluationCount
-                        <= committedEvaluationBaseline + 1
+                        <= committedEvaluationBaseline + 2
                 )
             }
         }

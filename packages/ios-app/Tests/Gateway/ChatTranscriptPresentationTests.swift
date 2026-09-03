@@ -532,6 +532,49 @@ struct ChatTranscriptPresentationTests {
         #expect(undersizedOvershoot.isPastBottomEdge)
     }
 
+    @Test("viewport movement is distinct from structural keyboard and content changes")
+    func viewportMovementClassification() {
+        let baseline = ChatTranscriptGeometry(
+            offsetY: 600,
+            contentHeight: 1_000,
+            containerHeight: 400,
+            bottomInset: 0,
+            visibleTopY: 600,
+            visibleBottomY: 1_000
+        )
+        let direct = ChatTranscriptGeometry(
+            offsetY: 100,
+            contentHeight: 1_000,
+            containerHeight: 400,
+            bottomInset: 0,
+            visibleTopY: 100,
+            visibleBottomY: 500
+        )
+        let keyboard = ChatTranscriptGeometry(
+            offsetY: 300,
+            contentHeight: 1_000,
+            containerHeight: 200,
+            bottomInset: 200,
+            visibleTopY: 300,
+            visibleBottomY: 500
+        )
+        let growth = ChatTranscriptGeometry(
+            offsetY: 600,
+            contentHeight: 1_100,
+            containerHeight: 400,
+            bottomInset: 0,
+            visibleTopY: 600,
+            visibleBottomY: 1_000
+        )
+
+        #expect(direct.hasIndependentViewportMovement(from: baseline))
+        #expect(!direct.hasStructuralChange(from: baseline))
+        #expect(!keyboard.hasIndependentViewportMovement(from: baseline))
+        #expect(keyboard.hasStructuralChange(from: baseline))
+        #expect(!growth.hasIndependentViewportMovement(from: baseline))
+        #expect(growth.hasStructuralChange(from: baseline))
+    }
+
     @Test("opening plausibility distinguishes a physical tail from overflow overshoot")
     func openingViewportPlausibility() {
         let bottom = ChatTranscriptGeometry(
@@ -996,16 +1039,27 @@ struct ChatTranscriptPresentationTests {
         let installed = state.installAuthoritativeBaseline(sessionID: "session-a", epoch: epoch)
         #expect(installed)
         #expect(state.phase == .positioning)
-        let wrongPositionedSession = state.installPositionedViewport(
+        let wrongPositionedSession = state.beginPositionedReveal(
             sessionID: "session-b", epoch: epoch
         )
-        let stalePositionedEpoch = state.installPositionedViewport(
+        let stalePositionedEpoch = state.beginPositionedReveal(
             sessionID: "session-a", epoch: epoch - 1
         )
-        let positioned = state.installPositionedViewport(sessionID: "session-a", epoch: epoch)
+        let positioned = state.beginPositionedReveal(sessionID: "session-a", epoch: epoch)
         #expect(!wrongPositionedSession)
         #expect(!stalePositionedEpoch)
         #expect(positioned)
+        #expect(state.phase == .revealing)
+        let wrongSettledSession = state.installSettledViewport(
+            sessionID: "session-b", epoch: epoch
+        )
+        let staleSettledEpoch = state.installSettledViewport(
+            sessionID: "session-a", epoch: epoch - 1
+        )
+        let settled = state.installSettledViewport(sessionID: "session-a", epoch: epoch)
+        #expect(!wrongSettledSession)
+        #expect(!staleSettledEpoch)
+        #expect(settled)
         #expect(state.phase == .ready)
     }
 

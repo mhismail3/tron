@@ -60,6 +60,14 @@ struct ChatContentTransitionTests {
         #expect(ChatEntranceGrowthPolicy.height(natural: 120, progress: -1) == 0)
         #expect(ChatEntranceGrowthPolicy.height(natural: 120, progress: 0.5) == 60)
         #expect(ChatEntranceGrowthPolicy.height(natural: 120, progress: 2) == 120)
+        #expect(ChatEntranceGrowthPolicy.height(
+            natural: ChatEntranceGrowthPolicy.maximumAnimatedHeight + 1,
+            progress: 0
+        ) == ChatEntranceGrowthPolicy.maximumAnimatedHeight + 1)
+        #expect(ChatEntranceGrowthPolicy.height(
+            natural: ChatEntranceGrowthPolicy.maximumAnimatedHeight + 1,
+            progress: 0.5
+        ) == ChatEntranceGrowthPolicy.maximumAnimatedHeight + 1)
         #expect(ChatEntranceGrowthPolicy.height(natural: .infinity, progress: 1) == 0)
         #expect(ChatEntranceGrowthPolicy.height(natural: 120, progress: .nan) == 0)
         #expect(ChatEntranceGrowthPolicy.requiresClip(progress: 0))

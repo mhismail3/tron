@@ -89,7 +89,11 @@ final class ChatInteractionTrace: @unchecked Sendable {
         var isPastBottomEdge: Bool?
         var tailClassification: ChatPhysicalTailClassification?
         var tailDisplacement: CGFloat?
+        /// Pending command publication and an already-applied native target are
+        /// separate leases and must never share one ambiguous diagnostic bit.
         var hasCommand: Bool?
+        var hasAppliedTarget: Bool?
+        var hasPendingRelease: Bool?
 
         static let empty = State()
     }
@@ -329,11 +333,20 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
         records.append(record)
         while records.count > Self.maximumRecords {
-            // Preserve sparse warnings/errors across routine geometry and
-            // lifecycle traffic. The ring remains globally bounded and falls
-            // back to FIFO once every retained record is diagnostic priority.
-            let evictionIndex = records.firstIndex { $0.level == "info" }
-                ?? records.startIndex
+            // Evict repetitive samples before causal lifecycle edges. Keep
+            // context starts, commands, failures, and warnings long enough to
+            // interpret the bounded suffix without retaining private content.
+            let evictionIndex = records.firstIndex {
+                $0.level == "info" && (
+                    $0.event.hasPrefix("chat.geometry.")
+                        || $0.event == "chat.viewport.transition"
+                        || $0.event == "chat.submission.checkpoint"
+                )
+            } ?? records.firstIndex {
+                $0.level == "info" && $0.event != "chat.context.begin"
+            } ?? records.firstIndex {
+                $0.level == "info"
+            } ?? records.startIndex
             records.remove(at: evictionIndex)
         }
         lock.unlock()
@@ -367,6 +380,8 @@ final class ChatInteractionTrace: @unchecked Sendable {
         if let value = state.tailClassification { values.append("tail=\(Self.tail(value))") }
         if let value = state.tailDisplacement { values.append("tailDelta=\(Self.scalar(value))") }
         if let value = state.hasCommand { values.append("command=\(Self.bit(value))") }
+        if let value = state.hasAppliedTarget { values.append("target=\(Self.bit(value))") }
+        if let value = state.hasPendingRelease { values.append("release=\(Self.bit(value))") }
     }
 
     private static func bit(_ value: Bool) -> Int { value ? 1 : 0 }
@@ -402,6 +417,7 @@ final class ChatInteractionTrace: @unchecked Sendable {
     private static func destination(_ destination: ChatScrollCommand.Destination) -> String {
         switch destination {
         case .tail: "tail"
+        case .materialize: "materialize"
         case .openingTail: "opening-tail"
         case .offsetY: "offset"
         }
@@ -445,6 +461,14 @@ enum ChatInteractionAnomalyPolicy {
               geometry.isValid else { return false }
         let markerIsDisplaced = tailClassification == .aboveViewport
             || tailClassification == .belowViewport
+        // A short/empty transcript intentionally fills only the viewport above
+        // the composer inset. Its marker can differ by that exact inset while
+        // native bottom geometry remains correctly installed.
+        if ChatTranscriptUnderflowLayoutPolicy.isPhysicallyInstalled(geometry),
+           geometry.isAtCatchUpBoundary,
+           !geometry.isPastBottomEdge {
+            return false
+        }
         return markerIsDisplaced
             || geometry.isPastBottomEdge
             || geometry.distanceFromBottom > max(160, geometry.containerHeight * 0.65)

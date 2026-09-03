@@ -17,6 +17,9 @@ struct ChatScrollCommand: Equatable, Sendable {
 
     enum Destination: Equatable, Sendable {
         case tail
+        /// Exact lazy row realization target. The coordinator retains the
+        /// lease until both this row and the physical tail publish evidence.
+        case materialize(String)
         case openingTail(String)
         case offsetY(CGFloat)
     }
@@ -53,8 +56,8 @@ enum ChatHistoryPageLoadResult: Equatable, Sendable {
 }
 
 /// Owns explicit viewport intent plus opening, catch-up, semantic restore, and
-/// prepend commands. Native anchoring owns payload and size changes. A genuinely
-/// New lazy rows lease the stable tail sentinel through their exact layout
+/// prepend commands. Native anchoring owns payload and size changes. New lazy
+/// rows lease their exact physical scroll target through their exact layout
 /// transaction. Foreground resume retains native ownership; signed-marker drift
 /// admits bounded repair.
 @Observable
@@ -64,6 +67,9 @@ final class ChatScrollCoordinator {
     static let defaultOpeningPostRevealTimeout: Duration = .seconds(2)
     static let maximumOpeningTailCommandAttempts = 3
     static let liveGrowthAnimationDuration = 0.16
+    /// Realizing the row immediately before the eager tail can leave only the
+    /// fixed row spacing and tail affordance outside the viewport.
+    static let maximumMaterializationTailDisplacement: CGFloat = 32
 
     private struct SemanticFrameSample: Equatable {
         let layoutEpoch: Int
@@ -73,6 +79,8 @@ final class ChatScrollCoordinator {
 
     private struct TailMaterialization {
         var renderedID: String?
+        var physicalTargetID: String?
+        var usesStableTailTarget: Bool
         var requiredRevision: Int?
         var requiredLayoutEpoch: Int?
         let layoutOwnerRenderedID: String?
@@ -82,15 +90,22 @@ final class ChatScrollCoordinator {
 
     private struct PendingTailMaterialization {
         let renderedID: String
+        let physicalTargetID: String
         let layoutOwnerRenderedID: String?
         let layoutTransactionID: Int?
         var layoutSettled: Bool
     }
 
+    enum OpeningTailSettlementResult: Equatable {
+        case settled
+        case failed
+        case cancelled
+    }
+
     private struct OpeningTailFinalWaiter {
         let id: Int
         let token: Int
-        let continuation: CheckedContinuation<Void, Never>
+        let continuation: CheckedContinuation<OpeningTailSettlementResult, Never>
     }
 
     private struct OpeningTailContext: Equatable {
@@ -184,6 +199,9 @@ final class ChatScrollCoordinator {
     private var geometry = ChatTranscriptGeometry.zero
     private var geometryRevision = 0
     private var installedPhysicalRowSpine: ChatPhysicalRowSpineIdentity?
+    /// A newly mounted non-retained tree cannot repair its placeholder geometry
+    /// before ChatView installs the authoritative opening baseline.
+    private var awaitingOpeningBaseline = false
     private var retainedViewportReconciliationPending = false
     private var semanticFrames: [String: SemanticFrameSample] = [:]
     private var semanticFrameRevision = 0
@@ -198,6 +216,7 @@ final class ChatScrollCoordinator {
     private var tailMaterialization: TailMaterialization?
     private var tailMaterializationEvidenceRevision = 0
     private var targetReleaseEvidenceRevision: Int?
+    private var forcedTailMaterializationReleaseToken: Int?
     private var pendingTailMaterialization: PendingTailMaterialization?
     /// Entrance completion may arrive synchronously before ChatView admits the
     /// exact local lifecycle row. Retain only its unique physical ID until that
@@ -230,7 +249,9 @@ final class ChatScrollCoordinator {
     @ObservationIgnored private var physicalTailRepairTask: Task<Void, Never>?
     @ObservationIgnored private var targetReleaseTask: Task<Void, Never>?
     @ObservationIgnored private var tailMaterializationSettlementTask: Task<Void, Never>?
+    @ObservationIgnored private var tailMaterializationFallbackTask: Task<Void, Never>?
     @ObservationIgnored private var directPositionOwnership = false
+    @ObservationIgnored private var viewportObservationActive = true
     @ObservationIgnored private var lastForegroundActivation: Int?
     @ObservationIgnored private var interactionTrace: ChatInteractionTrace?
     @ObservationIgnored private var interactionTraceContext: Int?
@@ -300,6 +321,8 @@ final class ChatScrollCoordinator {
     var permitsAsynchronousTranscriptContent: Bool { !openingTailPhase.isActive }
 
     private var openingTailSettlementPending: Bool { openingTailPhase.isActive }
+    var hasAppliedTargetLease: Bool { appliedTargetCommandToken != nil }
+    var hasPendingTargetRelease: Bool { targetReleaseToken != nil }
     private var openingTailToken: Int? { openingTailPhase.context?.token }
     private var openingTailPresentation: Int? { openingTailPhase.context?.presentation }
 
@@ -317,6 +340,7 @@ final class ChatScrollCoordinator {
         physicalTailRepairAttempts = 0
         installedPhysicalRowSpine = nil
         self.presentation = presentation ?? (self.presentation &+ 1)
+        awaitingOpeningBaseline = !retainingVisibleViewport
         lastForegroundActivation = nil
         reduceViewport(.presentationReset(retainingViewport: retainingVisibleViewport))
         retainedViewportReconciliationPending = retainingVisibleViewport
@@ -358,6 +382,7 @@ final class ChatScrollCoordinator {
         if appliedTargetOrigin == .tailMaterialization,
            (tailMaterialization?.renderedID == renderedID || renderedID == "transcript-bottom") {
             tailMaterializationEvidenceChanged()
+            retargetTailMaterializationToStableTailIfNeeded()
         }
         if semanticFrames.count > 256,
            let oldest = semanticFrames.min(by: { $0.value.revision < $1.value.revision })?.key {
@@ -527,17 +552,20 @@ final class ChatScrollCoordinator {
            current.hasScrollableOverflow,
            !current.hasStructuralChange(from: previousGeometry),
            current.offsetY < previousGeometry.offsetY - 2,
+           (current.visibleTopY ?? current.offsetY) <= 2,
            !current.isAtCatchUpBoundary {
             beginDirectInteraction(allowsBottomRubberBand: false)
         }
         geometry = current
-        let meaningfulTraceChange = current.hasStructuralChange(from: previousGeometry)
+        let viewportStructureChanged = abs(current.containerHeight - previousGeometry.containerHeight) > 0.5
+            || abs(current.bottomInset - previousGeometry.bottomInset) > 0.5
+        let contentHeightChangedMaterially = abs(current.contentHeight - previousGeometry.contentHeight)
+            > max(80, current.containerHeight * 0.25)
+        let meaningfulTraceChange = viewportStructureChanged
+            || contentHeightChangedMaterially
             || current.isPastBottomEdge != previousGeometry.isPastBottomEdge
             || abs(current.distanceFromBottom - previousGeometry.distanceFromBottom)
                 > max(80, current.containerHeight * 0.35)
-        if meaningfulTraceChange {
-            traceGeometry(.meaningfulChange)
-        }
         if appliedTargetOrigin == .tailMaterialization {
             tailMaterializationEvidenceChanged()
         }
@@ -545,6 +573,11 @@ final class ChatScrollCoordinator {
             refreshPhysicalTailEvidence(markerFrame: marker.frame)
         }
         geometryRevision &+= 1
+        // Trace the evidence derived from this geometry, never the previous
+        // marker classification paired with the new native dimensions.
+        if meaningfulTraceChange {
+            traceGeometry(.meaningfulChange)
+        }
         reconcileRetainedViewport(with: current)
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
@@ -638,6 +671,7 @@ final class ChatScrollCoordinator {
               token == appliedTargetCommandToken,
               command == nil else { return false }
         if appliedTargetOrigin == .tailMaterialization,
+           forcedTailMaterializationReleaseToken != token,
            let releaseEvidence = targetReleaseEvidenceRevision,
            releaseEvidence != tailMaterializationEvidenceRevision {
             // Geometry changed after publication; re-enter settlement with the
@@ -649,20 +683,27 @@ final class ChatScrollCoordinator {
         }
         targetReleaseToken = nil
         targetReleaseEvidenceRevision = nil
+        forcedTailMaterializationReleaseToken = nil
         let releasedOrigin = appliedTargetOrigin
-        completeOpeningTargetReleaseIfNeeded(releasedOrigin)
+        completeOpeningTargetReleaseIfNeeded(releasedOrigin, result: .settled)
         let pending = pendingTailMaterialization
         pendingTailMaterialization = nil
         if let pending, canAutomaticallyFollow {
-            // Transfer the applied sentinel directly to the newest insertion.
-            appliedTargetOrigin = .tailMaterialization
+            // The next lazy row needs its own exact realization target. Keep
+            // the prior token tracked until ChatView applies the replacement,
+            // so cancellation cannot orphan its native target.
             prepareTailMaterialization(
                 renderedID: pending.renderedID,
+                physicalTargetID: pending.physicalTargetID,
                 layoutOwnerRenderedID: pending.layoutOwnerRenderedID,
                 layoutTransactionID: pending.layoutTransactionID,
                 layoutSettled: pending.layoutSettled
             )
-            scheduleTailMaterializationSettlementIfReady()
+            publish(
+                .materialize(pending.physicalTargetID),
+                animation: .disabled,
+                origin: .tailMaterialization
+            )
             return false
         }
         appliedTargetCommandToken = nil
@@ -681,21 +722,25 @@ final class ChatScrollCoordinator {
         scheduleOpeningTailFrame()
     }
 
-    func waitForOpeningTailSettlement() async {
-        guard let token = openingTailToken ?? pendingOpeningReleaseWaiterToken else { return }
+    func waitForOpeningTailSettlement() async -> OpeningTailSettlementResult {
+        guard let token = openingTailToken ?? pendingOpeningReleaseWaiterToken else {
+            return .cancelled
+        }
         let id = nextOpeningTailFinalWaiterID
         nextOpeningTailFinalWaiterID &+= 1
-        await withTaskCancellationHandler {
+        return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 if (openingTailSettlementPending && openingTailToken == token)
                     || pendingOpeningReleaseWaiterToken == token {
                     openingTailFinalWaiters.append(.init(id: id, token: token, continuation: continuation))
                 } else {
-                    continuation.resume()
+                    continuation.resume(returning: .cancelled)
                 }
             }
         } onCancel: {
-            Task { @MainActor [weak self] in self?.resumeOpeningTailFinalWaiter(id: id, token: token) }
+            Task { @MainActor [weak self] in
+                self?.resumeOpeningTailFinalWaiter(id: id, token: token, result: .cancelled)
+            }
         }
     }
 
@@ -745,36 +790,43 @@ final class ChatScrollCoordinator {
         containsPhysicalRowID: (String) -> Bool
     ) {
         if let pending = pendingTailMaterialization,
-           !containsPhysicalRowID(pending.renderedID) {
+           !containsPhysicalRowID(pending.physicalTargetID) {
             pendingTailMaterialization = nil
         }
-        guard let renderedID = tailMaterialization?.renderedID,
-              !containsPhysicalRowID(renderedID) else { return }
+        guard let physicalTargetID = tailMaterialization?.physicalTargetID,
+              !containsPhysicalRowID(physicalTargetID) else { return }
         if let pending = pendingTailMaterialization,
-           containsPhysicalRowID(pending.renderedID) {
+           containsPhysicalRowID(pending.physicalTargetID) {
             pendingTailMaterialization = nil
-            if appliedTargetCommandToken != nil {
-                appliedTargetOrigin = .tailMaterialization
-            }
             prepareTailMaterialization(
                 renderedID: pending.renderedID,
+                physicalTargetID: pending.physicalTargetID,
                 layoutOwnerRenderedID: pending.layoutOwnerRenderedID,
                 layoutTransactionID: pending.layoutTransactionID,
                 layoutSettled: pending.layoutSettled
             )
-            scheduleTailMaterializationSettlementIfReady()
+            publish(
+                .materialize(pending.physicalTargetID),
+                animation: .disabled,
+                origin: .tailMaterialization
+            )
             return
         }
         if command?.origin == .tailMaterialization {
             clearCommand()
+            if appliedTargetOrigin == .tailMaterialization {
+                forcedTailMaterializationReleaseToken = appliedTargetCommandToken
+                requestAppliedTargetRelease(origin: .tailMaterialization)
+            } else {
+                clearTailMaterializationState()
+            }
         } else if appliedTargetCommandToken != nil,
                   appliedTargetOrigin == .tailMaterialization {
-            // Canonical replacement retains the sentinel when lifecycle-row
-            // geometry has not published.
-            tailMaterialization?.renderedID = nil
-            tailMaterialization?.requiredRevision = nil
-            tailMaterialization?.requiredLayoutEpoch = nil
-            scheduleTailMaterializationSettlementIfReady()
+            // An exact row target cannot outlive that physical row. Release it
+            // through the normal token callback; native pinned anchoring owns
+            // the canonical replacement.
+            forcedTailMaterializationReleaseToken = appliedTargetCommandToken
+            requestAppliedTargetRelease(origin: .tailMaterialization)
         } else {
             clearTailMaterializationState()
         }
@@ -803,9 +855,26 @@ final class ChatScrollCoordinator {
         traceGeometry(.submissionBaseline)
     }
 
+    /// Cancels disposable repair work while another surface covers the native
+    /// viewport. Canonical projection and pinned/anchored intent remain intact.
+    func viewportObservationChanged(isActive: Bool) {
+        viewportObservationActive = isActive
+        guard !isActive else { return }
+        physicalTailRepairTask?.cancel()
+        physicalTailRepairTask = nil
+        physicalTailRepairEvidenceRevision = nil
+        physicalTailRepairIssuedEvidenceRevision = nil
+        if command?.origin == .physicalTailRepair { clearCommand() }
+        if appliedTargetOrigin == .physicalTailRepair {
+            retireAppliedTargetWithoutCallback()
+        }
+        physicalTailRepairCommandToken = nil
+    }
+
     /// Retains native viewport ownership and admits bounded repair from current
     /// same-presentation or fresh resumed marker evidence.
     func foregroundViewportBecameActive(activation: Int? = nil) {
+        viewportObservationActive = true
         guard viewportMode == .pinned, !isUserInteracting else { return }
         if let activation {
             guard lastForegroundActivation != activation else { return }
@@ -863,9 +932,12 @@ final class ChatScrollCoordinator {
     @discardableResult
     func discreteTailInserted(
         renderedID: String,
+        physicalTargetID: String? = nil,
         layoutTransactionID: Int? = nil
     ) -> Bool {
-        guard !renderedID.isEmpty, canAutomaticallyFollow else { return false }
+        let physicalTargetID = physicalTargetID ?? renderedID
+        guard !renderedID.isEmpty, !physicalTargetID.isEmpty,
+              canAutomaticallyFollow else { return false }
         if layoutTransactionID == nil,
            let index = preAdmissionSettledEntranceIDs.firstIndex(of: renderedID) {
             preAdmissionSettledEntranceIDs.remove(at: index)
@@ -883,6 +955,7 @@ final class ChatScrollCoordinator {
             let ownsLayout = layoutTransactionID != nil
             pendingTailMaterialization = PendingTailMaterialization(
                 renderedID: renderedID,
+                physicalTargetID: physicalTargetID,
                 layoutOwnerRenderedID: ownsLayout
                     ? renderedID
                     : existing?.layoutOwnerRenderedID,
@@ -896,9 +969,30 @@ final class ChatScrollCoordinator {
         }
         beginTailMaterialization(
             renderedID: renderedID,
+            physicalTargetID: physicalTargetID,
             layoutTransactionID: layoutTransactionID
         )
         return true
+    }
+
+    /// Reapplies the exact materialization target after a visual-only entrance
+    /// fail-open made a previously zero-height lazy row concrete. This remains
+    /// the same bounded logical owner and never creates an automatic follow loop.
+    func retryTailMaterializationAfterEntranceAdmission(
+        renderedID: String,
+        physicalTargetID: String
+    ) {
+        guard tailMaterialization?.renderedID == renderedID,
+              tailMaterialization?.physicalTargetID == physicalTargetID,
+              command == nil,
+              appliedTargetOrigin == .tailMaterialization else { return }
+        tailMaterializationFallbackTask?.cancel()
+        tailMaterializationFallbackTask = nil
+        publish(
+            .materialize(physicalTargetID),
+            animation: .disabled,
+            origin: .tailMaterialization
+        )
     }
 
     func layoutTransactionSettled(_ id: Int) {
@@ -981,40 +1075,53 @@ final class ChatScrollCoordinator {
         pendingTailMaterialization = nil
         prepareTailMaterialization(
             renderedID: pending.renderedID,
+            physicalTargetID: pending.physicalTargetID,
             layoutOwnerRenderedID: pending.layoutOwnerRenderedID,
             layoutTransactionID: pending.layoutTransactionID,
             layoutSettled: pending.layoutSettled
         )
-        publish(.tail, animation: .disabled, origin: .tailMaterialization)
+        publish(
+            .materialize(pending.physicalTargetID),
+            animation: .disabled,
+            origin: .tailMaterialization
+        )
     }
 
     private func beginTailMaterialization(
         renderedID: String,
+        physicalTargetID: String,
         layoutTransactionID: Int?
     ) {
         prepareTailMaterialization(
             renderedID: renderedID,
+            physicalTargetID: physicalTargetID,
             layoutOwnerRenderedID: layoutTransactionID == nil ? nil : renderedID,
             layoutTransactionID: layoutTransactionID,
             layoutSettled: layoutTransactionID == nil
         )
-        // The stable sentinel preserves lazy-row identity through settlement.
-        publish(.tail, animation: .disabled, origin: .tailMaterialization)
+        // Target the exact lazy row first. Targeting only the already-realized
+        // tail marker can let SwiftUI skip a fully collapsed new child forever.
+        publish(.materialize(physicalTargetID), animation: .disabled, origin: .tailMaterialization)
     }
 
     private func prepareTailMaterialization(
         renderedID: String,
+        physicalTargetID: String,
         layoutOwnerRenderedID: String?,
         layoutTransactionID: Int?,
         layoutSettled: Bool
     ) {
         tailMaterializationSettlementTask?.cancel()
         tailMaterializationSettlementTask = nil
+        tailMaterializationFallbackTask?.cancel()
+        tailMaterializationFallbackTask = nil
         let requiredRevision = semanticFrames[renderedID].map {
             max(0, $0.revision - 1)
         } ?? semanticFrameRevision
         tailMaterialization = TailMaterialization(
             renderedID: renderedID,
+            physicalTargetID: physicalTargetID,
+            usesStableTailTarget: false,
             requiredRevision: requiredRevision,
             requiredLayoutEpoch: layoutEpoch,
             layoutOwnerRenderedID: layoutOwnerRenderedID,
@@ -1126,10 +1233,12 @@ final class ChatScrollCoordinator {
         }
         command = nil
         commandRevision &+= 1
-        traceCommand(.applied, command: applied)
         targetReleaseToken = nil
         appliedTargetCommandToken = applied.token
         appliedTargetOrigin = applied.origin
+        if applied.origin == .tailMaterialization {
+            scheduleTailMaterializationBoundedRelease(token: applied.token)
+        }
         if applied.origin == .tailMaterialization,
            let materialization = tailMaterialization,
            let renderedID = materialization.renderedID,
@@ -1208,6 +1317,10 @@ final class ChatScrollCoordinator {
         }
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
+        traceCommand(.applied, command: applied)
+        if applied.origin == .tailMaterialization {
+            retargetTailMaterializationToStableTailIfNeeded()
+        }
         return true
     }
 
@@ -1291,6 +1404,7 @@ final class ChatScrollCoordinator {
         targetRenderedID: String,
         continuation: CheckedContinuation<Bool, Never>?
     ) {
+        awaitingOpeningBaseline = false
         let context = OpeningTailContext(
             token: token,
             targetRenderedID: targetRenderedID,
@@ -1401,7 +1515,19 @@ final class ChatScrollCoordinator {
         let admittedGeometryRevision = geometryRevision
         openingTailFrameTask = Task { [weak self, frameScheduler] in
             do { try await frameScheduler.nextFrame(); try Task.checkCancellation() }
-            catch { return }
+            catch {
+                guard let self,
+                      self.openingTailFrameTaskGeneration == generation,
+                      self.openingTailPhase.context?.token == token,
+                      self.openingTailPhase.context?.presentation == admittedPresentation else { return }
+                self.openingTailFrameTask = nil
+                self.clearOpeningTailSettlement(
+                    ifToken: token,
+                    ifPresentation: admittedPresentation,
+                    positioningSucceeded: false
+                )
+                return
+            }
             guard let self, self.openingTailFrameTaskGeneration == generation,
                   self.openingTailPhase.context?.token == token,
                   self.openingTailPhase.context?.presentation == admittedPresentation else { return }
@@ -1485,7 +1611,7 @@ final class ChatScrollCoordinator {
         openingTailContinuation = nil
         if let token {
             if commandToken == nil {
-                resumeOpeningTailFinalWaiters(token: token)
+                resumeOpeningTailFinalWaiters(token: token, result: .settled)
             } else {
                 pendingOpeningReleaseWaiterToken = token
             }
@@ -1526,7 +1652,12 @@ final class ChatScrollCoordinator {
         openingTailPhase = .idle
         openingTailContinuation?.resume(returning: positioningSucceeded)
         openingTailContinuation = nil
-        if let token { resumeOpeningTailFinalWaiters(token: token) }
+        if let token {
+            resumeOpeningTailFinalWaiters(
+                token: token,
+                result: positioningSucceeded ? .settled : .cancelled
+            )
+        }
     }
 
     private func scheduleOpeningPostRevealTimeout(token: Int, presentation: Int) {
@@ -1554,13 +1685,10 @@ final class ChatScrollCoordinator {
                 self.openingTailContinuation = nil
                 continuation.resume(returning: false)
             }
-            self.resumeOpeningTailFinalWaiters(token: token)
-            self.reduceViewport(.opened)
-            self.isAtBottom = true
-            self.tailSettlementGeneration &+= 1
-            self.pinnedPositionRevision &+= 1
-            self.physicalTailRepairBlockedUntilEvidenceRevision = self.semanticFrameRevision
-            self.schedulePhysicalTailRepairIfNeeded()
+            self.resumeOpeningTailFinalWaiters(token: token, result: .failed)
+            // A timeout is absence of physical proof. The outer opening owner
+            // keeps the surface opaque and publishes the retryable failure;
+            // never relabel this path as an opened conversation.
         }
     }
 
@@ -1605,15 +1733,22 @@ final class ChatScrollCoordinator {
         }
     }
 
-    private func resumeOpeningTailFinalWaiter(id: Int, token: Int) {
+    private func resumeOpeningTailFinalWaiter(
+        id: Int,
+        token: Int,
+        result: OpeningTailSettlementResult
+    ) {
         guard let index = openingTailFinalWaiters.firstIndex(where: { $0.id == id && $0.token == token }) else { return }
-        openingTailFinalWaiters.remove(at: index).continuation.resume()
+        openingTailFinalWaiters.remove(at: index).continuation.resume(returning: result)
     }
 
-    private func resumeOpeningTailFinalWaiters(token: Int) {
+    private func resumeOpeningTailFinalWaiters(
+        token: Int,
+        result: OpeningTailSettlementResult
+    ) {
         let waiters = openingTailFinalWaiters.filter { $0.token == token }
         openingTailFinalWaiters.removeAll { $0.token == token }
-        waiters.forEach { $0.continuation.resume() }
+        waiters.forEach { $0.continuation.resume(returning: result) }
     }
 
     private func pinAtTail() {
@@ -1664,7 +1799,7 @@ final class ChatScrollCoordinator {
         let isBottomRubberBand = allowsBottomRubberBand
             && viewportMode == .pinned
             && geometry.isValid
-            && (geometry.isAtCatchUpBoundary || geometry.isPastBottomEdge)
+            && (geometry.isAtCatchUpBoundary || geometry.isPlausibleBottomRubberBand)
         if !isBottomRubberBand {
             reduceViewport(.userTookOver)
             isAtBottom = false
@@ -1757,8 +1892,15 @@ final class ChatScrollCoordinator {
                 || materialization.requiredLayoutEpoch == layoutEpoch else { return }
         guard let physicalEvidence = physicalTailEvidence,
               physicalEvidence.presentationEpoch == presentation,
-              physicalEvidence.layoutEpoch == layoutEpoch,
-              physicalEvidence.classification == .aligned else { return }
+              physicalEvidence.layoutEpoch == layoutEpoch else { return }
+        let tailIsAdmitted = if materialization.usesStableTailTarget {
+            physicalEvidence.classification == .aligned
+        } else {
+            physicalEvidence.classification == .aligned
+                || abs(physicalEvidence.signedDisplacement)
+                    <= Self.maximumMaterializationTailDisplacement
+        }
+        guard tailIsAdmitted else { return }
         if let renderedID = materialization.renderedID {
             // Row and marker callbacks are independent native observations; the
             // marker may arrive first. Require both fresh samples, not an
@@ -1794,8 +1936,54 @@ final class ChatScrollCoordinator {
     private func clearTailMaterializationState() {
         tailMaterializationSettlementTask?.cancel()
         tailMaterializationSettlementTask = nil
+        tailMaterializationFallbackTask?.cancel()
+        tailMaterializationFallbackTask = nil
         tailMaterialization = nil
         targetReleaseEvidenceRevision = nil
+        forcedTailMaterializationReleaseToken = nil
+    }
+
+    private func retargetTailMaterializationToStableTailIfNeeded() {
+        guard var materialization = tailMaterialization,
+              !materialization.usesStableTailTarget,
+              let renderedID = materialization.renderedID,
+              let sample = semanticFrames[renderedID],
+              sample.layoutEpoch == layoutEpoch,
+              let evidence = physicalTailEvidence,
+              evidence.presentationEpoch == presentation,
+              evidence.layoutEpoch == layoutEpoch,
+              abs(evidence.signedDisplacement)
+                > Self.maximumMaterializationTailDisplacement,
+              command == nil,
+              appliedTargetOrigin == .tailMaterialization else { return }
+        tailMaterializationFallbackTask?.cancel()
+        tailMaterializationFallbackTask = nil
+        materialization.usesStableTailTarget = true
+        tailMaterialization = materialization
+        publish(.tail, animation: .disabled, origin: .tailMaterialization)
+    }
+
+    private func scheduleTailMaterializationBoundedRelease(token: Int) {
+        tailMaterializationFallbackTask?.cancel()
+        let admittedPresentation = presentation
+        let admittedLayout = layoutEpoch
+        tailMaterializationFallbackTask = Task { [weak self, clock] in
+            do {
+                try await clock.sleep(.seconds(1))
+                try Task.checkCancellation()
+            } catch { return }
+            guard let self,
+                  self.presentation == admittedPresentation,
+                  self.layoutEpoch == admittedLayout,
+                  self.appliedTargetCommandToken == token,
+                  self.appliedTargetOrigin == .tailMaterialization else { return }
+            self.tailMaterializationFallbackTask = nil
+            self.forcedTailMaterializationReleaseToken = token
+            // Missing semantic geometry cannot leave the native target leased
+            // indefinitely. Releasing is not success evidence; native pinned
+            // anchoring resumes and later marker drift may use bounded repair.
+            self.requestTargetRelease(token)
+        }
     }
 
     private func requestTargetRelease(_ token: Int?) {
@@ -1841,21 +2029,29 @@ final class ChatScrollCoordinator {
         appliedTargetCommandToken = nil
         appliedTargetOrigin = nil
         clearTailMaterializationState()
-        completeOpeningTargetReleaseIfNeeded(retiredOrigin)
+        completeOpeningTargetReleaseIfNeeded(retiredOrigin, result: .cancelled)
     }
 
     private func completeOpeningTargetReleaseIfNeeded(
-        _ origin: ChatScrollCommand.Origin?
+        _ origin: ChatScrollCommand.Origin?,
+        result: OpeningTailSettlementResult
     ) {
         guard origin == .presentation,
               let token = pendingOpeningReleaseWaiterToken else { return }
         pendingOpeningReleaseWaiterToken = nil
-        resumeOpeningTailFinalWaiters(token: token)
+        resumeOpeningTailFinalWaiters(token: token, result: result)
     }
 
     private func reduceViewport(_ intent: ChatViewportIntent) {
         let previous = viewportMode
         viewportMode.reduce(intent)
+        // Direct native phase callbacks can repeat without changing ownership.
+        // Preserve meaningful lifecycle intents while suppressing duplicate
+        // reader/tail transitions from the diagnostic hot path.
+        if previous == viewportMode,
+           intent == .userTookOver || intent == .userReturnedToTail {
+            return
+        }
         guard let interactionTrace, let interactionTraceContext else { return }
         interactionTrace.viewportTransition(
             context: interactionTraceContext,
@@ -1917,7 +2113,9 @@ final class ChatScrollCoordinator {
             isPastBottomEdge: geometry.isValid ? geometry.isPastBottomEdge : nil,
             tailClassification: physicalTailEvidence?.classification,
             tailDisplacement: physicalTailEvidence?.signedDisplacement,
-            hasCommand: command != nil || appliedTargetCommandToken != nil
+            hasCommand: command != nil,
+            hasAppliedTarget: appliedTargetCommandToken != nil,
+            hasPendingRelease: targetReleaseToken != nil
         )
     }
 
@@ -1988,6 +2186,9 @@ final class ChatScrollCoordinator {
             tailMaterialization?.requiredLayoutEpoch = layoutEpoch
             tailMaterialization?.requiredRevision = semanticFrameRevision
             tailMaterializationEvidenceRevision &+= 1
+            if let token = appliedTargetCommandToken {
+                scheduleTailMaterializationBoundedRelease(token: token)
+            }
         }
         physicalTailRepairTask?.cancel()
         physicalTailRepairTask = nil
@@ -2063,6 +2264,9 @@ final class ChatScrollCoordinator {
               evidence.layoutEpoch == layoutEpoch,
               (evidence.classification == .belowViewport
                   || evidence.classification == .aboveViewport),
+              !awaitingOpeningBaseline,
+              viewportObservationActive,
+              !ChatTranscriptUnderflowLayoutPolicy.isPhysicallyInstalled(geometry),
               viewportMode == .pinned,
               !isUserInteracting, !directPositionOwnership,
               command == nil, appliedTargetCommandToken == nil,
@@ -2097,6 +2301,9 @@ final class ChatScrollCoordinator {
             guard let current = self.physicalTailEvidence,
                   (current.classification == .belowViewport
                       || current.classification == .aboveViewport),
+                  !self.awaitingOpeningBaseline,
+                  self.viewportObservationActive,
+                  !ChatTranscriptUnderflowLayoutPolicy.isPhysicallyInstalled(self.geometry),
                   self.viewportMode == .pinned,
                   !self.isUserInteracting, !self.directPositionOwnership,
                   self.command == nil, self.appliedTargetCommandToken == nil,

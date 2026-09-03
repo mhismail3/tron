@@ -253,16 +253,16 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   an observed call-to-result interval because Pi JSONL does not persist tool execution timing;
 - transcript structure has one explicit animation boundary: only rows with positive
   semantic-novelty evidence reserve their measured layout and reveal once after
-  exact current-generation geometry admission. A page-bounded semantic ledger preserves
+  exact current-generation geometry admission, with one two-frame visual-only fail-open when an exact targeted zero-height child emits no frame. A page-bounded semantic ledger preserves
   displayed identities, suppresses duplicate entrances, and cannot evict currently visible
-  rows. Pinned lazy insertion leases only the stable tail sentinel until fresh semantic
+  rows. Pinned lazy insertion leases only its exact physical row target until fresh semantic
   geometry proves the requested row mounted; anchored/offscreen entrances are consumed by
   direct interaction or catch-up rather than a wall-clock reveal race. Installed-row
   updates, live-to-canonical settlement, thinking-height measurement, and tool status changes
   inherit no stack-wide animation. The stable transcript transaction runs only when the installed projection identity changes and still admits explicit entrance/tool-chip markers; native-control touch-down and drag transactions do not cross that projection-only transform. Thinking height/tail motion is row-local downstream of that boundary. Authority-only changes whose bounded transcript/stream/tool/queue/runtime layout identity is unchanged take a synchronous metadata path and cannot arm settlement. The sole composer inset exposes one bottom-aligned measured height; a generation captured before structural mutation keeps pinned tail coupling nonanimated, preserves a detached semantic locus with zero tail commands, coalesces retargets, and yields immediately to direct interaction. Reduce Motion removes spatial transitions. Tool status text
   updates inside its stable row. Ordinary pinned growth and shrink remain coupled by one
   mode-qualified native bottom size-change anchor. A genuinely new lazy physical row may
-  request one disabled stable-sentinel materialization lease; payload, progress, completion,
+  request one disabled exact-row materialization lease; payload, progress, completion,
   and canonical settlement create no command stream. Native
   bottom distance is bounded for display only: a visible rect beyond the physical content edge is
   not tail settlement. A deliberately detached reader retains the same viewport authority;
@@ -321,20 +321,20 @@ not settlement evidence. The native geometry observation identity includes the o
 entering positioning replays current geometry even when SwiftUI would coalesce equal numeric fields. Exact-ID
 realization can proceed without a geometry sample. If physical proof still cannot settle within 750 milliseconds, the
 bounded attempt fails closed and the opening surface presents its retry path; elapsed time never substitutes for
-viewport evidence. The positioned transcript then fades/rises into view while the tail binding remains
-owned through animation completion, current non-lifted post-reveal marker/geometry evidence, two unchanged display frames, and the exact target-release callback. A separate two-second post-reveal deadline can abandon a stale target back to target-free native pinning and bounded repair, but cannot certify missing evidence. Direct user or accessibility interaction
+viewport evidence. The positioning lift resolves behind the opaque surface while the tail binding remains
+owned through animation completion, current non-lifted post-reveal marker/geometry evidence, two unchanged display frames, and the exact target-release callback. Only then is the transcript ready and interactive. A separate two-second post-reveal deadline retires the stale target and fails behind the opening surface; it cannot certify missing evidence or expose a displaced transcript. Direct user or accessibility interaction
 cancels that arm. The composer
 remains visible throughout opening, while sending stays disabled until readiness. Opening tail
 positioning and post-reveal settlement are owned by the coordinator's mutually exclusive opening
-phase. Automatic live projection intake remains coalesced through that phase and its applied target release, then submits only the newest desired cut. Ordinary pinned growth, shrink, streaming, and existing-row settlement create no command ownership. A genuinely new lazy physical row may own one stable-sentinel materialization lease until fresh row geometry arrives. Explicit
+phase. Automatic live projection intake remains coalesced through that phase and its applied target release, then submits only the newest desired cut. Ordinary pinned growth, shrink, streaming, and existing-row settlement create no command ownership. A genuinely new lazy physical row may own one exact-row materialization lease until fresh row geometry arrives; a one-second failure boundary releases missing geometry back to native pinning. Explicit
 opening, catch-up, semantic restore, prepend, retained resume, and the bounded physical-tail repair remain distinct command owners; after they release, pinned mode
 keeps `ScrollPosition` target-free and uses the native bottom size-change anchor with no recurring command stream. Repair is admitted only from current signed marker evidence and is cancelled by interaction or a newer layout epoch.
 Short-content alignment remains bottom-owned by the native anchor; blank space stays above the tail. Editor-only composer height changes install atomically;
 attachment, selected-skill, and resource-result identity changes use one value-scoped 240 ms smooth
 host-height transition, disabled under Reduce Motion. Direct user movement away from the tail and
-anchored mode select top retention and remain target-free. A pinned bottom rubber band remains pinned:
-past-bottom geometry is directional interaction evidence, not a detached-reader request, and catch-up
-appears only after valid geometry moves beyond the tail boundary.
+anchored mode select top retention and remain target-free. A pinned bottom rubber band remains pinned only within a bounded physical overscroll tolerance;
+extreme past-bottom geometry cannot preserve automatic ownership, and catch-up appears after valid
+direct geometry moves beyond the tail boundary.
 Session subscription ownership is token-scoped end to end. The open response remains
 provisional until sync acknowledgement and exact route-intent revalidation; both sync and subscription
 credentials must be nonempty, printable UTF-8 tokens no larger than 200 bytes. Baseline plus its
