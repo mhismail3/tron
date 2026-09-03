@@ -187,18 +187,22 @@ struct SessionShellView: View {
         .tint(Color.tronEmerald)
     }
 
+    @ViewBuilder
     private var dashboardScreen: some View {
-        Group {
-            if dashboardMode == .automations {
-                AutomationsDashboardView(
-                    viewPreferences: $automationViewPreferences,
-                    onSelectSessions: { dashboardMode = .sessions },
-                    onOpenSettings: { showSettings = true }
-                )
-            } else {
-                sessionDashboardScreen
-            }
+        switch dashboardMode {
+        case .sessions:
+            sessionDashboardScreen
+        case .automations:
+            AutomationsDashboardView(
+                viewPreferences: $automationViewPreferences,
+                onSelectDashboard: selectDashboard,
+                onOpenSettings: { showSettings = true }
+            )
         }
+    }
+
+    private func selectDashboard(_ mode: DashboardMode) {
+        dashboardMode = mode
     }
 
     private var sessionDashboardScreen: some View {
@@ -470,9 +474,7 @@ struct SessionShellView: View {
     @ToolbarContentBuilder
     private var dashboardToolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            DashboardModeMenuButton(mode: dashboardMode) { selected in
-                dashboardMode = selected
-            }
+            DashboardModeMenuButton(mode: dashboardMode, onSelect: selectDashboard)
             .frame(width: 34, height: 34)
             .accessibilityLabel("Switch dashboard")
             .accessibilityValue(dashboardMode.rawValue)

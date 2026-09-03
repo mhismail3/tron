@@ -12,6 +12,8 @@ struct DashboardStateOwnerTests {
     func dashboardLogoAccent() {
         #expect(DashboardMode.sessions.accent == .tronEmerald)
         #expect(DashboardMode.automations.accent == .tronAutomation)
+        #expect(Set(DashboardMode.allCases.map(\.id)).count == DashboardMode.allCases.count)
+        #expect(Set(DashboardMode.allCases.map(\.systemImage)).count == DashboardMode.allCases.count)
 
         let automation = UIColor(DashboardMode.automations.accent)
         #expect(

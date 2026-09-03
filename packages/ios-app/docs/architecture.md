@@ -354,8 +354,10 @@ than allowing a retired view to surface stale UI state. Backgrounding cancels on
 opening, paging, picker, and route work. A resumed open waits for an exact current transport connection rather than trusting the previous epoch's public connected label; a target-free background-retirement interval cancels silently, and the replacement connected transition retries through the same generation checks. Already-ready active and passive chats retain their complete installed projection while the lifecycle owner synchronizes in place.
 
 Gateway-owned automations advertise `automations.v1`; canonical agenda/preview reads additionally
-advertise `automations.timeline.v1`. The dashboard Tron logo opens a native Sessions/Automations menu;
-each choice retains independent root state. The Automations root provides a chronological Upcoming
+advertise `automations.timeline.v1`. The dashboard Tron logo opens a native mode menu and routes every
+selection through one generic dashboard-selection callback; the persistent shell uses an exhaustive
+`DashboardMode` switch, so adding a mode cannot compile while silently falling back to Sessions. Each
+choice retains independent root state. The Automations root provides a chronological Upcoming
 agenda and a searchable/filterable All inventory across identity-qualified paired Gateways. Its one
 managed filter sheet owns the view, status, action, and Gateway choices, while All-mode search reuses
 the Sessions dashboard's bottom reveal/close interaction. `SessionShellView`, which survives dashboard

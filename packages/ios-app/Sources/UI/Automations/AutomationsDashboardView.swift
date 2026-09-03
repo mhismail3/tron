@@ -34,7 +34,7 @@ enum AutomationTimelinePresentationPolicy {
 }
 
 struct AutomationsDashboardView: View {
-    let onSelectSessions: () -> Void
+    let onSelectDashboard: @MainActor (DashboardMode) -> Void
     let onOpenSettings: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
@@ -52,11 +52,11 @@ struct AutomationsDashboardView: View {
 
     init(
         viewPreferences: Binding<AutomationDashboardViewPreferences>,
-        onSelectSessions: @escaping () -> Void,
+        onSelectDashboard: @escaping @MainActor (DashboardMode) -> Void,
         onOpenSettings: @escaping () -> Void
     ) {
         _viewPreferences = viewPreferences
-        self.onSelectSessions = onSelectSessions
+        self.onSelectDashboard = onSelectDashboard
         self.onOpenSettings = onOpenSettings
     }
 
@@ -599,7 +599,8 @@ struct AutomationsDashboardView: View {
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            DashboardModeMenuButton(mode: .automations) { selected in if selected == .sessions { onSelectSessions() } }.frame(width: 34, height: 34)
+            DashboardModeMenuButton(mode: .automations, onSelect: onSelectDashboard)
+                .frame(width: 34, height: 34)
         }
         ToolbarItem(placement: .principal) {
             Text("Automations")
