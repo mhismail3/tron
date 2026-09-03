@@ -46,11 +46,14 @@ import { ModelCatalogPager } from "./model-pagination.js";
 import { SessionListPaginationStore } from "./session-list-pagination.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { AsyncMutex } from "../util/async-mutex.js";
+import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
 import { admitPromptText, admitResourceInvocation, canonicalResourceName } from "../sessions/resource-invocation.js";
 import type { AutomationService } from "../automations/automation-service.js";
-import { AUTOMATIONS_CAPABILITY } from "../automations/types.js";
+import { AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY } from "../automations/types.js";
 import { AutomationPaginationStore } from "../automations/automation-pagination.js";
+import { admitsAutomationTrigger } from "../automations/automation-contract.js";
+import { validateTimelineWindow } from "../automations/automation-timeline.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
@@ -111,7 +114,7 @@ const restartDrainMethods = new Set([
   "session.workspace.inspect", "session.workspace.list", "session.workspace.file", "session.workspace.git.diff", "session.workspace.git.history.list", "session.workspace.git.history.get", "session.workspace.git.history.diff",
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "session.processHistory.list", "session.processHistory.get", "session.processTranscript.open", "session.processTranscript.page", "session.processTranscript.abort", "session.processTranscript.close", "extension.respond", "extension.editor.update", "extension.toolsExpanded", "auth.respond", "auth.callback", "auth.resume", "auth.cancel",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
-  "automation.status", "automation.list", "automation.get", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
+  "automation.status", "automation.list", "automation.get", "automation.schedule.preview", "automation.timeline.list", "automation.run.list", "automation.run.get", "automation.run.cancel", "automation.run.resolve",
 ]);
 
 export interface ClientContext {
@@ -205,6 +208,7 @@ export class GatewayService {
   releaseClient(clientID: string): void {
     this.sessionListPages.releaseClient(clientID);
     this.automationPages.releaseClient(clientID);
+    this.dependencies.automations?.releaseClient(clientID);
     this.processTranscriptLeases.releaseClient(clientID);
   }
 
@@ -268,7 +272,7 @@ export class GatewayService {
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
         ...(this.dependencies.notifications ? ["push-notifications.v1", "notification-inbox.v1"] : []),
-        ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY] : []),
+        ...(this.dependencies.automations?.status().ready ? [AUTOMATIONS_CAPABILITY, AUTOMATIONS_TIMELINE_CAPABILITY] : []),
       ],
     };
   }
@@ -506,6 +510,37 @@ export class GatewayService {
         const cursor = optionalString(params.cursor, "cursor", 64);
         const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 100);
         return safeJson(this.automationPages.page(client.id, this.requireAutomations().list(), cursor, limit));
+      }
+      case "automation.schedule.preview": {
+        if (Object.keys(params).some((key) => !["trigger", "after", "limit"].includes(key))) {
+          throw new GatewayError("invalid_request", "Automation schedule preview accepts only trigger, after, and limit");
+        }
+        if (params.after === null) throw new GatewayError("invalid_request", "Preview after must be omitted or a Gateway timestamp");
+        if (!admitsAutomationTrigger(params.trigger)) throw new GatewayError("invalid_request", "Automation trigger is invalid");
+        const after = params.after === undefined ? new Date().toISOString() : string(params.after, "after", { max: 64 });
+        if (!isGatewayTimestamp(after)) throw new GatewayError("invalid_request", "Preview after must be a Gateway timestamp");
+        const limit = params.limit === undefined ? 5 : integer(params.limit, "limit", 1, 20);
+        return safeJson(this.requireAutomations().schedulePreview(params.trigger, after, limit));
+      }
+      case "automation.timeline.list": {
+        if (Object.keys(params).some((key) => !["from", "through", "displayTimezone", "cursor", "limit"].includes(key))) {
+          throw new GatewayError("invalid_request", "Automation timeline accepts only from, through, displayTimezone, cursor, and limit");
+        }
+        if (params.cursor === null) throw new GatewayError("invalid_request", "Timeline cursor must be omitted or a string");
+        const cursor = params.cursor === undefined ? undefined : string(params.cursor, "cursor", { max: 64 });
+        const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 200);
+        const from = string(params.from, "from", { max: 64 });
+        const through = string(params.through, "through", { max: 64 });
+        const displayTimezone = string(params.displayTimezone, "displayTimezone", { max: 128 });
+        validateTimelineWindow(from, through, displayTimezone);
+        return safeJson(this.requireAutomations().timelinePage(
+          client.id,
+          from,
+          through,
+          displayTimezone,
+          cursor,
+          limit,
+        ));
       }
       case "automation.get": {
         if (Object.keys(params).some((key) => key !== "automationId")) throw new GatewayError("invalid_request", "Automation get accepts only automationId");

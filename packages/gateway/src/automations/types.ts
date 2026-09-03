@@ -1,6 +1,7 @@
 import type { ResourceInvocation } from "../protocol/types.js";
 
 export const AUTOMATIONS_CAPABILITY = "automations.v1";
+export const AUTOMATIONS_TIMELINE_CAPABILITY = "automations.timeline.v1";
 
 export type AutomationActivation = "draft" | "enabled" | "paused" | "completed" | "blocked";
 export type AutomationMisfirePolicy = "latest" | "skip";

@@ -119,6 +119,20 @@ function calendarOccurrenceAtOrBefore(
   throw new Error("Calendar trigger did not produce a bounded prior occurrence");
 }
 
+/** Returns the UTC instant at the start of the local calendar day containing the instant. */
+export function automationLocalDayStart(instantMs: number, timezone: string): string {
+  if (!Number.isFinite(instantMs)) throw new Error("Schedule boundary is invalid");
+  const local = localParts(instantMs, timezone);
+  return new Date(localMinuteToInstant({ year: local.year, month: local.month, day: local.day, hour: 0, minute: 0 }, timezone)).toISOString();
+}
+
+/** Returns the local calendar day key for deterministic grouping and tests. */
+export function automationLocalDayKey(instantMs: number, timezone: string): string {
+  if (!Number.isFinite(instantMs)) throw new Error("Schedule boundary is invalid");
+  const local = localParts(instantMs, timezone);
+  return `${String(local.year).padStart(4, "0")}-${String(local.month).padStart(2, "0")}-${String(local.day).padStart(2, "0")}`;
+}
+
 export function nextAutomationOccurrence(trigger: AutomationTrigger, afterMs: number): string | undefined {
   if (!Number.isFinite(afterMs)) throw new Error("Schedule boundary is invalid");
   if (trigger.kind === "once") {

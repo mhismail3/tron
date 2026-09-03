@@ -180,20 +180,39 @@ The Gateway also owns a bounded 512-entry user-facing notification inbox in the 
 Every successfully admitted semantic interaction (`select`, `confirm`, `input`, `editor`, or form) emits one detached input-required callback from the shared `SemanticUIBroker` boundary while that exact interaction remains pending. This includes forms produced by the provenance-checked `@zhushanwen/pi-ask-user@7.0.15` adapter without giving that adapter a second notification path. The generated interaction ID is the durable notification deduplication source. RuntimeSlot samples the same token-bound `session.presentation.set` lease synchronously at interaction admission: an already-visible chat writes only a `suppressed` receipt, with no relay intent, inbox row, or quota charge; a hidden chat queues fixed “Input needed” copy with the exact Gateway machine/session route. Notification failure never delays or fails the interaction. The persisted `notifyWhenAskPresented` field retains its wire name for registration compatibility but governs all semantic input-required alerts. Producer `needsAttention` activity, status text, widgets, retained surfaces, and ordinary runtime phases do not prove a response-capable user interaction and therefore do not trigger this hook.
 
 Authenticated automation reads are `automation.status`, `automation.list`,
-`automation.get`, `automation.run.list`, and `automation.run.get`. Receipt-backed
-mutations are `automation.create`, `automation.update`, `automation.enable`,
-`automation.pause`, `automation.delete`, `automation.runNow`,
-`automation.run.cancel`, and `automation.run.resolve`. Definitions use optimistic
-revision fences; scheduler state advances a separate state revision so a running
-occurrence does not invalidate an unrelated definition edit. List responses omit
-action bodies and page under an opaque exact catalog lease. Get returns the full
-authenticated definition. The first-party schedule tool is restricted to its
-current persisted user session, deduplicates mutations by canonical tool-call
-identity, and rejects mutations from an automation-originated turn to prevent
-self-replication. Paired Gateway credentials are machine-administrator
-credentials throughout the existing protocol, so authenticated mobile and local
-clients may manage automations across that Gateway; this is not a new
-per-session authorization boundary.
+`automation.get`, `automation.schedule.preview`, `automation.timeline.list`,
+`automation.run.list`, and `automation.run.get`. Receipt-backed mutations are
+`automation.create`, `automation.update`, `automation.enable`, `automation.pause`,
+`automation.delete`, `automation.runNow`, `automation.run.cancel`, and
+`automation.run.resolve`. Definitions use optimistic revision fences; scheduler
+state advances a separate state revision so a running occurrence does not
+invalidate an unrelated definition edit. List responses omit action bodies and
+page under an opaque exact catalog lease. Get returns the full authenticated
+ definition. `automation.schedule.preview` accepts `{trigger, after?, limit?}`
+ where the trigger is the strict one-time, anchored-interval, or calendar
+ contract, `after` is a Gateway timestamp (defaulting to now), and `limit` is
+ 1–20 (default 5); it returns canonical future timestamps only and never writes
+ state. `automation.timeline.list` accepts `{from, through, displayTimezone,
+ cursor?, limit?}`. It admits a positive, at-most-seven-day timestamp window,
+ an IANA display timezone, and a page size from 1–200 (default 100). Its
+ revision-fenced opaque cursor is bound to the authenticated client and expires
+ after one minute; continuations cannot cross clients or catalog revisions.
+ Enabled definitions are expanded into canonical occurrence IDs in the
+ half-open window and grouped by display-timezone local day. More than twelve
+ occurrences from one automation on one day become one `series` item with
+ `dayStart`, `firstAt`, `lastAt`, and `count`; other entries are `occurrence`
+ items. Items sort by first instant and automation ID. Timeline materialization,
+ raw occurrence generation, source bytes, page bytes, global leases, and
+ per-client leases are all bounded; capacity overflow is an explicit retryable
+ error and never silently drops occurrences. The timeline capability is
+ advertised as `automations.timeline.v1` alongside `automations.v1` only after
+ automation recovery is ready. The first-party schedule tool is restricted to its
+ current persisted user session, deduplicates mutations by canonical tool-call
+ identity, and rejects mutations from an automation-originated turn to prevent
+ self-replication. Paired Gateway credentials are machine-administrator
+ credentials throughout the existing protocol, so authenticated mobile and local
+ clients may manage automations across that Gateway; this is not a new
+ per-session authorization boundary.
 
 Authenticated push RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`; authenticated notification-resource RPCs are `notification.inbox.list`, `notification.inbox.read`, and `notification.inbox.readAll`. Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, the exact public relay origin that issued it, and preview/policy booleans; preview disclosure defaults off. Status returns the Gateway-owned relay origin and a bounded rotation requirement. A mobile grant issued by another origin, missing legacy origin identity, or rejected by the relay is never reactivated in place: iOS rotates it through App Attest and transfers the replacement capability. Upsert, removal, and `device.revoke` enter one bounded lane per target device before command-receipt execution, so cross-method invocation order is authoritative while different devices remain concurrent. Revocation disables local push authority before removing the paired bearer; a later admitted upsert revalidates that the device remains paired, and remote revocation retains a bounded tombstone. A grant ID awaiting revocation cannot be admitted as active again: upsert requires rotated endpoint authority, and restart retires any legacy active projection that overlaps a durable tombstone. Thus a delayed revoke can address only the old capability, never a newly active grant. The public relay origin is read from the canonical maintainer-owned `config/PushService.xcconfig`, embedded into both signed products, and must be an exact public HTTPS origin. It is never accepted from tools, RPC, user settings, or runtime environment. Missing development configuration leaves notification delivery unavailable without affecting Gateway readiness; official packaging fails closed.
 

@@ -20,6 +20,9 @@ function fixture() {
     status: vi.fn(() => ({ ready: true, degraded: false, automationCount: 1, aggregateBytes: 1, malformedRecordCount: 0, catalogRevision: 2 })),
     list: vi.fn(() => ({ catalogRevision: 2, items: [{ id: record.id, revision: 1, stateRevision: 1, name: "Review", activation: "draft", actionKind: "sessionPrompt", targetSessionId: "session-one", trigger: record.trigger, consecutiveFailureCount: 0, createdAt: record.createdAt, updatedAt: record.updatedAt }] })),
     get: vi.fn(() => record),
+    schedulePreview: vi.fn(() => ({ occurrences: ["2026-01-02T00:00:00.000Z"] })),
+    timelinePage: vi.fn(() => ({ catalogRevision: 2, items: [] })),
+    releaseClient: vi.fn(),
     runList: vi.fn(() => []),
     runGet: vi.fn(),
     create: vi.fn(async () => record),
@@ -47,6 +50,27 @@ describe("Gateway automation RPC", () => {
     expect(page.items).toHaveLength(1);
     expect(JSON.stringify(page.items)).not.toContain("\"text\"");
     await expect(service.invoke(client(), "automation.get", { automationId: record.id })).resolves.toMatchObject({ action: { text: "Review" } });
+  });
+
+  it("serves strict schedule previews and revisioned timeline pages", async () => {
+    const { service, automations, record } = fixture();
+    await expect(service.invoke(client(), "automation.schedule.preview", {
+      trigger: record.trigger, after: "2026-01-01T00:00:00.000Z", limit: 5,
+    })).resolves.toEqual({ occurrences: ["2026-01-02T00:00:00.000Z"] });
+    expect(automations.schedulePreview).toHaveBeenCalledWith(record.trigger, "2026-01-01T00:00:00.000Z", 5);
+    await expect(service.invoke(client(), "automation.schedule.preview", {
+      trigger: record.trigger, after: "not-a-timestamp",
+    })).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(service.invoke(client(), "automation.timeline.list", {
+      from: "2026-01-01T00:00:00.000Z", through: "2026-01-02T00:00:00.000Z",
+      displayTimezone: "UTC", limit: 200,
+    })).resolves.toEqual({ catalogRevision: 2, items: [] });
+    expect(automations.timelinePage).toHaveBeenCalledWith(
+      client().id, "2026-01-01T00:00:00.000Z", "2026-01-02T00:00:00.000Z", "UTC", undefined, 200,
+    );
+    await expect(service.invoke(client(), "automation.timeline.list", {
+      from: "2026-01-01T00:00:00.000Z", through: "2026-01-09T00:00:00.000Z", displayTimezone: "UTC",
+    })).rejects.toMatchObject({ code: "invalid_request" });
   });
 
   it("requires command and definition revisions for mutations", async () => {

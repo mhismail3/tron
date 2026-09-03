@@ -1,8 +1,16 @@
 import { GatewayError } from "../errors.js";
-import { admitAutomationCreateInput, admitAutomationUpdateInput } from "./automation-contract.js";
+import { admitAutomationCreateInput, admitAutomationUpdateInput, admitsAutomationTrigger } from "./automation-contract.js";
 import { AutomationScheduler } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
-import type { AutomationProvenance, AutomationRecord, AutomationRun, AutomationRunSummary, AutomationSummary } from "./types.js";
+import type { AutomationProvenance, AutomationRecord, AutomationRun, AutomationRunSummary, AutomationSummary, AutomationTrigger } from "./types.js";
+import { nextAutomationOccurrence } from "./schedule.js";
+import { isGatewayTimestamp } from "../util/timestamp.js";
+import {
+  buildAutomationTimeline,
+  type AutomationTimelinePage,
+  AutomationTimelinePaginationStore,
+  validateTimelineWindow,
+} from "./automation-timeline.js";
 
 export interface AutomationTargetValidator {
   requirePersistedUserSession(sessionId: string): Promise<void>;
@@ -18,6 +26,7 @@ export class AutomationService {
     readonly store: AutomationStore,
     readonly scheduler: AutomationScheduler,
     private readonly targets: AutomationTargetValidator,
+    private readonly timelinePages = new AutomationTimelinePaginationStore(),
   ) {}
 
   async initialize(): Promise<void> {
@@ -26,6 +35,8 @@ export class AutomationService {
     await this.scheduler.recover();
     this.scheduler.start();
   }
+
+  releaseClient(clientId: string): void { this.timelinePages.releaseClient(clientId); }
 
   beginDrain(): void { this.scheduler.beginDrain(); }
   async requestShutdownCancellation(): Promise<void> { await this.scheduler.cancelActiveForShutdown(); }
@@ -57,6 +68,41 @@ export class AutomationService {
       ...(run.reason === undefined ? {} : { reason: run.reason }),
       ...(run.notificationAdmissionStatus === undefined ? {} : { notificationAdmissionStatus: run.notificationAdmissionStatus }),
     }));
+  }
+
+  schedulePreview(rawTrigger: unknown, after: string, limit: number): { occurrences: string[] } {
+    if (!admitsAutomationTrigger(rawTrigger)) throw new GatewayError("invalid_request", "Automation trigger is invalid");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) {
+      throw new GatewayError("invalid_request", "Preview limit must be between 1 and 20");
+    }
+    const afterMs = Date.parse(after);
+    if (!isGatewayTimestamp(after) || !Number.isFinite(afterMs)) throw new GatewayError("invalid_request", "Preview after must be a Gateway timestamp");
+    const trigger = rawTrigger as AutomationTrigger;
+    const occurrences: string[] = [];
+    let boundary = afterMs;
+    while (occurrences.length < limit) {
+      const next = nextAutomationOccurrence(trigger, boundary);
+      if (next === undefined) break;
+      occurrences.push(next);
+      const nextMs = Date.parse(next);
+      if (!Number.isFinite(nextMs) || nextMs <= boundary) break;
+      boundary = nextMs;
+    }
+    return { occurrences };
+  }
+
+  timelinePage(
+    clientId: string,
+    from: string,
+    through: string,
+    displayTimezone: string,
+    cursor: string | undefined,
+    limit: number,
+  ): AutomationTimelinePage {
+    validateTimelineWindow(from, through, displayTimezone);
+    const sourcePage = this.list();
+    const source = buildAutomationTimeline(sourcePage.items, sourcePage.catalogRevision, from, through, displayTimezone);
+    return this.timelinePages.page(clientId, source, cursor, limit);
   }
 
   runGet(id: string, runId: string): AutomationRun {
