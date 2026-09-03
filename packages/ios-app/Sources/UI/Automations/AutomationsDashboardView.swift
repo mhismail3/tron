@@ -35,6 +35,10 @@ enum AutomationTimelinePresentationPolicy {
     static func showsRefreshIndicator(isLoading: Bool, delayElapsed: Bool) -> Bool {
         isLoading && delayElapsed
     }
+
+    static func showsInventoryFilters(mode: AutomationDashboardViewMode) -> Bool {
+        mode == .all
+    }
 }
 
 struct AutomationsDashboardView: View {
@@ -475,41 +479,46 @@ struct AutomationsDashboardView: View {
                                 : "Search and manage every available Automation.",
                             selected: mode == option
                         ) {
-                            mode = option
+                            withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
+                                mode = option
+                            }
                         }
                     }
 
-                    if mode == .all {
-                        filterSectionTitle("Status", detail: "Limit the inventory by lifecycle state.")
-                            .padding(.top, TronSpacing.md)
-                        ForEach(AutomationInventoryFilter.allCases) { option in
-                            filterOption(
-                                title: option.rawValue,
-                                detail: nil,
-                                selected: filter == option
-                            ) {
-                                filter = option
+                    if AutomationTimelinePresentationPolicy.showsInventoryFilters(mode: mode) {
+                        VStack(alignment: .leading, spacing: TronSpacing.md) {
+                            filterSectionTitle("Status", detail: "Limit the inventory by lifecycle state.")
+                                .padding(.top, TronSpacing.md)
+                            ForEach(AutomationInventoryFilter.allCases) { option in
+                                filterOption(
+                                    title: option.rawValue,
+                                    detail: nil,
+                                    selected: filter == option
+                                ) {
+                                    filter = option
+                                }
                             }
-                        }
 
-                        filterSectionTitle("Action", detail: "Show prompts, notifications, or both.")
-                            .padding(.top, TronSpacing.md)
-                        filterOption(
-                            title: "All action types",
-                            detail: nil,
-                            selected: actionFilter == nil
-                        ) {
-                            actionFilter = nil
-                        }
-                        ForEach(AutomationActionKind.allCases, id: \.self) { action in
+                            filterSectionTitle("Action", detail: "Show prompts, notifications, or both.")
+                                .padding(.top, TronSpacing.md)
                             filterOption(
-                                title: action.label,
+                                title: "All action types",
                                 detail: nil,
-                                selected: actionFilter == action
+                                selected: actionFilter == nil
                             ) {
-                                actionFilter = action
+                                actionFilter = nil
+                            }
+                            ForEach(AutomationActionKind.allCases, id: \.self) { action in
+                                filterOption(
+                                    title: action.label,
+                                    detail: nil,
+                                    selected: actionFilter == action
+                                ) {
+                                    actionFilter = action
+                                }
                             }
                         }
+                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
 
                     if availableBuckets.count > 1 {
@@ -534,8 +543,11 @@ struct AutomationsDashboardView: View {
                     }
                 }
                 .padding(.horizontal, TronSpacing.xlarge)
-                .padding(.bottom, TronSpacing.large)
+                .padding(.vertical, TronSpacing.large)
             }
+            .defaultScrollAnchor(.top, for: .initialOffset)
+            .defaultScrollAnchor(.top, for: .alignment)
+            .defaultScrollAnchor(.top, for: .sizeChanges)
             .tronScrollEdgeChrome()
             .toolbar {
                 ToolbarItem(placement: .principal) {

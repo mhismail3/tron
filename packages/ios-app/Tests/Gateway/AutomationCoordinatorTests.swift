@@ -58,6 +58,8 @@ struct AutomationCoordinatorTests {
             isLoading: false,
             delayElapsed: true
         ))
+        #expect(!AutomationTimelinePresentationPolicy.showsInventoryFilters(mode: .upcoming))
+        #expect(AutomationTimelinePresentationPolicy.showsInventoryFilters(mode: .all))
     }
 
     @Test("no eligible Gateway produces a neutral empty projection")
