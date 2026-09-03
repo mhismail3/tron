@@ -47,14 +47,12 @@ private struct ChatComposerStructuralMeasurement: Equatable {
     let height: CGFloat
     let accessoryIdentity: ChatComposerAccessoryLayoutIdentity
     let submissionTransitionID: Int?
-    let holdsSubmissionHeight: Bool
 }
 
 struct ChatComposerStructuralHost<Content: View>: View {
     let accessoryIdentity: ChatComposerAccessoryLayoutIdentity
     let submissionTransitionID: Int?
     let submissionAnimation: Animation?
-    let holdsSubmissionHeight: Bool
     let reduceMotion: Bool
     let onHeightChange: ((CGFloat) -> Void)?
     let onHeightSettled: ((CGFloat) -> Void)?
@@ -68,7 +66,6 @@ struct ChatComposerStructuralHost<Content: View>: View {
         accessoryIdentity: ChatComposerAccessoryLayoutIdentity,
         submissionTransitionID: Int? = nil,
         submissionAnimation: Animation? = nil,
-        holdsSubmissionHeight: Bool = false,
         reduceMotion: Bool,
         onHeightChange: ((CGFloat) -> Void)? = nil,
         onHeightSettled: ((CGFloat) -> Void)? = nil,
@@ -77,7 +74,6 @@ struct ChatComposerStructuralHost<Content: View>: View {
         self.accessoryIdentity = accessoryIdentity
         self.submissionTransitionID = submissionTransitionID
         self.submissionAnimation = submissionAnimation
-        self.holdsSubmissionHeight = holdsSubmissionHeight
         self.reduceMotion = reduceMotion
         self.onHeightChange = onHeightChange
         self.onHeightSettled = onHeightSettled
@@ -91,8 +87,7 @@ struct ChatComposerStructuralHost<Content: View>: View {
                 ChatComposerStructuralMeasurement(
                     height: geometry.size.height,
                     accessoryIdentity: accessoryIdentity,
-                    submissionTransitionID: submissionTransitionID,
-                    holdsSubmissionHeight: holdsSubmissionHeight
+                    submissionTransitionID: submissionTransitionID
                 )
             } action: { measurement in
                 install(measurement)
@@ -109,11 +104,6 @@ struct ChatComposerStructuralHost<Content: View>: View {
     @MainActor
     private func install(_ measurement: ChatComposerStructuralMeasurement) {
         guard measurement.height.isFinite, measurement.height > 0 else { return }
-        // A measured morph owns the old composer geometry until its overlay
-        // reaches the fully laid-out transcript destination. The same
-        // measurement is replayed with `holdsSubmissionHeight == false`.
-        guard !measurement.holdsSubmissionHeight else { return }
-
         let submissionActive = measurement.submissionTransitionID != nil
         let heightChanged = ChatComposerStructuralTransitionPolicy.admitsHeightChange(
             current: presentedHeight,
@@ -231,6 +221,7 @@ enum ChatContentTransitionPolicy {
     static let transcriptEntranceDuration: TimeInterval = 0.18
     static let promptEntranceDuration: TimeInterval = transcriptEntranceDuration
     static let promptFlightDuration: TimeInterval = 0.18
+    static let promptFlightHandoffDuration: TimeInterval = 0.08
     static let promptReplacementDuration: TimeInterval = 0.14
     static let notificationReplacementDuration: TimeInterval = 0.16
     static let attachmentHiddenScale: CGFloat = 0.5

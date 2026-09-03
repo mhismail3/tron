@@ -32,8 +32,21 @@ private struct ChatLazyTailMaterializationRequest: Hashable {
 
 enum ChatTranscriptLayoutConstants {
     static let rowSpacing: CGFloat = 8
-    /// The marker owns the final composer affordance with zero stack spacing.
     static let tailAffordanceHeight: CGFloat = 12
+    /// Keep the eager target physically measurable while placing the rest of
+    /// the visual affordance inside the terminal row's target bounds. An exact
+    /// row materialization target and the canonical tail then differ by less
+    /// than the physical alignment tolerance, so release cannot cause a second
+    /// scroll correction.
+    static let tailTargetHeight: CGFloat = 0.5
+
+    static func terminalRowBottomPadding(ownsMaterializationTarget: Bool) -> CGFloat {
+        ownsMaterializationTarget ? tailAffordanceHeight - tailTargetHeight : 0
+    }
+
+    static func tailMarkerHeight(terminalRowOwnsMaterializationTarget: Bool) -> CGFloat {
+        terminalRowOwnsMaterializationTarget ? tailTargetHeight : tailAffordanceHeight
+    }
 }
 
 enum ChatTranscriptUnderflowLayoutPolicy {
@@ -296,7 +309,10 @@ enum ChatPhysicalTranscriptReplacementPolicy {
         to next: ChatPhysicalTranscriptRow
     ) -> ChatPhysicalTranscriptReplacementKind {
         guard previous.id == next.id else { return .none }
-        if previous.isPromptLifecycle && next.isCanonicalUser { return .prompt }
+        if previous.isPromptLifecycle,
+           next.isPromptLifecycle || next.isCanonicalUser {
+            return .prompt
+        }
         if case .transcript(.notification(let old), _) = previous.content,
            case .transcript(.notification(let new), _) = next.content,
            old.showsProgress,
@@ -382,25 +398,28 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
             return
         }
         deferredReplacement = nil
-        let animation: Animation? = switch kind {
-        case .none:
-            nil
+        switch kind {
         case .prompt:
-            reduceMotion
-                ? .linear(duration: 0.10)
-                : ChatPromptReplacementAnimationPolicy.animation(reduceMotion: false)
+            // Install the new prompt payload atomically. The persistent prompt
+            // host animates only its bounded measured height; interpolating the
+            // entire Liquid Glass subtree creates overlapping container images.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                displayed = next
+                promptReplacementRevision &+= 1
+            }
         case .notification:
-            ChatContentTransitionPolicy.notificationReplacementAnimation(
-                reduceMotion: reduceMotion
-            )
-        }
-        var transaction = Transaction(animation: animation)
-        transaction.admitsChatPromptReplacementAnimation = kind != .none
-        // Type-specific descendants animate shallow values in place. Prompt
-        // replacement also advances one bounded height interpolation owner.
-        withTransaction(transaction) {
-            displayed = next
-            if kind == .prompt { promptReplacementRevision &+= 1 }
+            var transaction = Transaction(animation:
+                ChatContentTransitionPolicy.notificationReplacementAnimation(
+                    reduceMotion: reduceMotion
+                ))
+            transaction.admitsChatPromptReplacementAnimation = true
+            withTransaction(transaction) { displayed = next }
+        case .none:
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { displayed = next }
         }
     }
 }
@@ -443,10 +462,20 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let hostedRecorder: (any ChatTranscriptHostedRecording)?
 
     var body: some View {
+        let physicalRows = installed.map {
+            ChatPhysicalTranscriptRowPolicy.rows(
+                installed: $0,
+                canonicalAliases: canonicalSubmissionAliases
+            )
+        }
+        let terminalPhysicalID = physicalRows?.last?.id
+        let terminalRowOwnsMaterializationTarget = terminalPhysicalID.map {
+            scrollCoordinator.ownsTailMaterializationTarget(renderedID: $0)
+        } == true
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if let installed {
+                    if let installed, let physicalRows {
                         if (installed.sourceWindow.originalStart ?? 0) > 0 {
                             stableRow(
                                 physicalID: "earlier-messages",
@@ -458,10 +487,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                                     .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
                             }
                         }
-                        ForEach(ChatPhysicalTranscriptRowPolicy.rows(
-                            installed: installed,
-                            canonicalAliases: canonicalSubmissionAliases
-                        )) { row in
+                        ForEach(physicalRows) { row in
                             ChatPhysicalTranscriptReplacementHost(
                                 row: row,
                                 reduceMotion: reduceMotion,
@@ -470,6 +496,19 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             ) { displayed in
                                 physicalRow(displayed, installed: installed)
                             }
+                            // Keep the visual tail affordance inside the final
+                            // collection target. The eager marker retains only
+                            // a measurable subpoint target, preventing a row-
+                            // bottom lease from releasing to a different tail.
+                            .padding(
+                                .bottom,
+                                row.id == terminalPhysicalID
+                                    ? ChatTranscriptLayoutConstants.terminalRowBottomPadding(
+                                        ownsMaterializationTarget:
+                                            terminalRowOwnsMaterializationTarget
+                                    )
+                                    : 0
+                            )
                             // Make the collection host itself the lazy scroll
                             // target; its descendant may not exist while the
                             // entrance is fully collapsed.
@@ -478,7 +517,9 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     }
                 }
                 // The eager sentinel is the lazy collection's bounded target.
-                tailMarker
+                tailMarker(
+                    terminalRowOwnsMaterializationTarget: terminalRowOwnsMaterializationTarget
+                )
             }
             .padding(.top, 12)
             // An explicit ScrollPosition target suppresses SwiftUI's advisory
@@ -750,6 +791,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         entranceSuppressed: entranceSuppressed
                     )) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
                 morphOwnership: morphRegistry.entranceOwnership(for: outgoing.id),
+                morphFlightPhase: morphRegistry.flightPhase(for: outgoing.id),
                 submissionAnimation: submissionAnimation,
                 kind: ChatPromptLifecycleTransitionPolicy.entranceKind(for: outgoing.promptBehavior),
                 onEntranceConsumed: {
@@ -981,10 +1023,12 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             }
     }
 
-    private var tailMarker: some View {
+    private func tailMarker(terminalRowOwnsMaterializationTarget: Bool) -> some View {
         let rowLayoutEpoch = scrollCoordinator.layoutEpoch
         return Color.clear
-            .frame(height: ChatTranscriptLayoutConstants.tailAffordanceHeight)
+            .frame(height: ChatTranscriptLayoutConstants.tailMarkerHeight(
+                terminalRowOwnsMaterializationTarget: terminalRowOwnsMaterializationTarget
+            ))
             .id("transcript-bottom")
             .accessibilityHidden(true)
             .onGeometryChange(for: ChatSemanticFrameObservation.self) { value in

@@ -13,7 +13,6 @@ struct ChatLayoutClock: Equatable, Sendable {
     enum Curve: Equatable, Sendable {
         case keyboard(Int)
         case smooth
-        case spring(response: Double, dampingFraction: Double, blendDuration: Double)
         case instant
     }
 
@@ -33,9 +32,12 @@ struct ChatLayoutClock: Equatable, Sendable {
             )
         }
         if joined.contains(.submission) {
+            // Submission geometry must be monotonic. A spring can overshoot the
+            // outgoing row, morph endpoint, and composer inset, producing a
+            // visible down/up correction even when every participant shares it.
             return Self(
-                duration: 0.40,
-                curve: .spring(response: 0.40, dampingFraction: 0.86, blendDuration: 0.08)
+                duration: ChatContentTransitionPolicy.transcriptEntranceDuration,
+                curve: .smooth
             )
         }
         return Self(duration: 0.34, curve: .smooth)
@@ -47,12 +49,6 @@ struct ChatLayoutClock: Equatable, Sendable {
             nil
         case .smooth:
             .smooth(duration: duration)
-        case let .spring(response, dampingFraction, blendDuration):
-            .spring(
-                response: response,
-                dampingFraction: dampingFraction,
-                blendDuration: blendDuration
-            )
         case let .keyboard(rawValue):
             switch UIView.AnimationCurve(rawValue: rawValue) ?? .easeInOut {
             case .easeInOut:
@@ -136,16 +132,8 @@ final class ChatLayoutTransaction {
     @discardableResult
     func joinParticipant(_ mutation: ChatLayoutMutation) -> ParticipantTicket {
         if var current = generation {
-            let wasAlreadyJoined = current.joined.contains(mutation)
             let revision = (current.participantRevisions[mutation] ?? 0) &+ 1
             current.joined.insert(mutation)
-            if mutation == .keyboard, !wasAlreadyJoined, keyboardTransition != nil {
-                // A keyboard notification may arrive just after submission
-                // opened its fallback clock. The first exact UIKit participant
-                // supersedes that provisional clock; later frame revisions keep
-                // the already-frozen keyboard clock.
-                current.clock = nil
-            }
             current.settled.remove(mutation)
             current.participantRevisions[mutation] = revision
             generation = current

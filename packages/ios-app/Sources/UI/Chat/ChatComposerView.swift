@@ -13,7 +13,6 @@ struct ChatComposerView: View {
     let morphRegistry: ChatMorphFrameRegistry
     let submissionTransitionID: Int?
     let submissionAnimation: Animation?
-    let holdsSubmissionHeight: Bool
     let reduceMotion: Bool
     let showsCatchUp: Bool
     let showsAmbientWorkingBlur: Bool
@@ -59,7 +58,6 @@ struct ChatComposerView: View {
             ),
             submissionTransitionID: submissionTransitionID,
             submissionAnimation: submissionAnimation,
-            holdsSubmissionHeight: holdsSubmissionHeight,
             reduceMotion: reduceMotion,
             onHeightChange: onComposerHeight,
             onHeightSettled: onComposerHeightSettled
@@ -96,15 +94,21 @@ struct ChatComposerView: View {
             // These value-scoped transactions animate only newly inserted or
             // removed child surfaces inside the already-installed space.
             .animation(
-                ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: reduceMotion),
+                submissionTransitionID == nil
+                    ? ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: reduceMotion)
+                    : nil,
                 value: pendingAttachments.map(\.id)
             )
             .animation(
-                ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion),
+                submissionTransitionID == nil
+                    ? ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion)
+                    : nil,
                 value: selectedResource?.id
             )
             .animation(
-                ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion),
+                submissionTransitionID == nil
+                    ? ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion)
+                    : nil,
                 value: resourcePicker?.kind
             )
         }
@@ -124,6 +128,7 @@ struct ChatComposerView: View {
             attachments: pendingAttachments,
             morphRegistry: morphRegistry,
             reduceMotion: reduceMotion,
+            submissionTransitionActive: submissionTransitionID != nil,
             onRemove: onRemoveAttachment
         )
     }
@@ -291,6 +296,7 @@ private struct ChatPendingAttachmentStrip: View {
     let attachments: [PendingAttachment]
     let morphRegistry: ChatMorphFrameRegistry
     let reduceMotion: Bool
+    let submissionTransitionActive: Bool
     let onRemove: (String) -> Void
 
     @State private var presentedAttachments: [PendingAttachment]
@@ -300,11 +306,13 @@ private struct ChatPendingAttachmentStrip: View {
         attachments: [PendingAttachment],
         morphRegistry: ChatMorphFrameRegistry,
         reduceMotion: Bool,
+        submissionTransitionActive: Bool,
         onRemove: @escaping (String) -> Void
     ) {
         self.attachments = attachments
         self.morphRegistry = morphRegistry
         self.reduceMotion = reduceMotion
+        self.submissionTransitionActive = submissionTransitionActive
         self.onRemove = onRemove
         _presentedAttachments = State(initialValue: attachments)
     }
@@ -349,6 +357,13 @@ private struct ChatPendingAttachmentStrip: View {
     private func reconcile(to target: [PendingAttachment]) {
         reconciliationTask?.cancel()
         reconciliationTask = nil
+
+        if submissionTransitionActive {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { presentedAttachments = target }
+            return
+        }
 
         if reduceMotion {
             withAnimation(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: true)) {

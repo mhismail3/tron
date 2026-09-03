@@ -58,6 +58,10 @@ struct ChatMorphFlightTests {
         #expect(registry.beginAnimation(lifecycleID: ready.lifecycleID) != nil)
         #expect(registry.flightPhase(for: ready.lifecycleID) == .animating)
         #expect(ready.elements.allSatisfy { registry.hidesDestination($0.id) })
+        #expect(registry.completeAnimation(lifecycleID: ready.lifecycleID) == nil)
+        #expect(registry.beginHandoff(lifecycleID: ready.lifecycleID) != nil)
+        #expect(registry.flightPhase(for: ready.lifecycleID) == .handingOff)
+        #expect(ready.elements.allSatisfy { !registry.hidesDestination($0.id) })
     }
 
     @Test("compact prompts morph while long prompts use the bounded row entrance")
@@ -144,6 +148,7 @@ struct ChatMorphFlightTests {
         let id = try #require(completed.flight?.elements.first?.id)
         completed.recordDestination(id: id, frame: CGRect(x: 40, y: 100, width: 250, height: 52))
         #expect(completed.beginAnimation(lifecycleID: lifecycleID) != nil)
+        #expect(completed.beginHandoff(lifecycleID: lifecycleID) != nil)
         #expect(completed.completeAnimation(lifecycleID: lifecycleID) == 6)
         #expect(completed.entranceOwnership(for: lifecycleID) == .completed)
         #expect(completed.reconcile(installedLifecycleID: nil) == nil)
@@ -201,8 +206,8 @@ struct ChatMorphFlightTests {
         ))
     }
 
-    @Test("a flight freezes its exact destination after progress begins")
-    func activeFlightFreezesDestination() throws {
+    @Test("a flight tracks its shared-clock destination and freezes only for handoff")
+    func activeFlightTracksThenFreezesDestination() throws {
         let registry = ChatMorphFrameRegistry()
         registry.recordDraftPrompt(frame: promptFrame)
         let lifecycle = lifecycle(nonce: 17, attachment: nil)
@@ -214,7 +219,11 @@ struct ChatMorphFlightTests {
         #expect(registry.beginAnimation(lifecycleID: lifecycle.id ?? "") != nil)
         registry.recordDestination(id: id, frame: settled)
         #expect(registry.flight?.phase == .animating)
-        #expect(registry.flight?.destinationFrames[id] == initial)
+        #expect(registry.flight?.destinationFrames[id] == settled)
+        #expect(registry.beginHandoff(lifecycleID: lifecycle.id ?? "") != nil)
+        registry.recordDestination(id: id, frame: initial)
+        #expect(registry.flight?.phase == .handingOff)
+        #expect(registry.flight?.destinationFrames[id] == settled)
         #expect(registry.consumeAbandonedGeneration() == nil)
     }
 
@@ -230,9 +239,7 @@ struct ChatMorphFlightTests {
         registry.recordDestination(id: id, frame: .null)
         #expect(registry.flight == nil)
         #expect(registry.consumeAbandonedGeneration() == 12)
-        #expect(registry.consumeAbandonedLifecycleID() == lifecycle.id)
         #expect(registry.consumeAbandonedGeneration() == nil)
-        #expect(registry.consumeAbandonedLifecycleID() == nil)
     }
 
     @Test("preflight card replacement fails an ordinary prompt flight open")

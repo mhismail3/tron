@@ -60,7 +60,7 @@ struct ChatMorphID: Hashable, Sendable, Identifiable {
 @MainActor
 @Observable
 final class ChatMorphFrameRegistry {
-    enum FlightPhase: Equatable, Sendable { case waitingForDestination, animating }
+    enum FlightPhase: Equatable, Sendable { case waitingForDestination, animating, handingOff }
     enum EntranceOwnership: Equatable, Sendable { case ordinary, flight, completed }
 
     struct Element: Identifiable, Equatable, Sendable {
@@ -93,7 +93,6 @@ final class ChatMorphFrameRegistry {
     private var activeElementIDs: Set<ChatMorphID> = []
     private var completedLifecycleID: String?
     private var abandonedGeneration: Int?
-    private var abandonedLifecycleID: String?
     private struct ResourceKey: Hashable {
         let source: ComposerResourceInvocation.Source
         let name: String
@@ -209,9 +208,8 @@ final class ChatMorphFrameRegistry {
     func recordDestination(id: ChatMorphID, frame: CGRect) {
         guard var flight, flight.elements.contains(where: { $0.id == id }) else { return }
         guard Self.valid(frame) else {
-            if flight.phase == .animating {
+            if flight.phase != .waitingForDestination {
                 abandonedGeneration = flight.generation
-                abandonedLifecycleID = flight.lifecycleID
                 self.flight = nil
                 activeLifecycleID = nil
                 activeElementIDs.removeAll(keepingCapacity: true)
@@ -222,12 +220,11 @@ final class ChatMorphFrameRegistry {
             readinessRevision &+= 1
             return
         }
-        // Endpoint changes after progress begins are mathematically
-        // discontinuous (`progress × delta`). Submission choreography holds the
-        // keyboard/composer geometry through the flight, so freeze the first
-        // complete destination and treat later valid callbacks as observation
-        // noise. Invalid disappearance still fails open above.
-        guard flight.phase == .waitingForDestination else { return }
+        // Row growth, composer collapse, and UIKit keyboard motion share one
+        // submission clock, so their destination advances continuously while
+        // the bridge is moving. Freeze only after the bridge reaches that live
+        // endpoint and begins its geometry-neutral handoff crossfade.
+        guard flight.phase != .handingOff else { return }
         guard ChatMorphFramePolicy.materiallyDiffers(
             flight.destinationFrames[id],
             from: frame
@@ -247,8 +244,19 @@ final class ChatMorphFrameRegistry {
         return flight
     }
 
+    func beginHandoff(lifecycleID: String) -> Flight? {
+        guard var flight,
+              flight.lifecycleID == lifecycleID,
+              flight.phase == .animating else { return nil }
+        flight.phase = .handingOff
+        self.flight = flight
+        readinessRevision &+= 1
+        return flight
+    }
+
     func hidesDestination(_ id: ChatMorphID) -> Bool {
-        activeElementIDs.contains(id)
+        guard activeElementIDs.contains(id) else { return false }
+        return flight?.phase != .handingOff
     }
 
     /// The outgoing row remains mounted for destination measurement. This
@@ -268,7 +276,7 @@ final class ChatMorphFrameRegistry {
     @discardableResult
     func completeAnimation(lifecycleID: String) -> Int? {
         guard let flight, flight.lifecycleID == lifecycleID,
-              flight.phase == .animating else { return nil }
+              flight.phase == .handingOff else { return nil }
         completedLifecycleID = lifecycleID
         activeLifecycleID = nil
         activeElementIDs.removeAll(keepingCapacity: true)
@@ -295,7 +303,6 @@ final class ChatMorphFrameRegistry {
         activeElementIDs.removeAll(keepingCapacity: true)
         completedLifecycleID = nil
         abandonedGeneration = nil
-        abandonedLifecycleID = nil
         readinessRevision &+= 1
         return generation
     }
@@ -304,12 +311,6 @@ final class ChatMorphFrameRegistry {
     func consumeAbandonedGeneration() -> Int? {
         defer { abandonedGeneration = nil }
         return abandonedGeneration
-    }
-
-    @discardableResult
-    func consumeAbandonedLifecycleID() -> String? {
-        defer { abandonedLifecycleID = nil }
-        return abandonedLifecycleID
     }
 
     @discardableResult
@@ -419,9 +420,9 @@ struct ChatMorphFlightLayer: View {
     let registry: ChatMorphFrameRegistry
     let layoutTransaction: ChatLayoutTransaction
     let reduceMotion: Bool
-    let onFlightEnded: (String) -> Void
 
     @State private var progress: CGFloat = 0
+    @State private var overlayOpacity: CGFloat = 1
 
     var body: some View {
         GeometryReader { geometry in
@@ -468,25 +469,22 @@ struct ChatMorphFlightLayer: View {
                             )
                     }
                 }
+                .opacity(overlayOpacity)
             }
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .onChange(of: registry.readinessRevision, initial: true) { _, _ in
             if let generation = registry.consumeAbandonedGeneration() {
-                if let lifecycleID = registry.consumeAbandonedLifecycleID() {
-                    onFlightEnded(lifecycleID)
-                }
                 layoutTransaction.settle(generation, source: .morphFlight)
                 progress = 0
+                overlayOpacity = 1
             }
             startIfReady()
         }
         .onChange(of: layoutTransaction.generation?.id) { _, generation in
             guard let flight = registry.flight, generation != flight.generation else { return }
-            let lifecycleID = flight.lifecycleID
             registry.abandon()
-            onFlightEnded(lifecycleID)
         }
         .task(id: registry.flight?.lifecycleID) {
             guard reduceMotion,
@@ -516,15 +514,33 @@ struct ChatMorphFlightLayer: View {
               let flight = registry.beginAnimation(lifecycleID: waiting.lifecycleID) else { return }
         var transaction = Transaction()
         transaction.disablesAnimations = true
-        withTransaction(transaction) { progress = 0 }
+        withTransaction(transaction) {
+            progress = 0
+            overlayOpacity = 1
+        }
         guard let animation = layoutTransaction.resolvedAnimation
             ?? ChatContentTransitionPolicy.promptFlightAnimation(reduceMotion: reduceMotion) else {
             progress = 1
-            finish(flight)
+            handoff(flight)
             return
         }
         withAnimation(animation, completionCriteria: .logicallyComplete) {
             progress = 1
+        } completion: {
+            handoff(flight)
+        }
+    }
+
+    private func handoff(_ flight: ChatMorphFrameRegistry.Flight) {
+        guard registry.beginHandoff(lifecycleID: flight.lifecycleID) != nil else { return }
+        // Reveal the real Liquid Glass destination beneath the bridge at the
+        // frozen endpoint, then remove only the bridge. The short overlap is
+        // visual and never changes row, composer, or viewport geometry.
+        withAnimation(
+            .easeOut(duration: ChatContentTransitionPolicy.promptFlightHandoffDuration),
+            completionCriteria: .logicallyComplete
+        ) {
+            overlayOpacity = 0
         } completion: {
             finish(flight)
         }
@@ -532,16 +548,16 @@ struct ChatMorphFlightLayer: View {
 
     private func finish(_ flight: ChatMorphFrameRegistry.Flight) {
         guard let generation = registry.completeAnimation(lifecycleID: flight.lifecycleID) else { return }
-        onFlightEnded(flight.lifecycleID)
         layoutTransaction.settle(generation, source: .morphFlight)
         progress = 0
+        overlayOpacity = 1
     }
 
     private func failOpen(lifecycleID: String) {
         guard let generation = registry.failOpen(lifecycleID: lifecycleID) else { return }
-        onFlightEnded(lifecycleID)
         layoutTransaction.settle(generation, source: .morphFlight)
         progress = 0
+        overlayOpacity = 1
     }
 
     private func interpolate(_ source: CGFloat, _ destination: CGFloat, _ progress: CGFloat) -> CGFloat {
