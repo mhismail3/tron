@@ -1546,8 +1546,12 @@ struct ChatView: View {
     private var isTranscriptReady: Bool { sessionPresentation.open.phase == .ready }
 
     private var hasSettledOpeningOffset: Bool {
-        sessionPresentation.open.phase == .revealing
-            || sessionPresentation.open.phase == .ready
+        switch sessionPresentation.open.phase {
+        case .revealing, .presenting, .presented, .ready:
+            true
+        case .opening, .positioning, .failed:
+            false
+        }
     }
 
     private var isLoadingEarlierMessages: Bool {
@@ -1566,6 +1570,8 @@ struct ChatView: View {
         presentationActivity.allowsViewportObservation
             && (sessionPresentation.open.phase == .positioning
                 || sessionPresentation.open.phase == .revealing
+                || sessionPresentation.open.phase == .presenting
+                || sessionPresentation.open.phase == .presented
                 || sessionPresentation.open.phase == .ready)
     }
 
@@ -1580,7 +1586,7 @@ struct ChatView: View {
 
     @ViewBuilder private var openingSurface: some View {
         switch sessionPresentation.open.phase {
-        case .opening, .positioning, .revealing:
+        case .opening, .positioning, .revealing, .presenting:
             ZStack {
                 TronPulseLoadingIndicator(accent: .tronEmerald, size: 44)
             }
@@ -1606,7 +1612,7 @@ struct ChatView: View {
             .padding(24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.tronBackground)
-        case .ready:
+        case .presented, .ready:
             EmptyView()
         }
     }
@@ -2165,16 +2171,54 @@ struct ChatView: View {
             context: ensureInteractionTraceContext(),
             state: interactionTraceState()
         )
-        return withAnimation(
-            transcriptRevealAnimation,
-            completionCriteria: .logicallyComplete
-        ) {
+        // Resolve the physical positioning lift atomically while it is still
+        // covered. The single user-visible animation is owned later, after
+        // marker settlement, so two animation clocks cannot race geometry.
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        let began = withTransaction(transaction) {
             sessionPresentation.open.beginPositionedReveal(sessionID: sessionID, epoch: epoch)
-        } completion: {
-            guard sessionPresentation.open.epoch == epoch,
-                  sessionPresentation.open.phase == .revealing else { return }
-            scrollCoordinator.openingRevealCompleted()
         }
+        if began { scrollCoordinator.openingRevealCompleted() }
+        return began
+    }
+
+    @MainActor
+    private func revealSettledTranscript(epoch: Int) async -> Bool {
+        do {
+            // Commit the initial opacity/offset while the opaque surface still
+            // owns presentation. This prevents an unanimated ready frame when
+            // settlement and reveal are coalesced in one SwiftUI update.
+            try await displayFrameScheduler.nextFrame()
+        } catch {
+            return false
+        }
+        guard !Task.isCancelled,
+              sessionPresentation.open.epoch == epoch,
+              sessionPresentation.open.phase == .presenting else { return false }
+        let completed: Bool = await withCheckedContinuation { continuation in
+            withAnimation(
+                transcriptRevealAnimation,
+                completionCriteria: .logicallyComplete
+            ) {
+                _ = sessionPresentation.open.beginVisibleReveal(
+                    sessionID: sessionID,
+                    epoch: epoch
+                )
+            } completion: {
+                continuation.resume(returning:
+                    sessionPresentation.open.epoch == epoch
+                        && sessionPresentation.open.phase == .presented
+                )
+            }
+        }
+        guard completed,
+              !Task.isCancelled,
+              sessionPresentation.open.epoch == epoch else { return false }
+        return sessionPresentation.open.installReadyViewport(
+            sessionID: sessionID,
+            epoch: epoch
+        )
     }
 
     @MainActor
@@ -2199,6 +2243,10 @@ struct ChatView: View {
                 epoch: epoch,
                 expectedVisibleRows: totalInteractionTraceRows
             )
+            // Release the final opening lease only after the visible animation
+            // and its first ready frame. Geometry, paging, projection intake,
+            // and repair therefore cannot interleave with the entrance.
+            scrollCoordinator.completeVisibleOpeningReveal()
             reconcileSessionPresentationVisibility()
             // Publish leased interaction/editor routes only after chat opening
             // has crossed a real ready frame. Otherwise their sheet can cover
@@ -2287,7 +2335,7 @@ struct ChatView: View {
               sessionPresentation.open.installSettledViewport(
                   sessionID: sessionID,
                   epoch: epoch
-              ) else {
+              ), await revealSettledTranscript(epoch: epoch) else {
             performanceSignposts.end(interval, result: .discarded, metrics: .none)
             return .discarded
         }

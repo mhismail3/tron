@@ -91,6 +91,81 @@ struct ChatContentTransitionTests {
         ).height == settledBounds.height - overflow * 2)
     }
 
+    @Test("admitted lazy rows retain their one-shot visual entrance")
+    func admittedLazyEntrance() {
+        #expect(!ChatTranscriptEntrancePresentationPolicy.initiallyRevealed(state: .pending))
+        #expect(!ChatTranscriptEntrancePresentationPolicy.initiallyRevealed(state: .admitted))
+        #expect(ChatTranscriptEntrancePresentationPolicy.initiallyRevealed(state: .none))
+    }
+
+    @Test("incremental response growth animates only current ordinary additions")
+    func incrementalResponseGrowth() {
+        #expect(ChatIncrementalContentGrowthPolicy.shouldAnimate(
+            currentHeight: 80,
+            targetHeight: 112,
+            contentChanged: true,
+            streaming: true,
+            reduceMotion: false,
+            surfaceActive: true
+        ))
+        #expect(!ChatIncrementalContentGrowthPolicy.shouldAnimate(
+            currentHeight: nil,
+            targetHeight: 112,
+            contentChanged: true,
+            streaming: true,
+            reduceMotion: false,
+            surfaceActive: true
+        ))
+        #expect(!ChatIncrementalContentGrowthPolicy.shouldAnimate(
+            currentHeight: 112,
+            targetHeight: 80,
+            contentChanged: true,
+            streaming: true,
+            reduceMotion: false,
+            surfaceActive: true
+        ))
+        #expect(!ChatIncrementalContentGrowthPolicy.shouldAnimate(
+            currentHeight: 80,
+            targetHeight: 112,
+            contentChanged: false,
+            streaming: true,
+            reduceMotion: false,
+            surfaceActive: true
+        ))
+        #expect(!ChatIncrementalContentGrowthPolicy.shouldAnimate(
+            currentHeight: 80,
+            targetHeight: 112,
+            contentChanged: true,
+            streaming: false,
+            reduceMotion: false,
+            surfaceActive: true
+        ))
+        #expect(!ChatIncrementalContentGrowthPolicy.shouldAnimate(
+            currentHeight: 80,
+            targetHeight: 112,
+            contentChanged: true,
+            streaming: true,
+            reduceMotion: true,
+            surfaceActive: true
+        ))
+        #expect(!ChatIncrementalContentGrowthPolicy.shouldAnimate(
+            currentHeight: 80,
+            targetHeight: 112,
+            contentChanged: true,
+            streaming: true,
+            reduceMotion: false,
+            surfaceActive: false
+        ))
+        #expect(!ChatIncrementalContentGrowthPolicy.shouldAnimate(
+            currentHeight: 80,
+            targetHeight: 80 + ChatIncrementalContentGrowthPolicy.maximumAnimatedGrowth + 1,
+            contentChanged: true,
+            streaming: true,
+            reduceMotion: false,
+            surfaceActive: true
+        ))
+    }
+
     @Test("user and queue content rises from the trailing composer edge")
     func composerEdgeMotion() {
         let user = ChatContentTransitionPolicy.hiddenTransform(

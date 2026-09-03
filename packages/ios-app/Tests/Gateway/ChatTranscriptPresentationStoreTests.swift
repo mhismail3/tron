@@ -1401,10 +1401,12 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(store.entranceState(for: rowID) == .admitted)
 
             let completedInstall = try await store.waitForInstall(of: completedTag)
-            // Terminal unanchored execution remains a live-region row until
-            // canonical ownership or Gateway retirement removes it, but its
-            // completed state cannot retain a visual entrance entitlement.
+            // Once the mounted running row is admitted, rapid terminal state
+            // cannot truncate its local entrance. The view retires the exact
+            // entitlement only after animation completion.
             #expect(completedInstall.containsDisplayedID(rowID))
+            #expect(store.entranceState(for: rowID) == .admitted)
+            store.consumeTranscriptEntrance(id: rowID)
             #expect(store.entranceState(for: rowID) == .none)
         }
     }
@@ -1757,6 +1759,8 @@ struct ChatTranscriptPresentationStoreTests {
                 isVisible: true
             ))
             #expect(store.entranceState(for: appended.id) == .admitted)
+            store.consumeTranscriptEntrance(id: appended.id)
+            #expect(store.entranceState(for: appended.id) == .none)
 
             let older = SessionScenarioBuilder(seed: 1_215)
                 .historyPage(count: 1, longRowBytes: 24)[0]
@@ -1768,7 +1772,7 @@ struct ChatTranscriptPresentationStoreTests {
             store.submit(snapshot: snapshot, tag: tag)
             _ = try await store.waitForInstall(of: tag)
             #expect(store.pendingEntranceIDs.isEmpty)
-            #expect(store.entranceState(for: appended.id) == .admitted)
+            #expect(store.entranceState(for: appended.id) == .none)
         }
     }
 
@@ -1858,14 +1862,21 @@ struct ChatTranscriptPresentationStoreTests {
         try await withTestWatchdog { @MainActor in
             var snapshot = try SessionScenarioBuilder(seed: 1_224)
                 .openingTail(targetEncodedBytes: 8_000)
+            snapshot.phase = .idle
+            snapshot.toolExecutions = []
+            let store = ChatTranscriptPresentationStore()
+            var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 23)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
             snapshot.phase = .running
             snapshot.toolExecutions = [storeRuntimeTool(
                 id: "call",
                 output: "working",
                 progressSequence: 1
             )]
-            let store = ChatTranscriptPresentationStore()
-            var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 23)
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 23)
             store.submit(snapshot: snapshot, tag: tag)
             let running = try await store.waitForInstall(of: tag)
             let runningRow = try #require(ChatPhysicalTranscriptRowPolicy.rows(
@@ -1873,6 +1884,12 @@ struct ChatTranscriptPresentationStoreTests {
                 canonicalAliases: [:]
             ).first { $0.semanticID == "tool-run-call" })
             #expect(runningRow.id == "tool-run-call")
+            #expect(store.resolveEntrance(
+                id: runningRow.semanticID,
+                installationTag: tag,
+                isVisible: true
+            ))
+            #expect(store.entranceState(for: runningRow.semanticID) == .admitted)
 
             snapshot.toolExecutions = [storeRuntimeTool(
                 id: "call",
@@ -1892,6 +1909,10 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(completedRow.id == runningRow.id)
             #expect(completedRow.semanticID == "tool-run-producer-group")
             #expect(completed.hasUniqueDisplayedIDs)
+            #expect(store.entranceState(for: runningRow.semanticID) == .none)
+            #expect(store.entranceState(for: completedRow.semanticID) == .admitted)
+            store.consumeTranscriptEntrance(id: completedRow.semanticID)
+            #expect(store.entranceState(for: completedRow.semanticID) == .none)
         }
     }
 

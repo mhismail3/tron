@@ -312,6 +312,10 @@ private enum ChatPromptReplacementAnimationTransactionKey: TransactionKey {
     static let defaultValue = false
 }
 
+private enum ChatIncrementalGrowthAnimationTransactionKey: TransactionKey {
+    static let defaultValue = false
+}
+
 extension Transaction {
     var admitsChatToolChipAnimation: Bool {
         get { self[ChatToolChipAnimationTransactionKey.self] }
@@ -326,6 +330,11 @@ extension Transaction {
     var admitsChatPromptReplacementAnimation: Bool {
         get { self[ChatPromptReplacementAnimationTransactionKey.self] }
         set { self[ChatPromptReplacementAnimationTransactionKey.self] = newValue }
+    }
+
+    var admitsChatIncrementalGrowthAnimation: Bool {
+        get { self[ChatIncrementalGrowthAnimationTransactionKey.self] }
+        set { self[ChatIncrementalGrowthAnimationTransactionKey.self] = newValue }
     }
 }
 
@@ -349,7 +358,8 @@ private struct ChatStableTranscriptUpdateModifier<ProjectionIdentity: Equatable>
             // transaction transform was erasing that first animation.
             if !transaction.admitsChatToolChipAnimation,
                !transaction.admitsChatEntranceAnimation,
-               !transaction.admitsChatPromptReplacementAnimation {
+               !transaction.admitsChatPromptReplacementAnimation,
+               !transaction.admitsChatIncrementalGrowthAnimation {
                 transaction.animation = nil
             }
         }

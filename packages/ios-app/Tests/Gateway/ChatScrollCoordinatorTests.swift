@@ -1353,7 +1353,13 @@ struct ChatScrollCoordinatorTests {
             #expect(coordinator.consumeTargetRelease())
             await waiter.value
             #expect(waiterResult == .settled)
+            #expect(coordinator.blocksAutomaticLiveProjectionIntake)
+            #expect(!coordinator.canRequestHistoryPage)
+            #expect(!coordinator.admitsSubmission)
+            coordinator.completeVisibleOpeningReveal()
             #expect(!coordinator.blocksAutomaticLiveProjectionIntake)
+            #expect(coordinator.canRequestHistoryPage)
+            #expect(coordinator.admitsSubmission)
         }
     }
 

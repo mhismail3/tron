@@ -871,9 +871,15 @@ struct ChatTranscriptGeometry: Equatable {
 enum ChatOpenPresentationPhase: Equatable {
     case opening
     case positioning
-    /// The positioning lift is resolving behind the opaque opening surface.
-    /// The transcript is not interactive or visible until physical settlement.
+    /// The physical positioning lift is resolving behind the opaque opening
+    /// surface. It is not the user-visible transcript entrance.
     case revealing
+    /// Physical settlement is complete. One covered frame installs the visible
+    /// entrance's initial opacity/offset without exposing intermediate layout.
+    case presenting
+    /// The opening surface is fading away while the settled transcript rises
+    /// into place. Interaction remains disabled until animation completion.
+    case presented
     case ready
     case failed(String)
 }
@@ -906,6 +912,18 @@ struct ChatOpenPresentationState: Equatable {
 
     mutating func installSettledViewport(sessionID: String, epoch: Int) -> Bool {
         guard sessionID == self.sessionID, epoch == self.epoch, phase == .revealing else { return false }
+        phase = .presenting
+        return true
+    }
+
+    mutating func beginVisibleReveal(sessionID: String, epoch: Int) -> Bool {
+        guard sessionID == self.sessionID, epoch == self.epoch, phase == .presenting else { return false }
+        phase = .presented
+        return true
+    }
+
+    mutating func installReadyViewport(sessionID: String, epoch: Int) -> Bool {
+        guard sessionID == self.sessionID, epoch == self.epoch, phase == .presented else { return false }
         phase = .ready
         return true
     }

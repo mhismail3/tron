@@ -30,7 +30,11 @@ enum ChatOpeningAttemptPolicy {
     static let unsettledMessage = "The conversation changed while opening. Please retry."
 
     static func isUnsettled(_ phase: ChatOpenPresentationPhase) -> Bool {
-        phase == .opening || phase == .positioning || phase == .revealing
+        phase == .opening
+            || phase == .positioning
+            || phase == .revealing
+            || phase == .presenting
+            || phase == .presented
     }
 
     static func shouldFailUnsettledAttempt(

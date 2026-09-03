@@ -66,7 +66,7 @@ final class ChatScrollCoordinator {
     static let defaultOpeningTailTimeout: Duration = .milliseconds(750)
     static let defaultOpeningPostRevealTimeout: Duration = .seconds(2)
     static let maximumOpeningTailCommandAttempts = 3
-    static let liveGrowthAnimationDuration = 0.16
+    nonisolated static let liveGrowthAnimationDuration = 0.16
     /// Realizing the row immediately before the eager tail can leave only the
     /// fixed row spacing and tail affordance outside the viewport.
     static let maximumMaterializationTailDisplacement: CGFloat = 32
@@ -180,7 +180,10 @@ final class ChatScrollCoordinator {
     var isPrependingHistory: Bool { prepend != nil }
     var canRequestHistoryPage: Bool {
         let hasCompatiblePendingCommand = command == nil || command?.origin == .layout
-        return prepend == nil && catchUpPhase == .none && !openingTailSettlementPending
+        return prepend == nil
+            && catchUpPhase == .none
+            && !openingTailSettlementPending
+            && !visibleOpeningRevealPending
             && hasCompatiblePendingCommand && appliedTargetCommandToken == nil
             && targetReleaseToken == nil && physicalTailRepairCommandToken == nil
     }
@@ -206,6 +209,10 @@ final class ChatScrollCoordinator {
     private var semanticFrames: [String: SemanticFrameSample] = [:]
     private var semanticFrameRevision = 0
     private var openingTailPhase: OpeningTailPhase = .idle
+    /// Extends opening ownership through the visual entrance after physical
+    /// target release. Repair, paging, submission, and live projection cannot
+    /// interleave with that bounded transition.
+    private var visibleOpeningRevealPending = false
     private var openingTailContinuation: CheckedContinuation<Bool, Never>?
     private var openingTailFinalWaiters: [OpeningTailFinalWaiter] = []
     private var pendingOpeningReleaseWaiterToken: Int?
@@ -295,7 +302,9 @@ final class ChatScrollCoordinator {
     }
     var blocksAutomaticLiveProjectionIntake: Bool {
         defersAutomaticLiveProjectionIntake
-            || openingTailPhase.isActive || appliedTargetOrigin == .presentation
+            || openingTailPhase.isActive
+            || visibleOpeningRevealPending
+            || appliedTargetOrigin == .presentation
     }
     var latestGeometry: ChatTranscriptGeometry { geometry }
     /// Native size-change anchoring is intent-based, not overflow-dependent.
@@ -307,18 +316,25 @@ final class ChatScrollCoordinator {
     }
     var canAutomaticallyFollow: Bool {
         viewportMode == .pinned && !isUserInteracting && prepend == nil
-            && catchUpPhase == .none && !openingTailPhase.isActive
+            && catchUpPhase == .none
+            && !openingTailPhase.isActive
+            && !visibleOpeningRevealPending
     }
     var canInstallPersistentBottomPosition: Bool {
         canAutomaticallyFollow && command == nil
             && appliedTargetCommandToken == nil && targetReleaseToken == nil
     }
     var admitsSubmission: Bool {
-        prepend == nil && catchUpPhase == .none && !openingTailPhase.isActive
+        prepend == nil
+            && catchUpPhase == .none
+            && !openingTailPhase.isActive
+            && !visibleOpeningRevealPending
     }
     /// Async transcript descendants may begin intrinsic-size work only after the
     /// opening reveal and its physical tail lease have fully settled.
-    var permitsAsynchronousTranscriptContent: Bool { !openingTailPhase.isActive }
+    var permitsAsynchronousTranscriptContent: Bool {
+        !openingTailPhase.isActive && !visibleOpeningRevealPending
+    }
 
     private var openingTailSettlementPending: Bool { openingTailPhase.isActive }
     var hasAppliedTargetLease: Bool { appliedTargetCommandToken != nil }
@@ -341,6 +357,7 @@ final class ChatScrollCoordinator {
         installedPhysicalRowSpine = nil
         self.presentation = presentation ?? (self.presentation &+ 1)
         awaitingOpeningBaseline = !retainingVisibleViewport
+        visibleOpeningRevealPending = !retainingVisibleViewport
         lastForegroundActivation = nil
         reduceViewport(.presentationReset(retainingViewport: retainingVisibleViewport))
         retainedViewportReconciliationPending = retainingVisibleViewport
@@ -625,6 +642,7 @@ final class ChatScrollCoordinator {
         }
         guard prepend == nil else { return false }
         clearOpeningTailSettlement(positioningSucceeded: false)
+        visibleOpeningRevealPending = true
         sequence &+= 1
         let token = sequence
         let admittedPresentation = presentation
@@ -655,6 +673,7 @@ final class ChatScrollCoordinator {
         guard prepend == nil else { return }
         clearOpeningTailSettlement(positioningSucceeded: false)
         guard let targetRenderedID else { return }
+        visibleOpeningRevealPending = true
         sequence &+= 1
         beginOpeningTailSettlement(
             token: sequence,
@@ -742,6 +761,12 @@ final class ChatScrollCoordinator {
                 self?.resumeOpeningTailFinalWaiter(id: id, token: token, result: .cancelled)
             }
         }
+    }
+
+    func completeVisibleOpeningReveal() {
+        guard visibleOpeningRevealPending else { return }
+        visibleOpeningRevealPending = false
+        schedulePhysicalTailRepairIfNeeded()
     }
 
     func requestCatchUp(reduceMotion: Bool) {
@@ -1650,6 +1675,7 @@ final class ChatScrollCoordinator {
            command?.token == commandToken { clearCommand() }
         retireAppliedTargetWithoutCallback()
         openingTailPhase = .idle
+        if !positioningSucceeded { visibleOpeningRevealPending = false }
         openingTailContinuation?.resume(returning: positioningSucceeded)
         openingTailContinuation = nil
         if let token {
@@ -1681,6 +1707,7 @@ final class ChatScrollCoordinator {
             self.retireAppliedTargetWithoutCallback()
             self.pendingOpeningReleaseWaiterToken = nil
             self.openingTailPhase = .idle
+            self.visibleOpeningRevealPending = false
             if let continuation = self.openingTailContinuation {
                 self.openingTailContinuation = nil
                 continuation.resume(returning: false)
@@ -1853,6 +1880,7 @@ final class ChatScrollCoordinator {
         physicalTailRepairIssuedEvidenceRevision = nil
         physicalTailRepairFailedDisplacement = nil
         physicalTailRepairBlockedUntilEvidenceRevision = nil
+        visibleOpeningRevealPending = false
         pendingTailMaterialization = nil
         preAdmissionSettledEntranceIDs.removeAll(keepingCapacity: true)
         tailMaterializationSettlementTask?.cancel()
@@ -2272,7 +2300,9 @@ final class ChatScrollCoordinator {
               command == nil, appliedTargetCommandToken == nil,
               physicalTailRepairCommandToken == nil,
               prepend == nil, layoutRestore == nil,
-              catchUpPhase == .none, !openingTailPhase.isActive,
+              catchUpPhase == .none,
+              !openingTailPhase.isActive,
+              !visibleOpeningRevealPending,
               physicalTailRepairAttempts < 2 else {
             physicalTailRepairTask?.cancel()
             physicalTailRepairTask = nil
@@ -2309,7 +2339,9 @@ final class ChatScrollCoordinator {
                   self.command == nil, self.appliedTargetCommandToken == nil,
                   self.physicalTailRepairCommandToken == nil,
                   self.prepend == nil, self.layoutRestore == nil,
-                  self.catchUpPhase == .none, !self.openingTailPhase.isActive,
+                  self.catchUpPhase == .none,
+                  !self.openingTailPhase.isActive,
+                  !self.visibleOpeningRevealPending,
                   self.physicalTailRepairAttempts < 2 else { return }
             self.physicalTailRepairAttempts &+= 1
             self.publish(.tail, animation: .disabled, origin: .physicalTailRepair)

@@ -124,6 +124,8 @@ struct ChatSessionPresentationTests {
         #expect(ChatOpeningAttemptPolicy.isUnsettled(.opening))
         #expect(ChatOpeningAttemptPolicy.isUnsettled(.positioning))
         #expect(ChatOpeningAttemptPolicy.isUnsettled(.revealing))
+        #expect(ChatOpeningAttemptPolicy.isUnsettled(.presenting))
+        #expect(ChatOpeningAttemptPolicy.isUnsettled(.presented))
         #expect(!ChatOpeningAttemptPolicy.isUnsettled(.ready))
         #expect(!ChatOpeningAttemptPolicy.isUnsettled(.failed("retry")))
         #expect(ChatOpeningAttemptPolicy.shouldFailUnsettledAttempt(

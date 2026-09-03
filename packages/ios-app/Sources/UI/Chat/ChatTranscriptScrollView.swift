@@ -443,7 +443,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             .frame(minHeight: minimumUnderflowContentHeight, alignment: .bottom)
             .scrollTargetLayout()
             .chatStableTranscriptUpdates(projectionIdentity: installed?.tag)
+            // Physical lift settlement remains hidden. Once settled, one
+            // covered `.presenting` frame installs a separate visual entrance;
+            // `.presented` then fades/rises the immutable commit without
+            // changing its scroll geometry or admitting concurrent input.
             .offset(y: hasSettledOpeningOffset || reduceMotion ? 0 : 8)
+            .opacity(presentationPhase == .presenting ? 0 : 1)
+            .offset(y: presentationPhase == .presenting && !reduceMotion ? 8 : 0)
             .accessibilityHidden(!isReady)
             .allowsHitTesting(isReady)
         }
@@ -497,6 +503,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             }
             guard observation.presentationPhase == .positioning
                     || observation.presentationPhase == .revealing
+                    || observation.presentationPhase == .presenting
+                    || observation.presentationPhase == .presented
                     || observation.presentationPhase == .ready,
                   admitsGeometryCallbacks else { return }
             if current.hasIndependentViewportMovement(from: prior) {
@@ -578,6 +586,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 )
             }
         }
+        // The opening overlay may already be fading during `.presented`;
+        // native scrolling remains disabled until the reveal owner publishes
+        // the first fully ready frame.
+        .scrollDisabled(!isReady)
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: responseState, initial: true) { previous, current in
             guard let current, previous?.sessionID == current.sessionID else { return }
@@ -790,7 +802,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     state: state,
                     admissionTag: installed.tag,
                     kind: kind,
-                    reduceMotion: reduceMotion
+                    reduceMotion: reduceMotion,
+                    onEntranceSettled: {
+                        transcriptPresentation.consumeTranscriptEntrance(id: semanticID)
+                    }
                 ) {
                     renderRow(item, installed: installed, isCommitted: isCommitted)
                         .padding(.bottom, ChatTranscriptLayoutConstants.rowSpacing)
