@@ -18,6 +18,11 @@ protocol DashboardGatewayConnectionPoolDelegate: AnyObject {
         state: DashboardServerConnectionState
     )
     func dashboardPoolNotificationInboxChanged(profileID: String)
+    func dashboardPoolAutomationChanged(profileID: String)
+}
+
+extension DashboardGatewayConnectionPoolDelegate {
+    func dashboardPoolAutomationChanged(profileID: String) {}
 }
 
 /// Maintains lightweight dashboard catalog connections for non-focused servers.
@@ -106,6 +111,18 @@ final class DashboardGatewayConnectionPool {
 
     func state(for profileID: String) -> DashboardServerConnectionState? {
         entries[profileID]?.state
+    }
+
+    func request(
+        profileID: String,
+        method: String,
+        params: JSONValue,
+        timeout: Duration = .seconds(15)
+    ) async throws -> JSONValue {
+        guard let client = entries[profileID]?.client else {
+            throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
+        }
+        return try await client.requestValue(method, params, timeout: timeout)
     }
 
     func info(for profileID: String) async -> GatewayInfo? {
@@ -326,6 +343,8 @@ final class DashboardGatewayConnectionPool {
             scheduleRefresh(profileID: profileID, generation: generation)
         case "notification.inbox.changed":
             delegate?.dashboardPoolNotificationInboxChanged(profileID: profileID)
+        case "automation.changed":
+            delegate?.dashboardPoolAutomationChanged(profileID: profileID)
         case "transport.disconnected":
             retireConnectionEpoch(profileID: profileID, generation: generation, state: .reconnecting)
             scheduleReconnect(profileID: profileID, generation: generation)

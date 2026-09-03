@@ -179,7 +179,8 @@ final class AppModel {
     var gatewayInfo: GatewayInfo? { lifecycle.gatewayInfo }
     private var gatewayConnectionID: Int? { lifecycle.connectionID }
     private var sessionCatalog = SessionCatalogCoordinator()
-    private let dashboardConnections = DashboardGatewayConnectionPool()
+    private let dashboardConnections: DashboardGatewayConnectionPool
+    let automationCatalog: AutomationCatalogCoordinator
     private var dashboardSessionsByProfile: [String: [SessionSummary]] = [:]
     private var dashboardStatesByProfile: [String: DashboardServerConnectionState] = [:]
     private var dashboardCacheLoadGeneration = 0
@@ -312,6 +313,7 @@ final class AppModel {
             profiles.token(for: profile)
         }
         let noticeCenter = InAppNoticeCenter(clock: clock)
+        let dashboardConnections = DashboardGatewayConnectionPool()
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
             profiles: profiles,
@@ -397,6 +399,40 @@ final class AppModel {
             admitsLifecycleGeneration: { lifecycle.admits(.init(generation: $0, connectionID: nil)) }
         )
         let gatewayDiagnostics = GatewayDiagnosticsService(client: client)
+        let automationCatalog = AutomationCatalogCoordinator(endpoints: { @MainActor in
+            profiles.profiles.filter { $0.isEnabled && profiles.token(for: $0) != nil }.map { profile in
+                let state: DashboardServerConnectionState
+                let capabilities: Set<String>
+                if profile.id == lifecycle.selectedProfileID {
+                    state = switch lifecycle.connectionState {
+                    case .connected: .connected
+                    case .connecting: .connecting
+                    case .reconnecting: .reconnecting
+                    case .restarting: .restarting
+                    case .offline: .offline
+                    case .unpaired: .offline
+                    case .unauthorized: .blocked
+                    }
+                    capabilities = Set(lifecycle.gatewayInfo?.capabilities ?? [])
+                } else {
+                    state = dashboardConnections.state(for: profile.id) ?? .stale
+                    // The pool validates the authenticated Gateway identity. A
+                    // missing info projection remains a stale, read-only row;
+                    // the client will fail closed when the capability is absent.
+                    capabilities = Set([AutomationAdmissionPolicy.capability, AutomationAdmissionPolicy.timelineCapability])
+                }
+                let request: AutomationRPCClient.Request = { method, params, timeout in
+                    if profile.id == lifecycle.selectedProfileID {
+                        return try await client.requestValue(method, params, timeout: timeout)
+                    }
+                    return try await dashboardConnections.request(profileID: profile.id, method: method, params: params, timeout: timeout)
+                }
+                return AutomationGatewayEndpoint(
+                    profile: AutomationDashboardProfile(id: profile.id, label: profile.label, state: state, capabilities: capabilities),
+                    client: AutomationRPCClient(request: request, mutationExecutor: profile.id == lifecycle.selectedProfileID ? mutationExecutor : nil)
+                )
+            }
+        })
         let workspaceInspection = WorkspaceInspectionService(client: client)
         let chatMedia = ChatMediaLoader(
             fetch: { identity in
@@ -427,6 +463,8 @@ final class AppModel {
         }
         self.lifecycle = lifecycle
         self.noticeCenter = noticeCenter
+        self.dashboardConnections = dashboardConnections
+        self.automationCatalog = automationCatalog
         self.mutationExecutor = mutationExecutor
         self.sessionMutations = sessionMutations
         self.sessionImports = SessionImportCoordinator(
@@ -3160,6 +3198,8 @@ final class AppModel {
             customModelConfiguration.noteCustomModelsChanged()
         case "notification.inbox.changed":
             if let profile = profiles.selected { await refreshNotificationInbox(profile: profile) }
+        case "automation.changed":
+            automationCatalog.invalidate()
         case "packages.progress", "packages.completed":
             postNotice(
                 event.topic == "packages.completed" ? "Package operation completed" : "Updating agent package…",
@@ -3390,6 +3430,10 @@ final class AppModel {
 }
 
 extension AppModel: DashboardGatewayConnectionPoolDelegate {
+    func dashboardPoolAutomationChanged(profileID: String) {
+        automationCatalog.invalidate(profileID: profileID)
+    }
+
     func dashboardPoolNotificationInboxChanged(profileID: String) {
         guard let profile = profiles.profiles.first(where: { $0.id == profileID }) else { return }
         Task { @MainActor [weak self] in await self?.refreshNotificationInbox(profile: profile) }

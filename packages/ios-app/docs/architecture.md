@@ -14,6 +14,7 @@ implementation detail; all user-facing language calls the agent Tron.
 | `Sources/State` | authoritative UI projection and reconnect orchestration |
 | `Sources/Support` | bounded cache and share intake |
 | `Sources/UI/Chat` | session shell, chat composition, attachment presentation, entrance rows, transcript, composer, context, and forks |
+| `Sources/UI/Automations` | dashboard selector, chronological agenda, inventory, detail/run presentations, and schedule editor |
 | `Sources/UI/Onboarding` | pairing/setup flow, reusable onboarding chrome, workspace, provider, and default setup |
 | `Sources/UI/Settings` | settings shell plus appearance, connection, provider, agent-default, on-demand package/resource, trust, custom-model, and diagnostic presentations |
 | `Sources/UI/Terminal` | sheet composition, presentation lifecycle, and SwiftTerm renderer |
@@ -90,6 +91,12 @@ valid saved source checkout. The supervised installer receives the signed
 Gateway payload's pinned XcodeGen path and never depends on a Homebrew or
 checkout-local tool installation.
 
+`AutomationCatalogCoordinator` owns only a bounded, disposable summary projection for each
+identity-verified Gateway profile. `AutomationTimelineCoordinator` groups canonical Gateway-generated
+occurrences by the device timezone and never calculates recurrence or DST locally. Full action text,
+run snapshots, and errors are fetched only while their managed detail surface is visible. Automation
+mutations use command IDs and the focused profile's `ConfirmedMutationExecutor`; an unavailable
+background profile is read-only rather than silently switching the selected session Gateway.
 `SessionCatalogCoordinator` owns the focused profile's summaries, while the dashboard pool owns
 profile-qualified shallow catalogs for non-focused profiles. `SessionSummary` carries dashboard-only
 profile ownership and the dashboard aggregates by `(profileID, sessionID)`; equal bare session IDs from

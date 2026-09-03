@@ -40,6 +40,7 @@ struct SessionShellProfileRouteOwner {
 struct SessionShellView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dashboardMode: DashboardMode = .sessions
     @State private var showNewSession = false
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
@@ -185,6 +186,16 @@ struct SessionShellView: View {
     }
 
     private var dashboardScreen: some View {
+        Group {
+            if dashboardMode == .automations {
+                AutomationsDashboardView(onSelectSessions: { dashboardMode = .sessions })
+            } else {
+                sessionDashboardScreen
+            }
+        }
+    }
+
+    private var sessionDashboardScreen: some View {
         ZStack(alignment: .bottom) {
             ZStack(alignment: .bottomTrailing) {
                 sessionList
@@ -203,7 +214,9 @@ struct SessionShellView: View {
         .background(Color.tronBackground)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { dashboardToolbar }
+        .toolbar {
+            if dashboardMode == .sessions { dashboardToolbar }
+        }
         .scrollDismissesKeyboard(.interactively)
         .navigationDestination(item: $presentedSession) { route in
             ChatView(
@@ -510,13 +523,12 @@ struct SessionShellView: View {
     @ToolbarContentBuilder
     private var dashboardToolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            Image("TronLogoVector")
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .frame(height: 28)
-                .foregroundStyle(Color.tronEmerald)
-                .accessibilityLabel("Tron")
+            DashboardModeMenuButton(mode: dashboardMode) { selected in
+                dashboardMode = selected
+            }
+            .frame(width: 34, height: 34)
+            .accessibilityLabel("Switch dashboard")
+            .accessibilityValue(dashboardMode.rawValue)
         }
         ToolbarItem(placement: .principal) {
             Text("Tron")

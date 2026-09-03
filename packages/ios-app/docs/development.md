@@ -11,6 +11,18 @@ scripts/install-ci-tools.sh xcodegen
 scripts/tron ios generate
 ```
 
+## Automations dashboard
+
+The top-left Tron logo on the session dashboard is a native `UIButton`/`UIMenu`
+selector. It switches between the independent Sessions and Automations root
+projections; it does not replace session navigation state. Automations uses
+`.tronCoral` and has Upcoming and All modes. Upcoming is a seven-day,
+Gateway-generated timeline and requires `automations.timeline.v1`; All remains
+available with `automations.v1` alone. Catalog rows are summary-only and action
+content is fetched only for a visible detail/run surface. Mutations remain
+revision-fenced and command-receipt backed. Do not add recurrence calculation,
+prompt/notification text to caches, or local automation journals in iOS.
+
 ## UI motion and loading surfaces
 
 Compact in-progress UI uses `TronPulseLoadingIndicator`, an in-house SwiftUI

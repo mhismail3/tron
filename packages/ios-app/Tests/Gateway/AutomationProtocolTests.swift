@@ -56,6 +56,33 @@ struct AutomationProtocolTests {
         }
     }
 
+    @Test("timeline occurrences group by the device timezone day")
+    @MainActor
+    func timelineGrouping() {
+        let first = GatewayAutomationOccurrence(kind: "occurrence", automationId: "a", automationRevision: 1, occurrenceId: "o1", scheduledFor: "2026-01-02T01:00:00Z", dayStart: nil, firstAt: nil, lastAt: nil, count: nil)
+        let second = GatewayAutomationOccurrence(kind: "occurrence", automationId: "a", automationRevision: 1, occurrenceId: "o2", scheduledFor: "2026-01-03T23:00:00Z", dayStart: nil, firstAt: nil, lastAt: nil, count: nil)
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: -5)!
+        let days = AutomationTimelineCoordinator.group([
+            AutomationTimelineItem(profileID: "profile", occurrence: second),
+            AutomationTimelineItem(profileID: "profile", occurrence: first)
+        ], calendar: calendar, timezone: calendar.timeZone)
+        #expect(days.count == 2)
+        #expect(days.first?.items.first?.occurrence.occurrenceId == "o1")
+    }
+
+    @Test("automation drafts encode exact trigger and action keys")
+    func draftWireShape() throws {
+        let draft = AutomationDefinitionDraft(
+            name: "Review", description: nil, targetSessionId: "session",
+            trigger: GatewayAutomationTrigger(kind: "once", at: "2026-01-01T00:00:00Z"),
+            misfirePolicy: "latest", overlapPolicy: "skip", executionDeadlineSeconds: 3600,
+            action: GatewayAutomationAction(kind: "notification", message: "Done")
+        )
+        let value = try JSONValue.encode(draft)
+        #expect(value.objectValue?["trigger"]?.objectValue?.keys.sorted() == ["at", "kind"])
+        #expect(value.objectValue?["action"]?.objectValue?.keys.sorted() == ["kind", "message"])
+    }
+
     @Test("automation invalidation is prepared and bounded")
     func invalidationPreparation() throws {
         let data = Data(#"""
