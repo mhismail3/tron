@@ -1551,6 +1551,14 @@ final class ChatTranscriptPresentationStore {
         return isVisible
     }
 
+    /// Retires one admitted transcript entrance only after its local animation
+    /// completes. The displayed-semantic ledger prevents a lazy remount or a
+    /// later projection from replaying it.
+    func consumeTranscriptEntrance(id: String) {
+        guard admittedEntranceIDs.remove(id) != nil else { return }
+        admittedEntranceOrder.removeAll { $0 == id }
+    }
+
     /// Lifecycle rows are lazily mounted, so their one-shot entrance ownership
     /// lives outside row-local `@State`. Recording a mounted row does not publish
     /// observation changes and therefore cannot truncate its active animation.
@@ -1567,6 +1575,8 @@ final class ChatTranscriptPresentationStore {
     func discardPendingEntrances() {
         pendingEntranceIDs.removeAll(keepingCapacity: true)
         pendingEntranceOrder.removeAll(keepingCapacity: true)
+        admittedEntranceIDs.removeAll(keepingCapacity: true)
+        admittedEntranceOrder.removeAll(keepingCapacity: true)
     }
 
     func handleMemoryPressure() {
@@ -1731,6 +1741,7 @@ final class ChatTranscriptPresentationStore {
     }
 
     private func synchronizeEntranceBookkeeping(with output: InstalledChatTranscript) {
+        transferAdmittedToolEntrancesToCurrentSemanticOwner(in: output)
         let composedLiveID = output.toolBoundaryFusion?.liveRenderedID
         pendingEntranceOrder.removeAll {
             !pendingEntranceIDs.contains($0)
@@ -1741,11 +1752,36 @@ final class ChatTranscriptPresentationStore {
         admittedEntranceOrder.removeAll {
             !admittedEntranceIDs.contains($0)
                 || !output.containsDisplayedID($0)
-                || output.toolRunIsRunning(forDisplayedID: $0) == false
                 || $0 == composedLiveID
         }
         pendingEntranceIDs = Set(pendingEntranceOrder)
         admittedEntranceIDs = Set(admittedEntranceOrder)
+    }
+
+    /// Finalized grouping or canonical fusion can replace a tool run's semantic
+    /// ID while preserving its physical host. Transfer only an already-admitted
+    /// entrance to that current semantic owner so rapid tool completion cannot
+    /// truncate the local animation or create a second entrance.
+    private func transferAdmittedToolEntrancesToCurrentSemanticOwner(
+        in output: InstalledChatTranscript
+    ) {
+        guard !admittedEntranceOrder.isEmpty else { return }
+        var semanticIDByPriorPhysicalID: [String: String] = [:]
+        for item in output.displayedItems {
+            guard case .toolRun = item,
+                  let physicalID = output.toolPhysicalID(forRenderedID: item.id),
+                  physicalID != item.id else { continue }
+            semanticIDByPriorPhysicalID[physicalID] = item.id
+        }
+        guard !semanticIDByPriorPhysicalID.isEmpty else { return }
+        for index in admittedEntranceOrder.indices {
+            let admittedID = admittedEntranceOrder[index]
+            guard let replacementID = semanticIDByPriorPhysicalID[admittedID] else { continue }
+            admittedEntranceIDs.remove(admittedID)
+            if admittedEntranceIDs.insert(replacementID).inserted {
+                admittedEntranceOrder[index] = replacementID
+            }
+        }
     }
 
     private func appendPendingEntrances(_ candidates: [String], output: InstalledChatTranscript) {

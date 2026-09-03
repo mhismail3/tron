@@ -48,6 +48,117 @@ enum ChatEntranceGrowthPolicy {
     }
 }
 
+enum ChatIncrementalContentGrowthPolicy {
+    static let duration = ChatScrollCoordinator.liveGrowthAnimationDuration
+    /// A large accumulated network backlog installs atomically instead of
+    /// interpolating an unbounded row. Ordinary line and chip growth remains
+    /// well below this limit.
+    static let maximumAnimatedGrowth: CGFloat = 2_000
+
+    static func shouldAnimate(
+        currentHeight: CGFloat?,
+        targetHeight: CGFloat,
+        contentChanged: Bool,
+        streaming: Bool,
+        reduceMotion: Bool,
+        surfaceActive: Bool
+    ) -> Bool {
+        guard let currentHeight,
+              currentHeight.isFinite,
+              targetHeight.isFinite,
+              targetHeight > currentHeight + 0.5 else { return false }
+        return contentChanged
+            && streaming
+            && !reduceMotion
+            && surfaceActive
+            && targetHeight - currentHeight <= maximumAnimatedGrowth
+    }
+}
+
+private struct ChatIncrementalContentMeasurement<Identity: Equatable>: Equatable {
+    let identity: Identity
+    let width: CGFloat
+    let height: CGFloat
+}
+
+/// Owns only the presentation height of an already-mounted streaming message.
+/// Canonical text and controls are installed immediately at natural size, then
+/// clipped by one local height while ordinary additions expand. Width changes,
+/// replacement/shrink, covered surfaces, and large backlogs install atomically.
+struct ChatIncrementalContentGrowthHost<Identity: Equatable, Content: View>: View {
+    let identity: Identity
+    let streaming: Bool
+    @ViewBuilder let content: Content
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @State private var presentedHeight: CGFloat?
+    @State private var measuredIdentity: Identity?
+    @State private var measuredWidth: CGFloat?
+
+    init(
+        identity: Identity,
+        streaming: Bool,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.identity = identity
+        self.streaming = streaming
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: ChatIncrementalContentMeasurement<Identity>.self) { geometry in
+                ChatIncrementalContentMeasurement(
+                    identity: identity,
+                    width: geometry.size.width,
+                    height: geometry.size.height
+                )
+            } action: { measurement in
+                install(measurement)
+            }
+            .frame(height: presentedHeight, alignment: .top)
+            .chatIncrementalVerticalClip()
+    }
+
+    @MainActor
+    private func install(_ measurement: ChatIncrementalContentMeasurement<Identity>) {
+        guard measurement.width.isFinite,
+              measurement.height.isFinite,
+              measurement.height >= 0 else { return }
+        let contentChanged = measuredIdentity.map { $0 != measurement.identity } ?? false
+        let layoutStable = measuredWidth.map { abs($0 - measurement.width) <= 0.5 } ?? false
+        let animates = ChatIncrementalContentGrowthPolicy.shouldAnimate(
+            currentHeight: presentedHeight,
+            targetHeight: measurement.height,
+            contentChanged: contentChanged && layoutStable,
+            streaming: streaming,
+            reduceMotion: reduceMotion,
+            surfaceActive: presentationActivity.allowsContinuousAnimation
+        )
+        measuredIdentity = measurement.identity
+        measuredWidth = measurement.width
+        if animates {
+            var transaction = Transaction(animation: .smooth(
+                duration: ChatIncrementalContentGrowthPolicy.duration
+            ))
+            transaction.admitsChatIncrementalGrowthAnimation = true
+            withTransaction(transaction) { presentedHeight = measurement.height }
+        } else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { presentedHeight = measurement.height }
+        }
+    }
+}
+
+enum ChatTranscriptEntrancePresentationPolicy {
+    static func initiallyRevealed(state: ChatTranscriptEntranceState) -> Bool {
+        state == .none
+    }
+}
+
 private struct ChatEntranceGrowthLayout: Layout, Animatable {
     struct Cache {
         var proposedWidth: CGFloat?
@@ -129,6 +240,14 @@ private struct ChatEntranceGrowthClipShape: Shape {
 }
 
 private extension View {
+    /// Clips only the animated vertical admission. Horizontal overflow remains
+    /// available to native text and glass effects throughout incremental growth.
+    func chatIncrementalVerticalClip() -> some View {
+        padding(.horizontal, ChatEntranceGrowthPolicy.effectOverflow)
+            .clipShape(Rectangle())
+            .padding(.horizontal, -ChatEntranceGrowthPolicy.effectOverflow)
+    }
+
     /// Keeps the measured-height entrance vertically bounded while preserving
     /// the natural horizontal shadow and press-morph region. Vertical overflow
     /// joins continuously as the row reaches its full admitted height.
@@ -168,6 +287,7 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
     let admissionTag: ChatTranscriptProjectionTag?
     let kind: ChatContentEntranceKind
     let reduceMotion: Bool
+    let onEntranceSettled: () -> Void
     @ViewBuilder let content: Content
     @State private var revealed: Bool
 
@@ -176,14 +296,18 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
         admissionTag: ChatTranscriptProjectionTag? = nil,
         kind: ChatContentEntranceKind,
         reduceMotion: Bool,
+        onEntranceSettled: @escaping () -> Void = {},
         @ViewBuilder content: () -> Content
     ) {
         self.state = state
         self.admissionTag = admissionTag
         self.kind = kind
         self.reduceMotion = reduceMotion
+        self.onEntranceSettled = onEntranceSettled
         self.content = content()
-        _revealed = State(initialValue: state != .pending)
+        _revealed = State(initialValue: ChatTranscriptEntrancePresentationPolicy.initiallyRevealed(
+            state: state
+        ))
     }
 
     var body: some View {
@@ -210,12 +334,19 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
             case .pending:
                 break
             case .admitted:
-                var transaction = Transaction(animation: ChatContentTransitionPolicy.revealAnimation(
+                let animation = ChatContentTransitionPolicy.revealAnimation(
                     for: kind,
                     reduceMotion: reduceMotion
-                ))
+                )
+                var transaction = Transaction()
                 transaction.admitsChatEntranceAnimation = true
-                withTransaction(transaction) { revealed = true }
+                withTransaction(transaction) {
+                    withAnimation(animation, completionCriteria: .logicallyComplete) {
+                        revealed = true
+                    } completion: {
+                        onEntranceSettled()
+                    }
+                }
             case .none:
                 var transaction = Transaction()
                 transaction.disablesAnimations = true

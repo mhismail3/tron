@@ -276,8 +276,7 @@ exact initial transcript projection, and a physically verified viewport at the m
 after transcript and queue rows. Rows remain fully realizable beneath that opaque cover;
 an opacity-zero lazy stack is never used as a layout gate. The eight-point positioning lift resolves behind that cover, and the cover is removed only after
 current non-lifted marker and geometry evidence, two unchanged presented frames, and consumption of
-the exact opening-target release. The first-ready performance interval closes after the next
-display-link frame proves that settled ready state was presented. Automatic projection intake remains
+the exact opening-target release. One still-covered frame then installs the settled transcript at zero opacity and an eight-point visual offset; the cover fades while that immutable commit rises into place, with interaction, repair, paging, and live projection intake still leased until animation completion and the next ready display-link frame. Reduce Motion keeps only the short fade. Automatic projection intake remains
 coalesced through that complete transaction. The first complete same-session/presentation/runtime commit may
 position and reveal even if streaming has advanced its payload; only the newest desired source is submitted
 after that lease ends. Runtime or presentation replacement still fails closed. Opening uses one exact
@@ -289,7 +288,7 @@ a retained detached reader remains anchored and is never repinned. Foreground
 activation retires any target belonging to the suspended native scroll tree before
 revalidating current marker evidence. An installed projection advances the layout epoch
 when its physical row spine changes; streaming payload and shallow tool-state updates
-retain their existing hosts and current geometry evidence. Delayed frames from a replaced
+retain their existing hosts and current geometry evidence. Newly admitted lazy rows retain their hidden one-shot state even when geometry admission precedes child mounting, then retire the entitlement only after local animation completion. Within an already-mounted assistant row, authoritative thinking and response content installs immediately but one bounded row-local height clips and smoothly expands ordinary growth; width changes, shrink/replacement, covered surfaces, Reduce Motion, and growth above 2,000 points install atomically rather than inheriting motion. Delayed frames from a replaced
 spine still cannot prove the new tree. A visible pinned presentation therefore
 requires fresh, current-layout marker proof; overflow requires alignment, while
 underflow requires the eager marker to be visible. Row existence, forced underflow
