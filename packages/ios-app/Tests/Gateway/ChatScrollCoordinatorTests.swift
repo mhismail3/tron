@@ -867,6 +867,7 @@ struct ChatScrollCoordinatorTests {
             layoutTransactionID: 41
         ))
         #expect(coordinator.materializationLayoutTransactionID(for: "outgoing-row") == nil)
+        #expect(!coordinator.ownsTailMaterializationTarget(renderedID: "outgoing-row"))
         #expect(coordinator.command == nil)
     }
 
@@ -884,6 +885,8 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.discreteTailInserted(renderedID: "newest-tool-row"))
         #expect(coordinator.materializationLayoutTransactionID(for: "outgoing-row") == 41)
         #expect(coordinator.materializationLayoutTransactionID(for: "newest-tool-row") == nil)
+        #expect(!coordinator.ownsTailMaterializationTarget(renderedID: "outgoing-row"))
+        #expect(!coordinator.ownsTailMaterializationTarget(renderedID: "first-row"))
 
         coordinator.layoutTransactionSettled(41)
         #expect(coordinator.materializationLayoutTransactionID(for: "outgoing-row") == 41)
@@ -944,7 +947,9 @@ struct ChatScrollCoordinatorTests {
                 layoutTransactionID: 41
             )
             let command = try #require(coordinator.command)
+            #expect(coordinator.ownsTailMaterializationTarget(renderedID: "outgoing-row"))
             #expect(coordinator.commandApplied(command))
+            #expect(coordinator.ownsTailMaterializationTarget(renderedID: "outgoing-row"))
 
             coordinator.semanticFrameChanged(
                 renderedID: "outgoing-row",

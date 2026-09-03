@@ -45,15 +45,14 @@ struct ChatLayoutTransactionTests {
         #expect(transaction.generation?.clock == resolved)
     }
 
-    @Test("a late first keyboard participant replaces only the provisional submission clock")
-    func lateKeyboardOwnsClock() {
+    @Test("a late keyboard participant cannot retarget dispatched submission geometry")
+    func lateKeyboardKeepsFrozenClock() {
         let transaction = ChatLayoutTransaction()
         _ = transaction.join(.submission)
         _ = transaction.animation
-        #expect(transaction.generation?.clock?.curve == .spring(
-            response: 0.40,
-            dampingFraction: 0.86,
-            blendDuration: 0.08
+        #expect(transaction.generation?.clock == ChatLayoutClock(
+            duration: ChatContentTransitionPolicy.transcriptEntranceDuration,
+            curve: .smooth
         ))
         transaction.configure(
             keyboard: ChatKeyboardTransition(
@@ -64,11 +63,10 @@ struct ChatLayoutTransactionTests {
             reduceMotion: false
         )
         _ = transaction.join(.keyboard)
-        #expect(transaction.resolvedAnimation == nil)
         _ = transaction.animation
         #expect(transaction.generation?.clock == ChatLayoutClock(
-            duration: 0.27,
-            curve: .keyboard(UIView.AnimationCurve.easeOut.rawValue)
+            duration: ChatContentTransitionPolicy.transcriptEntranceDuration,
+            curve: .smooth
         ))
     }
 

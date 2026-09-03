@@ -20,7 +20,7 @@ struct ChatScrollOwnershipGuardTests {
 
         #expect(transcript.components(separatedBy: "ScrollView {").count - 1 == 1)
         #expect(transcript.components(separatedBy: "LazyVStack(alignment: .leading, spacing: 0)").count - 1 == 1)
-        #expect(transcript.components(separatedBy: "ForEach(ChatPhysicalTranscriptRowPolicy.rows(").count - 1 == 1)
+        #expect(transcript.components(separatedBy: "ForEach(physicalRows)").count - 1 == 1)
         #expect(chat.components(separatedBy: ".safeAreaInset(edge: .bottom, spacing: 0)").count - 1 == 1)
         #expect(transcript.contains(".scrollPosition($scrollPosition)"))
         #expect(chat.contains("viewport.safeAreaInsets.bottom"))

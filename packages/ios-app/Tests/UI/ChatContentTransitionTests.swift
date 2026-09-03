@@ -166,11 +166,16 @@ struct ChatContentTransitionTests {
         ))
     }
 
-    @Test("measured flights reserve the complete outgoing row before animation")
+    @Test("measured flights grow the outgoing row on the shared clock")
     func flightDestinationLayout() {
         #expect(ChatOutgoingEntranceLayoutPolicy.progress(
             ownership: .flight,
             revealed: false,
+            reduceMotion: false
+        ) == 0)
+        #expect(ChatOutgoingEntranceLayoutPolicy.progress(
+            ownership: .flight,
+            revealed: true,
             reduceMotion: false
         ) == 1)
         #expect(ChatOutgoingEntranceLayoutPolicy.progress(
@@ -236,8 +241,28 @@ struct ChatContentTransitionTests {
         #expect(ChatContentTransitionPolicy.transcriptEntranceDuration == 0.18)
         #expect(ChatContentTransitionPolicy.promptEntranceDuration == 0.18)
         #expect(ChatContentTransitionPolicy.promptFlightDuration == 0.18)
+        #expect(ChatContentTransitionPolicy.promptFlightHandoffDuration == 0.08)
         #expect(ChatContentTransitionPolicy.promptReplacementDuration == 0.14)
         #expect(ChatContentTransitionPolicy.notificationReplacementDuration == 0.16)
+    }
+
+    @Test("terminal row and measurable marker retain one unchanged tail affordance")
+    func terminalTailAffordance() {
+        let rowPadding = ChatTranscriptLayoutConstants.terminalRowBottomPadding(
+            ownsMaterializationTarget: true
+        )
+        let marker = ChatTranscriptLayoutConstants.tailMarkerHeight(
+            terminalRowOwnsMaterializationTarget: true
+        )
+        #expect(rowPadding + marker == ChatTranscriptLayoutConstants.tailAffordanceHeight)
+        #expect(marker > 0)
+        #expect(marker <= 2)
+        #expect(ChatTranscriptLayoutConstants.terminalRowBottomPadding(
+            ownsMaterializationTarget: false
+        ) == 0)
+        #expect(ChatTranscriptLayoutConstants.tailMarkerHeight(
+            terminalRowOwnsMaterializationTarget: false
+        ) == ChatTranscriptLayoutConstants.tailAffordanceHeight)
     }
 
     @Test("activity remains role-aligned rather than flying across the transcript")

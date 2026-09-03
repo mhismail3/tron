@@ -1050,6 +1050,12 @@ final class ChatScrollCoordinator {
         clearTailMaterializationState()
     }
 
+    func ownsTailMaterializationTarget(renderedID: String) -> Bool {
+        tailMaterialization?.layoutOwnerRenderedID == renderedID
+            && (command?.origin == .tailMaterialization
+                || appliedTargetOrigin == .tailMaterialization)
+    }
+
     func materializationLayoutTransactionID(for renderedID: String) -> Int? {
         if tailMaterialization?.layoutOwnerRenderedID == renderedID {
             return tailMaterialization?.layoutTransactionID

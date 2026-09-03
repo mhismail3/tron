@@ -1622,6 +1622,25 @@ struct ChatTranscriptPresentationStoreTests {
                 from: outgoingPhysical,
                 to: replacement
             ) == .prompt)
+            let queuedMessage = SessionSnapshot.QueuedMessage(
+                id: "operation-owned",
+                behavior: .steer,
+                text: submission.outgoingText,
+                attachmentCount: 0
+            )
+            let queuedPhysical = ChatPhysicalTranscriptRow(
+                id: submission.presentationID,
+                semanticID: submission.presentationID,
+                content: .queued(ChatQueuedMessageRenderEntry(
+                    id: submission.presentationID,
+                    index: 0,
+                    message: queuedMessage
+                ))
+            )
+            #expect(ChatPhysicalTranscriptReplacementPolicy.replacement(
+                from: outgoingPhysical,
+                to: queuedPhysical
+            ) == .prompt)
             #expect(ChatPromptReplacementAnimationPolicy.animates(reduceMotion: false))
             #expect(!ChatPromptReplacementAnimationPolicy.animates(reduceMotion: true))
 

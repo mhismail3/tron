@@ -176,9 +176,33 @@ private struct ChatPromptReplacementMeasurement: Equatable {
     let height: CGFloat
 }
 
+private struct ChatPromptReplacementClipShape: Shape {
+    let active: Bool
+
+    func path(in rect: CGRect) -> Path {
+        Path(active
+            ? rect.insetBy(dx: 0, dy: ChatEntranceGrowthPolicy.effectOverflow)
+            : rect)
+    }
+}
+
+private struct ChatPromptReplacementClipModifier: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        // Keep one modifier identity for the entire physical row. The outer
+        // gutter preserves settled glass effects; the active shape clips only
+        // to the original vertical frame while a replacement height changes.
+        content
+            .padding(ChatEntranceGrowthPolicy.effectOverflow)
+            .clipShape(ChatPromptReplacementClipShape(active: active))
+            .padding(-ChatEntranceGrowthPolicy.effectOverflow)
+    }
+}
+
 /// Keeps one physical prompt host while queued/pending/outgoing presentation
-/// becomes canonical. Only its bounded height and visual interpolation animate;
-/// canonical identity and semantic geometry never gain a second owner.
+/// becomes canonical. Its authoritative payload installs atomically while only
+/// a bounded height delta animates; identity and geometry gain no second owner.
 struct ChatPromptReplacementLayoutHost<Content: View>: View {
     let revision: Int
     let reduceMotion: Bool
@@ -186,18 +210,28 @@ struct ChatPromptReplacementLayoutHost<Content: View>: View {
 
     @State private var presentedHeight: CGFloat?
     @State private var installedRevision: Int?
+    @State private var heightTransitionRevision = 0
+    @State private var clipsAnimatedHeight = false
 
     var body: some View {
+        let replacementClipActive = !reduceMotion && revision > 0
+            && (clipsAnimatedHeight || installedRevision != revision)
         content
-            .contentTransition(reduceMotion ? .opacity : .interpolate)
             .fixedSize(horizontal: false, vertical: true)
             .onGeometryChange(for: ChatPromptReplacementMeasurement.self) { geometry in
                 ChatPromptReplacementMeasurement(revision: revision, height: geometry.size.height)
             } action: { measurement in
                 install(measurement)
             }
-            .frame(height: presentedHeight, alignment: .bottom)
-            .chatIncrementalVerticalClip()
+            // Revision zero is the row's own entrance owner. Observe its final
+            // natural height without constraining it through a second frame.
+            // Once a lifecycle replacement occurs, preserve that final height
+            // and animate only the replacement delta.
+            .frame(
+                height: !reduceMotion && revision > 0 ? presentedHeight : nil,
+                alignment: .bottom
+            )
+            .modifier(ChatPromptReplacementClipModifier(active: replacementClipActive))
     }
 
     @MainActor
@@ -210,16 +244,29 @@ struct ChatPromptReplacementLayoutHost<Content: View>: View {
             reduceMotion: reduceMotion
         )
         installedRevision = measurement.revision
-        if animates {
-            var transaction = Transaction(animation: ChatPromptReplacementAnimationPolicy.animation(
-                reduceMotion: false
-            ))
+        heightTransitionRevision &+= 1
+        let transitionRevision = heightTransitionRevision
+        if animates, let animation = ChatPromptReplacementAnimationPolicy.animation(
+            reduceMotion: false
+        ) {
+            clipsAnimatedHeight = true
+            var transaction = Transaction()
             transaction.admitsChatPromptReplacementAnimation = true
-            withTransaction(transaction) { presentedHeight = measurement.height }
+            withTransaction(transaction) {
+                withAnimation(animation, completionCriteria: .logicallyComplete) {
+                    presentedHeight = measurement.height
+                } completion: {
+                    guard heightTransitionRevision == transitionRevision else { return }
+                    clipsAnimatedHeight = false
+                }
+            }
         } else {
             var transaction = Transaction()
             transaction.disablesAnimations = true
-            withTransaction(transaction) { presentedHeight = measurement.height }
+            withTransaction(transaction) {
+                presentedHeight = measurement.height
+                clipsAnimatedHeight = false
+            }
         }
     }
 }
@@ -433,7 +480,7 @@ enum ChatOutgoingEntranceLayoutPolicy {
         revealed: Bool,
         reduceMotion: Bool
     ) -> CGFloat {
-        ownership == .flight || ownership == .completed || revealed || reduceMotion ? 1 : 0
+        ownership == .completed || revealed || reduceMotion ? 1 : 0
     }
 }
 
@@ -444,6 +491,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
     let reduceMotion: Bool
     let animatesEntrance: Bool
     let morphOwnership: ChatMorphFrameRegistry.EntranceOwnership
+    let morphFlightPhase: ChatMorphFrameRegistry.FlightPhase?
     let submissionAnimation: Animation?
     let kind: ChatContentEntranceKind
     let onEntranceConsumed: () -> Void
@@ -456,6 +504,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
         reduceMotion: Bool,
         animatesEntrance: Bool = true,
         morphOwnership: ChatMorphFrameRegistry.EntranceOwnership = .ordinary,
+        morphFlightPhase: ChatMorphFrameRegistry.FlightPhase? = nil,
         submissionAnimation: Animation? = nil,
         kind: ChatContentEntranceKind = .userPrompt,
         onEntranceConsumed: @escaping () -> Void = {},
@@ -465,6 +514,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
         self.reduceMotion = reduceMotion
         self.animatesEntrance = animatesEntrance
         self.morphOwnership = morphOwnership
+        self.morphFlightPhase = morphFlightPhase
         self.submissionAnimation = submissionAnimation
         self.kind = kind
         self.onEntranceConsumed = onEntranceConsumed
@@ -474,10 +524,10 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
         case .ordinary:
             _revealed = State(initialValue: !animatesEntrance)
         case .flight:
-            // Reserve the destination's complete natural height before flight.
-            // Individual morph destinations remain hidden by the registry, so
-            // the overlay is the only visual owner without moving its endpoint.
-            _revealed = State(initialValue: true)
+            // The natural destination is measured inside the bottom-aligned
+            // zero-height layout. Its row height joins the shared submission
+            // clock only when the flight begins.
+            _revealed = State(initialValue: false)
         case .completed:
             _revealed = State(initialValue: true)
         }
@@ -514,10 +564,17 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
             case .ordinary:
                 revealOrdinaryEntranceIfNeeded()
             case .flight:
-                reportSettlementOnce()
+                // Begin row growth on the same first presented transaction as
+                // composer collapse. Destination elements remain hidden until
+                // the overlay reaches its handoff phase.
+                revealFlightEntranceIfNeeded()
             case .completed:
                 reportSettlementOnce()
             }
+        }
+        .onChange(of: morphFlightPhase) { _, phase in
+            guard morphOwnership == .flight, phase == .animating else { return }
+            revealFlightEntranceIfNeeded()
         }
         .onChange(of: morphOwnership) { previous, current in
             switch current {
@@ -541,6 +598,20 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
             withTransaction(transaction) { revealed = true }
             reportSettlementOnce()
         }
+    }
+
+    private func revealFlightEntranceIfNeeded() {
+        guard !revealed else { return }
+        guard let animation = submissionAnimation
+            ?? ChatContentTransitionPolicy.promptFlightAnimation(reduceMotion: reduceMotion) else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { revealed = true }
+            return
+        }
+        var transaction = Transaction(animation: animation)
+        transaction.admitsChatEntranceAnimation = true
+        withTransaction(transaction) { revealed = true }
     }
 
     private func revealOrdinaryEntranceIfNeeded() {

@@ -38,9 +38,6 @@ struct ChatView: View {
     @State private var keyboardObserver = ChatKeyboardObserver()
     @State private var layoutTransaction = ChatLayoutTransaction()
     @State private var morphRegistry = ChatMorphFrameRegistry()
-    /// A measured morph keeps the composer and keyboard geometry fixed until
-    /// the overlay reaches its stable transcript destination.
-    @State private var deferredMorphSubmissionLifecycleID: String?
     @State private var composerResourceCatalog = ComposerResourceCatalog(commands: [])
     @State private var composerResourcePicker: ComposerResourcePickerSource?
     @State private var composerResourceResults: [ComposerResourceEntry] = []
@@ -122,8 +119,7 @@ struct ChatView: View {
                 ChatMorphFlightLayer(
                     registry: morphRegistry,
                     layoutTransaction: layoutTransaction,
-                    reduceMotion: reduceMotion,
-                    onFlightEnded: finishDeferredMorphSubmissionIfNeeded
+                    reduceMotion: reduceMotion
                 )
             }
             .overlay {
@@ -721,18 +717,8 @@ struct ChatView: View {
     }
 
     private func abandonLayoutTransaction() {
-        deferredMorphSubmissionLifecycleID = nil
         morphRegistry.abandon()
         layoutTransaction.abandon()
-    }
-
-    private func finishDeferredMorphSubmissionIfNeeded(lifecycleID: String) {
-        guard deferredMorphSubmissionLifecycleID == lifecycleID else { return }
-        deferredMorphSubmissionLifecycleID = nil
-        if layoutTransaction.generation == nil {
-            _ = layoutTransaction.join(.submission)
-        }
-        dismissComposerForAdmittedSubmission()
     }
 
     private func dismissComposerForAdmittedSubmission() {
@@ -797,9 +783,6 @@ struct ChatView: View {
                 installedLifecycleID: outgoingPresentation?.id ?? retainedFlightLifecycleID,
                 permitsFlight: outgoingPresentation?.usesQueuedCardVisual != true
             ) {
-                if let activeFlightLifecycleID {
-                    finishDeferredMorphSubmissionIfNeeded(lifecycleID: activeFlightLifecycleID)
-                }
                 layoutTransaction.settle(generation, source: .morphFlight)
             }
         }
@@ -2573,7 +2556,6 @@ struct ChatView: View {
             morphRegistry: morphRegistry,
             submissionTransitionID: layoutTransaction.activeSubmissionGenerationID,
             submissionAnimation: layoutTransaction.resolvedAnimation,
-            holdsSubmissionHeight: morphRegistry.flight != nil,
             reduceMotion: reduceMotion,
             showsCatchUp: scrollCoordinator.shouldShowCatchUpButton,
             showsAmbientWorkingBlur: showsAmbientWorkingBlur,
@@ -3161,14 +3143,13 @@ struct ChatView: View {
                     generation: morphGeneration,
                     suppress: reduceMotion || scenePhase != .active || freezesDetachedProjection
                 )
-                if stagedMorph {
-                    deferredMorphSubmissionLifecycleID = submission.presentationID
-                    // The keyboard and composer stay physically fixed through
-                    // the measured flight, so its destination cannot move.
-                } else {
-                    dismissComposerForAdmittedSubmission()
+                if !stagedMorph {
                     layoutTransaction.settle(morphGeneration, source: .morphFlight)
                 }
+                // Responder, composer, row entrance, and morph begin from this
+                // same admitted transaction. UIKit publishes its keyboard clock
+                // synchronously when available before the outgoing graft.
+                dismissComposerForAdmittedSubmission()
                 // Exact extension commands do not create a canonical user
                 // message in Pi. Never graft a prompt bubble that can become a
                 // phantom row; the canonical invocation receipt owns its row.
