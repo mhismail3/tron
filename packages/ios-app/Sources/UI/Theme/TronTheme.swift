@@ -27,7 +27,7 @@ extension Color {
     static let tronIndigo = Color(lightHex: "#6366F1", darkHex: "#818CF8")
     static let tronTeal = Color(lightHex: "#0D9488", darkHex: "#2DD4BF")
     static let tronCoral = Color(lightHex: "#C06545", darkHex: "#D97757")
-    static let tronAutomation = Color(lightHex: "#B4D3D9", darkHex: "#B4D3D9")
+    static let tronAutomation = Color(lightHex: "#31889A", darkHex: "#74CBDC")
     static let tronRose = Color(lightHex: "#D4245F", darkHex: "#E62B6C")
     static let tronPink = Color(lightHex: "#DB2777", darkHex: "#EC4899")
     static let tronSlate = Color(lightHex: "#64748B", darkHex: "#94A3B8")

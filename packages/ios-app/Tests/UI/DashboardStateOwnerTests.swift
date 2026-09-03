@@ -13,10 +13,15 @@ struct DashboardStateOwnerTests {
         #expect(DashboardMode.sessions.accent == .tronEmerald)
         #expect(DashboardMode.automations.accent == .tronAutomation)
 
-        let expected = UIColor(hex: "#B4D3D9")
         let automation = UIColor(DashboardMode.automations.accent)
-        #expect(automation.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light)) == expected)
-        #expect(automation.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark)) == expected)
+        #expect(
+            automation.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+                == UIColor(hex: "#31889A")
+        )
+        #expect(
+            automation.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
+                == UIColor(hex: "#74CBDC")
+        )
     }
 
     @Test("a newer navigation intent rejects an older asynchronous completion")
