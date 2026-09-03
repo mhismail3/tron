@@ -4,8 +4,22 @@ import UIKit
 enum DashboardMode: String, CaseIterable, Identifiable {
     case sessions = "Sessions"
     case automations = "Automations"
+
     var id: String { rawValue }
-    var systemImage: String { self == .sessions ? "bubble.left.and.bubble.right" : "clock.badge.checkmark" }
+
+    var systemImage: String {
+        switch self {
+        case .sessions: "bubble.left.and.bubble.right"
+        case .automations: "clock.badge.checkmark"
+        }
+    }
+
+    var accent: Color {
+        switch self {
+        case .sessions: .tronEmerald
+        case .automations: .tronCoral
+        }
+    }
 }
 
 /// Native UIMenu presentation keeps dashboard switching consistent with the
@@ -26,7 +40,7 @@ struct DashboardModeMenuButton: UIViewRepresentable {
     func updateUIView(_ button: UIButton, context: Context) {
         context.coordinator.parent = self
         button.menu = context.coordinator.makeMenu()
-        button.tintColor = UIColor(Color.tronEmerald)
+        button.tintColor = UIColor(mode.accent)
         button.accessibilityValue = mode.rawValue
     }
 

@@ -6,6 +6,12 @@ import Testing
 
 @Suite("Dashboard state ownership")
 struct DashboardStateOwnerTests {
+    @Test("each dashboard owns the matching logo accent")
+    func dashboardLogoAccent() {
+        #expect(DashboardMode.sessions.accent == .tronEmerald)
+        #expect(DashboardMode.automations.accent == .tronCoral)
+    }
+
     @Test("a newer navigation intent rejects an older asynchronous completion")
     func navigationAdmission() {
         var owner = DashboardNavigationOwner()
