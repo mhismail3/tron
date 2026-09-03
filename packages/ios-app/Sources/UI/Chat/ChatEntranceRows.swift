@@ -360,7 +360,7 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
 /// Only the already-sized row fades and translates straight up; later canonical
 /// replacements reuse the same physical host without replaying the entrance.
 struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
-    static var hiddenOffset: CGFloat { 14 }
+    static var hiddenOffset: CGFloat { 20 }
 
     let reduceMotion: Bool
     let animatesEntrance: Bool

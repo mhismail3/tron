@@ -215,7 +215,9 @@ enum ChatContentTransitionPolicy {
     /// clock. Spring overshoot is inappropriate here because growth progress is
     /// clamped to layout bounds and can otherwise settle through visible stalls.
     static let transcriptEntranceDuration: TimeInterval = 0.18
-    static let promptEntranceDuration: TimeInterval = transcriptEntranceDuration
+    /// The outgoing prompt is transform-only, so it can use a slightly longer
+    /// readable entrance without prolonging composer or viewport settlement.
+    static let promptEntranceDuration: TimeInterval = 0.28
     static let notificationReplacementDuration: TimeInterval = 0.16
     static let attachmentHiddenScale: CGFloat = 0.5
     static let attachmentStaggerInterval: TimeInterval = 0.04
