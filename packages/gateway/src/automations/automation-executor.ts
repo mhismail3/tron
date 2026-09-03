@@ -1,3 +1,4 @@
+import { GatewayError } from "../errors.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { ResourceInvocation } from "../protocol/types.js";
 import type { GatewayWorkHandle, GatewayWorkRegistry } from "../sessions/gateway-work-registry.js";
@@ -51,11 +52,13 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
   async start(record: AutomationRecord, run: AutomationRun): Promise<AutomationExecutionHandle> {
     const operationId = run.operationId;
     if (!operationId) throw new AutomationAdmissionError("Automation operation identity is missing", false, "invalid-operation");
+    const target = run.targetSnapshot;
+    const sessionId = run.executionSessionId;
     let work: GatewayWorkHandle;
     try {
       work = this.workRegistry.begin({
         kind: "automation-dispatch",
-        sessionId: record.targetSessionId,
+        sessionId,
         hostEpoch: this.workRegistry.runtimeEpoch,
       });
     } catch (error) {
@@ -64,18 +67,26 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
 
     let releaseLease: (() => void) | undefined;
     try {
-      const leased = await this.sessions.acquireAutomationLease(record.targetSessionId);
-      releaseLease = leased.release;
-      const slot = leased.slot;
+      let slot;
+      if (target.kind === "workspace") {
+        const leased = await this.sessions.createAutomationSession(target.cwd, sessionId, operationId);
+        slot = leased.slot;
+        releaseLease = leased.release;
+      } else {
+        const leased = await this.sessions.acquireAutomationLease(sessionId);
+        slot = leased.slot;
+        releaseLease = leased.release;
+      }
       if (run.actionSnapshot.kind === "notification") {
+        if (target.kind !== "existingSession") throw new AutomationAdmissionError("Workspace automations support session prompts only", false, "invalid-action");
         if (!this.notifications) throw new AutomationAdmissionError("Notifications are unavailable", false, "notifications-unavailable");
         const status = await this.notifications.enqueue({
-          sessionId: record.targetSessionId,
+          sessionId,
           sourceId: run.runId,
           kind: "explicit",
           title: record.name,
           message: run.actionSnapshot.message,
-          ...(this.machineId ? { route: { sessionId: record.targetSessionId, machineId: this.machineId } } : {}),
+          ...(this.machineId ? { route: { sessionId, machineId: this.machineId } } : {}),
         });
         work.transition("automation-terminal-persistence");
         const result: AutomationExecutionResult = status === "queued" || status === "suppressed"
@@ -150,7 +161,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
             completion: Promise.resolve(observedResult),
             cancel: async () => {},
             acknowledgeTerminal: async () => {
-              await this.sessions.clearAutomationMarker(record.targetSessionId, operationId);
+              await this.sessions.clearAutomationMarker(sessionId, operationId);
               releaseLease?.();
               work.settle();
             },
@@ -175,7 +186,7 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
           }
         },
         acknowledgeTerminal: async () => {
-          await this.sessions.clearAutomationMarker(record.targetSessionId, operationId);
+          await this.sessions.clearAutomationMarker(sessionId, operationId);
           releaseLease?.();
           work.settle();
         },
@@ -183,15 +194,26 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
     } catch (error) {
       releaseLease?.();
       work.settle();
-      throw error instanceof AutomationAdmissionError
-        ? error
-        : new AutomationAdmissionError(error instanceof Error ? error.message : "Automation target is unavailable", true, "target-busy", true);
+      if (error instanceof AutomationAdmissionError) throw error;
+      if (error instanceof GatewayError) {
+        throw new AutomationAdmissionError(
+          error.message,
+          error.retryable,
+          `target-${error.code}`,
+          error.code === "busy",
+        );
+      }
+      throw new AutomationAdmissionError(
+        error instanceof Error ? error.message : "Automation target is unavailable",
+        false,
+        "target-unavailable",
+      );
     }
   }
 
   async recover(record: AutomationRecord, run: AutomationRun): Promise<AutomationRecoveryResult> {
     if (!run.operationId) return { state: "outcomeUnknown", reason: "operation-identity-missing" };
-    const evidence = await this.sessions.automationRecoveryEvidence(record.targetSessionId, run.operationId);
+    const evidence = await this.sessions.automationRecoveryEvidence(run.executionSessionId, run.operationId);
     const invocation = evidence.invocation;
     const marker = evidence.marker;
     if (marker?.assistantCompletionId) {
@@ -212,8 +234,13 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
     if (invocation?.lifecycle === "interrupted") return { state: "cancelled", reason: "recovered-interruption", invocationId: invocation.invocationId };
     if (invocation?.lifecycle === "outcomeUnknown") return { state: "outcomeUnknown", reason: "recovered-outcome-unknown", invocationId: invocation.invocationId };
     if (!invocation && !marker) {
-      return run.state === "cancelling"
-        ? { state: "cancelled", reason: "cancelled-before-admission" }
+      if (run.state === "cancelling") return { state: "cancelled", reason: "cancelled-before-admission" };
+      // Pi does not currently expose an owner-safe eager flush for a brand-new
+      // session. Once workspace provisioning entered the durable admitting
+      // state, a missing file cannot prove that provider admission never
+      // happened. Fail closed instead of creating a second user session.
+      return run.targetSnapshot.kind === "workspace"
+        ? { state: "outcomeUnknown", reason: "workspace-session-outcome-unknown" }
         : { state: "requeue", reason: "no-admission-evidence" };
     }
     return { state: "outcomeUnknown", reason: run.state === "cancelling"
@@ -226,15 +253,15 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
     for (const record of records) {
       for (const run of record.history) {
         if (!run.operationId) continue;
-        const operations = terminalOperations.get(record.targetSessionId) ?? new Set<string>();
+        const operations = terminalOperations.get(run.executionSessionId) ?? new Set<string>();
         operations.add(run.operationId);
-        terminalOperations.set(record.targetSessionId, operations);
+        terminalOperations.set(run.executionSessionId, operations);
       }
     }
     await this.sessions.reconcileStoredAutomationMarkers(terminalOperations);
   }
 
   async acknowledgeRecovery(record: AutomationRecord, run: AutomationRun): Promise<void> {
-    if (run.operationId) await this.sessions.clearAutomationMarker(record.targetSessionId, run.operationId);
+    if (run.operationId) await this.sessions.clearAutomationMarker(run.executionSessionId, run.operationId);
   }
 }

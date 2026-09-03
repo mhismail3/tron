@@ -286,18 +286,23 @@ export class AutomationScheduler {
         && (record.currentRun.retryAt === undefined || Date.parse(record.currentRun.retryAt) <= this.now()))
       .sort((left, right) => left.currentRun!.scheduledFor.localeCompare(right.currentRun!.scheduledFor) || left.id.localeCompare(right.id));
     const activeSessions = new Set([
-      ...[...this.active.values()].map((entry) => this.store.get(entry.automationId).targetSessionId),
-      ...this.dispatchReservations.values(),
+      ...[...this.active.values()].map((entry) => this.store.get(entry.automationId).currentRun?.executionSessionId ?? entry.runId),
+      ...this.dispatchReservations.keys(),
     ]);
     let dispatched = 0;
     for (const record of candidates) {
       if (!this.admissionOpen
         || this.active.size + this.dispatchReservations.size >= this.maximumConcurrent
         || dispatched >= MAXIMUM_DISPATCHES_PER_SCAN) break;
-      const runId = record.currentRun!.runId;
-      if (activeSessions.has(record.targetSessionId) || this.dispatchReservations.has(runId)) continue;
-      activeSessions.add(record.targetSessionId);
-      this.dispatchReservations.set(runId, record.targetSessionId);
+      const run = record.currentRun!;
+      const runId = run.runId;
+      if (this.dispatchReservations.has(runId)) continue;
+      // Existing-session runs serialize on their canonical session. Workspace
+      // runs already have a unique predetermined session identity.
+      const sessionKey = run.executionSessionId;
+      if (activeSessions.has(sessionKey)) continue;
+      activeSessions.add(sessionKey);
+      this.dispatchReservations.set(runId, sessionKey);
       dispatched += 1;
       let task!: Promise<void>;
       task = this.dispatch(record).catch((error) => {
@@ -361,6 +366,8 @@ export class AutomationScheduler {
       scheduledFor,
       triggerSnapshot: clone(record.trigger),
       actionSnapshot: clone(record.action),
+      targetSnapshot: clone(record.target),
+      executionSessionId: record.target.kind === "existingSession" ? record.target.sessionId : randomUUID(),
       state: "queued",
       createdAt: new Date(this.now()).toISOString(),
       preAdmissionAttemptCount: 0,

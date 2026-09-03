@@ -10,15 +10,15 @@ const client = (): ClientContext => ({
 
 function fixture() {
   const record = {
-    schemaVersion: 1, id: "10000000-0000-4000-8000-000000000001", revision: 1, stateRevision: 1,
+    schemaVersion: 2, id: "10000000-0000-4000-8000-000000000001", revision: 1, stateRevision: 1,
     name: "Review", activation: "draft", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
-    provenance: { kind: "mobile" }, targetSessionId: "session-one", trigger: { kind: "once", at: "2026-01-02T00:00:00.000Z" },
+    provenance: { kind: "mobile" }, target: { kind: "existingSession", sessionId: "session-one" }, trigger: { kind: "once", at: "2026-01-02T00:00:00.000Z" },
     misfirePolicy: "latest", overlapPolicy: "skip", executionDeadlineSeconds: 3_600,
     action: { kind: "sessionPrompt", text: "Review" }, consecutiveFailureCount: 0, history: [],
   };
   const automations = {
     status: vi.fn(() => ({ ready: true, degraded: false, automationCount: 1, aggregateBytes: 1, malformedRecordCount: 0, catalogRevision: 2 })),
-    list: vi.fn(() => ({ catalogRevision: 2, items: [{ id: record.id, revision: 1, stateRevision: 1, name: "Review", activation: "draft", actionKind: "sessionPrompt", targetSessionId: "session-one", trigger: record.trigger, consecutiveFailureCount: 0, createdAt: record.createdAt, updatedAt: record.updatedAt }] })),
+    list: vi.fn(() => ({ catalogRevision: 2, items: [{ id: record.id, revision: 1, stateRevision: 1, name: "Review", activation: "draft", actionKind: "sessionPrompt", target: { kind: "existingSession", sessionId: "session-one" }, trigger: record.trigger, consecutiveFailureCount: 0, createdAt: record.createdAt, updatedAt: record.updatedAt }] })),
     get: vi.fn(() => record),
     schedulePreview: vi.fn(() => ({ occurrences: ["2026-01-02T00:00:00.000Z"] })),
     timelinePage: vi.fn(() => ({ catalogRevision: 2, items: [] })),
@@ -45,6 +45,8 @@ function fixture() {
 describe("Gateway automation RPC", () => {
   it("projects bounded reads and keeps action content out of list summaries", async () => {
     const { service, record } = fixture();
+    expect((service.info() as any).capabilities).toContain("automations.v2");
+    expect((service.info() as any).capabilities).not.toContain("automations.v1");
     await expect(service.invoke(client(), "automation.status", {})).resolves.toMatchObject({ ready: true, automationCount: 1 });
     const page = await service.invoke(client(), "automation.list", { limit: 10 }) as any;
     expect(page.items).toHaveLength(1);
@@ -79,6 +81,9 @@ describe("Gateway automation RPC", () => {
       commandId: "command-enable-01", automationId: record.id, expectedRevision: 1,
     });
     expect(automations.enable).toHaveBeenCalledWith(record.id, 1);
+    await expect(service.invoke(client(), "automation.delete", {
+      commandId: "command-delete-01", automationId: record.id, expectedRevision: 1,
+    })).resolves.toEqual({ automationId: record.id, deleted: true });
     await expect(service.invoke(client(), "automation.enable", {
       commandId: "command-enable-02", automationId: record.id,
     })).rejects.toMatchObject({ code: "invalid_request" });

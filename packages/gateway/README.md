@@ -72,12 +72,14 @@ new work around the ownership lock.
 The Gateway is the sole scheduler and canonical owner for durable automations.
 Pi extensions and delegated subagents may execute work inside a scheduled turn,
 but they own no timer, definition, retry, or run ledger. Automation records live
-under `gateway/automations/` as bounded owner-only documents containing one
-definition, at most one nonterminal run, and 64 retained terminal runs. Writes
+under `gateway/automations/` as strict schema-version-2 bounded owner-only
+documents containing one definition, at most one nonterminal run, and 64
+retained terminal runs. Older target shapes are not admitted, migrated, or
+fallback-projected. Writes
 sync the replacement file and parent directory before acknowledgement. iOS and
 Pi's first-party `schedule` tool are clients of this authority, never mirrors.
 
-`automations.v1` supports one-time, anchored interval, and IANA-timezone
+`automations.v2` supports one-time, anchored interval, and IANA-timezone
 daily/weekly triggers. Calendar gaps advance to the first valid local minute and
 repeated local minutes choose the earlier instant. Misfire policy is `latest` or
 `skip`; overlap policy is `skip` or one `queueLatest` occurrence. Catch-up,
@@ -85,15 +87,34 @@ history, dispatch batches, timers, prompts, storage, and concurrency are all
 bounded. Recurrence advances from intended schedule time rather than completion
 time, and clock movement cannot recreate an already-recorded occurrence.
 
-Agent automations target an existing persisted user session and enter only
-through `RuntimeRegistry`/`RuntimeSlot`. An exact slot lease closes deletion and
-idle-eviction races; ordinary per-session serialization remains authoritative.
-Scheduled prompts never steer or enqueue into an active turn, so a busy target
-waits durably while unrelated sessions may proceed. Resource actions revalidate
-the current typed skill or prompt identity and project Gateway automation
-provenance instead of pretending the input came from a user. Extension commands,
-attachments, arbitrary shell, webhooks, deployment, and Gateway lifecycle
-actions are not automation capabilities.
+An Automation target is exactly one existing persisted user session or one
+Gateway-canonical workspace with `newPerRun` session policy. Existing-session
+targets support prompts and notifications. Workspace targets support prompts
+only, create one ordinary user-visible session for every run, and require
+intervals of at least 24 hours because generated sessions are canonical data and
+are never automatically deleted. Workspaces must already exist and have a
+resolved project-trust decision; Automations do not create directories,
+worktrees, or branches.
+
+Every run durably snapshots its target and concrete execution-session ID before
+dispatch. Existing targets reuse their session ID; workspace runs receive a new
+predetermined UUID and create that exact identity through
+`RuntimeRegistry`/`RuntimeSlot`. A live-only generated slot carries an exact
+operation-owned lease until Pi persists its first assistant entry. Restart
+recovery always consults the run snapshot and concrete session identity. Because
+the pinned Pi runtime has no owner-safe eager flush for a brand-new session, a
+restart after workspace admission without canonical evidence becomes
+`outcomeUnknown`; Tron never creates a second session or writes Pi's JSONL
+itself. Ordinary per-session serialization, runtime capacity, project resources,
+settings, credentials, and model selection remain authoritative.
+
+Scheduled prompts never steer or enqueue into an active turn, so a busy existing
+target waits durably while unrelated sessions may proceed. Resource actions
+revalidate the current typed skill or prompt identity inside the selected or
+newly created RuntimeSlot and project Gateway automation provenance instead of
+pretending the input came from a user. Extension commands, attachments,
+arbitrary shell, webhooks, deployment, and Gateway lifecycle actions are not
+automation capabilities.
 
 Each occurrence and run is durable before dispatch. Pre-admission transient
 failures may retry with bounded backoff; accepted agent failures do not. A crash
@@ -208,11 +229,12 @@ first instant and automation ID. Timeline materialization, iterative occurrence
 generation, source bytes, page bytes, global leases, and per-client leases are
 all bounded; capacity overflow is an explicit retryable error and never silently
 drops occurrences. The timeline capability is advertised as
-`automations.timeline.v1` alongside `automations.v1` only after automation
-recovery is ready. The first-party schedule tool is restricted to its
- current persisted user session, deduplicates mutations by canonical tool-call
- identity, and rejects mutations from an automation-originated turn to prevent
- self-replication. Paired Gateway credentials are machine-administrator
+`automations.timeline.v1` alongside `automations.v2` only after automation
+recovery is ready. The first-party schedule tool may target its current persisted
+user session or create a new session in that session's canonical workspace. The
+tool deduplicates mutations by canonical tool-call identity, retains immutable
+assistant provenance for workspace-definition ownership, and rejects mutations
+from an automation-originated turn to prevent self-replication. Paired Gateway credentials are machine-administrator
  credentials throughout the existing protocol, so authenticated mobile and local
  clients may manage automations across that Gateway; this is not a new
  per-session authorization boundary.

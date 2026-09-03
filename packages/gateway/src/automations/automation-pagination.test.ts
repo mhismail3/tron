@@ -6,7 +6,7 @@ function summary(index: number): AutomationSummary {
   return {
     id: `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
     revision: 1, stateRevision: 1, name: `Automation ${index}`, activation: "draft",
-    actionKind: "sessionPrompt", targetSessionId: "session-one",
+    actionKind: "sessionPrompt", target: { kind: "existingSession", sessionId: "session-one" },
     trigger: { kind: "once", at: "2026-01-01T00:00:00.000Z" },
     consecutiveFailureCount: 0,
     createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",

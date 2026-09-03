@@ -171,15 +171,19 @@ const automationScheduler = new AutomationScheduler(automationStore, automationE
     { event: "automation.dispatch-failed", source: "automations" },
   ),
   onBlocked: async (record, run) => {
+    // Workspace targets have no stable session route until a run is created;
+    // never fabricate one for a blocked definition. Existing targets retain
+    // the established session notification route.
+    if (record.target.kind !== "existingSession") return;
     await notifications.enqueue({
-      sessionId: record.targetSessionId,
+      sessionId: record.target.sessionId,
       sourceId: `automation-blocked:${run.runId}`,
       kind: "explicit",
       title: "Automation needs attention",
       message: run.state === "outcomeUnknown"
         ? "An automation stopped because its last outcome could not be confirmed."
         : "An automation paused after repeated failures.",
-      route: { sessionId: record.targetSessionId, machineId: config.machineId },
+      route: { sessionId: record.target.sessionId, machineId: config.machineId },
     });
   },
 });

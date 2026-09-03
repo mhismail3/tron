@@ -594,6 +594,10 @@ struct AutomationFormView: View {
         do {
             let inspection = try await model.inspectTrust(target: trustTarget)
             guard workspacePath == path, ownsMutationGateway else { return }
+            if let canonical = inspection.objectValue?["cwd"]?.stringValue,
+               AutomationAdmissionPolicy.validWorkspacePath(canonical) {
+                workspacePath = canonical
+            }
             workspaceTrustInspection = inspection
         } catch is CancellationError {
             return
@@ -605,7 +609,12 @@ struct AutomationFormView: View {
     private func setWorkspaceTrust(_ value: Bool) async {
         guard let trustTarget = TrustTarget(cwd: workspacePath), ownsMutationGateway else { return }
         do {
-            workspaceTrustInspection = try await model.setTrust(target: trustTarget, decision: value)
+            let inspection = try await model.setTrust(target: trustTarget, decision: value)
+            if let canonical = inspection.objectValue?["cwd"]?.stringValue,
+               AutomationAdmissionPolicy.validWorkspacePath(canonical) {
+                workspacePath = canonical
+            }
+            workspaceTrustInspection = inspection
         } catch {
             errorMessage = (error as? GatewayFailure)?.message ?? "Unable to update project trust."
         }
@@ -763,7 +772,10 @@ struct AutomationFormView: View {
             || (!weekdays.isEmpty && TimeZone(identifier: timezone) != nil)
         let targetIsValid = switch target {
         case let .existingSession(sessionID): AutomationAdmissionPolicy.validSessionID(sessionID)
-        case let .workspace(cwd, _): AutomationAdmissionPolicy.validWorkspacePath(cwd)
+        case let .workspace(cwd, _):
+            AutomationAdmissionPolicy.validWorkspacePath(cwd)
+                && workspaceTrustInspection != nil
+                && !NewSessionTrustPolicy.requiresDecision(workspaceTrustInspection)
         }
         let intervalIsValid = targetMode == .existingSession
             || AutomationAdmissionPolicy.admitsNewSessionInterval(trigger)

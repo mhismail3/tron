@@ -103,6 +103,28 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(fixture.startupEvidence).toHaveBeenCalledTimes(1);
   });
 
+  it("owns one exact live session for a workspace Automation operation", async () => {
+    const changed = vi.fn();
+    const fixture = await coldFixture("automation-exact-session", { sessionListChanged: changed });
+    const sessionId = "20000000-0000-4000-8000-000000000010";
+    const operationId = "automation:20000000-0000-4000-8000-000000000011";
+
+    const first = await fixture.registry.createAutomationSession(fixture.cwd, sessionId, operationId);
+    expect(first.slot.id).toBe(sessionId);
+    expect((await fixture.registry.list("user")).map((session) => session.id)).toContain(sessionId);
+    const second = await fixture.registry.createAutomationSession(fixture.cwd, sessionId, operationId);
+    expect(second.slot).toBe(first.slot);
+    await expect(fixture.registry.createAutomationSession(
+      fixture.cwd,
+      sessionId,
+      "automation:20000000-0000-4000-8000-000000000012",
+    )).rejects.toMatchObject({ code: "conflict" });
+
+    second.release();
+    first.release();
+    expect(changed).toHaveBeenCalled();
+  });
+
   it("admits a page source after in-flight live summary churn", async () => {
     const fixture = await coldFixture("page-source-summary-churn");
     const internals = fixture.registry as unknown as {

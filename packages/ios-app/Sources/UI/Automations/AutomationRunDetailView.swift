@@ -3,7 +3,6 @@ import SwiftUI
 struct AutomationRunDetailView: View {
     let automation: AutomationSummarySelection
     let run: GatewayAutomationRun
-    let target: GatewayAutomationTarget
     let automationRevision: Int
     let onOpenSession: (@MainActor (String) -> Void)?
     let onResolved: () -> Void
@@ -15,14 +14,12 @@ struct AutomationRunDetailView: View {
     init(
         automation: AutomationSummarySelection,
         run: GatewayAutomationRun,
-        target: GatewayAutomationTarget,
         automationRevision: Int,
         onOpenSession: (@MainActor (String) -> Void)? = nil,
         onResolved: @escaping () -> Void
     ) {
         self.automation = automation
         self.run = run
-        self.target = target
         self.automationRevision = automationRevision
         self.onOpenSession = onOpenSession
         self.onResolved = onResolved
@@ -39,16 +36,17 @@ struct AutomationRunDetailView: View {
                     runHeader
                     section("Timing", icon: "clock") { info("Scheduled", AutomationDateFormatting.date(run.scheduledFor)); info("Created", AutomationDateFormatting.date(run.createdAt)); info("Claimed", AutomationDateFormatting.date(run.claimedAt)); info("Started", AutomationDateFormatting.date(run.startedAt)); info("Finished", AutomationDateFormatting.date(run.terminalAt)); info("Attempts", "\(run.preAdmissionAttemptCount)") }
                     section("Execution Session", icon: "bubble.left.and.bubble.right") {
-                        info("Target", target.displayName)
+                        info("Target", run.targetSnapshot.displayName)
                         info("Session ID", run.executionSessionId)
-                        if run.state != .outcomeUnknown,
-                           run.startedAt != nil || run.state.isTerminal {
+                        if !run.targetSnapshot.isWorkspace || run.startedAt != nil {
                             Button("Open Session") { onOpenSession?(run.executionSessionId) }
                                 .buttonStyle(TronActionButtonStyle(role: .primary))
                                 .disabled(onOpenSession == nil)
                                 .padding(14)
-                        } else if run.targetSnapshot.isWorkspace {
-                            Text("The execution session will be available when this run starts.")
+                        } else {
+                            Text(run.state == .outcomeUnknown
+                                 ? "Tron cannot prove that the new session became available."
+                                 : "The execution session will be available when this run starts.")
                                 .font(TronTypography.secondaryDescription)
                                 .foregroundStyle(Color.tronTextMuted)
                                 .padding(14)

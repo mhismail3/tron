@@ -500,7 +500,10 @@ struct GatewayAutomationPreview: Decodable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey { case occurrences }
 }
 struct GatewayAutomationRuns: Codable, Hashable, Sendable { let runs: [GatewayAutomationRunSummary] }
-struct GatewayAutomationDeleteResponse: Codable, Hashable, Sendable { let deleted: Bool }
+struct GatewayAutomationDeleteResponse: Codable, Hashable, Sendable {
+    let automationId: String
+    let deleted: Bool
+}
 
 enum AutomationAdmissionPolicy {
     static let capability = "automations.v2"
@@ -628,7 +631,8 @@ enum AutomationAdmissionPolicy {
             && run.preAdmissionAttemptCount >= 0
             && admits(run.targetSnapshot)
             && validSessionID(run.executionSessionId)
-            && (run.targetSnapshot.sessionID == run.executionSessionId || run.targetSnapshot.isWorkspace)
+            && (run.targetSnapshot.sessionID == run.executionSessionId
+                || run.targetSnapshot.isWorkspace && validGeneratedSessionID(run.executionSessionId))
             && (run.claimedAt.map({ GatewayTimestamp.parse($0) != nil }) ?? true)
             && (run.startedAt.map({ GatewayTimestamp.parse($0) != nil }) ?? true)
             && (run.terminalAt.map({ GatewayTimestamp.parse($0) != nil }) ?? true)
@@ -679,6 +683,10 @@ enum AutomationAdmissionPolicy {
         !value.isEmpty && value.utf8.count <= 200 && value.unicodeScalars.allSatisfy {
             CharacterSet.alphanumerics.contains($0) || "-_:".unicodeScalars.contains($0)
         }
+    }
+
+    static func validGeneratedSessionID(_ value: String) -> Bool {
+        value.utf8.count == 36 && UUID(uuidString: value) != nil
     }
 
     static func validWorkspacePath(_ value: String) -> Bool {

@@ -584,11 +584,12 @@ export class GatewayService {
       case "automation.delete":
         return this.mutation(client, method, params, async () => {
           if (Object.keys(params).some((key) => !["commandId", "automationId", "expectedRevision"].includes(key))) throw new GatewayError("invalid_request", "Automation delete contains unknown parameters");
+          const automationId = string(params.automationId, "automationId", { max: 64 });
           await this.requireAutomations().delete(
-            string(params.automationId, "automationId", { max: 64 }),
+            automationId,
             integer(params.expectedRevision, "expectedRevision", 1, Number.MAX_SAFE_INTEGER),
           );
-          return { deleted: true };
+          return { automationId, deleted: true };
         });
       case "automation.runNow":
         return this.mutation(client, method, params, async () => {

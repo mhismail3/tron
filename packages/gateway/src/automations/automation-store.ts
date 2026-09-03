@@ -71,6 +71,31 @@ function boundedHistory(history: AutomationRun[]): AutomationRun[] {
   return history.slice(-MAXIMUM_AUTOMATION_HISTORY);
 }
 
+function blockedRecord(current: AutomationRecord, reason: string, now: string): AutomationRecord {
+  const next = clone(current);
+  next.revision = current.revision + 1;
+  next.stateRevision = current.stateRevision + 1;
+  next.activation = "blocked";
+  next.blockedReason = reason;
+  delete next.nextOccurrenceAt;
+  delete next.queuedLatestOccurrence;
+  if (next.currentRun) {
+    const uncertain = next.currentRun.state === "admitting" || next.currentRun.state === "running"
+      || next.currentRun.state === "cancelling";
+    const terminal: AutomationRun = {
+      ...next.currentRun,
+      state: uncertain ? "outcomeUnknown" : "cancelled",
+      reason,
+      terminalAt: now,
+    };
+    delete next.currentRun;
+    next.lastRun = terminal;
+    next.history = boundedHistory([...next.history, terminal]);
+  }
+  next.updatedAt = now;
+  return next;
+}
+
 function summarizeRun(run: AutomationRun | undefined): AutomationSummary["currentRun"] | undefined {
   if (!run) return undefined;
   return {
@@ -92,7 +117,7 @@ export function automationSummary(record: AutomationRecord): AutomationSummary {
     name: record.name,
     activation: record.activation,
     actionKind: record.action.kind,
-    targetSessionId: record.targetSessionId,
+    target: clone(record.target),
     trigger: clone(record.trigger),
     ...(record.nextOccurrenceAt === undefined ? {} : { nextOccurrenceAt: record.nextOccurrenceAt }),
     ...(currentRun === undefined ? {} : { currentRun }),
@@ -243,7 +268,7 @@ export class AutomationStore {
       while (this.occupiedIds.has(id)) id = randomUUID();
       const now = new Date(this.now()).toISOString();
       const record: AutomationRecord = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         id,
         revision: 1,
         stateRevision: 1,
@@ -253,7 +278,7 @@ export class AutomationStore {
         createdAt: now,
         updatedAt: now,
         provenance: clone(input.provenance),
-        targetSessionId: input.targetSessionId,
+        target: clone(input.target),
         trigger: clone(input.trigger),
         misfirePolicy: input.misfirePolicy ?? "latest",
         overlapPolicy: input.overlapPolicy ?? "skip",
@@ -277,7 +302,7 @@ export class AutomationStore {
       next.name = input.name;
       if (input.description === undefined) delete next.description;
       else next.description = input.description;
-      next.targetSessionId = input.targetSessionId;
+      next.target = clone(input.target);
       next.trigger = clone(input.trigger);
       next.misfirePolicy = input.misfirePolicy;
       next.overlapPolicy = input.overlapPolicy;
@@ -381,7 +406,7 @@ export class AutomationStore {
       this.assertInitialized();
       const current = this.requireCurrent(id);
       const next = update(clone(current));
-      if (next.id !== id || next.revision !== current.revision || next.schemaVersion !== 1) {
+      if (next.id !== id || next.revision !== current.revision || next.schemaVersion !== 2) {
         throw new Error("Automation state mutation changed immutable definition identity");
       }
       next.stateRevision = current.stateRevision + 1;
@@ -396,7 +421,7 @@ export class AutomationStore {
     return this.mutex.run(async () => {
       this.assertInitialized();
       const automationIds = [...this.records.values()]
-        .filter((record) => record.targetSessionId === sessionId && record.activation !== "completed")
+        .filter((record) => record.target.kind === "existingSession" && record.target.sessionId === sessionId && record.activation !== "completed")
         .map((record) => record.id);
       if (automationIds.length === 0) return [];
       const intent: TargetBlockIntent = { version: 1, kind: "target-block", sessionId, reason, automationIds };
@@ -408,10 +433,22 @@ export class AutomationStore {
     });
   }
 
+  async blockWorkspaceTarget(automationId: string, cwd: string, reason: string): Promise<void> {
+    await this.mutex.run(async () => {
+      this.assertInitialized();
+      const current = this.records.get(automationId);
+      if (!current || current.activation === "completed"
+        || current.activation === "blocked" && current.blockedReason === reason) return;
+      if (current.target.kind !== "workspace" || current.target.cwd !== cwd) return;
+      const next = blockedRecord(current, reason, new Date(this.now()).toISOString());
+      await this.publishReplacement(current, next);
+    });
+  }
+
   async rekeyTarget(previousSessionId: string, nextSessionId: string): Promise<void> {
     await this.mutex.run(async () => {
       this.assertInitialized();
-      const ids = [...this.records.values()].filter((record) => record.targetSessionId === previousSessionId).map((record) => record.id);
+      const ids = [...this.records.values()].filter((record) => record.target.kind === "existingSession" && record.target.sessionId === previousSessionId).map((record) => record.id);
       if (ids.length === 0) return;
       const intent: TargetRekeyIntent = { version: 1, kind: "target-rekey", previousSessionId, nextSessionId, automationIds: ids };
       await durableAtomicWriteJson(join(this.directory, MAINTENANCE_INTENT), intent);
@@ -555,30 +592,10 @@ export class AutomationStore {
     for (const id of intent.automationIds) {
       const current = this.records.get(id);
       if (!current || current.activation === "blocked" && current.blockedReason === intent.reason) continue;
-      if (current.targetSessionId !== intent.sessionId) {
+      if (current.target.kind !== "existingSession" || current.target.sessionId !== intent.sessionId) {
         throw new GatewayError("conflict", "Automation target changed during target-block recovery");
       }
-      const next = clone(current);
-      next.revision = current.revision + 1;
-      next.stateRevision = current.stateRevision + 1;
-      next.activation = "blocked";
-      next.blockedReason = intent.reason;
-      delete next.nextOccurrenceAt;
-      delete next.queuedLatestOccurrence;
-      if (next.currentRun) {
-        const uncertain = next.currentRun.state === "admitting" || next.currentRun.state === "running"
-          || next.currentRun.state === "cancelling";
-        const terminal: AutomationRun = {
-          ...next.currentRun,
-          state: uncertain ? "outcomeUnknown" : "cancelled",
-          reason: intent.reason,
-          terminalAt: new Date(this.now()).toISOString(),
-        };
-        delete next.currentRun;
-        next.lastRun = terminal;
-        next.history = boundedHistory([...next.history, terminal]);
-      }
-      next.updatedAt = new Date(this.now()).toISOString();
+      const next = blockedRecord(current, intent.reason, new Date(this.now()).toISOString());
       await this.publishReplacement(current, next, false);
     }
   }
@@ -586,13 +603,13 @@ export class AutomationStore {
   private async applyRekeyIntent(intent: TargetRekeyIntent): Promise<void> {
     for (const id of intent.automationIds) {
       const current = this.records.get(id);
-      if (!current || current.targetSessionId === intent.nextSessionId) continue;
-      if (current.targetSessionId !== intent.previousSessionId) {
+      if (!current || current.target.kind !== "existingSession" || current.target.sessionId === intent.nextSessionId) continue;
+      if (current.target.sessionId !== intent.previousSessionId) {
         throw new GatewayError("conflict", "Automation target changed during session rekey recovery");
       }
       const next: AutomationRecord = {
         ...clone(current),
-        targetSessionId: intent.nextSessionId,
+        target: { kind: "existingSession", sessionId: intent.nextSessionId },
         revision: current.revision + 1,
         stateRevision: current.stateRevision + 1,
         updatedAt: new Date(this.now()).toISOString(),

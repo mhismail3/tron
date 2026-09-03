@@ -371,6 +371,10 @@ interface IdleEviction {
 
 export class RuntimeRegistry {
   private readonly slots = new Map<string, RuntimeSlot>();
+  /** Live-only generated sessions are bound to the exact Automation operation
+   * until Pi persists their first assistant entry. Weak ownership cannot outlive
+   * the RuntimeSlot and is never a second session catalog. */
+  private readonly automationSessionOwners = new WeakMap<RuntimeSlot, string>();
   private readonly mutex = new AsyncMutex();
   /** Shares one authoritative materialization across concurrent callers. The
    * promise is disposable and keyed by the structural/invalidation generation;
@@ -1314,6 +1318,18 @@ export class RuntimeRegistry {
     return (await this.catalog(scope)).sessions;
   }
 
+  async requireResolvedAutomationWorkspace(cwd: string): Promise<string> {
+    return (await this.options.trust.requireResolved(cwd)).cwd;
+  }
+
+  async workspaceForSession(sessionId: string): Promise<string> {
+    const acquisition = await this.catalogAcquisition();
+    this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
+    const entry = acquisition.entriesByID.get(sessionId);
+    if (!entry) throw new GatewayError("not_found", "Tron session was not found");
+    return (await this.options.trust.requireResolved(entry.canonicalCwd)).cwd;
+  }
+
   async requirePersistedUserSession(sessionId: string): Promise<void> {
     const acquisition = await this.catalogAcquisition();
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
@@ -2205,6 +2221,85 @@ export class RuntimeRegistry {
     } catch (error) {
       if (this.trustReloadProjects.size > 0) return true;
       throw error;
+    }
+  }
+
+  async createAutomationSession(
+    cwdInput: string,
+    sessionId: string,
+    operationId: string,
+  ): Promise<{ slot: RuntimeSlot; release: () => void }> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(sessionId)
+      || !/^automation:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(operationId)) {
+      throw new GatewayError("invalid_request", "Automation execution identity is invalid");
+    }
+    const finishAdmission = this.beginSlotAdmission();
+    let reserved = false;
+    let slot: RuntimeSlot | undefined;
+    let published = false;
+    try {
+      const trust = await this.timedStage(
+        "automation.session.trust",
+        () => this.options.trust.requireResolved(cwdInput),
+      );
+      const existing = await this.mutex.run(() => {
+        this.assertSlotAdmissionOpen();
+        if (this.trustReloadProjects.has(trust.cwd)) {
+          throw new GatewayError("busy", "Project trust is being reconfigured", true);
+        }
+        const current = this.slots.get(sessionId);
+        if (current) {
+          if (current.isDisposed || current.cwd !== trust.cwd
+            || this.automationSessionOwners.get(current) !== operationId) {
+            throw new GatewayError("conflict", "Automation execution session identity is already owned");
+          }
+          return { slot: current, release: current.retainAutomationLease() };
+        }
+        this.requireLiveSlotCapacity();
+        this.reservedSlotStarts += 1;
+        reserved = true;
+        return undefined;
+      });
+      if (existing) return existing;
+
+      const manager = SessionManager.create(
+        trust.cwd,
+        this.sessionDirectoryFor(trust.cwd),
+        { id: sessionId },
+      );
+      slot = await this.timedStage(
+        "automation.session.runtime",
+        () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false),
+      );
+      return await this.mutex.run(() => {
+        this.assertSlotAdmissionOpen();
+        if (this.trustReloadProjects.has(trust.cwd)) {
+          throw new GatewayError("busy", "Automation session was retired before publication", true);
+        }
+        if (this.slots.has(sessionId)) {
+          throw new GatewayError("conflict", "Automation execution session identity is already owned");
+        }
+        const release = slot!.retainAutomationLease();
+        this.automationSessionOwners.set(slot!, operationId);
+        this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
+        reserved = false;
+        this.slots.set(sessionId, slot!);
+        published = true;
+        this.invalidateCatalogAdmission();
+        this.revision += 1;
+        this.options.sessionListChanged();
+        return { slot: slot!, release };
+      });
+    } catch (error) {
+      if (slot && !published) await slot.dispose().catch(() => {});
+      throw error;
+    } finally {
+      if (reserved) {
+        await this.mutex.run(() => {
+          this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
+        });
+      }
+      finishAdmission();
     }
   }
 

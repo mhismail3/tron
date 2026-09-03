@@ -2,7 +2,7 @@ import { GatewayError } from "../errors.js";
 import { admitAutomationCreateInput, admitAutomationUpdateInput, admitsAutomationTrigger } from "./automation-contract.js";
 import { AutomationScheduler } from "./automation-scheduler.js";
 import { AutomationStore } from "./automation-store.js";
-import type { AutomationProvenance, AutomationRecord, AutomationRun, AutomationRunSummary, AutomationSummary, AutomationTrigger } from "./types.js";
+import type { AutomationProvenance, AutomationRecord, AutomationRun, AutomationRunSummary, AutomationSummary, AutomationTarget, AutomationTrigger } from "./types.js";
 import { nextAutomationOccurrence } from "./schedule.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import {
@@ -14,6 +14,8 @@ import {
 
 export interface AutomationTargetValidator {
   requirePersistedUserSession(sessionId: string): Promise<void>;
+  requireResolvedAutomationWorkspace(cwd: string): Promise<string>;
+  workspaceForSession(sessionId: string): Promise<string>;
 }
 
 export interface AutomationPage {
@@ -114,7 +116,7 @@ export class AutomationService {
 
   async create(raw: unknown, provenance: AutomationProvenance): Promise<AutomationRecord> {
     const input = admitAutomationCreateInput(raw, provenance);
-    await this.targets.requirePersistedUserSession(input.targetSessionId);
+    input.target = await this.canonicalizeTarget(input.target);
     const record = await this.store.create(input);
     this.scheduler.wake();
     return record;
@@ -122,7 +124,7 @@ export class AutomationService {
 
   async update(id: string, expectedRevision: number, raw: unknown): Promise<AutomationRecord> {
     const input = admitAutomationUpdateInput(raw);
-    await this.targets.requirePersistedUserSession(input.targetSessionId);
+    input.target = await this.canonicalizeTarget(input.target);
     const record = await this.store.replace(id, expectedRevision, input);
     this.scheduler.wake();
     return record;
@@ -130,7 +132,7 @@ export class AutomationService {
 
   async enable(id: string, expectedRevision: number): Promise<AutomationRecord> {
     const current = this.store.get(id);
-    await this.targets.requirePersistedUserSession(current.targetSessionId);
+    await this.validateTarget(current.target);
     const record = await this.store.setActivation(id, expectedRevision, "enabled");
     this.scheduler.wake();
     return record;
@@ -150,7 +152,7 @@ export class AutomationService {
   async runNow(id: string, expectedRevision: number): Promise<AutomationRun> {
     const current = this.store.get(id);
     if (current.revision !== expectedRevision) throw new GatewayError("conflict", "Automation changed. Review it before running it.", true);
-    await this.targets.requirePersistedUserSession(current.targetSessionId);
+    await this.validateTarget(current.target);
     return this.scheduler.runNow(id, expectedRevision);
   }
 
@@ -180,14 +182,44 @@ export class AutomationService {
     this.scheduler.wake();
   }
 
+  async workspaceForSession(sessionId: string): Promise<string> {
+    return this.targets.workspaceForSession(sessionId);
+  }
+
+  private async canonicalizeTarget(target: AutomationTarget): Promise<AutomationTarget> {
+    if (target.kind === "existingSession") {
+      await this.targets.requirePersistedUserSession(target.sessionId);
+      return target;
+    }
+    return { ...target, cwd: await this.targets.requireResolvedAutomationWorkspace(target.cwd) };
+  }
+
+  private async validateTarget(target: AutomationTarget): Promise<void> {
+    if (target.kind === "existingSession") await this.targets.requirePersistedUserSession(target.sessionId);
+    else await this.targets.requireResolvedAutomationWorkspace(target.cwd);
+  }
+
   private async reconcileTargets(): Promise<void> {
     for (const record of this.store.snapshot()) {
       if (record.activation === "completed") continue;
+      if (record.target.kind === "workspace") {
+        try {
+          await this.targets.requireResolvedAutomationWorkspace(record.target.cwd);
+        } catch (error) {
+          if (error instanceof GatewayError && (error.code === "busy" || error.code === "internal")) throw error;
+          await this.store.blockWorkspaceTarget(
+            record.id,
+            record.target.cwd,
+            "target-workspace-unavailable",
+          );
+        }
+        continue;
+      }
       try {
-        await this.targets.requirePersistedUserSession(record.targetSessionId);
+        await this.targets.requirePersistedUserSession(record.target.sessionId);
       } catch (error) {
         if (error instanceof GatewayError && (error.code === "busy" || error.code === "internal")) throw error;
-        await this.store.blockTarget(record.targetSessionId, "target-session-unavailable");
+        await this.store.blockTarget(record.target.sessionId, "target-session-unavailable");
       }
     }
   }

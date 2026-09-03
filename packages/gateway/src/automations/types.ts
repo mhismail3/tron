@@ -1,6 +1,6 @@
 import type { ResourceInvocation } from "../protocol/types.js";
 
-export const AUTOMATIONS_CAPABILITY = "automations.v1";
+export const AUTOMATIONS_CAPABILITY = "automations.v2";
 export const AUTOMATIONS_TIMELINE_CAPABILITY = "automations.timeline.v1";
 
 export type AutomationActivation = "draft" | "enabled" | "paused" | "completed" | "blocked";
@@ -11,6 +11,10 @@ export type AutomationTrigger =
   | { kind: "once"; at: string }
   | { kind: "interval"; everySeconds: number; anchorAt: string }
   | { kind: "calendar"; timezone: string; localTime: string; weekdays: readonly number[] };
+
+export type AutomationTarget =
+  | { kind: "existingSession"; sessionId: string }
+  | { kind: "workspace"; cwd: string; sessionPolicy: "newPerRun" };
 
 export type AutomationAction =
   | { kind: "sessionPrompt"; text: string; resourceInvocation?: ResourceInvocation }
@@ -50,6 +54,8 @@ export interface AutomationRun {
   scheduledFor: string;
   triggerSnapshot: AutomationTrigger;
   actionSnapshot: AutomationAction;
+  targetSnapshot: AutomationTarget;
+  executionSessionId: string;
   state: AutomationRunState;
   createdAt: string;
   reason?: string;
@@ -69,7 +75,7 @@ export interface AutomationRun {
 }
 
 export interface AutomationRecord {
-  schemaVersion: 1;
+  schemaVersion: 2;
   id: string;
   /** User-visible definition revision used for optimistic mutation fencing. */
   revision: number;
@@ -81,7 +87,7 @@ export interface AutomationRecord {
   createdAt: string;
   updatedAt: string;
   provenance: AutomationProvenance;
-  targetSessionId: string;
+  target: AutomationTarget;
   trigger: AutomationTrigger;
   misfirePolicy: AutomationMisfirePolicy;
   overlapPolicy: AutomationOverlapPolicy;
@@ -107,7 +113,7 @@ export interface AutomationSummary {
   name: string;
   activation: AutomationActivation;
   actionKind: AutomationAction["kind"];
-  targetSessionId: string;
+  target: AutomationTarget;
   trigger: AutomationTrigger;
   nextOccurrenceAt?: string;
   currentRun?: Pick<AutomationRun, "runId" | "state" | "scheduledFor" | "startedAt" | "reason">;
@@ -122,7 +128,7 @@ export interface AutomationCreateInput {
   name: string;
   description?: string;
   activation?: "draft" | "enabled";
-  targetSessionId: string;
+  target: AutomationTarget;
   trigger: AutomationTrigger;
   misfirePolicy?: AutomationMisfirePolicy;
   overlapPolicy?: AutomationOverlapPolicy;
@@ -134,7 +140,7 @@ export interface AutomationCreateInput {
 export interface AutomationUpdateInput {
   name: string;
   description?: string;
-  targetSessionId: string;
+  target: AutomationTarget;
   trigger: AutomationTrigger;
   misfirePolicy: AutomationMisfirePolicy;
   overlapPolicy: AutomationOverlapPolicy;

@@ -72,7 +72,6 @@ struct AutomationDetailView: View {
             AutomationRunDetailView(
                 automation: selection,
                 run: run,
-                target: record?.target ?? selection.summary.target,
                 automationRevision: record?.revision ?? selection.summary.revision,
                 onOpenSession: { sessionID in openExecutionSession(sessionID) },
                 onResolved: { Task { await load() } }
@@ -270,7 +269,7 @@ struct AutomationDetailView: View {
         .padding(.vertical, 11)
     }
     private func errorState(_ message: String) -> some View { VStack(spacing: 12) { Image(systemName: "exclamationmark.triangle").font(TronTypography.sans(size: 30, weight: .semibold)).foregroundStyle(Color.tronAmber); Text(message).font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary); Button("Retry") { Task { await load() } }.buttonStyle(TronActionButtonStyle(role: .primary)) }.frame(maxWidth: .infinity, minHeight: 220) }
-    private func selectRun(_ summary: GatewayAutomationRunSummary) async { guard let client else { return }; do { selectedRun = try await client.run(id: selection.summary.id, runId: summary.runId, target: record?.target ?? selection.summary.target) } catch { errorMessage = (error as? GatewayFailure)?.message ?? "Unable to load run." } }
+    private func selectRun(_ summary: GatewayAutomationRunSummary) async { guard let client else { return }; do { selectedRun = try await client.run(id: selection.summary.id, runId: summary.runId) } catch { errorMessage = (error as? GatewayFailure)?.message ?? "Unable to load run." } }
     private func load() async {
         guard let client else { errorMessage = "This Gateway is unavailable."; isLoading = false; return }
         isLoading = record == nil
@@ -291,7 +290,7 @@ struct AutomationDetailView: View {
             case .run:
                 _ = try await client.runNow(id: selection.summary.id, revision: action.revision, target: record?.target ?? selection.summary.target)
             case .cancel:
-                if let runID = action.runID { _ = try await client.cancel(id: selection.summary.id, runId: runID, target: record?.target ?? selection.summary.target) }
+                if let runID = action.runID { _ = try await client.cancel(id: selection.summary.id, runId: runID) }
             case .activation:
                 _ = try await client.setActivation(id: selection.summary.id, revision: action.revision, enabled: action.enable)
             case .delete:

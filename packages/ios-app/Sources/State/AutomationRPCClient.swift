@@ -37,7 +37,7 @@ final class AutomationRPCClient {
     func get(id: String) async throws -> GatewayAutomationRecord {
         struct Params: Encodable { let automationId: String }
         let value: GatewayAutomationRecord = try await request("automation.get", Params(automationId: id))
-        guard AutomationAdmissionPolicy.admits(value) else {
+        guard AutomationAdmissionPolicy.admits(value), value.id == id else {
             throw GatewayFailure(code: "invalid_response", message: "The Automation definition is invalid.", retryable: false, details: nil)
         }
         return value
@@ -50,12 +50,10 @@ final class AutomationRPCClient {
         }
         return value
     }
-    func run(id: String, runId: String, target: GatewayAutomationTarget) async throws -> GatewayAutomationRun {
+    func run(id: String, runId: String) async throws -> GatewayAutomationRun {
         struct Params: Encodable { let automationId: String; let runId: String }
         let value: GatewayAutomationRun = try await request("automation.run.get", Params(automationId: id, runId: runId))
-        guard AutomationAdmissionPolicy.admits(value),
-              value.runId == runId,
-              value.targetSnapshot == target else {
+        guard AutomationAdmissionPolicy.admits(value), value.runId == runId else {
             throw GatewayFailure(code: "invalid_response", message: "The Automation run is invalid.", retryable: false, details: nil)
         }
         return value
@@ -141,13 +139,11 @@ final class AutomationRPCClient {
         }
         return run
     }
-    func cancel(id: String, runId: String, target: GatewayAutomationTarget) async throws -> GatewayAutomationRun {
+    func cancel(id: String, runId: String) async throws -> GatewayAutomationRun {
         struct Params: Encodable { let automationId: String; let runId: String }
         let value = try await mutate(method: "automation.run.cancel", parameters: Params(automationId: id, runId: runId))
         let run = try value.decode(GatewayAutomationRun.self)
-        guard AutomationAdmissionPolicy.admits(run),
-              run.runId == runId,
-              run.targetSnapshot == target else {
+        guard AutomationAdmissionPolicy.admits(run), run.runId == runId else {
             throw invalidMutationResponse()
         }
         return run
@@ -156,7 +152,7 @@ final class AutomationRPCClient {
         struct Params: Encodable { let automationId: String; let expectedRevision: Int }
         let value = try await mutate(method: "automation.delete", parameters: Params(automationId: id, expectedRevision: revision))
         let response = try value.decode(GatewayAutomationDeleteResponse.self)
-        guard response.deleted else { throw invalidMutationResponse() }
+        guard response.deleted, response.automationId == id else { throw invalidMutationResponse() }
     }
     func resolve(id: String, runId: String, revision: Int, outcome: String) async throws -> GatewayAutomationRecord {
         struct Params: Encodable { let automationId, runId: String; let expectedRevision: Int; let outcome: String }

@@ -10,7 +10,7 @@ import type { AutomationSummary } from "./types.js";
 
 const trigger = (value: AutomationSummary["trigger"]): AutomationSummary => ({
   id: "automation-one", revision: 2, stateRevision: 3, name: "One", activation: "enabled",
-  actionKind: "sessionPrompt", targetSessionId: "session-one", trigger: value,
+  actionKind: "sessionPrompt", target: { kind: "existingSession", sessionId: "session-one" }, trigger: value,
   consecutiveFailureCount: 0, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
 });
 

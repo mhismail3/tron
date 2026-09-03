@@ -52,6 +52,8 @@ struct AutomationProtocolTests {
             _ = try decoder.decode(GatewayAutomationTarget.self, from: Data(#"{"kind":"existingSession","sessionId":""}"#.utf8))
         }
         #expect(!AutomationAdmissionPolicy.validWorkspacePath(String(repeating: "/", count: 4_097)))
+        #expect(AutomationAdmissionPolicy.validGeneratedSessionID("10000000-0000-4000-8000-000000000004"))
+        #expect(!AutomationAdmissionPolicy.validGeneratedSessionID("not-a-generated-session"))
     }
 
     @Test("new-session intervals require one full day")

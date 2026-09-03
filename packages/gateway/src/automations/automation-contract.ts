@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { GatewayError } from "../errors.js";
 import { admitPromptText, admitResourceInvocation } from "../sessions/resource-invocation.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
@@ -7,6 +8,7 @@ import type {
   AutomationProvenance,
   AutomationRecord,
   AutomationRun,
+  AutomationTarget,
   AutomationTrigger,
   AutomationUpdateInput,
 } from "./types.js";
@@ -16,6 +18,7 @@ export const MAXIMUM_AUTOMATION_RECORD_BYTES = 512 * 1_024;
 export const MAXIMUM_AUTOMATION_AGGREGATE_BYTES = 128 * 1_048_576;
 export const MAXIMUM_AUTOMATION_HISTORY = 64;
 export const MINIMUM_AUTOMATION_INTERVAL_SECONDS = 60;
+export const MINIMUM_WORKSPACE_INTERVAL_SECONDS = 24 * 60 * 60;
 export const MINIMUM_AUTOMATION_DEADLINE_SECONDS = 5 * 60;
 export const MAXIMUM_AUTOMATION_DEADLINE_SECONDS = 24 * 60 * 60;
 export const DEFAULT_AUTOMATION_DEADLINE_SECONDS = 60 * 60;
@@ -24,6 +27,8 @@ export const AUTOMATION_FAILURE_CIRCUIT_LIMIT = 3;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const automationOperation = /^automation:([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/iu;
 const occurrenceId = /^[A-Za-z0-9_-]{43}$/u;
+const sessionTargetId = /^[A-Za-z0-9_:-]{1,200}$/u;
+const controlCharacter = /[\u0000-\u001f\u007f]/u;
 
 function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const keys = Object.keys(value);
@@ -87,6 +92,19 @@ export function admitsAutomationTrigger(value: unknown): value is AutomationTrig
   return false;
 }
 
+export function admitsAutomationTarget(value: unknown): value is AutomationTarget {
+  const input = record(value);
+  if (!input || typeof input.kind !== "string") return false;
+  if (input.kind === "existingSession") {
+    return exactKeys(input, ["kind", "sessionId"])
+      && typeof input.sessionId === "string" && sessionTargetId.test(input.sessionId);
+  }
+  return input.kind === "workspace"
+    && exactKeys(input, ["kind", "cwd", "sessionPolicy"])
+    && bounded(input.cwd, 4_096) && isAbsolute(input.cwd) && !controlCharacter.test(input.cwd)
+    && input.sessionPolicy === "newPerRun";
+}
+
 export function admitsAutomationAction(value: unknown): value is AutomationAction {
   const input = record(value);
   if (!input || typeof input.kind !== "string") return false;
@@ -128,13 +146,19 @@ function terminalRunState(value: unknown): boolean {
   return ["succeeded", "failed", "cancelled", "skipped", "outcomeUnknown"].includes(value as string);
 }
 
+function admitsTargetActionSchedule(target: AutomationTarget, action: AutomationAction, trigger: AutomationTrigger): boolean {
+  if (target.kind === "existingSession") return true;
+  if (action.kind !== "sessionPrompt") return false;
+  return trigger.kind !== "interval" || trigger.everySeconds >= MINIMUM_WORKSPACE_INTERVAL_SECONDS;
+}
+
 export function admitsAutomationRun(value: unknown): value is AutomationRun {
   const input = record(value);
   if (!input) return false;
   const optional = ["manual", "reason", "claimedAt", "startedAt", "terminalAt", "retryAt", "hostEpoch", "claimId",
     "operationId", "invocationId", "assistantCompletionId", "notificationAdmissionStatus", "error", "resolution"];
   const required = ["runId", "occurrenceId", "automationRevision", "scheduledFor", "triggerSnapshot",
-    "actionSnapshot", "state", "createdAt", "preAdmissionAttemptCount"];
+    "actionSnapshot", "targetSnapshot", "executionSessionId", "state", "createdAt", "preAdmissionAttemptCount"];
   const keys = Object.keys(input);
   if (keys.length < required.length || !keys.every((key) => required.includes(key) || optional.includes(key))
     || !required.every((key) => keys.includes(key))) return false;
@@ -144,6 +168,14 @@ export function admitsAutomationRun(value: unknown): value is AutomationRun {
     || !Number.isSafeInteger(input.automationRevision) || (input.automationRevision as number) < 1
     || !timestamp(input.scheduledFor) || !timestamp(input.createdAt)
     || !admitsAutomationTrigger(input.triggerSnapshot) || !admitsAutomationAction(input.actionSnapshot)
+    || !admitsAutomationTarget(input.targetSnapshot) || !bounded(input.executionSessionId, 200)
+    || !admitsTargetActionSchedule(
+      input.targetSnapshot as AutomationTarget,
+      input.actionSnapshot as AutomationAction,
+      input.triggerSnapshot as AutomationTrigger,
+    )
+    || (input.targetSnapshot as AutomationTarget).kind === "existingSession" && input.executionSessionId !== (input.targetSnapshot as { sessionId: string }).sessionId
+    || (input.targetSnapshot as AutomationTarget).kind === "workspace" && !uuid.test(input.executionSessionId as string)
     || !["queued", "waiting", "admitting", "running", "cancelling", "succeeded", "failed", "cancelled", "skipped", "outcomeUnknown"].includes(input.state as string)
     || !Number.isSafeInteger(input.preAdmissionAttemptCount) || (input.preAdmissionAttemptCount as number) < 0
     || (input.reason !== undefined && !bounded(input.reason, 256))) return false;
@@ -176,12 +208,12 @@ export function admitsAutomationRecord(value: unknown): value is AutomationRecor
   if (!input) return false;
   const optional = ["description", "nextOccurrenceAt", "currentRun", "queuedLatestOccurrence", "lastRun", "blockedReason"];
   const required = ["schemaVersion", "id", "revision", "stateRevision", "name", "activation", "createdAt", "updatedAt", "provenance",
-    "targetSessionId", "trigger", "misfirePolicy", "overlapPolicy", "executionDeadlineSeconds", "action",
+    "target", "trigger", "misfirePolicy", "overlapPolicy", "executionDeadlineSeconds", "action",
     "consecutiveFailureCount", "history"];
   const keys = Object.keys(input);
   if (keys.length < required.length || !keys.every((key) => required.includes(key) || optional.includes(key))
     || !required.every((key) => keys.includes(key))) return false;
-  return input.schemaVersion === 1
+  return input.schemaVersion === 2
     && bounded(input.id, 64) && uuid.test(input.id)
     && Number.isSafeInteger(input.revision) && (input.revision as number) >= 1
     && Number.isSafeInteger(input.stateRevision) && (input.stateRevision as number) >= 1
@@ -190,7 +222,7 @@ export function admitsAutomationRecord(value: unknown): value is AutomationRecor
     && ["draft", "enabled", "paused", "completed", "blocked"].includes(input.activation as string)
     && timestamp(input.createdAt) && timestamp(input.updatedAt)
     && admitsAutomationProvenance(input.provenance)
-    && bounded(input.targetSessionId, 200)
+    && admitsAutomationTarget(input.target)
     && admitsAutomationTrigger(input.trigger)
     && (input.misfirePolicy === "latest" || input.misfirePolicy === "skip")
     && (input.overlapPolicy === "skip" || input.overlapPolicy === "queueLatest")
@@ -198,6 +230,7 @@ export function admitsAutomationRecord(value: unknown): value is AutomationRecor
     && (input.executionDeadlineSeconds as number) >= MINIMUM_AUTOMATION_DEADLINE_SECONDS
     && (input.executionDeadlineSeconds as number) <= MAXIMUM_AUTOMATION_DEADLINE_SECONDS
     && admitsAutomationAction(input.action)
+    && admitsTargetActionSchedule(input.target as AutomationTarget, input.action as AutomationAction, input.trigger as AutomationTrigger)
     && (input.nextOccurrenceAt === undefined || timestamp(input.nextOccurrenceAt))
     && (input.currentRun === undefined || (admitsAutomationRun(input.currentRun) && !terminalRunState(input.currentRun.state)))
     && (input.queuedLatestOccurrence === undefined || timestamp(input.queuedLatestOccurrence))
@@ -216,10 +249,13 @@ function requiredText(value: unknown, name: string, maximumBytes: number): strin
 export function admitAutomationCreateInput(value: unknown, provenance: AutomationProvenance): AutomationCreateInput {
   const input = record(value);
   if (!input) throw new GatewayError("invalid_request", "Automation definition must be an object");
-  const allowed = ["name", "description", "activation", "targetSessionId", "trigger", "misfirePolicy", "overlapPolicy", "executionDeadlineSeconds", "action"];
+  const allowed = ["name", "description", "activation", "target", "trigger", "misfirePolicy", "overlapPolicy", "executionDeadlineSeconds", "action"];
   if (Object.keys(input).some((key) => !allowed.includes(key))) throw new GatewayError("invalid_request", "Automation definition contains unknown fields");
   if (!admitsAutomationTrigger(input.trigger)) throw new GatewayError("invalid_request", "Automation trigger is invalid");
   if (!admitsAutomationAction(input.action)) throw new GatewayError("invalid_request", "Automation action is invalid");
+  if (!admitsAutomationTarget(input.target) || !admitsTargetActionSchedule(input.target, input.action, input.trigger)) {
+    throw new GatewayError("invalid_request", "Automation target or action is invalid for this schedule");
+  }
   const description = input.description === undefined ? undefined : requiredText(input.description, "description", 2_048);
   const activation = input.activation === undefined ? "draft" : input.activation;
   if (activation !== "draft" && activation !== "enabled") throw new GatewayError("invalid_request", "Automation activation must be draft or enabled");
@@ -234,7 +270,7 @@ export function admitAutomationCreateInput(value: unknown, provenance: Automatio
     name: requiredText(input.name, "name", 256),
     ...(description === undefined ? {} : { description }),
     activation,
-    targetSessionId: requiredText(input.targetSessionId, "targetSessionId", 200),
+    target: input.target,
     trigger: input.trigger,
     misfirePolicy,
     overlapPolicy,
@@ -246,7 +282,7 @@ export function admitAutomationCreateInput(value: unknown, provenance: Automatio
 
 export function admitAutomationUpdateInput(value: unknown): AutomationUpdateInput {
   const input = record(value);
-  const allowed = ["name", "description", "targetSessionId", "trigger", "misfirePolicy", "overlapPolicy", "executionDeadlineSeconds", "action"];
+  const allowed = ["name", "description", "target", "trigger", "misfirePolicy", "overlapPolicy", "executionDeadlineSeconds", "action"];
   const required = allowed.filter((key) => key !== "description");
   if (!input || Object.keys(input).some((key) => !allowed.includes(key))
     || !required.every((key) => Object.hasOwn(input, key))) {
@@ -256,7 +292,7 @@ export function admitAutomationUpdateInput(value: unknown): AutomationUpdateInpu
   return {
     name: created.name,
     ...(created.description === undefined ? {} : { description: created.description }),
-    targetSessionId: created.targetSessionId,
+    target: created.target,
     trigger: created.trigger,
     misfirePolicy: created.misfirePolicy ?? "latest",
     overlapPolicy: created.overlapPolicy ?? "skip",

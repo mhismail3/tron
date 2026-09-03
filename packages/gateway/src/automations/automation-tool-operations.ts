@@ -4,7 +4,7 @@ import type { JsonValue } from "../protocol/types.js";
 import type { CommandReceiptStore } from "../transport/command-receipts.js";
 import type { AutomationService } from "./automation-service.js";
 import type { ScheduleToolOperations, ScheduleToolRequest, ScheduleToolResult } from "./tron-schedule-extension.js";
-import type { AutomationAction, AutomationTrigger } from "./types.js";
+import type { AutomationAction, AutomationRecord, AutomationTrigger } from "./types.js";
 
 function commandId(sessionId: string, toolCallId: string, action: string): string {
   return createHash("sha256").update("schedule\0").update(sessionId).update("\0").update(toolCallId).update("\0").update(action).digest("base64url");
@@ -51,9 +51,15 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
     private readonly now: () => number = Date.now,
   ) {}
 
+  private belongsToSession(automation: AutomationRecord, sessionId: string): boolean {
+    return (automation.target.kind === "existingSession" && automation.target.sessionId === sessionId)
+      || (automation.provenance.kind === "assistant" && automation.provenance.sessionId === sessionId);
+  }
+
   async execute(sessionId: string, toolCallId: string, request: ScheduleToolRequest): Promise<ScheduleToolResult> {
     if (request.action === "list") {
-      const all = this.service.list().items.filter((automation) => automation.targetSessionId === sessionId);
+      const all = this.service.list().items.filter((automation) =>
+        this.belongsToSession(this.service.get(automation.id), sessionId));
       const shown = all.slice(0, 50);
       const lines = shown.map((automation) => `${automation.name} (${automation.id}) — ${automation.activation}, revision ${automation.revision}`);
       return result(lines.length > 0 ? lines.join("\n") : "No automations target this session.", {
@@ -63,7 +69,7 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
     }
     if (request.action === "show") {
       const automation = this.service.get(requireField(request.automationId, "automationId"));
-      if (automation.targetSessionId !== sessionId) throw new GatewayError("not_found", "Automation does not belong to this session");
+      if (!this.belongsToSession(automation, sessionId)) throw new GatewayError("not_found", "Automation does not belong to this session");
       return result(`Automation “${automation.name}” is ${automation.activation}.`, automation);
     }
 
@@ -84,7 +90,9 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
       const created = await this.service.create({
         name: requireField(request.name, "name"),
         activation: request.activate === true ? "enabled" : "draft",
-        targetSessionId: sessionId,
+        target: request.target === "newSessionInWorkspace"
+          ? { kind: "workspace", cwd: await this.service.workspaceForSession(sessionId), sessionPolicy: "newPerRun" }
+          : { kind: "existingSession", sessionId },
         trigger: createTrigger(request, this.now()),
         misfirePolicy: "latest",
         overlapPolicy: "skip",
@@ -95,7 +103,7 @@ export class GatewayScheduleToolOperations implements ScheduleToolOperations {
 
     const id = requireField(request.automationId, "automationId");
     const current = this.service.get(id);
-    if (current.targetSessionId !== sessionId) throw new GatewayError("not_found", "Automation does not belong to this session");
+    if (!this.belongsToSession(current, sessionId)) throw new GatewayError("not_found", "Automation does not belong to this session");
     if (request.action === "enable" || request.action === "pause" || request.action === "delete") {
       const revision = requireField(request.expectedRevision, "expectedRevision");
       if (request.action === "delete") {
