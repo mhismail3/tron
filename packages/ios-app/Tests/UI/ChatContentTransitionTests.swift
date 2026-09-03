@@ -166,6 +166,53 @@ struct ChatContentTransitionTests {
         ))
     }
 
+    @Test("measured flights reserve the complete outgoing row before animation")
+    func flightDestinationLayout() {
+        #expect(ChatOutgoingEntranceLayoutPolicy.progress(
+            ownership: .flight,
+            revealed: false,
+            reduceMotion: false
+        ) == 1)
+        #expect(ChatOutgoingEntranceLayoutPolicy.progress(
+            ownership: .ordinary,
+            revealed: false,
+            reduceMotion: false
+        ) == 0)
+        #expect(ChatOutgoingEntranceLayoutPolicy.progress(
+            ownership: .completed,
+            revealed: false,
+            reduceMotion: false
+        ) == 1)
+    }
+
+    @Test("queued-to-canonical replacement animates only bounded height changes")
+    func promptReplacementHeight() {
+        #expect(ChatPromptReplacementLayoutPolicy.shouldAnimate(
+            currentHeight: 120,
+            targetHeight: 80,
+            replacementChanged: true,
+            reduceMotion: false
+        ))
+        #expect(!ChatPromptReplacementLayoutPolicy.shouldAnimate(
+            currentHeight: 120,
+            targetHeight: 80,
+            replacementChanged: false,
+            reduceMotion: false
+        ))
+        #expect(!ChatPromptReplacementLayoutPolicy.shouldAnimate(
+            currentHeight: 120,
+            targetHeight: 80,
+            replacementChanged: true,
+            reduceMotion: true
+        ))
+        #expect(!ChatPromptReplacementLayoutPolicy.shouldAnimate(
+            currentHeight: 0,
+            targetHeight: ChatPromptReplacementLayoutPolicy.maximumAnimatedHeightDelta + 1,
+            replacementChanged: true,
+            reduceMotion: false
+        ))
+    }
+
     @Test("user and queue content rises from the trailing composer edge")
     func composerEdgeMotion() {
         let user = ChatContentTransitionPolicy.hiddenTransform(
@@ -269,28 +316,39 @@ struct ChatContentTransitionTests {
             resourcePickerKind: nil,
             resourceResultIDs: []
         )
-        #expect(ChatComposerStructuralTransitionPolicy.animatesAccessoryHeight(
+        #expect(ChatComposerStructuralTransitionPolicy.animatesHeight(
             current: 44,
             installedIdentity: empty,
             identity: attachment,
+            submissionTransitionActive: false,
             reduceMotion: false
         ))
-        #expect(!ChatComposerStructuralTransitionPolicy.animatesAccessoryHeight(
+        #expect(ChatComposerStructuralTransitionPolicy.animatesHeight(
+            current: 88,
+            installedIdentity: attachment,
+            identity: attachment,
+            submissionTransitionActive: true,
+            reduceMotion: false
+        ))
+        #expect(!ChatComposerStructuralTransitionPolicy.animatesHeight(
             current: 44,
             installedIdentity: attachment,
             identity: attachment,
+            submissionTransitionActive: false,
             reduceMotion: false
         ))
-        #expect(!ChatComposerStructuralTransitionPolicy.animatesAccessoryHeight(
+        #expect(!ChatComposerStructuralTransitionPolicy.animatesHeight(
             current: nil,
             installedIdentity: empty,
             identity: attachment,
+            submissionTransitionActive: true,
             reduceMotion: false
         ))
-        #expect(!ChatComposerStructuralTransitionPolicy.animatesAccessoryHeight(
+        #expect(!ChatComposerStructuralTransitionPolicy.animatesHeight(
             current: 44,
             installedIdentity: empty,
             identity: attachment,
+            submissionTransitionActive: true,
             reduceMotion: true
         ))
     }

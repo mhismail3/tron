@@ -239,6 +239,7 @@ enum ChatPromptLifecycleReplacementPolicy {
     }
 
     static func matches(queue: SessionSnapshot.QueuedMessage, item: TranscriptItem) -> Bool {
+        guard queue.resourceInvocation == item.semantic?.resourceInvocation else { return false }
         let text = (item.content ?? []).compactMap { part -> String? in
             guard part.type == .text, part.attachment == nil else { return nil }
             return part.text
@@ -492,7 +493,8 @@ enum ChatPendingCanonicalSuppressionPolicy {
                 attachmentCount: pending.attachmentCount,
                 photoCount: pending.photoCount,
                 fileAttachmentCount: pending.fileAttachmentCount,
-                attachments: pending.attachments
+                attachments: pending.attachments,
+                resourceInvocation: pending.resourceInvocation
             ),
             in: transcript
         )
@@ -525,6 +527,7 @@ enum ChatPendingCanonicalSuppressionPolicy {
         _ pending: SessionSnapshot.PendingPrompt,
         item: TranscriptItem
     ) -> Bool {
+        guard pending.resourceInvocation == item.semantic?.resourceInvocation else { return false }
         if pending.text.isEmpty {
             guard pending.attachmentCount > 0,
                   pending.photoCount != nil,

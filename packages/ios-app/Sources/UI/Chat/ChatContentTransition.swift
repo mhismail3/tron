@@ -30,20 +30,31 @@ enum ChatComposerStructuralTransitionPolicy {
             && current.map { abs($0 - measured) > heightEpsilon } != false
     }
 
-    static func animatesAccessoryHeight(
+    static func animatesHeight(
         current: CGFloat?,
         installedIdentity: ChatComposerAccessoryLayoutIdentity?,
         identity: ChatComposerAccessoryLayoutIdentity,
+        submissionTransitionActive: Bool,
         reduceMotion: Bool
     ) -> Bool {
         current != nil
-            && installedIdentity != identity
+            && (submissionTransitionActive || installedIdentity != identity)
             && !reduceMotion
     }
 }
 
+private struct ChatComposerStructuralMeasurement: Equatable {
+    let height: CGFloat
+    let accessoryIdentity: ChatComposerAccessoryLayoutIdentity
+    let submissionTransitionID: Int?
+    let holdsSubmissionHeight: Bool
+}
+
 struct ChatComposerStructuralHost<Content: View>: View {
     let accessoryIdentity: ChatComposerAccessoryLayoutIdentity
+    let submissionTransitionID: Int?
+    let submissionAnimation: Animation?
+    let holdsSubmissionHeight: Bool
     let reduceMotion: Bool
     let onHeightChange: ((CGFloat) -> Void)?
     let onHeightSettled: ((CGFloat) -> Void)?
@@ -51,15 +62,22 @@ struct ChatComposerStructuralHost<Content: View>: View {
 
     @State private var presentedHeight: CGFloat?
     @State private var installedAccessoryIdentity: ChatComposerAccessoryLayoutIdentity?
+    @State private var heightTransitionRevision = 0
 
     init(
         accessoryIdentity: ChatComposerAccessoryLayoutIdentity,
+        submissionTransitionID: Int? = nil,
+        submissionAnimation: Animation? = nil,
+        holdsSubmissionHeight: Bool = false,
         reduceMotion: Bool,
         onHeightChange: ((CGFloat) -> Void)? = nil,
         onHeightSettled: ((CGFloat) -> Void)? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.accessoryIdentity = accessoryIdentity
+        self.submissionTransitionID = submissionTransitionID
+        self.submissionAnimation = submissionAnimation
+        self.holdsSubmissionHeight = holdsSubmissionHeight
         self.reduceMotion = reduceMotion
         self.onHeightChange = onHeightChange
         self.onHeightSettled = onHeightSettled
@@ -69,35 +87,15 @@ struct ChatComposerStructuralHost<Content: View>: View {
     var body: some View {
         content()
             .fixedSize(horizontal: false, vertical: true)
-            .onGeometryChange(for: CGFloat.self) { geometry in
-                geometry.size.height
-            } action: { height in
-                guard ChatComposerStructuralTransitionPolicy.admitsHeightChange(
-                    current: presentedHeight,
-                    measured: height
-                ) else { return }
-                let animatesAccessory = ChatComposerStructuralTransitionPolicy.animatesAccessoryHeight(
-                    current: presentedHeight,
-                    installedIdentity: installedAccessoryIdentity,
-                    identity: accessoryIdentity,
-                    reduceMotion: reduceMotion
+            .onGeometryChange(for: ChatComposerStructuralMeasurement.self) { geometry in
+                ChatComposerStructuralMeasurement(
+                    height: geometry.size.height,
+                    accessoryIdentity: accessoryIdentity,
+                    submissionTransitionID: submissionTransitionID,
+                    holdsSubmissionHeight: holdsSubmissionHeight
                 )
-                installedAccessoryIdentity = accessoryIdentity
-                if animatesAccessory {
-                    withAnimation(
-                        .smooth(duration: ChatComposerStructuralTransitionPolicy.accessoryDuration),
-                        completionCriteria: .logicallyComplete
-                    ) {
-                        presentedHeight = height
-                    } completion: {
-                        onHeightSettled?(height)
-                    }
-                } else {
-                    var transaction = Transaction()
-                    transaction.disablesAnimations = true
-                    withTransaction(transaction) { presentedHeight = height }
-                    onHeightSettled?(height)
-                }
+            } action: { measurement in
+                install(measurement)
             }
             .frame(height: presentedHeight, alignment: .bottom)
             .onGeometryChange(for: CGFloat.self) { geometry in
@@ -106,6 +104,55 @@ struct ChatComposerStructuralHost<Content: View>: View {
                 guard height.isFinite, height >= 0 else { return }
                 onHeightChange?(height)
             }
+    }
+
+    @MainActor
+    private func install(_ measurement: ChatComposerStructuralMeasurement) {
+        guard measurement.height.isFinite, measurement.height > 0 else { return }
+        // A measured morph owns the old composer geometry until its overlay
+        // reaches the fully laid-out transcript destination. The same
+        // measurement is replayed with `holdsSubmissionHeight == false`.
+        guard !measurement.holdsSubmissionHeight else { return }
+
+        let submissionActive = measurement.submissionTransitionID != nil
+        let heightChanged = ChatComposerStructuralTransitionPolicy.admitsHeightChange(
+            current: presentedHeight,
+            measured: measurement.height
+        )
+        let animates = heightChanged && ChatComposerStructuralTransitionPolicy.animatesHeight(
+            current: presentedHeight,
+            installedIdentity: installedAccessoryIdentity,
+            identity: measurement.accessoryIdentity,
+            submissionTransitionActive: submissionActive,
+            reduceMotion: reduceMotion
+        )
+        installedAccessoryIdentity = measurement.accessoryIdentity
+        heightTransitionRevision &+= 1
+        let revision = heightTransitionRevision
+
+        guard heightChanged else {
+            if submissionActive { onHeightSettled?(measurement.height) }
+            return
+        }
+        if animates {
+            let animation = submissionAnimation
+                ?? Animation.smooth(duration: ChatComposerStructuralTransitionPolicy.accessoryDuration)
+            var transaction = Transaction()
+            transaction.admitsChatIncrementalGrowthAnimation = true
+            withTransaction(transaction) {
+                withAnimation(animation, completionCriteria: .logicallyComplete) {
+                    presentedHeight = measurement.height
+                } completion: {
+                    guard heightTransitionRevision == revision else { return }
+                    onHeightSettled?(measurement.height)
+                }
+            }
+        } else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { presentedHeight = measurement.height }
+            onHeightSettled?(measurement.height)
+        }
     }
 }
 

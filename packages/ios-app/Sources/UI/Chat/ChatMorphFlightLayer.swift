@@ -93,6 +93,7 @@ final class ChatMorphFrameRegistry {
     private var activeElementIDs: Set<ChatMorphID> = []
     private var completedLifecycleID: String?
     private var abandonedGeneration: Int?
+    private var abandonedLifecycleID: String?
     private struct ResourceKey: Hashable {
         let source: ComposerResourceInvocation.Source
         let name: String
@@ -210,6 +211,7 @@ final class ChatMorphFrameRegistry {
         guard Self.valid(frame) else {
             if flight.phase == .animating {
                 abandonedGeneration = flight.generation
+                abandonedLifecycleID = flight.lifecycleID
                 self.flight = nil
                 activeLifecycleID = nil
                 activeElementIDs.removeAll(keepingCapacity: true)
@@ -220,9 +222,12 @@ final class ChatMorphFrameRegistry {
             readinessRevision &+= 1
             return
         }
-        // The keyboard and bottom inset may still be settling when the row is
-        // first measured. Retarget the endpoint in place so the flight remains
-        // visually continuous instead of abandoning into a mid-animation jump.
+        // Endpoint changes after progress begins are mathematically
+        // discontinuous (`progress × delta`). Submission choreography holds the
+        // keyboard/composer geometry through the flight, so freeze the first
+        // complete destination and treat later valid callbacks as observation
+        // noise. Invalid disappearance still fails open above.
+        guard flight.phase == .waitingForDestination else { return }
         guard ChatMorphFramePolicy.materiallyDiffers(
             flight.destinationFrames[id],
             from: frame
@@ -290,6 +295,7 @@ final class ChatMorphFrameRegistry {
         activeElementIDs.removeAll(keepingCapacity: true)
         completedLifecycleID = nil
         abandonedGeneration = nil
+        abandonedLifecycleID = nil
         readinessRevision &+= 1
         return generation
     }
@@ -298,6 +304,12 @@ final class ChatMorphFrameRegistry {
     func consumeAbandonedGeneration() -> Int? {
         defer { abandonedGeneration = nil }
         return abandonedGeneration
+    }
+
+    @discardableResult
+    func consumeAbandonedLifecycleID() -> String? {
+        defer { abandonedLifecycleID = nil }
+        return abandonedLifecycleID
     }
 
     @discardableResult
@@ -342,9 +354,11 @@ private struct ChatDraftPromptMorphSource: ViewModifier {
     let registry: ChatMorphFrameRegistry
 
     func body(content: Content) -> some View {
-        content.onGeometryChange(for: CGRect.self) { geometry in
-            geometry.frame(in: .global)
-        } action: { registry.recordDraftPrompt(frame: $0) }
+        content
+            .onGeometryChange(for: CGRect.self) { geometry in
+                geometry.frame(in: .global)
+            } action: { registry.recordDraftPrompt(frame: $0) }
+            .onDisappear { registry.recordDraftPrompt(frame: .null) }
     }
 }
 
@@ -353,9 +367,11 @@ private struct ChatDraftAttachmentMorphSource: ViewModifier {
     let registry: ChatMorphFrameRegistry
 
     func body(content: Content) -> some View {
-        content.onGeometryChange(for: CGRect.self) { geometry in
-            geometry.frame(in: .global)
-        } action: { registry.recordDraftAttachment(id: id, frame: $0) }
+        content
+            .onGeometryChange(for: CGRect.self) { geometry in
+                geometry.frame(in: .global)
+            } action: { registry.recordDraftAttachment(id: id, frame: $0) }
+            .onDisappear { registry.recordDraftAttachment(id: id, frame: .null) }
     }
 }
 
@@ -403,6 +419,7 @@ struct ChatMorphFlightLayer: View {
     let registry: ChatMorphFrameRegistry
     let layoutTransaction: ChatLayoutTransaction
     let reduceMotion: Bool
+    let onFlightEnded: (String) -> Void
 
     @State private var progress: CGFloat = 0
 
@@ -457,6 +474,9 @@ struct ChatMorphFlightLayer: View {
         .accessibilityHidden(true)
         .onChange(of: registry.readinessRevision, initial: true) { _, _ in
             if let generation = registry.consumeAbandonedGeneration() {
+                if let lifecycleID = registry.consumeAbandonedLifecycleID() {
+                    onFlightEnded(lifecycleID)
+                }
                 layoutTransaction.settle(generation, source: .morphFlight)
                 progress = 0
             }
@@ -464,7 +484,9 @@ struct ChatMorphFlightLayer: View {
         }
         .onChange(of: layoutTransaction.generation?.id) { _, generation in
             guard let flight = registry.flight, generation != flight.generation else { return }
+            let lifecycleID = flight.lifecycleID
             registry.abandon()
+            onFlightEnded(lifecycleID)
         }
         .task(id: registry.flight?.lifecycleID) {
             guard reduceMotion,
@@ -495,9 +517,8 @@ struct ChatMorphFlightLayer: View {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) { progress = 0 }
-        guard let animation = ChatContentTransitionPolicy.promptFlightAnimation(
-            reduceMotion: reduceMotion
-        ) else {
+        guard let animation = layoutTransaction.resolvedAnimation
+            ?? ChatContentTransitionPolicy.promptFlightAnimation(reduceMotion: reduceMotion) else {
             progress = 1
             finish(flight)
             return
@@ -511,12 +532,14 @@ struct ChatMorphFlightLayer: View {
 
     private func finish(_ flight: ChatMorphFrameRegistry.Flight) {
         guard let generation = registry.completeAnimation(lifecycleID: flight.lifecycleID) else { return }
+        onFlightEnded(flight.lifecycleID)
         layoutTransaction.settle(generation, source: .morphFlight)
         progress = 0
     }
 
     private func failOpen(lifecycleID: String) {
         guard let generation = registry.failOpen(lifecycleID: lifecycleID) else { return }
+        onFlightEnded(lifecycleID)
         layoutTransaction.settle(generation, source: .morphFlight)
         progress = 0
     }

@@ -286,6 +286,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
         let attachmentLabel = QueuedMessageAttachmentPresentation.accessibilityLabel(chips: chips)
         return [
             presentation.statusTitle,
+            resourceAccessibilityLabel,
             presentation.text.isEmpty ? nil : presentation.text,
             attachmentLabel.isEmpty ? nil : attachmentLabel,
         ]
@@ -318,25 +319,16 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
     }
 
     private var queuedMorphDestinationIDs: [String: ChatMorphID] {
-        let photos = attachments.filter {
-            $0.mimeType.hasPrefix("image/") && $0.transportBlobID != nil
-        }
-        let files = attachments.filter {
-            !$0.mimeType.hasPrefix("image/") && $0.transportBlobID != nil
-        }
-        return Dictionary(uniqueKeysWithValues:
-            photos.enumerated().map { index, attachment in
-                ("photo-\(index)", ChatMorphID(
+        Dictionary(uniqueKeysWithValues: attachments.compactMap { attachment in
+            guard let blobID = attachment.transportBlobID else { return nil }
+            return (
+                "attachment-\(blobID)",
+                ChatMorphID(
                     lifecycleID: presentation.id,
                     element: .attachment(attachment.id)
-                ))
-            } + files.enumerated().map { index, attachment in
-                ("file-\(index)", ChatMorphID(
-                    lifecycleID: presentation.id,
-                    element: .attachment(attachment.id)
-                ))
-            }
-        )
+                )
+            )
+        })
     }
 
     @ViewBuilder
@@ -387,9 +379,21 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
         }
     }
 
+    private var resourceAccessibilityLabel: String? {
+        guard let resource = presentation.resourceInvocation,
+              !resource.isExtensionCommand else { return nil }
+        return "\(CanonicalResourceChipPresentation.kindTitle(for: resource)) \(CanonicalResourceChipPresentation.title(for: resource))"
+    }
+
     private var accessibilityLabel: String {
-        [presentation.statusTitle, presentation.text.isEmpty ? "Prompt attachments" : presentation.text]
-            .compactMap { $0 }
-            .joined(separator: ": ")
+        [
+            presentation.statusTitle,
+            resourceAccessibilityLabel,
+            presentation.text.isEmpty
+                ? (attachments.isEmpty ? nil : "Prompt attachments")
+                : presentation.text,
+        ]
+        .compactMap { $0 }
+        .joined(separator: ": ")
     }
 }

@@ -38,6 +38,9 @@ struct ChatView: View {
     @State private var keyboardObserver = ChatKeyboardObserver()
     @State private var layoutTransaction = ChatLayoutTransaction()
     @State private var morphRegistry = ChatMorphFrameRegistry()
+    /// A measured morph keeps the composer and keyboard geometry fixed until
+    /// the overlay reaches its stable transcript destination.
+    @State private var deferredMorphSubmissionLifecycleID: String?
     @State private var composerResourceCatalog = ComposerResourceCatalog(commands: [])
     @State private var composerResourcePicker: ComposerResourcePickerSource?
     @State private var composerResourceResults: [ComposerResourceEntry] = []
@@ -119,7 +122,8 @@ struct ChatView: View {
                 ChatMorphFlightLayer(
                     registry: morphRegistry,
                     layoutTransaction: layoutTransaction,
-                    reduceMotion: reduceMotion
+                    reduceMotion: reduceMotion,
+                    onFlightEnded: finishDeferredMorphSubmissionIfNeeded
                 )
             }
             .overlay {
@@ -717,8 +721,37 @@ struct ChatView: View {
     }
 
     private func abandonLayoutTransaction() {
+        deferredMorphSubmissionLifecycleID = nil
         morphRegistry.abandon()
         layoutTransaction.abandon()
+    }
+
+    private func finishDeferredMorphSubmissionIfNeeded(lifecycleID: String) {
+        guard deferredMorphSubmissionLifecycleID == lifecycleID else { return }
+        deferredMorphSubmissionLifecycleID = nil
+        if layoutTransaction.generation == nil {
+            _ = layoutTransaction.join(.submission)
+        }
+        dismissComposerForAdmittedSubmission()
+    }
+
+    private func dismissComposerForAdmittedSubmission() {
+        let keyboardRevision = keyboardObserver.revision
+        // UIKit is the responder authority. Its synchronous keyboard frame
+        // notification joins this exact layout generation when available.
+        _ = composerResponder.resignFirstResponder()
+        composerFocused = false
+        layoutTransaction.configure(
+            keyboard: keyboardObserver.transition,
+            reduceMotion: reduceMotion
+        )
+        if keyboardObserver.transitionArrived(after: keyboardRevision) {
+            _ = layoutTransaction.join(.keyboard)
+        }
+        // Resolve one clock after the keyboard participant has had its
+        // synchronous admission opportunity. Every submission height owner
+        // reads this frozen value.
+        _ = layoutTransaction.animation
     }
 
     /// Projection data can advance while a descendant sheet is visible, but
@@ -750,10 +783,23 @@ struct ChatView: View {
         }
         if presentationActivity.allowsContinuousAnimation {
             let outgoingPresentation = installed?.handoff.outgoingPresentation
+            let activeFlightLifecycleID = morphRegistry.flight?.lifecycleID
+            let retainedFlightLifecycleID = activeFlightLifecycleID.flatMap { lifecycleID in
+                let retainedByInstalledLifecycle = installed?.containsPhysicalRowID(lifecycleID) == true
+                let retainedByCanonicalAlias = sessionPresentation.canonicalSubmissionAliases.aliases
+                    .contains { canonicalID, physicalID in
+                        physicalID == lifecycleID
+                            && installed?.containsDisplayedID(canonicalID) == true
+                    }
+                return retainedByInstalledLifecycle || retainedByCanonicalAlias ? lifecycleID : nil
+            }
             if let generation = morphRegistry.reconcile(
-                installedLifecycleID: outgoingPresentation?.id,
+                installedLifecycleID: outgoingPresentation?.id ?? retainedFlightLifecycleID,
                 permitsFlight: outgoingPresentation?.usesQueuedCardVisual != true
             ) {
+                if let activeFlightLifecycleID {
+                    finishDeferredMorphSubmissionIfNeeded(lifecycleID: activeFlightLifecycleID)
+                }
                 layoutTransaction.settle(generation, source: .morphFlight)
             }
         }
@@ -803,24 +849,6 @@ struct ChatView: View {
             catch { return }
             guard layoutTransaction.generation?.id == generation,
                   abs(composerHeightLedger.current - height)
-                    <= ChatComposerStructuralTransitionPolicy.heightEpsilon else { return }
-            layoutTransaction.settle(generation, source: .submission)
-        }
-    }
-
-    private func settleUnchangedComposerAfterDisplayFrames(
-        generation: Int,
-        baselineHeight: CGFloat
-    ) {
-        Task { @MainActor in
-            do {
-                try await displayFrameScheduler.nextFrame()
-                try Task.checkCancellation()
-                try await displayFrameScheduler.nextFrame()
-                try Task.checkCancellation()
-            } catch { return }
-            guard layoutTransaction.generation?.id == generation,
-                  abs(composerHeightLedger.current - baselineHeight)
                     <= ChatComposerStructuralTransitionPolicy.heightEpsilon else { return }
             layoutTransaction.settle(generation, source: .submission)
         }
@@ -1083,6 +1111,7 @@ struct ChatView: View {
             frameScheduler: displayFrameScheduler,
             minimumUnderflowContentHeight: minimumUnderflowContentHeight,
             reduceMotion: reduceMotion,
+            submissionAnimation: layoutTransaction.resolvedAnimation,
             presentationEpoch: sessionPresentation.open.epoch,
             presentationPhase: sessionPresentation.open.phase,
             admitsGeometryCallbacks: admitsScrollGeometryCallbacks,
@@ -2542,6 +2571,9 @@ struct ChatView: View {
             resourcePicker: composerResourcePicker,
             resourceResults: composerResourceResults,
             morphRegistry: morphRegistry,
+            submissionTransitionID: layoutTransaction.activeSubmissionGenerationID,
+            submissionAnimation: layoutTransaction.resolvedAnimation,
+            holdsSubmissionHeight: morphRegistry.flight != nil,
             reduceMotion: reduceMotion,
             showsCatchUp: scrollCoordinator.shouldShowCatchUpButton,
             showsAmbientWorkingBlur: showsAmbientWorkingBlur,
@@ -3091,8 +3123,6 @@ struct ChatView: View {
             context: traceContext,
             state: interactionTraceState(installed: installed)
         )
-        let composerHeightBeforeSubmission = composerHeightLedger.current
-        let keyboardRevision = keyboardObserver.revision
         do {
             // Admission and the local lifecycle graft are atomic. A locally
             // knowable rejection must occur before viewport, responder, layout,
@@ -3118,16 +3148,6 @@ struct ChatView: View {
                 // changes join one settlement generation only after admission.
                 let layoutGeneration = layoutTransaction.join(.submission)
                 _ = layoutTransaction.join(.transcriptGrowth)
-                // Only an admitted submission may change responder state.
-                composerFocused = false
-                _ = composerResponder.resignFirstResponder()
-                layoutTransaction.configure(
-                    keyboard: keyboardObserver.transition,
-                    reduceMotion: reduceMotion
-                )
-                if keyboardObserver.transitionArrived(after: keyboardRevision) {
-                    _ = layoutTransaction.join(.keyboard)
-                }
                 let submittedAttachments = model.composerDrafts.submittedAttachments(for: target)
                     .filter { attachment in
                         attachment.gatewayUploadID.map(submission.attachmentIDs.contains) == true
@@ -3141,7 +3161,12 @@ struct ChatView: View {
                     generation: morphGeneration,
                     suppress: reduceMotion || scenePhase != .active || freezesDetachedProjection
                 )
-                if !stagedMorph {
+                if stagedMorph {
+                    deferredMorphSubmissionLifecycleID = submission.presentationID
+                    // The keyboard and composer stay physically fixed through
+                    // the measured flight, so its destination cannot move.
+                } else {
+                    dismissComposerForAdmittedSubmission()
                     layoutTransaction.settle(morphGeneration, source: .morphFlight)
                 }
                 // Exact extension commands do not create a canonical user
@@ -3203,10 +3228,6 @@ struct ChatView: View {
                     state: interactionTraceState()
                 )
             }
-            settleUnchangedComposerAfterDisplayFrames(
-                generation: layoutGeneration,
-                baselineHeight: composerHeightBeforeSubmission
-            )
             // ComposerDraftCoordinator retains accepted transport across route
             // changes and target-gates late presentation effects.
             Task { @MainActor in

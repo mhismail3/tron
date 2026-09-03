@@ -11,6 +11,9 @@ struct ChatComposerView: View {
     let resourcePicker: ComposerResourcePickerSource?
     let resourceResults: [ComposerResourceEntry]
     let morphRegistry: ChatMorphFrameRegistry
+    let submissionTransitionID: Int?
+    let submissionAnimation: Animation?
+    let holdsSubmissionHeight: Bool
     let reduceMotion: Bool
     let showsCatchUp: Bool
     let showsAmbientWorkingBlur: Bool
@@ -54,6 +57,9 @@ struct ChatComposerView: View {
                 resourcePickerKind: resourcePicker?.kind,
                 resourceResultIDs: resourceResults.map(\.id)
             ),
+            submissionTransitionID: submissionTransitionID,
+            submissionAnimation: submissionAnimation,
+            holdsSubmissionHeight: holdsSubmissionHeight,
             reduceMotion: reduceMotion,
             onHeightChange: onComposerHeight,
             onHeightSettled: onComposerHeightSettled

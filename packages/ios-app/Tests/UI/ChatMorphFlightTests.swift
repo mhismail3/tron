@@ -165,6 +165,28 @@ struct ChatMorphFlightTests {
         #expect(suppressed.flight == nil)
     }
 
+    @Test("disappearing composer sources cannot seed a later flight")
+    func sourceDisappearanceInvalidatesFrames() {
+        let prompt = ChatMorphFrameRegistry()
+        prompt.recordDraftPrompt(frame: promptFrame)
+        prompt.recordDraftPrompt(frame: .null)
+        #expect(!prompt.stage(
+            lifecycle: lifecycle(nonce: 31, attachment: nil),
+            generation: 1,
+            suppress: false
+        ))
+
+        let attachmentRegistry = ChatMorphFrameRegistry()
+        attachmentRegistry.recordDraftPrompt(frame: promptFrame)
+        attachmentRegistry.recordDraftAttachment(id: "upload", frame: chipFrame)
+        attachmentRegistry.recordDraftAttachment(id: "upload", frame: .null)
+        #expect(!attachmentRegistry.stage(
+            lifecycle: lifecycle(nonce: 32, attachment: attachment),
+            generation: 2,
+            suppress: false
+        ))
+    }
+
     @Test("destination retargeting ignores subpixel geometry churn")
     func destinationRetargetTolerance() {
         let base = CGRect(x: 40, y: 100, width: 250, height: 52)
@@ -179,8 +201,8 @@ struct ChatMorphFlightTests {
         ))
     }
 
-    @Test("a valid destination may retarget while the keyboard settles")
-    func validDestinationRetargetsContinuously() throws {
+    @Test("a flight freezes its exact destination after progress begins")
+    func activeFlightFreezesDestination() throws {
         let registry = ChatMorphFrameRegistry()
         registry.recordDraftPrompt(frame: promptFrame)
         let lifecycle = lifecycle(nonce: 17, attachment: nil)
@@ -192,7 +214,7 @@ struct ChatMorphFlightTests {
         #expect(registry.beginAnimation(lifecycleID: lifecycle.id ?? "") != nil)
         registry.recordDestination(id: id, frame: settled)
         #expect(registry.flight?.phase == .animating)
-        #expect(registry.flight?.destinationFrames[id] == settled)
+        #expect(registry.flight?.destinationFrames[id] == initial)
         #expect(registry.consumeAbandonedGeneration() == nil)
     }
 
@@ -208,7 +230,9 @@ struct ChatMorphFlightTests {
         registry.recordDestination(id: id, frame: .null)
         #expect(registry.flight == nil)
         #expect(registry.consumeAbandonedGeneration() == 12)
+        #expect(registry.consumeAbandonedLifecycleID() == lifecycle.id)
         #expect(registry.consumeAbandonedGeneration() == nil)
+        #expect(registry.consumeAbandonedLifecycleID() == nil)
     }
 
     @Test("preflight card replacement fails an ordinary prompt flight open")

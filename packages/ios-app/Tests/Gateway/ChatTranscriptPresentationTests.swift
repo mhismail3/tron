@@ -310,6 +310,55 @@ struct ChatTranscriptPresentationTests {
         ) == nil)
     }
 
+    @Test("queue replacement requires exact skill or prompt resource identity")
+    func queueResourceReplacementIdentity() throws {
+        let resource = ComposerResourceInvocation(
+            source: .skill,
+            name: "review",
+            arguments: "ship it"
+        )
+        let queued = SessionSnapshot.QueuedMessage(
+            id: "operation-resource",
+            behavior: .steer,
+            text: "ship it",
+            attachmentCount: 0,
+            resourceInvocation: resource
+        )
+        let canonicalWithoutResource = try decodeTranscriptFixture(
+            TranscriptItem.self,
+            from: Data(#"{"id":"canonical-plain","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","presentationId":"canonical-plain","content":[{"id":"text","ordinal":0,"type":"text","text":"ship it"}]}"#.utf8)
+        )
+        let canonicalWithResource = try decodeTranscriptFixture(
+            TranscriptItem.self,
+            from: Data(#"{"id":"canonical-resource","parentId":null,"timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"user","presentationId":"canonical-resource","content":[{"id":"text","ordinal":0,"type":"text","text":"ship it"}],"semantic":{"version":1,"direction":"ambientStatus","contextEffect":"none","delivery":"stored","visibility":"visible","kind":"command","origin":{"kind":"extension","ownerId":"extension:test","title":"Test","confidence":"adapter"},"sequence":1,"resourceInvocation":{"source":"skill","name":"review","arguments":"ship it"}}}"#.utf8)
+        )
+        #expect(ChatPromptLifecycleReplacementPolicy.canonicalHandoffID(
+            previousQueue: [queued], incomingQueue: [], previousCanonicalIDs: [],
+            incomingTranscript: [canonicalWithoutResource]
+        ) == nil)
+        #expect(ChatPromptLifecycleReplacementPolicy.canonicalHandoffID(
+            previousQueue: [queued], incomingQueue: [], previousCanonicalIDs: [],
+            incomingTranscript: [canonicalWithResource]
+        ) == "canonical-resource")
+
+        let pending = SessionSnapshot.PendingPrompt(
+            id: "pending-resource",
+            createdAt: "2026-01-01T00:00:01Z",
+            behavior: .steer,
+            text: "ship it",
+            attachmentCount: 0,
+            resourceInvocation: resource
+        )
+        #expect(ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
+            for: pending,
+            in: [canonicalWithoutResource]
+        ).isEmpty)
+        #expect(ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
+            for: pending,
+            in: [canonicalWithResource]
+        ) == ["canonical-resource"])
+    }
+
     @Test("canonical media previews map exact files and only an exact ordered image sequence")
     func canonicalMediaPreviewMapping() throws {
         let photoPreview = Data([1, 2])
