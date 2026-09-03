@@ -1561,13 +1561,19 @@ final class ChatScrollCoordinator {
     private func scheduleOpeningTailFrame() {
         guard let context = openingTailPhase.context,
               context.presentation == presentation else { return }
+        if case .postReveal = openingTailPhase, openingTailFrameTask != nil {
+            // Repeated marker callbacks must not postpone the already-requested
+            // display-frame sample. That sample will inspect the newest values.
+            return
+        }
         openingTailFrameTask?.cancel()
         openingTailFrameTaskGeneration &+= 1
         let generation = openingTailFrameTaskGeneration
         let token = context.token
         let admittedPresentation = context.presentation
-        let semanticRevision = semanticFrameRevision
-        let admittedGeometryRevision = geometryRevision
+        let admittedLayoutEpoch = layoutEpoch
+        let admittedGeometry = geometry
+        let admittedTargetFrame = context.targetSample?.frame
         openingTailFrameTask = Task { [weak self, frameScheduler] in
             do { try await frameScheduler.nextFrame(); try Task.checkCancellation() }
             catch {
@@ -1605,8 +1611,12 @@ final class ChatScrollCoordinator {
                 schedulesPositionedFrame: false
             )
             guard case .postReveal(var value) = self.openingTailPhase else { return }
-            let stable = self.semanticFrameRevision == semanticRevision
-                && self.geometryRevision == admittedGeometryRevision
+            // Display-frame stability is equality of the physical facts, not
+            // absence of observation callbacks. SwiftUI may republish identical
+            // marker and geometry values while active row chrome refreshes.
+            let stable = self.layoutEpoch == admittedLayoutEpoch
+                && self.geometry == admittedGeometry
+                && value.base.targetSample?.frame == admittedTargetFrame
                 && self.openingTailViewportIsPhysicallySettled
             if stable {
                 value.stableFrameCount &+= 1

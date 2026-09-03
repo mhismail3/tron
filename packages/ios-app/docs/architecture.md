@@ -289,7 +289,7 @@ two-phase `session.open`/`session.sync` handshake installs its authoritative tai
 exact initial transcript projection, and a physically verified viewport at the marker
 after transcript and queue rows. Rows remain fully realizable beneath that opaque cover;
 an opacity-zero lazy stack is never used as a layout gate. The eight-point positioning lift resolves behind that cover, and the cover is removed only after
-current non-lifted marker and geometry evidence, two unchanged presented frames, and consumption of
+current non-lifted marker and geometry evidence, two physically unchanged presented frames regardless of duplicate SwiftUI observation callbacks, and consumption of
 the exact opening-target release. One still-covered frame then installs the settled transcript at zero opacity and an eight-point visual offset; the cover fades while that immutable commit rises into place, with interaction, repair, paging, and live projection intake still leased until animation completion and the next ready display-link frame. Reduce Motion keeps only the short fade. Automatic projection intake remains
 coalesced through that complete transaction. The first complete same-session/presentation/runtime commit may
 position and reveal even if streaming has advanced its payload; only the newest desired source is submitted

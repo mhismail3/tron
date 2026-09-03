@@ -1372,6 +1372,16 @@ struct ChatScrollCoordinatorTests {
             var nextRequest = 3
             while coordinator.targetReleaseGeneration == 0, nextRequest <= 8 {
                 await frames.waitForRequest(count: nextRequest)
+                for _ in 0..<4 {
+                    coordinator.geometryChanged(previous: bottom, current: bottom)
+                    coordinator.semanticFrameChanged(
+                        renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+                        frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+                    )
+                }
+                // Repeated identical observation callbacks must not reset the
+                // two-frame physical stability proof.
+                await Task.yield()
                 frames.releaseNext()
                 await Task.yield()
                 nextRequest += 1
