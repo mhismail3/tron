@@ -249,18 +249,19 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
             .accessibilityElement(children: .contain)
             .accessibilityLabel(promptAccessibilityLabel)
         } else {
-            HStack(alignment: .top, spacing: 10) {
-                Spacer(minLength: 24)
-                VStack(alignment: .trailing, spacing: 4) {
-                    resourceChip
-                    attachmentStrip
-                    if !presentation.text.isEmpty {
-                        UserPromptText(text: presentation.text)
-                            .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
-                            .padding(.top, ChatPromptContainerStyle.topPadding)
-                            .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
-                            .modifier(UserPromptGlassModifier())
-                    }
+            // Match the canonical user row's full-width proposal exactly. An
+            // extra leading spacer narrows long optimistic prompts, then lets
+            // them rewrap and change height when canonical content replaces
+            // the same physical row.
+            VStack(alignment: .trailing, spacing: 4) {
+                resourceChip
+                attachmentStrip
+                if !presentation.text.isEmpty {
+                    UserPromptText(text: presentation.text)
+                        .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
+                        .padding(.top, ChatPromptContainerStyle.topPadding)
+                        .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
+                        .modifier(UserPromptGlassModifier())
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)

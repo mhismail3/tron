@@ -165,7 +165,7 @@ struct ChatContentTransitionTests {
 
     @Test("outgoing prompts use a short straight-up visual offset")
     func outgoingPromptEntrance() {
-        #expect(ChatOutgoingSubmissionEntranceRow<EmptyView>.hiddenOffset == 14)
+        #expect(ChatOutgoingSubmissionEntranceRow<EmptyView>.hiddenOffset == 20)
     }
 
     @Test("user and queue content rises from the trailing composer edge")
@@ -189,7 +189,7 @@ struct ChatContentTransitionTests {
         #expect(queued.scale == 0.978)
         #expect(queued.offsetY == 12)
         #expect(ChatContentTransitionPolicy.transcriptEntranceDuration == 0.18)
-        #expect(ChatContentTransitionPolicy.promptEntranceDuration == 0.18)
+        #expect(ChatContentTransitionPolicy.promptEntranceDuration == 0.28)
         #expect(ChatContentTransitionPolicy.notificationReplacementDuration == 0.16)
     }
 

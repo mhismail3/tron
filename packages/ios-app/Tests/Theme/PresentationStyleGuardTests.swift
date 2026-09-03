@@ -784,6 +784,11 @@ struct PresentationStyleGuardTests {
         ).dropFirst().first ?? "").components(
             separatedBy: "struct ChatQueuedMessageEntranceRow"
         ).first ?? ""
+        let ordinaryOutgoing = (outgoing.components(
+            separatedBy: "// Match the canonical user row's full-width proposal exactly."
+        ).dropFirst().first ?? "").components(
+            separatedBy: "private var promptAccessibilityLabel"
+        ).first ?? ""
 
         #expect(!FileManager.default.fileExists(atPath: retiredMorphPath.path))
         #expect(entrances.contains("private struct ChatEntranceGrowthLayout: Layout, Animatable"))
@@ -792,7 +797,7 @@ struct PresentationStyleGuardTests {
         #expect(entrances.contains("contentChanged && layoutStable"))
         #expect(entrances.contains("struct Cache"))
         #expect(entrances.contains("cache.proposedWidth == width"))
-        #expect(outgoingEntrance.contains("static var hiddenOffset: CGFloat { 14 }"))
+        #expect(outgoingEntrance.contains("static var hiddenOffset: CGFloat { 20 }"))
         #expect(outgoingEntrance.contains(".opacity(revealed ? 1 : 0)"))
         #expect(outgoingEntrance.contains(".offset(y: revealed || reduceMotion ? 0 : Self.hiddenOffset)"))
         #expect(outgoingEntrance.contains("Animation.easeOut("))
@@ -801,8 +806,9 @@ struct PresentationStyleGuardTests {
         #expect(!outgoingEntrance.contains("scaleEffect"))
         #expect(!outgoingEntrance.contains("offset(x:"))
         #expect(!outgoingEntrance.contains(".onDisappear"))
-        #expect(transcript.contains("onPromptEntranceRetired: onEntranceSettled"))
-        #expect(transcript.contains("enum ChatPromptEntranceRetirementPolicy"))
+        #expect(transcript.contains("@State private var retainedPromptEntrance"))
+        #expect(transcript.contains("onPromptEntranceSettled: onEntranceSettled"))
+        #expect(transcript.contains("ChatOutgoingSubmissionEntranceRow("))
         #expect(!entrances.contains("ChatPromptReplacementLayoutHost"))
         #expect(!entrances.contains("ChatOutgoingEntranceLayoutPolicy"))
         #expect(entrances.contains("ChatEntranceGrowthClipShape"))
@@ -814,6 +820,8 @@ struct PresentationStyleGuardTests {
         #expect(!composer.contains("chatDraftAttachmentMorphSource"))
         #expect(!composer.contains("chatDraftResourceMorphSource"))
         #expect(!outgoing.contains("chatMorphDestination"))
+        #expect(ordinaryOutgoing.contains("VStack(alignment: .trailing, spacing: 4)"))
+        #expect(!ordinaryOutgoing.contains("Spacer(minLength: 24)"))
         #expect(!transcript.contains("promptReplacementRevision"))
         #expect(transcript.contains("withTransaction(transaction) { displayed = next }"))
         #expect(transcript.contains("tailTargetHeight: CGFloat = 0.5"))
