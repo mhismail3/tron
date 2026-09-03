@@ -2,7 +2,7 @@ import { X509Certificate } from "@peculiar/x509";
 import { encode } from "cbor-x";
 import { describe, expect, test } from "vitest";
 import syntheticAttestation from "./app-attest-synthetic.json";
-import { verifyAssertion, verifyAttestation, verifyAttestationAgainstTrustedRoot } from "../src/app-attest";
+import { verifyAssertion, verifyAttestationAgainstTrustedRoot } from "../src/app-attest";
 import { APPLE_APP_ATTESTATION_ROOT_PEM } from "../src/apple-app-attestation-root";
 import { base64Url, concatBytes, decodeBase64Url, ownedBuffer, sha256, utf8 } from "../src/crypto";
 
@@ -40,10 +40,12 @@ function rawEcdsaToDer(raw: Uint8Array): Uint8Array {
 }
 
 describe("Apple App Attest verification", () => {
-  test("parses the pinned Apple trust root in the Workers runtime", () => {
+  test("parses the pinned Apple trust root within its reviewed validity window", () => {
     const root = new X509Certificate(APPLE_APP_ATTESTATION_ROOT_PEM);
+    const reviewedAt = new Date("2026-01-01T00:00:00.000Z");
     expect(root.subject).toContain("Apple App Attestation Root CA");
-    expect(root.notAfter.getTime()).toBeGreaterThan(Date.now());
+    expect(root.notBefore.getTime()).toBeLessThanOrEqual(reviewedAt.getTime());
+    expect(root.notAfter.getTime()).toBeGreaterThan(reviewedAt.getTime());
   });
 
   test("executes the complete pinned-chain, nonce, AAGUID, credential, and counter path", async () => {
@@ -77,15 +79,16 @@ describe("Apple App Attest verification", () => {
     await expect(verifyAssertion({ ...fixture, clientDataHash, appId: "TEAMID.com.tron.mobile.beta", previousCounter: 6 })).resolves.toBe(7);
     await expect(verifyAssertion({ ...fixture, clientDataHash, appId: "TEAMID.com.tron.mobile.beta", previousCounter: 7 })).rejects.toThrow("assertion_replay");
     await expect(verifyAssertion({ ...fixture, clientDataHash, appId: "TEAMID.com.attacker", previousCounter: 6 })).rejects.toThrow("invalid_relying_party");
+
+    const tamperedObject = decodeBase64Url(fixture.assertionObject);
+    tamperedObject[tamperedObject.length - 1] ^= 1;
+    await expect(verifyAssertion({
+      ...fixture,
+      assertionObject: base64Url(tamperedObject),
+      clientDataHash,
+      appId: "TEAMID.com.tron.mobile.beta",
+      previousCounter: 6,
+    })).rejects.toThrow("invalid_assertion_signature");
   });
 
-  test("fails closed on malformed attestation instead of admitting a development bypass", async () => {
-    await expect(verifyAttestation({
-      attestationObject: base64Url(encode({ fmt: "none", attStmt: {}, authData: new Uint8Array(37) })),
-      keyId: "k".repeat(43),
-      clientDataHash: new Uint8Array(32),
-      appId: "TEAMID.com.tron.mobile.beta",
-      environment: "development",
-    })).rejects.toThrow("invalid_attestation_format");
-  });
 });

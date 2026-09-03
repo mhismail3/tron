@@ -292,7 +292,10 @@ struct PushNotificationCoordinatorTests {
                 #expect(route.sessionID == "session-from-push")
                 #expect(await MainActor.run { model.ownsNavigationRoute(route) })
                 #expect(factory.requests.count == 2)
-                #expect(await MainActor.run { model.connectionState } == .reconnecting)
+                    // Routing is admitted only after the replacement socket has
+                // authenticated. Do not assert the transient reconnecting phase:
+                // it may have already converged by the time the route is returned.
+                #expect(await MainActor.run { model.connectionState } == .connected)
             }
         } catch {
             await model.teardown()

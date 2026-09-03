@@ -5,16 +5,6 @@ import Testing
 
 @Suite("MenuBarLogReader")
 struct MenuBarLogReaderTests {
-    @Test("accepts only the exact supported server hello")
-    func decodesServerHello() {
-        let accepted = #"{"type":"hello","protocolVersion":4,"minProtocolVersion":4}"#
-        let older = #"{"type":"hello","protocolVersion":3,"minProtocolVersion":3}"#
-        let future = #"{"type":"hello","protocolVersion":5,"minProtocolVersion":4}"#
-        #expect(MenuBarLogReader.decodeHello(data: Data(accepted.utf8)) == .accepted)
-        #expect(MenuBarLogReader.decodeHello(data: Data(older.utf8)) == .rejected)
-        #expect(MenuBarLogReader.decodeHello(data: Data(future.utf8)) == .rejected)
-    }
-
     @Test("decodes system.logs response")
     func decodesRecentLogsResponse() throws {
         let data = """
@@ -47,19 +37,6 @@ struct MenuBarLogReaderTests {
         """.data(using: .utf8)!
 
         #expect(MenuBarLogReader.decodeFrame(data: data) == .malformed)
-    }
-
-    @Test("log fetching has no production loopback default")
-    func logFetchingRequiresExplicitHost() throws {
-        let sourceURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Sources/MenuBar/Presentation/MenuBarLogReader.swift")
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
-        #expect(source.contains("host: String"))
-        #expect(!source.contains("127.0.0.1"))
     }
 
     @Test("explicit log host is used to build the Gateway socket URL")

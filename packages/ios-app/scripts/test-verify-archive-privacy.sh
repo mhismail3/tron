@@ -71,6 +71,8 @@ fixture() {
 <key>TRONConfiguration</key><string>Release</string>
 <key>TRONPushRoute</key><string>production</string>
 <key>TRONAPNsEnvironment</key><string>production</string>
+<key>TRONGatewayProtocolVersion</key><string>4</string>
+<key>TRONGatewayMinProtocolVersion</key><string>4</string>
 <key>TRONAppAttestEnvironment</key><string>production</string>
 <key>TRONPrivateBlurEnabled</key><string>NO</string>
 </dict></plist>

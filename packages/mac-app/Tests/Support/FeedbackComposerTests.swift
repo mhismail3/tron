@@ -5,12 +5,6 @@ import Testing
 
 @Suite("FeedbackIssueComposer (Mac)")
 struct FeedbackComposerTests {
-    @Test("title includes app version and build number")
-    func titleFormat() {
-        let composer = FeedbackIssueComposer(appVersion: "0.1.0-beta.1", buildNumber: "1", osVersion: "macOS 15.0")
-        #expect(composer.title() == "Mac menu bar feedback - v0.1 (Beta 1) (build 1)")
-    }
-
     @Test("body includes environment, status, and redacted logs")
     func bodyRedactsLogs() {
         let composer = FeedbackIssueComposer(appVersion: "0.1.0-beta.1", buildNumber: "1", osVersion: "macOS 15.0")

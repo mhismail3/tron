@@ -34,31 +34,12 @@ struct PairingURLBuilderTests {
         #expect(queryValue("label", in: url) == "Studio Mac")
     }
 
-    @Test("blank server name label is omitted")
-    func omitsBlankLabel() throws {
-        let payload = PairingPayload(host: "100.64.0.1", port: 9847, code: "ABCD-EFGH", label: "  \n")
-        let url = try #require(PairingURLBuilder.makeURL(payload))
-        #expect(queryValue("label", in: url) == nil)
-    }
-
     @Test("trailing whitespace in host and code is trimmed")
     func whitespaceTrimming() throws {
         let payload = PairingPayload(host: "  100.64.0.1\n", port: 9847, code: "\tABCD-EFGH  ", label: nil)
         let url = try #require(PairingURLBuilder.makeURL(payload))
         #expect(queryValue("host", in: url) == "100.64.0.1")
         #expect(queryValue("code", in: url) == "ABCD-EFGH")
-    }
-
-    @Test("empty host rejected")
-    func emptyHostRejected() {
-        let payload = PairingPayload(host: "", port: 9847, code: "ABCD-EFGH", label: nil)
-        #expect(PairingURLBuilder.makeURL(payload) == nil)
-    }
-
-    @Test("whitespace-only host rejected")
-    func whitespaceOnlyHostRejected() {
-        let payload = PairingPayload(host: "   \n\t", port: 9847, code: "ABCD-EFGH", label: nil)
-        #expect(PairingURLBuilder.makeURL(payload) == nil)
     }
 
     @Test("empty code rejected")

@@ -148,6 +148,14 @@ targets:
             chmod -R a-w "$GATEWAY_DST"
           fi
 
+  SingleInstanceLockProbe:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/Server/ProcessControl/SingleInstanceLock.swift
+      - path: Tests/Fixtures/SingleInstanceLockProbe
+        createIntermediateGroups: true
+
   TronMacTests:
     type: bundle.unit-test
     platform: macOS
@@ -155,8 +163,11 @@ targets:
       - path: Tests
         createIntermediateGroups: true
         optional: true
+        excludes:
+          - Fixtures/SingleInstanceLockProbe/**
     dependencies:
       - target: TronMac
+      - target: SingleInstanceLockProbe
     settings:
       base:
         BUNDLE_LOADER: "$(TEST_HOST)"
@@ -179,6 +190,7 @@ schemes:
       config: Debug
       environmentVariables:
         TRON_MAC_TEST_HOST: "1"
+        TRON_SINGLE_INSTANCE_LOCK_PROBE: "$(BUILT_PRODUCTS_DIR)/SingleInstanceLockProbe"
       targets:
         - TronMacTests
     profile:

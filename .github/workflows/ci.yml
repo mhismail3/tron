@@ -17,6 +17,7 @@ jobs:
         with:
           node-version-file: .node-version
       - run: scripts/personal-info-guard.sh
+      - run: scripts/check-agent-policy.sh
       - run: scripts/tron version check
       - run: scripts/tron version test
       - run: python3 scripts/test-gateway-protocol-contract.py
@@ -26,15 +27,15 @@ jobs:
             scripts/gateway_protocol_contract.py \
             scripts/verify-gateway-protocol-contract.py \
             scripts/test-gateway-protocol-contract.py \
+            scripts/check-documentation-policy.py \
             scripts/validate-ios-artifact.py \
             scripts/ios-test-lock.py \
             scripts/ios-test-process.py \
             scripts/ios-test-simulator.py \
-            scripts/test-documentation-policy.py \
             scripts/test-ios-test-infrastructure.py
       - name: Test iOS runner infrastructure without hardware
         run: python3 scripts/test-ios-test-infrastructure.py
-      - run: python3 scripts/test-documentation-policy.py
+      - run: python3 scripts/check-documentation-policy.py
       - name: Check shell syntax
         run: |
           bash -n \
@@ -44,6 +45,7 @@ jobs:
             scripts/ios-gateway-e2e-test \
             scripts/ios-release-toolchain-doctor.sh \
             scripts/personal-info-guard.sh \
+            scripts/check-agent-policy.sh \
             scripts/tron \
             scripts/tron-version \
             scripts/verify-ci-toolchain.sh \
@@ -57,7 +59,6 @@ jobs:
             packages/ios-app/scripts/test-build-matrix-policy.sh \
             packages/ios-app/scripts/test-verify-archive-privacy.sh \
             packages/ios-app/scripts/verify-archive-privacy.sh \
-            scripts/test-agent-policy.sh \
             scripts/test-generate-xcode-project.sh \
             scripts/test-ios-artifact-validator.sh \
             scripts/tron-ios-device-test \
@@ -124,8 +125,8 @@ jobs:
       - run: scripts/install-ci-tools.sh xcodegen
       - run: scripts/verify-ci-toolchain.sh node ios xcodegen
       - run: packages/ios-app/scripts/test-source-policy.sh
+      - run: scripts/check-agent-policy.sh
       - run: packages/ios-app/scripts/test-build-matrix-policy.sh
-      - run: scripts/test-agent-policy.sh
       - run: scripts/test-ios-artifact-validator.sh
       - run: packages/ios-app/scripts/test-verify-archive-privacy.sh
       - run: scripts/tron-ios-device-test

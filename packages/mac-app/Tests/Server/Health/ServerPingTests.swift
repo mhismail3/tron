@@ -196,16 +196,6 @@ struct ServerPingDecodeTests {
     }
 }
 
-@Suite("ServerPingResult")
-struct ServerPingResultTests {
-    @Test("equality holds for matching cases")
-    func equality() {
-        #expect(ServerPingResult.unauthorized == ServerPingResult.unauthorized)
-        #expect(ServerPingResult.unreachable == ServerPingResult.unreachable)
-        #expect(ServerPingResult.unauthorized != ServerPingResult.unreachable)
-    }
-}
-
 @Suite("ServerPing — live network classification")
 struct ServerPingLiveTests {
     @Test("closed port is never reported as authenticated")

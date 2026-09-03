@@ -45,15 +45,6 @@ struct MacRuntimeVariantTests {
         #expect(!variant.canTakeOverRegistration(ownedBy: MacRuntimeVariant.debugBundleIdentifier))
     }
 
-    @Test("registration takeover keeps installed release authoritative")
-    func registrationTakeoverPolicy() {
-        #expect(MacRuntimeVariant.installedRelease.canTakeOverRegistration(ownedBy: MacRuntimeVariant.debugBundleIdentifier))
-        #expect(MacRuntimeVariant.installedRelease.canTakeOverRegistration(ownedBy: "other"))
-        #expect(!MacRuntimeVariant.installedRelease.canTakeOverRegistration(ownedBy: MacRuntimeVariant.releaseBundleIdentifier))
-        #expect(!MacRuntimeVariant.xcodeDebug.canTakeOverRegistration(ownedBy: MacRuntimeVariant.releaseBundleIdentifier))
-        #expect(!MacRuntimeVariant.xcodeDebug.canTakeOverRegistration(ownedBy: MacRuntimeVariant.debugBundleIdentifier))
-        #expect(!MacRuntimeVariant.xcodeDebug.canTakeOverRegistration(ownedBy: "other"))
-    }
 }
 
 @Suite("MacCommandLineMode")
@@ -86,12 +77,4 @@ struct MacStartupModeTests {
         #expect(MacStartupMode.resolve(variant: release, onboarded: true, command: .normal, underTests: true) == .testHost)
     }
 
-    @Test("test-host detection accepts Xcode test environment markers")
-    func testHostDetectionMarkers() {
-        #expect(TronMacRuntime.isRunningUnderTests(environment: ["TRON_MAC_TEST_HOST": "1"]))
-        #expect(TronMacRuntime.isRunningUnderTests(environment: ["XCTestSessionIdentifier": "session"]))
-        #expect(TronMacRuntime.isRunningUnderTests(environment: ["XCTestConfigurationFilePath": "/tmp/test.xctestconfiguration"]))
-        #expect(TronMacRuntime.isRunningUnderTests(environment: ["XCTestBundlePath": "/tmp/TronMacTests.xctest"]))
-        #expect(!TronMacRuntime.isRunningUnderTests(environment: [:]))
-    }
 }

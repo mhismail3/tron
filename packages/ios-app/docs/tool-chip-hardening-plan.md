@@ -428,7 +428,7 @@ Adopt and test one policy:
 - Chip updates never replay row entrance.
 - Rapid pending installation-tag replacement restarts or supersedes the exact-token failsafe correctly; a stale token cannot resolve a newer pending entrance.
 
-Update `ChatView`, `ChatScrollCoordinator` documentation, hosted tests, and `PresentationStyleGuardTests` so they assert the same production policy.
+Update `ChatView`, `ChatScrollCoordinator` documentation, and hosted behavior tests so they assert the same production policy.
 
 ## Validation plan
 

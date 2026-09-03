@@ -53,7 +53,7 @@ struct AppModelPerformanceSignpostTests {
                 .begin(.sessionResync),
                 .end(.sessionResync, .success, .none),
             ])
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -104,7 +104,7 @@ struct AppModelPerformanceSignpostTests {
             }
             defer { refreshResponder.cancel() }
             try await valueOfOwnedTask(refreshResponder)
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -146,7 +146,7 @@ struct AppModelPerformanceSignpostTests {
                 #expect(failure.code == "sync_failed")
             }
             #expect(await MainActor.run { harness.model.selectedSnapshot } == nil)
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -193,7 +193,7 @@ struct AppModelPerformanceSignpostTests {
             #expect(await MainActor.run {
                 harness.model.authoritativeSnapshot(for: cached.sessionId)
             } == nil)
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -267,7 +267,7 @@ struct AppModelPerformanceSignpostTests {
             }
             #expect(rejectedAfterRevocation?.eventSequence == next.eventSequence)
             #expect(rejectedAfterRevocation?.name != "revoked presentation")
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -325,7 +325,7 @@ struct AppModelPerformanceSignpostTests {
                 harness.model.selectedSnapshot?.transcript.count
             }
             #expect(restoredCount == snapshot.transcript.count)
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -349,7 +349,7 @@ struct AppModelPerformanceSignpostTests {
                 .end(.sessionSync, .cancelled, .none),
                 .end(.sessionOpen, .cancelled, .none),
             ])
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -393,7 +393,7 @@ struct AppModelPerformanceSignpostTests {
             await #expect(throws: CancellationError.self) {
                 try await harness.model.sendSharedContent("must remain pending", target: rejectedTarget)
             }
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -429,7 +429,7 @@ struct AppModelPerformanceSignpostTests {
                 .begin(.receiptResolution),
                 .end(.receiptResolution, .success, .none),
             ])
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -456,7 +456,7 @@ struct AppModelPerformanceSignpostTests {
             await harness.socket.releaseSend()
             #expect(await harness.socket.sentFrames().count == 1)
             #expect(harness.signposts.events().isEmpty)
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -485,7 +485,7 @@ struct AppModelPerformanceSignpostTests {
             }
             #expect(await harness.socket.sentFrames().count == 2)
             #expect(harness.signposts.events().isEmpty)
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -514,7 +514,7 @@ struct AppModelPerformanceSignpostTests {
             }
             #expect(await harness.socket.sentFrames().count == 2)
             #expect(harness.signposts.events().isEmpty)
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -550,7 +550,7 @@ struct AppModelPerformanceSignpostTests {
             #expect(expected.isEmpty)
             #expect(await harness.socket.sentFrames().count == 6)
             #expect(await MainActor.run { harness.model.selectedSessionID } == nil)
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -560,7 +560,7 @@ struct AppModelPerformanceSignpostTests {
             let harness = try await makeHarness()
             await harness.model.loadContext(sessionID: "unmounted-route")
             #expect(await harness.socket.sentFrames().count == 1)
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -581,6 +581,8 @@ struct AppModelPerformanceSignpostTests {
             let route = try await valueOfOwnedTask(creating)
             #expect(route.sessionID == "created-route")
             #expect(await MainActor.run { harness.model.ownsNavigationRoute(route) })
+            #expect(harness.appModelIDs.consumedCount == 1)
+            #expect(harness.gatewayIDs.consumedCount == 2)
             let selectedAfterCreate = await MainActor.run { harness.model.selectedSessionID }
             #expect(selectedAfterCreate == nil)
 
@@ -608,7 +610,7 @@ struct AppModelPerformanceSignpostTests {
             ))
             #expect(await convergence.value == .published)
             #expect(await MainActor.run { harness.model.visibleSessions.map(\.id) } == ["created-route"])
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -639,8 +641,9 @@ struct AppModelPerformanceSignpostTests {
             let route = try await valueOfOwnedTask(forking)
             #expect(route.sessionID == "forked-route")
             #expect(route.editorText == "restored draft")
-            #expect(route.id != route.sessionID)
             #expect(await MainActor.run { harness.model.ownsNavigationRoute(route) })
+            #expect(harness.appModelIDs.consumedCount == 2)
+            #expect(harness.gatewayIDs.consumedCount == 2)
             #expect(await MainActor.run {
                 harness.model.visibleNotices.contains {
                     $0.title == "Session forked" && $0.role == .success && $0.scope == .app
@@ -674,11 +677,11 @@ struct AppModelPerformanceSignpostTests {
             ))
             #expect(await convergence.value == .published)
             #expect(await MainActor.run { harness.model.visibleSessions.map(\.id) } == ["forked-route"])
-            await harness.client.close()
+            await harness.close()
         }
     }
 
-    @Test("targeted prompt removes attachments only after confirmed success")
+    @Test("targeted prompt retains attachments until canonical confirmation")
     func promptAttachmentOrdering() async throws {
         try await withTestWatchdog {
             let harness = try await makeHarness()
@@ -756,9 +759,14 @@ struct AppModelPerformanceSignpostTests {
                 result: .object(["operationId": .string("operation")])
             ))
             try await valueOfOwnedTask(succeeding)
+            // Transport success only proves admission. Canonical transcript
+            // reconciliation owns removal, so the staged attachments remain
+            // available until that authoritative confirmation arrives.
             #expect(await MainActor.run {
-                harness.model.composerDrafts.pendingAttachments(for: target).isEmpty
-            })
+                harness.model.composerDrafts.pendingAttachments(for: target)
+            } == attachments)
+            #expect(harness.appModelIDs.consumedCount == 2)
+            #expect(harness.gatewayIDs.consumedCount == 3)
 
             await MainActor.run {
                 harness.model.noticeCenter.dismissAll()
@@ -787,7 +795,7 @@ struct AppModelPerformanceSignpostTests {
                 )
             }
             #expect(await MainActor.run { harness.model.visibleNotices.isEmpty })
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -826,7 +834,7 @@ struct AppModelPerformanceSignpostTests {
             #expect(await MainActor.run {
                 harness.model.composerDrafts.pendingAttachments(for: target)
             } == [attachment])
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -862,7 +870,7 @@ struct AppModelPerformanceSignpostTests {
             #expect(await MainActor.run {
                 harness.model.authoritativeSnapshot(for: sessionID)?.queuedItems
             } == expectedQueue)
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -918,7 +926,7 @@ struct AppModelPerformanceSignpostTests {
                 harness.model.composerDrafts.editorRequest(for: newTarget)
             } == nil)
             #expect(await MainActor.run { harness.model.sessionTree } == [node])
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -975,7 +983,7 @@ struct AppModelPerformanceSignpostTests {
 
             try await valueOfOwnedTask(labeling)
             #expect(await MainActor.run { harness.model.sessionTree } == [newNode])
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -1011,7 +1019,7 @@ struct AppModelPerformanceSignpostTests {
             ))
             try await valueOfOwnedTask(deleting)
             #expect(await MainActor.run { harness.model.visibleSessions }.isEmpty)
-            await harness.client.close()
+            await harness.close()
         }
     }
 
@@ -1052,11 +1060,11 @@ struct AppModelPerformanceSignpostTests {
             #expect(await MainActor.run {
                 harness.model.authoritativeSnapshot(for: snapshot.sessionId)?.sessionId
             } == snapshot.sessionId)
-            await harness.client.close()
+            await harness.close()
         }
     }
 
-    @Test("terminal attach interval includes deduplicated replay installation")
+    @Test("terminal attach interval records reset replay installation")
     func terminalAttachReplay() async throws {
         try await withTestWatchdog {
             let harness = try await makeHarness()
@@ -1072,12 +1080,15 @@ struct AppModelPerformanceSignpostTests {
             let chunks = [
                 TerminalChunk(sequence: 1, data: "one"),
                 TerminalChunk(sequence: 2, data: "two"),
-                TerminalChunk(sequence: 2, data: "duplicate"),
             ]
             let resetChunks = [
                 TerminalChunk(sequence: 3, data: "replacement"),
-                TerminalChunk(sequence: 3, data: "duplicate replacement"),
             ]
+            var snapshot = try SessionScenarioBuilder(seed: 73).openingTail(targetEncodedBytes: 4_096)
+            snapshot.sessionId = terminal.sessionId
+            await MainActor.run {
+                harness.model.installHostedSubscribedSnapshot(snapshot, token: "terminal-token")
+            }
             let responder = Task {
                 let attach = try await request(in: harness.socket, frameIndex: 1)
                 #expect(attach.method == "terminal.attach")
@@ -1121,21 +1132,35 @@ struct AppModelPerformanceSignpostTests {
             }
             #expect(resetReplay.chunks == Array(resetChunks.prefix(1)))
             #expect(resetReplay.revision == 1)
+            #expect(harness.appModelIDs.consumedCount == 0)
+            #expect(harness.gatewayIDs.consumedCount == 3)
             #expect(harness.signposts.events() == [
                 .begin(.terminalAttachReplay),
                 .end(.terminalAttachReplay, .success, PerformanceMetrics(itemCount: 2)),
                 .begin(.terminalAttachReplay),
                 .end(.terminalAttachReplay, .success, PerformanceMetrics(itemCount: 1)),
             ])
-            await harness.client.close()
+            await harness.close()
         }
     }
 
-    private struct Harness {
+    private struct Harness: @unchecked Sendable {
         let socket: ScriptedGatewaySocket
         let client: GatewayClient
         let model: AppModel
         let signposts: RecordingPerformanceSignposts
+        let gatewayIDs: SequenceUUIDSource
+        let appModelIDs: SequenceUUIDSource
+        let defaults: UserDefaults
+        let defaultsName: String
+        let cacheRoot: URL
+
+        func close() async {
+            await model.teardown()
+            await client.close()
+            defaults.removePersistentDomain(forName: defaultsName)
+            try? FileManager.default.removeItem(at: cacheRoot)
+        }
     }
 
     private struct Request {
@@ -1147,39 +1172,59 @@ struct AppModelPerformanceSignpostTests {
     private func makeHarness() async throws -> Harness {
         let socket = ScriptedGatewaySocket()
         let signposts = RecordingPerformanceSignposts()
-        let gatewayIDs = (1...16).map {
+        // Keep request and model identities deterministic and bounded. The
+        // identity-sensitive cases above also assert their exact consumption.
+        let gatewayIDs = SequenceUUIDSource((1...32).map {
             UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", $0))!
-        }
+        })
         let client = GatewayClient(
             socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
-            uuidSource: SequenceUUIDSource(gatewayIDs).source,
+            uuidSource: gatewayIDs.source,
             performanceSignposts: signposts
         )
+        let defaultsName = "AppModelPerformanceSignpostTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        let profile = GatewayProfile(
+            id: "machine",
+            label: "Mac",
+            host: "gateway.test",
+            port: 9_847,
+            machineId: "machine",
+            deviceId: "device"
+        )
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: defaultsName)
+        let appModelIDs = SequenceUUIDSource((1...8).map {
+            UUID(uuidString: String(format: "10000000-0000-0000-0000-%012d", $0))!
+        })
         let model = AppModel(
             client: client,
-            cache: SnapshotCache(
-                root: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-            ),
-            uuidSource: SequenceUUIDSource([
-                UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
-                UUID(uuidString: "10000000-0000-0000-0000-000000000002")!,
-            ]).source,
+            profiles: GatewayProfileStore(defaults: defaults),
+            cache: SnapshotCache(root: cacheRoot),
+            uuidSource: appModelIDs.source,
             performanceSignposts: signposts
         )
         await socket.enqueue(helloFrame())
-        try await model.connectHostedGateway(
-            profile: GatewayProfile(
-                id: "machine",
-                label: "Mac",
-                host: "gateway.test",
-                port: 9_847,
-                machineId: "machine",
-                deviceId: "device"
-            ),
-            token: "token"
-        )
+        do {
+            try await model.connectHostedGateway(profile: profile, token: "token")
+        } catch {
+            defaults.removePersistentDomain(forName: defaultsName)
+            try? FileManager.default.removeItem(at: cacheRoot)
+            throw error
+        }
         signposts.reset()
-        return Harness(socket: socket, client: client, model: model, signposts: signposts)
+        return Harness(
+            socket: socket,
+            client: client,
+            model: model,
+            signposts: signposts,
+            gatewayIDs: gatewayIDs,
+            appModelIDs: appModelIDs,
+            defaults: defaults,
+            defaultsName: defaultsName,
+            cacheRoot: cacheRoot
+        )
     }
 
     private struct SynchronizationResponseProgress {

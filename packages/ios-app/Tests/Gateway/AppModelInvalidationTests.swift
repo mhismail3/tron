@@ -92,8 +92,7 @@ struct AppModelInvalidationTests {
     }
 
     private func runTrustTargetScenario() async throws {
-        try await withConnectedClient { client, socket in
-            let model = AppModel(client: client)
+        try await withConnectedClient { model, client, socket in
             let target = try #require(TrustTarget(cwd: "/workspace/project"))
 
             let inspection = Task { try await model.inspectTrust(target: target) }
@@ -123,8 +122,7 @@ struct AppModelInvalidationTests {
     }
 
     private func runSettingsOrderingScenario() async throws {
-        try await withConnectedClient { client, socket in
-            let model = AppModel(client: client)
+        try await withConnectedClient { model, client, socket in
             let project = SettingsTarget.project(cwd: "/workspace/project")
             let globalValue = JSONValue.object(["effective": .object(["marker": .string("global")])])
             let projectValue = JSONValue.object(["effective": .object(["marker": .string("project")])])
@@ -165,8 +163,7 @@ struct AppModelInvalidationTests {
     }
 
     private func runProviderOrderingScenario() async throws {
-        try await withConnectedClient { client, socket in
-            let model = AppModel(client: client)
+        try await withConnectedClient { model, client, socket in
             let session = ProviderCatalogTarget.session(id: "session-a")
 
             let globalLoad = Task { await model.refreshProviders(target: .global) }
@@ -276,28 +273,47 @@ struct AppModelInvalidationTests {
     }
 
     private func withConnectedClient(
-        _ operation: (GatewayClient, ScriptedGatewaySocket) async throws -> Void
+        _ operation: (AppModel, GatewayClient, ScriptedGatewaySocket) async throws -> Void
     ) async throws {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(
             socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory
         )
+        let defaultsName = "AppModelInvalidationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: defaultsName)!
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: defaultsName)
+        defaults.set(
+            try JSONEncoder.gateway.encode([profile]),
+            forKey: "gatewayProfiles.v1"
+        )
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let model = AppModel(
+            client: client,
+            profiles: GatewayProfileStore(defaults: defaults),
+            cache: SnapshotCache(root: cacheRoot)
+        )
         await socket.enqueue(helloFrame())
-        _ = try await client.connect(profile: profile, token: "token")
+        try await model.connectHostedGateway(profile: profile, token: "token")
         do {
-            try await operation(client, socket)
+            try await operation(model, client, socket)
         } catch {
+            await model.teardown()
             await client.close()
+            defaults.removePersistentDomain(forName: defaultsName)
+            try? FileManager.default.removeItem(at: cacheRoot)
             throw error
         }
+        await model.teardown()
         await client.close()
+        defaults.removePersistentDomain(forName: defaultsName)
+        try? FileManager.default.removeItem(at: cacheRoot)
     }
 
     private func exercisePublications(
+        model: AppModel,
         client: GatewayClient,
         socket: ScriptedGatewaySocket
     ) async throws {
-        let model = AppModel(client: client)
         model.setHostedSettingsInvalidationGeneration(11)
         model.setHostedPackageInvalidationGeneration(12)
         model.setHostedCustomModelInvalidationGeneration(13)

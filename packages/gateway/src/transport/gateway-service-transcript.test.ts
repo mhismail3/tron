@@ -231,7 +231,7 @@ describe("session transcript paging", () => {
     );
   });
 
-  it("validates a selected skill and keeps its transport prefix out of display text", async () => {
+  it("validates selected resources and preserves literal command arguments", async () => {
     const prompt = vi.fn(async () => ({ operationId: "skill-operation" }));
     const execute = vi.fn(async (
       _identity: string,
@@ -239,7 +239,10 @@ describe("session transcript paging", () => {
       _commandId: string,
       operation: () => Promise<unknown>,
     ) => operation());
-    const commands = vi.fn(() => [{ name: "skill:review", source: "skill" }]);
+    const commands = vi.fn(() => [
+      { name: "skill:review", source: "skill" },
+      { name: "goal", source: "extension" },
+    ]);
     const service = new GatewayService({
       sessions: {
         isSubscribed: () => true,
@@ -277,6 +280,13 @@ describe("session transcript paging", () => {
       resourceInvocation: { source: "skill", name: "review", arguments: "" },
       commandId: "00000000-0000-4000-8000-000000000005",
     })).resolves.toEqual({ operationId: "skill-operation" });
+    await expect(service.invoke(client, "session.prompt", {
+      sessionId: "session",
+      text: "/goal\tvalue",
+      commandId: "00000000-0000-4000-8000-000000000013",
+    })).resolves.toEqual({ operationId: "skill-operation" });
+    expect(prompt).toHaveBeenCalledWith("/goal\tvalue", [], undefined, expect.anything(), expect.any(Function));
+
     commands.mockReturnValue([
       { name: "skill:review", source: "skill" },
       { name: "skill:review", source: "extension" },
@@ -287,7 +297,7 @@ describe("session transcript paging", () => {
       resourceInvocation: { source: "skill", name: "review", arguments: "Inspect this change" },
       commandId: "00000000-0000-4000-8000-000000000006",
     })).rejects.toMatchObject({ code: "conflict", retryable: false });
-    expect(prompt).toHaveBeenCalledTimes(2);
+    expect(prompt).toHaveBeenCalledTimes(3);
   });
 
   it("admits empty resources, rejects mismatched text, and rejects extension attachments", async () => {
@@ -318,22 +328,6 @@ describe("session transcript paging", () => {
       resourceInvocation: { source: "extension", name: "goal", arguments: "" },
       commandId: "00000000-0000-4000-8000-000000000009",
     })).rejects.toMatchObject({ code: "invalid_request" });
-  });
-
-  it("preserves Pi literal-space command parsing", async () => {
-    const prompt = vi.fn(async () => ({ operationId: "plain-operation" }));
-    const execute = vi.fn(async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation());
-    const commands = vi.fn(() => [{ name: "goal", source: "extension" }]);
-    const service = new GatewayService({
-      sessions: { isSubscribed: () => true, acquire: async () => ({ id: "session", prompt, commands }) },
-      uploads: { materialize: async () => ({ envelope: "", images: [], photoCount: 0, fileAttachmentCount: 0, attachments: [] }) },
-      receipts: { execute },
-    } as unknown as GatewayServiceDependencies);
-    await expect(service.invoke(client, "session.prompt", {
-      sessionId: "session", text: "/goal\tvalue", uploadIds: [],
-      commandId: "00000000-0000-4000-8000-000000000010",
-    })).resolves.toEqual({ operationId: "plain-operation" });
-    expect(prompt).toHaveBeenCalledWith("/goal\tvalue", [], undefined, expect.anything(), expect.any(Function));
   });
 
   it("rejects invalid resource controls and oversized UTF-8 names", async () => {

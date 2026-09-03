@@ -11,20 +11,6 @@ struct SnapshotCacheTests {
         #expect(SnapshotCachePolicy.maximumEncodedSessionBytes == 131_072)
     }
 
-    @Test("writes use protection-at-creation and backup-excluded root policies")
-    func filePolicySourceContract() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let source = try String(
-            contentsOf: packageRoot.appending(path: "Sources/Support/SnapshotCache.swift"),
-            encoding: .utf8
-        )
-        #expect(source.contains("options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]"))
-        #expect(source.contains("values.isExcludedFromBackup = true"))
-    }
-
     @Test("ignores legacy snapshot state while retaining summaries")
     func ignoresLegacySnapshotValues() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)

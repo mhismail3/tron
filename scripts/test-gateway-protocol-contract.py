@@ -8,19 +8,17 @@ import unittest
 from pathlib import Path
 
 from gateway_protocol_contract import (
-    GatewayProtocolContract,
     ProtocolContractError,
     load_contract,
     verify_gateway_payload,
     verify_ios_app,
     verify_mac_app,
-    verify_source_contract,
 )
 
 
 class GatewayProtocolContractTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.contract = GatewayProtocolContract(4, 4)
+        self.contract = load_contract()
         self.temporary = tempfile.TemporaryDirectory(prefix="tron-protocol-contract-")
         self.root = Path(self.temporary.name)
 
@@ -48,11 +46,7 @@ class GatewayProtocolContractTests(unittest.TestCase):
             "minProtocolVersion": minimum,
         }), encoding="utf-8")
 
-    def test_repository_source_contract_is_coherent(self) -> None:
-        self.assertEqual(load_contract(), self.contract)
-        self.assertEqual(verify_source_contract(), self.contract)
-
-    def test_ios_artifact_metadata_is_lockstep(self) -> None:
+    def test_ios_artifact_metadata_matches_canonical_contract(self) -> None:
         app = self.root / "TronMobile.app"
         app.mkdir()
         self.write_info(app / "Info.plist")

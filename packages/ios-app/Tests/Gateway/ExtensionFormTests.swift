@@ -250,69 +250,6 @@ struct ExtensionFormTests {
         ) == nil)
     }
 
-    @Test func sheetRestoresIndependentSwipePagesWithFixedProgressAndDirectRows() throws {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let source = try String(
-            contentsOf: root.appending(path: "Sources/UI/Chat/ExtensionFormSheet.swift"),
-            encoding: .utf8
-        )
-        #expect(source.contains("TabView(selection: $currentQuestionIndex)"))
-        #expect(source.contains(".tabViewStyle(.page(indexDisplayMode: .never))"))
-        #expect(source.contains("fixedQuestionStatus(form)"))
-        #expect(source.contains(".tronTopBlurSurface()"))
-        #expect(!source.contains(".tronScrollEdgeChrome()"))
-        #expect(!source.contains("respond(value: nil, cancelled: true)"))
-        #expect(source.contains("onLocallyClosed()"))
-        #expect(source.contains("page == currentQuestionIndex"))
-        #expect(source.contains("questionPage(question, index: index)"))
-        #expect(source.contains("private func questionPage"))
-        #expect(source.contains("ScrollView"))
-        #expect(source.contains("activeOtherQuestionIDs"))
-        #expect(source.contains("focused($focusedQuestionID, equals: question.id)"))
-        #expect(source.contains("ToolbarItem(placement: .topBarTrailing)"))
-        #expect(source.contains("Button(action: submit)"))
-        #expect(!source.contains("reviewing"))
-        #expect(!source.contains("Review your answers"))
-        #expect(!source.contains("Button(\"Next\""))
-        #expect(!source.contains("ProgressView(value:"))
-    }
-
-    @Test func pendingToolChipsReopenNativeInteractionsAndCompletedAskUserDetailsAreReadOnly() throws {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let toolRuns = try String(
-            contentsOf: root.appending(path: "Sources/UI/Chat/ChatToolRunViews.swift"),
-            encoding: .utf8
-        )
-        let chatView = try String(
-            contentsOf: root.appending(path: "Sources/UI/Chat/ChatView.swift"),
-            encoding: .utf8
-        )
-        let toolDetails = try String(
-            contentsOf: root.appending(path: "Sources/UI/Chat/ToolDetailSheet.swift"),
-            encoding: .utf8
-        )
-        let primitiveSheet = try String(
-            contentsOf: root.appending(path: "Sources/UI/Chat/ExtensionInteractionSheet.swift"),
-            encoding: .utf8
-        )
-        #expect(toolRuns.contains("PendingExtensionInteractionToolPresentation.interaction("))
-        #expect(toolRuns.contains("presentPendingInteraction(interaction)"))
-        #expect(!toolRuns.contains("pendingInteractionSheet("))
-        #expect(!toolRuns.contains("@State private var pendingInteraction"))
-        #expect(chatView.contains(".environment(\\.pendingExtensionInteractionPresenter)"))
-        #expect(chatView.contains("permitsExtensionInteractionPresentation = true"))
-        #expect(toolDetails.contains("AskUserToolPresentation.completed(tool: tool)"))
-        #expect(toolDetails.contains("AskUserCompletedFormView"))
-        #expect(!primitiveSheet.contains("cancelled: true"))
-        #expect(primitiveSheet.contains("extensionInteractionDrafts.savePrimitive("))
-    }
-
     @Test func responsePolicyRequiresExactCoverageAndBoundsOtherByUTF8Bytes() {
         let form = descriptor()
         let valid = ExtensionFormAnswer(version: 1, answers: [

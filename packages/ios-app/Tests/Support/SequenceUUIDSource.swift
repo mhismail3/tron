@@ -3,17 +3,27 @@ import Synchronization
 @testable import TronMobile
 
 final class SequenceUUIDSource: Sendable {
-    private let values: Mutex<[UUID]>
+    private struct State {
+        var values: [UUID]
+        var consumedCount = 0
+    }
+
+    private let state: Mutex<State>
 
     init(_ values: [UUID]) {
-        self.values = Mutex(values)
+        self.state = Mutex(State(values: values))
+    }
+
+    var consumedCount: Int {
+        state.withLock { state in state.consumedCount }
     }
 
     var source: UUIDSource {
         UUIDSource { [self] in
-            self.values.withLock { values in
-                precondition(!values.isEmpty, "SequenceUUIDSource exhausted")
-                return values.removeFirst()
+            self.state.withLock { state in
+                precondition(!state.values.isEmpty, "SequenceUUIDSource exhausted")
+                state.consumedCount += 1
+                return state.values.removeFirst()
             }
         }
     }

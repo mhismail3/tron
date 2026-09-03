@@ -57,10 +57,10 @@ describe("SemanticUIBroker", () => {
     });
   });
 
-  it("installs settlement authority before synchronously broadcasting presentation", async () => {
+  it("settles re-entrant presentations and isolates detached notification failures", async () => {
     let broker!: SemanticUIBroker;
     let answered = false;
-    const announced: string[] = [];
+    const reentrantAnnouncements: string[] = [];
     broker = brokerWith((_topic, payload) => {
       const interaction = (payload as { interactionList?: Array<{ id: string; hostEpoch: string; presentationRevision: number }> }).interactionList?.[0];
       if (!interaction || answered) return;
@@ -72,7 +72,7 @@ describe("SemanticUIBroker", () => {
           { questionId: "q-region", optionIds: ["eu"] },
         ],
       }, false);
-    }, undefined, (interaction) => { announced.push(interaction.id); });
+    }, undefined, (interaction) => { reentrantAnnouncements.push(interaction.id); });
     await expect(broker.requestForm({ form: form() })).resolves.toEqual({
       version: 1,
       answers: [
@@ -81,7 +81,21 @@ describe("SemanticUIBroker", () => {
       ],
     });
     expect(broker.interactions()).toEqual([]);
-    expect(announced).toEqual([]);
+    expect(reentrantAnnouncements).toEqual([]);
+
+    const controller = new AbortController();
+    let announced: { id: string; method: string; pending: number } | undefined;
+    let detached!: SemanticUIBroker;
+    detached = brokerWith(() => {}, undefined, async (interaction) => {
+      announced = { id: interaction.id, method: interaction.method, pending: detached.interactions().length };
+      throw new Error("notification unavailable");
+    });
+    const pending = detached.requestForm({ form: form(), signal: controller.signal });
+    expect(detached.interactions()).toHaveLength(1);
+    expect(announced).toMatchObject({ method: "form", pending: 1 });
+    controller.abort();
+    await expect(pending).resolves.toBeUndefined();
+    expect(detached.interactions()).toEqual([]);
   });
 
   it("rejects malformed, incomplete, conflicting, and unknown form answers without removing the request", async () => {
@@ -121,26 +135,6 @@ describe("SemanticUIBroker", () => {
     expect(broker.interactions()).toHaveLength(1);
     broker.cancelAll();
     await expect(pending).rejects.toMatchObject({ code: "cancelled" });
-  });
-
-  it("announces an admitted interaction without owning its settlement", async () => {
-    const observed: Array<{ id: string; method: string; pending: number }> = [];
-    let broker!: SemanticUIBroker;
-    broker = brokerWith(
-      () => {},
-      undefined,
-      async (interaction) => {
-        observed.push({ id: interaction.id, method: interaction.method, pending: broker.interactions().length });
-        throw new Error("notification unavailable");
-      },
-    );
-    const controller = new AbortController();
-    const pending = broker.requestForm({ form: form(), signal: controller.signal });
-    const interaction = broker.interactions()[0]!;
-    expect(observed).toEqual([{ id: interaction.id, method: "form", pending: 1 }]);
-    controller.abort();
-    await expect(pending).resolves.toBeUndefined();
-    expect(broker.interactions()).toEqual([]);
   });
 
   it("routes every response-capable semantic interaction through one admission sink", async () => {

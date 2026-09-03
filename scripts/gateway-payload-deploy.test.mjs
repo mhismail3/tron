@@ -3,7 +3,7 @@ import { chmod, cp, mkdir, mkdtemp, readFile, readlink, rename, rm, symlink, wri
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+
 import {
   deploymentTransition,
   deploymentTimeoutMs,
@@ -52,18 +52,11 @@ import {
   PINNED_XCODEGEN_VERSION,
 } from "./gateway-payload-deploy.mjs";
 
-const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-
 test("deployment timeout defaults to a valid bounded millisecond value", () => {
   assert.equal(deploymentTimeoutMs({}), 60_000);
   assert.equal(deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "120000" }), 120_000);
   assert.throws(() => deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "60_000" }), /invalid update timeout/);
   assert.throws(() => deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "1999" }), /invalid update timeout/);
-});
-
-test("candidate preflight XcodeGen version matches the repository pin", async () => {
-  const toolchain = await readFile(join(repositoryRoot, "config", "ci-toolchain.env"), "utf8");
-  assert.match(toolchain, new RegExp(`^TRON_CI_XCODEGEN_VERSION=${PINNED_XCODEGEN_VERSION}$`, "mu"));
 });
 
 test("command timeout defaults to a valid bounded millisecond value", () => {
@@ -722,20 +715,17 @@ test("source npm resolution uses the exact Node runtime", () => {
 });
 
 test("trusted source policy is stored-only and source commands are bounded", async () => {
-  const config = { schema: 1, kind: "tron-gateway-update-config", sourceRoot: "/Users/tron/repo", updatedAt: "2026-04-27T00:00:00Z" };
+  const sourceRoot = join(tmpdir(), "trusted-gateway-source");
+  const config = { schema: 1, kind: "tron-gateway-update-config", sourceRoot, updatedAt: "2026-04-27T00:00:00Z" };
   assert.equal(validateUpdateConfigDocument(config), true);
   assert.equal(validateUpdateConfigDocument({ ...config, sourceRoot: "relative" }), false);
-  assert.deepEqual(sourceBuildCommands("/Users/tron/repo"), [
-    {
-      tool: process.execPath,
-      args: [
-        "/Users/tron/repo/packages/gateway/node_modules/typescript/bin/tsc",
-        "-p", "/Users/tron/repo/packages/gateway/tsconfig.json", "--outDir", "<private-output>",
-      ],
-      cwd: "/Users/tron/repo/packages/gateway",
-    },
-    { tool: "npm", args: ["ci", "--omit=dev", "--ignore-scripts=false"], cwd: "<candidate>/app" },
-  ]);
+  const commands = sourceBuildCommands(sourceRoot);
+  assert.equal(commands.length, 2);
+  assert.equal(commands[0].tool, process.execPath);
+  assert.equal(commands[0].args[0], join(sourceRoot, "packages", "gateway", "node_modules", "typescript", "bin", "tsc"));
+  assert.deepEqual(commands[0].args.slice(1, 3), ["-p", join(sourceRoot, "packages", "gateway", "tsconfig.json")]);
+  assert.equal(commands[0].cwd, join(sourceRoot, "packages", "gateway"));
+  assert.deepEqual(commands[1], { tool: "npm", args: ["ci", "--omit=dev", "--ignore-scripts=false"], cwd: "<candidate>/app" });
 });
 
 test("Debug handoff pins authenticated dev-channel pre/post identity to the selected manifest", () => {

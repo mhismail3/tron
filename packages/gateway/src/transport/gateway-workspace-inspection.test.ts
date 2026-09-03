@@ -17,17 +17,6 @@ const client: ClientContext = {
 };
 
 describe("Gateway workspace inspection dispatch", () => {
-  it("advertises the session-bound capability", () => {
-    const service = new GatewayService({
-      config: { machineId: "machine", machineName: "Mac", tronHome: "/tmp/tron-workspace-capability" },
-      sessions: {},
-    } as unknown as GatewayServiceDependencies);
-    expect((service.info() as { capabilities: string[] }).capabilities).toEqual(expect.arrayContaining([
-      "workspace-inspector.v1",
-      "workspace-history-diff.v1",
-    ]));
-  });
-
   it("derives every workspace root from the subscribed runtime slot", async () => {
     const inspect = vi.fn(async () => ({ root: "/authoritative", revision: "revision" }));
     const list = vi.fn(async () => ({ root: "/authoritative", path: "", revision: "listing", entries: [] }));

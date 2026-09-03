@@ -11,15 +11,21 @@ function fixture() {
 }
 
 describe("Tron schedule extension", () => {
-  it("registers a bounded first-party schedule tool", async () => {
+  it("forwards an approved creation and returns its durable result", async () => {
     const { tool, operations } = fixture();
     const result = await tool.execute("tool-call-one", {
       action: "create", name: "Review", prompt: "Review", everyMinutes: 60, activate: true,
     }, undefined, undefined, { hasUI: true, ui: { confirm: vi.fn(async () => true) } });
-    expect(tool.name).toBe("schedule");
-    expect(tool.executionMode).toBe("sequential");
-    expect(operations.execute).toHaveBeenCalledWith("session-one", "tool-call-one", expect.objectContaining({ action: "create" }));
-    expect(result).toMatchObject({ content: [{ type: "text", text: "Created automation." }] });
+
+    expect(operations.execute).toHaveBeenCalledWith(
+      "session-one",
+      "tool-call-one",
+      expect.objectContaining({ action: "create", name: "Review" }),
+    );
+    expect(result).toMatchObject({
+      content: [{ type: "text", text: "Created automation." }],
+      details: { id: "automation-one" },
+    });
   });
 
   it("requires confirmation and blocks recursive automation mutation", async () => {

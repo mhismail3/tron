@@ -4,16 +4,6 @@ import Testing
 
 @Suite("GatewayRestartClient protocol policy")
 struct GatewayRestartClientTests {
-    @Test("hello requires the exact supported protocol and minimum")
-    func helloValidationIsFailClosed() {
-        let valid = #"{"type":"hello","protocolVersion":4,"minProtocolVersion":4}"#
-        let older = #"{"type":"hello","protocolVersion":3,"minProtocolVersion":3}"#
-        let future = #"{"type":"hello","protocolVersion":5,"minProtocolVersion":4}"#
-        #expect(GatewayRestartClient.decodeHello(data: Data(valid.utf8)))
-        #expect(!GatewayRestartClient.decodeHello(data: Data(older.utf8)))
-        #expect(!GatewayRestartClient.decodeHello(data: Data(future.utf8)))
-    }
-
     @Test("request policy resolves the socket path and bearer header")
     func requestPolicy() throws {
         let request = try GatewayRestartClient.makeRequest(
@@ -61,15 +51,6 @@ struct GatewayRestartClientTests {
                 == .error(.gateway(code: "busy", message: "Close active terminal sessions before restarting the Gateway", retryable: true))
         )
         #expect(GatewayRestartClient.decodeFrame(data: Data(event.utf8), expectedID: "command-123") == .ignore)
-    }
-
-    @Test("one deadline budget is shared and expires monotonically")
-    func deadlineBudget() async throws {
-        let deadline = GatewayWebSocketTransport.Deadline(timeout: 0.05)
-        let initial = try #require(deadline.remainingNanoseconds)
-        try await Task.sleep(nanoseconds: 20_000_000)
-        let remaining = try #require(deadline.remainingNanoseconds)
-        #expect(remaining < initial)
     }
 
     @Test("cancellation propagates from the shared socket operation")

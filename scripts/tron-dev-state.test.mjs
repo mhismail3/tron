@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { execFile, execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { once } from "node:events";
 import { test } from "node:test";
 
 const run = (state, command, ...argumentsList) => execFileSync(process.execPath, [helper, command, state, ...argumentsList], { encoding: "utf8" });
@@ -30,6 +31,11 @@ test("Debug health host uses Gateway deterministic Tailscale ordering", () => {
   assert.equal(resolveFixture(mixed), "100.80.0.3");
   const reversed = Object.fromEntries(Object.entries(mixed).reverse());
   assert.equal(resolveFixture(reversed), "100.80.0.3");
+  const ipv6 = {
+    zeta: [{ address: "fd7a:115c:a1e0::b", family: 6, internal: false }],
+    alpha: [{ address: "fd7a:115c:a1e0::a", family: "IPv6", internal: false }],
+  };
+  assert.equal(resolveFixture(ipv6), "fd7a:115c:a1e0::a");
 });
 
 test("Debug command host inherits a live Tailscale lifecycle and rejects conflicts", () => {
@@ -116,11 +122,6 @@ test("Tailscale selection rejects malformed lookalikes and zones", () => {
   ]) assert.equal(resolveFixture({ en0: [{ address, family: address.includes(":" ) ? 6 : 4, internal: false }] }), "", address);
 });
 
-test("Debug health host orders IPv6 addresses then interface names", () => {
-  assert.equal(resolveFixture({ z: [{ address: "fd7a:115c:a1e0::b", family: 6, internal: false }], a: [{ address: "fd7a:115c:a1e0::a", family: "IPv6", internal: false }] }), "fd7a:115c:a1e0::a");
-  assert.equal(resolveFixture({ z: [{ address: "fd7a:115c:a1e0::a", family: 6, internal: false }], a: [{ address: "fd7a:115c:a1e0::a", family: 6, internal: false }] }), "fd7a:115c:a1e0::a");
-});
-
 test("Debug start admission recovers only an exact owned orphan", () => {
   const admission = (lifecycle, supervisorLive, childLive, listenerPresent) => execFileSync(process.execPath, [
     helper, "start-admission", lifecycle, supervisorLive ? "yes" : "no", childLive ? "yes" : "no", listenerPresent ? "yes" : "no",
@@ -131,33 +132,75 @@ test("Debug start admission recovers only an exact owned orphan", () => {
   assert.equal(admission("failed", false, false, false), "start");
 });
 
-test("Debug child termination always revalidates exact PID identity", () => {
-  const source = readFileSync(new URL("./tron-dev", import.meta.url), "utf8");
-  assert.match(source, /kill_child\(\)/);
-  assert.match(source, /pid_current "\x24pid" "\x24identity"/);
-  assert.match(source, /kill_child "\x24child" "\x24child_identity"/);
-  assert.match(source, /kill_child "\x24child_pid" "\x24child_identity"/);
-  assert.doesNotMatch(source, /kill(?: -[A-Z0-9]+)? "\x24child(?:_pid)?"/u);
-  assert.match(source, /for _ in \$\(seq 1 80\)/);
-  assert.match(source, /sleep 0\.05/);
+const stopFixture = ({ child, identity, childIsOwned }) => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-stop-"));
+  const home = join(root, "home");
+  const fakeBin = join(root, "bin");
+  const fakeNode = join(fakeBin, "node");
+  const fakeNpm = join(fakeBin, "npm");
+  try {
+    mkdirSync(home, { recursive: true });
+    mkdirSync(fakeBin, { recursive: true });
+    writeFileSync(fakeNode, `#!/bin/sh
+if [ "${"$"}{1:-}" = "--version" ]; then echo v22.22.0; exit 0; fi
+command="${"$"}{2:-}";
+count_file="${root}/pid-current.count";
+case "${"$"}command" in
+  get)
+    case "${"$"}{4:-}" in childPid) echo ${child} ;; childStartIdentity) echo ${identity} ;; *) echo ;; esac ;;
+  pid-current)
+    if [ "${"$"}{4:-}" = "${identity}" ]; then
+      count=0; [ -f "${"$"}count_file" ] && count=$(cat "${"$"}count_file"); count=$((count + 1)); echo "${"$"}count" > "${"$"}count_file";
+      if [ "${childIsOwned ? "yes" : "no"}" = yes ] && [ "${"$"}count" -eq 1 ]; then echo yes; else echo no; fi
+    else echo no; fi ;;
+  transition|resolve-command-host) exit 0 ;;
+  status) echo '{"lifecycle":"stopped"}' ;;
+  *) exit 0 ;;
+esac
+`);
+    execFileSync("/bin/chmod", ["+x", fakeNode]);
+    writeFileSync(fakeNpm, "#!/bin/sh\nexit 0\n");
+    execFileSync("/bin/chmod", ["+x", fakeNpm]);
+    const stateDir = join(home, ".tron-dev", "gateway");
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(join(stateDir, "lifecycle.json"), JSON.stringify({ lifecycle: "ready", childPid: child, childStartIdentity: identity }));
+    execFileSync("bash", [new URL("./tron-dev", import.meta.url).pathname, "stop"], {
+      env: { ...process.env, HOME: home, TRON_NODE_BIN: fakeNode },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+
+test("Debug stop refuses to signal a child after its recorded identity changes", async () => {
+  const childProcess = spawn("/bin/sleep", ["30"], { detached: true, stdio: "ignore" });
+  const child = String(childProcess.pid);
+  const exited = once(childProcess, "exit");
+  try {
+    stopFixture({ child, identity: "replaced", childIsOwned: false });
+    assert.doesNotThrow(() => process.kill(Number(child), 0));
+  } finally {
+    try { childProcess.kill("SIGTERM"); } catch {}
+    await exited;
+  }
 });
 
-test("Debug lifecycle uses one exact pinned Node and sibling npm for every command", () => {
-  const source = readFileSync(new URL("./tron-dev", import.meta.url), "utf8");
-  const bundle = readFileSync(new URL("../packages/mac-app/scripts/bundle-gateway.sh", import.meta.url), "utf8");
-  assert.match(source, /NODE_VERSION_FILE=.*\.node-version/u);
-  assert.match(source, /NODE_VERSION_LINES=.*awk/u);
-  assert.match(source, /relative NVM_DIR is not allowed/u);
-  assert.match(source, /versions\/node\/v\$\{NODE_VERSION\}\/bin\/node/u);
-  assert.match(source, /NPM_BIN=.*dirname.*NODE_BIN.*\/npm/u);
-  assert.match(source, /"\$NPM_BIN" run build/u);
-  assert.match(source, /\$NODE_BIN.*STATE_HELPER/u);
-  assert.match(source, /\$NODE_BIN.*DEPLOY/u);
-  assert.doesNotMatch(source, /(^|\s)node "\$STATE_HELPER/u);
-  assert.doesNotMatch(source, /(^|\s)npm run build/u);
-  assert.match(bundle, /actual=.*\$candidate.*--version/u);
-  assert.match(bundle, /NPM_BIN=.*dirname.*NODE_BIN.*\/npm/u);
-  assert.doesNotMatch(bundle, /resolve_tool\s*\(/u);
+test("Debug stop terminates and reaps an exactly owned child", async () => {
+  const childProcess = spawn("/bin/sleep", ["30"], { detached: true, stdio: "ignore" });
+  const child = String(childProcess.pid);
+  const exited = once(childProcess, "exit");
+  try {
+    stopFixture({ child, identity: "owned", childIsOwned: true });
+    await exited;
+    assert.notEqual(childProcess.signalCode, null);
+    assert.equal(childProcess.exitCode, null);
+  } finally {
+    if (childProcess.exitCode === null && childProcess.signalCode === null) {
+      try { childProcess.kill("SIGTERM"); } catch {}
+      await exited.catch(() => {});
+    }
+  }
 });
 
 test("Debug mutator command lock rejects a concurrent owner", () => {

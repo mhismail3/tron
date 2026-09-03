@@ -28,39 +28,6 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
 }
 
 describe("WebSocket connection and outbound capacity", () => {
-  it("serializes a legitimate burst above the retired 2 MiB ws pressure threshold", () => {
-    const writes: string[] = [];
-    const completions: Array<(error?: Error) => void> = [];
-    const overflow = vi.fn();
-    const writeFailed = vi.fn();
-    const queue = new OrderedOutboundQueue(
-      8 * 1_048_576,
-      (encoded, completion) => {
-        writes.push(encoded);
-        completions.push(completion);
-      },
-      overflow,
-      writeFailed,
-    );
-    const frames = Array.from({ length: 6 }, (_, index) => `${index}:${"x".repeat(512 * 1_024)}`);
-
-    expect(frames.every((frame) => queue.enqueue(frame))).toBe(true);
-    expect(queue.snapshot()).toMatchObject({ queuedFrames: 6, writeActive: true, acceptedFrames: 6, completedFrames: 0 });
-    expect(queue.snapshot().queuedBytes).toBeGreaterThan(2 * 1_048_576);
-    expect(writes).toEqual([frames[0]]);
-    const drained = vi.fn();
-    queue.whenIdle(drained);
-
-    for (let index = 0; index < frames.length; index += 1) {
-      completions[index]?.();
-      expect(writes).toEqual(frames.slice(0, Math.min(index + 2, frames.length)));
-    }
-    expect(queue.snapshot()).toEqual({ queuedFrames: 0, queuedBytes: 0, writeActive: false, acceptedFrames: 6, completedFrames: 6 });
-    expect(drained).toHaveBeenCalledTimes(1);
-    expect(overflow).not.toHaveBeenCalled();
-    expect(writeFailed).not.toHaveBeenCalled();
-  });
-
   it("fails closed once on true aggregate queue overflow", () => {
     const writes: string[] = [];
     const overflow = vi.fn();

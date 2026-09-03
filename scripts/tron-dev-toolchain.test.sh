@@ -24,10 +24,13 @@ make_node "$TMP/nvm/versions/node/v22.22.0/bin/node" 22.22.0
 touch "$TMP/nvm/versions/node/v22.22.0/bin/npm"
 chmod +x "$TMP/nvm/versions/node/v22.22.0/bin/npm"
 
-# A wrong ambient Node is skipped for the exact nvm candidate.
+# A wrong ambient Node is skipped for the exact nvm candidate. The executable
+# preflight proves the resolved Node actually runs both state-helper calls.
 HOME="$TMP/home" NVM_DIR="$TMP/nvm" PATH="$TMP/path:/usr/bin:/bin" \
   TRON_TOOLCHAIN_LOG="$TMP/right.log" "$SCRIPT" preflight >/dev/null
 [[ -s "$TMP/right.log" ]]
+grep -q 'resolve-command-host' "$TMP/right.log"
+grep -q 'status' "$TMP/right.log"
 [[ ! -e "$TMP/home/.tron-dev" ]]
 
 # Read-only/status and invalid commands never create lifecycle state.
@@ -63,12 +66,5 @@ if HOME="$TMP/home" NVM_DIR="$TMP/nvm" PATH="$TMP/path:/usr/bin:/bin" "$SCRIPT" 
   exit 1
 fi
 [[ ! -e "$TMP/home/.tron-dev" ]]
-
-# Every helper/build/deploy construction is pinned to the resolved absolute tools.
-source_text="$(<"$SCRIPT")"
-grep -q '"\$NODE_BIN" "\$STATE_HELPER"' <<<"$source_text"
-grep -q '"\$NPM_BIN" run build' <<<"$source_text"
-grep -q '"\$NODE_BIN" "\$DEPLOY"' <<<"$source_text"
-! grep -Eq '(^|[[:space:]])node "\$STATE_HELPER"' <<<"$source_text"
 
 echo "isolated tron-dev toolchain checks passed"

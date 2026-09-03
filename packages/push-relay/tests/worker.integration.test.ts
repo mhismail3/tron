@@ -2,7 +2,7 @@ import { env, SELF, reset, runInDurableObject } from "cloudflare:test";
 import { encode } from "cbor-x";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { REGISTRY_NAME } from "../src/contracts";
-import { base64Url, canonicalRegistration, concatBytes, hmacHex, ownedBuffer, sha256, sha256Hex, utf8 } from "../src/crypto";
+import { base64Url, canonicalRegistration, concatBytes, decodeBase64Url, hmacHex, ownedBuffer, sha256, sha256Hex, utf8 } from "../src/crypto";
 import type { PushRegistry } from "../src/registry";
 import { testGrant } from "./fixtures";
 
@@ -84,6 +84,58 @@ async function signedRevocation(requestId = "revoke-request-0000001"): Promise<R
       "x-tron-signature": signature,
     },
   };
+}
+
+async function assertionRegistration() {
+  const keys = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const publicKeySpki = base64Url(new Uint8Array(await crypto.subtle.exportKey("spki", keys.publicKey)));
+  const challengeResponse = await SELF.fetch("https://push.test/v3/attestation/challenge", { method: "POST" });
+  const challenge = await challengeResponse.json<{ challengeId: string; challenge: string }>();
+  const fields = {
+    version: 1 as const,
+    challengeId: challenge.challengeId,
+    challenge: challenge.challenge,
+    keyId: testGrant.keyId,
+    apnsToken: testGrant.deviceToken,
+    route: "beta" as const,
+    bindingHash: testGrant.bindingHash,
+  };
+  const clientDataHash = await sha256(canonicalRegistration(fields));
+  const authenticatorData = new Uint8Array(37);
+  authenticatorData.set(await sha256(utf8(`${env.APPLE_TEAM_ID}.com.tron.mobile.beta`)));
+  new DataView(authenticatorData.buffer).setUint32(33, 3, false);
+  const rawSignature = new Uint8Array(await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    keys.privateKey,
+    ownedBuffer(concatBytes(authenticatorData, clientDataHash)),
+  ));
+  const request: RequestInit = {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ...fields,
+      proof: "assertion",
+      assertionObject: base64Url(encode({ authenticatorData, signature: rawEcdsaToDer(rawSignature) })),
+    }),
+  };
+  return { publicKeySpki, challenge, fields, request };
+}
+
+async function seedAssertionInstallation(
+  registration: Awaited<ReturnType<typeof assertionRegistration>>,
+): Promise<string> {
+  const tokenHash = await sha256Hex(utf8(registration.fields.apnsToken));
+  await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
+    const now = Math.floor(Date.now() / 1000);
+    state.storage.sql.exec(
+      `INSERT INTO installations
+       (installation_id, key_id, public_key_spki, route, apns_token, token_hash, assertion_counter, enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 1, ?, ?)`,
+      "assertion-installation-0001", registration.fields.keyId, registration.publicKeySpki,
+      registration.fields.route, registration.fields.apnsToken, tokenHash, now, now,
+    );
+  });
+  return tokenHash;
 }
 
 afterEach(async () => {
@@ -238,6 +290,67 @@ describe("v3 Worker boundary", () => {
       grant_id: string; enabled: number;
     }>("SELECT grant_id, enabled FROM grants WHERE installation_id = ?", testGrant.installationId).one());
     expect(active).toEqual(expect.objectContaining({ grant_id: replacement.grantId, enabled: 1 }));
+  });
+
+  test("accepts a valid assertion registration and persists its capability binding", async () => {
+    const registration = await assertionRegistration();
+    const tokenHash = await seedAssertionInstallation(registration);
+
+    const response = await SELF.fetch("https://push.test/v3/installations", registration.request);
+    expect(response.status).toBe(201);
+    const result = await response.json<{ installationId: string; grantId: string; grantSecret: string; route: string }>();
+    expect(result).toMatchObject({ route: "beta" });
+    expect(result.installationId).toMatch(/^[A-Za-z0-9_-]{16,128}$/u);
+    expect(result.grantId).toMatch(/^[A-Za-z0-9_-]{16,128}$/u);
+    expect(result.grantSecret).toMatch(/^[A-Za-z0-9_-]{16,128}$/u);
+
+    const persisted = await runInDurableObject(stub(), async (_instance: PushRegistry, state) => ({
+      challenge: state.storage.sql.exec<{ consumed_at: number | null; attempt_count: number }>(
+        "SELECT consumed_at, attempt_count FROM challenges WHERE challenge_id = ?", registration.challenge.challengeId,
+      ).one(),
+      installation: state.storage.sql.exec<{ public_key_spki: string; assertion_counter: number; route: string; token_hash: string }>(
+        "SELECT public_key_spki, assertion_counter, route, token_hash FROM installations WHERE key_id = ?", registration.fields.keyId,
+      ).one(),
+      grant: state.storage.sql.exec<{ grant_id: string; binding_hash: string; enabled: number }>(
+        "SELECT grant_id, binding_hash, enabled FROM grants WHERE grant_id = ?", result.grantId,
+      ).one(),
+    }));
+    expect(persisted.challenge).toMatchObject({ attempt_count: 1 });
+    expect(persisted.challenge.consumed_at).not.toBeNull();
+    expect(persisted.installation).toEqual({
+      public_key_spki: registration.publicKeySpki,
+      assertion_counter: 3,
+      route: "beta",
+      token_hash: tokenHash,
+    });
+    expect(persisted.grant).toEqual({ grant_id: result.grantId, binding_hash: registration.fields.bindingHash, enabled: 1 });
+
+    const replay = await SELF.fetch("https://push.test/v3/installations", registration.request);
+    expect(replay.status).toBe(401);
+    expect(await replay.json()).toEqual({ error: "invalid_attestation" });
+  });
+
+  test("rejects a valid assertion envelope with a tampered signature", async () => {
+    const registration = await assertionRegistration();
+    await seedAssertionInstallation(registration);
+    const body = JSON.parse(registration.request.body as string) as { assertionObject: string };
+    const assertionObject = decodeBase64Url(body.assertionObject);
+    assertionObject[assertionObject.length - 1] ^= 1;
+
+    const response = await SELF.fetch("https://push.test/v3/installations", {
+      ...registration.request,
+      body: JSON.stringify({ ...body, assertionObject: base64Url(assertionObject) }),
+    });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "invalid_attestation" });
+
+    const unchanged = await runInDurableObject(stub(), async (_instance: PushRegistry, state) => ({
+      counter: state.storage.sql.exec<{ assertion_counter: number }>(
+        "SELECT assertion_counter FROM installations WHERE key_id = ?", registration.fields.keyId,
+      ).one().assertion_counter,
+      grants: state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM grants").one().count,
+    }));
+    expect(unchanged).toEqual({ counter: 0, grants: 0 });
   });
 
   test("enforces installation-wide quota across grants before contacting APNs", async () => {

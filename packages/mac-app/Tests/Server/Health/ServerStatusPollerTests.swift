@@ -8,6 +8,7 @@ struct ServerStatusPollerTests {
         token: String? = nil,
         pingResult: ServerPingResult = .unreachable,
         tailscaleFromSettings: String? = nil,
+        tailscaleStatus: TailscaleStatus = .notInstalled,
         serverPort: Int = 9847,
         launchAgentLoaded: Bool = false
     ) -> EnvironmentSetup {
@@ -52,7 +53,7 @@ struct ServerStatusPollerTests {
             },
             readTailscaleIPFromSettings: { tailscaleFromSettings },
             cacheTailscaleIP: { _ in },
-            probeTailscale: { .notInstalled },
+            probeTailscale: { tailscaleStatus },
             probePermissions: { [:] },
             detectExistingInstall: { .none },
             validateApplicationLocation: { nil },
@@ -66,16 +67,13 @@ struct ServerStatusPollerTests {
         )
     }
 
-    @Test("state tone follows state changes")
-    func stateToneFollowsStateChanges() {
-        var snapshot = ServerStatusSnapshot(state: .checking)
-        #expect(snapshot.state.tone == .attention)
-
-        snapshot.state = .running(version: "0.5.0", port: 9847)
-        #expect(snapshot.state.tone == .running)
-
-        snapshot.state = .failed(reason: "unreachable")
-        #expect(snapshot.state.tone == .failed)
+    @Test("Stable host resolution fails closed without a Tailscale address")
+    func stableHostResolutionFailsClosed() async {
+        let setup = Self.makeSetup(
+            tailscaleFromSettings: "127.0.0.1",
+            tailscaleStatus: .signedIn(address: "127.0.0.1")
+        )
+        #expect(await setup.resolvedTailscaleHost() == nil)
     }
 
     @Test("running: ping succeeds, snapshot is .running with version + port")

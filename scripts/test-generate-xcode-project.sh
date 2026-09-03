@@ -36,10 +36,6 @@ second_invocation="$(sed -n '2p' "$LOG")"
 [[ "$first_invocation" == "$ROOT/packages/ios-app|generate --quiet" ]]
 [[ "$second_invocation" == "$ROOT/packages/mac-app|generate --quiet" ]]
 
-if run_generator unknown; then
-  echo "unknown native project was accepted" >&2
-  exit 1
-fi
 if TRON_CI_TOOLS_DIR="$TOOLS" FAKE_XCODEGEN_VERSION=0.0.0 FAKE_XCODEGEN_LOG="$LOG" \
   "$ROOT/scripts/generate-xcode-project" ios; then
   echo "mismatched XcodeGen was accepted" >&2

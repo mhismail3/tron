@@ -1,7 +1,7 @@
 import Foundation
 
-/// Steps in the first-run wizard. `allCases` is the canonical flow;
-/// tests in `WizardStepOrderingTests` pin it to prevent silent reorderings.
+/// Steps in the first-run wizard. `allCases` is the canonical flow used by
+/// the wizard state machine and progress presentation.
 enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
     case welcome
     case tailscale
@@ -140,8 +140,8 @@ struct PairingPayload: Equatable, Sendable, Hashable {
     var label: String?
 }
 
-/// Discrete steps in the install pipeline. Ordering is covered by
-/// `InstallPipelineStageOrderingTests`.
+/// Discrete steps in the install pipeline. Ordering is consumed by the
+/// installation state machine and progress presentation.
 enum InstallPipelineStage: String, Equatable, Sendable, CaseIterable {
     /// Confirms this is the release app in `/Applications`.
     case validateApplication

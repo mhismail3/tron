@@ -27,23 +27,19 @@ function fixture() {
 }
 
 describe("first-party Tron display extension", () => {
-  it("registers a strict sequential tool and returns a canonical typed artifact descriptor", async () => {
+  it("ingests a local artifact and returns its canonical presentation descriptor", async () => {
     const value = fixture();
-    const tool = value.tool();
-    expect(tool.name).toBe("display");
-    expect(tool.executionMode).toBe("sequential");
-    expect(tool.parameters.additionalProperties).toBe(false);
-    const result = await tool.execute("call", {
+    const result = await value.tool().execute("call", {
       title: "Preview",
       altText: "A preview image.",
       fallbackText: "Preview unavailable.",
       source: { kind: "path", path: "preview.png" },
       presentation: { surface: "floating", inlineTapAction: "sheet" },
     });
+
     expect(value.ingests).toEqual([["/workspace", "preview.png", "session-a"]]);
     expect(result.details.display).toMatchObject({
       schema: "tron.display.v1",
-      revision: 1,
       kind: "image",
       presentation: { requestedSurface: "floating", inlineTapAction: "sheet" },
       eligibleSurfaces: ["sheet", "inline", "floating"],

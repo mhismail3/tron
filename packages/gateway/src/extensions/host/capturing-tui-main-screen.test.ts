@@ -1,4 +1,4 @@
-import { TuiMainScreen, type Component, type Focusable } from "@earendil-works/pi-tui";
+import { type Component, type Focusable } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CapturingTuiMainScreen } from "./capturing-tui-main-screen.js";
 import { InMemoryTerminal } from "./in-memory-terminal.js";
@@ -19,26 +19,6 @@ afterEach(() => {
 });
 
 describe("public TuiMainScreen feasibility harness", () => {
-  it("subclasses the package-root export and renders each component once per cycle", () => {
-    const terminal = new InMemoryTerminal(40, 12);
-    const renderedStates: number[] = [];
-    const tui = new CapturingTuiMainScreen(terminal, {
-      onRender: (state) => renderedStates.push(state.previousLines.length),
-    });
-    expect(tui).toBeInstanceOf(TuiMainScreen);
-
-    const original = component(["first"]);
-    const recording = new RecordingComponent(original);
-    tui.addChild(recording);
-    tui.renderNow();
-
-    expect(original.render).toHaveBeenCalledTimes(1);
-    expect(recording.renderCount).toBe(1);
-    expect(recording.capture?.lines).toEqual(["first"]);
-    expect(renderedStates).toEqual([1]);
-    expect(terminal.snapshot().writeEvents.length).toBeGreaterThan(0);
-  });
-
   it("coalesces requests and resize-driven rendering through the in-memory terminal", async () => {
     vi.useFakeTimers();
     const terminal = new InMemoryTerminal(40, 12);

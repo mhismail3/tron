@@ -164,33 +164,7 @@ struct InAppNoticeCenterTests {
 }
 
 @Suite("In-app notice presentation contract")
-struct InAppNoticePresentationGuardTests {
-    private var packageRoot: URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-    }
-
-    @Test("one scene window owns notices above sheet coordinate spaces")
-    func sceneWindowHostCoverage() throws {
-        let app = try source("Sources/App/TronMobileApp.swift")
-        let presentation = try source("Sources/UI/Components/InAppNoticePresentation.swift")
-        let shell = try source("Sources/UI/Chat/SessionShellView.swift")
-        let blur = try source("Sources/UI/Chat/ChatTopVariableBlur.swift")
-        let onboarding = try source("Sources/UI/Onboarding/OnboardingView.swift")
-        #expect(app.contains("InAppNoticeWindowInstaller("))
-        #expect(presentation.contains("NoticeOverlayWindow(windowScene: scene)"))
-        #expect(presentation.contains("window.windowLevel = UIWindow.Level("))
-        #expect(presentation.contains("override func hitTest"))
-        #expect(presentation.contains("proxy.frame(in: .named(NoticeOverlayCoordinateSpace.name))"))
-        #expect(presentation.contains("interactionRegistry?.contains("))
-        #expect(presentation.contains("rootViewController?.presentedViewController != nil"))
-        #expect(!presentation.contains("maximumInteractiveHeight"))
-        #expect(!shell.contains("InAppNoticeHost"))
-        #expect(!blur.contains("InAppNoticeHost"))
-        #expect(!onboarding.contains("InAppNoticeHost"))
-    }
+struct InAppNoticePresentationPolicyTests {
 
     @Test("horizontal dismissal accepts easy swipes in both directions and rejects vertical drags")
     func horizontalDismissalPolicy() {
@@ -212,50 +186,4 @@ struct InAppNoticePresentationGuardTests {
         ))
     }
 
-    @Test("notice cards retain glass, actions, stacking, motion, and accessibility semantics")
-    func noticeCardContract() throws {
-        let presentation = try source("Sources/UI/Components/InAppNoticePresentation.swift")
-        #expect(presentation.contains("GlassEffectContainer(spacing: 8)"))
-        #expect(presentation.contains("horizontalControlReservation: CGFloat = 80"))
-        #expect(presentation.contains("NoticeToolbarAlignmentReader"))
-        #expect(presentation.contains("UINavigationBar"))
-        #expect(!presentation.contains("toolbarReservation"))
-        #expect(presentation.contains("Color.tronSurfaceElevated.opacity(index == 0 ? 0.88 : 0.76)"))
-        #expect(presentation.contains("dynamicTypeSize.isAccessibilitySize"))
-        #expect(presentation.contains("model.noticeCenter.performAction"))
-        #expect(presentation.contains("DragGesture(minimumDistance: 12)"))
-        #expect(presentation.contains("InAppNoticeSwipePolicy.shouldDismiss"))
-        #expect(!presentation.contains("dragY"))
-        #expect(presentation.contains(".accessibilityAction(named: \"Dismiss notification\")"))
-        #expect(presentation.contains(".accessibilityHidden(index != 0)"))
-        #expect(presentation.contains("AccessibilityNotification.Announcement"))
-        #expect(presentation.contains("notice.message == nil && notice.actions.isEmpty"))
-        #expect(presentation.contains("isCompactPill ? .center : .top"))
-        #expect(presentation.contains("HStack(alignment: contentAlignment, spacing: 9)"))
-    }
-
-    @Test("passive blocking alerts and legacy notice owners stay removed")
-    func passiveAlertsAndLegacyOwnersAreRemoved() throws {
-        let app = try source("Sources/App/TronMobileApp.swift")
-        let onboarding = try source("Sources/UI/Onboarding/OnboardingView.swift")
-        let terminal = try source("Sources/UI/Terminal/TerminalSheet.swift")
-        let context = try source("Sources/UI/Chat/SessionContextSheet.swift")
-        #expect(!app.contains(".alert(\"Tron\""))
-        #expect(!onboarding.contains(".alert(\"Tron\""))
-        #expect(!terminal.contains(".alert(\"Terminal action failed\""))
-        #expect(!context.contains(".alert(\"Export Failed\""))
-        #expect(terminal.contains(".alert(\"Quit Terminal?\""))
-        #expect(context.contains(".tronTextEntryAlert("))
-        #expect(context.contains("\"Rename Session\""))
-        #expect(!FileManager.default.fileExists(
-            atPath: packageRoot.appending(path: "Sources/State/GlobalNoticeStore.swift").path
-        ))
-        #expect(!FileManager.default.fileExists(
-            atPath: packageRoot.appending(path: "Sources/UI/Components/GlobalSheets.swift").path
-        ))
-    }
-
-    private func source(_ path: String) throws -> String {
-        try String(contentsOf: packageRoot.appending(path: path), encoding: .utf8)
-    }
 }

@@ -229,13 +229,10 @@ struct CustomModelConfigurationCoordinatorTests {
         try await runScenario {
             let socket = ScriptedGatewaySocket()
             let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
-            let model = AppModel(
-                client: client,
-                uuidSource: SequenceUUIDSource([
-                    UUID(uuidString: "00000000-0000-0000-0000-000000000083")!,
-                    UUID(uuidString: "00000000-0000-0000-0000-000000000084")!,
-                ]).source
-            )
+            let ids = SequenceUUIDSource((83...85).map {
+                UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", $0))!
+            })
+            let model = AppModel(client: client, uuidSource: ids.source)
             await socket.enqueue(helloFrame())
             try await model.connectHostedGateway(profile: profile, token: "token")
             let operation = Task { try await model.replaceCustomModelsAndRestart(models("document"), target: .global) }
@@ -256,6 +253,7 @@ struct CustomModelConfigurationCoordinatorTests {
                 "activeSessionIds": .array([]),
             ])))
             try await operation.value
+            #expect(ids.consumedCount == 3)
             await model.teardown()
         }
     }

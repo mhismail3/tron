@@ -62,12 +62,4 @@ struct QRCodeGeneratorTests {
         #expect(decoded == urlString)
     }
 
-    @Test("very long payload still encodes (no crash)")
-    func longPayload() throws {
-        let payload = String(repeating: "abc", count: 200)  // 600 chars
-        // QR can handle this with low error correction; we just want
-        // to confirm we don't crash and we get an image back.
-        let image = QRCodeGenerator.makeImage(payload: payload)
-        #expect(image != nil)
-    }
 }

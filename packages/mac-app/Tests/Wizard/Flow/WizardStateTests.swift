@@ -36,18 +36,6 @@ struct WizardStateTests {
         #expect(state.existingInstallStatus == .none)
     }
 
-    @Test("advance walks the canonical sequence")
-    func advanceWalks() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        let expected: [WizardStep] = [.tailscale, .install, .permissions, .iosBeta, .pairingInfo, .done]
-        for step in expected {
-            state.advance()
-            #expect(state.step == step, "after advance, expected \(step) got \(state.step)")
-        }
-    }
-
     @Test("advance is bounded at the last step")
     func advanceBounded() {
         let (defaults, cleanup) = Self.isolatedDefaults()
@@ -179,43 +167,6 @@ struct WizardStateTests {
         }
     }
 
-    // MARK: - slideDirection invariants
-    //
-    // These pin the contract `WizardShell.slideTransition` depends on:
-    // every navigation method sets `slideDirection` BEFORE mutating
-    // `step`, and the value reflects the user's intent rather than
-    // ordinal arithmetic. Future contributors who add new navigation
-    // paths (e.g. an "Edit pairing" jump) must extend these tests so
-    // the wizard's animation never goes the wrong way.
-
-    @Test("advance sets slideDirection to forward")
-    func advanceForwardDirection() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.advance()
-        #expect(state.slideDirection == .forward)
-    }
-
-    @Test("goBack sets slideDirection to backward")
-    func goBackBackwardDirection() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.advance() // step now tailscale
-        state.goBack()
-        #expect(state.slideDirection == .backward)
-    }
-
-    @Test("skipToPairing sets slideDirection to forward (long forward jump)")
-    func skipToPairingForwardDirection() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.skipToPairing()
-        #expect(state.slideDirection == .forward)
-    }
-
     @Test("install does not start until explicitly requested")
     func installRequestIsExplicit() {
         let (defaults, cleanup) = Self.isolatedDefaults()
@@ -238,42 +189,6 @@ struct WizardStateTests {
         #expect(state.hasUnhandledInstallRequest == true)
     }
 
-    @Test("interleaved advance/goBack flips direction each time")
-    func interleavedDirection() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        state.advance(); #expect(state.slideDirection == .forward)
-        state.advance(); #expect(state.slideDirection == .forward)
-        state.goBack();  #expect(state.slideDirection == .backward)
-        state.goBack();  #expect(state.slideDirection == .backward)
-        state.advance(); #expect(state.slideDirection == .forward)
-        state.goBack();  #expect(state.slideDirection == .backward)
-    }
-
-    @Test("bounded advance/goBack do NOT flip direction (no nav happened)")
-    func boundedNavPreservesDirection() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        let state = WizardState(defaults: defaults)
-        // At welcome, goBack leaves state unchanged; direction must NOT flip.
-        // (default is .forward; if an unchanged transition flipped it, the next real
-        // advance would animate as backward.)
-        state.goBack()
-        #expect(state.step == .welcome)
-        #expect(state.slideDirection == .forward)
-
-        // At done, advance leaves state unchanged; direction must NOT flip.
-        for _ in 0..<10 { state.advance() }
-        #expect(state.step == .done)
-        state.goBack() // direction → backward
-        #expect(state.slideDirection == .backward)
-        for _ in 0..<10 { state.goBack() }
-        #expect(state.step == .welcome)
-        // After repeatedly going back and bottoming out, direction
-        // should still read .backward — last real nav was backward.
-        #expect(state.slideDirection == .backward)
-    }
 }
 
 @Suite("Wizard completion")

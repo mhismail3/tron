@@ -17,18 +17,28 @@ describe("CommandReceiptStore", () => {
     const store = new CommandReceiptStore(root);
     let running = 0;
     let maximum = 0;
+    let started = 0;
+    let signalBothStarted!: () => void;
+    const bothStarted = new Promise<void>((resolve) => { signalBothStarted = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
     const operation = async () => {
       running += 1;
+      started += 1;
       maximum = Math.max(maximum, running);
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      if (started === 2) signalBothStarted();
+      await gate;
       running -= 1;
       return { accepted: true };
     };
-    await Promise.all([
+    const executions = Promise.all([
       store.execute("device", "session.prompt", "command-one", operation),
       store.execute("device", "session.prompt", "command-two", operation),
     ]);
+    await bothStarted;
     expect(maximum).toBe(2);
+    release();
+    await executions;
   });
 
   it("serializes concurrent duplicates of the same command", async () => {

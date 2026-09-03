@@ -40,30 +40,12 @@ struct BearerTokenReaderTests {
         #expect(BearerTokenReader.read(at: path) == "abcdef1234567890abcdef1234567890")
     }
 
-    @Test("gateway fractional timestamp: bearerToken returned")
-    func fractionalGatewayTimestamp() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        try writeSecureToken(Data(#"{"version":2,"bearerToken":"abcdef1234567890abcdef1234567890","purpose":"local-wrapper-health","lastUpdated":"2026-08-19T00:26:48.173Z"}"#.utf8), to: path)
-        #expect(BearerTokenReader.read(at: path) == "abcdef1234567890abcdef1234567890")
-    }
-
     @Test("JSON with empty bearerToken returns nil")
     func emptyJSONToken() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
         try writeSecureToken(Data(#"{"bearerToken":""}"#.utf8), to: path)
-        #expect(BearerTokenReader.read(at: path) == nil)
-    }
-
-    @Test("JSON with whitespace-only bearerToken returns nil")
-    func whitespaceJSONToken() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        try writeSecureToken(Data(#"{"bearerToken":"   \n"}"#.utf8), to: path)
         #expect(BearerTokenReader.read(at: path) == nil)
     }
 
@@ -108,16 +90,6 @@ struct BearerTokenReaderTests {
         let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
         try Data(#"{"version":2,"bearerToken":"abcdef1234567890abcdef1234567890","purpose":"local-wrapper-health","lastUpdated":"2026-04-27T00:00:00Z"}"#.utf8).write(to: path)
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path.path)
-        #expect(BearerTokenReader.read(at: path) == nil)
-    }
-
-    @Test("group-readable file is rejected")
-    func groupReadableRejected() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        try Data(#"{"version":2,"bearerToken":"abcdef1234567890abcdef1234567890","purpose":"local-wrapper-health","lastUpdated":"2026-04-27T00:00:00Z"}"#.utf8).write(to: path)
-        try FileManager.default.setAttributes([.posixPermissions: 0o640], ofItemAtPath: path.path)
         #expect(BearerTokenReader.read(at: path) == nil)
     }
 

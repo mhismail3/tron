@@ -51,8 +51,9 @@ reject duplicated version mirrors. Install native project generation with
 `scripts/install-ci-tools.sh xcodegen`; both `scripts/tron ios generate` and
 `scripts/tron mac generate` reject a mismatched XcodeGen. Xcode version literals
 remain intentional Apple-toolchain pins. Run
-`python3 scripts/test-documentation-policy.py` after changing documentation
-navigation, commands, or repository paths.
+`python3 scripts/check-documentation-policy.py` after changing documentation
+navigation, commands, or repository paths. Run `scripts/check-agent-policy.sh`
+after changing agent guidance.
 
 ### Gateway
 

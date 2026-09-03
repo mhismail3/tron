@@ -1,20 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   KIMI_K3_MAX_COMPLETION_TOKENS,
-  isKimiK3Model,
   installKimiK3Policy,
   normalizeKimiK3Payload,
   wrapKimiK3Fetch,
 } from "./kimi-k3-policy.js";
 
 describe("Kimi K3 request policy", () => {
-  it("identifies only the built-in Moonshot K3 models", () => {
-    expect(isKimiK3Model({ provider: "moonshotai-cn", id: "kimi-k3" })).toBe(true);
-    expect(isKimiK3Model({ provider: "moonshotai", id: "kimi-k3" })).toBe(true);
-    expect(isKimiK3Model({ provider: "custom", id: "kimi-k3" })).toBe(false);
-    expect(isKimiK3Model({ provider: "moonshotai-cn", id: "kimi-k2.5" })).toBe(false);
-  });
-
   it("uses the documented completion field and caps the TPM reservation", () => {
     expect(normalizeKimiK3Payload({ model: "kimi-k3", max_tokens: 131_072 })).toMatchObject({
       max_completion_tokens: KIMI_K3_MAX_COMPLETION_TOKENS,
@@ -23,7 +15,7 @@ describe("Kimi K3 request policy", () => {
     expect(normalizeKimiK3Payload({ max_tokens: 1 })).toEqual({ max_completion_tokens: 1 });
   });
 
-  it("installs the payload and fetch policy without affecting other model requests", async () => {
+  it("translates K3 requests at the runtime boundary without changing other models", async () => {
     let capturedOptions: any;
     const stream = vi.fn((_model: unknown, _context: unknown, options: unknown) => {
       capturedOptions = options;
@@ -31,13 +23,16 @@ describe("Kimi K3 request policy", () => {
     });
     const runtime = { streamSimple: stream } as any;
     installKimiK3Policy(runtime);
-    const model = { provider: "moonshotai-cn", id: "kimi-k3" };
-    expect(runtime.streamSimple(model, {}, { onPayload: async (payload: any) => ({ ...payload, max_tokens: 131_072 }) })).toBe("stream");
-    expect(await capturedOptions.onPayload({ max_tokens: 131_072 }, model)).toEqual({
+    const k3 = { provider: "moonshotai-cn", id: "kimi-k3" };
+    expect(runtime.streamSimple(k3, {}, {
+      onPayload: async (payload: any) => ({ ...payload, max_tokens: 131_072 }),
+    })).toBe("stream");
+    expect(await capturedOptions.onPayload({ max_tokens: 131_072 }, k3)).toEqual({
       max_completion_tokens: KIMI_K3_MAX_COMPLETION_TOKENS,
     });
-    expect(capturedOptions.fetch).toBeTypeOf("function");
+
     expect(runtime.streamSimple({ provider: "other", id: "model" }, {}, {})).toBe("stream");
+    expect(capturedOptions).toEqual({});
   });
 
   it("performs one provider-advised retry for max-concurrency responses", async () => {

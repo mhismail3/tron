@@ -43,6 +43,5 @@ for an unbiased choice. Choose dependency upgrade for version movement, code
 modernization for a justified capability replacement, and surgical change for
 ordinary bounded delivery.
 
-Run `scripts/test-agent-policy.sh` after changing skills and
-`scripts/personal-info-guard.sh` before finishing. Upstream adaptation provenance
-and license terms are recorded in `skills/NOTICE.md`.
+Run `scripts/personal-info-guard.sh` and `scripts/check-agent-policy.sh` before finishing. Upstream adaptation
+provenance and license terms are recorded in `skills/NOTICE.md`.

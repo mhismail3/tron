@@ -95,8 +95,8 @@ struct AppModelPairingAttemptTests {
 
     @Test("switch invalidates pending enrollment without reading the real Keychain")
     func switchInvalidatesPendingPairing() async throws {
-        try await withFixture(ids: [uuid(1)]) { fixture in
-            let existingID = "existing-\(UUID().uuidString)"
+        try await withFixture(ids: [uuid(1), uuid(2), uuid(3)]) { fixture in
+            let existingID = "existing-profile"
             let existing = GatewayProfile(
                 id: existingID,
                 label: "Existing Mac",
@@ -107,6 +107,7 @@ struct AppModelPairingAttemptTests {
             )
             fixture.defaults.set(try JSONEncoder.gateway.encode([existing]), forKey: "gatewayProfiles.v1")
             fixture.defaults.set(existing.id, forKey: "selectedGateway.v1")
+            try fixture.store.reload()
             let pairing = fixture.startPairing(self.firstInvitation)
             try await fixture.http.waitForRequests(1)
 

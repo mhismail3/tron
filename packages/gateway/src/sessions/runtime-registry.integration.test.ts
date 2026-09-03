@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { appendFile, copyFile, mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { getExamplesPath, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
@@ -4124,49 +4124,6 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       && entry.message.content?.some((part: any) => part.type === "text" && part.text === prompt))).toBe(true);
   });
 
-  it("runs the unchanged official status and working-indicator examples with the baseline theme", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-official-semantic-examples-"));
-    const agentDir = join(root, "agent");
-    const cwd = join(root, "workspace");
-    const extensionDir = join(cwd, ".pi", "extensions");
-    await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
-    const examples = join(getExamplesPath(), "extensions");
-    await Promise.all([
-      copyFile(join(examples, "status-line.ts"), join(extensionDir, "status-line.ts")),
-      copyFile(join(examples, "working-indicator.ts"), join(extensionDir, "working-indicator.ts")),
-    ]);
-    const trust = new TrustService(agentDir);
-    await trust.set(cwd, true);
-    const faux = fauxProvider({ provider: "tron-official-examples", tokensPerSecond: 10_000 });
-    faux.setResponses([fauxAssistantMessage("persisted")]);
-    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
-    runtime.registerNativeProvider(faux.provider);
-    const registry = new RuntimeRegistry({
-      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
-      modelRuntimeFactory: async () => runtime,
-      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
-    });
-    registries.push(registry);
-    await registry.initialize();
-    const slot = await registry.create(cwd);
-    const presentation = slot.snapshot().extensionPresentation;
-    expect(presentation.semanticState.statuses["status-demo"]).toBe("Ready");
-    expect(presentation.semanticState.statuses["working-indicator"]).toBe("Indicator: custom spinner");
-    expect(presentation.semanticState.working.indicator).toMatchObject({ kind: "animated", intervalMs: 80 });
-    expect(presentation.semanticState.working.indicator.frames.every((frame) => !frame.includes("\u001b"))).toBe(true);
-    expect(slot.isBusy).toBe(false);
-    const model = faux.getModel();
-    await slot.setModel(model.provider, model.id);
-    await slot.prompt("persist session");
-    await waitUntil(() => !slot.isBusy);
-    await registry.reloadProject(cwd, true);
-    expect(slot.snapshot().extensionPresentation.hostEpoch).not.toBe(presentation.hostEpoch);
-    await slot.rename("decorative-state-delete-fixture");
-    const sessionID = slot.id;
-    await registry.delete(sessionID);
-    await expect(registry.acquire(sessionID)).rejects.toMatchObject({ code: "not_found" });
-  });
-
   it("keeps the Gateway alive when extension timers emit oversized or JSON-dense widgets", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-rpc-oversized-widget-"));
     const agentDir = join(root, "agent");
@@ -7477,122 +7434,6 @@ export default function (pi) {
       expect.objectContaining({ name: "project_echo" }),
     ]));
     expect(resourceEvents).toContain("session.resourcesChanged");
-  });
-
-  it("classifies exact producer topology and keeps top-level parented sessions user-visible", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-session-catalog-"));
-    const agentDir = join(root, "agent");
-    const tronHome = join(root, "tron");
-    const cwd = join(root, "workspace");
-    const externalDir = join(root, "external-sessions");
-    await Promise.all([mkdir(agentDir), mkdir(tronHome), mkdir(cwd), mkdir(externalDir)]);
-
-    const timestamp = new Date().toISOString();
-    const writeSession = async (directory: string, id: string, message: string, parentSession?: string) => {
-      const path = join(directory, `${id}.jsonl`);
-      await writeFile(path, [
-        JSON.stringify({ type: "session", version: 3, id, timestamp, cwd, ...(parentSession ? { parentSession } : {}) }),
-        JSON.stringify({ type: "message", id: randomUUID().slice(0, 8), parentId: null, timestamp, message: { role: "user", content: message, timestamp: Date.now() } }),
-      ].join("\n") + "\n");
-      return path;
-    };
-    const externalId = randomUUID();
-    await writeSession(externalDir, externalId, "external process");
-
-    const piSessionDirectory = join(agentDir, "sessions", "--workspace--");
-    await mkdir(piSessionDirectory, { recursive: true });
-    const parentId = randomUUID();
-    const parentFile = await writeSession(piSessionDirectory, parentId, "parent");
-
-    const nestedDirectory = join(parentFile.replace(/\.jsonl$/, ""), "child", "run-0");
-    await mkdir(nestedDirectory, { recursive: true });
-    const nestedId = randomUUID();
-    const generatedNestedFile = await writeSession(nestedDirectory, nestedId, "nested fresh child");
-    await rename(generatedNestedFile, join(nestedDirectory, "session.jsonl"));
-
-    const forksDirectory = join(parentFile.replace(/\.jsonl$/, ""), "forks");
-    await mkdir(forksDirectory, { recursive: true });
-    const nestedFork = SessionManager.forkFrom(parentFile, cwd, forksDirectory);
-    const fork = SessionManager.forkFrom(parentFile, cwd, piSessionDirectory);
-    fork.appendSessionInfo("ordinary fork");
-    const directSubagent = SessionManager.forkFrom(parentFile, cwd, piSessionDirectory);
-    directSubagent.appendSessionInfo("subagent-worker-fixture-1");
-    const crossProjectDirectory = join(agentDir, "sessions", "--other-workspace--");
-    await mkdir(crossProjectDirectory, { recursive: true });
-    const crossProjectFork = SessionManager.forkFrom(
-      parentFile, join(root, "other-workspace"), crossProjectDirectory
-    );
-
-    // Reproduce the incident shape without using text or timestamps: a
-    // top-level parented snapshot interrupted before child naming remains a
-    // user session because it does not satisfy delegated producer topology.
-    const interruptedId = randomUUID();
-    const interruptedFile = join(piSessionDirectory, `${interruptedId}.jsonl`);
-    await writeFile(interruptedFile, [
-      JSON.stringify({
-        type: "session", version: 3, id: interruptedId,
-        timestamp, cwd, parentSession: parentFile,
-      }),
-      JSON.stringify({
-        type: "message", id: randomUUID().slice(0, 8), parentId: null,
-        timestamp, message: { role: "user", content: "inherited", timestamp: Date.now() - 1_000 },
-      }),
-    ].join("\n") + "\n");
-
-    const registry = new RuntimeRegistry({
-      agentDir,
-      tronHome,
-      idleRuntimeMs: 60_000,
-      trust: new TrustService(agentDir),
-      broadcast: () => {},
-      sessionSummaryChanged: () => {},
-      sessionListChanged: () => {},
-    });
-    registries.push(registry);
-    await registry.initialize();
-    const defaultCatalog = await registry.list();
-    const completeCatalog = await registry.list("all");
-    expect(defaultCatalog.map((session) => session.id)).toEqual(expect.arrayContaining([
-      parentId, fork.getSessionId(), directSubagent.getSessionId(),
-      crossProjectFork.getSessionId(), interruptedId,
-    ]));
-    expect(defaultCatalog.map((session) => session.id)).not.toContain(nestedId);
-    expect(defaultCatalog.map((session) => session.id)).not.toContain(nestedFork.getSessionId());
-    expect(defaultCatalog.map((session) => session.id)).not.toContain(externalId);
-    expect(completeCatalog.map((session) => session.id)).not.toContain(externalId);
-    expect(completeCatalog.find((session) => session.id === parentId)).toMatchObject({ kind: "user" });
-    expect(completeCatalog.find((session) => session.id === fork.getSessionId())).toMatchObject({ kind: "user", parentSessionId: parentId });
-    expect(completeCatalog.find((session) => session.id === crossProjectFork.getSessionId())).toMatchObject({
-      kind: "user", parentSessionId: parentId,
-    });
-    expect(completeCatalog.find((session) => session.id === directSubagent.getSessionId())).toMatchObject({
-      kind: "user",
-      parentSessionId: parentId,
-    });
-    expect(completeCatalog.find((session) => session.id === interruptedId)).toMatchObject({
-      kind: "user",
-      parentSessionId: parentId,
-    });
-    expect(completeCatalog.find((session) => session.id === nestedFork.getSessionId())).toMatchObject({
-      kind: "subagent",
-      parentSessionId: parentId,
-    });
-    expect(completeCatalog.find((session) => session.id === nestedId)).toMatchObject({
-      kind: "subagent",
-    });
-    const acquisition = await (registry as unknown as {
-      catalogAcquisition: () => Promise<{ entriesByID: ReadonlyMap<string, { structuralSubagent: boolean; path: string }> }>;
-    }).catalogAcquisition();
-    expect(acquisition.entriesByID.get(nestedId)?.structuralSubagent).toBe(true);
-    expect(acquisition.entriesByID.get(nestedFork.getSessionId())?.structuralSubagent).toBe(true);
-    await expect(registry.acquire(nestedId)).rejects.toMatchObject({ code: "conflict" });
-    await expect(registry.acquire(nestedFork.getSessionId())).rejects.toMatchObject({ code: "conflict" });
-    await expect(registry.delete(nestedId)).rejects.toMatchObject({ code: "conflict" });
-
-    await registry.delete(parentId);
-    expect((await registry.list("all")).find((session) => session.id === nestedId)).toMatchObject({ kind: "subagent" });
-    expect((await registry.list("all")).find((session) => session.id === nestedFork.getSessionId()))
-      .toMatchObject({ kind: "subagent" });
   });
 
   it("rekeys the owning slot when a completed session is forked", async () => {

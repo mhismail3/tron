@@ -104,7 +104,7 @@ allowed = {
     ".codex/environments/environment.toml",
     "scripts/tron-ios-device",
     "scripts/tron-ios-device-test",
-    "scripts/test-agent-policy.sh",
+    "scripts/check-agent-policy.sh",
     "packages/ios-app/scripts/test-build-matrix-policy.sh",
 }
 paths = subprocess.check_output(

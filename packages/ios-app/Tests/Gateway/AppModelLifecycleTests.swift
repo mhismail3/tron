@@ -347,7 +347,10 @@ struct AppModelLifecycleTests {
     func currentDeviceRevokeOwnsShutdown() async throws {
         try await withFixture(socketCount: 1) { fixture in
             let connecting = Task {
-                try await fixture.client.connect(profile: fixture.initialProfile, token: "token")
+                try await fixture.model.connectHostedGateway(
+                    profile: fixture.initialProfile,
+                    token: "token"
+                )
             }
             defer { connecting.cancel() }
             try await fixture.sockets[0].waitUntilSent(count: 1)
@@ -380,7 +383,10 @@ struct AppModelLifecycleTests {
     func legacyImportCannotCrossProfileBoundary() async throws {
         try await withFixture(socketCount: 1) { fixture in
             let connecting = Task {
-                try await fixture.client.connect(profile: fixture.initialProfile, token: "token")
+                try await fixture.model.connectHostedGateway(
+                    profile: fixture.initialProfile,
+                    token: "token"
+                )
             }
             defer { connecting.cancel() }
             try await fixture.sockets[0].waitUntilSent(count: 1)

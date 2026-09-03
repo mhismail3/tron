@@ -344,8 +344,15 @@ xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
 xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64' \
   -only-testing:TronMacTests/PairingURLBuilderTests \
-  -only-testing:TronMacTests/EnrollmentCodeReaderTests
+  -only-testing:TronMacTests/EnrollmentCodeReaderTests \
+  -only-testing:TronMacTests/SingleInstanceLockTests
 ```
+
+`SingleInstanceLockTests` launches the test-only `SingleInstanceLockProbe` in
+separate processes. The owner and contender communicate through bounded pipe
+markers, proving exclusion while the first process holds a disposable lock and
+successful acquisition after release; it does not use sleeps or application
+lifecycle state.
 
 After an edit, rerun the incremental `build-for-testing`, then keep using
 `test-without-building`. This separates compilation from execution and avoids
