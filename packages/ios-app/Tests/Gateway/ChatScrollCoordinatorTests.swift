@@ -1027,7 +1027,9 @@ struct ChatScrollCoordinatorTests {
             coordinator.layoutTransactionAbandoned(41)
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
-            await Task.yield()
+            for _ in 0..<20 where coordinator.targetReleaseGeneration == 0 {
+                await Task.yield()
+            }
 
             #expect(coordinator.targetReleaseGeneration == 1)
             #expect(coordinator.consumeTargetRelease())
