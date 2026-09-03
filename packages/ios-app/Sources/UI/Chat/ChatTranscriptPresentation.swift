@@ -840,20 +840,40 @@ struct ChatTranscriptGeometry: Equatable {
         return offsetY <= maximumOffset + 2
     }
 
-    func hasViewportChange(from previous: Self) -> Bool {
-        abs(containerHeight - previous.containerHeight) > 0.5
-            || abs(bottomInset - previous.bottomInset) > 0.5
+    /// A direct native viewport move changes the content offset or visible
+    /// content rect without changing the measured layout. Keyboard, composer,
+    /// and row-size changes are structural and cannot impersonate user intent.
+    func hasIndependentViewportMovement(from previous: Self) -> Bool {
+        guard !hasStructuralChange(from: previous) else { return false }
+        if abs(offsetY - previous.offsetY) > 0.5 { return true }
+        if let current = visibleTopY, let prior = previous.visibleTopY,
+           abs(current - prior) > 0.5 { return true }
+        if let current = visibleBottomY, let prior = previous.visibleBottomY,
+           abs(current - prior) > 0.5 { return true }
+        return false
     }
 
     func hasStructuralChange(from previous: Self) -> Bool {
-        hasViewportChange(from: previous)
+        abs(containerHeight - previous.containerHeight) > 0.5
+            || abs(bottomInset - previous.bottomInset) > 0.5
             || abs(contentHeight - previous.contentHeight) > 0.5
+    }
+
+    var isPlausibleBottomRubberBand: Bool {
+        guard isPastBottomEdge, hasScrollableOverflow else { return false }
+        let legalBottom = max(0, contentHeight + bottomInset - containerHeight)
+        let overscroll = max(0, offsetY - legalBottom)
+        let tolerance = min(160, max(48, containerHeight * 0.25))
+        return overscroll <= tolerance
     }
 }
 
 enum ChatOpenPresentationPhase: Equatable {
     case opening
     case positioning
+    /// The positioning lift is resolving behind the opaque opening surface.
+    /// The transcript is not interactive or visible until physical settlement.
+    case revealing
     case ready
     case failed(String)
 }
@@ -878,8 +898,14 @@ struct ChatOpenPresentationState: Equatable {
         return true
     }
 
-    mutating func installPositionedViewport(sessionID: String, epoch: Int) -> Bool {
+    mutating func beginPositionedReveal(sessionID: String, epoch: Int) -> Bool {
         guard sessionID == self.sessionID, epoch == self.epoch, phase == .positioning else { return false }
+        phase = .revealing
+        return true
+    }
+
+    mutating func installSettledViewport(sessionID: String, epoch: Int) -> Bool {
+        guard sessionID == self.sessionID, epoch == self.epoch, phase == .revealing else { return false }
         phase = .ready
         return true
     }

@@ -345,6 +345,9 @@ struct ChatView: View {
                 )
             }
             _ = ensureInteractionTraceContext()
+            scrollCoordinator.viewportObservationChanged(
+                isActive: presentationActivity.allowsViewportObservation
+            )
             keyboardObserver.setOwnerWindow(composerResponder.window)
             keyboardObserver.start()
             reconcileSessionPresentationVisibility()
@@ -409,6 +412,7 @@ struct ChatView: View {
             if previous.allowsViewportObservation,
                !current.allowsViewportObservation {
                 viewportActivation &+= 1
+                scrollCoordinator.viewportObservationChanged(isActive: false)
                 if ChatOpeningAttemptPolicy.isUnsettled(sessionPresentation.open.phase) {
                     // A covered transcript cannot publish the native geometry
                     // needed to finish positioning. Cancel the exact opening and
@@ -431,6 +435,7 @@ struct ChatView: View {
             }
             if !previous.allowsViewportObservation,
                current.allowsViewportObservation {
+                scrollCoordinator.viewportObservationChanged(isActive: true)
                 if scenePhase == .active,
                    !sessionPresentation.needsOpeningResume,
                    transcriptPresentation.installed != nil {
@@ -538,7 +543,9 @@ struct ChatView: View {
             isPastBottomEdge: geometry.isValid ? geometry.isPastBottomEdge : nil,
             tailClassification: scrollCoordinator.physicalTailEvidence?.classification,
             tailDisplacement: scrollCoordinator.physicalTailEvidence?.signedDisplacement,
-            hasCommand: scrollCoordinator.command != nil
+            hasCommand: scrollCoordinator.command != nil,
+            hasAppliedTarget: scrollCoordinator.hasAppliedTargetLease,
+            hasPendingRelease: scrollCoordinator.hasPendingTargetRelease
         )
     }
 
@@ -1071,7 +1078,9 @@ struct ChatView: View {
             canonicalSubmissionIDs: sessionPresentation.canonicalSubmissionHandoffs.ids,
             canonicalSubmissionAliases: sessionPresentation.canonicalSubmissionAliases.aliases,
             isReady: isTranscriptReady,
+            hasSettledOpeningOffset: hasSettledOpeningOffset,
             permitsAsynchronousContent: scrollCoordinator.permitsAsynchronousTranscriptContent,
+            frameScheduler: displayFrameScheduler,
             minimumUnderflowContentHeight: minimumUnderflowContentHeight,
             reduceMotion: reduceMotion,
             presentationEpoch: sessionPresentation.open.epoch,
@@ -1536,6 +1545,11 @@ struct ChatView: View {
 
     private var isTranscriptReady: Bool { sessionPresentation.open.phase == .ready }
 
+    private var hasSettledOpeningOffset: Bool {
+        sessionPresentation.open.phase == .revealing
+            || sessionPresentation.open.phase == .ready
+    }
+
     private var isLoadingEarlierMessages: Bool {
         ChatEarlierMessagesOperationPolicy.isLoading(
             owner: sessionPresentation.earlierMessagesOperation,
@@ -1550,7 +1564,9 @@ struct ChatView: View {
 
     private var admitsScrollGeometryCallbacks: Bool {
         presentationActivity.allowsViewportObservation
-            && (sessionPresentation.open.phase == .positioning || sessionPresentation.open.phase == .ready)
+            && (sessionPresentation.open.phase == .positioning
+                || sessionPresentation.open.phase == .revealing
+                || sessionPresentation.open.phase == .ready)
     }
 
     private var admitsNativeScrollCallbacks: Bool {
@@ -1564,7 +1580,7 @@ struct ChatView: View {
 
     @ViewBuilder private var openingSurface: some View {
         switch sessionPresentation.open.phase {
-        case .opening, .positioning:
+        case .opening, .positioning, .revealing:
             ZStack {
                 TronPulseLoadingIndicator(accent: .tronEmerald, size: 44)
             }
@@ -2138,7 +2154,6 @@ struct ChatView: View {
         if geometry.isAtCatchUpBoundary {
             probe.recordScrollSettle(distanceFromBottom: geometry.distanceFromBottom)
         }
-        await scrollCoordinator.waitForOpeningTailSettlement()
         probe.recordReadyFrameCompletion()
     }
     #endif
@@ -2154,10 +2169,10 @@ struct ChatView: View {
             transcriptRevealAnimation,
             completionCriteria: .logicallyComplete
         ) {
-            sessionPresentation.open.installPositionedViewport(sessionID: sessionID, epoch: epoch)
+            sessionPresentation.open.beginPositionedReveal(sessionID: sessionID, epoch: epoch)
         } completion: {
             guard sessionPresentation.open.epoch == epoch,
-                  sessionPresentation.open.phase == .ready else { return }
+                  sessionPresentation.open.phase == .revealing else { return }
             scrollCoordinator.openingRevealCompleted()
         }
     }
@@ -2257,6 +2272,25 @@ struct ChatView: View {
             performanceSignposts.end(interval, result: .discarded, metrics: .none)
             return .discarded
         }
+        let settlement = await scrollCoordinator.waitForOpeningTailSettlement()
+        switch settlement {
+        case .cancelled:
+            performanceSignposts.end(interval, result: .cancelled, metrics: .none)
+            return .discarded
+        case .failed:
+            performanceSignposts.end(interval, result: .failure, metrics: .none)
+            return .positioningFailed
+        case .settled:
+            break
+        }
+        guard !Task.isCancelled,
+              sessionPresentation.open.installSettledViewport(
+                  sessionID: sessionID,
+                  epoch: epoch
+              ) else {
+            performanceSignposts.end(interval, result: .discarded, metrics: .none)
+            return .discarded
+        }
         return await completeFirstReadyFrame(interval, epoch: epoch) ? .ready : .discarded
     }
 
@@ -2295,9 +2329,12 @@ struct ChatView: View {
         performanceTracker.beginScrollCommand()
         let update = {
             switch command.destination {
-            case .tail where command.origin == .physicalTailRepair
-                    || command.origin == .tailMaterialization:
+            case .tail where command.origin == .physicalTailRepair:
                 installStableTailTarget()
+            case .materialize(let renderedID):
+                var target = ScrollPosition(idType: String.self)
+                target.scrollTo(id: renderedID, anchor: .bottom)
+                transcriptScrollPosition = target
             case .openingTail(let renderedID):
                 // Chat opening targets the eager marker after all rendered rows.
                 guard renderedID == "transcript-bottom" else { return }
@@ -3006,25 +3043,18 @@ struct ChatView: View {
             context: traceContext,
             state: interactionTraceState(installed: installed)
         )
-        // Transfer an applied sentinel lease directly to the outgoing row while
-        // preserving detached-reader ownership.
-        scrollCoordinator.submitted()
-        // Submission, row growth, composer height, morph, and keyboard changes
-        // join one settlement generation.
-        let layoutGeneration = layoutTransaction.join(.submission)
-        _ = layoutTransaction.join(.transcriptGrowth)
         let composerHeightBeforeSubmission = composerHeightLedger.current
         let keyboardRevision = keyboardObserver.revision
         do {
-            // Admission and the local lifecycle graft are atomic. Row entrance
-            // and morph views own their scoped animations.
+            // Admission and the local lifecycle graft are atomic. A locally
+            // knowable rejection must occur before viewport, responder, layout,
+            // draft, or row-presentation state changes.
             let installedBeforeSubmission = installed
             let freezesDetachedProjection = scrollCoordinator
                 .defersAutomaticLiveProjectionIntake
             // A neutral root transaction preserves descendant-scoped composer
             // and flight animations.
             let admission = try withTransaction(Transaction()) {
-                composerResourcePicker = nil
                 let submission = try model.beginComposerSubmission(
                     target: target,
                     behavior: behavior,
@@ -3032,9 +3062,15 @@ struct ChatView: View {
                     canonicalTranscript: model.transcriptSnapshot(for: sessionID)?.transcript ?? [],
                     queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? []
                 )
-                // Only an admitted submission may change responder state. The
-                // layout owner is armed beforehand so composer clearing, graft,
-                // morph, and keyboard settlement still share one generation.
+                composerResourcePicker = nil
+                // Transfer an applied sentinel lease directly to the outgoing
+                // row while preserving detached-reader ownership.
+                scrollCoordinator.submitted()
+                // Submission, row growth, composer height, morph, and keyboard
+                // changes join one settlement generation only after admission.
+                let layoutGeneration = layoutTransaction.join(.submission)
+                _ = layoutTransaction.join(.transcriptGrowth)
+                // Only an admitted submission may change responder state.
                 composerFocused = false
                 _ = composerResponder.resignFirstResponder()
                 layoutTransaction.configure(
@@ -3091,14 +3127,20 @@ struct ChatView: View {
                 } else if !materializationAdmitted {
                     layoutTransaction.settle(layoutGeneration, source: .transcriptGrowth)
                 }
-                return (submission, grafted, materializationAdmitted)
+                return (
+                    submission: submission,
+                    grafted: grafted,
+                    materialized: materializationAdmitted,
+                    layoutGeneration: layoutGeneration
+                )
             }
-            let submission = admission.0
+            let submission = admission.submission
+            let layoutGeneration = admission.layoutGeneration
             model.chatInteractionTrace.submission(
                 .lifecycleGrafted,
                 context: traceContext,
-                grafted: admission.1,
-                materialized: admission.2,
+                grafted: admission.grafted,
+                materialized: admission.materialized,
                 state: interactionTraceState()
             )
             if let capture = transcriptProjectionCapture {

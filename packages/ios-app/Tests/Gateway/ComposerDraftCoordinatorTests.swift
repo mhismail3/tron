@@ -2144,6 +2144,49 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
+    @Test("ordinary prompt admission matches the Gateway UTF-8 boundary without mutating rejected drafts")
+    func promptByteAdmissionIsAtomic() throws {
+        let exactHarness = ComposerHarness()
+        let exactTarget = SessionPresentationIdentity(sessionID: "exact", generation: 1)
+        let exactText = String(
+            repeating: "x",
+            count: SharedContentAdmissionPolicy.maximumPromptBytes
+        )
+        _ = exactHarness.coordinator.installHostedPresentation(
+            profileID: "profile",
+            target: exactTarget,
+            lifecycleGeneration: 1,
+            initialText: exactText
+        )
+        let admitted = try exactHarness.coordinator.beginSubmission(
+            target: exactTarget,
+            behavior: nil
+        )
+        #expect(admitted.outgoingText == exactText)
+
+        let rejectedHarness = ComposerHarness()
+        let rejectedTarget = SessionPresentationIdentity(sessionID: "rejected", generation: 1)
+        let rejectedText = String(
+            repeating: "x",
+            count: SharedContentAdmissionPolicy.maximumPromptBytes - 1
+        ) + "é"
+        let rejectedScope = rejectedHarness.coordinator.installHostedPresentation(
+            profileID: "profile",
+            target: rejectedTarget,
+            lifecycleGeneration: 1,
+            initialText: rejectedText
+        )
+        #expect(throws: GatewayFailure.self) {
+            try rejectedHarness.coordinator.beginSubmission(
+                target: rejectedTarget,
+                behavior: nil
+            )
+        }
+        #expect(rejectedHarness.coordinator.text(for: rejectedScope) == rejectedText)
+        #expect(rejectedHarness.coordinator.outgoingSubmission(for: rejectedTarget) == nil)
+        #expect(rejectedHarness.sendCalls.isEmpty)
+    }
+
     @Test("accepted submission survives remount until exact canonical settlement")
     func acceptedSendSurvivesPresentationRevocation() async throws {
         try await withTestWatchdog { @MainActor in

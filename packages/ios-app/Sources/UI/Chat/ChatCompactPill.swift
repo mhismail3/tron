@@ -450,10 +450,21 @@ struct UserPromptText: View {
 }
 
 private struct UserPromptLabel: UIViewRepresentable {
+    final class Coordinator {
+        var text: String?
+        var fontRevision: String?
+        var sizeCategory: ContentSizeCategory?
+        var layoutDirection: LayoutDirection?
+        var preferredContentSizeCategory: UIContentSizeCategory?
+        var interfaceStyle: UIUserInterfaceStyle?
+    }
+
     let text: String
     let fontRevision: String
     @Environment(\.sizeCategory) private var sizeCategory
     @Environment(\.layoutDirection) private var layoutDirection
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> UILabel {
         let label = UILabel()
@@ -467,7 +478,11 @@ private struct UserPromptLabel: UIViewRepresentable {
     }
 
     func updateUIView(_ label: UILabel, context: Context) {
-        configure(label, width: label.bounds.width > 0 ? label.bounds.width : nil)
+        configure(
+            label,
+            coordinator: context.coordinator,
+            width: label.bounds.width > 0 ? label.bounds.width : nil
+        )
     }
 
     func sizeThatFits(
@@ -477,7 +492,7 @@ private struct UserPromptLabel: UIViewRepresentable {
     ) -> CGSize? {
         let proposedWidth = proposal.width ?? 10_000
         guard proposedWidth > 0 else { return nil }
-        configure(uiView, width: proposedWidth)
+        configure(uiView, coordinator: context.coordinator, width: proposedWidth)
         guard let attributedText = uiView.attributedText else { return .zero }
         let measured = attributedText.boundingRect(
             with: CGSize(width: proposedWidth, height: .greatestFiniteMagnitude),
@@ -490,16 +505,33 @@ private struct UserPromptLabel: UIViewRepresentable {
                 measured: ceil(measured.width),
                 proposed: proposedWidth
             )
-        configure(uiView, width: fittedWidth)
+        configure(uiView, coordinator: context.coordinator, width: fittedWidth)
         let size = uiView.sizeThatFits(
             CGSize(width: fittedWidth, height: .greatestFiniteMagnitude)
         )
         return CGSize(width: fittedWidth, height: ceil(size.height))
     }
 
-    private func configure(_ label: UILabel, width: CGFloat?) {
-        _ = fontRevision
-        _ = sizeCategory
+    private func configure(
+        _ label: UILabel,
+        coordinator: Coordinator,
+        width: CGFloat?
+    ) {
+        if let width { label.preferredMaxLayoutWidth = width }
+        let preferredCategory = label.traitCollection.preferredContentSizeCategory
+        let interfaceStyle = label.traitCollection.userInterfaceStyle
+        guard coordinator.text != text
+                || coordinator.fontRevision != fontRevision
+                || coordinator.sizeCategory != sizeCategory
+                || coordinator.layoutDirection != layoutDirection
+                || coordinator.preferredContentSizeCategory != preferredCategory
+                || coordinator.interfaceStyle != interfaceStyle else { return }
+        coordinator.text = text
+        coordinator.fontRevision = fontRevision
+        coordinator.sizeCategory = sizeCategory
+        coordinator.layoutDirection = layoutDirection
+        coordinator.preferredContentSizeCategory = preferredCategory
+        coordinator.interfaceStyle = interfaceStyle
         let base = TronFontLoader.createUIFont(
             size: TronTypography.sizeBody * UserPromptTextLayoutPolicy.fontScale
         )
@@ -523,7 +555,6 @@ private struct UserPromptLabel: UIViewRepresentable {
             ]
         )
         label.accessibilityLabel = text
-        if let width { label.preferredMaxLayoutWidth = width }
     }
 
 }

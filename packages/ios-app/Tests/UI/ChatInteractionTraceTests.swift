@@ -23,7 +23,7 @@ struct ChatInteractionTraceTests {
         #expect(records.first?.record.message.contains(
             "presentation=\(ChatInteractionTrace.maximumRecords + 19)"
         ) == true)
-        #expect(records.last?.record.event == "chat.submission.checkpoint")
+        #expect(records.last?.record.event == "chat.context.begin")
         #expect(zip(records, records.dropFirst()).allSatisfy { pair in
             pair.0.record.timestamp > pair.1.record.timestamp
         })
@@ -77,13 +77,20 @@ struct ChatInteractionTraceTests {
             .issued,
             context: context,
             command: command,
-            state: .init(viewportMode: .pinned, distanceFromBottom: 12)
+            state: .init(
+                viewportMode: .pinned,
+                distanceFromBottom: 12,
+                hasCommand: false,
+                hasAppliedTarget: true,
+                hasPendingRelease: true
+            )
         )
 
         let record = trace.diagnosticRecords(limit: 1).first?.record
         #expect(record?.event == "chat.command.issued")
         #expect(record?.message.contains("destination=opening-tail") == true)
         #expect(record?.message.contains(privateTarget) == false)
+        #expect(record?.message.contains("command=0 target=1 release=1") == true)
     }
 
     @Test("anomaly policy distinguishes automatic displacement from reader ownership")
@@ -133,6 +140,23 @@ struct ChatInteractionTraceTests {
         ))
         #expect(ChatInteractionAnomalyPolicy.lostProjection(expectedRows: 4, currentRows: 0))
         #expect(!ChatInteractionAnomalyPolicy.lostProjection(expectedRows: 0, currentRows: 0))
+
+        let installedUnderflow = ChatTranscriptGeometry(
+            offsetY: -198,
+            contentHeight: 676,
+            containerHeight: 758,
+            bottomInset: 82,
+            visibleTopY: 0,
+            visibleBottomY: 758
+        )
+        #expect(!ChatInteractionAnomalyPolicy.displacedPinnedViewport(
+            expectedPinned: true,
+            currentMode: .pinned,
+            isUserInteracting: false,
+            isPositionedByUser: false,
+            geometry: installedUnderflow,
+            tailClassification: .belowViewport
+        ))
     }
 
     @Test("anomalies are actionable local error records")

@@ -21,6 +21,11 @@ enum ChatEntranceGrowthPolicy {
     /// row's layout bounds. The entrance reveal owns only vertical admission;
     /// this transparent gutter keeps those effects out of its clip boundary.
     static let effectOverflow: CGFloat = 24
+    /// Height interpolation is a layout optimization for compact arrivals, not
+    /// a transcript admission requirement. Keeping very tall rows at their
+    /// natural height prevents a single large prompt or Markdown response from
+    /// moving the lazy stack by tens of thousands of points per animation.
+    static let maximumAnimatedHeight: CGFloat = 8_000
 
     static func normalizedProgress(_ progress: CGFloat) -> CGFloat {
         guard progress.isFinite else { return 0 }
@@ -29,6 +34,7 @@ enum ChatEntranceGrowthPolicy {
 
     static func height(natural: CGFloat, progress: CGFloat) -> CGFloat {
         guard natural.isFinite, natural > 0 else { return 0 }
+        guard natural <= maximumAnimatedHeight else { return natural }
         return natural * normalizedProgress(progress)
     }
 

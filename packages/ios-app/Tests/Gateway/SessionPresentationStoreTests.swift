@@ -19,9 +19,10 @@ struct SessionPresentationStoreTests {
             switch request.objectValue?["method"]?.stringValue {
             case "session.attention.read":
                 return (request, index)
-            case "session.commands":
-                // Command readiness is an independent background request. Leave
-                // it pending so this helper observes only attention ordering.
+            case "session.commands", "session.transcript":
+                // Command readiness and opening-tail hydration are independent
+                // requests. Leave them pending so this helper observes only
+                // attention ordering.
                 _ = requestID
                 index += 1
             default:
@@ -40,8 +41,9 @@ struct SessionPresentationStoreTests {
         while true {
             try await socket.waitUntilSent(count: index + 1)
             let request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[index])
-            if request.objectValue?["method"]?.stringValue == method { return (request, index) }
-            #expect(request.objectValue?["method"]?.stringValue == "session.commands")
+            let observedMethod = request.objectValue?["method"]?.stringValue
+            if observedMethod == method { return (request, index) }
+            #expect(observedMethod == "session.commands" || observedMethod == "session.attention.read")
             index += 1
         }
     }
@@ -1703,17 +1705,16 @@ struct SessionPresentationStoreTests {
                 "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
                 "result": .object(["synchronized": .bool(true)]),
             ])))
-            let attentionIndex = try await answerAttentionRead(
+            _ = try await answerAttentionRead(
                 socket,
                 frameIndex: 3,
                 expectedRevision: 6
             )
 
-            _ = try await opening.value
             let transcriptRequest = try await nextRequest(
                 "session.transcript",
                 socket: socket,
-                startingAt: attentionIndex + 1
+                startingAt: 3
             )
             request = transcriptRequest.request
             requestID = try #require(request.objectValue?["id"]?.stringValue)
@@ -1729,6 +1730,7 @@ struct SessionPresentationStoreTests {
                     "leafEntryId": baseline.leafEntryId.map(JSONValue.string) ?? .null,
                 ]),
             ])))
+            _ = try await opening.value
             for _ in 0..<100 where store.visibleTranscriptStart != 0 {
                 try await Task.sleep(for: .milliseconds(10))
             }
@@ -1854,17 +1856,16 @@ struct SessionPresentationStoreTests {
                 "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
                 "result": .object(["synchronized": .bool(true)]),
             ])))
-            let attentionIndex = try await answerAttentionRead(
+            _ = try await answerAttentionRead(
                 socket,
                 frameIndex: 3,
                 expectedRevision: 6
             )
 
-            _ = try await opening.value
             let transcriptRequest = try await nextRequest(
                 "session.transcript",
                 socket: socket,
-                startingAt: attentionIndex + 1
+                startingAt: 3
             )
             request = transcriptRequest.request
             requestID = try #require(request.objectValue?["id"]?.stringValue)
@@ -1880,6 +1881,7 @@ struct SessionPresentationStoreTests {
                     "leafEntryId": baseline.leafEntryId.map(JSONValue.string) ?? .null,
                 ]),
             ])))
+            _ = try await opening.value
             for _ in 0..<100 where store.visibleTranscriptStart != 0 {
                 try await Task.sleep(for: .milliseconds(10))
             }
@@ -2456,6 +2458,19 @@ struct SessionPresentationStoreTests {
                 "type": .string("response"), "id": .string(updateID), "ok": .bool(true),
                 "result": .object(["applied": .bool(false), "revision": .number(4), "text": .string("remote")]),
             ])))
+            model.scheduleExtensionEditorUpdate(
+                target: target,
+                text: String(
+                    repeating: "é",
+                    count: SharedContentAdmissionPolicy.maximumPromptBytes / 2 + 1
+                )
+            )
+            try await Task.sleep(for: .milliseconds(400))
+            let updatesAfterOversizedDraft = await socket.sentFrames().dropFirst(sentBeforeEditorUpdate).filter { frame in
+                (try? JSONDecoder.gateway.decode(JSONValue.self, from: frame)
+                    .objectValue?["method"]?.stringValue) == "extension.editor.update"
+            }
+            #expect(updatesAfterOversizedDraft.count == 1)
             await model.teardown()
             await client.close()
         }

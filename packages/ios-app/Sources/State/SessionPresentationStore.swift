@@ -209,8 +209,6 @@ final class SessionPresentationStore {
     private(set) var loadingEarlierTranscript = false
     private(set) var transcriptLoadState: SessionTranscriptLoadState = .idle
     @ObservationIgnored private var transcriptLoadTarget: SessionPresentationIdentity?
-    @ObservationIgnored private var recentTailBackfillTask: Task<Void, Never>?
-    private var recentTailBackfillTarget: SessionPresentationIdentity?
     // At most one target can be mounted or in replacement intake. Keeping the
     // revoked marker exact avoids retaining every historical presentation.
     private var revokedTarget: SessionPresentationIdentity?
@@ -495,7 +493,6 @@ final class SessionPresentationStore {
         )
         pendingTarget = requested
         terminalSynchronizationFailures[requested] = nil
-        cancelRecentTailBackfill()
         transcriptLoadTarget = nil
         loadingEarlierTranscript = false
         transcriptLoadState = .idle
@@ -542,9 +539,16 @@ final class SessionPresentationStore {
               subscriptionTarget == requested else {
             throw GatewayFailure(code: "sync_failed", message: "Tron could not synchronize this session.", retryable: true, details: nil)
         }
+        // Optional recent-tail hydration is part of the opaque opening
+        // transaction. It either installs its exact bounded page now or times
+        // out silently; it can never race a second physical spine into view
+        // immediately after the first ready frame.
+        await backfillRecentTailForOpening(ifNeededFor: requested)
+        guard !Task.isCancelled, owns(requested), isAuthoritative else {
+            throw CancellationError()
+        }
         didOpen = true
         result = .success
-        scheduleRecentTailBackfill(for: requested)
         return requested.generation
     }
 
@@ -567,7 +571,6 @@ final class SessionPresentationStore {
         target = nil
         if pendingTarget == requested { pendingTarget = nil }
         isAuthoritative = false
-        cancelRecentTailBackfill()
         transcriptLoadTarget = nil
         loadingEarlierTranscript = false
         transcriptLoadState = .idle
@@ -853,7 +856,7 @@ final class SessionPresentationStore {
                         expectedRuntimeGeneration: current.runtimeGeneration,
                         expectedLeafEntryId: current.leafEntryId
                     ),
-                    timeout: optional ? .seconds(5) : .seconds(15)
+                    timeout: optional ? .seconds(1) : .seconds(15)
                 )
                 guard !Task.isCancelled,
                       let currentTarget = self.mountedTarget,
@@ -980,44 +983,21 @@ final class SessionPresentationStore {
         return .stale
     }
 
-    private func scheduleRecentTailBackfill(for target: SessionPresentationIdentity) {
+    private func backfillRecentTailForOpening(
+        ifNeededFor target: SessionPresentationIdentity
+    ) async {
         guard owns(target), isAuthoritative,
               snapshot?.sessionId == target.sessionID,
               let start = visibleTranscriptStart, start > 0,
               let total = visibleTranscriptTotal,
               visibleTranscriptEnd == total,
               visibleTranscript.count < ChatTranscriptPageRequest.maximumItemCount else { return }
-        cancelRecentTailBackfill()
-        recentTailBackfillTarget = target
-        recentTailBackfillTask = Task { @MainActor [weak self] in
-            await Task.yield()
-            guard let self else { return }
-            guard !Task.isCancelled,
-                  self.recentTailBackfillTarget == target,
-                  self.owns(target),
-                  self.isAuthoritative else {
-                if self.recentTailBackfillTarget == target {
-                    self.recentTailBackfillTask = nil
-                    self.recentTailBackfillTarget = nil
-                }
-                return
-            }
-            _ = await self.loadEarlier(
-                sessionID: target.sessionID,
-                presentationGeneration: target.generation,
-                maximumVisibleCount: ChatTranscriptPageRequest.maximumItemCount,
-                optional: true
-            )
-            guard self.recentTailBackfillTarget == target else { return }
-            self.recentTailBackfillTask = nil
-            self.recentTailBackfillTarget = nil
-        }
-    }
-
-    private func cancelRecentTailBackfill() {
-        recentTailBackfillTask?.cancel()
-        recentTailBackfillTask = nil
-        recentTailBackfillTarget = nil
+        _ = await loadEarlier(
+            sessionID: target.sessionID,
+            presentationGeneration: target.generation,
+            maximumVisibleCount: ChatTranscriptPageRequest.maximumItemCount,
+            optional: true
+        )
     }
 
     private func updateTranscriptLoadState(
@@ -1050,7 +1030,6 @@ final class SessionPresentationStore {
         observedAttentionSummary = nil
         retirePresentationVisibilityLocally()
         connectionGeneration &+= 1
-        cancelRecentTailBackfill()
         transcriptLoadTarget = nil
         loadingEarlierTranscript = false
         transcriptLoadState = .idle
@@ -2958,7 +2937,6 @@ final class SessionPresentationStore {
         let target = SessionPresentationIdentity(sessionID: snapshot.sessionId, generation: nextPresentationGeneration)
         self.target = target
         pendingTarget = nil
-        cancelRecentTailBackfill()
         transcriptLoadTarget = nil
         loadingEarlierTranscript = false
         transcriptLoadState = .idle

@@ -1846,6 +1846,18 @@ final class ComposerDraftCoordinator {
         guard !outgoing.isEmpty || !attachmentIDs.isEmpty || selectedResource != nil else {
             throw CancellationError()
         }
+        // Ordinary prompt admission must match the Gateway's exact UTF-8
+        // boundary before clearing the draft or installing an optimistic row.
+        // Resource invocations retain their narrower transport contract above.
+        if selectedResource == nil,
+           !SharedContentAdmissionPolicy.admitsPrompt(outgoing) {
+            throw GatewayFailure(
+                code: "invalid_request",
+                message: "Message is too large (maximum 192 KiB).",
+                retryable: false,
+                details: nil
+            )
+        }
         sequence &+= 1
         let snapshot = ComposerSubmissionSnapshot(
             target: target,

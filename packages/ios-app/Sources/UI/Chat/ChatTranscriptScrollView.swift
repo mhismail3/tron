@@ -24,7 +24,9 @@ private struct ChatScrollGeometryObservation: Equatable {
 }
 
 private struct ChatLazyTailMaterializationRequest: Hashable {
-    /// The exact semantic ID emitted by `stableRow` geometry callbacks.
+    /// SwiftUI scroll-target identity can differ from semantic geometry identity
+    /// during an exact canonical/lifecycle handoff.
+    let physicalID: String
     let semanticID: String
 }
 
@@ -371,7 +373,9 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let canonicalSubmissionIDs: Set<String>
     let canonicalSubmissionAliases: [String: String]
     let isReady: Bool
+    let hasSettledOpeningOffset: Bool
     let permitsAsynchronousContent: Bool
+    let frameScheduler: DisplayFrameScheduler
     let minimumUnderflowContentHeight: CGFloat
     let reduceMotion: Bool
     let presentationEpoch: Int
@@ -422,6 +426,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             ) { displayed in
                                 physicalRow(displayed, installed: installed)
                             }
+                            // Make the collection host itself the lazy scroll
+                            // target; its descendant may not exist while the
+                            // entrance is fully collapsed.
+                            .id(row.id)
                         }
                     }
                 }
@@ -435,7 +443,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             .frame(minHeight: minimumUnderflowContentHeight, alignment: .bottom)
             .scrollTargetLayout()
             .chatStableTranscriptUpdates(projectionIdentity: installed?.tag)
-            .offset(y: isReady || reduceMotion ? 0 : 8)
+            .offset(y: hasSettledOpeningOffset || reduceMotion ? 0 : 8)
             .accessibilityHidden(!isReady)
             .allowsHitTesting(isReady)
         }
@@ -488,9 +496,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 return
             }
             guard observation.presentationPhase == .positioning
+                    || observation.presentationPhase == .revealing
                     || observation.presentationPhase == .ready,
                   admitsGeometryCallbacks else { return }
-            if current.hasViewportChange(from: prior) {
+            if current.hasIndependentViewportMovement(from: prior) {
                 scrollCoordinator.viewportChanged(previous: prior, current: current)
             } else {
                 scrollCoordinator.geometryChanged(previous: prior, current: current)
@@ -531,7 +540,43 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             await Task.yield()
             guard !Task.isCancelled,
                   lazyTailMaterializationRequest == request else { return }
-            scrollCoordinator.discreteTailInserted(renderedID: request.semanticID)
+            let installationTag = transcriptPresentation.installed?.tag
+            guard scrollCoordinator.discreteTailInserted(
+                renderedID: request.semanticID,
+                physicalTargetID: request.physicalID
+            ) else { return }
+            // Geometry remains the ordinary entrance admission. A zero-height
+            // lazy child can nevertheless publish no frame even after its exact
+            // physical ID is targeted. Two presented frames provide a bounded
+            // visual-only fail-open: admit that still-current row so its natural
+            // height can materialize and produce normal settlement evidence.
+            do {
+                try await frameScheduler.nextFrame()
+                try await frameScheduler.nextFrame()
+                try Task.checkCancellation()
+            } catch { return }
+            guard scrollCoordinator.canAutomaticallyFollow,
+                  lazyTailMaterializationRequest == request,
+                  let installationTag,
+                  transcriptPresentation.installed?.tag == installationTag,
+                  transcriptPresentation.entranceState(for: request.semanticID) == .pending else {
+                return
+            }
+            let animated = transcriptPresentation.resolveEntrance(
+                id: request.semanticID,
+                installationTag: installationTag,
+                isVisible: true
+            )
+            if animated {
+                hostedRecorder?.recordEntranceResolution(
+                    animated: true,
+                    sourceOrdinal: installationTag.timelineGeneration
+                )
+                scrollCoordinator.retryTailMaterializationAfterEntranceAdmission(
+                    renderedID: request.semanticID,
+                    physicalTargetID: request.physicalID
+                )
+            }
         }
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: responseState, initial: true) { previous, current in
@@ -784,10 +829,17 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         guard let installed else { return nil }
         if let id = transcriptPresentation.newestPendingEntranceID,
            installed.containsDisplayedID(id) {
-            // Entrance IDs are rendered timeline IDs. The physical-row policy
-            // reports that same ID as geometry semantics; a canonical prompt
-            // alias changes only the outer `.id` and keeps this canonical key.
-            return ChatLazyTailMaterializationRequest(semanticID: id)
+            let rows = ChatPhysicalTranscriptRowPolicy.rows(
+                installed: installed,
+                canonicalAliases: canonicalSubmissionAliases
+            )
+            guard let physicalID = rows.first(where: { $0.semanticID == id })?.id else {
+                return nil
+            }
+            return ChatLazyTailMaterializationRequest(
+                physicalID: physicalID,
+                semanticID: id
+            )
         }
         let lifecycleIDs: [String] = {
             var ids: [String] = []
@@ -808,7 +860,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         guard let id = lifecycleIDs.first(where: {
             !transcriptPresentation.lifecycleEntranceIsConsumed(id: $0)
         }) else { return nil }
-        return ChatLazyTailMaterializationRequest(semanticID: id)
+        return ChatLazyTailMaterializationRequest(physicalID: id, semanticID: id)
     }
 
     private func stableRow<Content: View>(
