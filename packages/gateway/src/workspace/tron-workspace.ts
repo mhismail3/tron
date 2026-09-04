@@ -56,7 +56,13 @@ export class TronWorkspace {
       try {
         this.release = await lockfile.lock(state, {
           realpath: true, retries: 0, stale: 60_000, update: 10_000,
-          onCompromised: () => { this.identity = undefined; this.failure = "owned_elsewhere"; },
+          onCompromised: () => {
+            this.identity = undefined;
+            this.failure = "owned_elsewhere";
+            // proper-lockfile has already retired this ownership. Do not try
+            // to release an unowned lock or fail unrelated runtime shutdown.
+            this.release = undefined;
+          },
         });
       } catch { this.failure = "owned_elsewhere"; return; }
       const marker = join(state, "initialized.json");

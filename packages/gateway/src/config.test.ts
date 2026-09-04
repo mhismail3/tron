@@ -1,8 +1,20 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdtemp as createTemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { isTailscaleAddress, loadConfig, resolveBindHost, resolveTronHome } from "./config.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { isTailscaleAddress, loadConfig as loadGatewayConfig, resolveBindHost, resolveTronHome } from "./config.js";
+import * as durableJson from "./util/durable-json.js";
+
+const roots: string[] = [];
+async function mkdtemp(prefix: string) { const root = await createTemp(prefix); roots.push(root); return root; }
+const loadConfig: typeof loadGatewayConfig = (args, environment = {}) => loadGatewayConfig(args, {
+  TRON_MACHINE_GROUP_ID: environment.TRON_MACHINE_GROUP_PATH ? undefined : "test-machine-group",
+  ...environment,
+});
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
+});
 
 describe("gateway configuration", () => {
   it("recognizes only Tailscale CGNAT and canonical IPv6 ranges", () => {
@@ -66,8 +78,11 @@ describe("gateway configuration", () => {
     const before = { version: 1, machineId: "machine", machineName: "Mac", defaultWorkspace: "/old/workspace" };
     await writeFile(path, `${JSON.stringify(before)}\n`);
 
-    const loaded = await loadConfig([], { TRON_DATA_DIR: root });
-
+    const [loaded, concurrent] = await Promise.all([
+      loadConfig([], { TRON_DATA_DIR: root }), loadConfig([], { TRON_DATA_DIR: root }),
+    ]);
+    expect(concurrent.machineId).toBe(before.machineId);
+    expect(await loadConfig([], { TRON_DATA_DIR: root })).toEqual(loaded);
     expect(loaded.machineId).toBe(before.machineId);
     expect(loaded.machineName).toBe(before.machineName);
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
@@ -75,6 +90,36 @@ describe("gateway configuration", () => {
       machineId: before.machineId,
       machineName: before.machineName,
     });
+  });
+
+  it("preserves the exact old identity if normalization cannot publish", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-config-write-failure-"));
+    const path = join(root, "gateway/gateway.json");
+    await loadConfig([], { TRON_DATA_DIR: root });
+    const original = JSON.stringify({ version: 1, machineId: "kept", machineName: "Mac", defaultWorkspace: "/old" });
+    await writeFile(path, original);
+    vi.spyOn(durableJson, "durableAtomicWriteJson").mockRejectedValueOnce(Object.assign(new Error("disk full"), { code: "ENOSPC" }));
+    await expect(loadConfig([], { TRON_DATA_DIR: root })).rejects.toMatchObject({ code: "ENOSPC" });
+    expect(await readFile(path, "utf8")).toBe(original);
+    expect((await loadConfig([], { TRON_DATA_DIR: root })).machineId).toBe("kept");
+  });
+
+  it.each(["permissions", "symlink"])("preserves unsafe %s configuration rather than normalizing it", async kind => {
+    const root = await mkdtemp(join(tmpdir(), "tron-config-unsafe-"));
+    const path = join(root, "gateway/gateway.json");
+    await loadConfig([], { TRON_DATA_DIR: root });
+    const original = JSON.stringify({ version: 1, machineId: "kept", machineName: "Mac", defaultWorkspace: "/old" });
+    await writeFile(path, original);
+    if (kind === "permissions") await chmod(path, 0o644);
+    else {
+      await writeFile(join(root, "target.json"), original, { mode: 0o600 });
+      await rm(path);
+      await symlink(join(root, "target.json"), path);
+    }
+    const before = await lstat(path);
+    await expect(loadConfig([], { TRON_DATA_DIR: root })).rejects.toMatchObject({ code: "conflict" });
+    expect((await lstat(path)).ino).toBe(before.ino);
+    expect(await readFile(path, "utf8")).toBe(original);
   });
 
   it("persists one bounded identity and reloads it without rekeying", async () => {

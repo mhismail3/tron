@@ -70,9 +70,11 @@ struct TronUninstallerTests {
         defer { TestTempDir.cleanup(tmp) }
         let setup = makeSetup(tmp: tmp, manager: MockLaunchAgentManager())
         let workspaceFile = setup.tronHome.appendingPathComponent("workspace/files/notes.md")
-        let workspaceState = setup.tronHome.appendingPathComponent("gateway/workspace-state/index.json")
+        let workspaceState = setup.tronHome.appendingPathComponent("workspace/state/fixture/record.json")
+        let workspaceLifecycle = setup.tronHome.appendingPathComponent("gateway/workspace-state/initialized.json")
         try createFixtureFile(workspaceFile, contents: "durable workspace")
         try createFixtureFile(workspaceState, contents: "managed state")
+        try createFixtureFile(workspaceLifecycle, contents: "{\"version\":1}")
         try createFixtureFile(setup.networkCachePath, contents: "cache")
         try createFixtureFile(setup.bearerTokenPath, contents: "credential")
 
@@ -83,6 +85,7 @@ struct TronUninstallerTests {
 
         #expect(FileManager.default.fileExists(atPath: workspaceFile.path))
         #expect(FileManager.default.fileExists(atPath: workspaceState.path))
+        #expect(FileManager.default.fileExists(atPath: workspaceLifecycle.path))
         #expect(!FileManager.default.fileExists(atPath: setup.networkCachePath.path))
         #expect(!FileManager.default.fileExists(atPath: setup.bearerTokenPath.path))
     }

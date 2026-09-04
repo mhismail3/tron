@@ -168,7 +168,9 @@ Tron keeps its durable internal workspace under `<Tron home>/workspace` (normall
 sessions can still start in any directory selected through the Mac filesystem
 browser. Canonical session JSONL remains owned by the embedded runtime under
 `~/.pi/agent`; use the Settings Import action for supported JSON/JSONL session
-exports.
+exports. Retained documents in `workspace/files` can be presented in chat through
+`display` without changing the session directory. See the
+[workspace ownership and recovery contract](packages/gateway/docs/internal-workspace.md).
 
 ## Documentation
 

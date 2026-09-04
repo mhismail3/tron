@@ -218,7 +218,7 @@ rejected with bounded diagnostics and can never become an uncaught process exit.
 - Physical-machine group identity: a bounded random ID in
   `~/.tron-machine-group-id`, shared by separate Tron homes only for connection
   grouping; it is not a session, credential, or runtime-data store
-- Gateway state: `<TRON_DATA_DIR|~/$TRON_HOME_NAME|~/.tron>/gateway/`; `gateway.json` is an exact-shape, 16 KiB maximum document with a 256-byte machine ID and 1 KiB machine name; malformed/oversized existing files fail startup without rekeying. Tron’s durable internal workspace is the sibling `<tronHome>/workspace`; it is separate from the session cwd and canonical Pi session store.
+- Gateway state: `<TRON_DATA_DIR|~/$TRON_HOME_NAME|~/.tron>/gateway/`; `gateway.json` is an exact-shape, 16 KiB maximum document with a 256-byte machine ID and 1 KiB machine name; unsafe/malformed/oversized existing files fail startup without rekeying. Secure bounded reads reject symlinks and non-owner-only files; publication uses the existing durable atomic JSON utility. The exact old version-1 shape with a valid `defaultWorkspace` is normalized under the config lock by removing only that unused field, preserving machine identity; unknown shapes/versions are never rewritten. Tron’s durable internal workspace is the sibling `<tronHome>/workspace`; it is separate from the session cwd and canonical Pi session store.
 - Local wrapper credential: `gateway/local-auth.json` (`0600`, owner-UID-only regular non-symlink file;
   an existing malformed, wrong-version, or wrong-purpose credential fails closed)
 - Hashed mobile devices: `gateway/devices.json` (bounded owner-UID-only regular non-symlink file;

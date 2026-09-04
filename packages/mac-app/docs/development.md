@@ -238,7 +238,13 @@ app binds its own protocol metadata to that bundled payload before signing.
 After `scripts/tron mac verify` passes, the physical iOS helper independently
 requires the same signed protocol before installation.
 
-Do not remove `~/.tron`; it contains canonical sessions and owned credentials.
+Do not remove `~/.tron`; it contains Gateway-owned state/credentials and Tron's
+internal workspace (`workspace/files` and capability-owned `workspace/state`).
+Preserve `gateway/workspace-state` lifecycle evidence with that workspace. Canonical
+session JSONL, provider credentials and runtime settings stay separately under
+`~/.pi/agent` (Debug: `~/.pi/agent-dev`); do not remove those either. Application
+replacement and local settings/credential reset do not delete the internal
+workspace. See the [workspace ownership and restore contract](../../gateway/docs/internal-workspace.md).
 When replacing an already-installed app, first wait for active runs to finish,
 choose **Pause Tron** from the Mac menu bar, and quit the wrapper. Stop any
 legacy Debug SMAppService separately; Release installation never takes over or

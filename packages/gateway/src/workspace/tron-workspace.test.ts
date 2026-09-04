@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TronWorkspace } from "./tron-workspace.js";
 import * as durableJson from "../util/durable-json.js";
+import lockfile from "proper-lockfile";
 
 const roots: string[] = [];
 const owners: TronWorkspace[] = [];
@@ -142,6 +143,27 @@ describe("Tron internal workspace", () => {
     await rm(join(root, "files"), { recursive: true });
     await symlink(home, join(root, "files"));
     await expect(value.filesRoot()).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("makes compromised ownership unavailable without failing unrelated shutdown", async () => {
+    const home = await fixture();
+    const lock = lockfile.lock.bind(lockfile);
+    let compromise: ((error: Error) => void) | undefined;
+    let release: (() => Promise<void>) | undefined;
+    const spy = vi.spyOn(lockfile, "lock").mockImplementation(async (path, options) => {
+      compromise = options?.onCompromised;
+      release = await lock(path, options);
+      return release;
+    });
+    const value = owner(home);
+    expect((await value.describe()).available).toBe(true);
+    // Simulate the dependency retiring its exact lock before notifying its owner.
+    await release!();
+    compromise!(new Error("ownership lost"));
+    expect(await value.describe()).toMatchObject({ available: false, reason: "owned_elsewhere" });
+    await expect(value.dispose()).resolves.toBeUndefined();
+    spy.mockRestore();
+    expect((await owner(home).describe()).available).toBe(true);
   });
 
   it("disposal closes initialization and releases its lock idempotently", async () => {

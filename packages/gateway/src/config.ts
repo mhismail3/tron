@@ -5,7 +5,9 @@ import { isIP } from "node:net";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import lockfile from "proper-lockfile";
-import { atomicWriteJson, readJson, updateJsonLocked } from "./util/json.js";
+import { updateJsonLocked } from "./util/json.js";
+import { durableAtomicWriteJson } from "./util/durable-json.js";
+import { readSecureJson, SecureJsonFileError } from "./util/secure-json.js";
 import { GatewayError } from "./errors.js";
 
 export interface GatewayConfig {
@@ -155,23 +157,16 @@ function isStoredGatewayConfig(value: unknown): value is StoredGatewayConfig {
 }
 
 async function storedGatewayConfig(path: string): Promise<StoredGatewayConfig | null> {
-  const missing = {};
   let value: unknown;
-  try { value = await readJson<unknown>(path, missing, GATEWAY_CONFIG_MAX_BYTES); }
-  catch (error) {
-    if (error instanceof RangeError || error instanceof SyntaxError) {
-      throw new GatewayError("conflict", "Gateway identity configuration is malformed or oversized");
+  try {
+    const read = await readSecureJson<unknown>(path, GATEWAY_CONFIG_MAX_BYTES);
+    if (!read.present) return null;
+    value = read.value;
+  } catch (error) {
+    if (error instanceof SecureJsonFileError) {
+      throw new GatewayError("conflict", "Gateway identity configuration is unsafe, malformed or oversized");
     }
     throw error;
-  }
-  if (value === missing) {
-    try {
-      await stat(path);
-      throw new GatewayError("conflict", "Gateway identity configuration is empty");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw error;
-    }
   }
   if (!isStoredGatewayConfig(value)) {
     throw new GatewayError("conflict", "Gateway identity configuration is malformed");
@@ -219,7 +214,7 @@ async function loadOrCreateStoredGatewayConfig(path: string): Promise<StoredGate
             machineId: stored.machineId,
             machineName: stored.machineName,
           };
-          await atomicWriteJson(path, normalized);
+          await durableAtomicWriteJson(path, normalized);
           return normalized;
         }
         return stored;
@@ -231,7 +226,7 @@ async function loadOrCreateStoredGatewayConfig(path: string): Promise<StoredGate
       machineId: randomUUID(),
       machineName: hostname(),
     };
-    await atomicWriteJson(path, next);
+    await durableAtomicWriteJson(path, next);
     return next;
   } finally {
     await release();

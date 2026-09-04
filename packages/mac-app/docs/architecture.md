@@ -56,6 +56,22 @@ The retired Mac Operator accessibility/socket bridge is absent. The agent uses
 its normal filesystem, terminal, extensions, and tools; the wrapper is not a
 worker host.
 
+## Internal workspace preservation
+
+The Gateway resolves Tron's durable internal home as `<tronHome>/workspace`
+(Stable `~/.tron/workspace`, Debug `~/.tron-dev/workspace`). It is independent of
+session cwd, filesystem browsing, project trust, pairing identity and local
+recent-directory preferences. Ordinary retained documents belong in `files/`;
+`state/<owner>/` is reserved for real capability-owned data. Canonical JSONL and
+runtime stores remain under the separate Pi `agentDir`.
+
+The wrapper does not scan, index, synchronize or recreate this workspace.
+Application replacement and `TronUninstaller.cleanLocalState`, including local
+settings/credential resets, preserve both workspace content and the Gateway's
+`gateway/workspace-state` lifecycle evidence. Missing/unsafe workspace recovery is
+manual; never remove it as an application or signing repair. The Gateway owns the
+[initialization, backup and restore contract](../../gateway/docs/internal-workspace.md).
+
 ## Pairing
 
 Each profile's gateway creates `<profile home>/gateway/enrollment.json` (Stable
