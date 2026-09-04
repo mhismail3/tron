@@ -4,8 +4,9 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import type { SessionCreationOrigin } from "../protocol/types.js";
 
-export const CATALOG_METADATA_INDEX_VERSION = 1 as const;
+export const CATALOG_METADATA_INDEX_VERSION = 2 as const;
 export const CATALOG_METADATA_INDEX_MAX_BYTES = 8 * 1_024 * 1_024;
 export const CATALOG_METADATA_INDEX_MAX_ENTRIES = 25_000;
 const TAIL_BOUNDARY_BYTES = 4_096;
@@ -15,6 +16,7 @@ export interface CatalogMetadataIndexRow {
   path: string;
   cwd: string;
   parentSessionPath?: string;
+  creationOrigin?: SessionCreationOrigin;
   name?: string;
   firstMessage: string;
   createdAt: string;
@@ -72,6 +74,7 @@ export interface CatalogMetadataIndexSummary {
   path: string;
   cwd: string;
   parentSessionPath?: string;
+  creationOrigin?: SessionCreationOrigin;
   name?: string;
   firstMessage: string;
   createdAt: string;
@@ -84,7 +87,7 @@ export interface CatalogMetadataIndexDiagnostics {
 }
 
 interface CatalogMetadataIndexDocument {
-  version: 1;
+  version: 2;
   root: string;
   rows: CatalogMetadataIndexRow[];
 }
@@ -97,6 +100,13 @@ function validString(value: unknown, max: number): value is string {
   return typeof value === "string" && value.length <= max;
 }
 
+function validCreationOrigin(value: unknown): value is SessionCreationOrigin {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const origin = value as Partial<SessionCreationOrigin>;
+  return origin.kind === "automation" && typeof origin.automationId === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(origin.automationId);
+}
+
 /** Gateway-owned acceleration only. This never stores transcript content. */
 export class CatalogMetadataIndex {
   readonly path: string;
@@ -104,7 +114,7 @@ export class CatalogMetadataIndex {
   private readonly writeMutex = new AsyncMutex();
 
   constructor(private readonly gatewayStateRoot: string, diagnostics?: CatalogMetadataIndexDiagnostics) {
-    this.path = join(gatewayStateRoot, "catalog-metadata-v1.json");
+    this.path = join(gatewayStateRoot, "catalog-metadata-v2.json");
     this.diagnostics = diagnostics;
   }
 
@@ -389,6 +399,9 @@ export class CatalogMetadataIndex {
       && fromRoot !== ".." && !fromRoot.startsWith("..") && !isAbsolute(fromRoot)
       && value.path.endsWith(".jsonl") && validString(value.cwd, 4_096)
       && (value.parentSessionPath === undefined || validString(value.parentSessionPath, 4_096))
+      && (value.creationOrigin === undefined || (
+        value.parentSessionPath === undefined && validCreationOrigin(value.creationOrigin)
+      ))
       && (value.name === undefined || validString(value.name, 1_024))
       && validString(value.firstMessage, 64 * 1_024) && validString(value.createdAt, 128)
       && validString(value.updatedAt, 128) && Number.isFinite(Date.parse(value.createdAt))

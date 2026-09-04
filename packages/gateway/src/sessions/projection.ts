@@ -1658,6 +1658,39 @@ function durableInvocationLifecycle(lifecycle: InvocationProjection["lifecycle"]
     : "outcomeUnknown";
 }
 
+/**
+ * Enrich a canonical row only from the exact Gateway-authored invocation
+ * binding. The receipt owns producer provenance; the role-based fallback in
+ * projectMessage applies only when no durable binding exists.
+ */
+function withInvocationSemantics(
+  item: TranscriptItem,
+  boundInvocation: InvocationProjection | undefined,
+  invocationStates: ReadonlyMap<string, InvocationProjection["lifecycle"]>,
+): TranscriptItem {
+  if (boundInvocation && item.semantic) {
+    return { ...item, semantic: {
+      ...item.semantic,
+      origin: boundInvocation.origin,
+      invocationId: boundInvocation.invocationId,
+      operationId: boundInvocation.operationId,
+      kind: "resourcePrompt",
+      ...(boundInvocation.resourceInvocation ? { resourceInvocation: boundInvocation.resourceInvocation } : {}),
+      lifecycle: boundInvocation.lifecycle,
+    } };
+  }
+  if (item.semantic?.invocationId && invocationStates.has(item.semantic.invocationId)) {
+    const lifecycle = invocationStates.get(item.semantic.invocationId)!;
+    return { ...item, semantic: {
+      ...item.semantic,
+      lifecycle: item.semantic.kind === "command"
+        ? durableInvocationLifecycle(lifecycle)
+        : lifecycle,
+    } };
+  }
+  return item;
+}
+
 export function projectTranscript(
   manager: TranscriptSessionReader,
   blobs: BlobStore,
@@ -1690,26 +1723,7 @@ export function projectTranscript(
       bashMetadata,
     );
     if (!projected) throw new Error("projectable transcript entry produced no item");
-    if (boundInvocation && projected.semantic) {
-      return { ...projected, semantic: {
-        ...projected.semantic,
-        invocationId: boundInvocation.invocationId,
-        operationId: boundInvocation.operationId,
-        kind: "resourcePrompt",
-        ...(boundInvocation.resourceInvocation ? { resourceInvocation: boundInvocation.resourceInvocation } : {}),
-        lifecycle: boundInvocation.lifecycle,
-      } };
-    }
-    if (projected.semantic?.invocationId && invocationStates.has(projected.semantic.invocationId)) {
-      const lifecycle = invocationStates.get(projected.semantic.invocationId)!;
-      return { ...projected, semantic: {
-        ...projected.semantic,
-        lifecycle: projected.semantic.kind === "command"
-          ? durableInvocationLifecycle(lifecycle)
-          : lifecycle,
-      } };
-    }
-    return projected;
+    return withInvocationSemantics(projected, boundInvocation, invocationStates);
   });
 }
 
@@ -1772,23 +1786,7 @@ export function projectTranscriptPage(
       bashMetadata,
     );
     if (!item) throw new Error("projectable transcript entry produced no item");
-    const enriched = boundInvocation && item.semantic
-      ? { ...item, semantic: {
-          ...item.semantic,
-          invocationId: boundInvocation.invocationId,
-          operationId: boundInvocation.operationId,
-          kind: "resourcePrompt" as const,
-          ...(boundInvocation.resourceInvocation ? { resourceInvocation: boundInvocation.resourceInvocation } : {}),
-          lifecycle: boundInvocation.lifecycle,
-        } }
-      : item.semantic?.invocationId && invocationStates.has(item.semantic.invocationId)
-        ? { ...item, semantic: {
-            ...item.semantic,
-            lifecycle: item.semantic.kind === "command"
-              ? durableInvocationLifecycle(invocationStates.get(item.semantic.invocationId)!)
-              : invocationStates.get(item.semantic.invocationId)!,
-          } }
-        : item;
+    const enriched = withInvocationSemantics(item, boundInvocation, invocationStates);
     const itemBytes = Buffer.byteLength(JSON.stringify(enriched)) + 1;
     if (bytes + itemBytes > byteBudget && selected.length > 0) break;
     if (itemBytes > byteBudget) {

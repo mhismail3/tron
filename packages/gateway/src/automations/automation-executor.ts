@@ -69,7 +69,12 @@ export class GatewayAutomationExecutor implements AutomationExecutor {
     try {
       let slot;
       if (target.kind === "workspace") {
-        const leased = await this.sessions.createAutomationSession(target.cwd, sessionId, operationId);
+        const leased = await this.sessions.createAutomationSession(
+          target.cwd,
+          sessionId,
+          operationId,
+          record.id,
+        );
         slot = leased.slot;
         releaseLease = leased.release;
       } else {

@@ -5,6 +5,7 @@ import {
   CatalogMetadataIndex,
   applyCatalogMetadataEntry,
   CATALOG_METADATA_INDEX_MAX_BYTES,
+  CATALOG_METADATA_INDEX_VERSION,
   type CatalogMetadataAccumulator,
   type CatalogMetadataIndexSummary,
 } from "./catalog-metadata-index.js";
@@ -82,12 +83,24 @@ describe("CatalogMetadataIndex", () => {
   it("atomically saves and reloads unchanged canonical metadata", async () => {
     const f = await fixture();
     const index = new CatalogMetadataIndex(f.gateway);
-    const row = await index.entryFromSummary(summary(f.path));
+    const row = await index.entryFromSummary({
+      ...summary(f.path),
+      creationOrigin: {
+        kind: "automation",
+        automationId: "20000000-0000-4000-8000-000000000021",
+      },
+    });
     expect(row).toBeDefined();
     expect(await index.save(f.catalog, [row!])).toBe(true);
     const loaded = await reconcileSaved(index, f.catalog, [row!]);
     expect(loaded).toHaveLength(1);
-    expect(loaded![0]!.id).toBe("session");
+    expect(loaded![0]).toMatchObject({
+      id: "session",
+      creationOrigin: {
+        kind: "automation",
+        automationId: "20000000-0000-4000-8000-000000000021",
+      },
+    });
     expect((await readFile(index.path, "utf8"))).not.toContain("allMessagesText");
   });
 
@@ -148,7 +161,7 @@ describe("CatalogMetadataIndex", () => {
     await writeFile(index.path, JSON.stringify(document));
     expect(await reconcileSaved(index, f.catalog, [row])).toBeUndefined();
     await index.save(f.catalog, [row]);
-    document.version = 1;
+    document.version = CATALOG_METADATA_INDEX_VERSION;
     document.root = "/outside";
     await writeFile(index.path, JSON.stringify(document));
     expect(await reconcileSaved(index, f.catalog, [row])).toBeUndefined();

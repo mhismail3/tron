@@ -20,6 +20,7 @@ import type {
   AdministrativeDrainBlockerSummary,
   AdministrativeDrainPhase,
   AdministrativeDrainSnapshot,
+  SessionCreationOrigin,
   SessionSummary,
   SessionSummaryUpdate,
 } from "../protocol/types.js";
@@ -54,7 +55,14 @@ import type { NotificationService } from "../notifications/notification-service.
 import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
-import { invocationProjection, invocationReceipts, type InvocationProjection } from "./invocation-receipts.js";
+import { isAutomationId, runIdFromAutomationOperationId } from "../automations/automation-contract.js";
+import {
+  INVOCATION_RECEIPT_TYPE,
+  invocationProjection,
+  invocationReceipts,
+  parseInvocationReceipt,
+  type InvocationProjection,
+} from "./invocation-receipts.js";
 import { projectTranscriptPage, type TranscriptPage } from "./projection.js";
 import {
   CatalogMetadataIndex,
@@ -209,6 +217,7 @@ const DEFAULT_CATALOG_DISCOVERY_LIMITS = {
 type SessionInfo = Awaited<ReturnType<typeof SessionManager.listAll>>[number];
 type CatalogSessionInfo = Omit<SessionInfo, "allMessagesText"> & {
   fileIdentity?: string;
+  creationOrigin?: SessionCreationOrigin;
 };
 
 /** SDK-compatible row metadata without constructing its unused transcript-wide
@@ -226,6 +235,10 @@ async function buildCatalogSessionInfo(filePath: string): Promise<CatalogSession
       name: undefined,
       updatedAt: "",
     };
+    const automationStarts = new Map<string, { automationId: string; sessionId: string }>();
+    let sawPrePromptMessage = false;
+    let firstUserEntryId: string | undefined;
+    let automationCreation: { automationId: string; sessionId: string } | undefined;
     const lines = createInterface({
       input: createReadStream(filePath, { encoding: "utf8" }),
       crlfDelay: Infinity,
@@ -240,6 +253,35 @@ async function buildCatalogSessionInfo(filePath: string): Promise<CatalogSession
         header = entry;
         continue;
       }
+      if (firstUserEntryId === undefined && entry.type === "message") {
+        if (typeof entry.id === "string"
+          && entry.message && typeof entry.message === "object" && !Array.isArray(entry.message)
+          && (entry.message as Record<string, unknown>).role === "user") {
+          firstUserEntryId = entry.id;
+        } else {
+          // A generated Automation session begins with its invocation receipts
+          // and canonical user prompt. Any earlier message proves another owner.
+          sawPrePromptMessage = true;
+          automationStarts.clear();
+        }
+      }
+      if (entry.type === "custom" && entry.customType === INVOCATION_RECEIPT_TYPE) {
+        const receipt = parseInvocationReceipt(entry.data);
+        if (receipt?.receiptKind === "start" && firstUserEntryId === undefined
+          && !sawPrePromptMessage && automationStarts.size < 128
+          && receipt.source !== "extension"
+          && receipt.origin.kind === "gateway" && receipt.origin.confidence === "boundary"
+          && isAutomationId(receipt.origin.ownerId)
+          && runIdFromAutomationOperationId(receipt.operationId) !== undefined) {
+          automationStarts.set(receipt.invocationId, {
+            automationId: receipt.origin.ownerId,
+            sessionId: receipt.sessionId,
+          });
+        } else if (receipt?.receiptKind === "binding"
+          && receipt.canonicalEntryId === firstUserEntryId) {
+          automationCreation = automationStarts.get(receipt.invocationId);
+        }
+      }
       applyCatalogMetadataEntry(metadata, entry);
     }
     if (!header || typeof header.id !== "string") return null;
@@ -253,6 +295,9 @@ async function buildCatalogSessionInfo(filePath: string): Promise<CatalogSession
       cwd,
       ...(metadata.name ? { name: metadata.name } : {}),
       ...(typeof header.parentSession === "string" ? { parentSessionPath: header.parentSession } : {}),
+      ...(automationCreation?.sessionId === header.id && typeof header.parentSession !== "string"
+        ? { creationOrigin: { kind: "automation", automationId: automationCreation.automationId } as const }
+        : {}),
       created: new Date(typeof header.timestamp === "string" ? header.timestamp : stats.birthtime),
       modified,
       messageCount: metadata.messageCount,
@@ -333,6 +378,7 @@ interface CatalogPageSeed {
   readonly cwd: string;
   readonly kind: SessionSummary["kind"];
   readonly parentSessionId?: string;
+  readonly creationOrigin?: SessionCreationOrigin;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly activeSince?: string;
@@ -374,7 +420,10 @@ export class RuntimeRegistry {
   /** Live-only generated sessions are bound to the exact Automation operation
    * until Pi persists their first assistant entry. Weak ownership cannot outlive
    * the RuntimeSlot and is never a second session catalog. */
-  private readonly automationSessionOwners = new WeakMap<RuntimeSlot, string>();
+  private readonly automationSessionOwners = new WeakMap<RuntimeSlot, {
+    operationId: string;
+    automationId: string;
+  }>();
   private readonly mutex = new AsyncMutex();
   /** Shares one authoritative materialization across concurrent callers. The
    * promise is disposable and keyed by the structural/invalidation generation;
@@ -1571,6 +1620,7 @@ export class RuntimeRegistry {
         return {
           id: info.id, path: info.path, cwd: info.cwd,
           ...(info.parentSessionPath ? { parentSessionPath: info.parentSessionPath } : {}),
+          ...(info.creationOrigin ? { creationOrigin: info.creationOrigin } : {}),
           ...(info.name ? { name: info.name } : {}),
           firstMessage: info.firstMessage,
           createdAt: info.created.toISOString(), updatedAt: info.modified.toISOString(),
@@ -1595,6 +1645,7 @@ export class RuntimeRegistry {
       id: row.id,
       cwd: row.cwd,
       ...(row.parentSessionPath ? { parentSessionPath: row.parentSessionPath } : {}),
+      ...(row.creationOrigin ? { creationOrigin: row.creationOrigin } : {}),
       ...(row.name ? { name: row.name } : {}),
       created: new Date(row.createdAt),
       modified: new Date(row.updatedAt),
@@ -1629,6 +1680,7 @@ export class RuntimeRegistry {
         path: info.path,
         cwd: info.cwd,
         ...(info.parentSessionPath ? { parentSessionPath: info.parentSessionPath } : {}),
+        ...(info.creationOrigin ? { creationOrigin: info.creationOrigin } : {}),
         ...(info.name ? { name: info.name } : {}),
         firstMessage: info.firstMessage,
         createdAt: info.created.toISOString(),
@@ -2123,6 +2175,7 @@ export class RuntimeRegistry {
         cwd: session.cwd,
         kind,
         ...(parentSessionId ? { parentSessionId } : {}),
+        ...(session.creationOrigin ? { creationOrigin: session.creationOrigin } : {}),
         createdAt: session.created.toISOString(),
         updatedAt: latest?.updatedAt ?? session.modified.toISOString(),
         ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
@@ -2147,12 +2200,16 @@ export class RuntimeRegistry {
         if (slot.isDisposed || persistedIDs.has(id) || ambiguousIDs.has(id)) continue;
         const latest = this.latestSummaries.get(id);
         const parentSessionId = slot.catalogParentSessionId;
+        const automationOwner = this.automationSessionOwners.get(slot);
         seeds.push({
           id,
           ...(latest?.name ? { name: latest.name } : {}),
           cwd: slot.cwd,
           kind: "user",
           ...(parentSessionId ? { parentSessionId } : {}),
+          ...(automationOwner ? {
+            creationOrigin: { kind: "automation", automationId: automationOwner.automationId },
+          } as const : {}),
           createdAt: slot.catalogCreatedAt,
           updatedAt: latest?.updatedAt ?? slot.catalogCreatedAt,
           ...(latest?.activeSince ? { activeSince: latest.activeSince } : {}),
@@ -2183,6 +2240,8 @@ export class RuntimeRegistry {
       + (seed.activeSince ? Buffer.byteLength(seed.activeSince) : 0)
       + (seed.name ? Buffer.byteLength(seed.name) : 0)
       + (seed.parentSessionId ? Buffer.byteLength(seed.parentSessionId) : 0)
+      + (seed.creationOrigin ? Buffer.byteLength(seed.creationOrigin.kind)
+        + Buffer.byteLength(seed.creationOrigin.automationId) : 0)
       // Object/reference, number, and boolean storage for the seed and captured
       // summary/attention revision fields. String payloads are counted above.
       + 160, 0);
@@ -2194,6 +2253,7 @@ export class RuntimeRegistry {
         cwd: seed.cwd,
         kind: seed.kind,
         ...(seed.parentSessionId ? { parentSessionId: seed.parentSessionId } : {}),
+        ...(seed.creationOrigin ? { creationOrigin: seed.creationOrigin } : {}),
         createdAt: seed.createdAt,
         updatedAt: seed.updatedAt,
         ...(seed.activeSince ? { activeSince: seed.activeSince } : {}),
@@ -2228,9 +2288,10 @@ export class RuntimeRegistry {
     cwdInput: string,
     sessionId: string,
     operationId: string,
+    automationId: string,
   ): Promise<{ slot: RuntimeSlot; release: () => void }> {
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(sessionId)
-      || !/^automation:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(operationId)) {
+    if (!isAutomationId(sessionId) || !isAutomationId(automationId)
+      || runIdFromAutomationOperationId(operationId) === undefined) {
       throw new GatewayError("invalid_request", "Automation execution identity is invalid");
     }
     const finishAdmission = this.beginSlotAdmission();
@@ -2249,8 +2310,9 @@ export class RuntimeRegistry {
         }
         const current = this.slots.get(sessionId);
         if (current) {
+          const owner = this.automationSessionOwners.get(current);
           if (current.isDisposed || current.cwd !== trust.cwd
-            || this.automationSessionOwners.get(current) !== operationId) {
+            || owner?.operationId !== operationId || owner.automationId !== automationId) {
             throw new GatewayError("conflict", "Automation execution session identity is already owned");
           }
           return { slot: current, release: current.retainAutomationLease() };
@@ -2280,7 +2342,7 @@ export class RuntimeRegistry {
           throw new GatewayError("conflict", "Automation execution session identity is already owned");
         }
         const release = slot!.retainAutomationLease();
-        this.automationSessionOwners.set(slot!, operationId);
+        this.automationSessionOwners.set(slot!, { operationId, automationId });
         this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
         reserved = false;
         this.slots.set(sessionId, slot!);

@@ -109,7 +109,7 @@ profile-qualified shallow catalogs for non-focused profiles. `SessionSummary` ca
 profile ownership and the dashboard aggregates by `(profileID, sessionID)`; equal bare session IDs from
 separate runtimes therefore remain distinct. An ID-indexed monotonic
 live-summary overlay, cached/stale/live provenance, and exact profile/lifecycle/connection load admission
-remain scoped to each source. Equivalent
+remain scoped to each source. A session created by a workspace Automation carries only the Gateway-derived Automation definition identity in its shallow summary; the historical row renders the adaptive Automation clock immediately left of elapsed time, parallel to the fork marker, without an Automation catalog lookup or local run journal. Equivalent
 foreground, reconnect, unknown-summary, and structural invalidations share one
 catalog traversal; invalidation during a traversal sets one dirty bit and receives at most one immediate
 follow-up before handing newest truth to a new bounded lease. iOS requests user scope in 500-row pages,
@@ -1285,6 +1285,8 @@ the native bottom size-change anchor holds pinned readers at the tail. Detached 
 Reduce Motion removes spatial effects. Agent tool buttons retain the capsule primitive,
 while aggregate run sheets use bounded static summary rows with immutable call-ID routes and
 individual detail sheets.
+
+Canonical Automation prompts remain ordinary model-input user entries, but an exact Gateway-authored invocation binding projects their boundary origin, Automation ID, and generic `Automation` producer title. The transcript admits the dedicated right-aligned Automation-accent prompt container only when that complete semantic tuple is present, including UUID Automation/invocation identities and the Gateway-owned `automation:<run UUID>` operation namespace; missing or partial provenance fails closed to the ordinary user prompt container. Classification never matches message text, timestamps, or the presentation title and never reads or mirrors the Automation catalog. Only the triggering prompt is classified; assistant output remains an ordinary assistant row.
 
 Visible `custom_message` entries are conversation input rather than tool activity. They use a distinct right-aligned interactive glass container whose complete rounded geometry is one hit target. The compact row is deliberately schema-stable—**Producer · Context** plus one admitted finite lifecycle status, or **Received** when no single standard status exists—and never includes message text, custom type, objectives, or arbitrary detail values. Its medium/large technical sheet shares the standard technical-detail title, close control, role-matched color, blur, metadata-card, and drill-in JSON presentation used by tool details while exposing the full message, canonical identity, delivery semantics, message type, context payload, and exact extension attribution when available. When canonical producer evidence is absent, the compact row omits the producer instead of exposing an internal “Unattributed” label; the detail sheet reports **Unknown source** and technical origin remains `unknown`. iOS never promotes custom type, title, text, or timestamp into invented producer attribution.
 

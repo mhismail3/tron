@@ -14,6 +14,12 @@ export interface ModelRef {
 export type SessionPhase = "idle" | "running" | "compacting" | "retrying" | "interrupted";
 export type SessionKind = "user" | "subagent";
 
+export interface SessionCreationOrigin {
+  kind: "automation";
+  /** Stable Automation definition identity; no action content is projected. */
+  automationId: string;
+}
+
 export type AdministrativeDrainPhase = "idle" | "preparing" | "waiting" | "complete" | "failed";
 export type AdministrativeDrainBlockerCategory =
   | "slot-admission"
@@ -59,6 +65,8 @@ export interface SessionSummary {
   cwd: string;
   kind: SessionKind;
   parentSessionId?: string;
+  /** Immutable creation provenance derived from canonical session receipts. */
+  creationOrigin?: SessionCreationOrigin;
   createdAt: string;
   updatedAt: string;
   /** Stable Gateway-observed start of the current active dashboard period. */

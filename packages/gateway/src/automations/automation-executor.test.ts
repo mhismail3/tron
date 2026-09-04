@@ -44,7 +44,10 @@ describe("GatewayAutomationExecutor", () => {
 
     const handle = await executor.start(record, run);
     expect(slot.prompt).toHaveBeenCalled();
-    expect(ownership).toMatchObject({ operationId: run.operationId, origin: { kind: "gateway", ownerId: record.id } });
+    expect(ownership).toMatchObject({
+      operationId: run.operationId,
+      origin: { kind: "gateway", ownerId: record.id, title: "Automation", confidence: "boundary" },
+    });
     expect(handle.invocationId).toBe("invocation-one");
     expect(release).not.toHaveBeenCalled();
 
@@ -89,8 +92,13 @@ describe("GatewayAutomationExecutor", () => {
       "/workspace",
       run.executionSessionId,
       run.operationId,
+      record.id,
     );
     expect(slot.prompt).toHaveBeenCalledOnce();
+    expect(ownership).toMatchObject({
+      operationId: run.operationId,
+      origin: { kind: "gateway", ownerId: record.id, title: "Automation", confidence: "boundary" },
+    });
     expect(release).not.toHaveBeenCalled();
     await ownership.onTerminal({
       lifecycle: "completed",

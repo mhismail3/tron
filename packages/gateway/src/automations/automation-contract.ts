@@ -49,8 +49,12 @@ function timestamp(value: unknown): value is string {
   return typeof value === "string" && isGatewayTimestamp(value);
 }
 
+export function isAutomationId(value: unknown): value is string {
+  return typeof value === "string" && uuid.test(value);
+}
+
 export function automationOperationId(runId: string): string {
-  if (!uuid.test(runId)) throw new Error("Automation run identity is invalid");
+  if (!isAutomationId(runId)) throw new Error("Automation run identity is invalid");
   return `automation:${runId}`;
 }
 

@@ -6,6 +6,39 @@ enum SessionPhase: String, Codable, Hashable, Sendable {
     var isActive: Bool { self == .running || self == .compacting || self == .retrying }
 }
 
+struct SessionCreationOrigin: Codable, Hashable, Sendable {
+    enum Kind: String, Codable, Hashable, Sendable { case automation }
+
+    let kind: Kind
+    let automationId: String
+
+    init(kind: Kind, automationId: String) {
+        self.kind = kind
+        self.automationId = automationId
+    }
+
+    private enum CodingKeys: String, CodingKey { case kind, automationId }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(Kind.self, forKey: .kind)
+        automationId = try container.decode(String.self, forKey: .automationId)
+        let normalized = automationId.lowercased()
+        let versionIndex = normalized.index(normalized.startIndex, offsetBy: 14, limitedBy: normalized.endIndex)
+        let variantIndex = normalized.index(normalized.startIndex, offsetBy: 19, limitedBy: normalized.endIndex)
+        guard let uuid = UUID(uuidString: automationId),
+              uuid.uuidString.lowercased() == normalized,
+              let versionIndex, "12345".contains(normalized[versionIndex]),
+              let variantIndex, "89ab".contains(normalized[variantIndex]) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .automationId,
+                in: container,
+                debugDescription: "Session creation Automation identity is invalid"
+            )
+        }
+    }
+}
+
 struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     enum Kind: String, Codable, Hashable, Sendable { case user, subagent }
 
@@ -14,6 +47,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     let cwd: String
     let kind: Kind
     let parentSessionId: String?
+    let creationOrigin: SessionCreationOrigin?
     let createdAt: String
     let updatedAt: String
     /// Stable Gateway-observed start of the current active dashboard period.
@@ -37,6 +71,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
 
     init(
         id: String, name: String?, cwd: String, kind: Kind = .user, parentSessionId: String?,
+        creationOrigin: SessionCreationOrigin? = nil,
         createdAt: String, updatedAt: String, activeSince: String? = nil, messageCount: Int,
         firstMessage: String, phase: SessionPhase, foregroundPhase: SessionPhase? = nil,
         hasActiveSubagents: Bool = false, waitingForUser: Bool = false,
@@ -49,6 +84,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         self.cwd = cwd
         self.kind = kind
         self.parentSessionId = parentSessionId
+        self.creationOrigin = creationOrigin
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.activeSince = activeSince
@@ -67,7 +103,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, cwd, kind, parentSessionId, createdAt, updatedAt, activeSince, messageCount, firstMessage, phase, foregroundPhase, hasActiveSubagents, waitingForUser, summaryRevision
+        case id, name, cwd, kind, parentSessionId, creationOrigin, createdAt, updatedAt, activeSince, messageCount, firstMessage, phase, foregroundPhase, hasActiveSubagents, waitingForUser, summaryRevision
         case completionRevision, attentionRevision, isUnread
     }
 
@@ -78,6 +114,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         cwd = try container.decode(String.self, forKey: .cwd)
         kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .user
         parentSessionId = try container.decodeIfPresent(String.self, forKey: .parentSessionId)
+        creationOrigin = try container.decodeIfPresent(SessionCreationOrigin.self, forKey: .creationOrigin)
         createdAt = try container.decode(String.self, forKey: .createdAt)
         updatedAt = try container.decode(String.self, forKey: .updatedAt)
         activeSince = try container.decodeIfPresent(String.self, forKey: .activeSince)
@@ -110,6 +147,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
             cwd: cwd,
             kind: kind,
             parentSessionId: parentSessionId,
+            creationOrigin: creationOrigin,
             createdAt: createdAt,
             updatedAt: updatedAt,
             activeSince: activeSince,
@@ -137,6 +175,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     }
 
     var isFork: Bool { parentSessionId != nil }
+    var isAutomationCreated: Bool { creationOrigin?.kind == .automation }
 
     var title: String {
         if let name, !name.isEmpty { return name }

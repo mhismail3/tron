@@ -44,6 +44,41 @@ enum UserPromptPresentationPolicy {
     }
 }
 
+enum AutomationPromptPresentationPolicy {
+    static let originTitle = "Automation"
+    static let operationNamespace = "automation:"
+
+    static func visibleText(_ item: TranscriptItem) -> String? {
+        UserPromptPresentationPolicy.visibleText(item.text)
+    }
+
+    /// Automation identity comes only from the exact Gateway-authored
+    /// invocation receipt bound to this canonical user entry. Display titles
+    /// are intentionally not identity: the owner and operation namespaces are
+    /// durable UUID contracts. Missing or partial provenance fails closed to
+    /// the ordinary user prompt renderer.
+    static func admits(_ item: TranscriptItem) -> Bool {
+        guard item.kind == .message,
+              item.role == .user,
+              let semantic = item.semantic,
+              semantic.direction == .inboundContext,
+              semantic.contextEffect == .modelInput,
+              semantic.delivery == .stored,
+              semantic.visibility == .visible,
+              semantic.kind == .prompt || semantic.kind == .resourcePrompt,
+              semantic.origin.kind == .gateway,
+              semantic.origin.confidence == .boundary,
+              let ownerId = semantic.origin.ownerId,
+              UUID(uuidString: ownerId) != nil,
+              let invocationId = semantic.invocationId,
+              UUID(uuidString: invocationId) != nil,
+              let operationId = semantic.operationId,
+              operationId.hasPrefix(operationNamespace),
+              UUID(uuidString: String(operationId.dropFirst(operationNamespace.count))) != nil else { return false }
+        return true
+    }
+}
+
 struct TranscriptRow: View, Equatable {
     let item: TranscriptItem
     var streaming = false
@@ -128,6 +163,8 @@ struct TranscriptRow: View, Equatable {
                 response: item.details,
                 fallbackContent: item.text.isEmpty ? item.details : nil
             )
+        } else if AutomationPromptPresentationPolicy.admits(item) {
+            AutomationPromptMessageView(item: item)
         } else {
             VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 4) {
                 if let resource = item.semantic?.resourceInvocation {
@@ -350,6 +387,12 @@ struct BoundedTrailingContentLayout: Layout {
 }
 
 struct UserPromptGlassModifier: ViewModifier {
+    let accent: Color
+
+    init(accent: Color = .tronEmerald) {
+        self.accent = accent
+    }
+
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(
             cornerRadius: ChatPromptContainerStyle.cornerRadius,
@@ -363,7 +406,7 @@ struct UserPromptGlassModifier: ViewModifier {
             content.fixedSize(horizontal: false, vertical: true)
         }
         .glassEffect(
-            .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
+            .regular.tint(accent.opacity(ChatPromptContainerStyle.tintOpacity)),
             in: shape
         )
     }

@@ -8,6 +8,7 @@ struct SessionSummaryPresentationTests {
         _ id: String,
         kind: SessionSummary.Kind = .user,
         parent: String? = nil,
+        creationOrigin: SessionCreationOrigin? = nil,
         updatedAt: String = "2026-01-01T00:00:00Z",
         activeSince: String? = nil,
         phase: SessionPhase = .idle
@@ -18,6 +19,7 @@ struct SessionSummaryPresentationTests {
             cwd: "/tmp/\(id)",
             kind: kind,
             parentSessionId: parent,
+            creationOrigin: creationOrigin,
             createdAt: updatedAt,
             updatedAt: updatedAt,
             activeSince: activeSince,
@@ -117,6 +119,24 @@ struct SessionSummaryPresentationTests {
         #expect(!decoded.hasActiveSubagents)
         #expect(!decoded.hasOnlyActiveSubagents)
         #expect(SessionSummary.dashboardSessions([decoded]).map(\.id) == ["legacy"])
+    }
+
+    @Test("Automation creation origin is strict and survives gateway qualification")
+    func automationCreationOrigin() throws {
+        let automationId = "20000000-0000-4000-8000-000000000021"
+        let json = """
+        {"id":"generated","name":null,"cwd":"/tmp/project","kind":"user","parentSessionId":null,"creationOrigin":{"kind":"automation","automationId":"\(automationId)"},"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","messageCount":1,"firstMessage":"hello","phase":"idle","summaryRevision":0}
+        """
+        let decoded = try JSONDecoder().decode(SessionSummary.self, from: Data(json.utf8))
+
+        #expect(decoded.isAutomationCreated)
+        #expect(decoded.creationOrigin?.automationId == automationId)
+        #expect(decoded.withGatewaySource(id: "stable", label: "Mac").creationOrigin == decoded.creationOrigin)
+
+        let malformed = json.replacingOccurrences(of: automationId, with: "not-an-automation-id")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(SessionSummary.self, from: Data(malformed.utf8))
+        }
     }
 
     @Test("summary distinguishes settled foreground from active subagents")

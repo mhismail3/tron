@@ -4,6 +4,94 @@ import Testing
 
 @Suite("Chat transcript presentation")
 struct ChatTranscriptPresentationTests {
+    @Test("only exact receipt-bound Automation prompts select the Automation container")
+    func automationPromptContainerAdmission() throws {
+        let automationID = "10000000-0000-4000-8000-000000000001"
+        let invocationID = "10000000-0000-4000-8000-000000000002"
+        let operationID = "automation:10000000-0000-4000-8000-000000000003"
+        func item(
+            role: TranscriptItem.Role = .user,
+            direction: ChatDirection = .inboundContext,
+            contextEffect: ChatContextEffect = .modelInput,
+            delivery: ChatDelivery = .stored,
+            visibility: ChatSemanticVisibility = .visible,
+            semanticKind: ChatSemanticKind = .resourcePrompt,
+            origin: ChatOrigin,
+            invocationId: String? = invocationID,
+            operationId: String? = operationID
+        ) -> TranscriptItem {
+            .message(MessageTranscriptItem(
+                id: "message",
+                parentId: nil,
+                timestamp: "2026-01-01T00:00:00Z",
+                kind: .message,
+                role: role,
+                presentationId: "message",
+                content: [],
+                semantic: ChatSemanticMetadata(
+                    direction: direction,
+                    contextEffect: contextEffect,
+                    delivery: delivery,
+                    visibility: visibility,
+                    kind: semanticKind,
+                    origin: origin,
+                    invocationId: invocationId,
+                    operationId: operationId,
+                    sequence: 1,
+                    lifecycle: .completed
+                )
+            ))
+        }
+
+        let automation = ChatOrigin(
+            kind: .gateway,
+            ownerId: automationID,
+            title: AutomationPromptPresentationPolicy.originTitle,
+            confidence: .boundary
+        )
+        let canonical = item(origin: automation)
+        #expect(AutomationPromptPresentationPolicy.admits(canonical))
+        #expect(AutomationPromptPresentationPolicy.visibleText(canonical) == nil)
+        let decoded = try JSONDecoder.gateway.decode(
+            TranscriptItem.self,
+            from: JSONEncoder.gateway.encode(canonical)
+        )
+        #expect(AutomationPromptPresentationPolicy.admits(decoded))
+        #expect(AutomationPromptPresentationPolicy.admits(item(
+            semanticKind: .prompt,
+            origin: ChatOrigin(kind: .gateway, ownerId: automationID, title: "Localized label", confidence: .boundary)
+        )))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(role: .assistant, origin: automation)))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(direction: .agentOutput, origin: automation)))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(contextEffect: .none, origin: automation)))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(delivery: .triggeredTurn, origin: automation)))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(visibility: .hidden, origin: automation)))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(semanticKind: .message, origin: automation)))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(
+            origin: ChatOrigin(kind: .gateway, title: "Automation", confidence: .boundary)
+        )))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(
+            origin: ChatOrigin(kind: .gateway, ownerId: "not-a-uuid", title: "Automation", confidence: .boundary)
+        )))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(
+            origin: ChatOrigin(kind: .gateway, ownerId: automationID, title: "Automation", confidence: .receipt)
+        )))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(
+            origin: ChatOrigin(kind: .user, ownerId: automationID, title: "Automation", confidence: .boundary)
+        )))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(origin: automation, invocationId: nil)))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(origin: automation, invocationId: "not-a-uuid")))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(origin: automation, operationId: nil)))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(
+            origin: automation,
+            operationId: "manual:10000000-0000-4000-8000-000000000003"
+        )))
+        #expect(!AutomationPromptPresentationPolicy.admits(item(
+            origin: automation,
+            operationId: "automation:not-a-uuid"
+        )))
+    }
+
     @Test("producer session messages derive one typed compact status and optional duration")
     func compactSessionInputPresentation() {
         #expect(InboundContextCompactPresentationPolicy.status(

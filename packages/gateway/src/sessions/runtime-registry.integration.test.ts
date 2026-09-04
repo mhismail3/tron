@@ -11,7 +11,7 @@ import type { NotificationService } from "../notifications/notification-service.
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../protocol/types.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
-import { INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
+import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { RunMarkerCompletionConflictError } from "./run-markers.js";
 
@@ -108,21 +108,107 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const fixture = await coldFixture("automation-exact-session", { sessionListChanged: changed });
     const sessionId = "20000000-0000-4000-8000-000000000010";
     const operationId = "automation:20000000-0000-4000-8000-000000000011";
+    const automationId = "20000000-0000-4000-8000-000000000013";
 
-    const first = await fixture.registry.createAutomationSession(fixture.cwd, sessionId, operationId);
+    const first = await fixture.registry.createAutomationSession(
+      fixture.cwd,
+      sessionId,
+      operationId,
+      automationId,
+    );
     expect(first.slot.id).toBe(sessionId);
-    expect((await fixture.registry.list("user")).map((session) => session.id)).toContain(sessionId);
-    const second = await fixture.registry.createAutomationSession(fixture.cwd, sessionId, operationId);
+    expect((await fixture.registry.list("user")).find((session) => session.id === sessionId))
+      .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
+    const second = await fixture.registry.createAutomationSession(
+      fixture.cwd,
+      sessionId,
+      operationId,
+      automationId,
+    );
     expect(second.slot).toBe(first.slot);
     await expect(fixture.registry.createAutomationSession(
       fixture.cwd,
       sessionId,
       "automation:20000000-0000-4000-8000-000000000012",
+      automationId,
     )).rejects.toMatchObject({ code: "conflict" });
 
     second.release();
     first.release();
     expect(changed).toHaveBeenCalled();
+  });
+
+  it("recovers Automation session creation origin from the first canonical invocation binding", async () => {
+    const fixture = await coldFixture("automation-cold-origin");
+    const sessionId = "20000000-0000-4000-8000-000000000020";
+    const automationId = "20000000-0000-4000-8000-000000000021";
+    const invocationId = "20000000-0000-4000-8000-000000000022";
+    const operationId = "automation:20000000-0000-4000-8000-000000000023";
+    const generated = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile), { id: sessionId });
+    generated.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: `start:${invocationId}`, receiptKind: "start", invocationId,
+      operationId, sessionId, source: "plain", lifecycle: "staged",
+      origin: { kind: "gateway", ownerId: automationId, title: "Automation", confidence: "boundary" },
+      sequence: 1, createdAt: "2026-01-01T00:00:00.000Z",
+    }));
+    generated.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: `accepted:${invocationId}`, receiptKind: "transition", invocationId,
+      operationId, sessionId, source: "plain", lifecycle: "accepted",
+      sequence: 2, createdAt: "2026-01-01T00:00:00.100Z",
+    }));
+    const user = generated.appendMessage({ role: "user", content: "scheduled prompt", timestamp: 1 });
+    generated.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: `binding:${invocationId}`, receiptKind: "binding", invocationId,
+      operationId, sessionId, source: "plain", canonicalEntryId: user,
+      sequence: 3, createdAt: "2026-01-01T00:00:00.200Z",
+    }));
+    generated.appendMessage(fauxAssistantMessage("completed Automation response"));
+    generated.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: `terminal:${invocationId}`, receiptKind: "terminal", invocationId,
+      operationId, sessionId, source: "plain", lifecycle: "completed",
+      sequence: 4, createdAt: "2026-01-01T00:00:00.300Z",
+    }));
+
+    await fixture.registry.dispose();
+    registries.splice(registries.indexOf(fixture.registry), 1);
+    const cold = new RuntimeRegistry({
+      agentDir: fixture.agentDir,
+      tronHome: join(fixture.root, "tron-cold"),
+      idleRuntimeMs: 60_000,
+      workRegistry: new GatewayWorkRegistry(),
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(fixture.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(cold);
+    await cold.initialize();
+
+    expect((await cold.list("user")).find((session) => session.id === sessionId))
+      .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
+    const indexPath = join(fixture.root, "tron-cold", "gateway", "catalog-metadata-v2.json");
+    await waitUntil(() => existsSync(indexPath));
+    await cold.dispose();
+    registries.splice(registries.indexOf(cold), 1);
+
+    const indexed = new RuntimeRegistry({
+      agentDir: fixture.agentDir,
+      tronHome: join(fixture.root, "tron-cold"),
+      idleRuntimeMs: 60_000,
+      workRegistry: new GatewayWorkRegistry(),
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(fixture.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(indexed);
+    const scanner = vi.spyOn(indexed as any, "sessionInfos");
+    await indexed.initialize();
+    expect((await indexed.list("user")).find((session) => session.id === sessionId))
+      .toMatchObject({ creationOrigin: { kind: "automation", automationId } });
+    expect(scanner).not.toHaveBeenCalled();
   });
 
   it("admits a page source after in-flight live summary churn", async () => {
@@ -975,7 +1061,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     secondManager.appendMessage(fauxAssistantMessage("unchanged canonical body"));
     fixture.manager.appendMessage(fauxAssistantMessage("initial canonical body"));
     await fixture.registry.catalog("all");
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v1.json");
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
     await waitUntil(() => existsSync(indexPath));
     await fixture.registry.dispose();
     const restarted = new RuntimeRegistry({
@@ -1017,7 +1103,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const fixture = await coldFixture("restart-index-publication-race");
     fixture.manager.appendMessage(fauxAssistantMessage("indexed canonical body"));
     await fixture.registry.catalog("all");
-    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v1.json");
+    const indexPath = join(fixture.root, "tron", "gateway", "catalog-metadata-v2.json");
     await waitUntil(() => existsSync(indexPath));
     await fixture.registry.dispose();
 

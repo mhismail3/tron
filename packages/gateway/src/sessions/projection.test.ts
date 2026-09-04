@@ -515,6 +515,53 @@ describe("transcript projection", () => {
     });
   });
 
+  it("projects exact Automation provenance onto bound canonical prompts in snapshots and pages", () => {
+    const manager = SessionManager.inMemory("/tmp/project");
+    const ordinary = manager.appendMessage({ role: "user", content: "ordinary prompt", timestamp: 1 });
+    const origin = {
+      kind: "gateway" as const,
+      ownerId: "10000000-0000-4000-8000-000000000001",
+      title: "Automation",
+      confidence: "boundary" as const,
+    };
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: "start:automation", receiptKind: "start", invocationId: "automation",
+      operationId: "automation:run", sessionId: manager.getSessionId(), source: "plain",
+      lifecycle: "staged", origin, sequence: 1, createdAt: "2026-01-01T00:00:00.000Z",
+    }));
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: "accepted:automation", receiptKind: "transition", invocationId: "automation",
+      operationId: "automation:run", sessionId: manager.getSessionId(), source: "plain",
+      lifecycle: "accepted", sequence: 2, createdAt: "2026-01-01T00:00:00.100Z",
+    }));
+    const automated = manager.appendMessage({ role: "user", content: "scheduled prompt", timestamp: 2 });
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: "binding:automation", receiptKind: "binding", invocationId: "automation",
+      operationId: "automation:run", sessionId: manager.getSessionId(), source: "plain",
+      canonicalEntryId: automated, sequence: 3, createdAt: "2026-01-01T00:00:00.200Z",
+    }));
+    manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, makeInvocationReceipt({
+      version: 1, receiptId: "terminal:automation", receiptKind: "terminal", invocationId: "automation",
+      operationId: "automation:run", sessionId: manager.getSessionId(), source: "plain",
+      lifecycle: "completed", sequence: 4, createdAt: "2026-01-01T00:00:00.300Z",
+    }));
+
+    const transcript = projectTranscript(manager, new BlobStore());
+    expect(transcript).toHaveLength(2);
+    expect(transcript.find(item => item.id === ordinary)).toMatchObject({
+      semantic: { origin: { kind: "user", confidence: "boundary" } },
+    });
+    const expectedAutomationSemantic = {
+      invocationId: "automation",
+      operationId: "automation:run",
+      lifecycle: "completed",
+      origin,
+    };
+    expect(transcript.find(item => item.id === automated)).toMatchObject({ semantic: expectedAutomationSemantic });
+    expect(projectTranscriptPage(manager, new BlobStore()).items.find(item => item.id === automated))
+      .toMatchObject({ semantic: expectedAutomationSemantic });
+  });
+
   it("rejects a forged invocation customType without the Gateway writer marker", () => {
     const manager = SessionManager.inMemory("/tmp/project");
     manager.appendCustomEntry(INVOCATION_RECEIPT_TYPE, {

@@ -50,6 +50,47 @@ enum InboundProducerPresentationPolicy {
     }
 }
 
+/// A canonical model prompt admitted by a Gateway-owned Automation. It remains
+/// a visible chat turn, but its receipt-backed producer is distinct from the
+/// person using the session.
+struct AutomationPromptMessageView: View {
+    let item: TranscriptItem
+
+    private var promptText: String? {
+        AutomationPromptPresentationPolicy.visibleText(item)
+    }
+
+    private var accessibilitySummary: String {
+        promptText.map { "Automation prompt: \($0)" } ?? "Automation prompt"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 12, weight: .bold))
+                    .accessibilityHidden(true)
+                Text(AutomationPromptPresentationPolicy.originTitle.uppercased())
+                    .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .bold))
+            }
+            .foregroundStyle(Color.tronAutomation)
+
+            if let resource = item.semantic?.resourceInvocation {
+                CanonicalResourceChip(resource: resource)
+            }
+            if let promptText {
+                UserPromptText(text: promptText)
+            }
+        }
+        .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
+        .padding(.top, ChatPromptContainerStyle.topPadding)
+        .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
+        .modifier(UserPromptGlassModifier(accent: .tronAutomation))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilitySummary)
+    }
+}
+
 struct InboundContextGoalPresentation: Equatable {
     let objective: String
     let status: String

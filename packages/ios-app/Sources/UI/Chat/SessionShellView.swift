@@ -1121,6 +1121,12 @@ private struct HistoricalSessionRow: View {
             Spacer(minLength: 10)
 
             HStack(spacing: 5) {
+                if session.isAutomationCreated {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(Color.tronAutomation)
+                        .accessibilityHidden(true)
+                }
                 if session.isFork {
                     Image(systemName: "arrow.triangle.branch")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
@@ -1143,7 +1149,7 @@ private struct HistoricalSessionRow: View {
             interactive: true
         )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(session.title)\(session.isFork ? ", forked session" : ""), \(activity.accessibilityDescription)\(session.isUnread ? ", unread" : ""), \(relativeActivity)")
+        .accessibilityLabel("\(session.title)\(session.isAutomationCreated ? ", Automation-created session" : "")\(session.isFork ? ", forked session" : ""), \(activity.accessibilityDescription)\(session.isUnread ? ", unread" : ""), \(relativeActivity)")
     }
 
     private var indicatorState: DashboardSessionIndicatorState {
