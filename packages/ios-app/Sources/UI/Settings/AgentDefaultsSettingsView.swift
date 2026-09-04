@@ -68,45 +68,22 @@ struct AgentDefaultsSettingsView: View {
                         )
                     }
                 }
-                TronSettingsGroup("Default Model", accent: .tronPurple) {
-                    VStack(spacing: 0) {
-                        TronModelSelectionRow(
-                            selection: $draft.selectedModel,
-                            models: availableModels,
-                            navigationTitle: "Default Model"
-                        )
-                        TronSettingsDivider(accent: .tronPurple)
-                        Button {
-                            Task { await refreshModelCatalog() }
-                        } label: {
-                            TronSettingsRow(
-                                icon: "arrow.clockwise",
-                                title: "Refresh Model Catalog",
-                                subtitle: refreshingCatalog ? "Checking configured providers…" : modelCatalogSummary,
-                                accent: .tronPurple
-                            ) {
-                                if refreshingCatalog {
-                                    TronPulseLoadingIndicator(size: 18)
-                                        .accessibilityLabel("Refreshing model catalog")
-                                } else {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(TronTypography.buttonSM)
-                                        .foregroundStyle(Color.tronPurple)
-                                        .accessibilityHidden(true)
-                                }
-                            }
+                VStack(alignment: .leading, spacing: TronSpacing.md) {
+                    TronSettingsGroup("Default Model", accent: .tronPurple) {
+                        VStack(spacing: 0) {
+                            TronModelSelectionRow(
+                                selection: $draft.selectedModel,
+                                models: availableModels,
+                                navigationTitle: "Default Model"
+                            )
+                            TronSettingsDivider(accent: .tronPurple)
+                            TronThinkingSelectionRow(
+                                selection: $draft.thinking,
+                                levels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+                            )
                         }
-                        .buttonStyle(.plain)
-                        .disabled(refreshingCatalog || saving)
-                        .accessibilityLabel("Refresh Model Catalog")
-                        .accessibilityValue(refreshingCatalog ? "In progress" : modelCatalogSummary)
-                        .accessibilityHint("Checks configured providers for newly available models.")
-                        TronSettingsDivider(accent: .tronPurple)
-                        TronThinkingSelectionRow(
-                            selection: $draft.thinking,
-                            levels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
-                        )
                     }
+                    refreshModelCatalogButton
                 }
                 TronSettingsGroup("Context", accent: .tronTeal) {
                     VStack(spacing: 0) {
@@ -186,6 +163,39 @@ struct AgentDefaultsSettingsView: View {
 
     private var availableModels: [ModelSummary] {
         model.providerCatalog(for: catalogTarget)?.models.filter(\.available) ?? []
+    }
+
+    private var refreshModelCatalogButton: some View {
+        Button {
+            Task { await refreshModelCatalog() }
+        } label: {
+            TronSettingsRow(
+                icon: "arrow.clockwise",
+                title: "Refresh Model Catalog",
+                subtitle: refreshingCatalog ? "Checking configured providers…" : modelCatalogSummary,
+                accent: .tronPurple
+            ) {
+                if refreshingCatalog {
+                    TronPulseLoadingIndicator(size: 18)
+                        .accessibilityLabel("Refreshing model catalog")
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(TronTypography.buttonSM)
+                        .foregroundStyle(Color.tronPurple)
+                        .accessibilityHidden(true)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(refreshingCatalog || saving)
+        .tronGlassSurface(
+            accent: .tronPurple,
+            tintOpacity: 0.14,
+            interactive: !refreshingCatalog && !saving
+        )
+        .accessibilityLabel("Refresh Model Catalog")
+        .accessibilityValue(refreshingCatalog ? "In progress" : modelCatalogSummary)
+        .accessibilityHint("Checks configured providers for newly available models.")
     }
 
     private var modelCatalogSummary: String {
