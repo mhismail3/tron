@@ -111,6 +111,9 @@ struct ModelCatalogAccumulator {
         for model in page {
             guard pageIdentities.insert(model.ref).inserted,
                   !identities.contains(model.ref),
+                  model.contextWindow > 0,
+                  model.maxTokens > 0,
+                  model.contextWindowLimits?.isValid != false,
                   let bytes = Self.stringByteCount(model),
                   bytes <= Int.max - pageStringBytes else { throw invalidPagination() }
             pageStringBytes += bytes

@@ -281,6 +281,36 @@ struct SettingsTrustCoordinatorTests {
             let clock = ManualClock()
             let harness = try await makeHarness(clock: clock.clock)
             let update = Task {
+                try await harness.owner.updateSettings(
+                    .object(["modelContextWindows": .object(["openai-codex/gpt-6-astra": .number(1_050_000)])]),
+                    target: .project(cwd: "/workspace/project"),
+                    sessionID: "session-project"
+                )
+            }
+            defer { update.cancel() }
+
+            try await harness.socket.waitUntilSent(count: 2)
+            let initial = try request(await harness.socket.sentFrames()[1])
+            #expect(initial.method == "settings.update")
+            #expect(initial.params?["scope"] == .string("project"))
+            #expect(initial.params?["cwd"] == .string("/workspace/project"))
+            #expect(initial.params?["sessionId"] == .string("session-project"))
+            await harness.socket.enqueue(response(id: initial.id, result: .object(["updated": .bool(true)])))
+            try await harness.socket.waitUntilSent(count: 3)
+            let refresh = try request(await harness.socket.sentFrames()[2])
+            await harness.socket.enqueue(response(id: refresh.id, result: settingsValue("confirmed")))
+            try await update.value
+            #expect(harness.owner.settings(for: .project(cwd: "/workspace/project")) == settingsValue("confirmed"))
+            await harness.client.close()
+        }
+    }
+
+    @Test("global settings updates omit an unrelated project session identity")
+    func globalSettingsUpdateOmitsSessionID() async throws {
+        try await runScenario {
+            let clock = ManualClock()
+            let harness = try await makeHarness(clock: clock.clock)
+            let update = Task {
                 try await harness.owner.updateSettings(.object(["theme": .string("dark")]), target: .global)
             }
             defer { update.cancel() }
@@ -297,6 +327,7 @@ struct SettingsTrustCoordinatorTests {
             let replay = try request(await harness.socket.sentFrames()[3])
             #expect(replay.method == "settings.update")
             #expect(replay.params?["commandId"] == .string(stableID))
+            #expect(replay.params?["sessionId"] == nil)
             await harness.socket.enqueue(response(id: replay.id, result: .object(["updated": .bool(true)])))
 
             try await harness.socket.waitUntilSent(count: 5)

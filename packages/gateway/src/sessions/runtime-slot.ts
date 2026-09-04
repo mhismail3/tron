@@ -20,6 +20,7 @@ import {
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
+import { contextWindowExtension, SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import type {
   ChatOrigin,
   CommandDetail,
@@ -325,6 +326,7 @@ export interface RuntimeDrainBlockerFact {
  * remain concurrent.
  */
 export class RuntimeSlot {
+  private readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
   private runtime!: AgentSessionRuntime;
   private unsubscribe: (() => void) | undefined;
   private readonly lane = new AsyncMutex();
@@ -505,6 +507,8 @@ export class RuntimeSlot {
    * increments revision before publication, naturally invalidating this cut. */
   private cachedSnapshotDerived: {
     revision: number;
+    model: AgentSession["model"];
+    contextWindow: number | undefined;
     stats: ReturnType<AgentSession["getSessionStats"]>;
     latestCacheHitRate?: number;
   } | undefined;
@@ -1135,6 +1139,7 @@ export class RuntimeSlot {
       // leak project providers between concurrent Tron sessions. Credentials and
       // model files remain canonical through their shared file paths.
       const modelRuntime = await this.dependencies.createModelRuntime();
+      let contextPolicy: SessionContextWindowPolicy | undefined;
       this.resourceReloadOptions = {
         // Reload must re-read the canonical decision. Capturing the value from
         // runtime creation would leave project code loaded after trust changes.
@@ -1147,6 +1152,7 @@ export class RuntimeSlot {
         modelRuntime,
         resourceLoaderOptions: {
           extensionFactories: [
+            { name: "tron-context-window", factory: contextWindowExtension(() => contextPolicy) },
             { name: "tron-core", factory: createTronCoreExtension(this.dependencies.workspace) },
             {
               name: "tron-display",
@@ -1196,6 +1202,8 @@ export class RuntimeSlot {
         // bash schema is nevertheless the exact SDK definition registered here.
         customTools: [directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition],
       });
+      contextPolicy = new SessionContextWindowPolicy(created.session);
+      this.contextPolicies.set(created.session, contextPolicy);
       return { ...created, services, diagnostics: services.diagnostics };
     };
   }
@@ -4940,12 +4948,16 @@ export class RuntimeSlot {
     const session = this.runtime.session;
     this.ensureAgentProjection();
     const derived = this.cachedSnapshotDerived?.revision === this.revision
+      && this.cachedSnapshotDerived.model === session.model
+      && this.cachedSnapshotDerived.contextWindow === session.model?.contextWindow
       ? this.cachedSnapshotDerived
       : (() => {
           const stats = session.getSessionStats();
           const latestCacheHitRate = this.latestCacheHitRate();
           const computed = {
             revision: this.revision,
+            model: session.model,
+            contextWindow: session.model?.contextWindow,
             stats,
             ...(latestCacheHitRate === undefined ? {} : { latestCacheHitRate }),
           };
@@ -4953,6 +4965,7 @@ export class RuntimeSlot {
           return computed;
         })();
     const contextUsage = derived.stats.contextUsage;
+    const contextWindowPolicy = this.contextPolicies.get(session)?.snapshot();
     const stats = derived.stats;
     const latestCacheHitRate = derived.latestCacheHitRate;
     // Pi exposes streamingMessage before an async message_start hook returns,
@@ -5025,6 +5038,7 @@ export class RuntimeSlot {
       thinkingLevel: session.thinkingLevel,
       availableThinkingLevels: session.getAvailableThinkingLevels(),
       ...(contextUsage ? { contextUsage } : {}),
+      ...(contextWindowPolicy ? { contextWindowPolicy } : {}),
       stats: {
         userMessages: stats.userMessages,
         assistantMessages: stats.assistantMessages,
@@ -6161,6 +6175,26 @@ export class RuntimeSlot {
       await this.runtime.session.setModel(model as Model<never>);
       this.revision += 1;
       this.publishSnapshot();
+    });
+  }
+
+  async setContextWindow(provider: string, modelId: string, contextWindow: unknown, expectedRevision: number, expectedRuntimeGeneration: string): Promise<void> {
+    await this.lane.run(() => {
+      this.assertIdle();
+      if (expectedRuntimeGeneration !== this.runtimeGeneration || expectedRevision !== this.revision) {
+        throw new GatewayError("conflict", "Session changed; refresh before changing its context window");
+      }
+      const policy = this.contextPolicies.get(this.runtime.session);
+      if (!policy) throw new GatewayError("conflict", "Session context configuration is unavailable");
+      try {
+        policy.set({ provider, id: modelId }, contextWindow);
+      } finally {
+        // Pi may have staged the entry even when its disk append failed. Always
+        // project the exact runtime outcome rather than leaving clients stale.
+        this.revision += 1;
+        this.emit("session.contextChanged", {});
+        this.publishSnapshot();
+      }
     });
   }
 

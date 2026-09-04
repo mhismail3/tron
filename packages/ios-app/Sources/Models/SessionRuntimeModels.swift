@@ -3,7 +3,7 @@ import Foundation
 struct ModelRef: Codable, Hashable, Sendable, Identifiable {
     let provider: String
     let id: String
-
+    var contextWindowKey: String { "\(provider)/\(id)" }
 }
 
 struct ContextUsage: Codable, Hashable, Sendable {
@@ -397,6 +397,17 @@ struct SessionStats: Codable, Hashable, Sendable {
     let cost: Double
 }
 
+struct ContextWindowPolicy: Codable, Hashable, Sendable {
+    let model: ModelRef
+    let minimum: Int
+    let maximum: Int
+    let `default`: Int
+    let effective: Int
+    let override: Int?
+    let source: String
+    let warning: String?
+}
+
 struct SessionSnapshot: Codable, Hashable, Sendable {
     /// Gateway's bounded authoritative queue capacity. Rich queue projections
     /// exceeding this limit are invalid and must not reach row rendering.
@@ -449,6 +460,8 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     /// Set only on the disposable offline cache projection. Gateway snapshots
     /// leave this absent so canonical runtime state remains authoritative.
     var isCachedProjection: Bool? = nil
+    /// Optional on rolling gateways that do not advertise context-window.v1.
+    var contextWindowPolicy: ContextWindowPolicy? = nil
 
     struct PromptAttachment: Codable, Hashable, Identifiable, Sendable {
         let id: String
@@ -493,6 +506,8 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
 /// Narrow, immutable facts used by Manage Session. Streaming transcript content
 /// is deliberately absent so its publication cannot invalidate that surface.
 struct SessionContextPresentation: Hashable, Sendable {
+    let runtimeGeneration: String
+    let revision: Int
     let sessionID: String
     let phase: SessionPhase
     let operationKind: SessionOperationState.Kind?
@@ -508,8 +523,11 @@ struct SessionContextPresentation: Hashable, Sendable {
     let name: String?
     let cwd: String
     let diagnostics: [RuntimeDiagnostic]
+    let contextWindowPolicy: ContextWindowPolicy?
 
     init(_ snapshot: SessionSnapshot) {
+        runtimeGeneration = snapshot.runtimeGeneration
+        revision = snapshot.revision
         sessionID = snapshot.sessionId
         phase = snapshot.phase
         operationKind = snapshot.operation?.kind
@@ -525,6 +543,7 @@ struct SessionContextPresentation: Hashable, Sendable {
         name = snapshot.name
         cwd = snapshot.cwd
         diagnostics = snapshot.diagnostics
+        contextWindowPolicy = snapshot.contextWindowPolicy
     }
 }
 

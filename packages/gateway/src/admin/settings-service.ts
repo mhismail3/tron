@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { SettingsManager, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
+import { contextWindowLimits, contextWindowMinimum, contextWindowPreferences, MAX_CONTEXT_PREFERENCES, parseContextModelKey, validateContextWindow } from "../providers/context-window-policy.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { updateJsonLocked } from "../util/json.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, string } from "../util/validation.js";
@@ -134,6 +135,8 @@ export class SettingsService {
       effective: {
         defaultModel: defaultProvider && defaultModel ? { provider: defaultProvider, id: defaultModel } : null,
         defaultThinkingLevel: manager.getDefaultThinkingLevel() ?? null,
+        modelContextWindows: contextWindowPreferences(effective, MAX_CONTEXT_PREFERENCES * 2),
+        contextWindowMinimum: contextWindowMinimum(manager.getCompactionSettings()),
         thinkingBudgets: manager.getThinkingBudgets() ?? null,
         transport: manager.getTransport(),
         compaction: manager.getCompactionSettings(),
@@ -192,11 +195,11 @@ export class SettingsService {
     return result;
   }
 
-  async update(raw: unknown, options: { cwd: string; scope: SettingsScope; projectTrusted: boolean }): Promise<Record<string, unknown>> {
+  async update(raw: unknown, options: { cwd: string; scope: SettingsScope; projectTrusted: boolean; modelRuntime?: ModelRuntime }): Promise<Record<string, unknown>> {
     return this.mutation.run(() => this.updateLocked(raw, options));
   }
 
-  private async updateLocked(raw: unknown, options: { cwd: string; scope: SettingsScope; projectTrusted: boolean }): Promise<Record<string, unknown>> {
+  private async updateLocked(raw: unknown, options: { cwd: string; scope: SettingsScope; projectTrusted: boolean; modelRuntime?: ModelRuntime }): Promise<Record<string, unknown>> {
     if (options.scope === "project" && !options.projectTrusted) {
       throw new GatewayError("trust_required", "Trust this project before changing its project settings");
     }
@@ -209,6 +212,28 @@ export class SettingsService {
       : undefined;
     await updateJsonLocked<SettingsDocument>(path, {}, (current) => {
       const next = this.applyPatch(current, patch);
+      if ("modelContextWindows" in patch) {
+        const delta = object(patch.modelContextWindows, "modelContextWindows");
+        if (Object.keys(delta).length > MAX_CONTEXT_PREFERENCES) throw new GatewayError("invalid_request", "Too many context window preferences");
+        const values = contextWindowPreferences(current);
+        const effective = merge(global ?? {}, next);
+        const compaction = object(effective.compaction ?? {}, "compaction");
+        const budget = {
+          reserveTokens: typeof compaction.reserveTokens === "number" ? compaction.reserveTokens : 16_384,
+          keepRecentTokens: typeof compaction.keepRecentTokens === "number" ? compaction.keepRecentTokens : 20_000,
+        };
+        const catalog = (options.modelRuntime ?? this.modelRuntime).getModels();
+        for (const [key, value] of Object.entries(delta)) {
+          const identity = parseContextModelKey(key);
+          if (value === null) { delete values[key]; continue; }
+          const model = catalog.find(model => model.provider === identity.provider && model.id === identity.id);
+          if (!model) throw new GatewayError("not_found", "Context window model is not registered in this settings scope");
+          values[key] = validateContextWindow(value, contextWindowLimits(model, budget));
+        }
+        if (Object.keys(values).length > MAX_CONTEXT_PREFERENCES) throw new GatewayError("invalid_request", "Too many context window preferences");
+        if (Object.keys(values).length) next.modelContextWindows = values;
+        else delete next.modelContextWindows;
+      }
       // The response retains these documents once and derives at most another
       // document's worth of effective values. This conservative admission leaves
       // response byte/node/depth headroom before the canonical write commits.

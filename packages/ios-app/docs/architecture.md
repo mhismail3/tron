@@ -497,7 +497,24 @@ Its forced refresh and logout commands use the shared receipt executor before re
 exact captured target. Models and Defaults exposes a separate forced-refresh action row below its
 model controls for the displayed catalog target, reloads successful updates and cached fallbacks
 before reporting provider failures or timeout, and
-never mutates the settings draft, saved defaults, or credentials. `PackageConfigurationCoordinator` solely owns target-keyed inventories,
+never mutates the settings draft, saved defaults, or credentials. Models with
+`contextWindowLimits` expose a per-provider/model sparse context-window default;
+project edits carry the captured session ID when available so the Gateway can
+validate project-scoped model settings. The effective value is displayed with
+model-default/inherited, maximum, and custom token choices, without inventing a
+mobile-side maximum. The editor combines catalog capacity with the selected
+settings scope's `contextWindowMinimum`; custom input commits only on Apply.
+Defaults affect new/cold-resumed sessions or explicit resource reloads, not already
+live sessions. Manage Session exposes the same capability only when the Gateway
+advertises `context-window.v1`; its idle mutation captures provider/model identity,
+snapshot revision and runtime generation, and waits for the authoritative snapshot.
+Late saves cannot overwrite another client or survive a model/runtime round trip.
+The server's warnings expose stale saved preferences, pricing, and the SDK's
+first-assistant durability boundary for new sessions. Snapshot admission accepts
+bounded saved overrides outside refreshed capacity while requiring policy identity
+and effective usage to agree with the snapshot. Context budgets control future context assembly and
+compaction only: they do not restore history already summarized, and larger
+windows may consume more provider allowance or cost. `PackageConfigurationCoordinator` solely owns target-keyed inventories,
 update markers, newest-list/check/mutation admission, event-only invalidation, closed
 install/update/remove wire construction, and confirmed exact-target reload effects. Package presentation performs one bounded pass over the four canonical resource arrays for totals and friendly type summaries; nested type sheets expose names and source/scope copy, while paths, metadata, and additive unknown fields remain preserved behind Technical JSON disclosure. The separate
 `CustomModelConfigurationCoordinator` owns typed-global reads and validate-before-put mutation

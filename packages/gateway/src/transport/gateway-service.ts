@@ -1,6 +1,7 @@
 import { performance } from "node:perf_hooks";
 import type { AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { contextWindowLimits } from "../providers/context-window-policy.js";
 import type { GatewayConfig } from "../config.js";
 import { GatewayError } from "../errors.js";
 import { runtimeIdentity } from "./runtime-identity.js";
@@ -266,6 +267,7 @@ export class GatewayService {
         "queue-management.v1",
         "skill-prompt.v1",
         "restart-drain.v1",
+        "context-window.v1",
         "drain-status.v1",
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
@@ -1018,6 +1020,17 @@ export class GatewayService {
           await (await this.openedSlot(client, params)).setModel(string(params.provider, "provider", { max: 120 }), string(params.modelId, "modelId", { max: 300 }));
           return { updated: true };
         });
+      case "session.setContextWindow":
+        return this.mutation(client, method, params, async () => {
+          await (await this.openedSlot(client, params)).setContextWindow(
+            string(params.provider, "provider", { max: 120 }),
+            string(params.modelId, "modelId", { max: 300 }),
+            params.contextWindow,
+            integer(params.expectedRevision, "expectedRevision", 0, Number.MAX_SAFE_INTEGER),
+            string(params.expectedRuntimeGeneration, "expectedRuntimeGeneration", { max: 200 }),
+          );
+          return { updated: true };
+        });
       case "session.setThinking":
         return this.mutation(client, method, params, async () => {
           await (await this.openedSlot(client, params)).setThinking(oneOf(params.level, "level", thinkingLevels));
@@ -1182,10 +1195,13 @@ export class GatewayService {
           const resolved = scope === "project"
             ? await this.dependencies.trust.requireResolved(cwdInput)
             : { cwd: await this.dependencies.trust.canonicalDirectory(cwdInput), trusted: false };
+          const settingsSlot = scope === "project" && params.sessionId !== undefined ? await this.openedSlot(client, params) : undefined;
+          if (settingsSlot && settingsSlot.cwd !== resolved.cwd) throw new GatewayError("conflict", "Settings session belongs to a different project");
           const result = await this.dependencies.settings.update(params.patch, {
             cwd: resolved.cwd,
             scope,
             projectTrusted: scope === "project" && resolved.trusted,
+            ...(settingsSlot ? { modelRuntime: settingsSlot.modelRuntime } : {}),
           });
           this.dependencies.broadcast("settings.changed", { scope, cwd: resolved.cwd });
           return safeJson(result);
@@ -1516,6 +1532,7 @@ export class GatewayService {
         reasoning: model.reasoning,
         input: model.input,
         contextWindow: model.contextWindow,
+        contextWindowLimits: contextWindowLimits(model),
         maxTokens: model.maxTokens,
         available: available.has(`${model.provider}\0${model.id}`),
       }));

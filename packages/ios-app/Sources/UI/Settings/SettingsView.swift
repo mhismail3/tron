@@ -68,7 +68,8 @@ struct SettingsView: View {
                             AgentDefaultsSettingsView(
                                 allowsProjectScope: scope == .project,
                                 providerTarget: projectSessionID.map(ProviderCatalogTarget.session(id:)) ?? .global,
-                                projectCWD: projectCWD
+                                projectCWD: projectCWD,
+                                projectSessionID: projectSessionID
                             )
                         }
                         settingsDivider(accent: .tronPurple)

@@ -21,6 +21,7 @@ final class SettingsTrustCoordinator {
         let patch: JSONValue
         let scope: String
         let cwd: String?
+        let sessionId: String?
         let commandId: String
     }
 
@@ -109,13 +110,14 @@ final class SettingsTrustCoordinator {
         }
     }
 
-    func updateSettings(_ patch: JSONValue, target: SettingsTarget) async throws {
+    func updateSettings(_ patch: JSONValue, target: SettingsTarget, sessionID: String? = nil) async throws {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
         let params = SettingsUpdateParams(
             patch: patch,
             scope: target.scope.rawValue,
             cwd: target.cwd,
+            sessionId: sessionID,
             commandId: commandID
         )
         let _: JSONValue = try await mutationExecutor.performValue(

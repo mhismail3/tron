@@ -258,6 +258,50 @@ final class SessionMutationService {
         }
     }
 
+    func setContextWindow(
+        _ contextWindow: Int?,
+        for model: ModelRef,
+        sessionID: String,
+        expectedRevision: Int,
+        expectedRuntimeGeneration: String
+    ) async throws {
+        struct Params: Encodable {
+            let sessionId, provider, modelId: String
+            let contextWindow: Int?
+            let expectedRevision: Int
+            let expectedRuntimeGeneration: String
+            let commandId: String
+            private enum CodingKeys: String, CodingKey { case sessionId, provider, modelId, contextWindow, expectedRevision, expectedRuntimeGeneration, commandId }
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(sessionId, forKey: .sessionId)
+                try container.encode(provider, forKey: .provider)
+                try container.encode(modelId, forKey: .modelId)
+                try container.encode(expectedRevision, forKey: .expectedRevision)
+                try container.encode(expectedRuntimeGeneration, forKey: .expectedRuntimeGeneration)
+                if let contextWindow { try container.encode(contextWindow, forKey: .contextWindow) }
+                else { try container.encodeNil(forKey: .contextWindow) }
+                try container.encode(commandId, forKey: .commandId)
+            }
+        }
+        let commandID = uuidSource.next().uuidString
+        let params = Params(
+            sessionId: sessionID,
+            provider: model.provider,
+            modelId: model.id,
+            contextWindow: contextWindow,
+            expectedRevision: expectedRevision,
+            expectedRuntimeGeneration: expectedRuntimeGeneration,
+            commandId: commandID
+        )
+        let _: MutationResponse = try await executor.perform(
+            method: "session.setContextWindow",
+            commandID: commandID
+        ) {
+            try await client.request("session.setContextWindow", params)
+        }
+    }
+
     func rename(_ sessionID: String, name: String) async throws {
         struct Params: Codable { let sessionId, name, commandId: String }
         let commandID = uuidSource.next().uuidString

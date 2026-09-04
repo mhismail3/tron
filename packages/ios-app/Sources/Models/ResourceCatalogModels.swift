@@ -269,6 +269,29 @@ struct ProviderSummary: Codable, Hashable, Identifiable, Sendable {
     let modelCount: Int
 }
 
+struct ContextWindowLimits: Codable, Hashable, Sendable {
+    let minimum: Int
+    let maximum: Int
+    let `default`: Int
+    let longContextThreshold: Int?
+
+    func admits(_ value: Int) -> Bool {
+        value >= minimum && value <= maximum
+    }
+
+    func withMinimum(_ scopedMinimum: Int?) -> Self {
+        guard let scopedMinimum, scopedMinimum > 0 else { return self }
+        let adjustedMinimum = min(maximum, scopedMinimum)
+        return Self(minimum: adjustedMinimum, maximum: maximum,
+                    default: max(adjustedMinimum, `default`), longContextThreshold: longContextThreshold)
+    }
+
+    var isValid: Bool {
+        minimum > 0 && maximum >= minimum && maximum <= 100_000_000 && admits(`default`)
+            && (longContextThreshold == nil || (longContextThreshold! > 0 && longContextThreshold! <= maximum))
+    }
+}
+
 struct ModelSummary: Codable, Hashable, Identifiable, Sendable {
     let provider: String
     let id: String
@@ -278,6 +301,7 @@ struct ModelSummary: Codable, Hashable, Identifiable, Sendable {
     let contextWindow: Int
     let maxTokens: Int
     let available: Bool
+    var contextWindowLimits: ContextWindowLimits? = nil
 
     var ref: ModelRef { ModelRef(provider: provider, id: id) }
 }

@@ -739,6 +739,71 @@ checked with non-following directory metadata, then realpath containment is prov
 runs, so pre-existing symlinks cannot redirect a target. Pi itself receives only the resulting
 canonical `cwd`; its SDK has no Git/worktree creation option. Persisted worktrees remain available
 for later sessions and are never silently deleted with a session.
+### Model context windows
+
+`context-window.v1` exposes a model-qualified context budget in Models and Defaults
+and Manage Session. `model.list` retains the SDK's configured `contextWindow` and
+adds optional `contextWindowLimits` (`minimum`, `maximum`, `default`, and an optional
+`longContextThreshold`). The catalog minimum uses standard compaction headroom;
+`settings.get.effective.contextWindowMinimum` supplies the selected scope's actual
+reserve plus retained-tail headroom, clamped to each model's maximum by the editor.
+Session policy bounds use that live session's compaction settings. Capacity is
+declared by the provider/catalog, not inferred
+from a display name or copied from a different endpoint. The pinned catalog lacks a
+separate supported-maximum field: one endpoint-qualified adapter supplies OpenAI's
+documented 1,050,000-token maximum for `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`,
+and `gpt-5.6-luna` on the official OpenAI and OpenAI Codex routes. Other models,
+including custom and extension models, use their declared catalog window. Proxy
+routes do not inherit OpenAI's extra capacity. Account entitlement, remote acceptance,
+and long-context billing remain provider-controlled; the catalog is not a live
+million-token request probe.
+
+The first-party `modelContextWindows` preference lives in canonical global or
+trusted-project SDK `settings.json`, keyed by `provider/modelId`. `settings.update`
+accepts a sparse map of integer token counts or `null` to remove that scope's key;
+it preserves other models and unrelated settings. Each scope is bounded to 500
+preferences. Project updates may include `sessionId` to validate against that
+subscribed session's extension-provider catalog; its canonical cwd must match the
+requested project. New or cold-resumed sessions and explicit resource reloads read
+these defaults. Saving defaults never changes an in-flight request or silently
+reconfigures an already-live session. It does not restart the Gateway or rewrite
+`models.json`. This is a Tron-owned preference interpreted by its embedded runtime
+adapter, not a new native SDK setting consumed by independent runtime clients.
+
+`session.setContextWindow` requires `sessionId`, `provider`, `modelId`, an integer
+`contextWindow` (or `null` to inherit), `expectedRevision`, `expectedRuntimeGeneration`
+from the displayed snapshot, and `commandId`. It uses the exact open subscription,
+command receipts, and the session's idle-only serialized mutation lane. Revision
+and runtime generation are checked inside that lane, preventing same-model stale
+saves, A → B → A model switches, and delayed requests after cold reopen. A stale
+model identity, unavailable capacity, invalid integer, insufficient
+compaction headroom, or a reduction below current usage plus response reserve is
+rejected. The user must compact before an unsafe reduction; no messages are silently
+truncated. A successful change applies to the existing session without restart or
+new-session creation and leaves reasoning level, output ceiling, costs, and other
+sessions unchanged. Larger context never restores previously compacted history.
+
+One non-message `tron.context-window.v1` custom entry records each session override
+or reset in canonical JSONL. Its active branch is authoritative across fork, tree
+navigation, reload, import, and cold resume. The selected SDK model is a copy with
+the effective budget; the shared provider catalog is not mutated. Model-selection,
+resource-lifecycle, turn, and public model-lookup boundaries reapply that policy,
+including the SDK's silent provider-registration refresh. `contextWindowPolicy` in
+the session snapshot reports the model identity, bounds, configured default,
+effective budget, explicit override, scope source, and optional adjustment/cost
+warning; `contextUsage.contextWindow` uses the same effective runtime value.
+Existing saved preferences that no longer fit a model's current capacity or
+compaction headroom are bounded with an explicit warning, not treated as proof of
+unsupported capacity. As with other native session choices, a brand-new session
+is only durable after the SDK's first-assistant persistence boundary; the snapshot
+and Manage Session explicitly warn when the override is not yet saved to disk.
+Already-materialized sessions persist idle changes without needing another turn.
+No direct JSONL writer or separate preference journal bypasses the SDK. If native
+append stages an entry but disk persistence fails, the RPC reports an uncertain
+outcome and publishes the actual live projection rather than fabricating rollback
+or blindly replaying the command. An explicitly issued new command always records
+its desired value, even when it matches a previously staged in-memory value.
+
 Settings projections include
 scope-owned documents and effective values, but write-only proxy credentials are removed
 from both; clients receive only `httpProxyConfigured` and can set or explicitly clear the

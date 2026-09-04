@@ -317,6 +317,46 @@ struct SessionMutationServiceTests {
                 ]
             )
 
+            let contextWindow = Task {
+                try await harness.service.setContextWindow(
+                    1_050_000,
+                    for: ModelRef(provider: "openai-codex", id: "gpt-6-astra"),
+                    sessionID: "context-session", expectedRevision: 7, expectedRuntimeGeneration: "runtime-1"
+                )
+            }
+            try await completeVoid(
+                contextWindow, socket: harness.socket, frameIndex: &frameIndex,
+                method: "session.setContextWindow", result: .object(["updated": .bool(true)]),
+                expectedParams: [
+                    "sessionId": .string("context-session"),
+                    "provider": .string("openai-codex"),
+                    "modelId": .string("gpt-6-astra"),
+                    "contextWindow": .number(1_050_000),
+                    "expectedRevision": .number(7),
+                    "expectedRuntimeGeneration": .string("runtime-1"),
+                ]
+            )
+
+            let contextWindowReset = Task {
+                try await harness.service.setContextWindow(
+                    nil,
+                    for: ModelRef(provider: "openai-codex", id: "gpt-6-astra"),
+                    sessionID: "context-session", expectedRevision: 8, expectedRuntimeGeneration: "runtime-1"
+                )
+            }
+            try await completeVoid(
+                contextWindowReset, socket: harness.socket, frameIndex: &frameIndex,
+                method: "session.setContextWindow", result: .object(["updated": .bool(true)]),
+                expectedParams: [
+                    "sessionId": .string("context-session"),
+                    "provider": .string("openai-codex"),
+                    "modelId": .string("gpt-6-astra"),
+                    "contextWindow": .null,
+                    "expectedRevision": .number(8),
+                    "expectedRuntimeGeneration": .string("runtime-1"),
+                ]
+            )
+
             let thinking = Task {
                 try await harness.service.setThinking("high", sessionID: "thinking-session")
             }

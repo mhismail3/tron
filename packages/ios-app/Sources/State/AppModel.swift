@@ -1412,6 +1412,10 @@ final class AppModel {
         return await dashboardConnections.info(for: profileID)
     }
 
+    nonisolated static func supportsContextWindow(capabilities: [String]) -> Bool {
+        capabilities.contains("context-window.v1")
+    }
+
     nonisolated static func supportsGatewayUpdate(capabilities: [String]) -> Bool {
         capabilities.contains("gateway-update.v1")
     }
@@ -2433,6 +2437,13 @@ final class AppModel {
         try await sessionMutations.setThinking(level, sessionID: sessionID)
     }
 
+    func setContextWindow(_ contextWindow: Int?, for model: ModelRef, sessionID: String, expectedRevision: Int, expectedRuntimeGeneration: String) async throws {
+        guard gatewayInfo?.capabilities.contains("context-window.v1") == true else {
+            throw GatewayFailure(code: "unsupported", message: "This Gateway does not support context window controls.", retryable: false, details: nil)
+        }
+        try await sessionMutations.setContextWindow(contextWindow, for: model, sessionID: sessionID, expectedRevision: expectedRevision, expectedRuntimeGeneration: expectedRuntimeGeneration)
+    }
+
     func renameSession(_ sessionID: String, name: String) async throws {
         try await sessionMutations.rename(sessionID, name: name)
     }
@@ -2790,8 +2801,8 @@ final class AppModel {
         await settingsTrust.refreshSettings(target: target)
     }
 
-    func updateSettings(_ patch: JSONValue, target: SettingsTarget) async throws {
-        try await settingsTrust.updateSettings(patch, target: target)
+    func updateSettings(_ patch: JSONValue, target: SettingsTarget, sessionID: String? = nil) async throws {
+        try await settingsTrust.updateSettings(patch, target: target, sessionID: sessionID)
     }
 
     func inspectTrust(target: TrustTarget) async throws -> JSONValue {

@@ -52,6 +52,63 @@ struct SettingsDraftStoreTests {
         ])
     }
 
+    @Test("context window defaults patch only changed model keys and supports scope reset")
+    func modelContextWindowPatch() {
+        let model = ModelRef(provider: "openai-codex", id: "gpt-6-astra")
+        var baseline = AgentDefaultsDraft()
+        baseline.modelContextWindows[model.contextWindowKey] = 272_000
+        var edited = baseline
+        edited.modelContextWindows["other/model"] = 128_000
+        edited.setContextWindowOverride(nil, for: model)
+
+        #expect(edited.patch(comparedTo: baseline).objectValue?["modelContextWindows"]?.objectValue == [
+            model.contextWindowKey: .null,
+            "other/model": .number(128_000)
+        ])
+        #expect(edited.patch(comparedTo: edited).objectValue?.isEmpty == true)
+    }
+
+    @Test("context drafts retain other models and reveal inheritance without writing it")
+    func contextWindowInheritance() {
+        let model = ModelRef(provider: "p", id: "m"); let other = ModelRef(provider: "p", id: "other")
+        var baseline = AgentDefaultsDraft()
+        baseline.modelContextWindows = [model.contextWindowKey: 500_000, other.contextWindowKey: 100_000]
+        baseline.inheritedModelContextWindows = [model.contextWindowKey: 272_000]
+        var draft = baseline
+        draft.setContextWindowOverride(nil, for: model)
+        #expect(draft.inheritedModelContextWindows[model.contextWindowKey] == 272_000)
+        #expect(draft.modelContextWindows[other.contextWindowKey] == 100_000)
+        #expect(draft.patch(comparedTo: baseline).objectValue?["modelContextWindows"] == .object([model.contextWindowKey: .null]))
+        draft.setContextWindowOverride(500_000, for: model)
+        #expect(draft.patch(comparedTo: baseline).objectValue?.isEmpty == true)
+    }
+
+    @Test("custom context tokens are committed only as valid whole numbers")
+    func contextWindowInput() {
+        let limits = ContextWindowLimits(minimum: 37_408, maximum: 1_050_000, default: 272_000, longContextThreshold: 272_000)
+        for text in ["", "1M", "1,000,000", "1.5", "-100000", "100000000000000000000000", "1050001", "37407"] {
+            #expect(ContextWindowInput.tokens(text, limits: limits) == nil)
+        }
+        #expect(ContextWindowInput.tokens(" 1050000 ", limits: limits) == 1_050_000)
+        #expect(ContextWindowInput.tokens("1000000", limits: limits) == 1_000_000)
+        #expect(limits.withMinimum(300_000).minimum == 300_000)
+        #expect(limits.withMinimum(300_000).default == 300_000)
+        #expect(limits.withMinimum(300_000).isValid)
+        #expect(limits.withMinimum(2_000_000).minimum == 1_050_000)
+    }
+
+    @Test("context window limits reject malformed numeric capabilities")
+    func contextWindowLimitsValidation() {
+        let limits = ContextWindowLimits(minimum: 1, maximum: 1_050_000, default: 272_000, longContextThreshold: 272_000)
+        #expect(limits.isValid)
+        #expect(limits.admits(1))
+        #expect(limits.admits(1_050_000))
+        #expect(!limits.admits(1_050_001))
+        #expect(!ContextWindowLimits(minimum: 0, maximum: 1_000, default: 500, longContextThreshold: nil).isValid)
+        #expect(!ContextWindowLimits(minimum: 1_000, maximum: 500, default: 500, longContextThreshold: nil).isValid)
+        #expect(!ContextWindowLimits(minimum: 1, maximum: 1_000, default: 2_000, longContextThreshold: nil).isValid)
+    }
+
     @Test("proxy writes are explicit, redacted after save, and can be cleared")
     func proxyPatch() {
         var configured = ResourceSettingsDraft()

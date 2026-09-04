@@ -788,6 +788,24 @@ export interface PendingPromptState {
   resourceInvocation?: ResourceInvocation;
 }
 
+export interface ContextWindowLimits {
+  minimum: number;
+  maximum: number;
+  default: number;
+  longContextThreshold?: number;
+}
+
+export interface ContextWindowPolicy {
+  model: ModelRef;
+  minimum: number;
+  maximum: number;
+  default: number;
+  effective: number;
+  override: number | null;
+  source: "model" | "global" | "project" | "session";
+  warning?: string;
+}
+
 export interface SessionSnapshot {
   sessionId: string;
   runtimeGeneration: string;
@@ -803,6 +821,7 @@ export interface SessionSnapshot {
   thinkingLevel: string;
   availableThinkingLevels: string[];
   contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
+  contextWindowPolicy?: ContextWindowPolicy;
   stats: SessionStats;
   queueRevision: number;
   queuedItems: QueuedMessageState[];

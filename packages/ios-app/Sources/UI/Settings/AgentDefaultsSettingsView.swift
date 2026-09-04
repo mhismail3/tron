@@ -6,6 +6,19 @@ struct AgentDefaultsDraft: Equatable {
     var compaction = true
     var retry = true
     var trust = "ask"
+    /// Sparse values owned by this settings scope. Effective inherited values
+    /// are kept separately so selecting a model never creates a write.
+    var modelContextWindows: [String: Int] = [:]
+    var inheritedModelContextWindows: [String: Int] = [:]
+    var contextWindowMinimum: Int? = nil
+
+    func contextWindowOverride(for model: ModelRef) -> Int? {
+        modelContextWindows[model.contextWindowKey]
+    }
+
+    mutating func setContextWindowOverride(_ value: Int?, for model: ModelRef) {
+        modelContextWindows[model.contextWindowKey] = value
+    }
 
     func patch(comparedTo baseline: Self) -> JSONValue {
         var patch: [String: JSONValue] = [:]
@@ -25,6 +38,16 @@ struct AgentDefaultsDraft: Equatable {
                 patch["defaultModel"] = .null
             }
         }
+        let keys = Set(modelContextWindows.keys).union(baseline.modelContextWindows.keys)
+        var contextPatch: [String: JSONValue] = [:]
+        for key in keys {
+            if let value = modelContextWindows[key] {
+                if baseline.modelContextWindows[key] != value { contextPatch[key] = .number(Double(value)) }
+            } else if baseline.modelContextWindows[key] != nil {
+                contextPatch[key] = .null
+            }
+        }
+        if !contextPatch.isEmpty { patch["modelContextWindows"] = .object(contextPatch) }
         return .object(patch)
     }
 }
@@ -34,11 +57,24 @@ struct AgentDefaultsSettingsView: View {
     let allowsProjectScope: Bool
     let providerTarget: ProviderCatalogTarget
     let projectCWD: String?
+    let projectSessionID: String?
     @State private var draft = AgentDefaultsDraft()
     @State private var drafts = ScopedSettingsDraftStore<AgentDefaultsDraft>()
     @State private var scope: SettingsScope = .global
     @State private var saving = false
     @State private var refreshingCatalog = false
+
+    init(
+        allowsProjectScope: Bool,
+        providerTarget: ProviderCatalogTarget,
+        projectCWD: String?,
+        projectSessionID: String? = nil
+    ) {
+        self.allowsProjectScope = allowsProjectScope
+        self.providerTarget = providerTarget
+        self.projectCWD = projectCWD
+        self.projectSessionID = projectSessionID
+    }
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -76,6 +112,22 @@ struct AgentDefaultsSettingsView: View {
                                 models: availableModels,
                                 navigationTitle: "Default Model"
                             )
+                            if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
+                               let selectedModel, let limits = selectedContextWindowLimits {
+                                TronSettingsDivider(accent: .tronPurple)
+                                ContextWindowSelectionRow(
+                                    selection: contextWindowBinding(for: selectedModel),
+                                    limits: limits,
+                                    inheritedValue: draft.inheritedModelContextWindows[selectedModel.ref.contextWindowKey],
+                                    resetLabel: scope == .project ? "Use inherited default" : "Use model default"
+                                )
+                                .id("\(scope.rawValue):\(selectedModel.ref.contextWindowKey)")
+                                Text("Defaults apply to new sessions and after reloading session resources. Use Manage Session to change a live session. Larger windows do not restore compacted history.")
+                                    .font(TronTypography.secondaryDescription)
+                                    .foregroundStyle(Color.tronTextSecondary)
+                                    .padding(.horizontal, 14)
+                                    .padding(.bottom, 10)
+                            }
                             TronSettingsDivider(accent: .tronPurple)
                             TronThinkingSelectionRow(
                                 selection: $draft.thinking,
@@ -165,6 +217,24 @@ struct AgentDefaultsSettingsView: View {
         model.providerCatalog(for: catalogTarget)?.models.filter(\.available) ?? []
     }
 
+    private var selectedModel: ModelSummary? {
+        guard let selected = draft.selectedModel else { return nil }
+        return availableModels.first(where: { $0.ref == selected })
+    }
+
+    private var selectedContextWindowLimits: ContextWindowLimits? {
+        selectedModel?.contextWindowLimits?.withMinimum(draft.contextWindowMinimum)
+    }
+
+    private func contextWindowBinding(for modelSummary: ModelSummary) -> Binding<Int?> {
+        Binding(
+            get: { draft.contextWindowOverride(for: modelSummary.ref) },
+            set: { value in
+                draft.setContextWindowOverride(value, for: modelSummary.ref)
+            }
+        )
+    }
+
     private var refreshModelCatalogButton: some View {
         Button {
             Task { await refreshModelCatalog() }
@@ -250,17 +320,33 @@ struct AgentDefaultsSettingsView: View {
         } else {
             selectedModel = model.preferredAvailableModel(for: catalogTarget)
         }
+        let scopeDocument = root["documents"]?.objectValue?[target.scope.rawValue]?.objectValue ?? [:]
+        let scopedContextWindows = Self.contextWindows(scopeDocument["modelContextWindows"])
+        let inheritedContextWindows = target.scope == .project
+            ? Self.contextWindows(root["documents"]?.objectValue?["global"]?.objectValue?["modelContextWindows"])
+            : [:]
         let projected = AgentDefaultsDraft(
             selectedModel: selectedModel,
             thinking: value["defaultThinkingLevel"]?.stringValue ?? "medium",
             compaction: value["compaction"]?.objectValue?["enabled"]?.boolValue ?? true,
             retry: value["retry"]?.objectValue?["enabled"]?.boolValue ?? true,
-            trust: value["defaultProjectTrust"]?.stringValue ?? "ask"
+            trust: value["defaultProjectTrust"]?.stringValue ?? "ask",
+            modelContextWindows: scopedContextWindows,
+            inheritedModelContextWindows: inheritedContextWindows,
+            contextWindowMinimum: value["contextWindowMinimum"]?.intValue
         )
         if drafts.install(projected, for: target, ifCurrent: draft) {
             draft = projected
         } else if let saved = drafts.draft(for: target) {
             draft = saved
+        }
+    }
+
+    private static func contextWindows(_ value: JSONValue?) -> [String: Int] {
+        guard let object = value?.objectValue else { return [:] }
+        return object.compactMapValues { value in
+            guard let number = value.intValue, number > 0 else { return nil }
+            return number
         }
     }
 
@@ -289,7 +375,11 @@ struct AgentDefaultsSettingsView: View {
         saving = true
         defer { saving = false }
         do {
-            try await model.updateSettings(patch, target: target)
+            try await model.updateSettings(
+                patch,
+                target: target,
+                sessionID: target.scope == .project ? projectSessionID : nil
+            )
             guard target == settingsTarget, draft == savingDraft else { return }
             _ = drafts.markSaved(
                 savingDraft,

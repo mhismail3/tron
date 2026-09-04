@@ -2,7 +2,8 @@ enum SessionSnapshotTranscriptAdmissionPolicy {
     static let maximumItemIdentityUTF8Bytes = 512
 
     static func admit(_ snapshot: SessionSnapshot) -> Bool {
-        guard admitsItems(snapshot.transcript),
+        guard admitsContextWindowPolicy(snapshot),
+              admitsItems(snapshot.transcript),
               snapshot.streaming.map(admitsItem) ?? true,
               snapshot.activeToolSegmentId.map({
                   !$0.isEmpty && $0.utf8.count <= maximumItemIdentityUTF8Bytes
@@ -29,6 +30,26 @@ enum SessionSnapshotTranscriptAdmissionPolicy {
 
     static func admitsItem(_ item: TranscriptItem) -> Bool {
         !item.id.isEmpty && item.id.utf8.count <= maximumItemIdentityUTF8Bytes
+    }
+
+    private static func admitsContextWindowPolicy(_ snapshot: SessionSnapshot) -> Bool {
+        guard let policy = snapshot.contextWindowPolicy else { return true }
+        // Saved overrides may be outside today's capacity after a catalog change.
+        // They are displayed with the server's adjustment warning, not discarded
+        // along with the authoritative transcript. Effective is the actual live
+        // budget, which can briefly precede application of refreshed metadata.
+        guard policy.model == snapshot.model,
+              !policy.model.provider.isEmpty, policy.model.provider.utf8.count <= 480,
+              !policy.model.id.isEmpty, policy.model.id.utf8.count <= 1_200,
+              policy.minimum > 0, policy.maximum >= policy.minimum, policy.maximum <= 100_000_000,
+              policy.default >= policy.minimum, policy.default <= policy.maximum,
+              policy.effective > 0, policy.effective <= 100_000_000,
+              policy.override == nil || (policy.override! > 0 && policy.override! <= 100_000_000),
+              ["model", "global", "project", "session"].contains(policy.source),
+              (policy.source == "session") == (policy.override != nil),
+              snapshot.contextUsage == nil || snapshot.contextUsage?.contextWindow == policy.effective else { return false }
+        if let warning = policy.warning { return warning.utf8.count <= 4_096 }
+        return true
     }
 
     private static func admitsItems(_ items: [TranscriptItem]) -> Bool {

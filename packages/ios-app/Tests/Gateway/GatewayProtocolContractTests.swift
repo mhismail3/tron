@@ -12,6 +12,7 @@ struct GatewayProtocolContractTests {
           "model":{"provider":"anthropic","id":"model"},"thinkingLevel":"high",
           "availableThinkingLevels":["off","high"],
           "contextUsage":{"tokens":120,"contextWindow":1000,"percent":12},
+          "contextWindowPolicy":{"model":{"provider":"anthropic","id":"model"},"minimum":1000,"maximum":1000,"default":1000,"effective":1000,"override":null,"source":"model"},
           "stats":{"userMessages":1,"assistantMessages":0,"toolCalls":0,"toolResults":0,"totalMessages":1,"tokens":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"latestCacheHitRate":99.7,"cost":0},
           "queueRevision":4,
           "queuedItems":[{"id":"queued-1","behavior":"followUp","text":"later","attachmentCount":2}],
@@ -47,6 +48,22 @@ struct GatewayProtocolContractTests {
         ))
         #expect(snapshot.compactionQueued == true)
         #expect(snapshot.automaticCompactionEnabled == false)
+        #expect(snapshot.contextWindowPolicy?.model == snapshot.model)
+        #expect(snapshot.contextWindowPolicy?.maximum == 1_000)
+        #expect(snapshot.contextWindowPolicy?.override == nil)
+        let presentation = SessionContextPresentation(snapshot)
+        #expect(presentation.revision == snapshot.revision)
+        #expect(presentation.runtimeGeneration == snapshot.runtimeGeneration)
+        #expect(presentation.contextWindowPolicy == snapshot.contextWindowPolicy)
+        #expect(SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+        var stalePreference = snapshot
+        stalePreference.contextWindowPolicy = ContextWindowPolicy(
+            model: try #require(snapshot.model), minimum: 1_000, maximum: 1_000,
+            default: 1_000, effective: 1_000, override: 2_000, source: "session", warning: "Saved preference was bounded."
+        )
+        #expect(SessionSnapshotTranscriptAdmissionPolicy.admit(stalePreference))
+        stalePreference.model = ModelRef(provider: "different", id: "model")
+        #expect(!SessionSnapshotTranscriptAdmissionPolicy.admit(stalePreference))
         #expect(snapshot.displayedQueuedMessages == [SessionSnapshot.QueuedMessage(
             id: "queued-1",
             behavior: .followUp,
@@ -62,6 +79,15 @@ struct GatewayProtocolContractTests {
                 from: JSONSerialization.data(withJSONObject: missingRequired)
             )
         }
+    }
+
+    @Test("model capabilities and context policy are optional for rolling gateways")
+    func optionalContextWindowFieldsDecode() throws {
+        let model = try JSONDecoder.gateway.decode(ModelSummary.self, from: Data(#"{"provider":"openai-codex","id":"gpt-6-astra","name":"GPT-6 Astra","reasoning":true,"input":["text"],"contextWindow":272000,"maxTokens":128000,"available":true,"contextWindowLimits":{"minimum":37408,"maximum":1050000,"default":272000,"longContextThreshold":272000}}"#.utf8))
+        #expect(model.contextWindow == 272_000)
+        #expect(model.contextWindowLimits?.maximum == 1_050_000)
+        let old = try JSONDecoder.gateway.decode(ModelSummary.self, from: Data(#"{"provider":"p","id":"m","name":"M","reasoning":false,"input":["text"],"contextWindow":1000,"maxTokens":100,"available":true}"#.utf8))
+        #expect(old.contextWindowLimits == nil)
     }
 
     @Test("message presentation identity and content ordinals are required")

@@ -194,6 +194,7 @@ struct SessionContextSheet: View {
     @State private var fallbackNoticeScope = InAppNoticeScope.presentation(UUID())
     @State private var presentation: SessionContextPresentation?
     @State private var pendingModelSelection: ModelRef?
+    @State private var settingContextWindow = false
     @State private var forkNavigation = ChatForkNavigationOwner()
 
     private var presentationSource: SessionContextPresentation? {
@@ -564,6 +565,44 @@ struct SessionContextSheet: View {
                     navigationTitle: "Session Model",
                     accent: configurationRowAccent
                 )
+                if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
+                   let policy = snapshot.contextWindowPolicy {
+                    TronSettingsDivider(accent: .tronPurple)
+                    ContextWindowSelectionRow(
+                        selection: Binding(
+                            get: { policy.override },
+                            set: { value in
+                                // Bind the request to the model shown when the
+                                // control was rendered. A late tap after a model
+                                // switch must never mutate the replacement model.
+                                guard !settingContextWindow,
+                                      let current = model.sessionContextPresentation(for: sessionID),
+                                      !current.phase.isActive,
+                                      current.contextWindowPolicy?.model == policy.model else { return }
+                                settingContextWindow = true
+                                Task {
+                                    defer { settingContextWindow = false }
+                                    do { try await model.setContextWindow(value, for: policy.model, sessionID: sessionID, expectedRevision: snapshot.revision, expectedRuntimeGeneration: snapshot.runtimeGeneration) }
+                                    catch { surfaceActionError(error) }
+                                }
+                            }
+                        ),
+                        limits: ContextWindowLimits(
+                            minimum: policy.minimum,
+                            maximum: policy.maximum,
+                            default: policy.default,
+                            longContextThreshold: nil
+                        ),
+                        inheritedValue: policy.default,
+                        effectiveValue: policy.effective,
+                        resetLabel: "Use configured default",
+                        warning: policy.warning,
+                        source: policy.source,
+                        accent: configurationRowAccent
+                    )
+                    .id("\(snapshot.runtimeGeneration):\(policy.model.contextWindowKey):\(snapshot.revision)")
+                    .disabled(snapshot.phase.isActive || settingContextWindow || pendingModelSelection != nil)
+                }
                 TronSettingsDivider(accent: .tronPurple)
                 TronThinkingSelectionRow(
                     selection: Binding(
