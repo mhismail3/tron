@@ -200,6 +200,26 @@ struct ChatPhysicalTranscriptRows: RandomAccessCollection {
     }
 }
 
+/// Keeps the persistent lazy collection structurally unchanged while one new
+/// ordinary terminal prompt is hosted eagerly as its sibling. Excluding that
+/// one final element prevents LazyVStack from inventing its height from the
+/// preceding row before the prompt can be measured.
+struct ChatLazyPhysicalTranscriptRows: RandomAccessCollection {
+    typealias Index = ChatPhysicalTranscriptRows.Index
+
+    let base: ChatPhysicalTranscriptRows
+    let excludesTerminalRow: Bool
+
+    var startIndex: Index { base.startIndex }
+    var endIndex: Index {
+        excludesTerminalRow && !base.isEmpty
+            ? base.index(before: base.endIndex)
+            : base.endIndex
+    }
+
+    subscript(position: Index) -> ChatPhysicalTranscriptRow { base[position] }
+}
+
 struct ChatPhysicalToolRunFusion: Hashable {
     let canonicalRenderedID: String
     let liveRenderedID: String
@@ -452,13 +472,22 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             )
         }
         let terminalPhysicalID = physicalRows?.last?.id
+        let eagerTerminalRow = physicalRows?.last.flatMap { row in
+            scrollCoordinator.requiresEagerTerminalRow(renderedID: row.id) ? row : nil
+        }
+        let lazyPhysicalRows = physicalRows.map {
+            ChatLazyPhysicalTranscriptRows(
+                base: $0,
+                excludesTerminalRow: eagerTerminalRow != nil
+            )
+        }
         let terminalRowOwnsMaterializationTarget = terminalPhysicalID.map {
             scrollCoordinator.ownsTailMaterializationTarget(renderedID: $0)
         } == true
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if let installed, let physicalRows {
+                    if let installed, let lazyPhysicalRows {
                         if (installed.sourceWindow.originalStart ?? 0) > 0 {
                             stableRow(
                                 semanticID: "earlier-messages",
@@ -470,42 +499,29 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             }
                             .id("earlier-messages")
                         }
-                        ForEach(physicalRows) { row in
-                            let promptEntrance = promptEntrance(
-                                for: row,
+                        ForEach(lazyPhysicalRows) { row in
+                            physicalRowHost(
+                                row,
+                                terminalPhysicalID: terminalPhysicalID,
+                                terminalRowOwnsMaterializationTarget:
+                                    terminalRowOwnsMaterializationTarget,
                                 installed: installed
                             )
-                            ChatPhysicalTranscriptReplacementHost(
-                                row: row,
-                                reduceMotion: reduceMotion,
-                                promptEntrance: promptEntrance,
-                                hostedRecorder: hostedRecorder,
-                                onPromptEntranceConsumed: { lifecycleID in
-                                    transcriptPresentation.consumeLifecycleEntrance(id: lifecycleID)
-                                },
-                                onPromptEntranceSettled: onEntranceSettled
-                            ) { displayed in
-                                physicalRow(displayed, installed: installed)
-                            }
-                            // Keep the visual tail affordance inside the final
-                            // collection target. The eager marker retains only
-                            // a measurable subpoint target, preventing a row-
-                            // bottom lease from releasing to a different tail.
-                            .padding(
-                                .bottom,
-                                row.id == terminalPhysicalID
-                                    ? ChatTranscriptLayoutConstants.terminalRowBottomPadding(
-                                        ownsMaterializationTarget:
-                                            terminalRowOwnsMaterializationTarget
-                                    )
-                                    : 0
-                            )
-                            // Make the collection host itself the lazy scroll
-                            // target; its descendant may not exist while the
-                            // entrance is fully collapsed.
-                            .id(row.id)
                         }
                     }
+                }
+                if let installed, let eagerTerminalRow {
+                    // Ordinary outgoing prompts have complete natural height.
+                    // Keep the single terminal host eager until a successor row
+                    // arrives so LazyVStack never publishes a neighbor-derived
+                    // estimate as visible transcript geometry.
+                    physicalRowHost(
+                        eagerTerminalRow,
+                        terminalPhysicalID: terminalPhysicalID,
+                        terminalRowOwnsMaterializationTarget:
+                            terminalRowOwnsMaterializationTarget,
+                        installed: installed
+                    )
                 }
                 // The eager sentinel is the lazy collection's bounded target.
                 tailMarker(
@@ -710,6 +726,38 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         case .pending, .queued, .transcript:
             return nil
         }
+    }
+
+    private func physicalRowHost(
+        _ row: ChatPhysicalTranscriptRow,
+        terminalPhysicalID: String?,
+        terminalRowOwnsMaterializationTarget: Bool,
+        installed: InstalledChatTranscript
+    ) -> some View {
+        let entrance = promptEntrance(for: row, installed: installed)
+        return ChatPhysicalTranscriptReplacementHost(
+            row: row,
+            reduceMotion: reduceMotion,
+            promptEntrance: entrance,
+            hostedRecorder: hostedRecorder,
+            onPromptEntranceConsumed: { lifecycleID in
+                transcriptPresentation.consumeLifecycleEntrance(id: lifecycleID)
+            },
+            onPromptEntranceSettled: onEntranceSettled
+        ) { displayed in
+            physicalRow(displayed, installed: installed)
+        }
+        // Exact lazy-row targets retain the visual tail affordance inside the
+        // collection target. Marker-targeted eager prompts keep the full marker.
+        .padding(
+            .bottom,
+            row.id == terminalPhysicalID
+                ? ChatTranscriptLayoutConstants.terminalRowBottomPadding(
+                    ownsMaterializationTarget: terminalRowOwnsMaterializationTarget
+                )
+                : 0
+        )
+        .id(row.id)
     }
 
     @ViewBuilder

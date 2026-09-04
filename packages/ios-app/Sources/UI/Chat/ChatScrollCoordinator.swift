@@ -81,6 +81,7 @@ final class ChatScrollCoordinator {
         var renderedID: String?
         var physicalTargetID: String?
         var usesStableTailTarget: Bool
+        let keepsFullTailAffordance: Bool
         var requiredRevision: Int?
         var requiredLayoutEpoch: Int?
         let layoutOwnerRenderedID: String?
@@ -225,6 +226,9 @@ final class ChatScrollCoordinator {
     private var appliedTargetCommandToken: Int?
     private var appliedTargetOrigin: ChatScrollCommand.Origin?
     private var tailMaterialization: TailMaterialization?
+    /// Ordinary local prompts are eagerly realized until another physical row
+    /// becomes terminal, avoiding LazyVStack's inherited height estimate.
+    private var eagerTailRowRenderedID: String?
     private var tailMaterializationEvidenceRevision = 0
     private var targetReleaseEvidenceRevision: Int?
     private var forcedTailMaterializationReleaseToken: Int?
@@ -836,8 +840,12 @@ final class ChatScrollCoordinator {
     }
 
     func reconcileMaterializationRows(
+        terminalPhysicalRowID: String?,
         containsPhysicalRowID: (String) -> Bool
     ) {
+        if eagerTailRowRenderedID != terminalPhysicalRowID {
+            eagerTailRowRenderedID = nil
+        }
         if let pending = pendingTailMaterialization,
            !containsPhysicalRowID(pending.physicalTargetID) {
             pendingTailMaterialization = nil
@@ -978,6 +986,22 @@ final class ChatScrollCoordinator {
         schedulePhysicalTailRepairIfNeeded()
     }
 
+    /// An ordinary local prompt is rendered as the bounded eager terminal row,
+    /// so the established tail marker can own its complete settlement lease.
+    @discardableResult
+    func fullHeightTailInserted(
+        renderedID: String,
+        layoutTransactionID: Int
+    ) -> Bool {
+        let admitted = discreteTailInserted(
+            renderedID: renderedID,
+            physicalTargetID: "transcript-bottom",
+            layoutTransactionID: layoutTransactionID
+        )
+        if admitted { eagerTailRowRenderedID = renderedID }
+        return admitted
+    }
+
     @discardableResult
     func discreteTailInserted(
         renderedID: String,
@@ -1075,9 +1099,14 @@ final class ChatScrollCoordinator {
     }
 
     func ownsTailMaterializationTarget(renderedID: String) -> Bool {
-        tailMaterialization?.layoutOwnerRenderedID == renderedID
+        tailMaterialization?.keepsFullTailAffordance == false
+            && tailMaterialization?.layoutOwnerRenderedID == renderedID
             && (command?.origin == .tailMaterialization
                 || appliedTargetOrigin == .tailMaterialization)
+    }
+
+    func requiresEagerTerminalRow(renderedID: String) -> Bool {
+        eagerTailRowRenderedID == renderedID
     }
 
     func materializationLayoutTransactionID(for renderedID: String) -> Int? {
@@ -1154,8 +1183,8 @@ final class ChatScrollCoordinator {
             layoutTransactionID: layoutTransactionID,
             layoutSettled: layoutTransactionID == nil
         )
-        // Target the exact lazy row first. Targeting only the already-realized
-        // tail marker can let SwiftUI skip a fully collapsed new child forever.
+        // Exact lazy rows retain their existing bounded target. Ordinary local
+        // prompts instead pass the eagerly realized transcript-bottom marker.
         publish(.materialize(physicalTargetID), animation: .disabled, origin: .tailMaterialization)
     }
 
@@ -1176,7 +1205,8 @@ final class ChatScrollCoordinator {
         tailMaterialization = TailMaterialization(
             renderedID: renderedID,
             physicalTargetID: physicalTargetID,
-            usesStableTailTarget: false,
+            usesStableTailTarget: physicalTargetID == "transcript-bottom",
+            keepsFullTailAffordance: physicalTargetID == "transcript-bottom",
             requiredRevision: requiredRevision,
             requiredLayoutEpoch: layoutEpoch,
             layoutOwnerRenderedID: layoutOwnerRenderedID,
@@ -1922,6 +1952,7 @@ final class ChatScrollCoordinator {
         physicalTailRepairBlockedUntilEvidenceRevision = nil
         visibleOpeningRevealPending = false
         pendingTailMaterialization = nil
+        eagerTailRowRenderedID = nil
         preAdmissionSettledEntranceIDs.removeAll(keepingCapacity: true)
         tailMaterializationSettlementTask?.cancel()
         tailMaterializationSettlementTask = nil

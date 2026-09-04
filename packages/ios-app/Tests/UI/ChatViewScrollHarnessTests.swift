@@ -166,6 +166,81 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("ordinary send keeps one stable tail through target release")
+    func ordinarySendKeepsStableTail() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            var snapshot = try SessionScenarioBuilder(seed: 1_211)
+                .openingTail(targetEncodedBytes: 10_000)
+            snapshot.acceptsQueuedPrompts = false
+            try await withHarness(snapshot: snapshot, enablesComposerSubmission: true) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.observation.visibleRowIDs.contains(harness.lastTranscriptID)
+                        && abs(($0.observation.rowFrames["transcript-bottom"]?.height ?? 0)
+                            - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 0.5
+                }
+                let commandBaseline = ready.observation.tailMaterializationCommandCount
+                let releaseBaseline = ready.observation.targetReleaseCount
+                let repairBaseline = ready.observation.physicalTailRepairCommandCount
+                let composerHeight = ready.observation.composerHeight
+                let outgoingPrefix = "outgoing-submission:\(snapshot.sessionId):"
+
+                try harness.setComposerDraftText(
+                    "Keep the resumed transcript physically stable."
+                )
+                harness.submitPrompt()
+                let stabilized = try await harness.recorder.waitUntil { sample in
+                    let observation = sample.observation
+                    return observation.tailMaterializationCommandCount == commandBaseline + 1
+                        && observation.targetReleaseCount == releaseBaseline
+                        && observation.geometry.distanceFromBottom <= 1
+                        && observation.rowFrames.contains { id, frame in
+                            id.hasPrefix(outgoingPrefix) && frame.height > 1
+                        }
+                        && abs((observation.rowFrames["transcript-bottom"]?.height ?? 0)
+                            - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 0.5
+                }
+                let outgoingID = try #require(stabilized.observation.rowFrames.keys.first {
+                    $0.hasPrefix(outgoingPrefix)
+                })
+                let released = try await harness.recorder.waitUntil {
+                    $0.observation.targetReleaseCount == releaseBaseline + 1
+                        && $0.observation.rowFrames[outgoingID] != nil
+                        && abs(($0.observation.rowFrames["transcript-bottom"]?.height ?? 0)
+                            - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 0.5
+                }
+
+                let physicalPixel = 1 / max(1, harness.screenScale)
+                let sendSamples = harness.recorder.samples.filter {
+                    $0.frameIndex >= ready.frameIndex && $0.frameIndex <= released.frameIndex
+                }
+                // Geometry is current native evidence; the bounded row-frame
+                // map intentionally retains lazy callbacks after unmount.
+                let sendOffsets = sendSamples.map(\.observation.geometry.offsetY)
+                let sendDeltas = zip(sendOffsets, sendOffsets.dropFirst())
+                    .map { $1 - $0 }
+                    .filter { abs($0) > physicalPixel }
+                #expect(!(sendDeltas.contains(where: { $0 > 0 })
+                    && sendDeltas.contains(where: { $0 < 0 })))
+                let samples = sendSamples.filter { $0.frameIndex >= stabilized.frameIndex }
+                let offsets = samples.map(\.observation.geometry.offsetY)
+                let deltas = zip(offsets, offsets.dropFirst()).map { $1 - $0 }
+                    .filter { abs($0) > physicalPixel }
+                #expect(!(deltas.contains(where: { $0 > 0 })
+                    && deltas.contains(where: { $0 < 0 })))
+                #expect(samples.allSatisfy {
+                    abs(($0.observation.rowFrames["transcript-bottom"]?.height ?? 0)
+                        - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 0.5
+                })
+                #expect(released.observation.tailMaterializationCommandCount == commandBaseline + 1)
+                #expect(released.observation.physicalTailRepairCommandCount == repairBaseline)
+                #expect(abs(released.observation.composerHeight - composerHeight) <= 1)
+                #expect(released.observation.physicalRowAppearanceCounts[outgoingID] == 1)
+                #expect(released.observation.physicalRowDisappearanceCounts[outgoingID, default: 0] == 0)
+            }
+        }
+    }
+
     @Test("hosted aggregate counters and retained row frames are bounded")
     func hostedEvidenceBounds() {
         let probe = ChatHostedProbe()
@@ -387,7 +462,11 @@ struct ChatViewScrollHarnessTests {
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.readyFrameCompletionCount == 1
                 }
-                #expect(harness.firstReadyEvents == [
+                // A still-active surface may immediately schedule a fresh
+                // opening attempt after cancellation. This assertion owns only
+                // the completed attempt: its begin must close exactly once and
+                // in order, without depending on later retry scheduling.
+                #expect(Array(harness.firstReadyEvents.prefix(2)) == [
                     .begin(.firstReadyFrame),
                     .end(.firstReadyFrame, .cancelled, .none),
                 ])
@@ -1240,19 +1319,28 @@ struct ChatViewScrollHarnessTests {
     private func withHarness(
         snapshot: SessionSnapshot,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
+        enablesComposerSubmission: Bool = false,
         operation: @escaping @MainActor @Sendable (ChatViewScrollHarness) async throws -> Void
     ) async throws {
-        let harness = try ChatViewScrollHarness(
-            snapshot: snapshot,
-            displayFrameScheduler: displayFrameScheduler
-        )
+        let harness: ChatViewScrollHarness
+        if enablesComposerSubmission {
+            harness = try await ChatViewScrollHarness.composerSubmissionHarness(
+                snapshot: snapshot,
+                displayFrameScheduler: displayFrameScheduler
+            )
+        } else {
+            harness = try ChatViewScrollHarness(
+                snapshot: snapshot,
+                displayFrameScheduler: displayFrameScheduler
+            )
+        }
         do {
             try await operation(harness)
         } catch {
-            harness.cleanup()
+            await harness.close()
             throw error
         }
-        harness.cleanup()
+        await harness.close()
     }
 }
 
@@ -1383,24 +1471,130 @@ final class ChatViewScrollHarness {
     let signposts: RecordingPerformanceSignposts
     let probe: ChatHostedProbe
 
+    private struct Dependencies {
+        let suiteName: String
+        let defaults: UserDefaults
+        let cacheRoot: URL
+        let client: GatewayClient
+        let model: AppModel
+        let socket: ScriptedGatewaySocket?
+        let profile: GatewayProfile?
+    }
+
     private let model: AppModel
+    private let client: GatewayClient
     private let suiteName: String
     private let cacheRoot: URL
     private let defaults: UserDefaults
     private let window: UIWindow
     private let hostingController: UIHostingController<AnyView>
 
-    convenience init(seed: Int, displayFrameScheduler: DisplayFrameScheduler) throws {
-        try self.init(
-            snapshot: SessionScenarioBuilder(seed: seed).openingTail(targetEncodedBytes: 10_000),
-            displayFrameScheduler: displayFrameScheduler
-        )
-    }
-
-    init(
+    convenience init(
         snapshot: SessionSnapshot,
         displayFrameScheduler: DisplayFrameScheduler,
         performanceSignposts: (any PerformanceSignposting)? = nil
+    ) throws {
+        let dependencies = try Self.makeDependencies(enablesComposerSubmission: false)
+        try self.init(
+            snapshot: snapshot,
+            displayFrameScheduler: displayFrameScheduler,
+            performanceSignposts: performanceSignposts,
+            dependencies: dependencies,
+            installsSubscribedSnapshot: false
+        )
+    }
+
+    static func composerSubmissionHarness(
+        snapshot: SessionSnapshot,
+        displayFrameScheduler: DisplayFrameScheduler,
+        performanceSignposts: (any PerformanceSignposting)? = nil
+    ) async throws -> ChatViewScrollHarness {
+        let dependencies = try makeDependencies(enablesComposerSubmission: true)
+        guard let socket = dependencies.socket, let profile = dependencies.profile else {
+            throw HarnessError.invalidAuthorityBoundary
+        }
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":4,"minProtocolVersion":4,"machineId":"hosted-machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+        do {
+            try await dependencies.model.connectHostedGateway(
+                profile: profile,
+                token: "hosted-token"
+            )
+            return try ChatViewScrollHarness(
+                snapshot: snapshot,
+                displayFrameScheduler: displayFrameScheduler,
+                performanceSignposts: performanceSignposts,
+                dependencies: dependencies,
+                installsSubscribedSnapshot: true
+            )
+        } catch {
+            await dependencies.model.teardown()
+            await dependencies.client.close()
+            dependencies.defaults.removePersistentDomain(forName: dependencies.suiteName)
+            try? FileManager.default.removeItem(at: dependencies.cacheRoot)
+            throw error
+        }
+    }
+
+    private static func makeDependencies(
+        enablesComposerSubmission: Bool
+    ) throws -> Dependencies {
+        let suiteName = "ChatViewScrollHarnessTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(
+            path: suiteName,
+            directoryHint: .isDirectory
+        )
+        let socket = enablesComposerSubmission ? ScriptedGatewaySocket() : nil
+        let profile = enablesComposerSubmission ? GatewayProfile(
+            id: "hosted-chat",
+            label: "Hosted Chat",
+            host: "gateway.test",
+            port: 9_847,
+            machineId: "hosted-machine",
+            deviceId: "hosted-device"
+        ) : nil
+        if let profile {
+            defaults.set(
+                try JSONEncoder.gateway.encode([profile]),
+                forKey: "gatewayProfiles.v1"
+            )
+            defaults.set(profile.id, forKey: "selectedGateway.v1")
+        }
+        let client = if let socket {
+            GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        } else {
+            GatewayClient()
+        }
+        let hostedSend: ComposerSendOperation = {
+            _, _, _, _, _ in "hosted-prompt-operation"
+        }
+        let composerSend: ComposerSendOperation? = enablesComposerSubmission
+            ? hostedSend
+            : nil
+        let model = AppModel(
+            client: client,
+            profiles: GatewayProfileStore(defaults: defaults),
+            cache: SnapshotCache(root: cacheRoot),
+            composerSend: composerSend
+        )
+        return Dependencies(
+            suiteName: suiteName,
+            defaults: defaults,
+            cacheRoot: cacheRoot,
+            client: client,
+            model: model,
+            socket: socket,
+            profile: profile
+        )
+    }
+
+    private init(
+        snapshot: SessionSnapshot,
+        displayFrameScheduler: DisplayFrameScheduler,
+        performanceSignposts: (any PerformanceSignposting)?,
+        dependencies: Dependencies,
+        installsSubscribedSnapshot: Bool
     ) throws {
         self.snapshot = snapshot
         transcriptIDs = Set(snapshot.transcript.map(\.id)).union(["transcript-bottom"])
@@ -1408,24 +1602,22 @@ final class ChatViewScrollHarness {
         lastTranscriptID = try Self.require(snapshot.transcript.last?.id)
         let signposts = RecordingPerformanceSignposts()
         self.signposts = signposts
-
-        suiteName = "ChatViewScrollHarnessTests.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        cacheRoot = FileManager.default.temporaryDirectory.appending(path: suiteName, directoryHint: .isDirectory)
-        let model = AppModel(
-            client: GatewayClient(),
-            profiles: GatewayProfileStore(defaults: defaults),
-            cache: SnapshotCache(root: cacheRoot)
-        )
-        self.model = model
+        suiteName = dependencies.suiteName
+        defaults = dependencies.defaults
+        cacheRoot = dependencies.cacheRoot
+        client = dependencies.client
+        model = dependencies.model
         guard model.authoritativeSnapshot(for: snapshot.sessionId) == nil else {
             throw HarnessError.invalidAuthorityBoundary
         }
         // Hosted presentation generations are authoritative and need not match
         // ChatOpenPresentationState's local opening epoch.
         model.invalidateHostedPendingPresentation()
-        model.installHostedAuthoritativeSnapshot(snapshot)
+        if installsSubscribedSnapshot {
+            model.installHostedSubscribedSnapshot(snapshot, token: "hosted-session-token")
+        } else {
+            model.installHostedAuthoritativeSnapshot(snapshot)
+        }
         guard model.authoritativeSnapshot(for: snapshot.sessionId) == snapshot else {
             throw HarnessError.invalidAuthorityBoundary
         }
@@ -1464,6 +1656,7 @@ final class ChatViewScrollHarness {
     }
 
     var probeObservation: ChatHostedObservation { probe.observation }
+    var screenScale: CGFloat { window.screen.scale }
 
     func replaceAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
         model.replaceHostedAuthoritativeSnapshot(snapshot)
@@ -1508,6 +1701,8 @@ final class ChatViewScrollHarness {
     func driveCatchUp(reduceMotion: Bool) {
         probe.driveCatchUp(reduceMotion: reduceMotion)
     }
+
+    func submitPrompt() { probe.submitPrompt() }
 
     func drivePrepend() -> Bool { probe.drivePrepend() }
 
@@ -1598,11 +1793,32 @@ final class ChatViewScrollHarness {
         hostingController.view.setNeedsLayout()
     }
 
+    func setComposerDraftText(_ text: String) throws {
+        guard model.setHostedComposerText(text, sessionID: snapshot.sessionId) else {
+            throw HarnessError.missingComposer
+        }
+    }
+
     func cleanup() {
+        retireHostedView()
+        retireStorage()
+    }
+
+    func close() async {
+        retireHostedView()
+        await model.teardown()
+        await client.close()
+        retireStorage()
+    }
+
+    private func retireHostedView() {
         probe.cancelPresentation()
         recorder.stop()
         window.isHidden = true
         window.rootViewController = nil
+    }
+
+    private func retireStorage() {
         defaults.removePersistentDomain(forName: suiteName)
         try? FileManager.default.removeItem(at: cacheRoot)
     }

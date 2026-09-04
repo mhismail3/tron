@@ -1823,13 +1823,20 @@ final class ChatTranscriptPresentationStore {
             0,
             pendingEntranceOrder.count + novel.count - ChatTranscriptPageRequest.maximumItemCount
         )
+        // Observation can synchronously reevaluate the lazy-tail hint from a
+        // property mutation. Build both ledgers off-owner so that callback can
+        // never overlap an inout access to either observed collection.
+        var updatedOrder = pendingEntranceOrder
+        var updatedIDs = pendingEntranceIDs
         Self.retireOldestEntrances(
             count: excess,
-            order: &pendingEntranceOrder,
-            ids: &pendingEntranceIDs
+            order: &updatedOrder,
+            ids: &updatedIDs
         )
-        pendingEntranceOrder.append(contentsOf: novel)
-        pendingEntranceIDs.formUnion(novel)
+        updatedOrder.append(contentsOf: novel)
+        updatedIDs.formUnion(novel)
+        pendingEntranceOrder = updatedOrder
+        pendingEntranceIDs = updatedIDs
     }
 
     private func appendAdmittedEntrance(_ id: String) {

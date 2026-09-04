@@ -1653,6 +1653,16 @@ struct ChatTranscriptPresentationStoreTests {
                 canonicalAliases: [:]
             )
             #expect(localRows.contains { $0.id == submission.presentationID })
+            let lazyRows = ChatLazyPhysicalTranscriptRows(
+                base: localRows,
+                excludesTerminalRow: true
+            )
+            #expect(lazyRows.count == localRows.count - 1)
+            #expect(!lazyRows.contains { $0.id == submission.presentationID })
+            #expect(ChatLazyPhysicalTranscriptRows(
+                base: localRows,
+                excludesTerminalRow: false
+            ).count == localRows.count)
             let coordinator = ChatScrollCoordinator()
             #expect(coordinator.discreteTailInserted(
                 renderedID: submission.presentationID,
@@ -1697,7 +1707,9 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(admittedPhysicalIDs.contains(submission.presentationID))
             #expect(!admittedPhysicalIDs.contains(canonicalID))
             #expect(admittedPhysicalIDs.contains("transcript-bottom"))
-            coordinator.reconcileMaterializationRows { admittedPhysicalIDs.contains($0) }
+            coordinator.reconcileMaterializationRows(
+                terminalPhysicalRowID: submission.presentationID
+            ) { admittedPhysicalIDs.contains($0) }
             #expect(coordinator.ownsTailMaterializationTarget(
                 renderedID: submission.presentationID
             ))

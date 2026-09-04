@@ -299,6 +299,7 @@ final class AppModel {
         sessionImportUpload: SessionImportUpload? = nil,
         composerUpload: ComposerUploadOperation? = nil,
         composerFileUpload: ComposerFileUploadOperation? = nil,
+        composerSend: ComposerSendOperation? = nil,
         composerAttachmentFileAccess: ComposerAttachmentFileAccess = .live,
         composerDraftStore: ComposerDraftStore = ComposerDraftStore(),
         extensionInteractionDrafts: ExtensionInteractionDraftStore = ExtensionInteractionDraftStore(),
@@ -388,7 +389,7 @@ final class AppModel {
             },
             attachmentFileAccess: composerAttachmentFileAccess,
             draftStore: composerDraftStore,
-            send: { text, sessionID, uploadIDs, behavior, resourceInvocation in
+            send: composerSend ?? { text, sessionID, uploadIDs, behavior, resourceInvocation in
                 try await sessionMutations.prompt(
                     text,
                     sessionID: sessionID,
@@ -606,6 +607,15 @@ final class AppModel {
     func installHostedAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
         sessionPresentation.installHostedAuthoritativeSnapshot(snapshot)
         installHostedComposerPresentationIfPossible()
+    }
+
+    @discardableResult
+    func setHostedComposerText(_ text: String, sessionID: String) -> Bool {
+        guard let target = sessionPresentation.mountedTarget,
+              target.sessionID == sessionID,
+              let scope = composerDrafts.scope(for: target) else { return false }
+        composerDrafts.setText(text, for: scope)
+        return true
     }
 
     private func installHostedComposerPresentationIfPossible() {

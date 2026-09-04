@@ -885,6 +885,49 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
+    @Test("full-height prompt leases the stable marker for its eager terminal row")
+    func fullHeightPromptUsesStableTail() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            #expect(coordinator.fullHeightTailInserted(
+                renderedID: "outgoing-row",
+                layoutTransactionID: 41
+            ))
+            let stableCommand = try #require(coordinator.command)
+            #expect(stableCommand.destination == .materialize("transcript-bottom"))
+            #expect(coordinator.requiresEagerTerminalRow(renderedID: "outgoing-row"))
+            #expect(!coordinator.ownsTailMaterializationTarget(renderedID: "outgoing-row"))
+            #expect(coordinator.commandApplied(stableCommand))
+            coordinator.semanticFrameChanged(
+                renderedID: "outgoing-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 320, width: 100, height: 56)
+            )
+            admitAlignedTail(coordinator)
+            coordinator.layoutTransactionSettled(41)
+            let settlementFrameBaseline = frames.requestCount
+            await frames.waitForRequest(count: settlementFrameBaseline + 1)
+            frames.releaseNext()
+            await frames.waitForRequest(count: settlementFrameBaseline + 2)
+            frames.releaseNext()
+            await frames.waitForRequest(count: settlementFrameBaseline + 3)
+            frames.releaseNext()
+            await Task.yield()
+
+            #expect(coordinator.targetReleaseGeneration == 1)
+            #expect(coordinator.consumeTargetRelease())
+            #expect(!coordinator.ownsTailMaterializationTarget(renderedID: "outgoing-row"))
+            #expect(coordinator.requiresEagerTerminalRow(renderedID: "outgoing-row"))
+            coordinator.reconcileMaterializationRows(
+                terminalPhysicalRowID: "assistant-row"
+            ) { id in
+                id == "outgoing-row" || id == "assistant-row" || id == "transcript-bottom"
+            }
+            #expect(!coordinator.requiresEagerTerminalRow(renderedID: "outgoing-row"))
+        }
+    }
+
     @Test("detached submission declines tail materialization ownership")
     func detachedSubmissionDeclinesMaterialization() {
         let coordinator = detachedCoordinator(at: away)
@@ -1175,7 +1218,9 @@ struct ChatScrollCoordinatorTests {
             #expect(coordinator.commandApplied(transferred))
 
             coordinator.projectionInstalled()
-            coordinator.reconcileMaterializationRows { id in
+            coordinator.reconcileMaterializationRows(
+                terminalPhysicalRowID: "canonical-user-row"
+            ) { id in
                 id == "canonical-user-row" || id == "transcript-bottom"
             }
             // Canonical replacement retires the removed row's exact target;

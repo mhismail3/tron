@@ -25,6 +25,7 @@ struct ChatHostedObservation: Sendable {
     let scrollSettledDistance: CGFloat?
     let scrollCommandCount: Int
     let tailMaterializationCommandCount: Int
+    let targetReleaseCount: Int
     let physicalTailRepairCommandCount: Int
     let automaticScrollCommandCount: Int
     let smoothAutomaticScrollCommandCount: Int
@@ -84,6 +85,7 @@ final class ChatHostedProbe {
     private var scrollSettledDistance: CGFloat?
     private var scrollCommandCount = 0
     private var tailMaterializationCommandCount = 0
+    private var targetReleaseCount = 0
     private var physicalTailRepairCommandCount = 0
     private var automaticScrollCommandCount = 0
     private var smoothAutomaticScrollCommandCount = 0
@@ -116,6 +118,7 @@ final class ChatHostedProbe {
     private var nativeControl: ((Bool) -> Void)?
     private var catchUpControl: ((Bool) -> Void)?
     private var semanticResponseControl: (() -> Void)?
+    private var submitPromptControl: (() -> Void)?
     private var frameControl: (() async throws -> Void)?
     private var stateControl: (() -> ChatHostedScrollState)?
     private var prependControl: (() -> Bool)?
@@ -155,6 +158,7 @@ final class ChatHostedProbe {
             scrollSettledDistance: scrollSettledDistance,
             scrollCommandCount: scrollCommandCount,
             tailMaterializationCommandCount: tailMaterializationCommandCount,
+            targetReleaseCount: targetReleaseCount,
             physicalTailRepairCommandCount: physicalTailRepairCommandCount,
             automaticScrollCommandCount: automaticScrollCommandCount,
             smoothAutomaticScrollCommandCount: smoothAutomaticScrollCommandCount,
@@ -296,6 +300,11 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
+    func recordTargetRelease() {
+        targetReleaseCount &+= 1
+        revision &+= 1
+    }
+
     func recordEntranceResolution(animated: Bool, sourceOrdinal: Int) {
         if animated {
             animatedEntranceCount &+= 1
@@ -403,6 +412,7 @@ final class ChatHostedProbe {
         native: @escaping (Bool) -> Void,
         catchUp: @escaping (Bool) -> Void,
         semanticResponse: @escaping () -> Void,
+        submitPrompt: @escaping () -> Void,
         frame: @escaping () async throws -> Void,
         state: @escaping () -> ChatHostedScrollState,
         prepend: @escaping () -> Bool,
@@ -416,6 +426,7 @@ final class ChatHostedProbe {
         nativeControl = native
         catchUpControl = catchUp
         semanticResponseControl = semanticResponse
+        submitPromptControl = submitPrompt
         frameControl = frame
         stateControl = state
         prependControl = prepend
@@ -464,6 +475,13 @@ final class ChatHostedProbe {
     func driveCatchUp(reduceMotion: Bool) {
         controlEventCount &+= 1
         catchUpControl?(reduceMotion)
+        refreshControlledState()
+        revision &+= 1
+    }
+
+    func submitPrompt() {
+        controlEventCount &+= 1
+        submitPromptControl?()
         refreshControlledState()
         revision &+= 1
     }

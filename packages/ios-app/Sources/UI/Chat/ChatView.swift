@@ -758,11 +758,19 @@ struct ChatView: View {
                 canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
             )
         } ?? []
+        let terminalPhysicalRowID = installed.flatMap {
+            ChatPhysicalTranscriptRowPolicy.rows(
+                installed: $0,
+                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
+            ).last?.id
+        }
         // Validate against the exact physical spine rendered by
         // ChatTranscriptScrollView. The store's canonical namespace does not
         // include display-only prompt/tool aliases, so validating it directly
         // can retire a still-mounted materialization target during handoff.
-        scrollCoordinator.reconcileMaterializationRows { renderedID in
+        scrollCoordinator.reconcileMaterializationRows(
+            terminalPhysicalRowID: terminalPhysicalRowID
+        ) { renderedID in
             admittedPhysicalRowIDs.contains(renderedID)
         }
         let projectionLayoutChanged = previousTag.map { previousTag in
@@ -2082,6 +2090,9 @@ struct ChatView: View {
             semanticResponse: {
                 scrollCoordinator.semanticResponseArrived()
             },
+            submitPrompt: {
+                send()
+            },
             frame: {
                 try await displayFrameScheduler.nextFrame()
             },
@@ -2452,6 +2463,9 @@ struct ChatView: View {
         withTransaction(transaction) {
             transcriptScrollPosition = ScrollPosition(idType: String.self)
         }
+        #if HOSTED_TEST
+        hostedProbe?.recordTargetRelease()
+        #endif
     }
 
     @MainActor
@@ -3170,9 +3184,16 @@ struct ChatView: View {
                     queuePresentationIDByOperationID:
                         installedBeforeSubmission.queuePresentationIDByOperationID
                 )
-                let materializationAdmitted = grafted && scrollCoordinator.discreteTailInserted(
-                    renderedID: submission.presentationID,
-                    layoutTransactionID: layoutGeneration
+                let materializationAdmitted = grafted && (
+                    ChatPromptBehavior(rawValue: submission.behavior) == .ordinary
+                        ? scrollCoordinator.fullHeightTailInserted(
+                            renderedID: submission.presentationID,
+                            layoutTransactionID: layoutGeneration
+                        )
+                        : scrollCoordinator.discreteTailInserted(
+                            renderedID: submission.presentationID,
+                            layoutTransactionID: layoutGeneration
+                        )
                 )
                 if materializationAdmitted,
                    scrollCoordinator.consumePreAdmissionEntranceSettlement(
