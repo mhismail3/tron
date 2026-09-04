@@ -11,6 +11,19 @@ enum AutomationTimelinePresentationPolicy {
     static let agendaVerticalPadding: CGFloat = 12
     static let bottomControlClearance: CGFloat = 80
     static let minimumEmptyStateHeight: CGFloat = 280
+    static let initialLoadingPulseSize: CGFloat = 44
+
+    static func showsInitialLoading(
+        mode: AutomationDashboardViewMode,
+        catalogHasLoaded: Bool,
+        timelineAvailable: Bool,
+        timelineIsLoading: Bool,
+        visibleDayCount: Int
+    ) -> Bool {
+        guard catalogHasLoaded else { return true }
+        guard mode == .upcoming else { return false }
+        return !timelineAvailable || (timelineIsLoading && visibleDayCount == 0)
+    }
 
     static func showsEmptyState(visibleDayCount: Int) -> Bool {
         visibleDayCount == 0
@@ -92,6 +105,20 @@ struct AutomationsDashboardView: View {
             if running.0 != running.1 { return running.0 < running.1 }
             return (left.summary.nextOccurrenceAt ?? "9999", left.summary.name) < (right.summary.nextOccurrenceAt ?? "9999", right.summary.name)
         }
+    }
+
+    private var summarySelections: [AutomationSummarySelection] {
+        summaries.map { AutomationSummarySelection(profileID: $0.profile.id, summary: $0.summary) }
+    }
+
+    private var isInitiallyLoading: Bool {
+        AutomationTimelinePresentationPolicy.showsInitialLoading(
+            mode: mode,
+            catalogHasLoaded: model.automationCatalog.hasLoaded,
+            timelineAvailable: timeline != nil,
+            timelineIsLoading: timeline?.isLoading == true,
+            visibleDayCount: visibleTimelineDays.count
+        )
     }
 
     private var visibleTimelineDays: [AutomationAgendaDay] {
@@ -216,25 +243,51 @@ struct AutomationsDashboardView: View {
         }
     }
 
-    @ViewBuilder private var content: some View {
-        if mode == .all { inventoryList } else { upcomingContent }
+    private var content: some View {
+        ZStack {
+            if isInitiallyLoading {
+                TronPulseLoadingIndicator(
+                    accent: .tronAutomation,
+                    size: AutomationTimelinePresentationPolicy.initialLoadingPulseSize
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Loading Automations")
+                .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
+            } else if mode == .all {
+                inventoryList
+                    .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
+            } else {
+                upcomingContent
+                    .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(
+            TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+            value: isInitiallyLoading
+        )
     }
 
     private var inventoryList: some View {
         ScrollView {
             LazyVStack(spacing: TronSpacing.md) {
-                if model.automationCatalog.isLoading && summaries.isEmpty {
-                    TronLoadingState(label: "Loading Automations…", accent: .tronAutomation).frame(minHeight: 240)
-                } else if summaries.isEmpty {
+                if summaries.isEmpty {
                     inventoryEmptyState
+                        .transition(.opacity)
                 } else {
-                    ForEach(summaries.map { AutomationSummarySelection(profileID: $0.profile.id, summary: $0.summary) }) { item in
+                    ForEach(summarySelections) { item in
                         if let profile = model.automationCatalog.buckets.first(where: { $0.profile.id == item.profileID })?.profile {
                             automationCard(profile, item.summary)
+                                .transition(.opacity)
                         }
                     }
                 }
             }
+            .animation(
+                TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+                value: summarySelections
+            )
             .padding(.horizontal, 20).padding(.vertical, 16).padding(.bottom, 80)
         }
         .refreshable { model.automationCatalog.reload() }
@@ -245,7 +298,9 @@ struct AutomationsDashboardView: View {
         GeometryReader { geometry in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: TronSpacing.md, pinnedViews: [.sectionHeaders]) {
-                    if attentionCount > 0 { attentionBanner }
+                    if attentionCount > 0 {
+                        attentionBanner.transition(.opacity)
+                    }
                     if AutomationTimelinePresentationPolicy.showsEmptyState(
                         visibleDayCount: visibleTimelineDays.count
                     ) {
@@ -254,6 +309,7 @@ struct AutomationsDashboardView: View {
                                 viewportHeight: geometry.size.height,
                                 hasAttentionBanner: attentionCount > 0
                             ))
+                            .transition(.opacity)
                     } else {
                         ForEach(visibleTimelineDays) { day in
                             Section {
@@ -267,6 +323,7 @@ struct AutomationsDashboardView: View {
                             .onAppear {
                                 if day.id == visibleTimelineDays.last?.id { timeline?.loadNext() }
                             }
+                            .transition(.opacity)
                         }
                         if timeline?.isLoadingMore == true {
                             TronLoadingState(label: "Loading later dates…", accent: .tronAutomation)
@@ -279,6 +336,14 @@ struct AutomationsDashboardView: View {
                         }
                     }
                 }
+                .animation(
+                    TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+                    value: visibleTimelineDays
+                )
+                .animation(
+                    TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+                    value: attentionCount
+                )
                 .padding(.horizontal, 20)
                 .padding(.vertical, AutomationTimelinePresentationPolicy.agendaVerticalPadding)
                 .padding(.bottom, AutomationTimelinePresentationPolicy.bottomControlClearance)
@@ -614,7 +679,7 @@ struct AutomationsDashboardView: View {
                 .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                 .foregroundStyle(Color.tronAutomation)
                 .overlay(alignment: .trailing) {
-                    if mode == .upcoming && timelineRefreshIndicatorVisible {
+                    if mode == .upcoming && timelineRefreshIndicatorVisible && !isInitiallyLoading {
                         TronPulseLoadingIndicator(accent: .tronAutomation, size: 14)
                             .offset(x: 22)
                             .accessibilityElement(children: .ignore)

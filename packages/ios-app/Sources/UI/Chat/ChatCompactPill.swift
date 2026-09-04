@@ -429,10 +429,23 @@ enum UserPromptTextLayoutPolicy {
     }
 }
 
+enum UserPromptTextTone: Hashable {
+    case user
+    case automation
+
+    var color: Color {
+        switch self {
+        case .user: .userMessageText
+        case .automation: .tronAutomationText
+        }
+    }
+}
+
 /// UIKit/TextKit retains deterministic wrapping and Dynamic Type while SwiftUI
 /// owns the narrower right-anchored prompt block.
 struct UserPromptText: View {
     let text: String
+    var tone: UserPromptTextTone = .user
     @State private var fontSettings = FontSettings.shared
 
     var body: some View {
@@ -443,6 +456,7 @@ struct UserPromptText: View {
         let casual = fontSettings.axisValue(for: family, axis: .casual)
         UserPromptLabel(
             text: text,
+            tone: tone,
             fontRevision: "\(family.rawValue):\(weight):\(casual)"
         )
         .accessibilityLabel(text)
@@ -452,6 +466,7 @@ struct UserPromptText: View {
 private struct UserPromptLabel: UIViewRepresentable {
     final class Coordinator {
         var text: String?
+        var tone: UserPromptTextTone?
         var fontRevision: String?
         var sizeCategory: ContentSizeCategory?
         var layoutDirection: LayoutDirection?
@@ -460,6 +475,7 @@ private struct UserPromptLabel: UIViewRepresentable {
     }
 
     let text: String
+    let tone: UserPromptTextTone
     let fontRevision: String
     @Environment(\.sizeCategory) private var sizeCategory
     @Environment(\.layoutDirection) private var layoutDirection
@@ -521,12 +537,14 @@ private struct UserPromptLabel: UIViewRepresentable {
         let preferredCategory = label.traitCollection.preferredContentSizeCategory
         let interfaceStyle = label.traitCollection.userInterfaceStyle
         guard coordinator.text != text
+                || coordinator.tone != tone
                 || coordinator.fontRevision != fontRevision
                 || coordinator.sizeCategory != sizeCategory
                 || coordinator.layoutDirection != layoutDirection
                 || coordinator.preferredContentSizeCategory != preferredCategory
                 || coordinator.interfaceStyle != interfaceStyle else { return }
         coordinator.text = text
+        coordinator.tone = tone
         coordinator.fontRevision = fontRevision
         coordinator.sizeCategory = sizeCategory
         coordinator.layoutDirection = layoutDirection
@@ -550,7 +568,7 @@ private struct UserPromptLabel: UIViewRepresentable {
             string: text,
             attributes: [
                 .font: font,
-                .foregroundColor: UIColor(Color.userMessageText),
+                .foregroundColor: UIColor(tone.color),
                 .paragraphStyle: paragraph,
             ]
         )

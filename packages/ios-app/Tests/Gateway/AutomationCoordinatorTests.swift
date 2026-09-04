@@ -44,6 +44,34 @@ struct AutomationCoordinatorTests {
 
     @Test("timeline loading retains stable content and delays compact refresh activity")
     func timelineLoadingPresentation() {
+        #expect(AutomationTimelinePresentationPolicy.showsInitialLoading(
+            mode: .all,
+            catalogHasLoaded: false,
+            timelineAvailable: false,
+            timelineIsLoading: false,
+            visibleDayCount: 0
+        ))
+        #expect(!AutomationTimelinePresentationPolicy.showsInitialLoading(
+            mode: .all,
+            catalogHasLoaded: true,
+            timelineAvailable: false,
+            timelineIsLoading: false,
+            visibleDayCount: 0
+        ))
+        #expect(AutomationTimelinePresentationPolicy.showsInitialLoading(
+            mode: .upcoming,
+            catalogHasLoaded: true,
+            timelineAvailable: true,
+            timelineIsLoading: true,
+            visibleDayCount: 0
+        ))
+        #expect(!AutomationTimelinePresentationPolicy.showsInitialLoading(
+            mode: .upcoming,
+            catalogHasLoaded: true,
+            timelineAvailable: true,
+            timelineIsLoading: true,
+            visibleDayCount: 1
+        ))
         #expect(AutomationTimelinePresentationPolicy.showsEmptyState(visibleDayCount: 0))
         #expect(!AutomationTimelinePresentationPolicy.showsEmptyState(visibleDayCount: 1))
         #expect(AutomationTimelinePresentationPolicy.emptyStateHeight(

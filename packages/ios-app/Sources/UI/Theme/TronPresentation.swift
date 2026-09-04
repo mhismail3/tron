@@ -1716,6 +1716,16 @@ struct TronCaption: View {
     }
 }
 
+enum TronDashboardContentMotion {
+    static func animation(reduceMotion: Bool) -> Animation {
+        reduceMotion ? .easeOut(duration: 0.12) : .smooth(duration: 0.28)
+    }
+
+    static func transition(reduceMotion: Bool) -> AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.985))
+    }
+}
+
 /// A dependency-free, concentric pulse inspired by the requested loading
 /// treatment. One Canvas draws all three waves; TimelineView supplies a
 /// lifecycle-bound clock without retaining per-indicator animation tasks.

@@ -1,5 +1,29 @@
 import SwiftUI
 
+enum SessionDashboardPresentationPolicy {
+    static let initialLoadingPulseSize: CGFloat = 44
+
+    static func showsInitialLoading(
+        sessionCount: Int,
+        selectedCatalogIsLoading: Bool,
+        selectedConnectionState: GatewayConnectionState,
+        serverStates: [DashboardServerConnectionState]
+    ) -> Bool {
+        guard sessionCount == 0 else { return false }
+        let selectedIsConnecting: Bool
+        switch selectedConnectionState {
+        case .connecting, .reconnecting, .restarting:
+            selectedIsConnecting = true
+        case .unpaired, .connected, .unauthorized, .offline:
+            selectedIsConnecting = false
+        }
+        let backgroundIsLoading = serverStates.contains {
+            $0 == .connecting || $0 == .reconnecting || $0 == .restarting
+        }
+        return selectedCatalogIsLoading || selectedIsConnecting || backgroundIsLoading
+    }
+}
+
 enum PushNavigationFailureAdmission {
     static func admits(requestID: Int, pendingRequestID: Int?) -> Bool {
         !Task.isCancelled && pendingRequestID == requestID
@@ -187,19 +211,26 @@ struct SessionShellView: View {
         .tint(Color.tronEmerald)
     }
 
-    @ViewBuilder
     private var dashboardScreen: some View {
-        switch dashboardMode {
-        case .sessions:
-            sessionDashboardScreen
-        case .automations:
-            AutomationsDashboardView(
-                viewPreferences: automationViewPreferencesBinding,
-                onSelectDashboard: selectDashboard,
-                onOpenSettings: { showSettings = true },
-                onOpenSession: openAutomationSession
-            )
+        ZStack {
+            switch dashboardMode {
+            case .sessions:
+                sessionDashboardScreen
+                    .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
+            case .automations:
+                AutomationsDashboardView(
+                    viewPreferences: automationViewPreferencesBinding,
+                    onSelectDashboard: selectDashboard,
+                    onOpenSettings: { showSettings = true },
+                    onOpenSession: openAutomationSession
+                )
+                .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
+            }
         }
+        .animation(
+            TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+            value: dashboardMode
+        )
     }
 
     private var automationViewPreferencesBinding: Binding<AutomationDashboardViewPreferences> {
@@ -235,7 +266,7 @@ struct SessionShellView: View {
     private var sessionDashboardScreen: some View {
         ZStack(alignment: .bottom) {
             ZStack(alignment: .bottomTrailing) {
-                sessionList
+                sessionDashboardContent
                 TronTopBlurOverlay(style: .dashboard)
                 dashboardBottomControls
                     .accessibilityHidden(showingSearch)
@@ -558,6 +589,38 @@ struct SessionShellView: View {
         }
     }
 
+    private var isSessionDashboardInitiallyLoading: Bool {
+        SessionDashboardPresentationPolicy.showsInitialLoading(
+            sessionCount: dashboardPresentation.sessions.count,
+            selectedCatalogIsLoading: model.sessionCatalogIsLoading,
+            selectedConnectionState: model.connectionState,
+            serverStates: model.dashboardServerSources.map(\.state)
+        )
+    }
+
+    private var sessionDashboardContent: some View {
+        ZStack {
+            if isSessionDashboardInitiallyLoading {
+                TronPulseLoadingIndicator(
+                    accent: .tronEmerald,
+                    size: SessionDashboardPresentationPolicy.initialLoadingPulseSize
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Loading sessions")
+                .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
+            } else {
+                sessionList
+                    .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(
+            TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+            value: isSessionDashboardInitiallyLoading
+        )
+    }
+
     private var sessionList: some View {
         List {
             sessionSections
@@ -568,14 +631,14 @@ struct SessionShellView: View {
         .contentMargins(.bottom, 92)
         .tronCollectionSurface()
         .tronScrollEdgeChrome()
-        .transaction { transaction in
-            // Keep the dashboard projection visually stable while a focused
-            // server connection is being replaced. The bounded old buckets
-            // remain visible until the new authoritative catalog arrives.
-            if model.connectionState == .connecting || model.connectionState == .reconnecting {
-                transaction.animation = nil
-            }
-        }
+        .animation(
+            TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+            value: dashboardPresentation
+        )
+        .animation(
+            TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
+            value: filteredSessions.map(\.dashboardID)
+        )
     }
 
     @ViewBuilder
@@ -705,6 +768,7 @@ struct SessionShellView: View {
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .listRowInsets(SessionDashboardLayout.rowInsets)
+        .transition(.opacity)
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             Button(
                 session.isUnread ? "Mark Read" : "Mark Unread",
@@ -787,19 +851,22 @@ struct SessionShellView: View {
 
     private func reconcileDashboardPresentation() {
         let sessions = model.visibleSessions
-        dashboardPresentation = DashboardPresentationSnapshot(
+        let nextPresentation = DashboardPresentationSnapshot(
             sessions: sessions,
             activityByDashboardID: Dictionary(uniqueKeysWithValues: sessions.map { session in
                 (session.dashboardID, model.dashboardActivity(for: session))
             })
         )
         let groups = SessionListWorkspaceGroup.groups(from: sessions)
-        sessionExpansion.reconcile(
-            groupCounts: Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.sessions.count) })
-        )
-        workspaceDisclosure.reconcile(groupIDs: Set(groups.map(\.id)))
         let sources = model.dashboardServerSources
-        serverFilter.reconcile(profileIDs: sources.map(\.profileID))
+        withAnimation(TronDashboardContentMotion.animation(reduceMotion: reduceMotion)) {
+            dashboardPresentation = nextPresentation
+            sessionExpansion.reconcile(
+                groupCounts: Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.sessions.count) })
+            )
+            workspaceDisclosure.reconcile(groupIDs: Set(groups.map(\.id)))
+            serverFilter.reconcile(profileIDs: sources.map(\.profileID))
+        }
         if !sources.isEmpty { DashboardServerFilterPreferences.save(serverFilter) }
     }
 

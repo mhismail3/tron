@@ -24,6 +24,49 @@ struct DashboardStateOwnerTests {
             automation.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
                 == UIColor(hex: "#74CBDC")
         )
+        let automationText = UIColor(UserPromptTextTone.automation.color)
+        #expect(
+            automationText.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+                == UIColor(hex: "#1F6675")
+        )
+        #expect(
+            automationText.resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
+                == UIColor(hex: "#8BD8E4")
+        )
+    }
+
+    @Test("initial session loading is shown only while an empty catalog is converging")
+    func sessionInitialLoadingPresentation() {
+        #expect(SessionDashboardPresentationPolicy.showsInitialLoading(
+            sessionCount: 0,
+            selectedCatalogIsLoading: false,
+            selectedConnectionState: .connecting,
+            serverStates: []
+        ))
+        #expect(SessionDashboardPresentationPolicy.showsInitialLoading(
+            sessionCount: 0,
+            selectedCatalogIsLoading: false,
+            selectedConnectionState: .connected,
+            serverStates: [.connected, .reconnecting]
+        ))
+        #expect(!SessionDashboardPresentationPolicy.showsInitialLoading(
+            sessionCount: 1,
+            selectedCatalogIsLoading: true,
+            selectedConnectionState: .reconnecting,
+            serverStates: [.connecting]
+        ))
+        #expect(!SessionDashboardPresentationPolicy.showsInitialLoading(
+            sessionCount: 0,
+            selectedCatalogIsLoading: false,
+            selectedConnectionState: .connected,
+            serverStates: [.connected]
+        ))
+        #expect(!SessionDashboardPresentationPolicy.showsInitialLoading(
+            sessionCount: 0,
+            selectedCatalogIsLoading: false,
+            selectedConnectionState: .offline("unavailable"),
+            serverStates: [.offline]
+        ))
     }
 
     @Test("a newer navigation intent rejects an older asynchronous completion")

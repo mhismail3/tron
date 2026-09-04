@@ -270,6 +270,7 @@ final class AppModel {
     private var deviceLoadGeneration = 0
     private var legacyImportLoadGeneration = 0
     private var catalogRefreshTask: Task<SessionCatalogRefreshOutcome, Never>?
+    var sessionCatalogIsLoading: Bool { catalogRefreshTask != nil }
     private var catalogRefreshKey: SessionCatalogLoadKey?
     private var catalogRefreshRequestGeneration = 0
     private var catalogInvalidationGeneration = 0

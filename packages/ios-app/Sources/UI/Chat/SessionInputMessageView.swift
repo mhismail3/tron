@@ -79,7 +79,7 @@ struct AutomationPromptMessageView: View {
                 CanonicalResourceChip(resource: resource)
             }
             if let promptText {
-                UserPromptText(text: promptText)
+                UserPromptText(text: promptText, tone: .automation)
             }
         }
         .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
