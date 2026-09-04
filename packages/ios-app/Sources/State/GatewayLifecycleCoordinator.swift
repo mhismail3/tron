@@ -893,6 +893,23 @@ final class GatewayLifecycleCoordinator {
                         let restored = await self.delegate?.lifecycleRestoreMountedPresentation(admission: admission) ?? true
                         guard restored else {
                             _ = await refresh
+                            // The event reducer can lag transport retirement.
+                            // Consult the client before publishing readiness,
+                            // then revalidate lifecycle ownership after the await.
+                            let activeConnectionID = await self.client.activeConnectionID()
+                            try self.requireReconnect(
+                                lifecycleGeneration: lifecycleGeneration,
+                                attemptGeneration: attemptGeneration
+                            )
+                            guard self.connectionID == connection.id,
+                                  activeConnectionID == connection.id else {
+                                throw GatewayFailure(
+                                    code: "disconnected",
+                                    message: "The Gateway connection ended during refresh.",
+                                    retryable: true,
+                                    details: nil
+                                )
+                            }
                             self.delegate?.lifecycleCompleteReconciliationAggregate(
                                 admission: admission,
                                 succeeded: false
@@ -910,11 +927,13 @@ final class GatewayLifecycleCoordinator {
                         }
                         await self.delegate?.lifecycleReattachTerminals(admission: admission)
                         _ = await refresh
+                        let activeConnectionID = await self.client.activeConnectionID()
                         try self.requireReconnect(
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration
                         )
-                        guard self.connectionID == connection.id else {
+                        guard self.connectionID == connection.id,
+                              activeConnectionID == connection.id else {
                             throw GatewayFailure(
                                 code: "disconnected",
                                 message: "The Gateway connection ended during refresh.",

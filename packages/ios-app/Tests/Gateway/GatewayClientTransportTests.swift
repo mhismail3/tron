@@ -491,6 +491,7 @@ struct GatewayClientTransportTests {
                 .begin(.gatewayConnect),
                 .end(.gatewayConnect, .cancelled, .none),
             ])
+            #expect(await client.diagnostics().contains { $0.reason == .canceled })
             await client.close()
         }
     }
@@ -500,6 +501,136 @@ struct GatewayClientTransportTests {
         #expect(!GatewayRequestTransmissionState.queued.mayHaveBeenSent)
         #expect(GatewayRequestTransmissionState.sending.mayHaveBeenSent)
         #expect(GatewayRequestTransmissionState.sent.mayHaveBeenSent)
+    }
+
+    @Test("ping completion remembers cancellation before install and ignores late callbacks")
+    func pingCompletionCancellationIsSingleSettlement() async throws {
+        for cancelBeforeInstall in [true, false] {
+            let completion = GatewayPingCompletion()
+            if cancelBeforeInstall { completion.cancel() }
+            await #expect(throws: CancellationError.self) {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    #expect(completion.install(continuation) == !cancelBeforeInstall)
+                    completion.cancel()
+                    completion.settle(.success(()))
+                    completion.cancel()
+                }
+            }
+        }
+        let completion = GatewayPingCompletion()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            #expect(completion.install(continuation))
+            completion.settle(.success(()))
+            completion.cancel()
+            completion.settle(.failure(URLError(.networkConnectionLost)))
+        }
+    }
+
+    @Test("application RPCs are definitely unsent until hello and receive activation finish")
+    func requestsRequireActivatedHello() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            let connecting = Task { try await client.connectForLifecycle(profile: profile, token: "token") }
+            defer { connecting.cancel() }
+            try await socket.waitUntilSent(count: 1)
+            await #expect(throws: GatewayDefinitelyNotSentError.self) {
+                try await client.requestValue("system.logs", EmptyParams())
+            }
+            await socket.enqueue(helloFrame())
+            let connection = try await valueOfOwnedTask(connecting)
+            await #expect(throws: GatewayDefinitelyNotSentError.self) {
+                try await client.requestValue("system.logs", EmptyParams())
+            }
+            #expect(await socket.sentFrames().count == 1)
+            try await client.activateEvents(connectionID: connection.id)
+            let request = Task { try await client.requestValue("system.logs", EmptyParams()) }
+            defer { request.cancel() }
+            try await socket.waitUntilSent(count: 2)
+            let frame = try await decodedValue(in: socket, index: 1)
+            let id = try #require(frame.objectValue?["id"]?.stringValue)
+            await socket.enqueue(responseFrame(id: id, result: .object([:])))
+            _ = try await valueOfOwnedTask(request)
+            await client.close()
+        }
+    }
+
+    @Test("handshake deadline closes a socket stalled in hello send")
+    func stalledHelloSendIsRetiredAtDeadline() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket(suspendsSend: true)
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                clock: clock.clock
+            )
+            let connection = Task { try await client.connect(profile: profile, token: "token") }
+            defer { connection.cancel() }
+            try await socket.waitUntilSendInvoked(count: 1)
+            try await clock.waitUntilSleeping(count: 1)
+            clock.advance(by: .seconds(15))
+            for _ in 0..<10 { await Task.yield() }
+            try await socket.waitUntilCloseInvoked()
+            await socket.releaseSend()
+            await #expect(throws: GatewayFailure.self) { try await valueOfOwnedTask(connection) }
+            #expect(await socket.closeInvocationCount() >= 1)
+            #expect(await client.activeConnectionID() == nil)
+            await client.close()
+        }
+    }
+
+    @Test("handshake timeout closes before a cancellation-insensitive hello receive can finish")
+    func stalledHelloReceiveClosesBeforeLateCallback() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket(deliversCallbacksAfterClose: true)
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                clock: clock.clock
+            )
+            let connection = Task { try await client.connect(profile: profile, token: "token") }
+            defer { connection.cancel() }
+            try await socket.waitUntilSendInvoked(count: 1)
+            try await clock.waitUntilSleeping(count: 1)
+            clock.advance(by: .seconds(15))
+            for _ in 0..<10 { await Task.yield() }
+            try await socket.waitUntilCloseInvoked()
+            await socket.enqueue(helloFrame())
+            await #expect(throws: GatewayFailure.self) { try await valueOfOwnedTask(connection) }
+            #expect(await socket.closeInvocationCount() >= 1)
+            #expect(await client.activeConnectionID() == nil)
+            await client.close()
+        }
+    }
+
+    @Test("current send failure retires its epoch without losing possibly-sent classification")
+    func currentSendFailureRetiresEpoch() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000201")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000202")!,
+                ]).source
+            )
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+            await socket.failNextSend(URLError(.networkConnectionLost))
+            var events = client.events.makeAsyncIterator()
+            let request = Task { try await client.requestValue("session.prompt", EmptyParams()) }
+            defer { request.cancel() }
+            try await socket.waitUntilSendInvoked(count: 2)
+            await #expect(throws: GatewayPossiblySentError.self) { try await valueOfOwnedTask(request) }
+            let disconnected = await events.next()
+            #expect(disconnected?.event.topic == "transport.disconnected")
+            #expect(disconnected?.event.payload.objectValue?["reason"] == .string("transport_send_failed"))
+            let diagnostic = try #require(await client.diagnostics().first { $0.reason == .sendFailure })
+            #expect(diagnostic.platformCode == URLError.networkConnectionLost.rawValue)
+            #expect(await socket.closeInvocationCount() == 1)
+            #expect(await client.activeConnectionID() == nil)
+            await client.close()
+        }
     }
 
     @Test("cancellation during suspended send reports uncertainty and prevents a late ghost frame")
@@ -630,6 +761,39 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("a missing pong closes the exact socket and emits one transport retirement")
+    func missingPongRetiresExactEpoch() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket(suspendsPing: true)
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                clock: clock.clock
+            )
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+            try await clock.waitUntilSleeping(count: 1)
+            var events = client.events.makeAsyncIterator()
+            clock.advance(by: .seconds(10))
+            try await socket.waitUntilPingInvoked(count: 1)
+            try await clock.waitUntilSleeping(count: 1)
+            clock.advance(by: .seconds(8))
+            for _ in 0..<10 { await Task.yield() }
+            try await socket.waitUntilClosed()
+            let event = await events.next()
+            #expect(event?.event.topic == "transport.disconnected")
+            #expect(event?.event.payload.objectValue?["reason"] == .string("pong_timeout"))
+            let diagnostics = await client.diagnostics()
+            let probe = try #require(diagnostics.first { $0.stage == .liveness })
+            #expect(probe.reason == .pingTimeout)
+            #expect(probe.durationMilliseconds == 8_000)
+            #expect(probe.platformCode == nil)
+            #expect(diagnostics.first { $0.stage == .transport }?.durationMilliseconds == 18_000)
+            #expect(await client.info == nil)
+            await client.close()
+        }
+    }
+
     @Test("server traffic cannot suppress the transport heartbeat proof")
     func inboundTrafficDoesNotSuppressLivenessProbe() async throws {
         try await withTestWatchdog {
@@ -654,7 +818,11 @@ struct GatewayClientTransportTests {
             clock.advance(by: .seconds(5))
             try await socket.waitUntilPingInvoked(count: 1)
             #expect(await socket.sentFrames().count == 1)
-            try await clock.waitUntilSleeping(count: 1)
+            for _ in 0..<50 {
+                if clock.recordedSleeps().filter({ $0 == .seconds(10) }).count >= 2 { break }
+                await Task.yield()
+            }
+            #expect(clock.recordedSleeps().filter({ $0 == .seconds(10) }).count >= 2)
             clock.advance(by: .seconds(10))
             try await socket.waitUntilPingInvoked(count: 2)
             #expect(await client.info?.machineId == "machine")
@@ -751,13 +919,15 @@ struct GatewayClientTransportTests {
         try await withTestWatchdog {
             let oldSocket = ScriptedGatewaySocket(suspendsClose: true)
             let replacementSocket = ScriptedGatewaySocket()
-            let factory = ScriptedGatewaySocketFactory(sockets: [oldSocket, replacementSocket])
+            let reconnectedSocket = ScriptedGatewaySocket()
+            let factory = ScriptedGatewaySocketFactory(sockets: [oldSocket, replacementSocket, reconnectedSocket])
             let client = GatewayClient(
                 socketFactory: factory.factory,
                 uuidSource: SequenceUUIDSource([
                     UUID(uuidString: "00000000-0000-0000-0000-000000000051")!,
                     UUID(uuidString: "00000000-0000-0000-0000-000000000052")!,
                     UUID(uuidString: "00000000-0000-0000-0000-000000000053")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000054")!,
                 ]).source
             )
             await oldSocket.enqueue(helloFrame())
@@ -792,6 +962,9 @@ struct GatewayClientTransportTests {
                 result: .string("alive")
             ))
             #expect(try await valueOfOwnedTask(request) == .string("alive"))
+            await reconnectedSocket.enqueue(helloFrame())
+            _ = try await client.reconnect()
+            #expect(factory.requests.last?.value(forHTTPHeaderField: "Authorization") == "Bearer new-token")
             await client.close()
         }
     }
@@ -965,6 +1138,10 @@ struct GatewayClientTransportTests {
             }
             try await socket.waitUntilCloseInvoked()
             #expect(await socket.closeTransitionCount() == 0)
+            let diagnostics = await client.diagnostics()
+            #expect(diagnostics.contains {
+                $0.reason == .eventOverflow && $0.overflowCount == 1_024
+            })
 
             let (bufferDrained, bufferDrainedContinuation) = AsyncStream<Void>.makeStream(
                 bufferingPolicy: .bufferingNewest(1)

@@ -522,22 +522,18 @@ struct AppModelTerminalLifecycleTests {
 
     @Test("revoked terminal open never replays a confirmed-missing command")
     func revokedOpenDoesNotReplayMissingCommand() async throws {
-        try await withHarness { harness in
+        let requestClock = ManualClock()
+        try await withHarness(clientClock: requestClock.clock) { harness in
             try installHostedTerminalSession(on: harness.model)
             let controller = TerminalController()
             controller.start(sessionID: "session", model: harness.model)
             let list = try await request(in: harness.socket, frameIndex: 1)
-            await harness.socket.failNextSend(GatewayFailure(
-                code: "disconnected",
-                message: "synthetic",
-                retryable: true,
-                details: nil
-            ))
             await harness.socket.enqueue(successResponse(
                 id: list.id,
                 result: .object(["terminals": .array([])])
             ))
-            let status = try await request(in: harness.socket, frameIndex: 2)
+            try await requestClock.expireRequest(on: harness.socket, sentCount: 3, after: .seconds(30))
+            let status = try await request(in: harness.socket, frameIndex: 3)
             #expect(status.method == "command.status")
             #expect(status.params?.objectValue?["method"] == .string("terminal.open"))
 
@@ -546,7 +542,7 @@ struct AppModelTerminalLifecycleTests {
                 id: status.id,
                 result: .object(["status": .string("missing")])
             ))
-            let attach = try await request(in: harness.socket, frameIndex: 3)
+            let attach = try await request(in: harness.socket, frameIndex: 4)
             #expect(attach.method == "terminal.attach")
             #expect(attach.params?.objectValue?["terminalId"] == .string("terminal-b"))
             await harness.socket.enqueue(successResponse(
@@ -559,7 +555,7 @@ struct AppModelTerminalLifecycleTests {
                 try JSONDecoder.gateway.decode(JSONValue.self, from: data)
                     .objectValue?["method"]?.stringValue
             }
-            #expect(!methods.compactMap { $0 }.contains("terminal.open"))
+            #expect(methods.compactMap { $0 }.filter { $0 == "terminal.open" }.count == 1)
             controller.stop(model: harness.model)
         }
     }
@@ -1135,9 +1131,10 @@ struct AppModelTerminalLifecycleTests {
     }
 
     private func withHarness(
+        clientClock: MonotonicClock = .continuous,
         operation: @escaping @MainActor (Harness) async throws -> Void
     ) async throws {
-        let harness = try await makeHarness()
+        let harness = try await makeHarness(clientClock: clientClock)
         do {
             try await withTestWatchdog { try await operation(harness) }
         } catch {
@@ -1160,13 +1157,14 @@ struct AppModelTerminalLifecycleTests {
         let params: JSONValue?
     }
 
-    private func makeHarness() async throws -> Harness {
+    private func makeHarness(clientClock: MonotonicClock = .continuous) async throws -> Harness {
         let socket = ScriptedGatewaySocket()
         let gatewayIDs = (1...24).map {
             UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", $0))!
         }
         let client = GatewayClient(
             socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+            clock: clientClock,
             uuidSource: SequenceUUIDSource(gatewayIDs).source
         )
         let clock = ManualClock()

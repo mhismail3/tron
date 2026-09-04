@@ -278,33 +278,29 @@ struct SettingsTrustCoordinatorTests {
     @Test("settings mutations use centralized receipt resolution and replay a stable command ID")
     func settingsMutationUsesReceipts() async throws {
         try await runScenario {
-            let harness = try await makeHarness()
-            await harness.socket.failNextSend(GatewayFailure(
-                code: "disconnected",
-                message: "synthetic send failure",
-                retryable: true,
-                details: nil
-            ))
+            let clock = ManualClock()
+            let harness = try await makeHarness(clock: clock.clock)
             let update = Task {
                 try await harness.owner.updateSettings(.object(["theme": .string("dark")]), target: .global)
             }
             defer { update.cancel() }
 
-            try await harness.socket.waitUntilSent(count: 2)
-            let status = try request(await harness.socket.sentFrames()[1])
+            try await clock.expireRequest(on: harness.socket, sentCount: 2, after: .seconds(60))
+            try await harness.socket.waitUntilSent(count: 3)
+            let status = try request(await harness.socket.sentFrames()[2])
             #expect(status.method == "command.status")
             #expect(status.params?["method"] == .string("settings.update"))
             let stableID = try #require(status.params?["commandId"]?.stringValue)
             await harness.socket.enqueue(response(id: status.id, result: .object(["status": .string("missing")])))
 
-            try await harness.socket.waitUntilSent(count: 3)
-            let replay = try request(await harness.socket.sentFrames()[2])
+            try await harness.socket.waitUntilSent(count: 4)
+            let replay = try request(await harness.socket.sentFrames()[3])
             #expect(replay.method == "settings.update")
             #expect(replay.params?["commandId"] == .string(stableID))
             await harness.socket.enqueue(response(id: replay.id, result: .object(["updated": .bool(true)])))
 
-            try await harness.socket.waitUntilSent(count: 4)
-            let refresh = try request(await harness.socket.sentFrames()[3])
+            try await harness.socket.waitUntilSent(count: 5)
+            let refresh = try request(await harness.socket.sentFrames()[4])
             #expect(refresh.method == "settings.get")
             await harness.socket.enqueue(response(id: refresh.id, result: settingsValue("confirmed")))
             try await update.value
@@ -336,9 +332,9 @@ struct SettingsTrustCoordinatorTests {
         let params: [String: JSONValue]?
     }
 
-    private func makeHarness() async throws -> Harness {
+    private func makeHarness(clock: MonotonicClock = .continuous) async throws -> Harness {
         let socket = ScriptedGatewaySocket()
-        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock)
         let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,

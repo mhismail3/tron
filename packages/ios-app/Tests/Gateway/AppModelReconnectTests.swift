@@ -183,6 +183,58 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("false mounted restore cannot publish connected after its socket dies during refresh")
+    func falseRestoreRejectsDeadEpochAfterRefresh() async throws {
+        try await withTestWatchdog { @MainActor in
+            let suiteName = "GatewayMountedRestoreDisconnectTests.\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suiteName)!
+            defaults.removePersistentDomain(forName: suiteName)
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            let profile = GatewayProfile(
+                id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+            defaults.set(profile.id, forKey: "selectedGateway.v1")
+            let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
+            let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+            let client = GatewayClient(socketFactory: factory.factory)
+            let coordinator = GatewayLifecycleCoordinator(
+                client: client,
+                profiles: GatewayProfileStore(defaults: defaults),
+                clock: .continuous,
+                reconnectDelayPolicy: .standard,
+                uuidSource: .random,
+                pairer: GatewayPairer(),
+                pairingCommit: { _, _ in },
+                profileTokenLookup: { _ in "token" }
+            )
+            let projection = FailFirstMountedRestoreProjection(blockRefresh: true)
+            coordinator.delegate = projection
+
+            let initial = Task { try await coordinator.connectHosted(profile: profile, token: "token") }
+            try await sockets[0].waitUntilSent(count: 1)
+            await sockets[0].enqueue(helloFrame())
+            try await initial.value
+
+            coordinator.requestReconnect(immediate: true)
+            try await sockets[1].waitUntilSent(count: 1)
+            await sockets[1].enqueue(helloFrame())
+            for _ in 0..<50 where !projection.refreshStarted { await Task.yield() }
+            #expect(projection.refreshStarted)
+            await sockets[1].failPendingReceivers(CancellationError())
+            try await sockets[1].waitUntilClosed()
+            #expect(await client.activeConnectionID() == nil)
+            // Deliberately leave transport.disconnected queued: the coordinator
+            // still has its stale ID until the event reducer catches up.
+            projection.releaseRefresh()
+            for _ in 0..<50 where coordinator.connectionState == .connected { await Task.yield() }
+            #expect(coordinator.connectionState != .connected)
+            await coordinator.teardown()
+            await client.close()
+        }
+    }
+
     @Test("foreground reconciliation releases its task slot after failure and reconnect")
     func foregroundFailureReleasesOwnership() async throws {
         try await withTestWatchdog {
@@ -648,6 +700,11 @@ private final class NoopGatewayLifecycleProjection: GatewayLifecycleProjectionDe
 private final class FailFirstMountedRestoreProjection: GatewayLifecycleProjectionDelegate {
     private(set) var restoreCount = 0
     private(set) var aggregateCompletions: [Bool] = []
+    private let blockRefresh: Bool
+    private(set) var refreshStarted = false
+    private var releaseRefreshContinuation: CheckedContinuation<Void, Never>?
+
+    init(blockRefresh: Bool = false) { self.blockRefresh = blockRefresh }
 
     func lifecycleLoadCache(profileID: String, admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleInvalidateSessionConnectionOwnership() {}
@@ -658,7 +715,19 @@ private final class FailFirstMountedRestoreProjection: GatewayLifecycleProjectio
     ) {
         aggregateCompletions.append(succeeded)
     }
-    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
+        guard blockRefresh else { return }
+        refreshStarted = true
+        await withCheckedContinuation { continuation in
+            releaseRefreshContinuation = continuation
+        }
+    }
+
+    func releaseRefresh() {
+        releaseRefreshContinuation?.resume()
+        releaseRefreshContinuation = nil
+    }
+
     func lifecycleRestoreMountedPresentation(
         admission: GatewayLifecycleCoordinator.Admission
     ) async -> Bool {

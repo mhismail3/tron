@@ -1649,7 +1649,17 @@ final class AppModel {
     func loadGatewayLogsResult(limit: Int = 1_000) async -> GatewayLogsLoadResult {
         let profileSnapshot = profiles.profiles
         var loaded = Array(iosClientDiagnostics.records.prefix(limit))
+        loaded.append(contentsOf: (await client.diagnostics()).map(IOSClientDiagnosticBuffer.logRecord))
         loaded.append(contentsOf: chatInteractionTrace.diagnosticRecords(limit: limit))
+        // Local evidence must remain available during a stalled handshake.
+        // Never send diagnostic RPCs into an epoch that is still connecting;
+        // mark remote buckets unavailable so the view retains their last rows.
+        guard diagnosticsAreReady else {
+            return GatewayLogsLoadResult(
+                records: Array(loaded.sorted { $0.record.timestamp > $1.record.timestamp }.prefix(limit)),
+                failedProfileIDs: Set(profileSnapshot.map(\.id))
+            )
+        }
         var failedProfileIDs: Set<String> = []
         for profile in profileSnapshot {
             do {

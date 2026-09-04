@@ -204,6 +204,80 @@ struct GatewayDiagnosticsServiceTests {
         #expect((buffer.records.first?.record.timestamp.utf8.count ?? 0) <= 128)
     }
 
+    @Test("connection diagnostics retain profile ownership and same-time sequence identity")
+    func connectionDiagnosticsAreOwnedAndDistinct() {
+        let first = GatewayConnectionDiagnostic(
+            sequence: 1,
+            timestamp: "2026-08-16T01:00:00Z",
+            profileID: "stable",
+            profileLabel: "Stable",
+            stage: .helloSend,
+            outcome: .failure,
+            durationMilliseconds: 15,
+            reason: .timeout,
+            platformCode: -1001,
+            overflowCount: nil
+        )
+        let second = GatewayConnectionDiagnostic(
+            sequence: 10,
+            timestamp: first.timestamp,
+            profileID: "debug",
+            profileLabel: "Debug",
+            stage: .transport,
+            outcome: .failure,
+            durationMilliseconds: 2,
+            reason: .eventOverflow,
+            platformCode: nil,
+            overflowCount: 1_024
+        )
+        let firstRecord = IOSClientDiagnosticBuffer.logRecord(first)
+        let secondRecord = IOSClientDiagnosticBuffer.logRecord(second)
+        #expect(firstRecord.profileID == "stable:ios-client")
+        #expect(secondRecord.profileID == "debug:ios-client")
+        #expect(firstRecord.record.timestamp == secondRecord.record.timestamp)
+        #expect(firstRecord.record.message.contains("sequence=1 "))
+        #expect(!firstRecord.record.message.contains("sequence=10"))
+        #expect(secondRecord.record.message.contains("reason=event_overflow"))
+        #expect(secondRecord.record.message.contains("overflowCount=1024"))
+        #expect(firstRecord.record.message.contains("platformCode=-1001"))
+    }
+
+    @MainActor
+    @Test("offline Logs never sends RPCs into a pending handshake and retains local evidence")
+    func offlineLogsDoNotUsePendingHandshake() async throws {
+        try await withTestWatchdog { @MainActor in
+            let suiteName = "OfflineGatewayLogs.\(UUID().uuidString)"
+            let defaults = try #require(UserDefaults(suiteName: suiteName))
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            let profile = GatewayProfile(
+                id: "machine", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+            defaults.set(profile.id, forKey: "selectedGateway.v1")
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            let model = AppModel(client: client, profiles: GatewayProfileStore(defaults: defaults))
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            defer { connecting.cancel() }
+            try await socket.waitUntilSent(count: 1)
+
+            let pending = await model.loadGatewayLogsResult()
+            #expect(pending.failedProfileIDs == [profile.id])
+            #expect(await socket.sentFrames().count == 1)
+
+            connecting.cancel()
+            do { _ = try await valueOfOwnedTask(connecting) }
+            catch {}
+            let offline = await model.loadGatewayLogsResult()
+            #expect(offline.failedProfileIDs == [profile.id])
+            #expect(offline.records.contains { $0.record.event == "gateway.connection" })
+            #expect(await socket.sentFrames().count == 1)
+            await model.teardown()
+            await client.close()
+        }
+    }
+
     @Test("non-repository and absent records retain empty presentation semantics")
     func emptyValues() async throws {
         let recorder = DiagnosticsRequestRecorder(responses: [

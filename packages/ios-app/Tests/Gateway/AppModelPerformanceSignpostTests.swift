@@ -400,15 +400,17 @@ struct AppModelPerformanceSignpostTests {
     @Test("receipt interval starts only after an uncertain mutation response")
     func receiptResolution() async throws {
         try await withTestWatchdog {
-            let harness = try await makeHarness()
-            await harness.socket.failNextSend(GatewayFailure(
-                code: "disconnected",
-                message: "synthetic send failure",
-                retryable: true,
-                details: nil
-            ))
+            let clock = ManualClock()
+            let harness = try await makeHarness(clock: clock.clock)
             let responder = Task {
-                let status = try await request(in: harness.socket, frameIndex: 1)
+                // An unanswered application request is uncertain without
+                // implying a broken socket. A genuine send failure now retires
+                // transport and is covered by the receipt reconnect tests.
+                let original = try await request(in: harness.socket, frameIndex: 1)
+                #expect(original.method == "session.setModel")
+                try await clock.waitUntilSleeping(count: 2)
+                clock.advance(by: .seconds(30))
+                let status = try await request(in: harness.socket, frameIndex: 2)
                 #expect(status.method == "command.status")
                 await harness.socket.enqueue(successResponse(
                     id: status.id,
@@ -1167,7 +1169,7 @@ struct AppModelPerformanceSignpostTests {
         let params: JSONValue?
     }
 
-    private func makeHarness() async throws -> Harness {
+    private func makeHarness(clock: MonotonicClock = .continuous) async throws -> Harness {
         let socket = ScriptedGatewaySocket()
         let signposts = RecordingPerformanceSignposts()
         // Keep request and model identities deterministic and bounded. The
@@ -1177,6 +1179,7 @@ struct AppModelPerformanceSignpostTests {
         })
         let client = GatewayClient(
             socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+            clock: clock,
             uuidSource: gatewayIDs.source,
             performanceSignposts: signposts
         )
@@ -1200,6 +1203,7 @@ struct AppModelPerformanceSignpostTests {
             client: client,
             profiles: GatewayProfileStore(defaults: defaults),
             cache: SnapshotCache(root: cacheRoot),
+            clock: clock,
             uuidSource: appModelIDs.source,
             performanceSignposts: signposts
         )

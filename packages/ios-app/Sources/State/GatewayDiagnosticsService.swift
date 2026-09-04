@@ -37,6 +37,47 @@ struct GatewayLogsLoadResult: Equatable, Sendable {
     let failedProfileIDs: Set<String>
 }
 
+enum GatewayConnectionDiagnosticStage: String, Sendable {
+    case helloSend = "hello-send"
+    case helloReceive = "hello-receive"
+    case liveness
+    case transport
+}
+
+enum GatewayConnectionDiagnosticOutcome: String, Sendable {
+    case success
+    case failure
+}
+
+enum GatewayConnectionDiagnosticReason: String, Sendable {
+    case timeout
+    case canceled
+    case replaced
+    case background
+    case eventOverflow = "event_overflow"
+    case transport
+    case pingTimeout = "ping_timeout"
+    case sendFailure = "send_failure"
+    case closed
+    case retired
+    case protocolMismatch
+    case identityMismatch
+    case invalidProfile
+}
+
+struct GatewayConnectionDiagnostic: Sendable {
+    let sequence: Int
+    let timestamp: String
+    let profileID: String?
+    let profileLabel: String?
+    let stage: GatewayConnectionDiagnosticStage
+    let outcome: GatewayConnectionDiagnosticOutcome
+    let durationMilliseconds: Int
+    let reason: GatewayConnectionDiagnosticReason?
+    let platformCode: Int?
+    let overflowCount: Int?
+}
+
 struct IOSClientDiagnosticBuffer: Sendable {
     static let maximumRecords = 200
     private(set) var records: [GatewayProfileLogRecord] = []
@@ -67,6 +108,36 @@ struct IOSClientDiagnosticBuffer: Sendable {
         if records.count > Self.maximumRecords {
             records.removeLast(records.count - Self.maximumRecords)
         }
+    }
+
+    static func logRecord(_ diagnostic: GatewayConnectionDiagnostic) -> GatewayProfileLogRecord {
+        let ownerID = boundedUTF8(diagnostic.profileID ?? "ios-client", maximumBytes: 256)
+        let ownerLabel = boundedUTF8(
+            diagnostic.profileLabel.map { "\($0) · iOS client" } ?? "iOS client",
+            maximumBytes: 512
+        )
+        var fields = [
+            "stage=\(diagnostic.stage.rawValue)",
+            "outcome=\(diagnostic.outcome.rawValue)",
+            "sequence=\(max(0, diagnostic.sequence))",
+            "durationMs=\(max(0, diagnostic.durationMilliseconds))",
+        ]
+        if let reason = diagnostic.reason { fields.append("reason=\(reason.rawValue)") }
+        if let platformCode = diagnostic.platformCode { fields.append("platformCode=\(platformCode)") }
+        if let overflowCount = diagnostic.overflowCount {
+            fields.append("overflowCount=\(max(0, overflowCount))")
+        }
+        return GatewayProfileLogRecord(
+            profileID: "\(ownerID):ios-client",
+            profileLabel: ownerLabel,
+            record: GatewayLogRecord(
+                timestamp: boundedUTF8(diagnostic.timestamp, maximumBytes: 128),
+                level: diagnostic.outcome == .failure ? "warning" : "info",
+                message: fields.joined(separator: " "),
+                event: "gateway.connection",
+                source: "ios-client"
+            )
+        )
     }
 
     private static func boundedUTF8(_ value: String, maximumBytes: Int) -> String {

@@ -1,5 +1,44 @@
 import Foundation
 
+private final class GatewayHandshakeStage: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: GatewayConnectionDiagnosticStage = .helloSend
+
+    func set(_ value: GatewayConnectionDiagnosticStage) {
+        lock.lock(); self.value = value; lock.unlock()
+    }
+
+    func get() -> GatewayConnectionDiagnosticStage {
+        lock.lock(); defer { lock.unlock() }
+        return value
+    }
+}
+
+private enum GatewayTimeoutOutcome<T: Sendable>: @unchecked Sendable {
+    case value(T)
+    case failure(Error)
+    case loser
+}
+
+private final class GatewayTimeoutWinner: @unchecked Sendable {
+    private let lock = NSLock()
+    private var timeoutWon = false
+
+    func claimTimeout() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !timeoutWon else { return false }
+        timeoutWon = true
+        return true
+    }
+
+    func claimOperation() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard !timeoutWon else { return false }
+        timeoutWon = true
+        return true
+    }
+}
+
 enum GatewayRequestTransmissionState: Equatable {
     case queued
     case sending
@@ -17,6 +56,10 @@ enum GatewayLivenessPolicy {
     /// Transport pings run independently of GatewayClient actor/event work so a
     /// busy live stream cannot starve the proof required by the server heartbeat.
     static let probeInterval: Duration = .seconds(10)
+    /// A short callback delay is tolerated, but an absent pong retires the
+    /// captured epoch. This is intentionally shorter than the Gateway's
+    /// server-side heartbeat window.
+    static let pongTimeout: Duration = .seconds(8)
 }
 
 struct GatewayEventBufferPolicy: Sendable {
@@ -104,6 +147,8 @@ private actor GatewayEventHub {
         default: return nil
         }
     }
+
+    func bufferedEventCount() -> Int { buffered.count }
 
     func reset(connectionID: Int) {
         let retained = buffered.filter { $0.delivery.connectionID != connectionID }
@@ -225,6 +270,9 @@ actor GatewayClient {
     private struct ConnectionEpoch {
         let id: Int
         let socket: any GatewaySocketConnection
+        let startedAt: ContinuousClock.Instant
+        let profileID: String
+        let profileLabel: String
         var receiveTask: Task<Void, Never>?
         var livenessTask: Task<Void, Never>?
         var eventsActivated = false
@@ -245,6 +293,8 @@ actor GatewayClient {
     private let boundedHTTPFileTransport: BoundedHTTPFileTransport
     private let performanceSignposts: any PerformanceSignposting
     private var connection: ConnectionEpoch?
+    private var connectionDiagnostics: [GatewayConnectionDiagnostic] = []
+    private var diagnosticSequence = 0
     private var generation = 0
     private var profile: GatewayProfile?
     private var token: String?
@@ -252,6 +302,43 @@ actor GatewayClient {
     var info: GatewayInfo? { connection?.info }
 
     func activeConnectionID() -> Int? { connection?.id }
+
+    func diagnostics() -> [GatewayConnectionDiagnostic] { connectionDiagnostics }
+
+    private func recordDiagnostic(
+        stage: GatewayConnectionDiagnosticStage,
+        outcome: GatewayConnectionDiagnosticOutcome,
+        startedAt: ContinuousClock.Instant,
+        reason: GatewayConnectionDiagnosticReason? = nil,
+        error: Error? = nil,
+        overflowCount: Int? = nil,
+        profileID: String? = nil,
+        profileLabel: String? = nil
+    ) {
+        let components = startedAt.duration(to: clock.now()).components
+        let elapsed = max(
+            Int64(0),
+            components.seconds * 1_000
+                + components.attoseconds / 1_000_000_000_000_000
+        )
+        let platformCode = error.flatMap(Self.platformErrorCode)
+        diagnosticSequence &+= 1
+        connectionDiagnostics.insert(GatewayConnectionDiagnostic(
+            sequence: diagnosticSequence,
+            timestamp: Date.now.formatted(.iso8601),
+            profileID: profileID ?? self.profile?.id,
+            profileLabel: profileLabel ?? self.profile?.label,
+            stage: stage,
+            outcome: outcome,
+            durationMilliseconds: Int(elapsed),
+            reason: reason,
+            platformCode: platformCode,
+            overflowCount: overflowCount
+        ), at: 0)
+        if connectionDiagnostics.count > 200 {
+            connectionDiagnostics.removeLast(connectionDiagnostics.count - 200)
+        }
+    }
 
     init(
         socketFactory: GatewaySocketFactory = .urlSession,
@@ -336,13 +423,18 @@ actor GatewayClient {
         self.profile = profile
         self.token = token
         let handshakeTimeout: Duration = isReconnect ? .seconds(5) : .seconds(15)
-        // The actor-owned 5/15-second watchdog bounds the handshake. Keep the
-        // URL loading inactivity timeout above the 10+8-second application
-        // liveness decision so CFNetwork cannot pre-empt it after upgrade.
+        let attemptStartedAt = clock.now()
+        let handshakeStage = GatewayHandshakeStage()
+        // The actor-owned 5/15-second watchdog covers both hello send and
+        // receive. Keep the URL loading inactivity timeout above the 10+8-second
+        // application liveness decision so CFNetwork cannot pre-empt it after upgrade.
         var request = URLRequest(url: socketURL, timeoutInterval: GatewaySocketPolicy.requestTimeout)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let socket = socketFactory.makeConnection(request)
-        connection = ConnectionEpoch(id: epochID, socket: socket)
+        connection = ConnectionEpoch(
+            id: epochID, socket: socket, startedAt: attemptStartedAt,
+            profileID: profile.id, profileLabel: profile.label
+        )
 
         do {
             let hello: JSONValue = .object([
@@ -351,9 +443,14 @@ actor GatewayClient {
                 "clientId": .string(uuidSource.next().uuidString),
                 "clientRole": .string("mobile"),
             ])
-            try await socket.send(JSONEncoder.gateway.encode(hello))
-            try requireEpoch(epochID)
-            let data = try await withTimeout(duration: handshakeTimeout) { try await socket.receive() }
+            let helloData = try JSONEncoder.gateway.encode(hello)
+            let data = try await Self.withTimeout(clock: clock, duration: handshakeTimeout, onTimeout: { await socket.close() }) {
+                handshakeStage.set(.helloSend)
+                try await socket.send(helloData)
+                try await self.requireEpoch(epochID)
+                handshakeStage.set(.helloReceive)
+                return try await socket.receive()
+            }
             try requireEpoch(epochID)
             try GatewayFramePolicy.validateInboundBytes(data)
             let decoded = try JSONDecoder.gateway.decode(GatewayHello.self, from: data)
@@ -377,9 +474,26 @@ actor GatewayClient {
             epoch.lastInboundAt = clock.now()
             connection = epoch
             if activateEvents { try activateEventDelivery(connectionID: epochID) }
+            recordDiagnostic(
+                stage: .helloReceive,
+                outcome: .success,
+                startedAt: attemptStartedAt,
+                profileID: profile.id,
+                profileLabel: profile.label
+            )
             return GatewayConnectionIdentity(id: epochID, info: decoded.info)
         } catch {
-            await detachConnection(epochID: epochID, reason: Self.transportFailure(error))
+            let failure = Self.transportFailure(error)
+            recordDiagnostic(
+                stage: handshakeStage.get(),
+                outcome: .failure,
+                startedAt: attemptStartedAt,
+                reason: Self.diagnosticReason(for: failure.code),
+                error: error,
+                profileID: profile.id,
+                profileLabel: profile.label
+            )
+            await detachConnection(epochID: epochID, reason: failure)
             throw error
         }
     }
@@ -433,6 +547,8 @@ actor GatewayClient {
 
     func close() async {
         generation &+= 1
+        // Revoke credentials before suspension: an older close must never
+        // erase the profile installed by a concurrent replacement connection.
         profile = nil
         token = nil
         let retiredConnectionID = connection?.id
@@ -496,7 +612,7 @@ actor GatewayClient {
         timeout: Duration,
         expectedEpochID: Int?
     ) async throws -> JSONValue {
-        guard let epoch = connection,
+        guard let epoch = connection, epoch.info != nil, epoch.eventsActivated,
               expectedEpochID == nil || expectedEpochID == epoch.id else {
             throw Self.definitelyNotSentFailure()
         }
@@ -566,7 +682,7 @@ actor GatewayClient {
         _ result: Result<Void, Error>,
         id: String,
         epochID: Int
-    ) {
+    ) async {
         guard var epoch = connection, epoch.id == epochID,
               var request = epoch.pending[id] else { return }
         switch result {
@@ -575,10 +691,19 @@ actor GatewayClient {
             epoch.pending[id] = request
             connection = epoch
         case .failure(let error):
-            fail(
-                id: id,
+            let failure = Self.possiblySentFailure(cause: error)
+            fail(id: id, epochID: epochID, error: failure)
+            // A genuine current-epoch write failure is stronger than an RPC
+            // timeout: retire exactly this socket, while the request remains
+            // classified as possibly sent for command-ID reconciliation.
+            await disconnectEpoch(
                 epochID: epochID,
-                error: Self.possiblySentFailure(cause: error)
+                failure: GatewayFailure(
+                    code: "transport_send_failed",
+                    message: "The Mac gateway connection could not send data.",
+                    retryable: true,
+                    details: Self.transportFailure(error).details
+                )
             )
         }
     }
@@ -929,11 +1054,30 @@ actor GatewayClient {
                 do {
                     try await clock.sleep(GatewayLivenessPolicy.probeInterval)
                     try Task.checkCancellation()
-                    try await socket.ping()
-                } catch is CancellationError {
-                    return
+                } catch { return }
+                let startedAt = clock.now()
+                let timeout = GatewayFailure(
+                    code: "pong_timeout",
+                    message: "The Mac gateway did not answer its liveness probe.",
+                    retryable: true,
+                    details: nil
+                )
+                do {
+                    try await GatewayClient.withTimeout(
+                        clock: clock,
+                        duration: GatewayLivenessPolicy.pongTimeout,
+                        onTimeout: { [weak self] in
+                            // Record and revoke at the epoch owner before close
+                            // wakes the receiver with a less-specific error.
+                            await self?.livenessFailed(timeout, epochID: epochID, startedAt: startedAt)
+                        },
+                        timeoutFailure: timeout
+                    ) {
+                        try await socket.ping()
+                    }
                 } catch {
-                    await self?.livenessFailed(error, epochID: epochID)
+                    guard !Task.isCancelled else { return }
+                    await self?.livenessFailed(error, epochID: epochID, startedAt: startedAt)
                     return
                 }
             }
@@ -941,8 +1085,15 @@ actor GatewayClient {
         connection = epoch
     }
 
-    private func livenessFailed(_ error: Error, epochID: Int) async {
+    private func livenessFailed(_ error: Error, epochID: Int, startedAt: ContinuousClock.Instant) async {
         guard ownsEpoch(epochID) else { return }
+        recordDiagnostic(
+            stage: .liveness,
+            outcome: .failure,
+            startedAt: startedAt,
+            reason: Self.diagnosticReason(for: Self.transportFailure(error).code),
+            error: error
+        )
         await disconnectEpoch(epochID: epochID, failure: Self.transportFailure(error))
     }
 
@@ -955,7 +1106,9 @@ actor GatewayClient {
                 type: "event",
                 topic: "transport.disconnected",
                 sessionId: nil,
-                payload: .object(["message": .string(failure.message)]),
+                // Only fixed reason codes cross the diagnostics/event boundary;
+                // transport errors may contain URLs or other private text.
+                payload: .object(["reason": .string(failure.code)]),
                 admittedBytes: 256
             )
         ), bytes: 256)
@@ -990,11 +1143,21 @@ actor GatewayClient {
                 connectionID: epochID,
                 event: admittedEvent
             ), bytes: data.count) {
+                let overflowCount = await eventHub.bufferedEventCount()
                 guard var current = connection,
                       current.id == epochID,
                       !current.overflowResyncSignaled else { return }
                 current.overflowResyncSignaled = true
                 connection = current
+                recordDiagnostic(
+                    stage: .transport,
+                    outcome: .failure,
+                    startedAt: current.startedAt,
+                    reason: .eventOverflow,
+                    overflowCount: overflowCount,
+                    profileID: current.profileID,
+                    profileLabel: current.profileLabel
+                )
                 await disconnectEpoch(
                     epochID: epochID,
                     failure: GatewayFailure(
@@ -1047,6 +1210,16 @@ actor GatewayClient {
         guard let epoch = connection,
               epochID == nil || epoch.id == epochID else { return false }
         connection = nil
+        let failure = Self.transportFailure(reason)
+        recordDiagnostic(
+            stage: .transport,
+            outcome: .failure,
+            startedAt: epoch.startedAt,
+            reason: Self.diagnosticReason(for: failure.code),
+            error: reason,
+            profileID: epoch.profileID,
+            profileLabel: epoch.profileLabel
+        )
         epoch.receiveTask?.cancel()
         epoch.livenessTask?.cancel()
         for waiter in epoch.pending.values {
@@ -1102,27 +1275,101 @@ actor GatewayClient {
         ))
     }
 
+    private nonisolated static func diagnosticReason(for code: String) -> GatewayConnectionDiagnosticReason {
+        switch code {
+        case "timeout": return .timeout
+        case "cancelled": return .canceled
+        case "replaced": return .replaced
+        case "backgrounded": return .background
+        case "event_overflow": return .eventOverflow
+        case "pong_timeout", "ping_timeout": return .pingTimeout
+        case "possibly_sent", "transport_send_failed": return .sendFailure
+        case "closed": return .closed
+        case "retired": return .retired
+        case "protocol_mismatch": return .protocolMismatch
+        case "identity_mismatch": return .identityMismatch
+        case "invalid_profile": return .invalidProfile
+        default: return .transport
+        }
+    }
+
+    private nonisolated static func platformErrorCode(_ error: Error) -> Int? {
+        if let urlError = error as? URLError { return urlError.errorCode }
+        return (error as? GatewayFailure)?.details?.objectValue?["platformCode"]?.intValue
+    }
+
     private nonisolated static func transportFailure(_ error: Error) -> GatewayFailure {
+        if error is CancellationError {
+            return GatewayFailure(code: "cancelled", message: "Connection attempt cancelled.", retryable: true, details: nil)
+        }
         if let failure = error as? GatewayFailure { return failure }
         if let definitelyNotSent = error as? GatewayDefinitelyNotSentError { return definitelyNotSent.failure }
         if let possiblySent = error as? GatewayPossiblySentError { return possiblySent.failure }
-        return GatewayFailure(code: "disconnected", message: error.localizedDescription, retryable: true, details: nil)
+        let platformCode: Int? = (error as? URLError)?.errorCode
+        return GatewayFailure(
+            code: "disconnected",
+            message: "The Mac gateway connection ended.",
+            retryable: true,
+            details: platformCode.map { .object(["platformCode": .number(Double($0))]) }
+        )
     }
 
-    private func withTimeout<T: Sendable>(
+    private nonisolated static func withTimeout<T: Sendable>(
+        clock: MonotonicClock,
         duration: Duration,
+        onTimeout: (@Sendable () async -> Void)? = nil,
+        timeoutFailure: GatewayFailure = GatewayFailure(
+            code: "timeout",
+            message: "The Mac gateway did not complete its handshake.",
+            retryable: true,
+            details: nil
+        ),
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
-        let clock = self.clock
-        return try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask { try await operation() }
-            group.addTask {
-                try await clock.sleep(duration)
-                throw GatewayFailure(code: "timeout", message: "The Mac gateway did not complete its handshake.", retryable: true, details: nil)
+        let winner = GatewayTimeoutWinner()
+        return try await withTaskCancellationHandler {
+            let selected: GatewayTimeoutOutcome<T>? = await withTaskGroup(of: GatewayTimeoutOutcome<T>.self) { group in
+                group.addTask {
+                    do {
+                        let value = try await operation()
+                        return winner.claimOperation() ? .value(value) : .loser
+                    } catch {
+                        return winner.claimOperation() ? .failure(error) : .loser
+                    }
+                }
+                group.addTask {
+                    do {
+                        try await clock.sleep(duration)
+                        try Task.checkCancellation()
+                    } catch {
+                        return .loser
+                    }
+                    guard winner.claimTimeout() else { return .loser }
+                    // Close before cancelling/awaiting the operation. URLSession
+                    // callbacks are not required to honor task cancellation.
+                    await onTimeout?()
+                    return .failure(timeoutFailure)
+                }
+                defer { group.cancelAll() }
+                while let outcome = await group.next() {
+                    if case .loser = outcome { continue }
+                    return outcome
+                }
+                return nil
             }
-            let value = try await group.next()!
-            group.cancelAll()
-            return value
+            guard let selected else { throw CancellationError() }
+            switch selected {
+            case .value(let value): return value
+            case .failure(let error): throw error
+            case .loser: throw CancellationError()
+            }
+        } onCancel: {
+            // Cancellation can happen while either child is suspended. The
+            // captured socket close is deliberately initiated before the group
+            // waits for non-cooperative Foundation callbacks to unwind.
+            if let onTimeout {
+                Task { await onTimeout() }
+            }
         }
     }
 }

@@ -413,7 +413,8 @@ struct GatewayUpdateControlPlaneTests {
         defaults.set(stable.id, forKey: "selectedGateway.v1")
         let profiles = GatewayProfileStore(defaults: defaults)
         let socket = ScriptedGatewaySocket()
-        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let clock = ManualClock()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
         let commandIDs = [
             UUID(uuidString: "00000000-0000-0000-0000-000000000201")!,
             UUID(uuidString: "00000000-0000-0000-0000-000000000202")!,
@@ -434,7 +435,6 @@ struct GatewayUpdateControlPlaneTests {
         try await connecting.value
 
         let candidate = try debugCandidate(fingerprint: String(repeating: "c", count: 64))
-        await socket.failNextSend(GatewayFailure(code: "disconnected", message: "synthetic", retryable: true, details: nil))
         let completed = Task {
             await model.requestGatewayUpdate(
                 for: stable,
@@ -442,8 +442,9 @@ struct GatewayUpdateControlPlaneTests {
                 debugCandidate: candidate
             )
         }
-        try await socket.waitUntilSent(count: 2)
-        let completedStatus = try requestFrame(await socket.sentFrames()[1])
+        try await clock.expireRequest(on: socket, sentCount: 2, after: .seconds(30))
+        try await socket.waitUntilSent(count: 3)
+        let completedStatus = try requestFrame(await socket.sentFrames()[2])
         #expect(completedStatus.method == "command.status")
         let completedID = try #require(completedStatus.params?["commandId"]?.stringValue)
         await socket.enqueue(successResponse(
@@ -455,15 +456,15 @@ struct GatewayUpdateControlPlaneTests {
         ))
         #expect(await completed.value == completedID)
 
-        await socket.failNextSend(GatewayFailure(code: "disconnected", message: "synthetic", retryable: true, details: nil))
         let missing = Task { await model.requestGatewayRollback(for: stable) }
-        try await socket.waitUntilSent(count: 3)
-        let missingStatus = try requestFrame(await socket.sentFrames()[2])
+        try await clock.expireRequest(on: socket, sentCount: 4, after: .seconds(30))
+        try await socket.waitUntilSent(count: 5)
+        let missingStatus = try requestFrame(await socket.sentFrames()[4])
         #expect(missingStatus.method == "command.status")
         let missingID = try #require(missingStatus.params?["commandId"]?.stringValue)
         await socket.enqueue(successResponse(id: missingStatus.id, result: .object(["status": .string("missing")])))
-        try await socket.waitUntilSent(count: 4)
-        let replay = try requestFrame(await socket.sentFrames()[3])
+        try await socket.waitUntilSent(count: 6)
+        let replay = try requestFrame(await socket.sentFrames()[5])
         #expect(replay.method == "gateway.rollback")
         #expect(replay.params?["commandId"] == .string(missingID))
         await socket.enqueue(successResponse(
@@ -472,10 +473,10 @@ struct GatewayUpdateControlPlaneTests {
         ))
         #expect(await missing.value == missingID)
 
-        await socket.failNextSend(GatewayFailure(code: "disconnected", message: "synthetic", retryable: true, details: nil))
         let mismatched = Task { await model.requestGatewayRollback(for: stable) }
-        try await socket.waitUntilSent(count: 5)
-        let mismatchedStatus = try requestFrame(await socket.sentFrames()[4])
+        try await clock.expireRequest(on: socket, sentCount: 7, after: .seconds(30))
+        try await socket.waitUntilSent(count: 8)
+        let mismatchedStatus = try requestFrame(await socket.sentFrames()[7])
         await socket.enqueue(successResponse(
             id: mismatchedStatus.id,
             result: .object([

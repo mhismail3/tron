@@ -480,23 +480,25 @@ struct SessionMutationServiceTests {
                     sessionID: "session"
                 )
             }
-            let status = try await request(in: harness.socket, frameIndex: 1)
+            defer { mutation.cancel() }
+            try await reconnect(harness)
+            let status = try await request(in: harness.replacement, frameIndex: 1)
             #expect(status.method == "command.status")
             let statusCommandID = try #require(status.params?["commandId"]?.stringValue)
             #expect(status.params?["method"] == .string("session.setModel"))
-            await harness.socket.enqueue(successResponse(
+            await harness.replacement.enqueue(successResponse(
                 id: status.id,
                 result: .object(["status": .string("missing")])
             ))
-            let replay = try await request(in: harness.socket, frameIndex: 2)
+            let replay = try await request(in: harness.replacement, frameIndex: 2)
             #expect(replay.method == "session.setModel")
             #expect(replay.params?["commandId"] == .string(statusCommandID))
-            await harness.socket.enqueue(successResponse(
+            await harness.replacement.enqueue(successResponse(
                 id: replay.id,
                 result: .object(["updated": .bool(true)])
             ))
             try await valueOfOwnedTask(mutation)
-            #expect(harness.signposts.events() == [
+            #expect(receiptEvents(harness) == [
                 .begin(.receiptResolution),
                 .end(.receiptResolution, .success, .none),
             ])
@@ -522,15 +524,16 @@ struct SessionMutationServiceTests {
             }
             defer { mutation.cancel() }
 
-            let status = try await request(in: harness.socket, frameIndex: 1)
+            try await reconnect(harness)
+            let status = try await request(in: harness.replacement, frameIndex: 1)
             #expect(status.method == "command.status")
             let stableCommandID = try #require(status.params?["commandId"]?.stringValue)
-            await harness.socket.suspendSends()
-            await harness.socket.enqueue(successResponse(
+            await harness.replacement.suspendSends()
+            await harness.replacement.enqueue(successResponse(
                 id: status.id,
                 result: .object(["status": .string("missing")])
             ))
-            try await harness.socket.waitUntilSendInvoked(count: 4)
+            try await harness.replacement.waitUntilSendInvoked(count: 3)
             mutation.cancel()
 
             do {
@@ -542,8 +545,11 @@ struct SessionMutationServiceTests {
                 #expect(failure.details?.objectValue?["commandId"] == .string(stableCommandID))
                 #expect(failure.details?.objectValue?["method"] == .string("session.setModel"))
             }
-            #expect(await harness.socket.sentFrames().count == 2)
-            #expect(harness.signposts.events() == [
+            await harness.replacement.releaseSend()
+            #expect(await harness.socket.sentFrames().count == 1)
+            #expect(await harness.replacement.sentFrames().count == 2)
+            #expect(await harness.client.activeConnectionID() != nil)
+            #expect(receiptEvents(harness) == [
                 .begin(.receiptResolution),
                 .end(.receiptResolution, .cancelled, .none),
             ])
@@ -586,6 +592,9 @@ struct SessionMutationServiceTests {
 
     private struct Harness {
         let socket: ScriptedGatewaySocket
+        let replacement: ScriptedGatewaySocket
+        let lifecycle: GatewayLifecycleCoordinator
+        let profile: GatewayProfile
         let client: GatewayClient
         let service: SessionMutationService
         let signposts: RecordingPerformanceSignposts
@@ -599,9 +608,10 @@ struct SessionMutationServiceTests {
 
     private func makeHarness() async throws -> Harness {
         let socket = ScriptedGatewaySocket()
+        let replacement = ScriptedGatewaySocket()
         let signposts = RecordingPerformanceSignposts()
         let client = GatewayClient(
-            socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+            socketFactory: ScriptedGatewaySocketFactory(sockets: [socket, replacement]).factory,
             performanceSignposts: signposts
         )
         let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
@@ -626,20 +636,31 @@ struct SessionMutationServiceTests {
             executor: executor,
             uuidSource: .random
         )
-        await socket.enqueue(helloFrame())
-        try await lifecycle.connectHosted(
-            profile: GatewayProfile(
-                id: "machine",
-                label: "Mac",
-                host: "gateway.test",
-                port: 9_847,
-                machineId: "machine",
-                deviceId: "device"
-            ),
-            token: "token"
+        let profile = GatewayProfile(
+            id: "machine", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device"
         )
+        await socket.enqueue(helloFrame())
+        try await lifecycle.connectHosted(profile: profile, token: "token")
         signposts.reset()
-        return Harness(socket: socket, client: client, service: service, signposts: signposts)
+        return Harness(
+            socket: socket, replacement: replacement, lifecycle: lifecycle, profile: profile,
+            client: client, service: service, signposts: signposts
+        )
+    }
+
+    private func reconnect(_ harness: Harness) async throws {
+        try await harness.socket.waitUntilClosed()
+        var events = harness.client.events.makeAsyncIterator()
+        let delivery = try #require(await events.next())
+        #expect(delivery.event.topic == "transport.disconnected")
+        harness.lifecycle.noteDisconnected(connectionID: delivery.connectionID)
+        await harness.replacement.enqueue(helloFrame())
+        try await harness.lifecycle.connectHosted(profile: harness.profile, token: "token")
+    }
+
+    private nonisolated func receiptEvents(_ harness: Harness) -> [RecordingPerformanceSignposts.Event] {
+        harness.signposts.events().filter { $0.operation == .receiptResolution }
     }
 
     private func complete<Value>(

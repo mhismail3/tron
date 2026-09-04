@@ -269,16 +269,12 @@ struct SessionImportCoordinatorTests {
     func possiblySentReceiptReplay() async throws {
         try await withTestWatchdog { @MainActor in
             let access = FileAccessRecorder(data: Data("receipt".utf8))
+            let clock = ManualClock()
             let harness = try await makeHarness(
                 fileAccess: access.seam,
-                upload: { _, _, _, _ in "receipt-upload" }
+                upload: { _, _, _, _ in "receipt-upload" },
+                clock: clock.clock
             )
-            await harness.socket.failNextSend(GatewayFailure(
-                code: "disconnected",
-                message: "synthetic send failure",
-                retryable: true,
-                details: nil
-            ))
             let importing = Task {
                 try await harness.coordinator.importSession(
                     from: URL(fileURLWithPath: "/tmp/receipt.jsonl"),
@@ -287,7 +283,8 @@ struct SessionImportCoordinatorTests {
             }
             defer { importing.cancel() }
 
-            let status = try await request(in: harness.socket, frameIndex: 1)
+            try await clock.expireRequest(on: harness.socket, sentCount: 2, after: .seconds(120))
+            let status = try await request(in: harness.socket, frameIndex: 2)
             #expect(status.method == "command.status")
             #expect(status.params?["method"] == .string("session.import"))
             let commandID = try #require(status.params?["commandId"]?.stringValue)
@@ -296,7 +293,7 @@ struct SessionImportCoordinatorTests {
                 result: .object(["status": .string("missing")])
             ))
 
-            let replay = try await request(in: harness.socket, frameIndex: 2)
+            let replay = try await request(in: harness.socket, frameIndex: 3)
             #expect(replay.method == "session.import")
             #expect(replay.params?["commandId"] == .string(commandID))
             #expect(replay.params?["uploadId"] == .string("receipt-upload"))
@@ -647,14 +644,16 @@ struct SessionImportCoordinatorTests {
     private func makeHarness(
         fileAccess: SessionImportFileAccess,
         upload: @escaping SessionImportUpload,
-        connect: Bool = true
+        connect: Bool = true,
+        clock: MonotonicClock = .continuous
     ) async throws -> Harness {
         let socket = ScriptedGatewaySocket()
         let reconnectSocket = ScriptedGatewaySocket()
         let client = GatewayClient(
             socketFactory: ScriptedGatewaySocketFactory(
                 sockets: [socket, reconnectSocket]
-            ).factory
+            ).factory,
+            clock: clock
         )
         let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
         let profile = gatewayProfile(id: "initial")

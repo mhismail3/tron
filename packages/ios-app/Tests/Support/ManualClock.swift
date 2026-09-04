@@ -4,6 +4,7 @@ import Synchronization
 
 final class ManualClock: Sendable {
     private struct Sleeper {
+        let duration: Duration
         let deadline: ContinuousClock.Instant
         let continuation: CheckedContinuation<Void, Error>
     }
@@ -11,6 +12,7 @@ final class ManualClock: Sendable {
     private struct SleepWaiter {
         let token: Int
         let count: Int
+        let duration: Duration?
         let continuation: CheckedContinuation<Void, Error>
     }
 
@@ -47,6 +49,16 @@ final class ManualClock: Sendable {
         for continuation in continuations { continuation.resume() }
     }
 
+    /// Receipt-owner tests model an unanswered application request on a live
+    /// socket. Advance only after transmission and the request/liveness timers
+    /// are registered; a real send failure instead requires a new connection.
+    func expireRequest(on socket: ScriptedGatewaySocket, sentCount: Int, after duration: Duration) async throws {
+        try await socket.waitUntilSent(count: sentCount)
+        try await waitUntilSleeping(count: 1, duration: duration)
+        try await waitUntilSleeping(count: 1, duration: GatewayLivenessPolicy.probeInterval)
+        advance(by: duration)
+    }
+
     func recordedSleeps() -> [Duration] {
         state.withLock { $0.sleepHistory }
     }
@@ -55,7 +67,7 @@ final class ManualClock: Sendable {
         state.withLock { $0.sleepers.count }
     }
 
-    func waitUntilSleeping(count: Int) async throws {
+    func waitUntilSleeping(count: Int, duration: Duration? = nil) async throws {
         let token = state.withLock { state -> Int in
             defer { state.nextWaiterToken += 1 }
             return state.nextWaiterToken
@@ -63,8 +75,9 @@ final class ManualClock: Sendable {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let resumeNow = state.withLock { state -> Bool in
-                    if state.sleepers.count >= count || Task.isCancelled { return true }
-                    state.sleepWaiters.append(.init(token: token, count: count, continuation: continuation))
+                    let matches = state.sleepers.values.filter { duration == nil || $0.duration == duration }.count
+                    if matches >= count || Task.isCancelled { return true }
+                    state.sleepWaiters.append(.init(token: token, count: count, duration: duration, continuation: continuation))
                     return false
                 }
                 if resumeNow {
@@ -103,9 +116,14 @@ final class ManualClock: Sendable {
                         if deadline <= state.now {
                             immediate = .success(())
                         } else {
-                            state.sleepers[token] = Sleeper(deadline: deadline, continuation: continuation)
-                            let ready = state.sleepWaiters.filter { state.sleepers.count >= $0.count }
-                            state.sleepWaiters.removeAll { state.sleepers.count >= $0.count }
+                            state.sleepers[token] = Sleeper(duration: duration, deadline: deadline, continuation: continuation)
+                            let ready = state.sleepWaiters.filter { waiter in
+                                state.sleepers.values.filter {
+                                    waiter.duration == nil || $0.duration == waiter.duration
+                                }.count >= waiter.count
+                            }
+                            let readyTokens = Set(ready.map(\.token))
+                            state.sleepWaiters.removeAll { readyTokens.contains($0.token) }
                             registrationContinuations = ready.map(\.continuation)
                         }
                     }

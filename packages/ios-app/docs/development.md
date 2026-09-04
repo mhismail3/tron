@@ -93,6 +93,12 @@ performance fixture on a device another workflow owns. Runtime build role and
 push route are emitted into `Info.plist`, but the final signed entitlements and
 provisioning profile remain authoritative for Apple service environments.
 
+## Connection recovery diagnostics
+
+The WebSocket hello attempt has one monotonic deadline covering both the hello send and receive. Its exact socket is closed before a timed-out or canceled operation is joined. Foreground liveness waits ten seconds between independent probes and observes each pong callback with an eight-second bound; successful probes are not logged. Logs can be opened and refreshed while Connecting, Reconnecting, or Offline: the bounded in-memory iOS connection ring is shown immediately with profile ownership, stage, outcome, duration, fixed retirement reason, numeric platform code, and overflow count where applicable, while unavailable Gateway records are retained as stale. It contains no URLs, tokens, prompts, or arbitrary transport error text and is not persisted. Remote log RPCs are skipped until diagnostic readiness so opening Logs cannot interfere with hello; cached remote rows remain visible. Probe durations measure the actual pong wait and transport durations measure the retired epoch's age. Native URL-loading error codes survive failure normalization; intentional cancellation is categorized separately.
+
+`GatewayClientTransportTests` cover cancellation before ping continuation installation, late/duplicate callback settlement, RPC rejection before hello/event activation, complete handshake deadlines, missing-pong retirement, genuine send-failure provenance, and overflow diagnostics. `AppModelReconnectTests` also leave the disconnect event queued while a failed mounted restore finishes, proving readiness consults the client rather than stale UI identity. `SessionMutationServiceTests` reconcile uncertain sends on a replacement socket with the same command ID; the signpost and configuration/import/terminal/control-plane receipt tests use responsive-socket RPC timeouts, which must not force reconnect. Their manual clock advances only after the original request is sent and the exact request deadline and between-probe timer are registered. `GatewayDiagnosticsServiceTests` open Logs during a stalled hello and verify immediate local evidence without a remote RPC.
+
 ## Efficient focused tests
 
 Do not rerun the full suite for each edit. Compile test products once, then run

@@ -418,36 +418,28 @@ struct PackageConfigurationCoordinatorTests {
     @Test("retired receipt uncertainty cancels while same-profile uncertainty remains explicit")
     func receiptUncertaintyAdmission() async throws {
         try await runScenario {
-            let retiredHarness = try await makeHarness()
-            await retiredHarness.socket.failNextSend(GatewayFailure(
-                code: "disconnected",
-                message: "synthetic",
-                retryable: true,
-                details: nil
-            ))
+            let retiredClock = ManualClock()
+            let retiredHarness = try await makeHarness(clock: retiredClock.clock)
             let retired = Task {
                 try await retiredHarness.owner.mutate(.install, source: "retired", local: false, target: .global)
             }
-            try await retiredHarness.socket.waitUntilSent(count: 2)
-            let status = try request(await retiredHarness.socket.sentFrames()[1])
+            try await retiredClock.expireRequest(on: retiredHarness.socket, sentCount: 2, after: .seconds(300))
+            try await retiredHarness.socket.waitUntilSent(count: 3)
+            let status = try request(await retiredHarness.socket.sentFrames()[2])
             #expect(status.method == "command.status")
             retiredHarness.owner.clearProfile()
             retiredHarness.owner.clearProfile()
             await retiredHarness.lifecycle.teardown()
             await #expect(throws: CancellationError.self) { try await retired.value }
 
-            let currentHarness = try await makeHarness()
-            await currentHarness.socket.failNextSend(GatewayFailure(
-                code: "disconnected",
-                message: "synthetic",
-                retryable: true,
-                details: nil
-            ))
+            let currentClock = ManualClock()
+            let currentHarness = try await makeHarness(clock: currentClock.clock)
             let current = Task {
                 try await currentHarness.owner.mutate(.install, source: "current", local: false, target: .global)
             }
-            try await currentHarness.socket.waitUntilSent(count: 2)
-            let currentStatus = try request(await currentHarness.socket.sentFrames()[1])
+            try await currentClock.expireRequest(on: currentHarness.socket, sentCount: 2, after: .seconds(300))
+            try await currentHarness.socket.waitUntilSent(count: 3)
+            let currentStatus = try request(await currentHarness.socket.sentFrames()[2])
             #expect(currentStatus.method == "command.status")
             current.cancel()
             do {
@@ -463,29 +455,25 @@ struct PackageConfigurationCoordinatorTests {
     @Test("possibly-sent package mutation replays with one stable command ID")
     func receiptResolution() async throws {
         try await runScenario {
-            let harness = try await makeHarness(commandIDs: ["00000000-0000-0000-0000-000000000092"])
-            await harness.socket.failNextSend(GatewayFailure(
-                code: "disconnected",
-                message: "synthetic",
-                retryable: true,
-                details: nil
-            ))
+            let clock = ManualClock()
+            let harness = try await makeHarness(commandIDs: ["00000000-0000-0000-0000-000000000092"], clock: clock.clock)
             let mutation = Task {
                 try await harness.owner.mutate(.install, source: "package", local: false, target: .global)
             }
-            try await harness.socket.waitUntilSent(count: 2)
-            let status = try request(await harness.socket.sentFrames()[1])
+            try await clock.expireRequest(on: harness.socket, sentCount: 2, after: .seconds(300))
+            try await harness.socket.waitUntilSent(count: 3)
+            let status = try request(await harness.socket.sentFrames()[2])
             #expect(status.method == "command.status")
             #expect(status.params?["method"] == .string("packages.install"))
             #expect(status.params?["commandId"] == .string("00000000-0000-0000-0000-000000000092"))
             await harness.socket.enqueue(response(id: status.id, result: .object(["status": .string("missing")])))
-            try await harness.socket.waitUntilSent(count: 3)
-            let replay = try request(await harness.socket.sentFrames()[2])
+            try await harness.socket.waitUntilSent(count: 4)
+            let replay = try request(await harness.socket.sentFrames()[3])
             #expect(replay.method == "packages.install")
             #expect(replay.params?["commandId"] == status.params?["commandId"])
             await harness.socket.enqueue(response(id: replay.id, result: .object([:])))
-            try await harness.socket.waitUntilSent(count: 4)
-            let reload = try request(await harness.socket.sentFrames()[3])
+            try await harness.socket.waitUntilSent(count: 5)
+            let reload = try request(await harness.socket.sentFrames()[4])
             await harness.socket.enqueue(response(id: reload.id, result: inventory("confirmed")))
             try await mutation.value
             await harness.client.close()
@@ -534,9 +522,9 @@ struct PackageConfigurationCoordinatorTests {
         try await withTestWatchdog { try await valueOfOwnedTask(task) }
     }
 
-    private func makeHarness(commandIDs: [String] = []) async throws -> Harness {
+    private func makeHarness(commandIDs: [String] = [], clock: MonotonicClock = .continuous) async throws -> Harness {
         let socket = ScriptedGatewaySocket()
-        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock)
         let lifecycle = makeLifecycle(client: client)
         let executor = ConfirmedMutationExecutor(
             client: client,

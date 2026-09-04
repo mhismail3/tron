@@ -26,6 +26,7 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
     private var pingInvocations = 0
     private var pingFailures: [Error] = []
     private var pingWaiters: [Waiter] = []
+    private var pingBarrierWaiters: [Int: CheckedContinuation<Void, Error>] = [:]
     private var sendBarrierWaiters: [Int: CheckedContinuation<Void, Error>] = [:]
     private var closeInvocations = 0
     private var closeTransitions = 0
@@ -36,6 +37,7 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
 
     private var isClosed = false
     private var suspendsSend: Bool
+    private var suspendsPing: Bool
     private var suspendsClose: Bool
     private let deliversCallbacksAfterClose: Bool
     private let deliversSendsAfterCancellation: Bool
@@ -43,11 +45,13 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
 
     init(
         suspendsSend: Bool = false,
+        suspendsPing: Bool = false,
         suspendsClose: Bool = false,
         deliversCallbacksAfterClose: Bool = false,
         deliversSendsAfterCancellation: Bool = false
     ) {
         self.suspendsSend = suspendsSend
+        self.suspendsPing = suspendsPing
         self.suspendsClose = suspendsClose
         self.deliversCallbacksAfterClose = deliversCallbacksAfterClose
         self.deliversSendsAfterCancellation = deliversSendsAfterCancellation
@@ -86,6 +90,21 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
         pingInvocations += 1
         resumeSatisfiedWaiters(&pingWaiters, observedCount: pingInvocations)
         if !pingFailures.isEmpty { throw pingFailures.removeFirst() }
+        if suspendsPing {
+            let token = nextWaiterToken
+            nextWaiterToken += 1
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    if Task.isCancelled || !suspendsPing {
+                        continuation.resume(throwing: CancellationError())
+                    } else {
+                        pingBarrierWaiters[token] = continuation
+                    }
+                }
+            } onCancel: {
+                Task { await self.cancelPingBarrierWaiter(token: token) }
+            }
+        }
         try Task.checkCancellation()
         guard !isClosed else { throw CancellationError() }
     }
@@ -131,6 +150,9 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
         guard !isClosed else { return }
         isClosed = true
         closeTransitions += 1
+        let pendingPings = pingBarrierWaiters
+        pingBarrierWaiters.removeAll()
+        for continuation in pendingPings.values { continuation.resume(throwing: CancellationError()) }
         if !deliversCallbacksAfterClose {
             let pendingReceivers = receivers
             receivers.removeAll()
@@ -149,6 +171,13 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
 
     func suspendSends() {
         suspendsSend = true
+    }
+
+    func releasePing() {
+        suspendsPing = false
+        let waiters = pingBarrierWaiters.values
+        pingBarrierWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
     }
 
     func releaseSend() {
@@ -254,6 +283,10 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
         } else if let index = closeWaiters.firstIndex(where: { $0.token == token }) {
             closeWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
         }
+    }
+
+    private func cancelPingBarrierWaiter(token: Int) {
+        pingBarrierWaiters.removeValue(forKey: token)?.resume(throwing: CancellationError())
     }
 
     private func cancelSendBarrierWaiter(token: Int) {

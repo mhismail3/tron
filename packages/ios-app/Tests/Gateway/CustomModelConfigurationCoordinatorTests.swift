@@ -155,19 +155,15 @@ struct CustomModelConfigurationCoordinatorTests {
     @Test("receipt uncertainty after profile retirement becomes cancellation")
     func retiredReceiptUncertainty() async throws {
         try await runScenario {
-            let harness = try await makeHarness()
+            let clock = ManualClock()
+            let harness = try await makeHarness(clock: clock.clock)
             let mutation = Task { try await harness.owner.replace(models("retired"), target: .global) }
             try await harness.socket.waitUntilSent(count: 2)
             let validation = try request(await harness.socket.sentFrames()[1])
-            await harness.socket.failNextSend(GatewayFailure(
-                code: "disconnected",
-                message: "synthetic",
-                retryable: true,
-                details: nil
-            ))
             await harness.socket.enqueue(response(id: validation.id, result: .null))
-            try await harness.socket.waitUntilSent(count: 3)
-            let status = try request(await harness.socket.sentFrames()[2])
+            try await clock.expireRequest(on: harness.socket, sentCount: 3, after: .seconds(30))
+            try await harness.socket.waitUntilSent(count: 4)
+            let status = try request(await harness.socket.sentFrames()[3])
             #expect(status.method == "command.status")
             harness.owner.clearProfile()
             harness.owner.clearProfile()
@@ -179,20 +175,21 @@ struct CustomModelConfigurationCoordinatorTests {
     @Test("possibly-sent put uses centralized receipts and one stable command ID")
     func receiptResolution() async throws {
         try await runScenario {
-            let harness = try await makeHarness(commandIDs: ["00000000-0000-0000-0000-000000000082"])
+            let clock = ManualClock()
+            let harness = try await makeHarness(commandIDs: ["00000000-0000-0000-0000-000000000082"], clock: clock.clock)
             let mutation = Task { try await harness.owner.replace(models("document"), target: .global) }
             try await harness.socket.waitUntilSent(count: 2)
             let validation = try request(await harness.socket.sentFrames()[1])
-            await harness.socket.failNextSend(GatewayFailure(code: "disconnected", message: "synthetic", retryable: true, details: nil))
             await harness.socket.enqueue(response(id: validation.id, result: .null))
-            try await harness.socket.waitUntilSent(count: 3)
-            let status = try request(await harness.socket.sentFrames()[2])
+            try await clock.expireRequest(on: harness.socket, sentCount: 3, after: .seconds(30))
+            try await harness.socket.waitUntilSent(count: 4)
+            let status = try request(await harness.socket.sentFrames()[3])
             #expect(status.method == "command.status")
             #expect(status.params?["method"] == .string("models.custom.put"))
             #expect(status.params?["commandId"] == .string("00000000-0000-0000-0000-000000000082"))
             await harness.socket.enqueue(response(id: status.id, result: .object(["status": .string("missing")])))
-            try await harness.socket.waitUntilSent(count: 4)
-            let replay = try request(await harness.socket.sentFrames()[3])
+            try await harness.socket.waitUntilSent(count: 5)
+            let replay = try request(await harness.socket.sentFrames()[4])
             #expect(replay.method == "models.custom.put")
             #expect(replay.params?["commandId"] == status.params?["commandId"])
             await harness.socket.enqueue(response(id: replay.id, result: .null))
@@ -344,9 +341,9 @@ struct CustomModelConfigurationCoordinatorTests {
         try await withTestWatchdog { try await valueOfOwnedTask(task) }
     }
 
-    private func makeHarness(commandIDs: [String] = []) async throws -> Harness {
+    private func makeHarness(commandIDs: [String] = [], clock: MonotonicClock = .continuous) async throws -> Harness {
         let socket = ScriptedGatewaySocket()
-        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock)
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,

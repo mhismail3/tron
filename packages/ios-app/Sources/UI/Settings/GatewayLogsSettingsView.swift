@@ -55,7 +55,7 @@ struct GatewayLogsSettingsView: View {
                 }
                 if !hasLoaded && recordIndex.isEmpty {
                     TronLoadingState(
-                        label: automaticLoadID.isReady ? "Loading logs…" : "Reconnecting to refresh logs…",
+                        label: model.diagnosticsAreReady ? "Loading logs…" : "Loading local diagnostics…",
                         accent: .tronEmerald
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -97,7 +97,7 @@ struct GatewayLogsSettingsView: View {
                         .font(TronTypography.buttonSM)
                         .tronSettingsAccent()
                 }
-                .disabled(loading || !automaticLoadID.isReady)
+                .disabled(loading)
                 .accessibilityLabel("Refresh logs")
 
                 Button { copyVisibleLogs() } label: {
@@ -115,8 +115,7 @@ struct GatewayLogsSettingsView: View {
             source: automaticLoadID,
             presentationActive: presentationActivity.allowsPresentationPublication
         )) {
-            guard presentationActivity.allowsPresentationPublication,
-                  automaticLoadID.isReady else { return }
+            guard presentationActivity.allowsPresentationPublication else { return }
             await loadLogs(preserveExistingOnEmpty: true)
         }
         .tronManagedSheet(

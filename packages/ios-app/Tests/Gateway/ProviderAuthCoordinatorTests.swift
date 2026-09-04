@@ -1164,15 +1164,16 @@ struct ProviderAuthCoordinatorTests {
     @Test("model refresh uses shared receipts and refreshes its exact target")
     func modelRefreshUsesReceipts() async throws {
         try await runScenario {
-            let harness = try await makeHarness()
+            let clock = ManualClock()
+            let harness = try await makeHarness(clock: clock.clock)
             let target = ProviderCatalogTarget.session(id: "session-a")
-            await harness.socket.failNextSend(possiblySentFailure())
             let mutation = Task { try await harness.owner.refreshModelCatalog(target: target, force: false) }
+            try await clock.expireRequest(on: harness.socket, sentCount: 2, after: .seconds(75))
             try await completeReceiptMutation(
                 method: "models.refresh",
                 target: target,
                 result: modelRefreshResult(),
-                startingAt: 1,
+                startingAt: 2,
                 harness: harness
             )
             try await mutation.value
@@ -1249,15 +1250,16 @@ struct ProviderAuthCoordinatorTests {
     @Test("logout uses shared receipts and refreshes its exact target")
     func logoutUsesReceipts() async throws {
         try await runScenario {
-            let harness = try await makeHarness()
+            let clock = ManualClock()
+            let harness = try await makeHarness(clock: clock.clock)
             let target = ProviderCatalogTarget.session(id: "session-b")
-            await harness.socket.failNextSend(possiblySentFailure())
             let mutation = Task { try await harness.owner.logout(providerID: "provider", target: target) }
+            try await clock.expireRequest(on: harness.socket, sentCount: 2, after: .seconds(60))
             try await completeReceiptMutation(
                 method: "auth.logout",
                 target: target,
                 result: .object(["loggedOut": .bool(true)]),
-                startingAt: 1,
+                startingAt: 2,
                 harness: harness
             )
             try await mutation.value
@@ -1345,9 +1347,9 @@ struct ProviderAuthCoordinatorTests {
         let params: [String: JSONValue]?
     }
 
-    private func makeHarness() async throws -> Harness {
+    private func makeHarness(clock: MonotonicClock = .continuous) async throws -> Harness {
         let socket = ScriptedGatewaySocket()
-        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock)
         let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
@@ -1547,10 +1549,6 @@ struct ProviderAuthCoordinatorTests {
                 "retryable": .bool(retryable),
             ]),
         ]))
-    }
-
-    private func possiblySentFailure() -> GatewayFailure {
-        GatewayFailure(code: "disconnected", message: "synthetic send failure", retryable: true, details: nil)
     }
 
     private var profile: GatewayProfile {
