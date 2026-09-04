@@ -2,6 +2,14 @@
 
 Tron's reserved first-party `display` tool presents agent-selected project artifacts and public HTTPS references without making native UI an extension-owned capability. Canonical Pi JSONL records one ordinary `tron.display.v1` tool result; Gateway artifact bytes are immutable durable sidecars; every iOS value is a bounded disposable projection.
 
+The Gateway also accepts `source: { kind: "internal_file", path: "reports/summary.md" }`
+for visible files beneath Tron's internal `workspace/files`, independent of the
+session cwd. Ordinary `path` sources remain session-relative. Both produce the
+same immutable authenticated artifact and `tron.display.v1` projection; iOS does
+not browse, cache, or mirror the internal workspace. Missing/unavailable roots,
+managed-state paths, traversal, hidden components, and symlinks are rejected by
+the Gateway before presentation.
+
 ## Surfaces
 
 The model requests a surface, but native policy resolves it by typed content kind and advertised eligibility:

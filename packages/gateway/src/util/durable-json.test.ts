@@ -56,6 +56,35 @@ describe("durable JSON publication", () => {
     expect(fs.rm).not.toHaveBeenCalledWith("/state/record.json", expect.anything());
   });
 
+  it.each(["write", "file-sync", "directory-sync"])("closes handles and reports %s failure without deleting published data", async stage => {
+    const failure = Object.assign(new Error("storage failure"), { code: "ENOSPC" });
+    const temporaryHandle = {
+      writeFile: vi.fn(async () => { if (stage === "write") throw failure; }),
+      sync: vi.fn(async () => { if (stage === "file-sync") throw failure; }),
+      close: vi.fn(async () => {}),
+    };
+    const directoryHandle = {
+      sync: vi.fn(async () => { if (stage === "directory-sync") throw failure; }),
+      close: vi.fn(async () => {}),
+    };
+    let opens = 0;
+    const fs = fileSystem({
+      open: vi.fn(async () => opens++ === 0 ? temporaryHandle : directoryHandle) as unknown as DurableJsonFileSystem["open"],
+    });
+    await expect(durableAtomicWriteJson("/state/record.json", {}, 0o600, fs)).rejects.toMatchObject({ code: "ENOSPC" });
+    expect(temporaryHandle.close).toHaveBeenCalledOnce();
+    expect(fs.rm).not.toHaveBeenCalledWith("/state/record.json", expect.anything());
+    if (stage === "directory-sync") {
+      // Publication has happened: report uncertainty, never delete the value.
+      expect(fs.rename).toHaveBeenCalledOnce();
+      expect(directoryHandle.close).toHaveBeenCalledOnce();
+      expect(fs.rm).not.toHaveBeenCalled();
+    } else {
+      expect(fs.rename).not.toHaveBeenCalled();
+      expect(fs.rm).toHaveBeenCalledOnce();
+    }
+  });
+
   it("syncs the parent directory after removal", async () => {
     const directoryHandle = { sync: vi.fn(async () => {}), close: vi.fn(async () => {}) };
     const fs = {

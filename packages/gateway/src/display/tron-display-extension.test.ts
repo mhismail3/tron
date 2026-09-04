@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createTronDisplayExtension } from "./tron-display-extension.js";
 
-function fixture() {
+function fixture(internalFilesRoot?: () => Promise<string>) {
   let tool: any;
   const ingests: unknown[] = [];
   const revokes: unknown[] = [];
   const factory = createTronDisplayExtension({
     sessionId: () => "session-a",
     cwd: () => "/workspace",
+    ...(internalFilesRoot ? { internalFilesRoot } : {}),
     artifacts: {
       ingest: async (...args: unknown[]) => {
         ingests.push(args);
@@ -46,6 +47,30 @@ describe("first-party Tron display extension", () => {
       fallbackText: "Preview unavailable.",
       artifact: { id: "85bff6fb-7282-4c9b-9c0c-f6d06625235a" },
     });
+  });
+
+  it("uses only the internal files resolver for internal sources and retains the result contract", async () => {
+    const value = fixture(async () => "/tron/workspace/files");
+    const result = await value.tool().execute("call", {
+      title: "Internal", altText: "Internal document", source: { kind: "internal_file", path: "preview.png" },
+    });
+    expect(value.ingests).toEqual([["/tron/workspace/files", "preview.png", "session-a"]]);
+    expect(result.details.display.schema).toBe("tron.display.v1");
+    expect(result.details.display).not.toHaveProperty("internalFilesRoot");
+    const missing = fixture();
+    await expect(missing.tool().execute("call", {
+      title: "Internal", altText: "Internal document", source: { kind: "internal_file", path: "preview.png" },
+    })).rejects.toMatchObject({ code: "conflict" });
+    expect(missing.ingests).toEqual([]);
+  });
+
+  it("does not ingest if cancelled while resolving the internal root", async () => {
+    const controller = new AbortController();
+    const value = fixture(async () => { controller.abort(); return "/tron/workspace/files"; });
+    await expect(value.tool().execute("call", {
+      title: "Internal", altText: "Internal document", source: { kind: "internal_file", path: "preview.png" },
+    }, controller.signal)).rejects.toThrow("Display operation aborted");
+    expect(value.ingests).toEqual([]);
   });
 
   it("accepts only public credential-free HTTPS URL descriptors", async () => {

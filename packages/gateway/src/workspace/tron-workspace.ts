@@ -1,0 +1,128 @@
+import { lstat, mkdir, open, realpath } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import lockfile from "proper-lockfile";
+import { GatewayError } from "../errors.js";
+import { readSecureJson } from "../util/secure-json.js";
+import { durableAtomicWriteJson } from "../util/durable-json.js";
+
+export interface TronWorkspaceDescriptor {
+  root: string;
+  available: boolean;
+  reason?: "unavailable" | "owned_elsewhere" | "closed";
+}
+
+/** Only owns internal-workspace initialization and availability. It neither
+ * selects session cwd nor scans content nor owns extension data schemas. */
+export class TronWorkspace {
+  private home: string;
+  private root: string;
+  private initialization?: Promise<void>;
+  private release: (() => Promise<void>) | undefined;
+  private identity: { dev: number; ino: number } | undefined;
+  private failure: NonNullable<TronWorkspaceDescriptor["reason"]> = "unavailable";
+  private closed = false;
+
+  constructor(tronHome: string) {
+    this.home = resolve(tronHome);
+    this.root = join(this.home, "workspace");
+  }
+
+  private async directory(path: string, create = false): Promise<{ dev: number; ino: number }> {
+    if (create) {
+      try { await mkdir(path, { mode: 0o700 }); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+    }
+    const info = await lstat(path);
+    if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.()
+      || (info.mode & 0o777) !== 0o700) throw new Error("Workspace directory must be owner-only and accessible");
+    return { dev: info.dev, ino: info.ino };
+  }
+
+  async initialize(): Promise<void> {
+    if (this.closed) return;
+    this.initialization ??= this.initializeOwned();
+    await this.initialization;
+  }
+
+  private async initializeOwned(): Promise<void> {
+    try {
+      await this.directory(this.home, true);
+      this.home = await realpath(this.home);
+      this.root = join(this.home, "workspace");
+      const gateway = join(this.home, "gateway");
+      await this.directory(gateway, true);
+      const state = join(gateway, "workspace-state");
+      await this.directory(state, true);
+      try {
+        this.release = await lockfile.lock(state, {
+          realpath: true, retries: 0, stale: 60_000, update: 10_000,
+          onCompromised: () => { this.identity = undefined; this.failure = "owned_elsewhere"; },
+        });
+      } catch { this.failure = "owned_elsewhere"; return; }
+      const marker = join(state, "initialized.json");
+      const read = await readSecureJson<unknown>(marker, 128);
+      if (read.present) {
+        const value = read.value as Record<string, unknown> | null;
+        if (!value || typeof value !== "object" || Array.isArray(value)
+          || Object.keys(value).length !== 1 || value.version !== 1) {
+          throw new Error("Invalid workspace initialization record");
+        }
+      }
+      // A missing established root is loss of data, not a new installation.
+      this.identity = await this.directory(this.root, !read.present);
+      if (!read.present) {
+        const parent = await open(this.home, "r");
+        try { await parent.sync(); } finally { await parent.close(); }
+        await durableAtomicWriteJson(marker, { version: 1 });
+      }
+      if (this.failure === "owned_elsewhere") this.identity = undefined;
+      if (this.closed) { this.identity = undefined; await this.release?.(); this.release = undefined; }
+    } catch {
+      this.identity = undefined;
+      // Preserve invalid data and make the failure local to this feature.
+      const release = this.release;
+      this.release = undefined;
+      await release?.().catch(() => {});
+    }
+  }
+
+  async describe(): Promise<TronWorkspaceDescriptor> {
+    await this.initialize();
+    if (this.closed) return { root: this.root, available: false, reason: "closed" };
+    if (this.identity) {
+      try {
+        await this.directory(this.home);
+        const current = await this.directory(this.root);
+        if (current.dev === this.identity.dev && current.ino === this.identity.ino) {
+          return { root: this.root, available: true };
+        }
+      } catch { /* Unavailable is a fact, never permission to recreate. */ }
+      this.identity = undefined;
+    }
+    return { root: this.root, available: false, reason: this.failure };
+  }
+
+  /** Read-only resolution for display. The document producer creates files/;
+   * displaying a missing directory must never mutate the workspace. */
+  async filesRoot(): Promise<string> {
+    if (!(await this.describe()).available) {
+      throw new GatewayError("conflict", "Tron internal workspace is unavailable; restore it before using internal files");
+    }
+    const files = join(this.root, "files");
+    try {
+      const info = await lstat(files);
+      if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.()
+        || (info.mode & 0o700) !== 0o700 || (info.mode & 0o022) !== 0) throw new Error("Invalid files directory");
+    } catch { throw new GatewayError("conflict", "Tron internal files must be an existing directory writable only by its owner"); }
+    return files;
+  }
+
+  async dispose(): Promise<void> {
+    this.closed = true;
+    await this.initialization;
+    const release = this.release;
+    this.release = undefined;
+    this.identity = undefined;
+    await release?.();
+  }
+}

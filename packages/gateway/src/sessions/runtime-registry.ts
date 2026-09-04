@@ -53,6 +53,7 @@ import { ProcessActivityRecency } from "./process-activity-recency.js";
 import { admitExtensionLifecycleArtifact } from "./extension-run-projection.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import { DisplayArtifactStore } from "../display/display-artifact-store.js";
+import { TronWorkspace } from "../workspace/tron-workspace.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import type { ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import { isAutomationId, runIdFromAutomationOperationId } from "../automations/automation-contract.js";
@@ -447,6 +448,7 @@ export class RuntimeRegistry {
   private readonly blobs: BlobStore;
   private readonly exports: BlobStore;
   private readonly displayArtifacts: DisplayArtifactStore;
+  private readonly workspace: TronWorkspace;
   private readonly markers: RunMarkerStore;
   private readonly extensionActivityRecency = new ExtensionActivityRecency();
   private readonly processActivityRecency = new ProcessActivityRecency();
@@ -520,6 +522,7 @@ export class RuntimeRegistry {
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     this.displayArtifacts = new DisplayArtifactStore(options.tronHome);
+    this.workspace = new TronWorkspace(options.tronHome);
     this.exports = new BlobStore({
       maximumItemBytes: SESSION_EXPORT_MAX_ITEM_BYTES,
       maximumItems: SESSION_EXPORT_MAX_ITEMS,
@@ -553,6 +556,7 @@ export class RuntimeRegistry {
   get administrativeWorkRegistry(): GatewayWorkRegistry { return this.workRegistry; }
 
   async initialize(onPhase?: (phase: "catalog-warming" | "attention-recovery") => void): Promise<void> {
+    await this.workspace.initialize();
     // Load the durable recovery inputs before capturing catalog membership, as
     // before this optimization. The later evidence cut therefore cannot omit a
     // marker that was already admitted to this reconciliation pass.
@@ -881,6 +885,7 @@ export class RuntimeRegistry {
       blobs: this.blobs,
       exports: this.exports,
       displayArtifacts: this.displayArtifacts,
+      workspace: this.workspace,
       markers: this.markers,
       extensionActivityRecency: this.extensionActivityRecency,
       processActivityRecency: this.processActivityRecency,
@@ -3457,7 +3462,7 @@ export class RuntimeRegistry {
     if (failures.length > 0) {
       throw new AggregateError(failures, "One or more session runtimes failed to shut down");
     }
-    await Promise.all([this.blobs.dispose(), this.exports.dispose()]);
+    await Promise.all([this.blobs.dispose(), this.exports.dispose(), this.workspace.dispose()]);
     this.shutdownState = "disposed";
   }
 

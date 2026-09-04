@@ -188,6 +188,16 @@ the same over-budget request from consuming the account's RPM through repeated
 retries. The provider key still belongs in the runtime credential store and is
 never persisted by Gateway.
 
+## Internal workspace
+
+`<tronHome>/workspace` is Tron's durable internal home, separate from every session
+cwd and the generic filesystem browser. `files/` holds deliberately retained
+documents; `state/<owner>/` is reserved for real capability-owned data. Pi and
+Gateway canonical stores stay with their existing owners. Initialization,
+fail-local recovery, backup, prompt coverage, internal-file display, and the
+future managed-state contract are owned by
+[`docs/internal-workspace.md`](docs/internal-workspace.md).
+
 ## Runtime and state
 
 A supervised payload validates its architecture-specific immutable `node` and
@@ -1155,6 +1165,40 @@ and is never automatically replayed.
 Each project session has an isolated mutable model/provider runtime. Tron's
 administration/onboarding runtime composes global providers without loading
 untrusted project resources.
+
+### Tron context and delegated children
+
+The bundled `tron-core` extension appends Tron identity, the resolved internal
+workspace path, and active-tool guidance to the Gateway-owned parent Pi runtime.
+It does not change the session `cwd`, load workspace contents, or replace Pi's
+base prompt. This inline extension is not automatically loaded in native
+`pi-subagents` child processes.
+
+`pi-subagents` exposes bounded `extensionBindings` for native child metadata and
+retains the original binding for a resumed run, but the current supported
+transport only places JSON in `PI_SUBAGENT_EXTENSION_BINDINGS`; it does not load
+an extension or append that value to the child's prompt. Its public request
+schema has no per-call `extensions`/`subagentOnlyExtensions` override. The
+`subagents.defaultExtensions` setting configures `extensions` only, and
+`runtimeSnapshotHost` snapshots runtime MCP servers only. Tron therefore does
+not mutate Pi settings, agent definitions, or workflow scripts to force-load
+`tron-core`, and must not claim automatic identity/workspace propagation to an
+arbitrary child. A public mutable `tool_call` hook prefixes direct model-facing
+`subagent` task/resume text with a bounded (2 KiB UTF-8) advisory handoff, preserving
+the task verbatim and never truncating it. Native tasks above 8,000 UTF-16 code
+units use the launcher's private task-file delivery; that is not a task rejection
+limit. Workflow/structured delegation stage limits remain runner-owned (1 MiB
+UTF-8 in the pinned native implementation).
+
+Workflow VM launches, slash/RPC/structured delegation, and further children do not
+emit this parent tool event: explicitly repeat identity, root, availability and
+ownership in every stage/task. The handoff does not grant authorization, change
+cwd, load extensions, or give a child parent tools. Explicitly configured child
+extensions are an agent configuration guarantee, not Gateway inheritance.
+
+External CLI/job runners do not accept `extensionBindings` and do not provide
+native fork/resume, tool-event, or supervisor guarantees. They can receive the
+same advisory facts only as runner-specific prompt/task text.
 
 Unresolved trust blocks project resource loading. A trusted project may load
 settings, extensions, skills, prompts, packages, and system prompt files with the

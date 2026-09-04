@@ -101,6 +101,8 @@ import { createTronNotifyExtension } from "../notifications/tron-notify-extensio
 import { createTronDisplayExtension } from "../display/tron-display-extension.js";
 import { createTronScheduleExtension, type ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
+import type { TronWorkspace } from "../workspace/tron-workspace.js";
+import { createTronCoreExtension } from "../workspace/tron-core-extension.js";
 import { displayArtifactIDs } from "../display/display-contract.js";
 import { DirectBashProcessOwner } from "./direct-bash-process-owner.js";
 
@@ -287,6 +289,7 @@ export interface RuntimeSlotDependencies {
   blobs: BlobStore;
   exports: BlobStore;
   displayArtifacts: DisplayArtifactStore;
+  workspace: TronWorkspace;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
   processActivityRecency: ProcessActivityRecency;
@@ -1144,12 +1147,14 @@ export class RuntimeSlot {
         modelRuntime,
         resourceLoaderOptions: {
           extensionFactories: [
+            { name: "tron-core", factory: createTronCoreExtension(this.dependencies.workspace) },
             {
               name: "tron-display",
               factory: createTronDisplayExtension({
                 sessionId: () => this.id,
                 cwd: () => this.cwd,
                 artifacts: this.dependencies.displayArtifacts,
+                internalFilesRoot: () => this.dependencies.workspace.filesRoot(),
               }),
             },
             ...(this.dependencies.scheduleToolOperations ? [{

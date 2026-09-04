@@ -21,6 +21,10 @@ const parameters = Type.Object({
       path: Type.String({ minLength: 1, maxLength: 4_096 }),
     }, { additionalProperties: false }),
     Type.Object({
+      kind: Type.Literal("internal_file"),
+      path: Type.String({ minLength: 1, maxLength: 4_096 }),
+    }, { additionalProperties: false }),
+    Type.Object({
       kind: Type.Literal("public_url"),
       url: Type.String({ minLength: 1, maxLength: 8_192 }),
       media: Type.Union([Type.Literal("webpage"), Type.Literal("hls")]),
@@ -34,7 +38,7 @@ type Parameters = {
   caption?: string;
   altText: string;
   fallbackText?: string;
-  source: { kind: "path"; path: string } | { kind: "public_url"; url: string; media: "webpage" | "hls" };
+  source: { kind: "path"; path: string } | { kind: "internal_file"; path: string } | { kind: "public_url"; url: string; media: "webpage" | "hls" };
   presentation?: { surface: DisplaySurface; inlineTapAction?: DisplayInlineTapAction };
 };
 
@@ -62,18 +66,19 @@ export function createTronDisplayExtension(input: {
   sessionId: () => string;
   cwd: () => string;
   artifacts: DisplayArtifactStore;
+  internalFilesRoot?: () => Promise<string>;
 }): ExtensionFactory {
   return (pi) => {
     pi.registerTool({
       name: "display",
       label: "Display",
-      description: "Present a project artifact or public HTTPS webpage in Tron chat. Sheet is the default; inline and floating are applied only to compatible content. Local paths must be relative to the session workspace.",
+      description: "Present an artifact or public HTTPS webpage in Tron chat. Sheet is the default; inline and floating apply only to compatible content. source.kind=path uses a path relative to the session directory; internal_file uses a path relative to Tron's internal workspace files/ directory. Neither accepts absolute paths.",
       promptSnippet: "Display visual or document content in Tron chat when it materially improves the response.",
       promptGuidelines: [
         "Use display at your discretion when visual, document, media, or webpage content materially improves the app experience.",
         "Always provide concise alt text and never include secrets or credential-bearing URLs.",
         "Prefer the default sheet surface; use inline for bounded content that belongs in transcript flow and floating for content worth keeping visible while chatting.",
-        "Write generated HTML or media to a project file before displaying it; do not pass inline bytes or base64.",
+        "Write generated HTML or media to a session file or an internal workspace files/ document before calling display; do not pass inline bytes or base64.",
       ],
       parameters,
       executionMode: "sequential",
@@ -90,8 +95,13 @@ export function createTronDisplayExtension(input: {
         let kind: DisplayKind;
         let artifact: DisplayProjection["artifact"];
         let remoteURL: string | undefined;
-        if (params.source.kind === "path") {
-          artifact = await input.artifacts.ingest(input.cwd(), params.source.path, sessionID);
+        if (params.source.kind === "path" || params.source.kind === "internal_file") {
+          if (params.source.kind === "internal_file" && !input.internalFilesRoot) {
+            throw new GatewayError("conflict", "Tron internal workspace is unavailable");
+          }
+          const root = params.source.kind === "path" ? input.cwd() : await input.internalFilesRoot!();
+          if (signal?.aborted) throw new Error("Display operation aborted");
+          artifact = await input.artifacts.ingest(root, params.source.path, sessionID);
           if (signal?.aborted) {
             await input.artifacts.revoke(artifact.id, sessionID);
             throw new Error("Display operation aborted");
