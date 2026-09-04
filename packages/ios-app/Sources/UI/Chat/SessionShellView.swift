@@ -211,26 +211,23 @@ struct SessionShellView: View {
         .tint(Color.tronEmerald)
     }
 
+    @ViewBuilder
     private var dashboardScreen: some View {
-        ZStack {
-            switch dashboardMode {
-            case .sessions:
-                sessionDashboardScreen
-                    .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
-            case .automations:
-                AutomationsDashboardView(
-                    viewPreferences: automationViewPreferencesBinding,
-                    onSelectDashboard: selectDashboard,
-                    onOpenSettings: { showSettings = true },
-                    onOpenSession: openAutomationSession
-                )
-                .transition(TronDashboardContentMotion.transition(reduceMotion: reduceMotion))
-            }
+        // Replace the owning dashboard surface atomically. Cross-fading whole
+        // surfaces temporarily composites both top blur and bottom glass chrome,
+        // which presents as bars that vanish when the outgoing view retires.
+        // Each dashboard animates only its content beneath one stable chrome.
+        switch dashboardMode {
+        case .sessions:
+            sessionDashboardScreen
+        case .automations:
+            AutomationsDashboardView(
+                viewPreferences: automationViewPreferencesBinding,
+                onSelectDashboard: selectDashboard,
+                onOpenSettings: { showSettings = true },
+                onOpenSession: openAutomationSession
+            )
         }
-        .animation(
-            TronDashboardContentMotion.animation(reduceMotion: reduceMotion),
-            value: dashboardMode
-        )
     }
 
     private var automationViewPreferencesBinding: Binding<AutomationDashboardViewPreferences> {
@@ -241,7 +238,11 @@ struct SessionShellView: View {
     }
 
     private func selectDashboard(_ mode: DashboardMode) {
-        dashboardMode = mode
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            dashboardMode = mode
+        }
     }
 
     private func openAutomationSession(profileID: String, sessionID: String) {
