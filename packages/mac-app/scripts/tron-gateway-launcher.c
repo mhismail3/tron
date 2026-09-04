@@ -286,23 +286,31 @@ static int required_runtime_alias(const char *root, const char *architecture) {
     return 0;
 }
 
+/* Staging, deployment, and Swift payload admission parse package.json and
+ * require .bin/pi to match declared bin.pi. This minimal launcher does not
+ * duplicate a general JSON parser; it owns the final immutable alias text,
+ * package/node_modules containment, fingerprint, and executable checks. */
 static int required_pi_alias(const char *root, const char *architecture) {
-    const char *expectedTarget = "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js";
-    char directory[PATH_MAX], alias[PATH_MAX], cli[PATH_MAX];
-    char aliasResolved[PATH_MAX], cliResolved[PATH_MAX], target[PATH_MAX];
-    struct stat directoryInfo, aliasInfo, cliInfo, targetInfo;
+    const char *expectedTarget = "../../app/node_modules/.bin/pi";
+    char directory[PATH_MAX], alias[PATH_MAX], cli[PATH_MAX], packageRoot[PATH_MAX], nodeModules[PATH_MAX];
+    char aliasResolved[PATH_MAX], cliResolved[PATH_MAX], packageResolved[PATH_MAX], nodeModulesResolved[PATH_MAX], target[PATH_MAX];
+    struct stat directoryInfo, aliasInfo, cliInfo, packageRootInfo, targetInfo;
     if (snprintf(directory, sizeof(directory), "%s/runtime/bin-%s", root, architecture) >= (int)sizeof(directory) ||
         snprintf(alias, sizeof(alias), "%s/pi", directory) >= (int)sizeof(alias) ||
-        snprintf(cli, sizeof(cli), "%s/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", root) >= (int)sizeof(cli) ||
+        snprintf(cli, sizeof(cli), "%s/app/node_modules/.bin/pi", root) >= (int)sizeof(cli) ||
+        snprintf(packageRoot, sizeof(packageRoot), "%s/app/node_modules/@earendil-works/pi-coding-agent", root) >= (int)sizeof(packageRoot) ||
+        snprintf(nodeModules, sizeof(nodeModules), "%s/app/node_modules", root) >= (int)sizeof(nodeModules) ||
         lstat(directory, &directoryInfo) != 0 || !S_ISDIR(directoryInfo.st_mode) || S_ISLNK(directoryInfo.st_mode) ||
-        lstat(cli, &cliInfo) != 0 || !S_ISREG(cliInfo.st_mode) || S_ISLNK(cliInfo.st_mode) ||
+        lstat(cli, &cliInfo) != 0 || !S_ISLNK(cliInfo.st_mode) ||
+        lstat(packageRoot, &packageRootInfo) != 0 || !S_ISDIR(packageRootInfo.st_mode) || S_ISLNK(packageRootInfo.st_mode) ||
         lstat(alias, &aliasInfo) != 0 || !S_ISLNK(aliasInfo.st_mode)) return -1;
     ssize_t length = readlink(alias, target, sizeof(target) - 1);
     if (length <= 0 || length >= (ssize_t)sizeof(target) - 1) return -1;
     target[length] = '\0';
     if (strcmp(target, expectedTarget) != 0 || realpath(alias, aliasResolved) == NULL ||
-        realpath(cli, cliResolved) == NULL || strcmp(aliasResolved, cliResolved) != 0 ||
-        !path_is_under(root, aliasResolved) || stat(aliasResolved, &targetInfo) != 0 ||
+        realpath(cli, cliResolved) == NULL || realpath(packageRoot, packageResolved) == NULL || realpath(nodeModules, nodeModulesResolved) == NULL || strcmp(aliasResolved, cliResolved) != 0 ||
+        !path_is_under(root, aliasResolved) || !path_is_under(root, nodeModulesResolved) || !path_is_under(nodeModulesResolved, packageResolved) ||
+        !path_is_under(packageResolved, cliResolved) || stat(aliasResolved, &targetInfo) != 0 ||
         !S_ISREG(targetInfo.st_mode) || access(aliasResolved, X_OK) != 0) return -1;
     return 0;
 }

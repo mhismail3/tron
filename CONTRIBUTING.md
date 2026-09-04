@@ -38,6 +38,26 @@ agent execution, session state, inbox, badge, or reminder policy.
    assistants may prepare and validate source or artifacts, but must not run a
    mutating `scripts/tron dev` lifecycle command or submit Gateway
    update/rollback/restart/promote RPCs.
+8. Pi SDK updates are one atomic family change. `packages/gateway/package.json`
+   is the version authority; do not merge independent Pi package updates. Use
+   `cd packages/gateway && npm run update:pi-sdk -- <exact-version>` from a
+   clean manifest/lockfile, then run `npm run check:pi-sdk` and
+   `npm run test:pi-sdk-scripts` and `npm run test:pi-sdk-rollback`. The
+   `pi-sdk-baseline.json` file records only the prior runtime used by the
+   sequential rollback probe; `package.json` remains the current-version
+   authority. The updater performs online metadata preflight, uses the npm
+   paired with the repository-pinned Node runtime, runs normal repository
+   lifecycle scripts with `--engine-strict`, and restores only its owned manifests plus
+   the disposable installed tree with `npm ci` if anything fails. No deployment or
+   Gateway lifecycle command is part of dependency maintenance.
+9. Stop on any meaningful Pi behavior delta. Event ordering, canonical JSONL,
+   compaction/retries, extension UI, projections, settings/auth/models,
+   packaging, or user-visible UI/UX changes must be compared with the approved
+   baseline and explicitly decided; never accept a changed behavior merely
+   because TypeScript or tests compile. The executable payload contract is npm's
+   `app/node_modules/.bin/pi` projection and the exact runtime alias
+   `../../app/node_modules/.bin/pi`; changing it requires the documented one-time
+   manual Mac Release reinstall, not source-only promotion through an old launcher.
 
 ## Fast validation
 

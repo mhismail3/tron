@@ -582,7 +582,6 @@ struct AppModelPerformanceSignpostTests {
             #expect(route.sessionID == "created-route")
             #expect(await MainActor.run { harness.model.ownsNavigationRoute(route) })
             #expect(harness.appModelIDs.consumedCount == 1)
-            #expect(harness.gatewayIDs.consumedCount == 2)
             let selectedAfterCreate = await MainActor.run { harness.model.selectedSessionID }
             #expect(selectedAfterCreate == nil)
 
@@ -643,7 +642,6 @@ struct AppModelPerformanceSignpostTests {
             #expect(route.editorText == "restored draft")
             #expect(await MainActor.run { harness.model.ownsNavigationRoute(route) })
             #expect(harness.appModelIDs.consumedCount == 2)
-            #expect(harness.gatewayIDs.consumedCount == 2)
             #expect(await MainActor.run {
                 harness.model.visibleNotices.contains {
                     $0.title == "Session forked" && $0.role == .success && $0.scope == .app

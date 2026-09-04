@@ -132,8 +132,10 @@ verify_payload() {
       && "$(plist_value minProtocolVersion "$manifest")" == "$APP_MIN_PROTOCOL_VERSION" ]] \
     && pass "$label selected payload protocol matches installed app" \
     || fail "$label selected payload protocol differs from installed app"
-  local pi_cli="${payload}/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
-  [[ -f "$pi_cli" && ! -L "$pi_cli" && -x "$pi_cli" ]] && pass "$label bundled Pi CLI executable" || fail "$label bundled Pi CLI missing/substituted"
+  local pi_cli="${payload}/app/node_modules/.bin/pi" pi_package="${payload}/app/node_modules/@earendil-works/pi-coding-agent"
+  local pi_real="" pi_package_real="" pi_node_modules_real=""
+  pi_real="$(realpath "$pi_cli" 2>/dev/null || true)"; pi_package_real="$(realpath "$pi_package" 2>/dev/null || true)"; pi_node_modules_real="$(realpath "${payload}/app/node_modules" 2>/dev/null || true)"
+  [[ -L "$pi_cli" && ! -L "$pi_package" && "$pi_package_real" == "$pi_node_modules_real"/* && "$pi_real" == "$pi_package_real"/* && -f "$pi_real" && -x "$pi_real" ]] && pass "$label npm Pi projection executable" || fail "$label npm Pi projection missing/substituted"
   local xcodegen="${payload}/runtime/xcodegen/bin/xcodegen"
   local xcodegen_presets="${payload}/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"
   local xcodegen_arches
@@ -194,9 +196,9 @@ verify_payload() {
     else
       pass "$label Node $architecture command alias is cross-architecture; execution deferred"
     fi
-    [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" \
-        && "$(realpath "$pi_alias")" == "$(realpath "$pi_cli")" && -x "$pi_alias" ]] \
-      && pass "$label Pi $architecture command alias resolves to the bundled CLI" \
+    [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/.bin/pi" \
+        && "$(realpath "$pi_alias")" == "$pi_real" && -x "$pi_alias" ]] \
+      && pass "$label Pi $architecture command alias resolves to npm projection" \
       || fail "$label Pi $architecture command alias is invalid"
     if [[ "$architecture" == "$native_arch" ]]; then
       PATH="$(dirname "$pi_alias"):/usr/bin:/bin:/usr/sbin:/sbin" pi --version >/dev/null 2>&1 \

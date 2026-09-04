@@ -35,9 +35,48 @@ advertised minimum or allow a mixed v3/v4 pair merely to bypass that handoff.
 Ordinary same-major updates continue through the owned Gateway update flow.
 
 Tron Gateway is the minimal always-running Mac service behind the Tron iPhone
-app. It embeds `@earendil-works/pi-coding-agent` 0.84.1 through supported SDK
-exports. User-facing copy calls the product and agent **Tron**; source may use
-Pi-specific names only where it identifies the backing SDK contract.
+app. It embeds the pinned Pi SDK through supported SDK exports. User-facing copy
+calls the product and agent **Tron**; source may use Pi-specific names only where
+it identifies the backing SDK contract.
+
+## Pi SDK maintenance
+
+`packages/gateway/package.json` is the sole Pi SDK version authority. The four
+runtime dependencies (`pi-agent-core`, `pi-ai`, `pi-coding-agent`, and `pi-tui`)
+must always be exact, equal versions. The complete seven-package Pi family,
+including `pi-client`, `pi-protocol`, and `pi-telemetry`, must resolve coherently
+in npm's lockfile and installed tree; npm's native nested `pi-coding-agent`
+shrinkwrap entries may omit integrity while retaining their canonical registry
+URL. The executable authority is npm's `node_modules/.bin/pi` projection: it must
+be a symlink to the declared `bin.pi` executable inside `pi-coding-agent`, and
+payload runtime aliases must target `../../app/node_modules/.bin/pi` exactly.
+Check the source state offline with `npm run check:pi-sdk`. Staged production
+payloads intentionally omit development-only `pi-sdk-baseline.json`; validate
+those trees with `node scripts/check-pi-sdk.mjs --runtime-tree <app>`. Run focused script tests with
+`npm run test:pi-sdk-scripts` and the isolated sequential rollback matrix with
+`npm run test:pi-sdk-rollback`. The committed `pi-sdk-baseline.json` records
+only the prior runtime used for rollback verification; `package.json` remains
+current-version authority. Run `node scripts/compare-pi-sdk-graph.mjs BASE HEAD`
+to compare the complete resolved dependency closure reachable from the direct Pi
+family, without treating unrelated lockfile churn as an SDK change. CI runs the
+networked rollback matrix and hosted iOS/Gateway boundary only when that graph
+changes (or when explicitly dispatched).
+
+A maintainer updates the family only with `npm run update:pi-sdk -- <exact-version>`
+from a clean `package.json`/`package-lock.json`. The helper preflights every
+family package through the current npm and prints bounded preflight evidence for
+version, source revision, integrity, and the registry-declared Node engine; it updates all four direct pins
+in one native `npm install --save-exact --engine-strict` operation, validates the
+resulting lockfile, runs `npm audit signatures`, and restores its owned
+manifests plus the disposable installed tree with `npm ci` on failure. Do not submit independent
+Pi package updates, hand-edit lockfiles, run Gateway deployment/lifecycle
+commands, or promote/restart a Gateway as part of this process.
+
+After each candidate update, run the focused SDK checks, Gateway build and
+owning runtime tests, then the full required Gateway/Mac/iOS validation. Treat
+any event, persistence, projection, packaging, UI, or UX difference as a
+behavior-delta stop: do not normalize it silently; compare current and candidate
+behavior and obtain an explicit product decision before continuing.
 
 ## Ownership
 
@@ -368,7 +407,10 @@ to match the selected validated payload exactly and reuse that payload's complet
 shutdown, or fresh native-module signatures; dependency changes require a newly signed app or
 artifact. Artifact mode only promotes a verified candidate, and auto prefers staged artifacts
 before source. A successful RPC acknowledges helper launch, not eventual
-build or promotion success; asynchronous helper failures are reported in update progress. A
+build or promotion success; asynchronous helper failures are reported in update progress. An old
+helper may still stage or copy a candidate, but the new `.bin/pi` runtime contract fails closed
+before a source-only transition can become healthy; the manual reinstall replaces launcher and
+payload together. A
 planned restart publishes a distinct `draining` phase and may wait without a startup deadline
 for already-accepted runs; only after the exact captured old PID/start identity disappears or
 changes does the bounded startup deadline begin. Readiness requires one different PID/start
@@ -448,7 +490,7 @@ new canonical entry in the following microtask before publishing the settled
 snapshot. The binding ledger is capped beyond the maximum mobile transcript page;
 canonical entry IDs and JSONL remain authoritative and unmodified. Active operations also emit a bounded sequenced heartbeat, so
 a long tool with no output remains distinguishable from a broken mobile stream.
-Tool lifecycle state is a disposable overlay, not a second transcript: Pi 0.84.1's ordinary
+Tool lifecycle state is a disposable overlay, not a second transcript: the pinned Pi SDK's ordinary
 `toolResult` persistence is observed at its exact `message_end` handoff (not only through
 `entry_appended`) and verified against canonical ownership in the following microtask, so a
 failed append cannot create a projection gap. The matching runtime call ID is then retired while
@@ -568,7 +610,7 @@ Phase 4C currently exposes a bounded first UI validation pass: one bounded,
 epoch-scoped host/store owner, generic full-frame protocol models, strict admission,
 atomic revisions, stale-callback protection, exact-once disposal/settlement, and
 reload/shutdown/drain/reconnect-safe ownership. The direct harness admits at most one
-non-overlay blocking custom call and uses a real public pi-tui 0.84.1 keybindings
+non-overlay blocking custom call and uses the pinned public pi-tui keybindings
 manager; the production RPC host rejects blocking custom calls before invoking
 extension factories because no native client surface exists for them. Overlay
 custom calls fail closed before factory invocation with one bounded
@@ -617,7 +659,7 @@ For newly admitted steering/follow-up work, the returned prompt operation ID is 
 clients can therefore settle one optimistic submission without content-based queue guessing.
 A Gateway advertising
 `queue-management.v1` includes both `queueRevision` and `queuedItems` in every authoritative
-session snapshot. The pinned Pi 0.84.1 queue itself still exposes string arrays rather than
+session snapshot. The pinned Pi queue itself still exposes string arrays rather than
 queue records. RuntimeSlot therefore retains the exact admission ID before accepting another
 queued mutation, publishes it from the same serialized lane, and treats later text arrays only
 as bounded live-runtime delivery evidence. A Gateway process restart does not replay or claim
@@ -633,7 +675,7 @@ moves an entry into the corresponding delivery stage. Attachments remain bound t
 their original queued identity and cannot be fabricated by clients. Queue snapshots
 are bounded to 32 entries, 64 KiB per display message, and 256 KiB total.
 Prompt RPC admission follows the pinned runtime's preflight callback as its sole outcome.
-Because Pi 0.84.1 can clear its streaming flag before the final `agent_settled` choreography reaches
+Because the pinned Pi SDK can clear its streaming flag before the final `agent_settled` choreography reaches
 the Gateway, ordinary admission additionally waits behind the existing sequenced foreground operation
 owner whenever runtime streaming is false but settlement/compaction/retry state is still active. The
 Gateway re-evaluates delivery behavior after that transition and never invokes an ordinary Agent prompt

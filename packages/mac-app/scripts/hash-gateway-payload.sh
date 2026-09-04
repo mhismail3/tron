@@ -26,8 +26,13 @@ done
 [[ -x "$ROOT/runtime/xcodegen/bin/xcodegen" ]] || {
     echo "required payload XcodeGen is not executable" >&2; exit 2;
 }
-PI_CLI="$ROOT/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
-[[ -f "$PI_CLI" && ! -L "$PI_CLI" && -x "$PI_CLI" ]] || { echo "required payload Pi CLI is invalid" >&2; exit 2; }
+PI_CLI="$ROOT/app/node_modules/.bin/pi"
+PI_PACKAGE="$ROOT/app/node_modules/@earendil-works/pi-coding-agent"
+[[ -L "$PI_CLI" && ! -L "$PI_PACKAGE" ]] || { echo "required npm Pi projection or package root is missing or substituted" >&2; exit 2; }
+PI_REAL="$(realpath "$PI_CLI")"; PI_PACKAGE_REAL="$(realpath "$PI_PACKAGE")"; PI_NODE_MODULES_REAL="$(realpath "$ROOT/app/node_modules")"
+[[ "$PI_PACKAGE_REAL" == "$PI_NODE_MODULES_REAL"/* && "$PI_REAL" == "$PI_PACKAGE_REAL"/* && -f "$PI_REAL" && -x "$PI_REAL" ]] || {
+    echo "required npm Pi projection or package root escapes app/node_modules" >&2; exit 2;
+}
 for architecture in arm64 x64; do
     directory="$ROOT/runtime/bin-$architecture"
     alias="$directory/node"
@@ -37,8 +42,8 @@ for architecture in arm64 x64; do
         && "$(realpath "$alias")" == "$(realpath "$ROOT/runtime/node-$architecture")" ]] || {
         echo "required runtime Node alias is invalid: $architecture" >&2; exit 2;
     }
-    [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" \
-        && "$(realpath "$pi_alias")" == "$(realpath "$PI_CLI")" ]] || {
+    [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/.bin/pi" \
+        && "$(realpath "$pi_alias")" == "$PI_REAL" ]] || {
         echo "required runtime Pi alias is invalid: $architecture" >&2; exit 2;
     }
 done

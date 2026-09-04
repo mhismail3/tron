@@ -229,7 +229,7 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     notifications.dispose();
     await automations.dispose();
     await sessions.dispose();
-    // pi-coding-agent 0.84.1 exposes no disposal API on the retained
+    // The retained pi-coding-agent session exposes no disposal API on the
     // administration resource loader/model runtime. Admission closure and exact
     // operation settlement above are therefore its truthful teardown boundary.
     void administrationServices;

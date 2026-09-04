@@ -242,6 +242,7 @@ describe("SemanticUIBroker", () => {
     const broker = brokerWith(() => {});
     const context = broker.context();
     expect(context.theme).toBeDefined();
+    expect(context.theme.fg("searchMatchText", "Ready")).toBe(context.theme.fg("text", "Ready"));
     context.setStatus("theme", context.theme.fg("dim", "Ready"));
     expect(broker.state().semanticState.statuses.theme).toBe("Ready");
   });

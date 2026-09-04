@@ -10,6 +10,8 @@ import Darwin
 struct GatewayPayloadStore {
     static let schema = 1
     static let maxManifestBytes = 64 * 1024
+    static let maxPackageJSONBytes = 64 * 1024
+    static let maxPackageLockBytes = 16 * 1024 * 1024
     static let maxPushConfigurationBytes = 4 * 1024
     static let channelComponentLimit = 64
     static let versionComponentLimit = 128
@@ -18,8 +20,8 @@ struct GatewayPayloadStore {
     static let sourceRevisionByteLimit = 255
     static let runtimeEpochComponentLimit = 127
     static let fingerprintCoverage = "app/** and runtime/** regular files"
-    static let piCLIRelativePath = "app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
-    static let piAliasTarget = "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+    static let piCLIRelativePath = "app/node_modules/.bin/pi"
+    static let piAliasTarget = "../../app/node_modules/.bin/pi"
 
     let home: URL
     let channel: String
@@ -263,6 +265,15 @@ enum GatewayPayloadValidator {
                   usableFile(url, minimumBytes: minimumBytes, fileManager: fileManager) else {
                 return .failure(.incomplete(relativePath))
             }
+            if relativePath == "app/package.json" || relativePath == "app/package-lock.json" {
+                var info = stat()
+                let maximum = relativePath == "app/package.json"
+                    ? Int64(GatewayPayloadStore.maxPackageJSONBytes)
+                    : Int64(GatewayPayloadStore.maxPackageLockBytes)
+                guard stat(url.path, &info) == 0, info.st_size <= maximum else {
+                    return .failure(.tooLarge(relativePath))
+                }
+            }
         }
         guard let dependencies = containedRegularURL("app/node_modules", under: root, directory: true),
               isDirectory(dependencies, fileManager: fileManager) else {
@@ -417,11 +428,16 @@ enum GatewayPayloadValidator {
         fileManager: FileManager
     ) -> Bool {
         let cli = root.appendingPathComponent(GatewayPayloadStore.piCLIRelativePath, isDirectory: false)
+        let nodeModules = root.appendingPathComponent("app/node_modules", isDirectory: true)
+        let packageRoot = nodeModules.appendingPathComponent("@earendil-works/pi-coding-agent", isDirectory: true)
         let alias = root.appendingPathComponent("runtime/bin-\(architecture)/pi", isDirectory: false)
         var cliInfo = stat()
+        var packageInfo = stat()
         var aliasInfo = stat()
         guard lstat(cli.path, &cliInfo) == 0,
-              (cliInfo.st_mode & S_IFMT) == S_IFREG,
+              (cliInfo.st_mode & S_IFMT) == S_IFLNK,
+              lstat(packageRoot.path, &packageInfo) == 0,
+              (packageInfo.st_mode & S_IFMT) == S_IFDIR,
               fileManager.isExecutableFile(atPath: cli.path),
               lstat(alias.path, &aliasInfo) == 0,
               (aliasInfo.st_mode & S_IFMT) == S_IFLNK,
@@ -429,7 +445,27 @@ enum GatewayPayloadValidator {
               target == GatewayPayloadStore.piAliasTarget else { return false }
         let resolvedAlias = alias.resolvingSymlinksInPath().standardizedFileURL
         let resolvedCLI = cli.resolvingSymlinksInPath().standardizedFileURL
-        return resolvedAlias == resolvedCLI && isContained(resolvedAlias, under: root)
+        let resolvedPackage = packageRoot.resolvingSymlinksInPath().standardizedFileURL
+        let resolvedNodeModules = nodeModules.resolvingSymlinksInPath().standardizedFileURL
+        guard isContained(resolvedNodeModules, under: root), isContained(resolvedPackage, under: resolvedNodeModules),
+              let packageData = try? Data(contentsOf: packageRoot.appendingPathComponent("package.json")),
+              packageData.count <= GatewayPayloadStore.maxPackageJSONBytes,
+              let packageObject = try? JSONSerialization.jsonObject(with: packageData) as? [String: Any],
+              let bin = packageObject["bin"] as? [String: Any],
+              let declared = bin["pi"] as? String,
+              !declared.isEmpty, !declared.hasPrefix("/"),
+              !declared.split(whereSeparator: { $0 == "/" || $0 == "\\" }).contains(".."),
+              let projectionTarget = try? fileManager.destinationOfSymbolicLink(atPath: cli.path),
+              projectionTarget == "../@earendil-works/pi-coding-agent/\(declared)" else { return false }
+        let resolvedDeclared = packageRoot.appendingPathComponent(declared).resolvingSymlinksInPath().standardizedFileURL
+        var targetInfo = stat()
+        guard resolvedAlias == resolvedCLI, isContained(resolvedAlias, under: root),
+              isContained(resolvedCLI, under: resolvedPackage),
+              resolvedDeclared == resolvedCLI,
+              stat(resolvedCLI.path, &targetInfo) == 0,
+              (targetInfo.st_mode & S_IFMT) == S_IFREG,
+              fileManager.isExecutableFile(atPath: resolvedCLI.path) else { return false }
+        return true
     }
 
     private static func validatePushConfiguration(_ url: URL, channel: String, fileManager: FileManager) -> Bool {

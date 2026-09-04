@@ -1,0 +1,4 @@
+{"type":"session","version":1,"id":"fixture-v1","timestamp":"2024-01-01T00:00:00.000Z","cwd":"/tmp/pi-fixture"}
+{"type":"message","message":{"role":"user","content":"fixture user","timestamp":1}}
+{"type":"message","message":{"role":"hookMessage","customType":"fixture-hook","content":"fixture hook","display":true}}
+{"type":"compaction","summary":"fixture summary","firstKeptEntryIndex":1,"tokensBefore":2}

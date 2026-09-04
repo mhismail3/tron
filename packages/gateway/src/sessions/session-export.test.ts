@@ -1,8 +1,8 @@
-import { appendFile, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, open, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { copyCanonicalSessionCut, writeSessionProjectionCut } from "./session-export.js";
+import { copyCanonicalSessionCut, resolvePiCliExecutable, validatePiCliPackageRoot, writeSessionProjectionCut } from "./session-export.js";
 
 const roots: string[] = [];
 
@@ -17,6 +17,24 @@ afterEach(async () => {
 });
 
 describe("session export cuts", () => {
+  it("resolves the declared npm Pi executable inside its package", async () => {
+    const executable = resolvePiCliExecutable();
+    expect(executable).toContain("node_modules/@earendil-works/pi-coding-agent/");
+    expect(executable).not.toContain("node_modules/.bin/");
+  });
+
+  it("rejects a pi-coding-agent package root redirected outside Gateway node_modules", async () => {
+    const directory = await root("pi-package-escape");
+    const nodeModules = join(directory, "node_modules");
+    const expectedParent = join(nodeModules, "@earendil-works");
+    const outside = join(directory, "outside-pi-coding-agent");
+    await mkdir(expectedParent, { recursive: true });
+    await mkdir(outside);
+    await symlink(outside, join(expectedParent, "pi-coding-agent"));
+
+    expect(() => validatePiCliPackageRoot(outside, nodeModules)).toThrow(/package root is substituted|outside/u);
+  });
+
   it("copies only the descriptor length captured before later canonical appends", async () => {
     const directory = await root("prefix");
     const source = join(directory, "source.jsonl");

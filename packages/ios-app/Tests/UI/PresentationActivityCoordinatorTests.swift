@@ -30,9 +30,10 @@ struct PresentationActivityCoordinatorTests {
         try await waitForSurfaceCount(1, coordinator: coordinator)
         state.sheetPresented = true
         try await waitForSurfaceCount(2, coordinator: coordinator)
+        try await waitForPresentedSurface(from: controller)
         state.sheetPresented = false
         await Task.yield()
-        controller.presentedViewController?.dismiss(animated: false)
+        await dismissPresentedSurface(from: controller)
         try await waitForSurfaceCount(1, coordinator: coordinator)
 
         state.systemPresented = true
@@ -235,6 +236,20 @@ struct PresentationActivityCoordinatorTests {
         #expect(active == PresentationActivityTaskID(source: "load", presentationActive: true))
     }
 
+    private func waitForPresentedSurface(from controller: UIViewController) async throws {
+        for _ in 0..<200 {
+            if controller.presentedViewController != nil { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw PresentationActivityHostedError.presentationTimedOut
+    }
+
+    private func dismissPresentedSurface(from controller: UIViewController) async {
+        await withCheckedContinuation { continuation in
+            controller.dismiss(animated: false) { continuation.resume() }
+        }
+    }
+
     private func waitForSurfaceCount(
         _ expected: Int,
         coordinator: PresentationActivityCoordinator
@@ -289,5 +304,6 @@ private struct PresentationActivityHostedView: View {
 }
 
 private enum PresentationActivityHostedError: Error {
+    case presentationTimedOut
     case timedOut(expected: Int, actual: Int)
 }

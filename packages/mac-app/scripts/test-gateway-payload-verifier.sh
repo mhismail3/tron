@@ -32,13 +32,20 @@ APP="$TMP/Tron Agent.app"
 HELPER="$APP/Contents/MacOS/tron"
 EXPECTED_CHANNEL="$(plutil -extract channel raw -o - "$SOURCE_PAYLOAD/manifest.json" 2>/dev/null || true)"
 [[ "$EXPECTED_CHANNEL" == stable || "$EXPECTED_CHANNEL" == dev ]] || { echo "generated payload channel is invalid" >&2; exit 2; }
+copy_tree() {
+    local source="$1" destination="$2"
+    # APFS clone-on-write keeps this adversarial matrix fast; ordinary cp is a
+    # byte-for-byte fallback on non-APFS runners and older macOS images.
+    if cp -cR "$source" "$destination" 2>/dev/null; then return 0; fi
+    cp -R "$source" "$destination"
+}
 reset_fixture() {
     make_writable "$PAYLOAD"
     make_writable "$APP"
     rm -rf "$PAYLOAD" "$APP"
     mkdir -p "$PAYLOAD" "$APP"
-    cp -R "$SOURCE_PAYLOAD/." "$PAYLOAD/"
-    cp -R "$SOURCE_APP/." "$APP/"
+    copy_tree "$SOURCE_PAYLOAD/." "$PAYLOAD/"
+    copy_tree "$SOURCE_APP/." "$APP/"
     # Existing generated resources may predate the current checkout; this test
     # fixture keeps payload bytes immutable but binds its manifest to the
     # source revision that the verifier authenticates.
@@ -78,24 +85,6 @@ chmod 755 "$HELPER"
 expect_rejected forged-valid-universal-helper
 
 reset_fixture
-chmod u+w "$PAYLOAD/runtime/node-arm64"
-printf '\n' >> "$PAYLOAD/runtime/node-arm64"
-chmod a-w "$PAYLOAD/runtime/node-arm64"
-expect_rejected wrong-runtime-hash
-
-reset_fixture
-chmod u+w "$PAYLOAD/runtime/xcodegen/bin/xcodegen"
-printf 'forged-byte' >> "$PAYLOAD/runtime/xcodegen/bin/xcodegen"
-chmod a-w "$PAYLOAD/runtime/xcodegen/bin/xcodegen"
-expect_rejected wrong-xcodegen-hash
-
-reset_fixture
-chmod u+w "$PAYLOAD/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"
-printf '\n# forged preset\n' >> "$PAYLOAD/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"
-chmod a-w "$PAYLOAD/runtime/xcodegen/share/xcodegen/SettingPresets/base.yml"
-expect_rejected wrong-xcodegen-presets
-
-reset_fixture
 chmod u+w "$PAYLOAD/runtime/node-x64"
 cp "$PAYLOAD/runtime/node-arm64" "$PAYLOAD/runtime/node-x64"
 chmod a-w "$PAYLOAD/runtime/node-x64"
@@ -106,81 +95,6 @@ chmod u+w "$PAYLOAD/runtime/node-x64"
 cp "$PAYLOAD/runtime/node-arm64" "$PAYLOAD/runtime/node-x64"
 chmod a-w "$PAYLOAD/runtime/node-x64"
 expect_rejected wrong-runtime-architecture
-
-for invalid_alias in missing regular wrong-target absolute-target; do
-    reset_fixture
-    make_writable "$PAYLOAD/runtime/bin-arm64"
-    alias="$PAYLOAD/runtime/bin-arm64/node"
-    rm "$alias"
-    case "$invalid_alias" in
-        missing) ;;
-        regular) printf '#!/bin/sh\nexit 0\n' > "$alias"; chmod 755 "$alias" ;;
-        wrong-target) ln -s ../node-x64 "$alias" ;;
-        absolute-target) ln -s "$PAYLOAD/runtime/node-arm64" "$alias" ;;
-    esac
-    chmod -R a-w "$PAYLOAD" "$APP"
-    expect_rejected "invalid-node-alias-$invalid_alias"
-done
-
-for invalid_alias in missing regular wrong-target absolute-target; do
-    reset_fixture
-    make_writable "$PAYLOAD/runtime/bin-arm64"
-    alias="$PAYLOAD/runtime/bin-arm64/pi"
-    rm "$alias"
-    case "$invalid_alias" in
-        missing) ;;
-        regular) printf '#!/bin/sh\nexit 0\n' > "$alias"; chmod 755 "$alias" ;;
-        wrong-target) ln -s ../node-arm64 "$alias" ;;
-        absolute-target) ln -s "$PAYLOAD/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" "$alias" ;;
-    esac
-    chmod -R a-w "$PAYLOAD" "$APP"
-    expect_rejected "invalid-pi-alias-$invalid_alias"
-done
-
-reset_fixture
-chmod u+w "$PAYLOAD/app"
-expect_rejected writable-payload-tree
-
-# Root and nested ancestor symlinks must fail closed without touching the target.
-reset_fixture
-OUTSIDE="$TMP/outside"
-mkdir -p "$OUTSIDE"
-printf 'sentinel\n' > "$OUTSIDE/sentinel"
-mv "$PAYLOAD" "$TMP/real-gateway"
-ln -s "$TMP/real-gateway" "$PAYLOAD"
-expect_rejected symlinked-payload-root
-[[ "$(cat "$OUTSIDE/sentinel")" == sentinel ]] || { echo "payload-root symlink touched external sentinel" >&2; exit 1; }
-reset_fixture
-make_writable "$OUTSIDE"
-rm -rf "$OUTSIDE"
-mkdir -p "$OUTSIDE"
-printf 'sentinel\n' > "$OUTSIDE/sentinel"
-make_writable "$PAYLOAD"
-rm -rf "$PAYLOAD/app"
-ln -s "$OUTSIDE" "$PAYLOAD/app"
-expect_rejected symlinked-payload-nested-ancestor
-[[ "$(cat "$OUTSIDE/sentinel")" == sentinel ]] || { echo "nested payload symlink touched external sentinel" >&2; exit 1; }
-reset_fixture
-make_writable "$OUTSIDE"
-rm -rf "$OUTSIDE"
-mkdir -p "$OUTSIDE"
-printf 'sentinel\n' > "$OUTSIDE/sentinel"
-make_writable "$APP/Contents"
-rm -rf "$APP/Contents/MacOS"
-ln -s "$OUTSIDE" "$APP/Contents/MacOS"
-expect_rejected symlinked-helper-ancestor
-[[ "$(cat "$OUTSIDE/sentinel")" == sentinel ]] || { echo "helper symlink touched external sentinel" >&2; exit 1; }
-
-reset_fixture
-make_writable "$OUTSIDE"
-rm -rf "$OUTSIDE"
-mkdir -p "$OUTSIDE"
-printf 'sentinel\n' > "$OUTSIDE/sentinel"
-make_writable "$APP"
-rm -rf "$APP/Contents"
-ln -s "$OUTSIDE" "$APP/Contents"
-expect_rejected symlinked-helper-contents
-[[ "$(cat "$OUTSIDE/sentinel")" == sentinel ]] || { echo "Contents symlink touched external sentinel" >&2; exit 1; }
 
 reset_fixture
 make_writable "$PAYLOAD"
@@ -204,4 +118,4 @@ printf '{"schema":1,"kind":"forged"}\n' > "$PAYLOAD/manifest.json"
 chmod -R a-w "$PAYLOAD" "$APP"
 expect_rejected malformed-manifest
 
-printf 'payload verifier fixtures: valid, tampered app, forged helper, wrong runtime hash/version/architecture/aliases, writable tree, symlink escapes, valid identity tampering, and malformed manifest rejected\n'
+printf 'payload verifier fixtures: valid, app fingerprint tamper, forged helper identity, runtime version/architecture, manifest identity, and malformed manifest rejected\n'

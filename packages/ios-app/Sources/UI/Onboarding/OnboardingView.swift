@@ -180,11 +180,7 @@ struct OnboardingView: View {
                 applyDetent()
                 return
             }
-            #if HOSTED_TEST
-            selectedWorkspace = ProcessInfo.processInfo.environment["TRON_E2E_WORKSPACE"] ?? model.defaultWorkspace ?? ""
-            #else
             selectedWorkspace = model.defaultWorkspace ?? ""
-            #endif
             if isPaired && !model.setupComplete {
                 step = .workspace
                 if !selectedWorkspace.isEmpty { await inspectTrust() }

@@ -112,8 +112,11 @@ verify_app_bundle() {
     [[ "$actual_fingerprint" == "$expected_fingerprint" ]] \
         || die "Gateway payload fingerprint does not match its authoritative manifest"
 
-    pi_cli="$root/$gateway_root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
-    [[ -f "$pi_cli" && ! -L "$pi_cli" && -x "$pi_cli" ]] || die "Gateway payload Pi CLI is invalid"
+    pi_cli="$root/$gateway_root/app/node_modules/.bin/pi"
+    pi_package="$root/$gateway_root/app/node_modules/@earendil-works/pi-coding-agent"
+    [[ -L "$pi_cli" && ! -L "$pi_package" ]] || die "Gateway payload npm Pi projection or package root is invalid"
+    pi_real="$(realpath "$pi_cli")"; pi_package_real="$(realpath "$pi_package")"; pi_node_modules_real="$(realpath "$root/$gateway_root/app/node_modules")"
+    [[ "$pi_package_real" == "$pi_node_modules_real"/* && "$pi_real" == "$pi_package_real"/* && -f "$pi_real" && -x "$pi_real" ]] || die "Gateway payload npm Pi projection or package root escapes app/node_modules"
     local xcodegen="$root/$gateway_root/runtime/xcodegen/bin/xcodegen"
     local xcodegen_arches
     [[ -f "$xcodegen" && ! -L "$xcodegen" && -x "$xcodegen" ]] || die "Gateway payload XcodeGen is invalid"
@@ -150,7 +153,7 @@ verify_app_bundle() {
             && "$(realpath "$alias")" == "$(realpath "$runtime")" && -x "$alias" ]] \
             || die "Node $runtime_arch command alias is invalid"
         pi_alias="$root/$gateway_root/runtime/bin-$runtime_arch/pi"
-        [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" \
+        [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/.bin/pi" \
             && "$(realpath "$pi_alias")" == "$(realpath "$pi_cli")" && -x "$pi_alias" ]] \
             || die "Pi $runtime_arch command alias is invalid"
     done

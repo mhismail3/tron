@@ -3,6 +3,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -11,11 +12,35 @@ concurrency:
 jobs:
   policy:
     runs-on: ubuntu-latest
+    outputs:
+      pi-sdk-graph-changed: ${{ steps.pi-graph.outputs.changed }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
+      - name: Detect Pi SDK graph change
+        id: pi-graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == workflow_dispatch ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "${{ github.event_name }}" == pull_request ]]; then
+            base='${{ github.event.pull_request.base.sha }}'
+          else
+            base='${{ github.event.before }}'
+          fi
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git cat-file -e "$base^{commit}" 2>/dev/null || git fetch --no-tags --depth=1 origin "$base"
+          changed="$(node packages/gateway/scripts/compare-pi-sdk-graph.mjs "$base" HEAD "$GITHUB_WORKSPACE" | python3 -c 'import json,sys; print(str(json.load(sys.stdin)["changed"]).lower())')"
+          [[ "$changed" == true || "$changed" == false ]] || { echo "invalid graph comparison result" >&2; exit 1; }
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
       - run: scripts/personal-info-guard.sh
       - run: scripts/check-agent-policy.sh
       - run: scripts/tron version check
@@ -32,9 +57,13 @@ jobs:
             scripts/ios-test-lock.py \
             scripts/ios-test-process.py \
             scripts/ios-test-simulator.py \
+            scripts/patch-ios-gateway-e2e-xctestrun.py \
+            scripts/test-ios-gateway-e2e-xctestrun.py \
             scripts/test-ios-test-infrastructure.py
       - name: Test iOS runner infrastructure without hardware
-        run: python3 scripts/test-ios-test-infrastructure.py
+        run: |
+          python3 scripts/test-ios-test-infrastructure.py
+          python3 scripts/test-ios-gateway-e2e-xctestrun.py
       - run: python3 scripts/check-documentation-policy.py
       - name: Check shell syntax
         run: |
@@ -54,6 +83,9 @@ jobs:
             packages/mac-app/scripts/verify-gateway-payload.sh \
             packages/mac-app/scripts/test-gateway-payload-verifier.sh \
             packages/mac-app/scripts/test-tron-gateway-launcher.sh \
+            packages/mac-app/scripts/test-signed-pi-payload-smoke.sh \
+            packages/mac-app/scripts/test-update-payload-fingerprint.sh \
+            packages/mac-app/scripts/test-push-product-config.sh \
             packages/mac-app/scripts/package-dmg.sh \
             packages/ios-app/scripts/test-source-policy.sh \
             packages/ios-app/scripts/test-build-matrix-policy.sh \
@@ -68,6 +100,7 @@ jobs:
       - run: scripts/ios-release-toolchain-doctor.sh --self-test
 
   gateway:
+    needs: policy
     runs-on: macos-15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -78,9 +111,14 @@ jobs:
           cache-dependency-path: packages/gateway/package-lock.json
       - run: npm ci
         working-directory: packages/gateway
+      - run: npm run check:pi-sdk
+        working-directory: packages/gateway
       - run: npm run build
         working-directory: packages/gateway
       - run: npm test
+        working-directory: packages/gateway
+      - run: npm run test:pi-sdk-rollback
+        if: needs.policy.outputs.pi-sdk-graph-changed == 'true'
         working-directory: packages/gateway
       - run: npm audit --omit=dev
         working-directory: packages/gateway
@@ -145,6 +183,53 @@ jobs:
         if: always()
         run: scripts/ios-ci-test.sh cleanup
 
+  pi-sdk-e2e:
+    needs: policy
+    if: needs.policy.outputs.pi-sdk-graph-changed == 'true'
+    runs-on: macos-26
+    env:
+      TRON_IOS_E2E_STATE_DIR: ${{ runner.temp }}/tron-ios-gateway-e2e
+      TRON_IOS_E2E_DERIVED_DATA: ${{ runner.temp }}/tron-ios-gateway-e2e-derived
+      TRON_IOS_TEST_STATE_DIR: ${{ runner.temp }}/tron-ios-test-state
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: packages/gateway/package-lock.json
+      - name: Resolve canonical iOS Xcode
+        id: pi-ios-toolchain
+        run: |
+          source config/ci-toolchain.env
+          echo "xcode=$TRON_CI_XCODE_VERSION" >> "$GITHUB_OUTPUT"
+      - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: ${{ steps.pi-ios-toolchain.outputs.xcode }}
+      - name: Install canonical iOS E2E tools
+        run: scripts/install-ci-tools.sh xcodegen
+      - name: Verify canonical iOS E2E toolchain
+        run: scripts/verify-ci-toolchain.sh node ios xcodegen
+      - name: Run upgrade-only hosted iOS Gateway boundary
+        run: |
+          set -euo pipefail
+          trap 'scripts/ios-gateway-e2e-test stop || true' EXIT
+          scripts/ios-gateway-e2e-test all
+      - name: Upload Pi boundary evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pi-sdk-boundary-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.TRON_IOS_E2E_STATE_DIR }}/attempts
+            ${{ env.TRON_IOS_E2E_STATE_DIR }}/results
+            ${{ env.TRON_IOS_E2E_STATE_DIR }}/gateway.log
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Remove only Pi boundary owned state
+        if: always()
+        run: scripts/ios-gateway-e2e-test clean
+
   mac:
     runs-on: macos-26
     steps:
@@ -167,6 +252,8 @@ jobs:
       - run: packages/mac-app/scripts/bundle-gateway.sh
       - run: packages/mac-app/scripts/test-tron-gateway-launcher.sh
       - run: packages/mac-app/scripts/test-gateway-payload-verifier.sh
+      - run: packages/mac-app/scripts/test-update-payload-fingerprint.sh
+      - run: packages/mac-app/scripts/test-push-product-config.sh
       - run: scripts/tron mac generate
       - name: Build Mac test products
         working-directory: packages/mac-app
@@ -174,6 +261,8 @@ jobs:
           xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
             -destination 'platform=macOS,arch=arm64' -configuration Debug \
             -derivedDataPath build/ci-derived-data
+      - name: Smoke test signed staged Pi payload
+        run: packages/mac-app/scripts/test-signed-pi-payload-smoke.sh packages/mac-app/build/ci-derived-data/Build/Products/Debug/TronMac.app
       - name: Run Mac tests without rebuilding
         working-directory: packages/mac-app
         run: |

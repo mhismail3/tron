@@ -5,6 +5,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readFileSync,
   readlinkSync,
   realpathSync,
   rmSync,
@@ -12,8 +13,10 @@ import {
   unlinkSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
 
 /** Ensure the Darwin node-pty helper remains executable after payload extraction. */
 export function ensureNodePtyHelper(platform = process.platform, packageRoot = undefined) {
@@ -66,11 +69,45 @@ export function ensurePayloadNodeAliases(platform = process.platform, appRoot = 
     if (!info?.isFile() || info.isSymbolicLink()) throw new Error(`payload Node runtime is missing or substituted: ${architecture}`);
     accessSync(path, constants.X_OK);
   }
-  const piCli = join(app, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
+  const nodeModulesRoot = join(app, "node_modules");
+  const packageRoot = join(nodeModulesRoot, "@earendil-works", "pi-coding-agent");
+  const piCli = join(nodeModulesRoot, ".bin", "pi");
+  const nodeModulesInfo = pathInfo(nodeModulesRoot);
+  const packageRootInfo = pathInfo(packageRoot);
   const piCliInfo = pathInfo(piCli);
-  if (!piCliInfo?.isFile() || piCliInfo.isSymbolicLink()) throw new Error("payload Pi CLI is missing or substituted");
+  if (!nodeModulesInfo?.isDirectory() || nodeModulesInfo.isSymbolicLink()
+    || !packageRootInfo?.isDirectory() || packageRootInfo.isSymbolicLink()
+    || !piCliInfo?.isSymbolicLink()) throw new Error("payload npm Pi projection or package root is missing or substituted");
+  let declaredBin;
+  try {
+    const packageJsonPath = join(packageRoot, "package.json");
+    const packageJsonInfo = pathInfo(packageJsonPath);
+    if (!packageJsonInfo?.isFile() || packageJsonInfo.isSymbolicLink() || packageJsonInfo.size > PACKAGE_JSON_MAX_BYTES) {
+      throw new Error("package metadata is missing, substituted, or oversized");
+    }
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+    declaredBin = typeof packageJson.bin === "object" && packageJson.bin !== null ? packageJson.bin.pi : undefined;
+  } catch {
+    throw new Error("payload pi-coding-agent package metadata is missing or invalid");
+  }
+  if (typeof declaredBin !== "string" || !declaredBin || isAbsolute(declaredBin) || declaredBin.split(/[\\/]/u).includes("..")) {
+    throw new Error("payload pi-coding-agent bin.pi is unsafe or missing");
+  }
+  const declaredPath = resolve(packageRoot, declaredBin);
+  const appReal = realpathSync(app);
+  const nodeModulesReal = realpathSync(nodeModulesRoot);
+  const packageRootReal = realpathSync(packageRoot);
+  const piCliReal = realpathSync(piCli);
+  if (!nodeModulesReal.startsWith(`${appReal}/`) || !packageRootReal.startsWith(`${nodeModulesReal}/`)
+    || !piCliReal.startsWith(`${packageRootReal}/`)) throw new Error("payload npm Pi projection or package root escapes app/node_modules");
+  const declaredReal = realpathSync(declaredPath);
+  const declaredInfo = lstatSync(declaredPath);
+  if (!declaredInfo.isFile() || declaredInfo.isSymbolicLink() || readlinkSync(piCli) !== relative(dirname(piCli), declaredPath)
+    || realpathSync(declaredPath) !== piCliReal) {
+    throw new Error("payload npm Pi projection disagrees with pi-coding-agent bin.pi");
+  }
   accessSync(piCli, constants.X_OK);
-  const piTarget = "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js";
+  const piTarget = "../../app/node_modules/.bin/pi";
 
   for (const { architecture, path: runtime } of runtimes) {
     const aliasDirectory = join(runtimeRoot, `bin-${architecture}`);
@@ -83,7 +120,7 @@ export function ensurePayloadNodeAliases(platform = process.platform, appRoot = 
     if (readlinkSync(nodeAlias) !== `../node-${architecture}` || realpathSync(nodeAlias) !== realpathSync(runtime)) {
       throw new Error(`payload Node alias validation failed: ${architecture}`);
     }
-    if (readlinkSync(piAlias) !== piTarget || realpathSync(piAlias) !== realpathSync(piCli)) {
+    if (readlinkSync(piAlias) !== piTarget || realpathSync(piAlias) !== piCliReal || declaredReal !== piCliReal) {
       throw new Error(`payload Pi alias validation failed: ${architecture}`);
     }
   }

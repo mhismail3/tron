@@ -121,7 +121,7 @@ private final class TestWebSocketTask: GatewayWebSocketTransport.WebSocketTask, 
 struct ServerPingDecodeTests {
     @Test("matching system.info response projects the gateway version")
     func matchingCanonicalResponseProjectsVersion() {
-        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine","gatewayChannel":"stable","machineName":"Mac","piVersion":"0.84.1","capabilities":[]}}"#
+        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":4,"minProtocolVersion":4,"machineId":"machine","gatewayChannel":"stable","machineName":"Mac","piVersion":"fixture-version","capabilities":[]}}"#
         #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(ServerPingInfo(version: "0.1.0", gatewayChannel: "stable")))
     }
 

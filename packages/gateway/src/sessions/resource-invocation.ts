@@ -64,7 +64,7 @@ export function admitResourceInvocation(value: unknown): ResourceInvocation {
   return { source, name: source === "skill" ? name.slice("skill:".length) : name, arguments: argumentsText };
 }
 
-/** Pi 0.84.1's extension/skill command delimiter is literal ASCII space. */
+/** The Pi extension/skill command delimiter is literal ASCII space. */
 export function parsePiLiteralCommand(text: string): { name: string; arguments: string } | undefined {
   if (!text.startsWith("/")) return undefined;
   const rest = text.slice(1);

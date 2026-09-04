@@ -25,9 +25,11 @@ make_payload() {
   printf '%s\n' 'TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.test' > "$root/app/PushService.xcconfig"
   printf '%s\n' '// fixture helper' > "$root/app/scripts/ensure-node-pty-helper.mjs"
   printf '%s\n' '// fixture updater' > "$root/app/scripts/gateway-payload-deploy.mjs"
-  mkdir -p "$root/app/node_modules/@earendil-works/pi-coding-agent/dist"
+  mkdir -p "$root/app/node_modules/@earendil-works/pi-coding-agent/dist" "$root/app/node_modules/.bin"
+  printf '%s\n' '{"name":"@earendil-works/pi-coding-agent","bin":{"pi":"dist/cli.js"}}' > "$root/app/node_modules/@earendil-works/pi-coding-agent/package.json"
   printf '%s\n' '#!/usr/bin/env node' > "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   chmod 755 "$root/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+  ln -s ../@earendil-works/pi-coding-agent/dist/cli.js "$root/app/node_modules/.bin/pi"
   printf '%s\n' '#!/bin/sh' '[ -n "$TRON_GATEWAY_BUNDLED_PAYLOAD_ROOT" ] || exit 9' 'printf "%s\\n" "$TRON_GATEWAY_PAYLOAD_ROOT"' 'exit 0' > "$root/runtime/node-arm64"
   # Keep each fake runtime over the canonical minimum size without embedding
   # NUL bytes that would make the shell fixture itself invalid.
@@ -41,8 +43,8 @@ make_payload() {
   mkdir -p "$root/runtime/bin-arm64" "$root/runtime/bin-x64"
   ln -s ../node-arm64 "$root/runtime/bin-arm64/node"
   ln -s ../node-x64 "$root/runtime/bin-x64/node"
-  ln -s ../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js "$root/runtime/bin-arm64/pi"
-  ln -s ../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js "$root/runtime/bin-x64/pi"
+  ln -s ../../app/node_modules/.bin/pi "$root/runtime/bin-arm64/pi"
+  ln -s ../../app/node_modules/.bin/pi "$root/runtime/bin-x64/pi"
   fingerprint="$("$HASH" "$root")"
   printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"fixture","protocolVersion":"4","minProtocolVersion":"4","nodeVersion":"fixture","sourceRevision":"0123456789abcdef0123456789abcdef01234567","runtimeEpoch":"01234567-89ab-cdef-0123-456789abcdef","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' "$version" "$fingerprint" > "$root/manifest.json"
   chmod -R a-w "$root"
@@ -127,7 +129,7 @@ for invalid_alias in missing regular wrong-target absolute-target; do
     missing) ;;
     regular) printf '#!/bin/sh\nexit 0\n' > "$alias"; chmod 755 "$alias" ;;
     wrong-target) ln -s ../node-arm64 "$alias" ;;
-    absolute-target) ln -s "$INVALID/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" "$alias" ;;
+    absolute-target) ln -s "$INVALID/app/node_modules/.bin/pi" "$alias" ;;
   esac
   chmod -R a-w "$INVALID"
   if "$HELPER" --verify-payload "$INVALID" stable fixture fixture 0123456789abcdef0123456789abcdef01234567 >/dev/null 2>&1; then

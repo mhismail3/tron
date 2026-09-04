@@ -134,12 +134,17 @@ validate_runtime_alias arm64
 validate_runtime_alias x64
 validate_pi_alias() {
     local architecture="$1" directory="$PAYLOAD_DIR/runtime/bin-$1" alias="$PAYLOAD_DIR/runtime/bin-$1/pi"
-    local cli="$PAYLOAD_DIR/app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
-    local expected="../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
-    [[ -f "$cli" && ! -L "$cli" && -x "$cli" ]] || fail "payload Pi CLI is missing, symlinked, or non-executable"
+    local cli="$PAYLOAD_DIR/app/node_modules/.bin/pi" package_root="$PAYLOAD_DIR/app/node_modules/@earendil-works/pi-coding-agent"
+    local expected="../../app/node_modules/.bin/pi"
+    [[ -L "$cli" && ! -L "$package_root" ]] || fail "npm Pi projection or package root is missing or substituted"
+    local cli_real package_real node_modules_real
+    cli_real="$(realpath "$cli")" || fail "npm Pi projection is dangling"
+    package_real="$(realpath "$package_root")" || fail "pi-coding-agent package is missing"
+    node_modules_real="$(realpath "$PAYLOAD_DIR/app/node_modules")" || fail "payload node_modules is missing"
+    [[ "$package_real" == "$node_modules_real"/* && "$cli_real" == "$package_real"/* && -f "$cli_real" && -x "$cli_real" ]] || fail "npm Pi projection or package root escapes app/node_modules"
     [[ -d "$directory" && ! -L "$directory" && -L "$alias" ]] || fail "Pi $architecture alias is missing or substituted"
     [[ "$(readlink "$alias")" == "$expected" ]] || fail "Pi $architecture alias target is not exact"
-    [[ "$(realpath "$alias")" == "$(realpath "$cli")" ]] || fail "Pi $architecture alias does not resolve to the payload CLI"
+    [[ "$(realpath "$alias")" == "$cli_real" ]] || fail "Pi $architecture alias does not resolve to npm Pi projection"
 }
 validate_pi_alias arm64
 validate_pi_alias x64

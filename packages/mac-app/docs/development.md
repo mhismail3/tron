@@ -157,13 +157,31 @@ completed app contains the Gateway entrypoint, production `node_modules`, both
 arm64/x64 Node runtimes, and fingerprinted architecture-specific `node` command
 aliases. Stable adds only its selected immutable alias to `PATH` before extension
 discovery, so it never consults a user's nvm/Homebrew installation or a global Pi
-command. Debug preserves an already-resolving developer Node and uses the payload
-alias only as fallback. Release validation must also
+command. The Pi command is npm's `app/node_modules/.bin/pi` projection, and the
+runtime alias must target it exactly; private package-internal CLI paths are not
+a payload contract. Debug preserves an already-resolving developer
+Node and uses the payload alias only as fallback. Release validation must also
 execute the signed embedded runtime, not only check that the binary is present;
 a hardened Node runtime without its JIT entitlement exits before the Gateway
 can bind its port.
 
+The `.bin/pi` projection is an executable contract transition. Existing signed
+launchers retain the old private CLI path until the user performs the documented
+manual Mac Release reinstall; source-only payload promotion through that launcher
+must fail closed rather than silently accepting the old target. The reinstall
+replaces the launcher and payload together, after which `scripts/tron mac verify`
+confirms the signed projection.
+
 ### Gateway payload promotion
+
+Pi SDK rollback verification is performed before payload promotion with
+`cd packages/gateway && npm run test:pi-sdk-rollback`; its JSONL/settings/auth
+fixtures are disposable and isolated from `~/.tron`. The simulator-only iOS
+E2E gate is upgrade-only: CI compares the committed Pi package graph and runs
+`scripts/ios-gateway-e2e-test all` only when that graph changes, with cleanup
+always guaranteed. The `.bin/pi` projection is a one-time signed launcher
+transition; an installed old launcher is not a valid source-only promotion
+path, so the user must perform the documented manual Release reinstall.
 
 The installed Release wrapper owns only the Stable LaunchAgent. Debug lifecycle
 belongs only to `scripts/tron dev`; the Release menu is a read-only authenticated

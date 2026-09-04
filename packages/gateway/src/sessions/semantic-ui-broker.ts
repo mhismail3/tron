@@ -68,7 +68,9 @@ const THEME_COLORS: Record<ThemeColor, string | number> = {
   syntaxFunction: 6, syntaxVariable: 7, syntaxString: 2, syntaxNumber: 3,
   syntaxType: 4, syntaxOperator: 7, syntaxPunctuation: 8, thinkingOff: 8,
   thinkingMinimal: 8, thinkingLow: 4, thinkingMedium: 6, thinkingHigh: 3,
-  thinkingXhigh: 5, thinkingMax: 1, bashMode: 3,
+  // Pi's optional search foreground falls back to the ordinary text color.
+  // Pinning the same value preserves the pre-upgrade RPC baseline exactly.
+  thinkingXhigh: 5, thinkingMax: 1, bashMode: 3, searchMatchText: 7,
 };
 const THEME_BACKGROUNDS: ConstructorParameters<typeof Theme>[1] = {
   selectedBg: 8, userMessageBg: 0, customMessageBg: 0,

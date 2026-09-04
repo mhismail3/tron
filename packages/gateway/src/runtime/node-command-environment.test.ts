@@ -25,11 +25,14 @@ function fixture(architecture: "arm64" | "x64" = "arm64") {
   mkdirSync(aliasDirectory, { recursive: true });
   mkdirSync(join(root, "app", "dist"), { recursive: true });
   mkdirSync(join(root, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist"), { recursive: true });
+  mkdirSync(join(root, "app", "node_modules", ".bin"), { recursive: true });
+  writeFileSync(join(root, "app", "node_modules", "@earendil-works", "pi-coding-agent", "package.json"), JSON.stringify({ name: "@earendil-works/pi-coding-agent", bin: { pi: "dist/cli.js" } }));
   executable(runtime, `runtime-${architecture}`);
   executable(piCli, "pi-cli");
+  symlinkSync("../@earendil-works/pi-coding-agent/dist/cli.js", join(root, "app", "node_modules", ".bin", "pi"));
   writeFileSync(entryPoint, "// fixture entry\n");
   symlinkSync(`../node-${architecture}`, join(aliasDirectory, "node"));
-  symlinkSync("../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", join(aliasDirectory, "pi"));
+  symlinkSync("../../app/node_modules/.bin/pi", join(aliasDirectory, "pi"));
   return { root, runtime, aliasDirectory, alias: join(aliasDirectory, "node"), piAlias: join(aliasDirectory, "pi"), piCli, entryPoint };
 }
 
@@ -106,6 +109,20 @@ describe("supervised Gateway Node command environment", () => {
       entryPoint: sourceEntry,
     })).toEqual({ managed: false });
     expect(inherited.PATH).toBe("/custom/bin");
+  });
+
+  it("rejects a symlinked Pi package root outside the selected payload", () => {
+    const escaped = fixture();
+    const packageRoot = join(escaped.root, "app", "node_modules", "@earendil-works", "pi-coding-agent");
+    const outside = mkdtempSync(join(tmpdir(), "tron-escaped-pi-"));
+    roots.push(outside);
+    rmSync(packageRoot, { recursive: true, force: true });
+    mkdirSync(outside, { recursive: true });
+    symlinkSync(outside, packageRoot);
+    expect(() => configureSupervisedNodeCommandEnvironment({
+      environment: environment(escaped.root, "stable", "/usr/bin"), architecture: "arm64",
+      execPath: escaped.runtime, entryPoint: escaped.entryPoint,
+    })).toThrow(/package root|projection/);
   });
 
   it("rejects missing, substituted, and incorrectly targeted aliases", () => {

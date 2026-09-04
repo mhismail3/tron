@@ -693,36 +693,33 @@ are in [performance-baseline.md](performance-baseline.md).
 
 The checked-in `UIValidation.xctestplan` keeps routine UI diagnostics disabled.
 UI journeys run on the Development app identity but only on the exact owned test
-simulator; they never use the persistent Development simulator. The repository's
-real Gateway UI harness below owns that simulator/process boundary.
+simulator; they never use the persistent Development simulator.
 
-For real gateway-to-iOS E2E work, keep the deterministic gateway fixture and
-DerivedData alive across edits. Preparation and the first build happen once;
-`run` renews only the one-use enrollment/session fixture and executes the
-focused UI test without reinstalling dependencies or rebuilding:
+The hosted real-Gateway boundary test owns one narrow integration contract: the
+iOS pairing and transport clients connect to the selected Pi runtime, accepted
+work survives transport retirement, a new connection decodes canonical
+completion, extension interactions round-trip, and a parallel tool group settles
+once. It deliberately excludes SwiftUI, visual, settings, picker, navigation,
+and general accessibility coverage.
+
+Preparation and the first build happen once; `run` renews the one-use Gateway
+fixture, then executes the focused hosted test without reinstalling dependencies
+or rebuilding:
 
 ```bash
 scripts/ios-gateway-e2e-test prepare
 scripts/ios-gateway-e2e-test build
 scripts/ios-gateway-e2e-test run
 
-# After a Swift edit:
+# After an affected Swift edit:
 scripts/ios-gateway-e2e-test iterate
-
-# Exercise only native attachment menu → camera/photo/file presentations:
-TRON_E2E_ATTACHMENT_ONLY=1 scripts/ios-gateway-e2e-test iterate
 ```
 
-The focused runner disables Xcode's failure sysdiagnose collection, which can
-otherwise add a ten-minute timeout after a UI assertion. Its reconnect journey
-cold-launches back to the authoritative dashboard and explicitly reopens the
-session; transient `NavigationStack` state is not part of restoration or cache
-truth. Use `logs`, `status`, `stop`, and `clean` to inspect or manage the
-persistent fixture. CI owns the
-complete unit target; smoke/accessibility and real-gateway UI journeys remain
-explicit cross-module/release checkpoints because they are slower and depend on
-simulator integration rather than ordinary source compilation. Full UI suites
-remain final checkpoint validation, not an edit loop.
+The Gateway uses a fixture-owned home, state directory, agent directory, and
+workspace. Use `logs`, `status`, `stop`, and `clean` to inspect or manage those
+resources. On CI, focused result/log evidence is uploaded before owned state is
+removed. This simulator boundary is an explicit Pi-graph/release checkpoint, not
+an ordinary edit-loop or general UI regression suite.
 
 Typography and control styling are presentation concerns; review them through
 manual UI validation rather than source-occurrence tests. Runtime lifecycle,
@@ -730,21 +727,13 @@ transport, bounds, accessibility identifiers, and authorization remain covered
 by their owning behavior tests. OS-owned alerts, menus, and pickers remain
 intentional platform exceptions.
 
-UI validation audits onboarding in light and dark modes and audits a
-populated real-gateway chat, session management, settings, and appearance. The
-real-gateway test retains named screenshot checkpoints for the completed chat,
-Manage Session, root settings, and appearance in its result bundle. Manage Session
-acceptance additionally verifies the compact context bar, exactly two primary groups,
-textual Compact action, peer Project Resources details, the shared Technical JSON sheet,
-user-oriented Agent Context, and the History-owned runtime summary. Focused presentation policy tests separately pin stable export-row identity and single-row progress ownership.
+`TronSmokeUITests` owns bounded onboarding visual and accessibility checks.
+Focused presentation policy tests separately pin stable export-row identity and
+single-row progress ownership. The hosted Pi-boundary test does not duplicate
+either owner.
 `SessionExportArtifactStoreTests` owns archive-specific item/aggregate/count/reservation/age/protection policy, while
 `BoundedHTTPFileTransportTests` owns reservation-backed, resumable file transfer and exact byte ceilings. Gateway integration fixtures cross the legacy
 25 MiB boundary and exercise running-session JSONL/HTML cuts without placing those bytes in iOS test memory.
-The end-to-end path also
-relaunches at accessibility XXXL to verify standard SwiftUI controls that
-XCTest's simulated Dynamic Type audit misclassifies. Any audit suppression must
-name one exact element, have a retained rendered checkpoint, and have a separate
-real-size assertion; category-wide suppression is not allowed.
 
 Simulator screenshots are deterministic regression artifacts, not the final
 system-chrome authority. A physical install is protocol-gated before
@@ -984,6 +973,12 @@ archive upload, TestFlight distribution, or App Store release automatically.
 ## Gateway fixture work
 
 Protocol DTO changes require matching gateway tests and Swift decoding tests.
+Pi SDK rollback fixtures belong to `packages/gateway/test-fixtures/pi-sdk` and
+are disposable JSONL only; they never use iOS app data, Keychain, or a live
+Gateway. The simulator-only `pi-sdk-e2e` workflow runs the hosted real-Gateway boundary
+only when the Pi package graph changes (workflow dispatch forces it),
+and always cleans its owned simulator and fixture state. It is an upgrade gate,
+not a general iOS test replacement.
 Keep Swift wire values in their authority-owned model files (`GatewayConnectionModels`,
 `SessionCatalogModels`, `TranscriptModels`, `SessionRuntimeModels`,
 `ResourceCatalogModels`, `WorkspaceModels`, and `TerminalModels`) without adding projection state or custom

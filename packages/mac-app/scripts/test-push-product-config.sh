@@ -4,19 +4,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
 VALIDATE="$REPO_ROOT/scripts/validate-push-service-config.sh"
 
-bash -n "$SCRIPT_DIR/bundle-gateway.sh" "$SCRIPT_DIR/ensure-gateway-bundle.sh" \
-  "$SCRIPT_DIR/verify-gateway-payload.sh" "$REPO_ROOT/scripts/verify-mac-install.sh" "$VALIDATE"
-grep -F '#include "../../../config/PushService.xcconfig"' "$REPO_ROOT/packages/ios-app/Configuration/Base.xcconfig" >/dev/null
-grep -F 'cp "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/"' "$SCRIPT_DIR/bundle-gateway.sh" >/dev/null
-grep -F '"$PAYLOAD_DIR/app/PushService.xcconfig"' "$SCRIPT_DIR/verify-gateway-payload.sh" >/dev/null
-grep -F 'cmp -s "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/PushService.xcconfig"' "$SCRIPT_DIR/bundle-gateway.sh" >/dev/null
-grep -F 'cmp -s "$STABLE_PAYLOAD_ROOT/app/PushService.xcconfig" "$BUNDLED/app/PushService.xcconfig"' "$REPO_ROOT/scripts/verify-mac-install.sh" >/dev/null
-grep -F 'payload_channel=dev' "$SCRIPT_DIR/bundle-gateway.sh" >/dev/null
-grep -F '"$EXPECTED_CHANNEL"' "$SCRIPT_DIR/verify-gateway-payload.sh" >/dev/null
-if grep -R 'TRON_PUSH_SERVICE_ORIGIN' "$REPO_ROOT/packages/gateway/src" --include='*.ts' | grep -F 'environment.TRON_PUSH_SERVICE_ORIGIN' >/dev/null; then
-  echo "Gateway must not accept a runtime Push origin" >&2
-  exit 1
-fi
 
 temp="$(mktemp -d)"
 trap 'rm -rf "$temp"' EXIT

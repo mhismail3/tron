@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { appendFile, copyFile, mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -4674,6 +4674,9 @@ export default function (pi) {
       const during = slot.snapshot().streaming;
       expect(during).toMatchObject({ role: "assistant" });
       if (during?.kind !== "message") throw new Error("expected live assistant");
+      if (hook === "message_end") {
+        expect(slot.snapshot().transcript.some((item) => item.kind === "message" && item.role === "assistant")).toBe(false);
+      }
       await writeFile(release, "release");
       await prompt;
       await waitUntil(() => !slot.isBusy);
@@ -7506,6 +7509,12 @@ export default function (pi) {
       slots: Map<string, typeof slot>;
       latestSummaries: Map<string, SessionSummaryUpdate>;
     };
+    const parentPath = (slot as unknown as { sessionManager: SessionManager }).sessionManager.getSessionFile()!;
+    const parentBytes = await readFile(parentPath);
+    const forkDirectory = join(dirname(parentPath), basename(parentPath, ".jsonl"), "forks");
+    const forkListingBefore = existsSync(forkDirectory)
+      ? (await readdir(forkDirectory)).filter((name) => name.endsWith(".jsonl")).sort()
+      : [];
     const assertAbsent = vi.spyOn(internals.attention, "assertAbsent")
       .mockRejectedValueOnce(new Error("injected attention prepare failure"));
     // Retaining the assistant makes Pi materialize the candidate fork before
@@ -7519,6 +7528,11 @@ export default function (pi) {
     expect(registry.isSubscribed("fork-subscriber", original)).toBe(true);
     expect(internals.latestSummaries.get(original)?.sessionId).toBe(original);
     expect(registry.attentionProjection(original).isUnread).toBe(true);
+    expect(await readFile(parentPath)).toEqual(parentBytes);
+    const forkListingAfter = existsSync(forkDirectory)
+      ? (await readdir(forkDirectory)).filter((name) => name.endsWith(".jsonl")).sort()
+      : [];
+    expect(forkListingAfter).toEqual(forkListingBefore);
     assertAbsent.mockRestore();
 
     const fork = await slot.fork(userEntry!.id, "at");

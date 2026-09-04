@@ -4,8 +4,11 @@
 for the always-running Tron agent. The Login Item launches a minimal universal C
 shim, which execs the exact bundled Node runtime and Tron Gateway payload. Each
 immutable payload also carries exact architecture-specific command directories.
-Their `node` aliases resolve to those same runtime binaries, while their technical
-`pi` aliases resolve to the executable CLI in the pinned backing SDK package.
+Their `node` aliases resolve to those same runtime binaries. The technical `pi`
+alias is always the exact relative link `../../app/node_modules/.bin/pi`; that
+npm-created projection must resolve to the declared executable inside the pinned
+`pi-coding-agent` package. The projection and both aliases are covered by the
+payload fingerprint and signed launcher validation.
 
 User-facing terminology is Tron or Tron Agent. Historical `com.tron.server`
 launchd labels remain stable internal identifiers so upgrades do not orphan old

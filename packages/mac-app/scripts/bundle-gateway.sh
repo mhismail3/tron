@@ -119,6 +119,7 @@ required=(
     "$REPO_ROOT/scripts/verify-gateway-protocol-contract.py"
     "$REPO_ROOT/scripts/gateway_protocol_contract.py"
     "$REPO_ROOT/scripts/gateway-payload-deploy.mjs"
+    "$GATEWAY_DIR/scripts/check-pi-sdk.mjs"
     "$SCRIPT_DIR/tron-gateway-launcher.c"
     "$SCRIPT_DIR/verify-gateway-payload.sh"
     "$HELPER_DIR/Info.plist"
@@ -260,6 +261,10 @@ else
         exit 2
     }
 fi
+
+# This is a deterministic, offline check of the already-installed source tree;
+# it intentionally does not perform another install or registry lookup.
+(cd "$GATEWAY_DIR" && "$NODE_BIN" scripts/check-pi-sdk.mjs)
 
 # Build generated resources privately. The previously published projection is
 # not touched until the complete replacement passes the same payload verifier
@@ -440,6 +445,7 @@ cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
 # npm prune in the source tree would damage developer dependencies. Install an
 # independent production tree directly into the generated app payload.
 (cd "$APP_DIR" && "$NPM_BIN" ci --omit=dev --ignore-scripts=false)
+"$NODE_BIN" "$GATEWAY_DIR/scripts/check-pi-sdk.mjs" --runtime-tree "$APP_DIR"
 
 stage_node arm64 "$NODE_ARM64_SHA256"
 stage_node x64 "$NODE_X64_SHA256"
@@ -457,7 +463,7 @@ for arch in arm64 x64; do
     safe_remove_tree "$alias_dir"
     mkdir -p "$alias_dir"
     ln -s "../node-$arch" "$alias_dir/node"
-    ln -s "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" "$alias_dir/pi"
+    ln -s "../../app/node_modules/.bin/pi" "$alias_dir/pi"
 done
 
 launcher_temp="$(mktemp -d)/tron"
@@ -476,8 +482,13 @@ for required_payload in \
     "$RUNTIME_DIR/xcodegen/bin/xcodegen" "$RUNTIME_DIR/xcodegen/share/xcodegen/SettingPresets/base.yml"; do
     [[ -e "$required_payload" ]] || { echo "missing required staged payload: $required_payload" >&2; exit 3; }
 done
-PI_CLI="$APP_DIR/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
-[[ -f "$PI_CLI" && ! -L "$PI_CLI" && -x "$PI_CLI" ]] || { echo "missing staged Pi CLI: $PI_CLI" >&2; exit 3; }
+PI_CLI="$APP_DIR/node_modules/.bin/pi"
+PI_PACKAGE="$APP_DIR/node_modules/@earendil-works/pi-coding-agent"
+[[ -L "$PI_CLI" && ! -L "$PI_PACKAGE" ]] || { echo "missing staged npm Pi projection or package root: $PI_CLI" >&2; exit 3; }
+PI_REAL="$(realpath "$PI_CLI")"; PI_PACKAGE_REAL="$(realpath "$PI_PACKAGE")"; PI_NODE_MODULES_REAL="$(realpath "$APP_DIR/node_modules")"
+[[ "$PI_PACKAGE_REAL" == "$PI_NODE_MODULES_REAL"/* && "$PI_REAL" == "$PI_PACKAGE_REAL"/* && -f "$PI_REAL" && -x "$PI_REAL" ]] || {
+    echo "staged npm Pi projection or package root escapes app/node_modules: $PI_CLI" >&2; exit 3;
+}
 for arch in arm64 x64; do
     alias="$RUNTIME_DIR/bin-$arch/node"
     pi_alias="$RUNTIME_DIR/bin-$arch/pi"
@@ -485,8 +496,8 @@ for arch in arm64 x64; do
         echo "invalid staged Node command alias: $alias" >&2
         exit 3
     }
-    [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" \
-        && "$(realpath "$pi_alias")" == "$(realpath "$PI_CLI")" ]] || {
+    [[ -L "$pi_alias" && "$(readlink "$pi_alias")" == "../../app/node_modules/.bin/pi" \
+        && "$(realpath "$pi_alias")" == "$PI_REAL" ]] || {
         echo "invalid staged Pi command alias: $pi_alias" >&2
         exit 3
     }

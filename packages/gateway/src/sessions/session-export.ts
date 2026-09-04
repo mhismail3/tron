@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, lstatSync, readFileSync, realpathSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { open, rm, stat, statfs } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,7 @@ export const SESSION_EXPORT_MAX_PRODUCTIONS = 1;
 const COPY_BUFFER_BYTES = 1 * 1_024 * 1_024;
 const HTML_EXPORT_TIMEOUT_MS = 15 * 60_000;
 const MAXIMUM_EXPORT_ERROR_BYTES = 8 * 1_024;
+const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
 export const SESSION_EXPORT_MINIMUM_FREE_BYTES = 64 * 1_024 * 1_024;
 const PROJECTION_DISK_RESERVATION_BYTES = 64 * 1_024 * 1_024;
 
@@ -123,9 +124,62 @@ export async function writeSessionProjectionCut(
  * renderer from blocking the Gateway event loop or retaining its temporary
  * strings in the live runtime heap.
  */
-export async function renderSessionCutToHtml(snapshot: string, output: string): Promise<number> {
+export function validatePiCliPackageRoot(packageRoot: string, nodeModulesRoot: string): string {
+  const nodeModulesReal = realpathSync(nodeModulesRoot);
+  const expected = join(nodeModulesReal, "@earendil-works", "pi-coding-agent");
+  const expectedInfo = lstatSync(expected);
+  if (!expectedInfo.isDirectory() || expectedInfo.isSymbolicLink()) {
+    throw new Error("pi-coding-agent package root is substituted");
+  }
+  const expectedReal = realpathSync(expected);
+  const packageReal = realpathSync(packageRoot);
+  const fromNodeModules = relative(nodeModulesReal, packageReal);
+  if (packageReal !== expectedReal || fromNodeModules.startsWith("..") || isAbsolute(fromNodeModules)) {
+    throw new Error("pi-coding-agent package root is outside the Gateway node_modules");
+  }
+  return packageReal;
+}
+
+export function resolvePiCliExecutable(): string {
   const packageEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
-  const cli = join(dirname(packageEntry), "cli.js");
+  const nodeModulesRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..", "node_modules");
+  let packageRoot = dirname(packageEntry);
+  for (;;) {
+    const packageJsonPath = join(packageRoot, "package.json");
+    try {
+      const packageJsonInfo = lstatSync(packageJsonPath);
+      if (!packageJsonInfo.isFile() || packageJsonInfo.isSymbolicLink() || packageJsonInfo.size > PACKAGE_JSON_MAX_BYTES) {
+        throw new Error("package.json is missing, substituted, or oversized");
+      }
+      const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: unknown; bin?: unknown };
+      if (packageJson.name === "@earendil-works/pi-coding-agent") {
+        const bin = typeof packageJson.bin === "object" && packageJson.bin !== null
+          ? (packageJson.bin as { pi?: unknown }).pi : undefined;
+        if (typeof bin !== "string" || !bin || isAbsolute(bin) || bin.split(/[\\/]/u).includes("..")) {
+          throw new Error("declared bin.pi is unsafe or missing");
+        }
+        const executable = resolve(packageRoot, bin);
+        const packageReal = validatePiCliPackageRoot(packageRoot, nodeModulesRoot);
+        const executableReal = realpathSync(executable);
+        const info = lstatSync(executable);
+        if (!executableReal.startsWith(`${packageReal}/`) || !info.isFile() || info.isSymbolicLink()) {
+          throw new Error("declared bin.pi is not an executable regular file inside its package");
+        }
+        if ((info.mode & 0o111) === 0) throw new Error("declared bin.pi is not executable");
+        return executable;
+      }
+    } catch (error) {
+      if (error instanceof Error && /declared bin\.pi|not an executable|not executable|package root/u.test(error.message)) throw error;
+    }
+    const parent = dirname(packageRoot);
+    if (parent === packageRoot) break;
+    packageRoot = parent;
+  }
+  throw new Error("could not locate pi-coding-agent package metadata");
+}
+
+export async function renderSessionCutToHtml(snapshot: string, output: string): Promise<number> {
+  const cli = resolvePiCliExecutable();
   let errorOutput = Buffer.alloc(0);
   let outputBytes = 0;
   let reservedWritableBytes = 0;

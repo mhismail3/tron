@@ -46,13 +46,15 @@ const WebSocket = requireForDependencies("ws");
 const lockfile = requireForDependencies("proper-lockfile");
 
 const MAX_MANIFEST_BYTES = 64 * 1024;
+const MAX_PACKAGE_JSON_BYTES = 64 * 1024;
+const MAX_PACKAGE_LOCK_BYTES = 16 * 1024 * 1024;
 const MAX_PUSH_CONFIG_BYTES = 4 * 1024;
 const SCHEMA = 1;
 const KIND = "tron-gateway-payload";
 const SELECTION_KIND = "tron-gateway-selection";
 const PAYLOAD_FINGERPRINT_COVERAGE = "app/** and runtime/** regular files";
-const PAYLOAD_PI_CLI = "app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js";
-const PAYLOAD_PI_ALIAS_TARGET = "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js";
+const PAYLOAD_PI_CLI = "app/node_modules/.bin/pi";
+const PAYLOAD_PI_ALIAS_TARGET = "../../app/node_modules/.bin/pi";
 const PROTOCOL_VERSION = 4;
 const MIN_PROTOCOL_VERSION = 4;
 export const PINNED_XCODEGEN_VERSION = "2.45.3";
@@ -194,12 +196,36 @@ async function validateRuntimePiAlias(root, architecture) {
   const directory = join(root, "runtime", `bin-${architecture}`);
   const alias = join(directory, "pi");
   const cli = join(root, PAYLOAD_PI_CLI);
-  const [cliInfo, aliasInfo] = await Promise.all([lstat(cli), lstat(alias)]);
-  if (!cliInfo.isFile() || cliInfo.isSymbolicLink() || (cliInfo.mode & 0o111) === 0) throw new Error("payload Pi CLI is not a regular executable");
+  const packageRoot = join(root, "app/node_modules/@earendil-works/pi-coding-agent");
+  const nodeModulesRoot = join(root, "app/node_modules");
+  const [cliInfo, aliasInfo, packageInfo, nodeModulesInfo] = await Promise.all([lstat(cli), lstat(alias), lstat(packageRoot), lstat(nodeModulesRoot)]);
+  if (!cliInfo.isSymbolicLink() || !packageInfo.isDirectory() || !nodeModulesInfo.isDirectory()) throw new Error("payload npm Pi projection or package root is missing or substituted");
+  const [resolvedCli, resolvedPackage, resolvedNodeModules, resolvedApp] = await Promise.all([realpath(cli), realpath(packageRoot), realpath(nodeModulesRoot), realpath(join(root, "app"))]);
+  if (!under(resolvedApp, resolvedNodeModules) || !under(resolvedNodeModules, resolvedPackage)) throw new Error("payload Pi package root escapes app/node_modules");
+  if (!under(resolvedPackage, resolvedCli)) throw new Error("payload npm Pi projection escapes pi-coding-agent");
+  let declaredBin;
+  try {
+    const packageJsonPath = join(packageRoot, "package.json");
+    const packageJsonInfo = await lstat(packageJsonPath);
+    if (!packageJsonInfo.isFile() || packageJsonInfo.isSymbolicLink() || packageJsonInfo.size > MAX_PACKAGE_JSON_BYTES) throw new Error("package metadata is missing, substituted, or oversized");
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
+    declaredBin = typeof packageJson.bin === "object" && packageJson.bin !== null ? packageJson.bin.pi : undefined;
+  } catch {
+    throw new Error("payload pi-coding-agent package metadata is missing or invalid");
+  }
+  if (typeof declaredBin !== "string" || !declaredBin || isAbsolute(declaredBin) || declaredBin.split(/[\\/]/u).includes("..")) {
+    throw new Error("payload pi-coding-agent bin.pi is unsafe or missing");
+  }
+  const resolvedDeclared = await realpath(join(packageRoot, declaredBin));
+  if (await readlink(cli) !== relative(dirname(cli), join(packageRoot, declaredBin)) || resolvedDeclared !== resolvedCli) {
+    throw new Error("payload npm Pi projection disagrees with declared bin.pi");
+  }
+  const cliTargetInfo = await stat(resolvedCli);
+  if (!cliTargetInfo.isFile() || (cliTargetInfo.mode & 0o111) === 0) throw new Error("payload npm Pi projection target is not executable");
   if (!aliasInfo.isSymbolicLink()) throw new Error(`runtime Pi alias is not a symlink: ${architecture}`);
   if (await readlink(alias) !== PAYLOAD_PI_ALIAS_TARGET) throw new Error(`runtime Pi alias target is invalid: ${architecture}`);
-  const [resolvedAlias, resolvedCli] = await Promise.all([realpath(alias), realpath(cli)]);
-  if (!under(root, resolvedAlias) || resolvedAlias !== resolvedCli) throw new Error(`runtime Pi alias does not resolve to the payload CLI: ${architecture}`);
+  const resolvedAlias = await realpath(alias);
+  if (!under(root, resolvedAlias) || resolvedAlias !== resolvedCli) throw new Error(`runtime Pi alias does not resolve to npm Pi projection: ${architecture}`);
 }
 
 async function completePayload(root) {
@@ -973,12 +999,19 @@ export async function withGatewaySourceBuildLock(sourceRoot, operation) {
  * dependency tree rather than invoking a package manager or network service in
  * the supervised update path.
  */
+async function readBoundedRegular(path, maximumBytes) {
+  const info = await lstat(path);
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error(`refusing non-regular metadata file: ${path}`);
+  if (info.size > maximumBytes) throw new Error(`metadata file exceeds ${maximumBytes} byte limit: ${path}`);
+  return readFile(path);
+}
+
 export async function captureReusableSourcePackage(activeRoot, gatewayRoot) {
   const [activeLock, sourceLock, activePackageBytes, sourcePackageBytes] = await Promise.all([
-    readFile(join(activeRoot, "app", "package-lock.json")),
-    readFile(join(gatewayRoot, "package-lock.json")),
-    readFile(join(activeRoot, "app", "package.json")),
-    readFile(join(gatewayRoot, "package.json")),
+    readBoundedRegular(join(activeRoot, "app", "package-lock.json"), MAX_PACKAGE_LOCK_BYTES),
+    readBoundedRegular(join(gatewayRoot, "package-lock.json"), MAX_PACKAGE_LOCK_BYTES),
+    readBoundedRegular(join(activeRoot, "app", "package.json"), MAX_PACKAGE_JSON_BYTES),
+    readBoundedRegular(join(gatewayRoot, "package.json"), MAX_PACKAGE_JSON_BYTES),
   ]);
   if (!activeLock.equals(sourceLock)) {
     throw new Error("Gateway dependency lock changed; install a newly signed Tron build before rebuilding from source");

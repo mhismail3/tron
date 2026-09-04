@@ -228,10 +228,6 @@ schemes:
       config: Development
     test:
       config: Development
-      environmentVariables:
-        TRON_E2E_PORT: "$(TRON_E2E_PORT_VALUE)"
-        TRON_E2E_CODE: "$(TRON_E2E_CODE_VALUE)"
-        TRON_E2E_WORKSPACE: "$(TRON_E2E_WORKSPACE_VALUE)"
       testPlans:
         - path: TestPlans/UIValidation.xctestplan
           defaultPlan: true

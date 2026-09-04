@@ -69,7 +69,7 @@ struct GatewayClientTransportTests {
         let socket = ScriptedGatewaySocket()
         let factory = ScriptedGatewaySocketFactory(socket: socket)
         let client = GatewayClient(socketFactory: factory.factory)
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"0.84.1","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"fixture-version","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":[]}"#.utf8))
 
         do {
             _ = try await client.connect(profile: profile, token: "token")

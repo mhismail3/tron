@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readlink, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -70,11 +70,26 @@ function selection(version, payloadFingerprint = "a".repeat(64)) {
   return { schema: 1, kind: "tron-gateway-selection", channel: "stable", version, payloadFingerprint };
 }
 
+async function makeTreeWritable(root) {
+  const info = await lstat(root).catch(() => undefined);
+  if (!info || info.isSymbolicLink()) return;
+  await chmod(root, info.isDirectory() ? 0o755 : ((info.mode & 0o111) !== 0 ? 0o755 : 0o644));
+  if (info.isDirectory()) for (const entry of await readdir(root)) await makeTreeWritable(join(root, entry));
+}
+
 async function addRuntimeNodeAliases(root) {
-  const piCli = join(root, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
+  const piPackage = join(root, "app", "node_modules", "@earendil-works", "pi-coding-agent");
+  const piCli = join(piPackage, "dist", "cli.js");
   await mkdir(dirname(piCli), { recursive: true });
+  await mkdir(join(root, "app", "node_modules", ".bin"), { recursive: true });
+  await writeFile(join(piPackage, "package.json"), JSON.stringify({ name: "@earendil-works/pi-coding-agent", bin: { pi: "dist/cli.js" } }));
   await writeFile(piCli, "#!/usr/bin/env node\n");
   await chmod(piCli, 0o755);
+  try {
+    await symlink("../@earendil-works/pi-coding-agent/dist/cli.js", join(root, "app", "node_modules", ".bin", "pi"));
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+  }
   const xcodegen = join(root, "runtime", "xcodegen", "bin", "xcodegen");
   await mkdir(dirname(xcodegen), { recursive: true });
   await writeFile(xcodegen, `#!/bin/sh\nprintf 'Version: 2.45.3\\n'\n#${"x".repeat(1_048_576)}\n`);
@@ -86,7 +101,7 @@ async function addRuntimeNodeAliases(root) {
     const directory = join(root, "runtime", `bin-${architecture}`);
     await mkdir(directory, { recursive: true });
     await symlink(`../node-${architecture}`, join(directory, "node"));
-    await symlink("../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", join(directory, "pi"));
+    await symlink("../../app/node_modules/.bin/pi", join(directory, "pi"));
   }
 }
 
@@ -451,6 +466,12 @@ test("source builds compile privately and leave the trusted source tree unchange
     await writeFile(join(versionRoot, "app", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
     await writeFile(join(versionRoot, "app", "scripts", "gateway-payload-deploy.mjs"), "// updater\n");
     await writeFile(join(versionRoot, "app", "node_modules", "dependency-marker"), "validated active dependency tree\n");
+    await mkdir(join(versionRoot, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist"), { recursive: true });
+    await mkdir(join(versionRoot, "app", "node_modules", ".bin"), { recursive: true });
+    await writeFile(join(versionRoot, "app", "node_modules", "@earendil-works", "pi-coding-agent", "package.json"), JSON.stringify({ name: "@earendil-works/pi-coding-agent", bin: { pi: "dist/cli.js" } }));
+    await writeFile(join(versionRoot, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js"), "#!/usr/bin/env node\n");
+    await chmod(join(versionRoot, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js"), 0o755);
+    await symlink("../@earendil-works/pi-coding-agent/dist/cli.js", join(versionRoot, "app", "node_modules", ".bin", "pi"));
     await writeFile(join(versionRoot, "runtime", "node-arm64"), "n".repeat(1_048_576));
     await writeFile(join(versionRoot, "runtime", "node-x64"), "n".repeat(1_048_576));
     await chmod(join(versionRoot, "runtime", "node-arm64"), 0o755);
@@ -502,7 +523,7 @@ test("source builds compile privately and leave the trusted source tree unchange
       join(store.versionsRoot, "candidate", "runtime", "xcodegen"),
       join(store.versionsRoot, "candidate", "runtime"),
     ]) await chmod(directory, 0o755);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { await makeTreeWritable(root); await rm(root, { recursive: true, force: true }); }
 });
 
 async function makePreflightFixture(root) {
@@ -670,7 +691,7 @@ test("runtime Node and Pi aliases are exact required command links", async () =>
       } else if (kind === "wrong-target") {
         await symlink("../node-arm64", alias);
       } else if (kind === "absolute-target") {
-        await symlink(join(payload, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js"), alias);
+        await symlink(join(payload, "app", "node_modules", ".bin", "pi"), alias);
       }
       await assert.rejects(validatePayload(payload, { channel: "stable" }, true), /runtime Pi alias|ENOENT/);
     }

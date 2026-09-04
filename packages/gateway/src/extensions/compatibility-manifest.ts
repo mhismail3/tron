@@ -1,3 +1,4 @@
+import { PI_VERSION } from "../version.js";
 import type {
   EntryRenderOptions,
   ExtensionAPI,
@@ -11,7 +12,8 @@ import type {
   ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
 
-export const PINNED_PI_VERSION = "0.84.1" as const;
+export { PI_VERSION };
+export const PINNED_PI_VERSION = PI_VERSION;
 export const EXTENSION_PRESENTATION_VERSION = 3 as const;
 
 export type HostClassification = "native-semantic" | "remote-component" | "renderer" | "pi-runtime" | "explicit-fallback";
@@ -54,11 +56,13 @@ export const extensionEventCompatibility = {
   session_start: entry("pi-runtime", "event.session-start"), session_info_changed: entry("pi-runtime", "event.session-info"),
   session_before_switch: entry("pi-runtime", "event.session-before-switch"), session_before_fork: entry("pi-runtime", "event.session-before-fork"),
   session_before_compact: entry("pi-runtime", "event.session-before-compact"), session_compact: entry("pi-runtime", "event.session-compact"),
+  session_compact_failed: entry("pi-runtime", "event.session-compact-failed"),
   session_shutdown: entry("pi-runtime", "event.session-shutdown"), session_before_tree: entry("pi-runtime", "event.session-before-tree"),
   session_tree: entry("pi-runtime", "event.session-tree"), context: entry("pi-runtime", "event.context"),
   before_provider_request: entry("pi-runtime", "event.provider-request"), before_provider_headers: entry("pi-runtime", "event.provider-headers"),
   after_provider_response: entry("pi-runtime", "event.provider-response"), before_agent_start: entry("pi-runtime", "event.before-agent-start"),
   agent_start: entry("pi-runtime", "event.agent-start"), agent_end: entry("pi-runtime", "event.agent-end"), agent_settled: entry("pi-runtime", "event.agent-settled"),
+  ui_prompt_start: entry("pi-runtime", "event.ui-prompt-start"), ui_prompt_end: entry("pi-runtime", "event.ui-prompt-end"),
   turn_start: entry("pi-runtime", "event.turn-start"), turn_end: entry("pi-runtime", "event.turn-end"),
   message_start: entry("pi-runtime", "event.message-start"), message_update: entry("pi-runtime", "event.message-update"), message_end: entry("pi-runtime", "event.message-end"),
   tool_execution_start: entry("pi-runtime", "event.tool-start"), tool_execution_update: entry("pi-runtime", "event.tool-update"), tool_execution_end: entry("pi-runtime", "event.tool-end"),

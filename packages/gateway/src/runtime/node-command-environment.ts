@@ -1,7 +1,8 @@
-import { accessSync, constants, lstatSync, readlinkSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { accessSync, constants, lstatSync, readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 const MAX_PATH_BYTES = 64 * 1024;
+const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
 const SUPPORTED_ARCHITECTURES = new Map<string, "arm64" | "x64">([
   ["arm64", "arm64"],
   ["x64", "x64"],
@@ -114,9 +115,11 @@ function configureValidatedNodeCommandEnvironment(
   const aliasDirectory = join(payloadRoot, "runtime", `bin-${architecture}`);
   const aliasPath = join(aliasDirectory, "node");
   const expectedTarget = `../node-${architecture}`;
-  const piCliPath = join(payloadRoot, "app", "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
+  const piNodeModulesRoot = join(payloadRoot, "app", "node_modules");
+  const piCliPath = join(piNodeModulesRoot, ".bin", "pi");
+  const piPackageRoot = join(piNodeModulesRoot, "@earendil-works", "pi-coding-agent");
   const piAliasPath = join(aliasDirectory, "pi");
-  const expectedPiTarget = "../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js";
+  const expectedPiTarget = "../../app/node_modules/.bin/pi";
 
   const aliasDirectoryInfo = lstatSync(aliasDirectory);
   if (!aliasDirectoryInfo.isDirectory() || aliasDirectoryInfo.isSymbolicLink()) fail("runtime alias directory is not regular");
@@ -132,14 +135,40 @@ function configureValidatedNodeCommandEnvironment(
   if (!runtimeInfo.isFile() || runtimeInfo.isSymbolicLink() || !executable(runtimePath)) fail("selected payload runtime is not a regular executable");
   if (!sameFile(resolvedRuntime, resolvedExecPath)) fail("selected payload runtime does not match the running executable");
 
+  const piNodeModulesInfo = lstatSync(piNodeModulesRoot);
+  const piPackageInfo = lstatSync(piPackageRoot);
   const piCliInfo = lstatSync(piCliPath);
   const piAliasInfo = lstatSync(piAliasPath);
-  if (!piCliInfo.isFile() || piCliInfo.isSymbolicLink() || !executable(piCliPath)) fail("selected payload Pi CLI is not a regular executable");
+  if (!piNodeModulesInfo.isDirectory() || piNodeModulesInfo.isSymbolicLink()
+    || !piPackageInfo.isDirectory() || piPackageInfo.isSymbolicLink()
+    || !piCliInfo.isSymbolicLink() || !executable(piCliPath)) fail("selected payload npm Pi projection or package root is not regular");
   if (!piAliasInfo.isSymbolicLink() || readlinkSync(piAliasPath) !== expectedPiTarget) fail("runtime Pi alias has the wrong target");
+  let declaredBin: unknown;
+  try {
+    const packageJsonPath = join(piPackageRoot, "package.json");
+    const packageJsonInfo = lstatSync(packageJsonPath);
+    if (!packageJsonInfo.isFile() || packageJsonInfo.isSymbolicLink() || packageJsonInfo.size > PACKAGE_JSON_MAX_BYTES) {
+      fail("selected pi-coding-agent package metadata is missing, substituted, or oversized");
+    }
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { bin?: unknown };
+    declaredBin = typeof packageJson.bin === "object" && packageJson.bin !== null
+      ? (packageJson.bin as { pi?: unknown }).pi : undefined;
+  } catch { fail("selected pi-coding-agent package metadata is missing or invalid"); }
+  if (typeof declaredBin !== "string" || !declaredBin || isAbsolute(declaredBin) || declaredBin.split(/[\\/]/u).includes("..")) {
+    fail("selected pi-coding-agent bin.pi is unsafe or missing");
+  }
+  const resolvedApp = realpathSync(join(payloadRoot, "app"));
+  const resolvedNodeModules = realpathSync(piNodeModulesRoot);
+  const resolvedPackageRoot = realpathSync(piPackageRoot);
+  const resolvedDeclaredBin = realpathSync(join(piPackageRoot, declaredBin));
   const resolvedPiCli = realpathSync(piCliPath);
   const resolvedPiAlias = realpathSync(piAliasPath);
-  if (!resolvedPiCli.startsWith(`${payloadRoot}/`) || resolvedPiAlias !== resolvedPiCli || !sameFile(resolvedPiAlias, resolvedPiCli)) {
-    fail("runtime Pi alias does not resolve to the selected payload CLI");
+  const declaredInfo = lstatSync(join(piPackageRoot, declaredBin));
+  if (!resolvedNodeModules.startsWith(`${resolvedApp}/`) || !resolvedPackageRoot.startsWith(`${resolvedNodeModules}/`)
+    || !resolvedPiCli.startsWith(`${resolvedPackageRoot}/`) || readlinkSync(piCliPath) !== relative(dirname(piCliPath), join(piPackageRoot, declaredBin))
+    || resolvedDeclaredBin !== resolvedPiCli || !declaredInfo.isFile() || declaredInfo.isSymbolicLink()
+    || resolvedPiAlias !== resolvedPiCli || !sameFile(resolvedPiAlias, resolvedPiCli)) {
+    fail("runtime Pi alias does not resolve to the declared npm Pi projection");
   }
 
   const path = normalizedPath(environment.PATH, aliasDirectory, channelValue);

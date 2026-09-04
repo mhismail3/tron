@@ -30,7 +30,7 @@ final class TronSmokeUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Install Tron on Mac"].waitForExistence(timeout: 2))
         app.buttons["Next"].tap()
 
-        XCTAssertTrue(app.staticTexts["Connect your Mac"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Connect a Mac"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.buttons["Scan QR code"].exists)
         XCTAssertTrue(app.buttons["Enter Manually"].exists)
         app.buttons["Enter Manually"].tap()

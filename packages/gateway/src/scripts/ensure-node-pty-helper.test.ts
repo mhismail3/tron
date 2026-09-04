@@ -57,9 +57,13 @@ describe("source-built payload runtime alias bridge", () => {
     mkdirSync(join(app, "node_modules", "@earendil-works", "pi-coding-agent", "dist"), { recursive: true });
     mkdirSync(runtime);
     mkdirSync(outside);
-    const piCli = join(app, "node_modules", "@earendil-works", "pi-coding-agent", "dist", "cli.js");
+    const piPackage = join(app, "node_modules", "@earendil-works", "pi-coding-agent");
+    const piCli = join(piPackage, "dist", "cli.js");
+    mkdirSync(join(app, "node_modules", ".bin"), { recursive: true });
+    writeFileSync(join(piPackage, "package.json"), JSON.stringify({ name: "@earendil-works/pi-coding-agent", bin: { pi: "dist/cli.js" } }));
     writeFileSync(piCli, "#!/usr/bin/env node\n");
     chmodSync(piCli, 0o755);
+    symlinkSync("../@earendil-works/pi-coding-agent/dist/cli.js", join(app, "node_modules", ".bin", "pi"));
     writeFileSync(join(outside, "sentinel"), "unchanged\n");
     for (const architecture of ["arm64", "x64"]) {
       const executable = join(runtime, `node-${architecture}`);
@@ -79,8 +83,8 @@ describe("source-built payload runtime alias bridge", () => {
       expect(readlinkSync(alias)).toBe(`../node-${architecture}`);
       expect(realpathSync(alias)).toBe(realpathSync(join(runtime, `node-${architecture}`)));
       expect(lstatSync(piAlias).isSymbolicLink()).toBe(true);
-      expect(readlinkSync(piAlias)).toBe("../../app/node_modules/@earendil-works/pi-coding-agent/dist/cli.js");
-      expect(realpathSync(piAlias)).toBe(realpathSync(piCli));
+      expect(readlinkSync(piAlias)).toBe("../../app/node_modules/.bin/pi");
+      expect(realpathSync(piAlias)).toBe(realpathSync(join(app, "node_modules", ".bin", "pi")));
     }
   });
 
@@ -90,6 +94,23 @@ describe("source-built payload runtime alias bridge", () => {
     mkdirSync(app);
     expect(ensurePayloadNodeAliases("darwin", app)).toBe(false);
     expect(() => lstatSync(join(root, "runtime"))).toThrow();
+  });
+
+  it("fails closed when pi-coding-agent is an escaped package-root symlink", () => {
+    const root = temporary("tron-runtime-alias-escaped-package-");
+    const app = join(root, "app");
+    const runtime = join(root, "runtime");
+    const outside = join(root, "outside-package");
+    mkdirSync(join(app, "node_modules", "@earendil-works"), { recursive: true });
+    mkdirSync(runtime);
+    mkdirSync(outside);
+    for (const architecture of ["arm64", "x64"]) {
+      const executable = join(runtime, `node-${architecture}`);
+      writeFileSync(executable, "runtime\\n");
+      chmodSync(executable, 0o755);
+    }
+    symlinkSync(outside, join(app, "node_modules", "@earendil-works", "pi-coding-agent"));
+    expect(() => ensurePayloadNodeAliases("darwin", app)).toThrow(/package root|projection/);
   });
 
   it("fails closed on a partial or substituted runtime set", () => {

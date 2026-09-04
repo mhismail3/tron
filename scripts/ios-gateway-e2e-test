@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Focused real-gateway iOS E2E harness. Gateway, fixture, DerivedData, and the
-# test build persist across invocations so protocol/UI assertions can iterate
-# without repeating npm installation or a cold Xcode build.
+# Focused real-Gateway/iOS integration harness. Gateway build inputs, the owned
+# simulator, DerivedData, and test products persist across invocations; each run
+# renews only its isolated Gateway, enrollment, and canonical session state.
 
 set -euo pipefail
 
@@ -10,7 +10,9 @@ gateway_dir="$repo_root/packages/gateway"
 ios_dir="$repo_root/packages/ios-app"
 # shellcheck disable=SC1091
 source "$repo_root/config/ci-toolchain.env"
-export PATH="$repo_root/.ci-tools/bin:/opt/homebrew/bin:$PATH"
+# Keep the caller/setup-node toolchain ahead of Homebrew; .ci-tools contributes
+# repository-pinned helpers such as XcodeGen but never owns Node or npm.
+export PATH="$repo_root/.ci-tools/bin:$PATH:/opt/homebrew/bin"
 run_root="${TRON_IOS_E2E_STATE_DIR:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-$UID}"
 derived_data="${TRON_IOS_E2E_DERIVED_DATA:-${TMPDIR:-/tmp}/tron-ios-gateway-e2e-derived-$UID}"
 test_state_root="${TRON_IOS_TEST_STATE_DIR:-$HOME/.tron/internal/ios-test}"
@@ -54,7 +56,7 @@ Usage: scripts/ios-gateway-e2e-test COMMAND
 Commands:
   prepare   Install/build gateway if needed and start one persistent fixture.
   build     Incrementally build the UI-test products and patch their fixture env.
-  run       Renew the cheap fixture and run only the E2E test, without building.
+  run       Renew the Gateway fixture and run only the boundary test, without building.
   iterate   Incremental build, then one focused test-without-building run.
   all       Prepare, build, and run. Leaves the fixture running for iteration.
   status    Print fixture/build status.
@@ -65,17 +67,20 @@ Commands:
 Typical edit loop:
   scripts/ios-gateway-e2e-test prepare  # once
   scripts/ios-gateway-e2e-test build    # once, then after source edits
-  scripts/ios-gateway-e2e-test run      # repeat; renews pairing/session state only
+  scripts/ios-gateway-e2e-test run      # repeat; renews isolated Gateway/session state
 
 Environment:
   TRON_IOS_TEST_STATE_DIR       shared repository-owned test-simulator state
   TRON_IOS_E2E_STATE_DIR        persistent fixture directory
   TRON_IOS_E2E_DERIVED_DATA     persistent focused-test DerivedData
-  TRON_E2E_ATTACHMENT_ONLY      set to 1 to stop after attachment picker coverage
 USAGE
 }
 
 die() { echo "error: $*" >&2; exit 1; }
+
+manifest_pi_version() {
+  node -e 'const value=require(process.argv[1]).dependencies["@earendil-works/pi-coding-agent"]; if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value)) process.exit(1); process.stdout.write(value)' "$gateway_dir/package.json"
+}
 
 provision_test_simulator() {
   local simulator_id
@@ -132,9 +137,11 @@ load_state() {
   # Generated exclusively by this script with shell-escaped values.
   # shellcheck disable=SC1090
   source "$state_file"
-  [[ "${TRON_E2E_WORKSPACE:-}" == "$run_root/workspace" \
+  [[ "${TRON_E2E_WORKSPACE:-}" == "$(realpath "$run_root/home/workspace")" \
+      && "${TRON_E2E_GATEWAY_HOME:-}" == "$(realpath "$run_root/home")" \
       && "${TRON_E2E_TRON_HOME:-}" == "$run_root/tron" \
       && "${TRON_E2E_AGENT_DIR:-}" == "$run_root/agent" \
+      && "${TRON_E2E_PI_VERSION:-}" == "$(manifest_pi_version)" \
       && "${TRON_E2E_PORT:-}" =~ ^[1-9][0-9]*$ \
       && -n "${TRON_E2E_CODE:-}" ]] \
     || die "fixture state does not match the owned E2E paths/identity"
@@ -142,7 +149,11 @@ load_state() {
 }
 
 install_gateway_if_needed() {
-  local lock_hash installed_hash=""
+  "$repo_root/scripts/verify-ci-toolchain.sh" node
+  local node_bin npm_bin lock_hash installed_hash=""
+  node_bin="$(command -v node || true)"; npm_bin="$(command -v npm || true)"
+  [[ -n "$node_bin" && -n "$npm_bin" && "$(cd "$(dirname "$node_bin")" && pwd -P)" == "$(cd "$(dirname "$npm_bin")" && pwd -P)" ]] \
+    || die "Gateway E2E requires npm from the repository-pinned Node bin directory"
   lock_hash="$(shasum -a 256 "$gateway_dir/package-lock.json" | awk '{print $1}')"
   [[ -s "$run_root/npm-lock.sha256" ]] && installed_hash="$(<"$run_root/npm-lock.sha256")"
   if [[ ! -d "$gateway_dir/node_modules" || "$installed_hash" != "$lock_hash" ]]; then
@@ -206,9 +217,25 @@ prepare_fixture() {
 
 start_fresh_fixture() {
   stop_gateway
-  local tron_home="$run_root/tron" agent_dir="$run_root/agent" workspace="$run_root/workspace" port code
-  rm -rf "$tron_home" "$agent_dir" "$workspace"
-  mkdir -p "$tron_home" "$workspace"
+  local tron_home="$run_root/tron" agent_dir="$run_root/agent" gateway_home="$run_root/home" workspace="$run_root/home/workspace" port code pi_version
+  rm -rf "$tron_home" "$agent_dir" "$gateway_home"
+  mkdir -p "$tron_home/gateway" "$workspace"
+  chmod 700 "$tron_home" "$tron_home/gateway" "$gateway_home" "$workspace"
+  gateway_home="$(realpath "$gateway_home")"
+  workspace="$(realpath "$workspace")"
+  python3 - "$tron_home/gateway/gateway.json" "$workspace" <<'PY'
+import json, os, sys
+path, workspace = sys.argv[1:]
+with open(path, "x", encoding="utf-8") as handle:
+    json.dump({
+        "version": 1,
+        "machineId": "tron-ios-e2e",
+        "machineName": "Tron iOS E2E",
+        "defaultWorkspace": workspace,
+    }, handle)
+    handle.write("\n")
+os.chmod(path, 0o600)
+PY
   write_fixture_extension "$agent_dir"
   port="$(python3 - <<'PY'
 import socket
@@ -219,30 +246,44 @@ sock.close()
 PY
 )"
 
-  TRON_DATA_DIR="$tron_home" PI_CODING_AGENT_DIR="$agent_dir" \
+  local spawned_pid
+  HOME="$gateway_home" TRON_DATA_DIR="$tron_home" PI_CODING_AGENT_DIR="$agent_dir" \
+    TRON_MACHINE_GROUP_ID=tron-ios-e2e \
     TRON_GATEWAY_HOST=127.0.0.1 TRON_GATEWAY_PORT="$port" \
     nohup node "$gateway_dir/dist/index.js" >"$log_file" 2>&1 </dev/null &
-  echo "$!" >"$pid_file"
+  spawned_pid="$!"
+  echo "$spawned_pid" >"$pid_file"
 
+  # The exact child PID is authoritative during startup. `ps` can briefly show
+  # an incomplete command immediately after fork, so defer the stricter command
+  # ownership check until readiness instead of misclassifying a live child.
+  sleep 0.1
   for _ in {1..200}; do
     [[ -s "$tron_home/gateway/enrollment.json" ]] \
       && curl -fsS "http://127.0.0.1:$port/health" >/dev/null 2>&1 \
       && break
-    gateway_running || { cat "$log_file" >&2; die "gateway fixture exited"; }
+    if ! kill -0 "$spawned_pid" 2>/dev/null; then
+      sleep 0.1
+      kill -0 "$spawned_pid" 2>/dev/null || { cat "$log_file" >&2; die "gateway fixture exited"; }
+    fi
     sleep 0.1
   done
   [[ -s "$tron_home/gateway/enrollment.json" ]] || die "gateway fixture did not become ready"
+  gateway_running || die "ready Gateway fixture does not match its owned command"
   code="$(python3 - "$tron_home/gateway/enrollment.json" <<'PY'
 import json, sys
 with open(sys.argv[1]) as handle:
     print(json.load(handle)["code"])
 PY
 )"
+  pi_version="$(manifest_pi_version)"
 
   {
     printf 'TRON_E2E_PORT=%q\n' "$port"
     printf 'TRON_E2E_CODE=%q\n' "$code"
     printf 'TRON_E2E_WORKSPACE=%q\n' "$workspace"
+    printf 'TRON_E2E_PI_VERSION=%q\n' "$pi_version"
+    printf 'TRON_E2E_GATEWAY_HOME=%q\n' "$gateway_home"
     printf 'TRON_E2E_TRON_HOME=%q\n' "$tron_home"
     printf 'TRON_E2E_AGENT_DIR=%q\n' "$agent_dir"
   } >"$state_file"
@@ -253,35 +294,19 @@ PY
 find_xctestrun() {
   [[ -d "$derived_data/Build/Products" ]] || return 0
   find "$derived_data/Build/Products" -maxdepth 1 -type f \
-    -name 'Tron UI Validation_*.xctestrun' \
+    -name 'Tron Development_UnitTests_*.xctestrun' \
     -exec /usr/bin/stat -f '%m %N' {} + 2>/dev/null \
     | sort -nr | head -1 | cut -d' ' -f2-
 }
 
 patch_xctestrun() {
   local xctestrun="$1"
-  python3 - "$xctestrun" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" "${TRON_E2E_ATTACHMENT_ONLY:-0}" <<'PY'
-import plistlib, sys
-path, port, code, workspace, attachment_only = sys.argv[1:]
-with open(path, "rb") as handle:
-    document = plistlib.load(handle)
-entry = document["TronMobileUITests"]
-values = {
-    "TRON_E2E_PORT": port,
-    "TRON_E2E_CODE": code,
-    "TRON_E2E_WORKSPACE": workspace,
-    "TRON_E2E_ATTACHMENT_ONLY": attachment_only,
-}
-entry.setdefault("EnvironmentVariables", {}).update(values)
-entry.setdefault("UITargetAppEnvironmentVariables", {}).update(values)
-with open(path, "wb") as handle:
-    plistlib.dump(document, handle)
-PY
+  python3 "$repo_root/scripts/patch-ios-gateway-e2e-xctestrun.py" \
+    "$xctestrun" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" "$TRON_E2E_PI_VERSION"
   printf '%s\n' "$xctestrun" >"$run_root/xctestrun-path"
 }
 
 build_tests() {
-  load_state
   command -v xcodegen >/dev/null || die "pinned XcodeGen is missing; run scripts/install-ci-tools.sh xcodegen"
   "$repo_root/scripts/verify-ci-toolchain.sh" ios xcodegen
   local simulator_id destination attempt attempt_dir
@@ -297,23 +322,23 @@ build_tests() {
     "${TRON_IOS_E2E_BUILD_NO_OUTPUT_SECONDS:-300}" "$derived_data/Build/Products" \
     xcodebuild build-for-testing \
       -project "$ios_dir/TronMobile.xcodeproj" \
-      -scheme 'Tron UI Validation' \
-      -testPlan UIValidation \
-      -configuration Development \
+      -scheme 'Tron Development' \
+      -testPlan UnitTests \
+      -configuration Test \
       -destination "$destination" \
       -derivedDataPath "$derived_data" \
       -parallel-testing-enabled NO
   local xctestrun
   xctestrun="$(find_xctestrun)"
   [[ -n "$xctestrun" ]] || die "focused build did not produce an xctestrun file"
-  patch_xctestrun "$xctestrun"
+  printf '%s\n' "$xctestrun" >"$run_root/xctestrun-path"
   echo "Focused test products ready: $xctestrun"
 }
 
 run_test() {
-  # Pairing invitations are intentionally one-use and each UI run resets its
-  # local profile. Renew only fixture state here; do not reinstall npm packages,
-  # rebuild the gateway, regenerate Xcode, or rebuild test products.
+  # Pairing invitations are intentionally one-use. Renew the isolated Gateway
+  # and canonical session state without reinstalling npm packages, rebuilding
+  # the Gateway, regenerating Xcode, or rebuilding test products.
   start_fresh_fixture
   load_state
   local xctestrun=""
@@ -329,12 +354,12 @@ run_test() {
   attempt_dir="$(mktemp -d "$run_root/results/$(date -u '+%Y%m%dT%H%M%SZ')-run.XXXXXX")"
   attempt_id="$(basename "$attempt_dir")"
   result_bundle="$attempt_dir/FocusedE2E.xcresult"
-  if run_bounded "results/$attempt_id/test" 65 "${TRON_IOS_E2E_RUN_TIMEOUT_SECONDS:-1800}" \
-    "${TRON_IOS_E2E_RUN_NO_OUTPUT_SECONDS:-240}" "$result_bundle" \
+  if run_bounded "results/$attempt_id/test" 65 "${TRON_IOS_E2E_RUN_TIMEOUT_SECONDS:-300}" \
+    "${TRON_IOS_E2E_RUN_NO_OUTPUT_SECONDS:-120}" "$result_bundle" \
     xcodebuild test-without-building \
       -xctestrun "$xctestrun" \
       -destination "$destination" \
-      -only-testing:TronMobileUITests/TronGatewayEndToEndUITests \
+      -only-testing:TronMobileTests/RealGatewayPiBoundaryTests/testStreamsReconnectsAndSettlesExtensionTools \
       -parallel-testing-enabled NO \
       -collect-test-diagnostics never \
       -resultBundlePath "$result_bundle"; then
@@ -395,10 +420,10 @@ case "$command" in
   build) build_tests ;;
   run) run_test ;;
   iterate) build_tests; run_test ;;
-  all) prepare_fixture; build_tests; run_test ;;
+  all) install_gateway_if_needed; build_tests; run_test ;;
   status) show_status ;;
   logs) touch "$log_file"; tail -f "$log_file" ;;
-  stop) stop_gateway; rm -rf "$run_root/tron" "$run_root/agent" "$run_root/workspace" "$state_file" "$run_root/xctestrun-path" ;;
+  stop) stop_gateway; rm -rf "$run_root/tron" "$run_root/agent" "$run_root/home" "$state_file" "$run_root/xctestrun-path" ;;
   clean)
     stop_gateway
     python3 "$simulator_owner" delete "${simulator_args[@]}"

@@ -926,7 +926,7 @@ export class RuntimeSlot {
     return session?.isStreaming === true || session?.state.isStreaming === true;
   }
 
-  /** Pi 0.84.1 can clear isStreaming before its agent_settled choreography has
+  /** Pi can clear isStreaming before its agent_settled choreography has
    * reached this runtime. Keep ordinary admission behind the existing Gateway
    * operation owner until the sequenced state transition is published. */
   private get isAgentAdmissionSettling(): boolean {
@@ -2993,7 +2993,7 @@ export class RuntimeSlot {
         this.summaryContentDirty = true;
         this.scheduleSnapshot();
         if (event.message.role === "toolResult") {
-          // Pi 0.84.1 invokes listeners immediately before appending this exact
+          // Pi invokes listeners immediately before appending this exact
           // object. Verify canonical call-ID ownership in the next microtask;
           // a failed persistence attempt must not create a runtime/canonical
           // gap merely because message_end was observed.
@@ -5196,7 +5196,7 @@ export class RuntimeSlot {
           throw new GatewayError("conflict", "The selected resource is no longer unambiguous for this session");
         }
       }
-      // Pi 0.84.1 uses the first literal ASCII space as its command
+      // Pi uses the first literal ASCII space as its command
       // delimiter. Keep admission byte-for-byte identical: tabs/newlines are
       // part of the command name and therefore remain ordinary prompt text.
       const parsedCommand = parsePiLiteralCommand(text);
