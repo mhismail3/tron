@@ -684,9 +684,16 @@ state retires. Producer-triggered extension/session-input messages occupy one co
 status row in the transcript and retain their full message, origin, canonical identity, and
 JSON payloads in the existing detail sheet. Tool calls, progress, and results join by `toolCallId`.
 The Gateway stamps every live and canonical declaration with a producer-owned `toolSegmentId` for one visible
-conversation segment. The segment survives lifecycle-operation rotation across tool-only continuations and retires
-at user or visible assistant barriers. Only equal nonempty segment IDs authorize distinct finalized groups to share
-one consecutive tool-only display run; missing or conflicting identity fails closed to separate rows. At the canonical/live
+conversation segment. The segment survives lifecycle-operation rotation across tool-only continuations and rotates
+at user, visible assistant/custom, and compaction barriers. A provisional no-match generation covers the gap until
+an assistant receives its stable presentation identity. The authoritative snapshot also names the exact segment owned by the currently
+running agent tool segment, excluding retry, compaction, and settlement phases. An unresolved declaration remains an active **Invocation** only when it belongs to that segment;
+starting a later prompt, retry, or compaction cannot revive an unmatched tool left by an interrupted older run.
+Older compatible Gateways without segment authority retain the existing broad active-phase fallback. Read-only
+child transcripts derive the newest declared segment from their canonical page and apply parent process activity
+only to that segment; a later canonical turn or barrier interrupts older unresolved calls. Only equal
+nonempty segment IDs authorize distinct finalized groups to share one consecutive tool-only display run; missing or
+conflicting identity fails closed to separate rows. At the canonical/live
 boundary, a bounded display-only composition may fuse directly adjacent runs with one equal segment, preserving
 the first run's physical host while canonical and live authority remain separate. Canonical descriptors win
 handoff duplicates, and any member running keeps the aggregate spinner/count live until the same host settles.

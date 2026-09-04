@@ -819,6 +819,8 @@ export interface SessionSnapshot {
   leafEntryId?: string;
   operation?: SessionOperationState;
   retry?: RetryState;
+  /** Exact Gateway-owned tool-segment authority for the running Pi agent; a barrier generation may match no call yet. */
+  activeToolSegmentId?: string;
   toolExecutions: ToolExecutionState[];
   /** Bounded recent extension-owned run history. Live entries are also carried
    * on their owning toolExecution so progress can update without a snapshot. */

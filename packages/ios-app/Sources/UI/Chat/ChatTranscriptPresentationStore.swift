@@ -29,6 +29,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         // synthesized equality rejects streaming/tool/queue churn in O(1).
         let streaming: TranscriptItem?
         let phase: SessionPhase
+        let activeToolSegmentId: String?
         let toolExecutions: [ToolExecutionState]
         let queuedMessages: [SessionSnapshot.QueuedMessage]
         let runtimeItems: [ChatTranscriptRenderItem]
@@ -47,6 +48,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
             transcriptTotal = snapshot.transcriptTotal
             streaming = snapshot.streaming
             phase = snapshot.phase
+            activeToolSegmentId = snapshot.activeToolSegmentId
             toolExecutions = snapshot.toolExecutions
             queuedMessages = snapshot.displayedQueuedMessages
             runtimeItems = ChatTranscriptProjectionKernel.runtimeItems(in: snapshot)
@@ -973,6 +975,8 @@ private actor ChatTranscriptProjectionWorker {
     private struct ProjectionKey: Equatable, Sendable {
         let canonical: CanonicalKey
         let phase: SessionPhase
+        let acceptsQueuedPrompts: Bool?
+        let activeToolSegmentId: String?
         let streaming: TranscriptItem?
         let toolExecutions: [ToolExecutionState]
         let hiddenThinkingLabel: String?
@@ -981,6 +985,8 @@ private actor ChatTranscriptProjectionWorker {
         init(tag: ChatTranscriptProjectionTag, snapshot: SessionSnapshot) {
             canonical = CanonicalKey(tag: tag)
             phase = snapshot.phase
+            acceptsQueuedPrompts = snapshot.acceptsQueuedPrompts
+            activeToolSegmentId = snapshot.activeToolSegmentId
             streaming = snapshot.streaming
             toolExecutions = snapshot.toolExecutions
             hiddenThinkingLabel = tag.hiddenThinkingLabel

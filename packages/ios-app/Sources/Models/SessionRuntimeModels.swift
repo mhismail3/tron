@@ -431,6 +431,10 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     var leafEntryId: String?
     var operation: SessionOperationState?
     var retry: RetryState?
+    /// Exact Gateway-owned segment authority for the running streaming agent;
+    /// a barrier generation may match no declaration yet. Older compatible
+    /// Gateways omit it and retain phase-based presentation.
+    var activeToolSegmentId: String? = nil
     var toolExecutions: [ToolExecutionState]
     var extensionActivities: [ExtensionRunActivity]? = nil
     var extensionActivityOmissions: ExtensionActivityOmissions? = nil

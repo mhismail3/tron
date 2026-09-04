@@ -134,6 +134,27 @@ struct SessionSnapshotEventAdmissionTests {
         #expect(!SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
     }
 
+    @Test("active tool segment authority is bounded and requires an active agent")
+    func activeToolSegmentAdmission() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 5_512)
+            .openingTail(targetEncodedBytes: 8_192)
+        snapshot.phase = .running
+        snapshot.acceptsQueuedPrompts = true
+        snapshot.activeToolSegmentId = String(repeating: "s", count: 512)
+        #expect(SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+
+        snapshot.activeToolSegmentId = String(repeating: "s", count: 513)
+        #expect(!SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+        snapshot.activeToolSegmentId = ""
+        #expect(!SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+        snapshot.activeToolSegmentId = "tool-segment"
+        snapshot.acceptsQueuedPrompts = false
+        #expect(!SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+        snapshot.acceptsQueuedPrompts = true
+        snapshot.phase = .retrying
+        #expect(!SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))
+    }
+
     @Test("queue admission is bounded and rejects duplicate or empty identities")
     func queueAdmission() throws {
         var snapshot = try SessionScenarioBuilder(seed: 55).openingTail(targetEncodedBytes: 8_192)

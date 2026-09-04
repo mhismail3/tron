@@ -3,7 +3,12 @@ enum SessionSnapshotTranscriptAdmissionPolicy {
 
     static func admit(_ snapshot: SessionSnapshot) -> Bool {
         guard admitsItems(snapshot.transcript),
-              snapshot.streaming.map(admitsItem) ?? true else { return false }
+              snapshot.streaming.map(admitsItem) ?? true,
+              snapshot.activeToolSegmentId.map({
+                  !$0.isEmpty && $0.utf8.count <= maximumItemIdentityUTF8Bytes
+                      && snapshot.phase == .running
+                      && snapshot.acceptsQueuedPrompts != false
+              }) ?? true else { return false }
         switch (snapshot.transcriptStart, snapshot.transcriptTotal) {
         case (nil, nil):
             // Legacy/test projections without paging metadata remain valid. A

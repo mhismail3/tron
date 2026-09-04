@@ -184,6 +184,152 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(inactiveRun.tools.first?.error == true)
     }
 
+    @Test("read-only child activity applies only to its newest canonical tool segment")
+    func readOnlyChildUsesCanonicalToolSegmentAuthority() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"old-user","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"old-text","ordinal":0,"type":"text","text":"old"}]},
+          {"id":"old-assistant","parentId":"old-user","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"old-call","ordinal":0,"type":"toolCall","toolCallId":"old-call","name":"bash","arguments":{},"toolSegmentId":"old-segment"}]},
+          {"id":"new-user","parentId":"old-assistant","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","content":[{"id":"new-text","ordinal":0,"type":"text","text":"new"}]}
+        ]
+        """)
+        var projection = ChatTranscriptProjectionKernel.readOnlyTranscript(
+            snapshot.transcript,
+            transcriptStart: 0,
+            transcriptTotal: snapshot.transcript.count,
+            isActive: true
+        )
+        guard let oldRun = projection.timeline.items.compactMap({ item -> ChatToolRunPresentation? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run
+        }).first else {
+            Issue.record("Expected the retained old tool run")
+            return
+        }
+        #expect(oldRun.tools.first?.subtitle == "Interrupted")
+
+        snapshot.transcript.append(try decodeTranscriptFixture(
+            TranscriptItem.self,
+            from: Data("""
+            {"id":"new-assistant","parentId":"new-user","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"assistant","content":[{"id":"new-call","ordinal":0,"type":"toolCall","toolCallId":"new-call","name":"read","arguments":{},"toolSegmentId":"new-segment"},{"id":"new-status","ordinal":1,"type":"text","text":"Working"}]}
+            """.utf8)
+        ))
+        projection = ChatTranscriptProjectionKernel.readOnlyTranscript(
+            snapshot.transcript,
+            transcriptStart: 0,
+            transcriptTotal: snapshot.transcript.count,
+            isActive: true
+        )
+        let runs = projection.timeline.items.compactMap { item -> ChatToolRunPresentation? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run
+        }
+        #expect(runs.count == 2)
+        #expect(runs[0].tools.first?.subtitle == "Interrupted")
+        #expect(runs[1].tools.first?.subtitle == "Invocation")
+    }
+
+    @Test("a new operation cannot reactivate an interrupted invocation from an older run")
+    func newOperationDoesNotReactivateInterruptedInvocation() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"old-user","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"old-text","type":"text","text":"start"}]},
+          {"id":"old-assistant","parentId":"old-user","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"old-call","type":"toolCall","toolCallId":"old-call","name":"bash","arguments":{"command":"sleep 30"},"toolSegmentId":"old-segment"}]}
+        ]
+        """)
+        snapshot.transcriptTotal = snapshot.transcript.count
+        snapshot.phase = .interrupted
+        let stopped = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        guard case .toolRun(let stoppedRun) = stopped.timeline.items.last else {
+            Issue.record("Expected the stopped tool run")
+            return
+        }
+        #expect(stoppedRun.tools.first?.subtitle == "Interrupted")
+
+        // Pi emits agent_start before the new canonical user message. That phase
+        // change must not make the older unresolved call look live again.
+        snapshot.phase = .running
+        snapshot.acceptsQueuedPrompts = true
+        snapshot.activeToolSegmentId = "new-segment"
+        snapshot.operation = SessionOperationState(
+            id: "new-operation",
+            kind: .prompt,
+            startedAt: "2026-01-01T00:00:10Z"
+        )
+        let restarted = ChatTranscriptProjectionKernel.incremental(
+            snapshot: snapshot,
+            previous: stopped,
+            canonicalSourceUnchanged: true
+        )
+        guard case .toolRun(let restartedRun) = restarted.timeline.items.last else {
+            Issue.record("Expected the retained stopped tool run")
+            return
+        }
+        #expect(restartedRun.tools.first?.subtitle == "Interrupted")
+        #expect(!restartedRun.isRunning)
+        #expect(restarted.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
+
+        var cached = snapshot
+        cached.isCachedProjection = true
+        let cachedCandidate = ChatTranscriptProjectionKernel.cold(snapshot: cached)
+        guard case .toolRun(let cachedRun) = cachedCandidate.timeline.items.last else {
+            Issue.record("Expected the cached tool run")
+            return
+        }
+        #expect(cachedRun.tools.first?.subtitle == "Invocation")
+        #expect(cachedRun.isRunning)
+
+        for (phase, acceptsQueuedPrompts) in [
+            (SessionPhase.running, false),
+            (.compacting, true),
+            (.retrying, true),
+        ] {
+            var noAgentRun = snapshot
+            noAgentRun.phase = phase
+            noAgentRun.acceptsQueuedPrompts = acceptsQueuedPrompts
+            noAgentRun.activeToolSegmentId = nil
+            let candidate = ChatTranscriptProjectionKernel.cold(snapshot: noAgentRun)
+            guard case .toolRun(let run) = candidate.timeline.items.last else {
+                Issue.record("Expected the retained tool run without a foreground agent")
+                continue
+            }
+            #expect(run.tools.first?.subtitle == "Interrupted")
+        }
+
+        var legacyCompaction = snapshot
+        legacyCompaction.phase = .compacting
+        legacyCompaction.acceptsQueuedPrompts = nil
+        legacyCompaction.activeToolSegmentId = nil
+        let legacyCandidate = ChatTranscriptProjectionKernel.cold(snapshot: legacyCompaction)
+        guard case .toolRun(let legacyRun) = legacyCandidate.timeline.items.last else {
+            Issue.record("Expected the legacy active-phase tool run")
+            return
+        }
+        #expect(legacyRun.tools.first?.subtitle == "Invocation")
+
+        // A declaration produced after the new operation starts remains a live
+        // Invocation while it waits behind another sequential call.
+        snapshot.transcript.append(contentsOf: try decodeTranscriptFixture(
+            [TranscriptItem].self,
+            from: Data("""
+            [
+              {"id":"new-user","parentId":"old-assistant","timestamp":"2026-01-01T00:00:10Z","kind":"message","role":"user","content":[{"id":"new-text","type":"text","text":"continue"}]},
+              {"id":"new-assistant","parentId":"new-user","timestamp":"2026-01-01T00:00:11Z","kind":"message","role":"assistant","content":[{"id":"new-call","type":"toolCall","toolCallId":"new-call","name":"read","arguments":{"path":"README.md"},"toolSegmentId":"new-segment"}]}
+            ]
+            """.utf8)
+        ))
+        snapshot.transcriptTotal = snapshot.transcript.count
+        let current = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        let runs = current.timeline.items.compactMap { item -> ChatToolRunPresentation? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run
+        }
+        #expect(runs.count == 2)
+        #expect(runs[0].tools.first?.subtitle == "Interrupted")
+        #expect(runs[1].tools.first?.subtitle == "Invocation")
+        #expect(runs[1].isRunning)
+    }
+
     @Test("global assembler owns bootstrap filtering and orphan result visibility")
     func bootstrapAndOrphan() throws {
         var snapshot = try fixture(transcript: """

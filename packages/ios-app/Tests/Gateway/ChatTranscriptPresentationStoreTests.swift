@@ -1290,6 +1290,48 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("active tool segment replacement terminalizes an older unresolved invocation")
+    func activeToolSegmentReplacementRebuildsInvocation() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_215)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.phase = .running
+            snapshot.acceptsQueuedPrompts = true
+            snapshot.activeToolSegmentId = "old-segment"
+            snapshot.transcript = [try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: Data("""
+                {"id":"assistant-tool","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call","ordinal":0,"type":"toolCall","toolCallId":"old-tool","name":"read","arguments":{},"toolSegmentId":"old-segment"}]}
+                """.utf8)
+            )]
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 1
+            snapshot.toolExecutions = []
+            let store = ChatTranscriptPresentationStore()
+            var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 14)
+            store.submit(snapshot: snapshot, tag: tag)
+            let active = try await store.waitForInstall(of: tag)
+            guard case .toolRun(let activeRun) = active.timeline.items.first else {
+                Issue.record("Expected the unresolved tool run")
+                return
+            }
+            #expect(activeRun.tools.first?.subtitle == "Invocation")
+
+            snapshot.activeToolSegmentId = "replacement-segment"
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 14)
+            store.submit(snapshot: snapshot, tag: tag)
+            let replaced = try await store.waitForInstall(of: tag)
+            guard case .toolRun(let replacedRun) = replaced.timeline.items.first else {
+                Issue.record("Expected the retained interrupted tool run")
+                return
+            }
+            #expect(replacedRun.id == activeRun.id)
+            #expect(replacedRun.tools.first?.subtitle == "Interrupted")
+            #expect(!replacedRun.isRunning)
+        }
+    }
+
     @Test("cached projection mode changes rebuild running-tool normalization in the same scope")
     func cachedProjectionModeRebuildsRunningTools() async throws {
         try await withTestWatchdog { @MainActor in

@@ -208,6 +208,15 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   flush the run in exact order even inside one segment. The Gateway retires runtime segment membership
   at agent settlement and deterministically reconstructs canonical segment boundaries on cold reopen,
   so continuous delivery and catch-up assemble the same bounded physical rows without cross-turn merges.
+  `SessionSnapshot.activeToolSegmentId` is present only for an exact running-phase streaming agent segment,
+  never retry, compaction, settlement, or idle ownership. User, visible assistant/custom, and canonical
+  compaction barriers rotate that authority; a provisional no-match generation is published before any
+  subsequent tool progress and is replaced by the next assistant's stable presentation identity. iOS combines it with the exact
+  `acceptsQueuedPrompts` streaming fact: an unresolved declaration outside that segment, any declaration in
+  retry/compaction, or any unresolved declaration when streaming is authoritatively false is terminally
+  interrupted rather than being reactivated by a later prompt's broad active phase. Older compatible snapshots
+  without active segment authority use the streaming-capability fallback when present; snapshots omitting both
+  ownership facts retain the existing broad active-phase behavior.
   The Gateway supplies monotonic duration samples while a call is running and the
   authoritative final call-to-return duration when it completes. Visible running chips
   rebase each sample onto device uptime and advance locally between progress events;

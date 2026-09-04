@@ -146,6 +146,8 @@ type PendingContextMessage = {
   targetEntryId?: string;
   delivery: "stored" | "triggeredTurn";
   origin?: ExtensionToolOrigin;
+  /** Live presentation owner bound to the triggered canonical entry at message_end. */
+  toolSegmentOwnerId?: string;
 };
 
 type PendingExtensionCanonicalEffect =
@@ -385,9 +387,12 @@ export class RuntimeSlot {
   private readonly toolStartedAtMonotonicMs = new Map<string, number>();
   private activeOperationId: string | undefined;
   /** Display lineage survives tool-only agent continuations even when lifecycle
-   * settlement rotates the operation owner. Visible/user barriers retire it so
-   * live projection matches cold transcript derivation exactly. */
+   * settlement rotates the operation owner. User, visible content, and compaction
+   * barriers rotate it so live projection matches cold transcript derivation. */
   private activeToolSegmentOwnerId: string | undefined;
+  /** A provisional no-match owner prevents old calls from reviving between a
+   * canonical barrier and the next assistant message's stable presentation ID. */
+  private toolSegmentAwaitsAssistantOwner = false;
   private readonly operationWork = new Map<string, GatewayWorkHandle>();
   private activeExports = 0;
   private operation: SessionOperationState | undefined;
@@ -1037,7 +1042,7 @@ export class RuntimeSlot {
     if (!this.hasActiveAgentRun) return;
     if (this.phase === "idle" || this.phase === "interrupted") this.phase = "running";
     this.activeOperationId ??= randomUUID();
-    this.activeToolSegmentOwnerId ??= this.activeOperationId;
+    if (!this.activeToolSegmentOwnerId) this.ownToolSegment(this.activeOperationId);
     this.operation ??= { id: this.activeOperationId, kind: "prompt", startedAt: new Date().toISOString() };
     this.beginDerivedOperationWork(this.activeOperationId, "foreground-agent-operation");
     if (!this.activityHeartbeat) this.startActivityHeartbeat();
@@ -1864,9 +1869,23 @@ export class RuntimeSlot {
     });
   }
 
+  private ownToolSegment(ownerId: string | undefined): void {
+    this.activeToolSegmentOwnerId = ownerId;
+    this.toolSegmentAwaitsAssistantOwner = false;
+  }
+
+  private prepareAssistantOwnedToolSegment(): void {
+    // Publish a fresh provisional generation immediately. It intentionally
+    // matches no declaration and is replaced by the next assistant's stable
+    // presentation ID before that message can publish tool progress.
+    this.activeToolSegmentOwnerId = randomUUID();
+    this.toolSegmentAwaitsAssistantOwner = true;
+  }
+
   private activeToolSegmentId(): string | undefined {
-    const owner = this.activeToolSegmentOwnerId ?? this.activeOperationId;
-    return owner ? toolSegmentId(owner) : undefined;
+    return this.activeToolSegmentOwnerId
+      ? toolSegmentId(this.activeToolSegmentOwnerId)
+      : undefined;
   }
 
   private emitProgress(message: AgentMessage): void {
@@ -1948,7 +1967,7 @@ export class RuntimeSlot {
     const lastToolIndex = projected.content.findLastIndex(part => part.type === "toolCall");
     const lastBarrierIndex = projected.content.findLastIndex(part => part.type !== "toolCall");
     if (lastToolIndex < 0 || lastBarrierIndex > lastToolIndex) {
-      this.activeToolSegmentOwnerId = undefined;
+      this.prepareAssistantOwnedToolSegment();
     }
   }
 
@@ -2482,7 +2501,11 @@ export class RuntimeSlot {
         const continuesToolSegment = continuationFromSettlement
           && queuedOwner === undefined
           && this.pendingExtensionCommand === undefined
-          && this.activeToolSegmentOwnerId !== undefined;
+          && this.activeToolSegmentOwnerId !== undefined
+          && !this.toolSegmentAwaitsAssistantOwner;
+        const beginsWithUserInput = queuedOwner !== undefined
+          || this.pendingPrompt?.id === preflightOwner
+          || this.pendingQueueAdmission?.id === preflightOwner;
         const requiresDistinctAgentOwner = queuedOwner === undefined
           && (continuationFromSettlement || this.pendingExtensionCommand !== undefined);
         if (continuationFromSettlement) {
@@ -2535,7 +2558,10 @@ export class RuntimeSlot {
         this.toolStartedAtMonotonicMs.clear();
         this.nextToolOrder = 0;
         this.activeOperationId ??= requiresDistinctAgentOwner ? randomUUID() : (preflightOwner ?? randomUUID());
-        if (!continuesToolSegment) this.activeToolSegmentOwnerId = this.activeOperationId;
+        if (!continuesToolSegment) {
+          if (beginsWithUserInput) this.ownToolSegment(this.activeOperationId);
+          else this.prepareAssistantOwnedToolSegment();
+        }
         const activeInvocation = this.invocationForOperation(this.activeOperationId);
         this.operation ??= {
           id: this.activeOperationId,
@@ -2575,7 +2601,7 @@ export class RuntimeSlot {
         this.phase = "idle";
         const settledOperationId = this.activeOperationId;
         this.activeOperationId = undefined;
-        this.activeToolSegmentOwnerId = undefined;
+        this.ownToolSegment(undefined);
         this.operation = undefined;
         this.retry = undefined;
         this.toolExecutions.clear();
@@ -2656,6 +2682,10 @@ export class RuntimeSlot {
         break;
       case "compaction_start":
         this.phase = "compacting";
+        // Canonical compaction is a hard transcript barrier. A provisional
+        // generation keeps older unresolved calls terminal until the next
+        // assistant message supplies its stable presentation identity.
+        this.prepareAssistantOwnedToolSegment();
         this.compactionBaselineEntryId = [...this.sessionManager.getBranch()]
           .reverse()
           .find((entry) => entry.type === "compaction")?.id;
@@ -2760,10 +2790,19 @@ export class RuntimeSlot {
         if (event.message.role === "assistant") {
           this.flushPendingProgress();
           this.captureStreamIdentity(event.message, true);
+          if (this.toolSegmentAwaitsAssistantOwner) {
+            this.ownToolSegment(this.streamPresentationId);
+            // Segment authority must precede any progress/tool delta from this
+            // assistant; otherwise iOS could briefly apply the new tool against
+            // the preceding segment's snapshot owner.
+            this.publishSnapshot();
+          }
         } else if (event.message.role === "user") {
+          this.flushPendingProgress();
+          const precedingToolSegmentId = this.activeToolSegmentId();
           // User input is a hard display-chain boundary even when lifecycle
           // callbacks overlap a preceding completion.
-          this.activeToolSegmentOwnerId = this.activeOperationId;
+          this.ownToolSegment(this.activeOperationId);
           // Foreground admission is serialized. Claim the exact Pi object;
           // repeated text and crossing user callbacks cannot impersonate it.
           if (this.pendingPrompt && this.pendingPromptMessage === undefined) {
@@ -2797,7 +2836,7 @@ export class RuntimeSlot {
                 startedAt: new Date().toISOString(),
                 ...(invocation?.invocationId ? { invocationId: invocation.invocationId } : {}),
               };
-              this.activeToolSegmentOwnerId = reclassifiedAdmission.id;
+              this.ownToolSegment(reclassifiedAdmission.id);
               const work = this.operationWork.get(reclassifiedAdmission.id)
                 ?? this.beginDerivedOperationWork(reclassifiedAdmission.id, "foreground-agent-operation");
               work.transition("foreground-agent-operation");
@@ -2809,6 +2848,10 @@ export class RuntimeSlot {
             const operationId = dequeuedSteeringOperationID
               ?? reclassifiedAdmission?.id
               ?? this.activeOperationId;
+            // User input is also the canonical tool-segment boundary. Rotate to
+            // the exact nested steering/reclassified prompt owner rather than
+            // retaining the enclosing agent operation's older segment.
+            if (operationId) this.ownToolSegment(operationId);
             const invocation = this.invocationForOperation(operationId);
             if (operationId && invocation) {
               this.pendingInvocationUserMessages.set(event.message, {
@@ -2820,7 +2863,13 @@ export class RuntimeSlot {
               }
             }
           }
+          if (this.activeToolSegmentId() !== precedingToolSegmentId) {
+            // Publish the new no-match owner before a new-segment tool delta can
+            // arrive; the canonical user append follows on the scheduled frame.
+            this.publishSnapshot();
+          }
         } else if (event.message.role === "custom") {
+          this.flushPendingProgress();
           // Pi emits stored messages after their exact canonical append and
           // turn-triggering messages before it. Capture that ordering boundary,
           // never payload/type/renderer identity, then bind at message_end.
@@ -2835,11 +2884,19 @@ export class RuntimeSlot {
               || (latest.type === "message" && latest.message.role === "custom"))
             ? latest.id : undefined;
           const origin = this.currentExtensionContextOrigin();
+          const toolSegmentOwnerId = event.message.display
+            ? (storedTarget ? (this.presentationIDs.get(storedTarget) ?? storedTarget) : randomUUID())
+            : undefined;
+          if (toolSegmentOwnerId) {
+            this.ownToolSegment(toolSegmentOwnerId);
+            this.publishSnapshot();
+          }
           this.pendingContextMessages.push({
             kind: "context",
             delivery: storedTarget ? "stored" : "triggeredTurn",
             ...(storedTarget ? { targetEntryId: storedTarget } : {}),
             ...(origin ? { origin } : {}),
+            ...(toolSegmentOwnerId ? { toolSegmentOwnerId } : {}),
           });
         }
         break;
@@ -3074,6 +3131,9 @@ export class RuntimeSlot {
           // as this listener returns, before the queued microtask runs.
           const pending = this.pendingContextMessages.shift();
           if (pending?.targetEntryId) {
+            if (pending.toolSegmentOwnerId) {
+              this.rememberPresentationID(pending.targetEntryId, pending.toolSegmentOwnerId);
+            }
             this.enqueueExtensionCanonicalEffect({
               kind: "context",
               targetEntryId: pending.targetEntryId,
@@ -3090,6 +3150,9 @@ export class RuntimeSlot {
                   message: "Custom message did not acquire canonical context identity",
                 }));
                 return;
+              }
+              if (pending.toolSegmentOwnerId) {
+                this.rememberPresentationID(candidate.id, pending.toolSegmentOwnerId);
               }
               this.enqueueExtensionCanonicalEffect({
                 kind: "context",
@@ -4936,6 +4999,10 @@ export class RuntimeSlot {
     const canonicalToolResultIDs = canonicalToolResultCallIDs(session.sessionManager);
     const queuedItems = this.projectedQueue();
     const processProjection = this.currentProcessProjection();
+    const acceptsQueuedPrompts = session.isStreaming && !this.isAgentAdmissionSettling;
+    const activeToolSegmentId = acceptsQueuedPrompts && this.effectivePhase === "running"
+      ? this.activeToolSegmentId()
+      : undefined;
     // Canonical receipts are authoritative after runtime recreation; live maps
     // only enrich the current projection and never replace persisted facts.
     return fitSessionSnapshot({
@@ -4946,7 +5013,7 @@ export class RuntimeSlot {
       phase: this.effectivePhase,
       // Phase is presentation state; Pi streaming is the exact authority for
       // whether a new prompt can request steer/follow-up delivery right now.
-      acceptsQueuedPrompts: session.isStreaming,
+      acceptsQueuedPrompts,
       ...(session.sessionName ? { name: session.sessionName } : {}),
       cwd: session.sessionManager.getCwd(),
       ...(session.sessionManager.getHeader()?.parentSession ? { parentSessionId: session.sessionManager.getHeader()!.parentSession } : {}),
@@ -4976,6 +5043,7 @@ export class RuntimeSlot {
       ...(session.sessionManager.getLeafId() ? { leafEntryId: session.sessionManager.getLeafId()! } : {}),
       ...(this.operation ? { operation: this.operation } : {}),
       ...(this.retry ? { retry: this.retry } : {}),
+      ...(activeToolSegmentId ? { activeToolSegmentId } : {}),
       toolExecutions: [...this.toolExecutions.values()]
         .filter((tool) => !canonicalToolResultIDs.has(tool.toolCallId))
         .filter((tool) => this.effectivePhase === "running" || tool.status !== "running")

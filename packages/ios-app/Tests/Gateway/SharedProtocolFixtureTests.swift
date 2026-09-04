@@ -17,6 +17,7 @@ struct SharedProtocolFixtureTests {
 
         #expect(snapshot.runtimeGeneration == "fixture-generation")
         #expect(snapshot.acceptsQueuedPrompts == false)
+        #expect(snapshot.activeToolSegmentId == nil)
         #expect(snapshot.transcriptStart == 0)
         #expect(snapshot.transcriptTotal == snapshot.transcript.count)
         #expect(snapshot.transcriptTotal == 11)
@@ -78,6 +79,23 @@ struct SharedProtocolFixtureTests {
         let encoded = try JSONEncoder.gateway.encode(snapshot)
         let roundTrip = try JSONDecoder.gateway.decode(SessionSnapshot.self, from: encoded)
         #expect(roundTrip == snapshot)
+
+        var activeWire = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        activeWire["phase"] = "running"
+        activeWire["acceptsQueuedPrompts"] = true
+        activeWire["activeToolSegmentId"] = "tool-segment:fixture-turn"
+        activeWire["operation"] = [
+            "id": "fixture-operation",
+            "kind": "prompt",
+            "startedAt": "2026-01-01T00:00:11Z",
+        ]
+        activeWire.removeValue(forKey: "retry")
+        let activeData = try JSONSerialization.data(withJSONObject: activeWire)
+        let activeSnapshot = try JSONDecoder.gateway.decode(SessionSnapshot.self, from: activeData)
+        #expect(activeSnapshot.activeToolSegmentId == "tool-segment:fixture-turn")
+        #expect(SessionSnapshotTranscriptAdmissionPolicy.admit(activeSnapshot))
     }
 }
 

@@ -103,6 +103,8 @@ struct ChatTranscriptProjectionCandidate: Sendable {
     let runtimeItems: [ChatTranscriptRenderItem]
     let workReport: ChatTranscriptProjectionWorkReport
     fileprivate let phase: SessionPhase
+    fileprivate let acceptsQueuedPrompts: Bool?
+    fileprivate let activeToolSegmentId: String?
     fileprivate let toolExecutions: [ToolExecutionState]
     fileprivate let patchMetadata: ChatToolPatchMetadata
     fileprivate let usesIsolatedStreamingSuffix: Bool
@@ -205,9 +207,15 @@ enum ChatTranscriptProjectionKernel {
         transcriptTotal: Int,
         isActive: Bool
     ) -> ChatReadOnlyTranscriptProjection {
+        let segmentAuthority = readOnlyToolSegmentAuthority(in: transcript)
         let assembly = assemble(
             phase: isActive ? .running : .idle,
             toolExecutions: [],
+            // Once the canonical child transcript carries segment metadata, an
+            // active child with no open declaration segment must interrupt older
+            // unresolved calls rather than falling back to broad process activity.
+            acceptsQueuedPrompts: segmentAuthority.hasSegmentMetadata ? false : nil,
+            activeToolSegmentId: isActive ? segmentAuthority.activeSegmentId : nil,
             transcriptStart: transcriptStart,
             transcriptTotal: transcriptTotal,
             preservesRunningState: false,
@@ -218,6 +226,48 @@ enum ChatTranscriptProjectionKernel {
             timeline: assembly.timeline,
             toolPayloads: assembly.toolPayloads
         )
+    }
+
+    private static func readOnlyToolSegmentAuthority(
+        in transcript: [TranscriptItem]
+    ) -> (hasSegmentMetadata: Bool, activeSegmentId: String?) {
+        var hasSegmentMetadata = false
+        var activeSegmentId: String?
+        for item in transcript {
+            switch item {
+            case .message(let message):
+                switch message.role {
+                case .user:
+                    activeSegmentId = nil
+                case .toolResult:
+                    continue
+                case .assistant:
+                    if message.content.contains(where: {
+                        $0.type == .toolCall && $0.toolSegmentId != nil
+                    }) {
+                        hasSegmentMetadata = true
+                    }
+                    guard let lastToolIndex = message.content.lastIndex(where: {
+                        $0.type == .toolCall
+                    }) else {
+                        activeSegmentId = nil
+                        continue
+                    }
+                    // Parent activity is the only live child evidence. Keep the
+                    // newest declared segment eligible even when that assistant
+                    // includes trailing visible content; a later canonical item
+                    // still retires it before another segment can be admitted.
+                    activeSegmentId = message.content[lastToolIndex].toolSegmentId
+                default:
+                    activeSegmentId = nil
+                }
+            default:
+                // Visible custom messages, compaction, command/status entries,
+                // and direct bash rows are canonical conversation barriers.
+                activeSegmentId = nil
+            }
+        }
+        return (hasSegmentMetadata, activeSegmentId)
     }
 
     static func cold(
@@ -299,6 +349,8 @@ enum ChatTranscriptProjectionKernel {
     ) -> ChatTranscriptProjectionCandidate {
         if canonicalSourceUnchanged,
            snapshot.phase == previous.phase,
+           snapshot.acceptsQueuedPrompts == previous.acceptsQueuedPrompts,
+           snapshot.activeToolSegmentId == previous.activeToolSegmentId,
            snapshot.toolExecutions == previous.toolExecutions,
            snapshot.toolExecutions.allSatisfy({ $0.status != .running }),
            !hasUnanchoredRuntimeTool(metadata: previous.patchMetadata),
@@ -328,6 +380,8 @@ enum ChatTranscriptProjectionKernel {
                     runtimeItems: runtimeItems(in: snapshot),
                     workReport: report,
                     phase: snapshot.phase,
+                    acceptsQueuedPrompts: snapshot.acceptsQueuedPrompts,
+                    activeToolSegmentId: snapshot.activeToolSegmentId,
                     toolExecutions: snapshot.toolExecutions,
                     patchMetadata: previous.patchMetadata,
                     usesIsolatedStreamingSuffix: true,
@@ -624,6 +678,8 @@ enum ChatTranscriptProjectionKernel {
             runtimeItems: runtimeItems(in: snapshot),
             workReport: report,
             phase: snapshot.phase,
+            acceptsQueuedPrompts: snapshot.acceptsQueuedPrompts,
+            activeToolSegmentId: snapshot.activeToolSegmentId,
             toolExecutions: snapshot.toolExecutions,
             patchMetadata: projection.patchMetadata,
             usesIsolatedStreamingSuffix: projection.usesIsolatedStreamingSuffix,
@@ -666,6 +722,8 @@ enum ChatTranscriptProjectionKernel {
     ) -> ChatTranscriptProjectionCandidate? {
         guard previous.isValid,
               snapshot.phase == previous.phase,
+              snapshot.acceptsQueuedPrompts == previous.acceptsQueuedPrompts,
+              snapshot.activeToolSegmentId == previous.activeToolSegmentId,
               snapshot.streaming == previous.streamingFragment?.source,
               snapshot.toolExecutions != previous.toolExecutions else { return nil }
 
@@ -730,12 +788,16 @@ enum ChatTranscriptProjectionKernel {
                     updated = foregroundPresentation(
                         resolved(canonical, live: live),
                         phase: snapshot.phase,
+                        acceptsQueuedPrompts: snapshot.acceptsQueuedPrompts,
+                        activeToolSegmentId: snapshot.activeToolSegmentId,
                         preservesRunningState: snapshot.isCachedProjection == true
                     )
                 case .unanchoredRuntime:
                     updated = foregroundPresentation(
                         livePresentation(live),
                         phase: snapshot.phase,
+                        acceptsQueuedPrompts: snapshot.acceptsQueuedPrompts,
+                        activeToolSegmentId: snapshot.activeToolSegmentId,
                         preservesRunningState: snapshot.isCachedProjection == true
                     )
                 }
@@ -783,6 +845,8 @@ enum ChatTranscriptProjectionKernel {
                 runtimeItems: runtimeItems(in: snapshot),
                 workReport: report,
                 phase: snapshot.phase,
+                acceptsQueuedPrompts: snapshot.acceptsQueuedPrompts,
+                activeToolSegmentId: snapshot.activeToolSegmentId,
                 toolExecutions: snapshot.toolExecutions,
                 patchMetadata: previous.patchMetadata,
                 usesIsolatedStreamingSuffix: previous.usesIsolatedStreamingSuffix,
@@ -850,6 +914,8 @@ enum ChatTranscriptProjectionKernel {
         assemble(
             phase: snapshot.phase,
             toolExecutions: snapshot.toolExecutions,
+            acceptsQueuedPrompts: snapshot.acceptsQueuedPrompts,
+            activeToolSegmentId: snapshot.activeToolSegmentId,
             transcriptStart: snapshot.transcriptStart,
             transcriptTotal: snapshot.transcriptTotal,
             preservesRunningState: snapshot.isCachedProjection == true,
@@ -861,6 +927,8 @@ enum ChatTranscriptProjectionKernel {
     private static func assemble(
         phase: SessionPhase,
         toolExecutions: [ToolExecutionState],
+        acceptsQueuedPrompts: Bool?,
+        activeToolSegmentId: String?,
         transcriptStart: Int?,
         transcriptTotal: Int?,
         preservesRunningState: Bool,
@@ -898,6 +966,8 @@ enum ChatTranscriptProjectionKernel {
                     presentation: foregroundPresentation(
                         prepared.presentation,
                         phase: phase,
+                        acceptsQueuedPrompts: acceptsQueuedPrompts,
+                        activeToolSegmentId: activeToolSegmentId,
                         preservesRunningState: preservesRunningState
                     ),
                     canonicalBase: prepared.canonicalBase,
@@ -1570,13 +1640,35 @@ enum ChatTranscriptProjectionKernel {
     }
 
     /// An inactive authoritative snapshot cannot leave a live tool presentation
-    /// running. Cached projections preserve their explicitly retained activity.
+    /// running. A later active operation likewise cannot revive an unresolved
+    /// declaration outside its exact Gateway-owned tool segment. Cached projections
+    /// preserve their explicitly retained activity.
     private static func foregroundPresentation(
         _ tool: ChatToolPresentation,
         phase: SessionPhase,
+        acceptsQueuedPrompts: Bool?,
+        activeToolSegmentId: String?,
         preservesRunningState: Bool = false
     ) -> ChatToolPresentation {
-        guard !preservesRunningState, !phase.isActive, tool.isRunning else { return tool }
+        guard !preservesRunningState, tool.isRunning else { return tool }
+        let isSupersededInvocation: Bool
+        if tool.subtitle != "Invocation" {
+            isSupersededInvocation = false
+        } else if phase != .running {
+            // Retry and compaction are active session phases, but neither owns a
+            // currently executable declaration from a preceding tool segment.
+            // Legacy Gateways omit both ownership facts and retain their original
+            // broad phase fallback until an authoritative replacement arrives.
+            isSupersededInvocation = activeToolSegmentId != nil || acceptsQueuedPrompts != nil
+        } else if let activeToolSegmentId {
+            isSupersededInvocation = tool.toolSegmentId != activeToolSegmentId
+        } else {
+            // Exact false proves there is no streaming agent/tool segment during
+            // a running-phase settlement gap. Nil remains the legacy compatibility
+            // case for Gateways predating segment authority.
+            isSupersededInvocation = acceptsQueuedPrompts == false
+        }
+        guard !phase.isActive || isSupersededInvocation else { return tool }
         return ChatToolPresentation(
             id: tool.id, title: tool.title, toolName: tool.toolName, subtitle: "Interrupted", request: tool.request,
             response: tool.response, content: tool.content, fallbackContent: tool.fallbackContent,

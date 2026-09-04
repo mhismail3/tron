@@ -940,6 +940,8 @@ describe("transcript projection", () => {
       revision: 40,
       eventSequence: 80,
       phase: "running",
+      acceptsQueuedPrompts: true,
+      activeToolSegmentId: "tool-segment:\"operation\"",
       cwd: "/tmp/project",
       thinkingLevel: "high",
       availableThinkingLevels: ["off", "high"],
@@ -982,7 +984,11 @@ describe("transcript projection", () => {
 
     const fitted = fitSessionSnapshot(snapshot);
     expect(Buffer.byteLength(JSON.stringify(fitted))).toBeLessThanOrEqual(SESSION_SNAPSHOT_BYTES);
-    expect(fitted).toMatchObject({ phase: "running", operation: { id: "operation" } });
+    expect(fitted).toMatchObject({
+      phase: "running",
+      activeToolSegmentId: "tool-segment:\"operation\"",
+      operation: { id: "operation" },
+    });
     expect(fitted.toolExecutions.map(({ toolCallId, order }) => ({ toolCallId, order }))).toEqual(
       Array.from({ length: 6 }, (_, index) => ({ toolCallId: `tool-${index}`, order: index })),
     );

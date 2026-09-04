@@ -14,6 +14,7 @@ import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { RunMarkerCompletionConflictError } from "./run-markers.js";
+import { toolSegmentId } from "./projection.js";
 
 async function collectStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
   const chunks: Buffer[] = [];
@@ -4986,6 +4987,7 @@ export default function (pi) {
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const internal = slot as unknown as {
       phase: "compacting" | "running";
+      activeOperationId?: string;
       operation?: { id?: string; kind: "compaction"; startedAt: string };
       publishSnapshot: () => void;
       runtime: { session: {
@@ -5002,6 +5004,11 @@ export default function (pi) {
       id: "compaction-operation", kind: "compaction", startedAt: new Date().toISOString(),
     };
     vi.spyOn(internal.runtime.session, "isStreaming", "get").mockReturnValue(true);
+    internal.activeOperationId = "prior-agent-operation";
+    const compactingSnapshot = slot.snapshot();
+    expect(compactingSnapshot.acceptsQueuedPrompts).toBe(false);
+    expect(compactingSnapshot.activeToolSegmentId).toBeUndefined();
+    internal.activeOperationId = undefined;
     let queued = false;
     vi.spyOn(internal.runtime.session, "getSteeringMessages")
       .mockImplementation(() => queued ? ["after compaction"] : []);
@@ -5027,20 +5034,83 @@ export default function (pi) {
     ]);
   });
 
+  it("rotates provisional tool segment authority across automatic compaction", async () => {
+    const fixture = await coldFixture("compaction-tool-segment-boundary");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      phase: "running" | "compacting";
+      activeOperationId?: string;
+      activeToolSegmentOwnerId?: string;
+      onEvent: (event: unknown) => void;
+      runtime: { session: { readonly isStreaming: boolean } };
+    };
+    const streaming = vi.spyOn(internal.runtime.session, "isStreaming", "get").mockReturnValue(true);
+    internal.phase = "running";
+    internal.activeOperationId = "operation-before-compaction";
+    internal.activeToolSegmentOwnerId = "operation-before-compaction";
+    const beforeSegment = slot.snapshot().activeToolSegmentId;
+    expect(beforeSegment).toBe(toolSegmentId("operation-before-compaction"));
+
+    internal.onEvent({ type: "compaction_start", reason: "threshold" });
+    expect(slot.snapshot()).toMatchObject({
+      phase: "compacting",
+      acceptsQueuedPrompts: false,
+    });
+    expect(slot.snapshot().activeToolSegmentId).toBeUndefined();
+
+    internal.onEvent({
+      type: "compaction_end",
+      reason: "threshold",
+      result: undefined,
+      aborted: false,
+      willRetry: false,
+    });
+    const provisionalSegment = slot.snapshot().activeToolSegmentId;
+    expect(provisionalSegment).toMatch(/^tool-segment:/);
+    expect(provisionalSegment).not.toBe(beforeSegment);
+
+    const assistant = fauxAssistantMessage([
+      fauxToolCall("read", { path: "README.md" }, { id: "call-after-compaction" }),
+    ], { stopReason: "toolUse" });
+    internal.onEvent({ type: "message_start", message: assistant });
+    const assistantSegment = slot.snapshot().activeToolSegmentId;
+    expect(assistantSegment).toMatch(/^tool-segment:/);
+    expect(assistantSegment).not.toBe(provisionalSegment);
+    internal.onEvent({ type: "message_end", message: assistant });
+    internal.onEvent({
+      type: "tool_execution_start",
+      toolCallId: "call-after-compaction",
+      toolName: "read",
+      args: { path: "README.md" },
+    });
+    expect(slot.snapshot().toolExecutions).toEqual([
+      expect.objectContaining({
+        toolCallId: "call-after-compaction",
+        toolSegmentId: assistantSegment,
+      }),
+    ]);
+    streaming.mockRestore();
+  });
+
   it("binds duplicate consumed steering to each exact queue operation", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-steering-ownership-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(agentDir), mkdir(cwd)]);
     let releaseResponse!: () => void;
+    let releaseSteeringResponse!: () => void;
     const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    const steeringResponseBarrier = new Promise<void>((resolve) => { releaseSteeringResponse = resolve; });
     const faux = fauxProvider({ provider: "tron-steering-ownership", tokensPerSecond: 10_000 });
     faux.setResponses([
       async () => {
         await responseBarrier;
         return fauxAssistantMessage("initial complete");
       },
-      fauxAssistantMessage("steering complete"),
+      async () => {
+        await steeringResponseBarrier;
+        return fauxAssistantMessage("steering complete");
+      },
     ]);
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
     runtime.registerNativeProvider(faux.provider);
@@ -5078,6 +5148,20 @@ export default function (pi) {
     ]);
 
     releaseResponse();
+    await waitUntil(() => [queued.operationId, duplicate.operationId].some(operationId =>
+      slot.snapshot().transcript.some(item =>
+        item.kind === "message" && item.role === "user" && item.presentationId === operationId,
+      ),
+    ));
+    const steeringSnapshot = slot.snapshot();
+    const consumedSteeringIDs = steeringSnapshot.transcript.flatMap((item) =>
+      item.kind === "message" && item.role === "user"
+        && [queued.operationId, duplicate.operationId].includes(item.presentationId ?? "")
+        ? [item.presentationId!] : [],
+    );
+    expect(consumedSteeringIDs.length).toBeGreaterThan(0);
+    expect(steeringSnapshot.activeToolSegmentId).toBe(toolSegmentId(consumedSteeringIDs.at(-1)!));
+    releaseSteeringResponse();
     await initial;
     await waitUntil(() => [queued.operationId, duplicate.operationId].every(operationId =>
       slot.snapshot().transcript.some(item =>
@@ -6889,8 +6973,17 @@ export default function (pi) {
     const slot = await registry.create(cwd);
     const model = faux.getModel();
     await slot.setModel(model.provider, model.id);
-    await slot.prompt("run tools");
+    const prompting = slot.prompt("run tools");
+    await waitUntil(() => slot.snapshot().toolExecutions.some((tool) => tool.status === "running"));
+    const activeSnapshot = slot.snapshot();
+    expect(activeSnapshot.activeToolSegmentId).toBeDefined();
+    expect(activeSnapshot.acceptsQueuedPrompts).toBe(true);
+    expect(activeSnapshot.toolExecutions.every(
+      (tool) => tool.toolSegmentId === activeSnapshot.activeToolSegmentId,
+    )).toBe(true);
+    await prompting;
     await waitUntil(() => !slot.isBusy);
+    expect(slot.snapshot().activeToolSegmentId).toBeUndefined();
     await waitUntil(() => registry.attentionProjection(slot.id).isUnread);
     expect(registry.attentionProjection(slot.id).completionRevision).toBe(1);
 
@@ -7068,6 +7161,162 @@ export default function (pi) {
         : []
     );
     expect(new Set(canonicalSegments)).toEqual(new Set([segmentByCall.get("call-one")]));
+  });
+
+  it("rotates tool segment authority across a visible assistant barrier before new tool progress", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-tool-segment-visible-barrier-"));
+    const agentDir = join(root, "agent");
+    const sessionDir = join(root, "sessions");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(sessionDir), mkdir(cwd)]);
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({ sessionDir }));
+    await Promise.all([
+      writeFile(join(cwd, "one.txt"), "one\n"),
+      writeFile(join(cwd, "two.txt"), "two\n"),
+    ]);
+
+    const faux = fauxProvider({ provider: "tron-tool-segment-visible-barrier", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("read", { path: join(cwd, "one.txt") }, { id: "call-before-barrier" }),
+        { type: "text", text: "Visible checkpoint" },
+      ], { stopReason: "toolUse" }),
+      fauxAssistantMessage([
+        fauxToolCall("read", { path: join(cwd, "two.txt") }, { id: "call-after-barrier" }),
+      ], { stopReason: "toolUse" }),
+      fauxAssistantMessage("finished"),
+    ]);
+    const events: Array<{ topic: string; payload: any }> = [];
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => {
+        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+        runtime.registerNativeProvider(faux.provider);
+        return runtime;
+      },
+      trust: new TrustService(agentDir),
+      broadcast: (_sessionId, topic, payload) => events.push({ topic, payload }),
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("run tools around a visible barrier");
+    await waitUntil(() => !slot.isBusy);
+
+    const toolProgress = events
+      .filter((event) => event.topic === "session.toolProgress")
+      .map((event) => event.payload.data as { toolCallId: string; toolSegmentId?: string });
+    const segmentByCall = new Map(toolProgress.map((event) => [event.toolCallId, event.toolSegmentId]));
+    const beforeSegment = segmentByCall.get("call-before-barrier");
+    const afterSegment = segmentByCall.get("call-after-barrier");
+    expect(beforeSegment).toMatch(/^tool-segment:/);
+    expect(afterSegment).toMatch(/^tool-segment:/);
+    expect(afterSegment).not.toBe(beforeSegment);
+
+    const canonicalSegmentByCall = new Map(slot.snapshot().transcript.flatMap((item) =>
+      item.kind === "message" && item.role === "assistant"
+        ? item.content.flatMap((part) => part.type === "toolCall"
+          ? [[part.toolCallId, part.toolSegmentId] as const]
+          : [])
+        : []
+    ));
+    expect(canonicalSegmentByCall.get("call-before-barrier")).toBe(beforeSegment);
+    expect(canonicalSegmentByCall.get("call-after-barrier")).toBe(afterSegment);
+
+    const afterProgressIndex = events.findIndex((event) =>
+      event.topic === "session.toolProgress"
+        && event.payload.data?.toolCallId === "call-after-barrier"
+    );
+    const precedingAuthorityIndex = events.findLastIndex((event, index) => {
+      if (index >= afterProgressIndex || event.topic !== "session.snapshot") return false;
+      const snapshot = event.payload?.data ?? event.payload;
+      return snapshot.activeToolSegmentId === afterSegment;
+    });
+    expect(afterProgressIndex).toBeGreaterThanOrEqual(0);
+    expect(precedingAuthorityIndex).toBeGreaterThanOrEqual(0);
+    expect(precedingAuthorityIndex).toBeLessThan(afterProgressIndex);
+  });
+
+  it("rotates tool segment authority at a visible custom-message barrier", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-tool-segment-custom-barrier-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+    await writeFile(join(extensionDir, "visible-barrier.ts"), `
+let sent = false;
+export default function (pi) {
+  pi.on("turn_end", () => {
+    if (sent) return;
+    sent = true;
+    pi.sendMessage({ customType: "visible-boundary", content: "Visible extension input", display: true }, { triggerTurn: true });
+  });
+}
+`);
+    await Promise.all([
+      writeFile(join(cwd, "one.txt"), "one\n"),
+      writeFile(join(cwd, "two.txt"), "two\n"),
+    ]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-tool-segment-custom-barrier", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("read", { path: join(cwd, "one.txt") }, { id: "call-before-custom" }),
+      ], { stopReason: "toolUse" }),
+      fauxAssistantMessage([
+        fauxToolCall("read", { path: join(cwd, "two.txt") }, { id: "call-after-custom" }),
+      ], { stopReason: "toolUse" }),
+      fauxAssistantMessage("finished"),
+    ]);
+    const progress: Array<{ toolCallId: string; toolSegmentId?: string }> = [];
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => {
+        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+        runtime.registerNativeProvider(faux.provider);
+        return runtime;
+      },
+      trust,
+      broadcast: (_sessionId, topic, payload) => {
+        if (topic === "session.toolProgress") progress.push(payload.data);
+      },
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("run tools around visible extension input");
+    await waitUntil(() => !slot.isBusy);
+
+    const segmentByCall = new Map(progress.map((event) => [event.toolCallId, event.toolSegmentId]));
+    const beforeSegment = segmentByCall.get("call-before-custom");
+    const afterSegment = segmentByCall.get("call-after-custom");
+    expect(beforeSegment).toMatch(/^tool-segment:/);
+    expect(afterSegment).toMatch(/^tool-segment:/);
+    expect(afterSegment).not.toBe(beforeSegment);
+    const snapshot = slot.snapshot();
+    expect(snapshot.transcript.some((item) => item.kind === "customMessage")).toBe(true);
+    const canonicalSegmentByCall = new Map(snapshot.transcript.flatMap((item) =>
+      item.kind === "message" && item.role === "assistant"
+        ? item.content.flatMap((part) => part.type === "toolCall"
+          ? [[part.toolCallId, part.toolSegmentId] as const]
+          : [])
+        : []
+    ));
+    expect(canonicalSegmentByCall.get("call-before-custom")).toBe(beforeSegment);
+    expect(canonicalSegmentByCall.get("call-after-custom")).toBe(afterSegment);
   });
 
   it("permits one delayed agent start owned by an accepted extension command during drain", async () => {
