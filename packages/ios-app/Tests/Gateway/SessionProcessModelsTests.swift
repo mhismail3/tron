@@ -136,6 +136,28 @@ struct SessionProcessModelsTests {
         #expect(SessionProcessProjection.sections([recent, active]).recent.map(\.id) == [recent.id])
     }
 
+    @Test("active subagent order is stable across progress timestamps")
+    func activeOrderUsesStartBoundary() {
+        let first = makeProcess(
+            sequence: 1,
+            observedAt: "2026-01-01T00:00:20Z",
+            startedAt: "2026-01-01T00:00:01Z"
+        )
+        let second = makeProcess(
+            sequence: 2,
+            observedAt: "2026-01-01T00:00:10Z",
+            startedAt: "2026-01-01T00:00:02Z"
+        )
+        #expect(SessionProcessProjection.sections([first, second]).active.map(\.processId) == [second.processId, first.processId])
+
+        let firstHeartbeat = makeProcess(
+            sequence: 1,
+            observedAt: "2026-01-01T00:00:30Z",
+            startedAt: "2026-01-01T00:00:01Z"
+        )
+        #expect(SessionProcessProjection.sections([firstHeartbeat, second]).active.map(\.processId) == [second.processId, first.processId])
+    }
+
     @Test("subagent stop control mounts disabled before exact authority arrives")
     func stopControlVisibility() {
         #expect(ReadOnlySubagentStopControlPolicy.isVisible(
@@ -443,6 +465,8 @@ struct SessionProcessModelsTests {
         sequence: Int = 1,
         terminalAt: String? = nil,
         recentUntil: String? = nil,
+        observedAt: String? = nil,
+        startedAt: String = "2026-01-01T00:00:00Z",
         currentTool: String? = nil,
         currentPathBasename: String? = nil,
         outputTail: String? = "output"
@@ -457,11 +481,11 @@ struct SessionProcessModelsTests {
             executionMode: .asynchronous, source: .delegatedAgent,
             lifecycle: SessionProcessLifecycle(
                 state: state, sequence: sequence,
-                observedAt: terminalAt ?? "2026-01-01T00:00:02Z",
+                observedAt: observedAt ?? terminalAt ?? "2026-01-01T00:00:02Z",
                 terminalAt: terminalAt, recentUntil: effectiveRecentUntil
             ),
             visibility: visibility,
-            startedAt: "2026-01-01T00:00:00Z", title: "worker",
+            startedAt: startedAt, title: "worker",
             currentTool: currentTool, currentPathBasename: currentPathBasename, outputTail: outputTail,
             toolCallId: "call-1", runId: "run-1"
         )

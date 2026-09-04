@@ -173,6 +173,23 @@ struct ChatSessionPresentationTests {
         #expect(passive.needsOpeningResume)
     }
 
+    @Test("a drained cancelled opening publishes a new surface-task edge")
+    func drainedOpeningPublishesResumeEdge() async throws {
+        let presentation = ChatSessionPresentation(sessionID: "session")
+        _ = presentation.open.begin()
+        let task = Task<Void, Never> {}
+        let generation = try #require(presentation.installOpeningTask(task))
+        await task.value
+        let before = presentation.openingTaskRevision
+        #expect(presentation.finishOpeningTask(generation))
+        #expect(presentation.openingTaskRevision == before + 1)
+        #expect(presentation.needsOpeningResume)
+        #expect(ChatOpeningSurfaceTaskID(
+            surfaceActive: true,
+            openingTaskRevision: presentation.openingTaskRevision
+        ) != ChatOpeningSurfaceTaskID(surfaceActive: true, openingTaskRevision: before))
+    }
+
     @Test("uncover waits for a covered opening and then retries only when still needed")
     func coveredOpeningResumePolicy() {
         #expect(ChatOpeningSurfacePolicy.action(

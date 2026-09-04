@@ -80,6 +80,23 @@ describe("CatalogMetadataIndex", () => {
     expect(target.name).toBeUndefined();
   });
 
+  it("keeps machine-authored skill and command envelopes out of session titles", () => {
+    const skillTarget: CatalogMetadataAccumulator = {
+      messageCount: 0, firstMessage: "(no messages)", name: undefined, updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    applyCatalogMetadataEntry(skillTarget, { type: "message", message: {
+      role: "user",
+      content: `<skill name="review" location="/skills/review/SKILL.md">\nReferences are relative to /skills/review.\n\nInstructions\n</skill>`,
+    } });
+    expect(skillTarget.firstMessage).toBe("Review");
+
+    const commandTarget = { ...skillTarget, firstMessage: "(no messages)" };
+    applyCatalogMetadataEntry(commandTarget, { type: "message", message: {
+      role: "user", content: "/release-notes summarize v2",
+    } });
+    expect(commandTarget.firstMessage).toBe("summarize v2");
+  });
+
   it("atomically saves and reloads unchanged canonical metadata", async () => {
     const f = await fixture();
     const index = new CatalogMetadataIndex(f.gateway);

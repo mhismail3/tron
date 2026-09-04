@@ -435,7 +435,10 @@ struct ChatView: View {
         .onChange(of: scrollCoordinator.defersAutomaticLiveProjectionIntake) { _, deferred in
             automaticLiveProjectionIntakeChanged(deferred: deferred)
         }
-        .task(id: presentationActivity.allowsPresentationPublication) {
+        .task(id: ChatOpeningSurfaceTaskID(
+            surfaceActive: presentationActivity.allowsPresentationPublication,
+            openingTaskRevision: sessionPresentation.openingTaskRevision
+        )) {
             switch ChatOpeningSurfacePolicy.action(
                 surfaceActive: presentationActivity.allowsPresentationPublication,
                 hasOpeningTask: sessionPresentation.openingTask != nil,

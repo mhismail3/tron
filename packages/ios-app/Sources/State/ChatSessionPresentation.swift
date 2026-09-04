@@ -9,6 +9,11 @@ enum ChatOpeningSurfaceAction: Equatable {
     case waitForCurrentThenBeginIfNeeded
 }
 
+struct ChatOpeningSurfaceTaskID: Hashable {
+    let surfaceActive: Bool
+    let openingTaskRevision: Int
+}
+
 enum ChatOpeningSurfacePolicy {
     static func action(
         surfaceActive: Bool,
@@ -107,6 +112,7 @@ final class ChatSessionPresentation {
     @ObservationIgnored var photoImportTask: Task<Void, Never>?
     @ObservationIgnored var attachmentPresentationTask: Task<Void, Never>?
     @ObservationIgnored private(set) var openingTask: Task<Void, Never>?
+    private(set) var openingTaskRevision = 0
     private var openingTaskGeneration = 0
     private var cancelledOpeningTaskGeneration: Int?
 
@@ -166,6 +172,9 @@ final class ChatSessionPresentation {
     func finishOpeningTask(_ generation: Int) -> Bool {
         guard openingTaskGeneration == generation, openingTask != nil else { return false }
         openingTask = nil
+        // A cancelled opening can drain after foreground/surface callbacks have
+        // already fired. Publish that newly resumable edge explicitly.
+        openingTaskRevision &+= 1
         return true
     }
 

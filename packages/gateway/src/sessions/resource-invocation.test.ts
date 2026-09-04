@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { admitResourceInvocation, canonicalResourceName, parsePiLiteralCommand } from "./resource-invocation.js";
+import { admitResourceInvocation, canonicalResourceName, parsePiLiteralCommand, userFacingPromptPreview } from "./resource-invocation.js";
 
 describe("resource invocation contract", () => {
   it("normalizes skill transport names without changing arguments", () => {
@@ -20,6 +20,15 @@ describe("resource invocation contract", () => {
     expect(() => admitResourceInvocation({ source: "prompt", name: "x", arguments: "x", extra: true })).toThrow(/unknown/);
     expect(() => admitResourceInvocation({ source: "prompt", name: "x", arguments: "x".repeat(5_001) })).toThrow(/UTF-8/);
     expect(() => admitResourceInvocation({ source: "prompt", name: "🙂".repeat(200), arguments: "x" })).toThrow(/UTF-8/);
+  });
+
+  it("derives user-facing previews without machine-authored invocation syntax", () => {
+    const skill = `<skill name="code-review" location="/skills/code-review/SKILL.md">\nReferences are relative to /skills/code-review.\n\nPrivate instructions\n</skill>`;
+    expect(userFacingPromptPreview(skill)).toBe("Code review");
+    expect(userFacingPromptPreview(`${skill}\n\nInspect this change`)).toBe("Inspect this change");
+    expect(userFacingPromptPreview("/release-notes summarize v2")).toBe("summarize v2");
+    expect(userFacingPromptPreview("/release-notes")).toBe("Release notes");
+    expect(userFacingPromptPreview("ordinary prompt")).toBe("ordinary prompt");
   });
 
   it("matches Pi's literal ASCII-space command delimiter", () => {

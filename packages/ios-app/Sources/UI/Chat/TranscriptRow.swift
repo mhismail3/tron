@@ -243,7 +243,7 @@ struct TranscriptRow: View, Equatable {
                 }
                 if showsMessageFooter, let error = item.errorMessage, !error.isEmpty {
                     TranscriptNotice(
-                        title: error,
+                        title: ChatProviderErrorPresentation.message(error),
                         icon: "exclamationmark.triangle.fill",
                         tone: .error,
                         animatesEntrance: streaming

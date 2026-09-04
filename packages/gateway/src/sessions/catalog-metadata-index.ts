@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { SessionCreationOrigin } from "../protocol/types.js";
+import { userFacingPromptPreview } from "./resource-invocation.js";
 
 export const CATALOG_METADATA_INDEX_VERSION = 2 as const;
 export const CATALOG_METADATA_INDEX_MAX_BYTES = 8 * 1_024 * 1_024;
@@ -55,7 +56,7 @@ export function applyCatalogMetadataEntry(target: CatalogMetadataAccumulator, en
         .filter((part): part is Record<string, unknown> => !!part && typeof part === "object" && !Array.isArray(part))
         .filter((part) => part.type === "text" && typeof part.text === "string")
         .map((part) => part.text as string).join(" ") : "";
-    if (text) target.firstMessage = text;
+    if (text) target.firstMessage = userFacingPromptPreview(text);
   }
   const timestamp = typeof message.timestamp === "number"
     ? message.timestamp

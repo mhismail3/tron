@@ -29,12 +29,10 @@ import type { ChatOrigin, ChatSemanticMetadata, CommandInfo, ContentPart, Extens
 import { contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, parseInvocationReceipt, type InvocationProjection } from "./invocation-receipts.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, parseExtensionNotificationReceipt } from "./extension-notification-receipts.js";
-import { RESOURCE_NAME_MAX_BYTES } from "./resource-invocation.js";
+import { projectSkillInvocation, RESOURCE_NAME_MAX_BYTES } from "./resource-invocation.js";
+export { projectSkillInvocation } from "./resource-invocation.js";
 
 const MAX_TEXT = 64_000;
-const MAX_SKILL_INVOCATION_BYTES = 4 * 1_048_576;
-const MAX_SKILL_NAME_BYTES = 512;
-const MAX_SKILL_PATH_BYTES = 8_192;
 const MAX_JSON_STRING = 100_000;
 const MAX_PROJECTED_JSON_BYTES = 96_000;
 const MAX_CONTENT_BYTES = 320_000;
@@ -161,63 +159,6 @@ function semanticForState(sequence = 0): ChatSemanticMetadata {
     origin: { kind: "extension", confidence: "unknown" },
     sequence,
   };
-}
-
-export interface ProjectedSkillInvocation {
-  resourceName: string;
-  text: string;
-}
-
-/**
- * Recognizes only Pi's exact persisted skill envelope. Malformed, oversized,
- * nested, or future shapes remain untouched rather than risking content loss.
- */
-export function projectSkillInvocation(value: string, expectedArguments?: string): ProjectedSkillInvocation | undefined {
-  if (!value.startsWith("<skill name=\"") || Buffer.byteLength(value) > MAX_SKILL_INVOCATION_BYTES) return undefined;
-  const headerEnd = value.indexOf(">\n");
-  if (headerEnd < 0 || headerEnd > MAX_SKILL_NAME_BYTES + MAX_SKILL_PATH_BYTES + 64) return undefined;
-  const header = value.slice(0, headerEnd + 1);
-  const match = /^<skill name="([A-Za-z0-9][A-Za-z0-9._-]*)" location="([^"\r\n]+)">$/.exec(header);
-  if (!match) return undefined;
-  const [, resourceName, location] = match;
-  if (!resourceName || !location
-      || Buffer.byteLength(resourceName) > MAX_SKILL_NAME_BYTES
-      || Buffer.byteLength(location) > MAX_SKILL_PATH_BYTES) return undefined;
-  const bodyStart = headerEnd + 2;
-  const referenceEnd = value.indexOf("\n\n", bodyStart);
-  if (referenceEnd < 0) return undefined;
-  const reference = value.slice(bodyStart, referenceEnd);
-  const referencePrefix = "References are relative to ";
-  if (!reference.startsWith(referencePrefix) || !reference.endsWith(".")) return undefined;
-  const baseDir = reference.slice(referencePrefix.length, -1);
-  if (!baseDir || /[\r\n]/u.test(baseDir) || Buffer.byteLength(baseDir) > MAX_SKILL_PATH_BYTES) return undefined;
-  const closing = "\n</skill>";
-  // Delimiter-like text can occur in skill Markdown or user arguments. Exact
-  // receipt arguments disambiguate it; without them, multiple candidates fail
-  // closed rather than dropping user text or exposing private skill content.
-  let closingIndex = value.lastIndexOf(closing);
-  if (expectedArguments !== undefined) {
-    let matched = false;
-    let candidate = value.indexOf(closing, referenceEnd + 2);
-    while (candidate >= 0) {
-      const candidateTail = value.slice(candidate + closing.length);
-      if ((candidateTail === "" && expectedArguments === "")
-        || (candidateTail.startsWith("\n\n") && candidateTail.slice(2) === expectedArguments)) {
-        closingIndex = candidate;
-        matched = true;
-        break;
-      }
-      candidate = value.indexOf(closing, candidate + closing.length);
-    }
-    if (!matched) return undefined;
-  } else {
-    const firstClosingIndex = value.indexOf(closing, referenceEnd + 2);
-    if (firstClosingIndex !== closingIndex) return undefined;
-  }
-  if (closingIndex < referenceEnd + 2) return undefined;
-  const tail = value.slice(closingIndex + closing.length);
-  if (tail !== "" && !tail.startsWith("\n\n")) return undefined;
-  return { resourceName, text: tail === "" ? "" : tail.slice(2) };
 }
 
 function projectedSkillText(value: string): string {

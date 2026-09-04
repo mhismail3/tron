@@ -83,7 +83,7 @@ import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, exte
 import { CONTEXT_DELIVERY_RECEIPT_TYPE, makeContextDeliveryReceipt } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, makeInvocationReceipt, receiptJSON, type InvocationProjection } from "./invocation-receipts.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, extensionNotificationJSON, makeExtensionNotificationReceipt } from "./extension-notification-receipts.js";
-import { admitPromptText, admitResourceInvocation, canonicalResourceName, parsePiLiteralCommand } from "./resource-invocation.js";
+import { admitPromptText, admitResourceInvocation, canonicalResourceName, parsePiLiteralCommand, userFacingPromptPreview } from "./resource-invocation.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import { ProcessActivityRecency, type ProcessActivityExpiryFrame } from "./process-activity-recency.js";
 import {
@@ -2069,7 +2069,7 @@ export class RuntimeSlot {
         ? firstUser.message.content
         : firstUser.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join(""))
       : "";
-    const title = rawName || firstMessage.trim() || "New session";
+    const title = rawName || userFacingPromptPreview(firstMessage) || "New session";
     return boundedSummaryText([...title].slice(0, 80).join(""), 256);
   }
 
@@ -2083,10 +2083,9 @@ export class RuntimeSlot {
         if (entry.type === "message") {
           messageCount += 1;
           if (!firstMessage && entry.message.role === "user") {
-            firstMessage = boundedSummaryText((typeof entry.message.content === "string"
+            firstMessage = boundedSummaryText(userFacingPromptPreview(typeof entry.message.content === "string"
               ? entry.message.content
-              : entry.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join(""))
-              .trim());
+              : entry.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("")));
           }
         }
         updatedAt = entry.timestamp;

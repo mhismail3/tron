@@ -982,6 +982,20 @@ struct ChatTranscriptPageRequest: Equatable {
     }
 }
 
+enum ChatProviderErrorPresentation {
+    static let unspecifiedNotFound = "The model provider returned an unspecified Not Found error. Check the selected model and provider connection, then try again."
+
+    static func message(_ raw: String) -> String {
+        let normalized = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: ":", with: "")
+        return normalized == "error not found" || normalized == "not found"
+            ? unspecifiedNotFound
+            : raw
+    }
+}
+
 struct ChatStreamingResponseSignature: Equatable {
     let itemID: String
     let parts: [ChatMessagePart]
@@ -993,7 +1007,9 @@ struct ChatStreamingResponseSignature: Equatable {
             guard case .content(let content) = part else { return true }
             return content.type != .toolCall
         }
-        let visibleError = (item.errorMessage ?? "").isEmpty ? nil : item.errorMessage
+        let visibleError = (item.errorMessage ?? "").isEmpty
+            ? nil
+            : item.errorMessage.map(ChatProviderErrorPresentation.message)
         guard !visibleParts.isEmpty || visibleError != nil else { return nil }
         itemID = item.id
         parts = visibleParts

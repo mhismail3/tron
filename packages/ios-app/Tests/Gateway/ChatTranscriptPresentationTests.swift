@@ -4,6 +4,13 @@ import Testing
 
 @Suite("Chat transcript presentation")
 struct ChatTranscriptPresentationTests {
+    @Test("provider not-found placeholder becomes actionable without rewriting real errors")
+    func providerNotFoundPresentation() {
+        #expect(ChatProviderErrorPresentation.message("Error Not Found") == ChatProviderErrorPresentation.unspecifiedNotFound)
+        #expect(ChatProviderErrorPresentation.message("Error: Not Found") == ChatProviderErrorPresentation.unspecifiedNotFound)
+        #expect(ChatProviderErrorPresentation.message("Model access denied") == "Model access denied")
+    }
+
     @Test("only exact receipt-bound Automation prompts select the Automation container")
     func automationPromptContainerAdmission() throws {
         let automationID = "10000000-0000-4000-8000-000000000001"

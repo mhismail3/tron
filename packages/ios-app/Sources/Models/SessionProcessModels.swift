@@ -456,8 +456,15 @@ enum SessionProcessProjection {
         let lhsProblem = lhs.lifecycle.attention == .needsAttention || lhs.lifecycle.state.isProblem
         let rhsProblem = rhs.lifecycle.attention == .needsAttention || rhs.lifecycle.state.isProblem
         if lhsProblem != rhsProblem { return lhsProblem }
-        let lhsTime = lhs.lifecycle.terminalAt ?? lhs.lifecycle.observedAt
-        let rhsTime = rhs.lifecycle.terminalAt ?? rhs.lifecycle.observedAt
+        // Active observation timestamps advance with progress heartbeats and
+        // are not ordering authority. Hold rows at their run-start boundary;
+        // terminal history may continue using its fixed completion boundary.
+        let lhsTime = lhs.visibility == .active
+            ? (lhs.startedAt ?? "")
+            : (lhs.lifecycle.terminalAt ?? lhs.lifecycle.observedAt)
+        let rhsTime = rhs.visibility == .active
+            ? (rhs.startedAt ?? "")
+            : (rhs.lifecycle.terminalAt ?? rhs.lifecycle.observedAt)
         if lhsTime != rhsTime { return lhsTime > rhsTime }
         return lhs.processId < rhs.processId
     }
