@@ -38,6 +38,7 @@ struct AgentDefaultsSettingsView: View {
     @State private var drafts = ScopedSettingsDraftStore<AgentDefaultsDraft>()
     @State private var scope: SettingsScope = .global
     @State private var saving = false
+    @State private var refreshingCatalog = false
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -71,9 +72,35 @@ struct AgentDefaultsSettingsView: View {
                     VStack(spacing: 0) {
                         TronModelSelectionRow(
                             selection: $draft.selectedModel,
-                            models: model.providerCatalog(for: catalogTarget)?.models.filter(\.available) ?? [],
+                            models: availableModels,
                             navigationTitle: "Default Model"
                         )
+                        TronSettingsDivider(accent: .tronPurple)
+                        Button {
+                            Task { await refreshModelCatalog() }
+                        } label: {
+                            TronSettingsRow(
+                                icon: "arrow.clockwise",
+                                title: "Refresh Model Catalog",
+                                subtitle: refreshingCatalog ? "Checking configured providers…" : modelCatalogSummary,
+                                accent: .tronPurple
+                            ) {
+                                if refreshingCatalog {
+                                    TronPulseLoadingIndicator(size: 18)
+                                        .accessibilityLabel("Refreshing model catalog")
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(TronTypography.buttonSM)
+                                        .foregroundStyle(Color.tronPurple)
+                                        .accessibilityHidden(true)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(refreshingCatalog || saving)
+                        .accessibilityLabel("Refresh Model Catalog")
+                        .accessibilityValue(refreshingCatalog ? "In progress" : modelCatalogSummary)
+                        .accessibilityHint("Checks configured providers for newly available models.")
                         TronSettingsDivider(accent: .tronPurple)
                         TronThinkingSelectionRow(
                             selection: $draft.thinking,
@@ -126,7 +153,10 @@ struct AgentDefaultsSettingsView: View {
         .tronNavigationTitle("Models and Defaults")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                TronSaveToolbarButton(isSaving: saving, isEnabled: hasUnsavedChanges) {
+                TronSaveToolbarButton(
+                    isSaving: saving,
+                    isEnabled: hasUnsavedChanges && !refreshingCatalog
+                ) {
                     Task { await save() }
                 }
             }
@@ -152,6 +182,17 @@ struct AgentDefaultsSettingsView: View {
 
     private var catalogTarget: ProviderCatalogTarget {
         scope == .project ? providerTarget : .global
+    }
+
+    private var availableModels: [ModelSummary] {
+        model.providerCatalog(for: catalogTarget)?.models.filter(\.available) ?? []
+    }
+
+    private var modelCatalogSummary: String {
+        guard model.providerCatalog(for: catalogTarget) != nil else { return "Catalog not loaded" }
+        return availableModels.count == 1
+            ? "1 model currently available"
+            : "\(availableModels.count) models currently available"
     }
 
     private var hasUnsavedChanges: Bool {
@@ -210,6 +251,20 @@ struct AgentDefaultsSettingsView: View {
             draft = projected
         } else if let saved = drafts.draft(for: target) {
             draft = saved
+        }
+    }
+
+    private func refreshModelCatalog() async {
+        guard !refreshingCatalog, !saving else { return }
+        let requestedTarget = catalogTarget
+        refreshingCatalog = true
+        defer { refreshingCatalog = false }
+        do {
+            try await model.refreshModelCatalog(target: requestedTarget, force: true)
+        } catch is CancellationError {
+            // Profile replacement retires the old target and its presentation.
+        } catch {
+            model.presentError(error)
         }
     }
 

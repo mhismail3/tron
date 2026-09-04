@@ -494,7 +494,9 @@ and duplicate compound identities. Gateway cursors bind offsets to an exact whol
 so mutation cannot mix generations. Model pickers key rows by that compound identity, so equal model
 names from distinct providers remain stable. Profile retirement synchronously discards catalogs and auth routing.
 Its forced refresh and logout commands use the shared receipt executor before reloading the
-exact captured target. `PackageConfigurationCoordinator` solely owns target-keyed inventories,
+exact captured target. Models and Defaults exposes forced refresh for the displayed catalog target,
+reloads successful updates and cached fallbacks before reporting provider failures or timeout, and
+never mutates the settings draft, saved defaults, or credentials. `PackageConfigurationCoordinator` solely owns target-keyed inventories,
 update markers, newest-list/check/mutation admission, event-only invalidation, closed
 install/update/remove wire construction, and confirmed exact-target reload effects. Package presentation performs one bounded pass over the four canonical resource arrays for totals and friendly type summaries; nested type sheets expose names and source/scope copy, while paths, metadata, and additive unknown fields remain preserved behind Technical JSON disclosure. The separate
 `CustomModelConfigurationCoordinator` owns typed-global reads and validate-before-put mutation

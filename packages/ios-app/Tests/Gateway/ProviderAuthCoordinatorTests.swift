@@ -1127,10 +1127,12 @@ struct ProviderAuthCoordinatorTests {
             try await harness.socket.waitUntilSent(count: 2)
             let refreshRequest = try request(await harness.socket.sentFrames()[1])
             #expect(refreshRequest.method == "models.refresh")
+            #expect(refreshRequest.params?["force"] == .bool(true))
+            #expect(refreshRequest.params?["sessionId"] == nil)
             harness.owner.clearProfile()
             await harness.socket.enqueue(response(
                 id: refreshRequest.id,
-                result: .object(["refreshed": .bool(true)])
+                result: modelRefreshResult()
             ))
             do {
                 try await refresh.value
@@ -1159,7 +1161,7 @@ struct ProviderAuthCoordinatorTests {
         }
     }
 
-    @Test("forced model refresh uses shared receipts and refreshes its exact target")
+    @Test("model refresh uses shared receipts and refreshes its exact target")
     func modelRefreshUsesReceipts() async throws {
         try await runScenario {
             let harness = try await makeHarness()
@@ -1169,12 +1171,77 @@ struct ProviderAuthCoordinatorTests {
             try await completeReceiptMutation(
                 method: "models.refresh",
                 target: target,
-                result: .object(["refreshed": .bool(true)]),
+                result: modelRefreshResult(),
                 startingAt: 1,
                 harness: harness
             )
             try await mutation.value
             #expect(harness.owner.catalog(for: target)?.providers.first?.id == "confirmed")
+            await harness.client.close()
+        }
+    }
+
+    @Test("model refresh publishes retained catalog before reporting provider errors")
+    func modelRefreshReportsProviderErrorsAfterReload() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            let mutation = Task { try await harness.owner.refreshModelCatalog(target: .global) }
+            try await harness.socket.waitUntilSent(count: 2)
+            let refreshRequest = try request(await harness.socket.sentFrames()[1])
+            #expect(refreshRequest.method == "models.refresh")
+            #expect(refreshRequest.params?["force"] == .bool(true))
+            await harness.socket.enqueue(response(
+                id: refreshRequest.id,
+                result: modelRefreshResult(errors: ["openai-codex": "catalog unavailable"])
+            ))
+
+            try await harness.socket.waitUntilSent(count: 4)
+            let catalogRequests = try await requests(in: 2...3, socket: harness.socket)
+            #expect(catalogRequests.allSatisfy { $0.params?["sessionId"] == nil })
+            try await respondCatalog(catalogRequests, marker: "retained", socket: harness.socket)
+
+            do {
+                try await mutation.value
+                Issue.record("Provider refresh errors unexpectedly succeeded")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "model_catalog_refresh_failed")
+                #expect(failure.retryable)
+                #expect(failure.message == "One or more model providers could not be refreshed. Existing models remain available.")
+            }
+            #expect(harness.owner.catalog(for: .global)?.models.first?.id == "retained-model")
+            #expect(harness.delegate.errors.isEmpty)
+            await harness.client.close()
+        }
+    }
+
+    @Test("model refresh publishes retained catalog before reporting timeout")
+    func modelRefreshReportsTimeoutAfterReload() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            let target = ProviderCatalogTarget.session(id: "session-timeout")
+            let mutation = Task { try await harness.owner.refreshModelCatalog(target: target) }
+            try await harness.socket.waitUntilSent(count: 2)
+            let refreshRequest = try request(await harness.socket.sentFrames()[1])
+            #expect(refreshRequest.params?["sessionId"] == .string("session-timeout"))
+            await harness.socket.enqueue(response(
+                id: refreshRequest.id,
+                result: modelRefreshResult(aborted: true)
+            ))
+
+            try await harness.socket.waitUntilSent(count: 4)
+            let catalogRequests = try await requests(in: 2...3, socket: harness.socket)
+            #expect(catalogRequests.allSatisfy { $0.params?["sessionId"] == .string("session-timeout") })
+            try await respondCatalog(catalogRequests, marker: "cached", socket: harness.socket)
+
+            do {
+                try await mutation.value
+                Issue.record("Aborted model refresh unexpectedly succeeded")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "model_catalog_refresh_timeout")
+                #expect(failure.retryable)
+                #expect(failure.message == "Model catalog refresh timed out. Existing models remain available.")
+            }
+            #expect(harness.owner.catalog(for: target)?.providers.first?.id == "cached")
             await harness.client.close()
         }
     }
@@ -1241,6 +1308,9 @@ struct ProviderAuthCoordinatorTests {
         #expect(replay.method == method)
         #expect(replay.params?["commandId"] == .string(stableID))
         #expect(replay.params?["sessionId"] == target.sessionID.map(JSONValue.string))
+        if method == "models.refresh" {
+            #expect(replay.params?["force"] == .bool(false))
+        }
         await harness.socket.enqueue(response(id: replay.id, result: result))
 
         try await harness.socket.waitUntilSent(count: index + 4)
@@ -1356,6 +1426,16 @@ struct ProviderAuthCoordinatorTests {
                 Issue.record("Unexpected catalog method \(request.method)")
             }
         }
+    }
+
+    private func modelRefreshResult(
+        aborted: Bool = false,
+        errors: [String: String] = [:]
+    ) -> JSONValue {
+        .object([
+            "aborted": .bool(aborted),
+            "errors": .object(errors.mapValues { JSONValue.string($0) }),
+        ])
     }
 
     private func providerSummary(id: String, name: String? = nil) -> ProviderSummary {

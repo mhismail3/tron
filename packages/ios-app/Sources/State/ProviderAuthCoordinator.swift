@@ -165,6 +165,7 @@ final class ProviderAuthCoordinator {
     private struct CancelParams: Codable { let operationId: String }
     private struct CancelResponse: Decodable { let cancelled: Bool }
     private struct RefreshParams: Codable { let force: Bool; let sessionId: String?; let commandId: String }
+    private struct RefreshResponse: Codable { let aborted: Bool; let errors: [String: String] }
     private struct LogoutParams: Codable { let providerId, commandId: String; let sessionId: String? }
     private struct LogoutResponse: Codable { let loggedOut: Bool }
 
@@ -546,12 +547,33 @@ final class ProviderAuthCoordinator {
         let admittedProfileGeneration = profileGeneration
         let commandID = uuidSource.next().uuidString
         let params = RefreshParams(force: force, sessionId: target.sessionID, commandId: commandID)
-        _ = try await mutationExecutor.performValue(method: "models.refresh", commandID: commandID) {
-            try await client.requestValue("models.refresh", params, timeout: .seconds(75))
+        let response: RefreshResponse = try await mutationExecutor.perform(
+            method: "models.refresh",
+            commandID: commandID
+        ) {
+            try await client.request("models.refresh", params, timeout: .seconds(75))
         }
         try requireProfile(admittedProfileGeneration)
+        // Pi retains prior provider entries when one network refresh fails. Reload
+        // first so successful provider updates and cached fallbacks remain visible.
         _ = await refreshCatalog(target: target)
         try requireProfile(admittedProfileGeneration)
+        if response.aborted {
+            throw GatewayFailure(
+                code: "model_catalog_refresh_timeout",
+                message: "Model catalog refresh timed out. Existing models remain available.",
+                retryable: true,
+                details: nil
+            )
+        }
+        if !response.errors.isEmpty {
+            throw GatewayFailure(
+                code: "model_catalog_refresh_failed",
+                message: "One or more model providers could not be refreshed. Existing models remain available.",
+                retryable: true,
+                details: nil
+            )
+        }
     }
 
     func logout(providerID: String, target: ProviderCatalogTarget) async throws {
