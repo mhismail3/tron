@@ -201,6 +201,9 @@ struct ExtensionFormTests {
             ExtensionFormQuestionAnswer(questionId: "question-0", optionIds: ["question-0-option-1"], other: nil),
             ExtensionFormQuestionAnswer(questionId: "question-1", optionIds: ["question-1-option-0", "question-1-option-2"], other: "LATAM"),
         ]))
+        let navigation = ToolDetailNavigationPresentation(tool: tool)
+        #expect(navigation.title == "Questions")
+        #expect(navigation.icon == nil)
     }
 
     @Test func pendingToolMatchingUsesOperationAndAuditedOwnerInsteadOfToolCallID() throws {

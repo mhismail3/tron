@@ -449,11 +449,11 @@ private struct SessionProcessRow: View {
     }
 }
 
-private enum SessionProcessPillMetrics {
-    static let iconWidth: CGFloat = 16
+enum SessionProcessPillMetrics {
+    static let iconFrameSize: CGFloat = 16
 }
 
-private struct SessionProcessPill: View {
+struct SessionProcessPill: View {
     let icon: String
     let text: String
 
@@ -465,7 +465,10 @@ private struct SessionProcessPill: View {
                     accent: ChatNotificationTone.neutral.primaryColor,
                     iconSize: ChatCompactPillLayoutPolicy.standardIconSize
                 )
-                .frame(width: SessionProcessPillMetrics.iconWidth)
+                .frame(
+                    width: SessionProcessPillMetrics.iconFrameSize,
+                    height: SessionProcessPillMetrics.iconFrameSize
+                )
                 Text(text)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                     .lineLimit(1)

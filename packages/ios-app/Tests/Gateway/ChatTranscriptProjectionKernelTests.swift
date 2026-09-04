@@ -1098,6 +1098,31 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(tool.title == "Subagent")
     }
 
+    @Test("completed ask user results keep the enriched read-only form route")
+    func completedAskUserResultKeepsReadOnlyFormRoute() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call","type":"toolCall","toolCallId":"ask-call","name":"ask_user","label":"Ask User","arguments":{"questions":[{"question":"Which database?","options":[{"label":"Postgres"},{"label":"SQLite"}]}]}}]},
+          {"id":"result","parentId":"assistant","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"text","type":"text","text":"SQLite"}],"toolCallId":"ask-call","toolName":"ask_user","toolLabel":"Ask User","isError":false,"details":{"questions":[{"question":"Which database?","options":[{"label":"Postgres"},{"label":"SQLite"}]}],"answers":{"Which database?":{"selected":["SQLite"],"other":null}},"cancelled":false},"extensionOrigin":{"source":"npm:@zhushanwen/pi-ask-user@7.0.15","owner":{"id":"ask-user","title":"Pi Ask User","source":"npm:@zhushanwen/pi-ask-user@7.0.15"}}}
+        ]
+        """)
+        snapshot.transcriptTotal = 2
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        guard case .toolRun(let run) = candidate.timeline.items.first,
+              let descriptor = run.tools.first,
+              let tool = candidate.toolPayloads.resolving(descriptor),
+              let form = AskUserToolPresentation.completed(tool: tool) else {
+            Issue.record("Expected an enriched completed Ask User form")
+            return
+        }
+
+        #expect(tool.toolName == "ask_user")
+        #expect(tool.extensionOrigin?.owner?.source == AskUserToolPresentation.auditedSource)
+        #expect(form.answer?.answers.first?.optionIds == ["question-0-option-1"])
+        #expect(ToolDetailNavigationPresentation(tool: tool).title == "Question")
+    }
+
     @Test("triggered extension messages remain trailing conversation input instead of tool runs")
     func triggeredExtensionMessageIsConversationInput() throws {
         var snapshot = try fixture(transcript: """

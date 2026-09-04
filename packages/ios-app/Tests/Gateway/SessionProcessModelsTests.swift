@@ -1,5 +1,7 @@
 import Foundation
+import SwiftUI
 import Testing
+import UIKit
 @testable import TronMobile
 
 @Suite("Session process models")
@@ -90,6 +92,32 @@ struct SessionProcessModelsTests {
         )) == "bash")
         #expect(SessionProcessRowPresentation.countLabel(1, singular: "tool") == "1 tool")
         #expect(SessionProcessRowPresentation.countLabel(2, singular: "turn") == "2 turns")
+    }
+
+    @MainActor
+    @Test("subagent metadata symbols share one pill height")
+    func metadataPillHeight() {
+        let values = [
+            ("arrow.triangle.branch", "Asynchronous"),
+            ("wrench.and.screwdriver", "1 tool"),
+            ("arrow.triangle.2.circlepath", "2 turns"),
+        ]
+
+        for category in [ContentSizeCategory.large, .accessibilityExtraExtraExtraLarge] {
+            let heights = values.map { icon, text in
+                let controller = UIHostingController(
+                    rootView: SessionProcessPill(icon: icon, text: text)
+                        .environment(\.sizeCategory, category)
+                )
+                return controller.sizeThatFits(in: CGSize(width: 1_000, height: 1_000)).height
+            }
+            guard let minimum = heights.min(), let maximum = heights.max() else {
+                Issue.record("Expected metadata pill measurements")
+                return
+            }
+            #expect(maximum - minimum < 0.5)
+            #expect(minimum >= SessionProcessPillMetrics.iconFrameSize)
+        }
     }
 
     @Test("paused subagents are not presented as live execution")

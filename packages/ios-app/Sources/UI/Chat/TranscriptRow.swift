@@ -155,14 +155,25 @@ struct TranscriptRow: View, Equatable {
 
     @ViewBuilder private var message: some View {
         if item.role == .toolResult {
-            ToolCard(
+            ToolCard(data: ChatToolPresentation(
+                id: item.toolCallId ?? item.id,
                 title: item.toolLabel ?? item.toolName ?? "Tool result",
+                toolName: item.toolName,
                 subtitle: item.isError == true ? "Failed" : "Completed",
-                content: item.text,
-                error: item.isError == true,
+                request: nil,
                 response: item.details,
-                fallbackContent: item.text.isEmpty ? item.details : nil
-            )
+                content: item.text,
+                fallbackContent: item.text.isEmpty ? item.details : nil,
+                error: item.isError == true,
+                startedAt: item.startedAt,
+                completedAt: item.completedAt ?? item.timestamp,
+                durationMs: item.durationMs,
+                lastProgressAt: item.lastProgressAt,
+                progressSequence: item.progressSequence,
+                display: item.display,
+                extensionOrigin: item.extensionOrigin,
+                toolSegmentId: item.toolSegmentId
+            ))
         } else if AutomationPromptPresentationPolicy.admits(item) {
             AutomationPromptMessageView(item: item)
         } else {
@@ -219,15 +230,29 @@ struct TranscriptRow: View, Equatable {
                         case .toolCall:
                             if rendersToolCalls {
                                 if let callID = part.toolCallId, let result = toolResults[callID] {
-                                    ToolCard(
+                                    ToolCard(data: ChatToolPresentation(
+                                        id: callID,
                                         title: part.label ?? result.toolLabel ?? part.name ?? result.toolName ?? "Tool",
+                                        toolName: part.name ?? result.toolName,
                                         subtitle: result.isError == true ? "Failed" : "Completed",
-                                        content: result.text,
-                                        error: result.isError == true,
                                         request: part.arguments,
                                         response: result.details,
-                                        fallbackContent: result.text.isEmpty ? result.details : nil
-                                    )
+                                        content: result.text,
+                                        fallbackContent: result.text.isEmpty ? result.details : nil,
+                                        error: result.isError == true,
+                                        startedAt: result.startedAt ?? item.timestamp,
+                                        completedAt: result.completedAt ?? result.timestamp,
+                                        durationMs: result.durationMs,
+                                        lastProgressAt: result.lastProgressAt,
+                                        progressSequence: result.progressSequence,
+                                        display: result.display,
+                                        extensionOrigin: result.extensionOrigin,
+                                        toolSegmentId: part.toolSegmentId ?? result.toolSegmentId,
+                                        groupId: part.groupId,
+                                        groupIndex: part.groupIndex,
+                                        groupCount: part.groupCount,
+                                        groupFinalized: part.groupFinalized
+                                    ))
                                 } else {
                                     ToolCard(
                                         title: part.label ?? part.name ?? "Tool",

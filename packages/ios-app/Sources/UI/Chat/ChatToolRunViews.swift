@@ -217,7 +217,6 @@ struct ToolRunView: View {
             ) {
                 if let resolvedState {
                     if resolvedState.run.displayCount == 1, let tool = resolvedState.tools.first {
-                        let accent: Color = tool.error ? .tronError : ChatSemanticPillRole.tool.accent
                         NavigationStack {
                             ToolDetailSheet(
                                 tool: tool,
@@ -226,11 +225,7 @@ struct ToolRunView: View {
                             .tronToolDetailNavigationChrome()
                             .toolbar {
                                 ToolbarItem(placement: .principal) {
-                                    TronSheetTitle(
-                                        title: ToolDetailPresentation.contextualDisplayTitle(for: tool),
-                                        accent: accent,
-                                        icon: ToolDetailPresentation.sheetTitleIcon(for: tool)
-                                    )
+                                    ToolDetailNavigationTitle(tool: tool)
                                 }
                                 ToolbarItem(placement: .confirmationAction) {
                                     Button { self.resolvedState = nil } label: {
@@ -310,7 +305,6 @@ struct ReadOnlyToolRunView: View {
             identity: "chat.read-only-tool-run.\(run.id)"
         ) {
             if run.displayCount == 1, let tool = resolvedTools.first {
-                let accent: Color = tool.error ? .tronError : ChatSemanticPillRole.tool.accent
                 NavigationStack {
                     ToolDetailSheet(
                         tool: tool,
@@ -319,11 +313,7 @@ struct ReadOnlyToolRunView: View {
                     .tronToolDetailNavigationChrome()
                     .toolbar {
                         ToolbarItem(placement: .principal) {
-                            TronSheetTitle(
-                                title: ToolDetailPresentation.contextualDisplayTitle(for: tool),
-                                accent: accent,
-                                icon: ToolDetailPresentation.sheetTitleIcon(for: tool)
-                            )
+                            ToolDetailNavigationTitle(tool: tool)
                         }
                         ToolbarItem(placement: .confirmationAction) {
                             Button { showsDetails = false } label: {
@@ -549,11 +539,7 @@ private struct ToolRunSelectedDetailSheet: View {
                 .tronToolDetailNavigationChrome()
                 .toolbar {
                     ToolbarItem(placement: .principal) {
-                        TronSheetTitle(
-                            title: ToolDetailPresentation.contextualDisplayTitle(for: tool),
-                            accent: tool.error ? .tronError : ChatSemanticPillRole.tool.accent,
-                            icon: ToolDetailPresentation.sheetTitleIcon(for: tool)
-                        )
+                        ToolDetailNavigationTitle(tool: tool)
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button(action: close) {
@@ -1036,7 +1022,6 @@ private struct ToolDetailSheetHost: ViewModifier {
             identity: { "chat.tool-detail.\($0.id)" }
         ) { _ in
             if let tool {
-                let accent: Color = tool.error ? .tronError : ChatSemanticPillRole.tool.accent
                 NavigationStack {
                     ToolDetailSheet(
                         tool: tool,
@@ -1045,11 +1030,7 @@ private struct ToolDetailSheetHost: ViewModifier {
                     .tronToolDetailNavigationChrome()
                     .toolbar {
                         ToolbarItem(placement: .principal) {
-                            TronSheetTitle(
-                                title: ToolDetailPresentation.contextualDisplayTitle(for: tool),
-                                accent: accent,
-                                icon: ToolDetailPresentation.sheetTitleIcon(for: tool)
-                            )
+                            ToolDetailNavigationTitle(tool: tool)
                         }
                         ToolbarItem(placement: .confirmationAction) {
                             Button { route = nil } label: {
