@@ -218,7 +218,7 @@ rejected with bounded diagnostics and can never become an uncaught process exit.
 - Physical-machine group identity: a bounded random ID in
   `~/.tron-machine-group-id`, shared by separate Tron homes only for connection
   grouping; it is not a session, credential, or runtime-data store
-- Gateway state: `<TRON_DATA_DIR|~/$TRON_HOME_NAME|~/.tron>/gateway/`; `gateway.json` is an exact-shape, 16 KiB maximum document with a 256-byte machine ID, 1 KiB machine name, and optional 8 KiB default workspace; malformed/oversized existing files fail startup without rekeying
+- Gateway state: `<TRON_DATA_DIR|~/$TRON_HOME_NAME|~/.tron>/gateway/`; `gateway.json` is an exact-shape, 16 KiB maximum document with a 256-byte machine ID and 1 KiB machine name; malformed/oversized existing files fail startup without rekeying. Tron’s durable internal workspace is the sibling `<tronHome>/workspace`; it is separate from the session cwd and canonical Pi session store.
 - Local wrapper credential: `gateway/local-auth.json` (`0600`, owner-UID-only regular non-symlink file;
   an existing malformed, wrong-version, or wrong-purpose credential fails closed)
 - Hashed mobile devices: `gateway/devices.json` (bounded owner-UID-only regular non-symlink file;
@@ -231,15 +231,6 @@ rejected with bounded diagnostics and can never become an uncaught process exit.
 - Uploads: transient and bounded; clients may immediately discard their unclaimed staging, remaining unclaimed staging expires, and prompt attachments remain session-owned until canonical deletion
 - Tool invocation lineage: Gateway stamps every live and canonical tool declaration with a `toolSegmentId` owned by one visible conversation segment, then publishes each complete contiguous declaration group at finalized assistant `message_end` with runtime-only `groupId`, `groupIndex`, `groupCount`, and `groupFinalized` metadata before any corresponding tool start. Lifecycle operation IDs may rotate while a tool-only agent continuation settles; the display segment remains stable until user input, visible assistant/custom content, or canonical compaction ends it. A fresh provisional generation prevents old calls from matching between such a barrier and the next assistant's stable presentation identity. While Pi has an exact running-phase streaming agent run, `SessionSnapshot.activeToolSegmentId` publishes that run's current segment; it is absent during retry, compaction, settlement, and idle ownership. Equal segment IDs authorize bounded cross-message display aggregation and current unresolved-invocation activity; missing or different IDs do not. This prevents a new operation from reviving an unmatched declaration left by an aborted older tool batch after disposable terminal execution state retires. Group IDs derive from the stable assistant presentation ID plus first projected content ordinal. Cold canonical projection deterministically derives the same segment boundary from authoritative conversation input and visible barriers. All lineage is bounded presentation metadata, survives live/canonical/result reconciliation, is never written to Pi JSONL, and never implies parallel execution.
 - Push grants and short-lived intents: `gateway/notifications.json`, an exact 1 MiB owner-only document. It stores endpoint-scoped grants, at most 64 active devices, 256 pending intents, 512 bounded receipts, and 192 revocation tombstones (128 rotation slots plus a 64-device revocation reserve). It never stores raw APNs tokens. Secrets and message content are excluded from RPC projections, logs, and Pi session JSONL.
-
-Legacy `~/.tron/auth.json` is not gateway auth and is never overwritten. It is
-read only by the explicit legacy importer. That importer rejects duplicate or
-oversized identities and bounded page/history/payload overflow, detects stalled
-cursors, and persists each completed legacy-to-canonical mapping before moving
-to the next session so a retry safely skips partial success. Known append or
-index-write failures remove the new canonical file; cleanup failure is surfaced
-with the original failure, while process termination in the narrow interval
-before the index rename remains outside that cleanup.
 
 ## Push notifications
 
@@ -774,7 +765,7 @@ requesting connection. Closing a session immediately revokes attachment admissio
 prevent stale client selection or reconnect races from reading or mutating a different runtime,
 controlling another connection's PTY, or leaving an orphan terminal process.
 
-Primary operation groups are `system`, `device`, `legacy`, `session`,
+Primary operation groups are `system`, `device`, `session`,
 `extension`, `provider`, `model`, `auth`, `settings`, `trust`, `packages`,
 `models.custom`, `filesystem`, `git`, `terminal`, and uploads/blobs over HTTP.
 `workspace-inspector.v1` adds only session-bound reads: `session.workspace.inspect`,
@@ -1243,13 +1234,12 @@ Run one test owner while iterating:
 ```bash
 npx vitest run src/transport/session-sync.test.ts
 npx vitest run src/sessions/runtime-registry.integration.test.ts
-npx vitest run src/admin/legacy-import-service.test.ts
 ```
 
 The integration tests use the SDK's faux provider to verify concurrent real
 session runtimes, detached completion, and fork rekeying without network
 credentials. Additional deterministic tests exercise interactive API-key and
-OAuth brokering, project trust, native local-package persistence, legacy import,
+OAuth brokering, project trust, and native local-package persistence,
 and credential separation.
 
 ## Session subagent activity

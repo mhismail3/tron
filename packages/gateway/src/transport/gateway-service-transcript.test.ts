@@ -16,6 +16,37 @@ const client: ClientContext = {
 };
 
 describe("session transcript paging", () => {
+  it("removes retired legacy RPCs without removing canonical JSONL import", async () => {
+    const importFromJsonl = vi.fn(async () => ({ id: "canonical-session" }));
+    const release = vi.fn(async () => {});
+    const service = new GatewayService({
+      config: {
+        machineId: "machine",
+        machineGroupID: "group",
+        machineName: "Mac",
+        tronHome: "/tmp/tron-legacy-retirement",
+      },
+      receipts: {
+        execute: async (_identity: string, _method: string, _commandID: string, operation: () => Promise<unknown>) => operation(),
+      },
+      uploads: {
+        prepareSessionImport: async () => ({ path: "/tmp/session.jsonl", release }),
+        remove: vi.fn(async () => {}),
+      },
+      sessions: { importFromJsonl },
+    } as unknown as GatewayServiceDependencies);
+
+    await expect(service.invoke(client, "legacy.inspect", {})).rejects.toMatchObject({ code: "not_found" });
+    await expect(service.invoke(client, "legacy.import", { commandId: "command-1" })).rejects.toMatchObject({ code: "not_found" });
+    await expect(service.invoke(client, "session.import", {
+      commandId: "command-2",
+      uploadId: "upload-1",
+      cwd: "/tmp/project",
+    })).resolves.toEqual({ sessionId: "canonical-session" });
+    expect(importFromJsonl).toHaveBeenCalledWith("/tmp/session.jsonl", "/tmp/project");
+    expect(release).toHaveBeenCalledOnce();
+  });
+
   it("routes exact mobile presentation visibility through connection ownership", async () => {
     const setPresentationVisibility = vi.fn((_sessionId, _token, revision: number, visible: boolean) => ({
       revision,

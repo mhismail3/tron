@@ -1197,9 +1197,7 @@ server/project identities, so selecting one switches the owning Gateway profile 
 configuration admission. Source-control creation sends an explicit strategy to Gateway;
 Pi receives only the resulting worktree `cwd`, while Git worktree creation and cleanup remain
 Gateway-owned. Import
-is owned by one progressive Import sheet, including canonical session-file import
-and the bounded legacy migration path; the legacy import action is outside its
-amber status/configuration card. The chat composer remains visually floating without an
+is owned by one progressive Import sheet for canonical session-file import. The chat composer remains visually floating without an
 opaque footer, but structurally reserves the transcript's bottom safe area. Its UIKit
 text view is the sole first-responder owner; SwiftUI mirrors delegate focus only for
 presentation, so transcript relayout and programmatic tail-follow cannot dismiss a

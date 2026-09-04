@@ -38,6 +38,7 @@ interface StoredGatewayConfig {
   version: 1;
   machineId: string;
   machineName: string;
+  /** Accepted only to normalize the retired pre-workspace configuration. */
   defaultWorkspace?: string;
 }
 
@@ -137,9 +138,10 @@ export function resolveTronHome(environment = process.env): string {
 function isStoredGatewayConfig(value: unknown): value is StoredGatewayConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const document = value as Record<string, unknown>;
-  const expectedKeys = document.defaultWorkspace === undefined
-    ? ["version", "machineId", "machineName"]
-    : ["version", "machineId", "machineName", "defaultWorkspace"];
+  const hasRetiredWorkspace = Object.prototype.hasOwnProperty.call(document, "defaultWorkspace");
+  const expectedKeys = hasRetiredWorkspace
+    ? ["version", "machineId", "machineName", "defaultWorkspace"]
+    : ["version", "machineId", "machineName"];
   const keys = Object.keys(document);
   return keys.length === expectedKeys.length && keys.every((key) => expectedKeys.includes(key))
     && document.version === 1
@@ -147,7 +149,7 @@ function isStoredGatewayConfig(value: unknown): value is StoredGatewayConfig {
     && Buffer.byteLength(document.machineId) <= 256 && !/[\u0000-\u001f\u007f]/.test(document.machineId)
     && typeof document.machineName === "string" && Buffer.byteLength(document.machineName) > 0
     && Buffer.byteLength(document.machineName) <= 1_024 && !/[\u0000-\u001f\u007f]/.test(document.machineName)
-    && (document.defaultWorkspace === undefined
+    && (!hasRetiredWorkspace
       || (typeof document.defaultWorkspace === "string" && Buffer.byteLength(document.defaultWorkspace) > 0
         && Buffer.byteLength(document.defaultWorkspace) <= 8_192 && !/[\u0000-\u001f\u007f]/.test(document.defaultWorkspace)));
 }
@@ -207,7 +209,21 @@ async function loadOrCreateStoredGatewayConfig(path: string): Promise<StoredGate
   try {
     if (!created) {
       const stored = await storedGatewayConfig(path);
-      if (stored) return stored;
+      if (stored) {
+        // The former defaultWorkspace field was never an authoritative
+        // workspace setting. Normalize it while holding the existing config
+        // lock so concurrent Gateway starts cannot publish mixed shapes.
+        if (Object.prototype.hasOwnProperty.call(stored, "defaultWorkspace")) {
+          const normalized: StoredGatewayConfig = {
+            version: stored.version,
+            machineId: stored.machineId,
+            machineName: stored.machineName,
+          };
+          await atomicWriteJson(path, normalized);
+          return normalized;
+        }
+        return stored;
+      }
       throw new GatewayError("conflict", "Gateway identity configuration is empty");
     }
     const next: StoredGatewayConfig = {

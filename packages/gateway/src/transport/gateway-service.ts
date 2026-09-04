@@ -32,7 +32,6 @@ import type { SettingsService } from "../admin/settings-service.js";
 import type { ModelConfigService } from "../admin/model-config-service.js";
 import type { PackageService } from "../admin/package-service.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
-import type { LegacyImportService } from "../admin/legacy-import-service.js";
 import { GatewayUpdateService, validateGatewayUpdateRequest } from "../admin/gateway-update-service.js";
 import {
   IOS_DEVICE_INSTALL_CAPABILITY,
@@ -156,7 +155,6 @@ export interface GatewayServiceDependencies {
   modelConfig: ModelConfigService;
   packages: PackageService;
   auth: AuthBroker;
-  legacyImport: LegacyImportService;
   /** Configured only by the LaunchAgent-owned update helper; never from RPC params. */
   updateService?: GatewayUpdateService;
   /** Fixed LocalDevice installer; source and CoreDevice identity never come from install RPC params. */
@@ -618,13 +616,6 @@ export class GatewayService {
             { kind: client.isLocal ? "local" : "mobile" },
           ));
         }, true);
-
-      case "legacy.inspect":
-        return safeJson(await this.dependencies.legacyImport.inspect());
-      case "legacy.import":
-        return this.mutation(client, method, params, async () => safeJson(await this.dependencies.legacyImport.import(
-          params.port === undefined ? 9849 : integer(params.port, "port", 1, 65_535),
-        )));
 
       case "session.list": {
         const scope = params.scope === undefined ? "user" : oneOf(params.scope, "scope", ["user", "all"] as const);

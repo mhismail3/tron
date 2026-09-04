@@ -223,15 +223,14 @@ start_fresh_fixture() {
   chmod 700 "$tron_home" "$tron_home/gateway" "$gateway_home" "$workspace"
   gateway_home="$(realpath "$gateway_home")"
   workspace="$(realpath "$workspace")"
-  python3 - "$tron_home/gateway/gateway.json" "$workspace" <<'PY'
+  python3 - "$tron_home/gateway/gateway.json" <<'PY'
 import json, os, sys
-path, workspace = sys.argv[1:]
+path = sys.argv[1]
 with open(path, "x", encoding="utf-8") as handle:
     json.dump({
         "version": 1,
         "machineId": "tron-ios-e2e",
         "machineName": "Tron iOS E2E",
-        "defaultWorkspace": workspace,
     }, handle)
     handle.write("\n")
 os.chmod(path, 0o600)

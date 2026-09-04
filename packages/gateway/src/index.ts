@@ -11,7 +11,6 @@ import { SettingsService } from "./admin/settings-service.js";
 import { ModelConfigService } from "./admin/model-config-service.js";
 import { PackageService } from "./admin/package-service.js";
 import { AuthBroker } from "./admin/auth-broker.js";
-import { LegacyImportService } from "./admin/legacy-import-service.js";
 import { RuntimeRegistry } from "./sessions/runtime-registry.js";
 import { GatewayWorkRegistry } from "./sessions/gateway-work-registry.js";
 import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
@@ -150,7 +149,6 @@ const packages = new PackageService(
   (topic, payload) => transport?.broadcast(topic, payload),
   workRegistry,
 );
-const legacyImport = new LegacyImportService(config.tronHome);
 const automationStore = new AutomationStore(config.tronHome, {
   changed: (automationId) => transport?.broadcast("automation.changed", {
     catalogRevision: automationStore.status().catalogRevision,
@@ -287,7 +285,6 @@ const service = new GatewayService({
   modelConfig,
   packages,
   auth,
-  legacyImport,
   logger,
   receipts,
   // LaunchAgent/supervisor restarts unsuccessful exits. Administrative

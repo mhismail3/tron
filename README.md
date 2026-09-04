@@ -161,13 +161,14 @@ Item. The resulting Mac app runs without a global Pi or Node installation.
 Generated payloads are ignored; use `bundle-gateway.sh` when you explicitly need
 to refresh them.
 
-## Legacy session migration
+## Workspace and session files
 
-The iOS Settings screen can import sessions from the retired authenticated local
-server running on loopback (default migration port `9849`). The gateway reads the
-legacy owner-only credential locally, imports message history into canonical
-Tron sessions, records idempotent receipts, and never modifies legacy databases
-or credentials.
+Tron keeps its durable internal workspace under `<Tron home>/workspace` (normally
+`~/.tron/workspace`). This is separate from the current session directory: new
+sessions can still start in any directory selected through the Mac filesystem
+browser. Canonical session JSONL remains owned by the embedded runtime under
+`~/.pi/agent`; use the Settings Import action for supported JSON/JSONL session
+exports.
 
 ## Documentation
 

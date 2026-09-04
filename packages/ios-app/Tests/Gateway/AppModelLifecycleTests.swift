@@ -379,62 +379,6 @@ struct AppModelLifecycleTests {
         }
     }
 
-    @Test("profile teardown stops uncertain legacy import before replacement-profile receipt work")
-    func legacyImportCannotCrossProfileBoundary() async throws {
-        try await withFixture(socketCount: 1) { fixture in
-            let connecting = Task {
-                try await fixture.model.connectHostedGateway(
-                    profile: fixture.initialProfile,
-                    token: "token"
-                )
-            }
-            defer { connecting.cancel() }
-            try await fixture.sockets[0].waitUntilSent(count: 1)
-            await fixture.sockets[0].enqueue(helloFrame())
-            _ = try await connecting.value
-
-            let importing = Task { try await fixture.model.importLegacySessions() }
-            defer { importing.cancel() }
-            try await fixture.sockets[0].waitUntilSent(count: 2)
-            await fixture.model.teardown()
-            do {
-                try await importing.value
-                Issue.record("retired profile import unexpectedly completed")
-            } catch let failure as GatewayFailure {
-                #expect(failure.code == "outcome_unknown")
-            } catch {
-                Issue.record("unexpected import error: \(error)")
-            }
-
-            #expect(fixture.model.legacyImportedCount == 0)
-            #expect(fixture.model.visibleNotices.isEmpty)
-            #expect(fixture.socketFactory.requests.count == 1)
-        }
-    }
-
-    @Test("profile teardown rejects a late legacy inspection failure")
-    func legacyInspectionCannotPublishAfterTeardown() async throws {
-        try await withFixture(socketCount: 1) { fixture in
-            let connecting = Task {
-                try await fixture.client.connect(profile: fixture.initialProfile, token: "token")
-            }
-            defer { connecting.cancel() }
-            try await fixture.sockets[0].waitUntilSent(count: 1)
-            await fixture.sockets[0].enqueue(helloFrame())
-            _ = try await connecting.value
-
-            let inspection = Task { await fixture.model.inspectLegacyImport() }
-            defer { inspection.cancel() }
-            try await fixture.sockets[0].waitUntilSent(count: 2)
-            await fixture.model.teardown()
-            await inspection.value
-
-            #expect(!fixture.model.legacyImportAvailable)
-            #expect(fixture.model.legacyImportedCount == 0)
-            #expect(fixture.model.visibleNotices.isEmpty)
-        }
-    }
-
     @Test("concurrent teardown callers share the same close completion")
     func concurrentTeardownSharesCompletion() async throws {
         try await withFixture(socketCount: 1, suspendsClose: true) { fixture in

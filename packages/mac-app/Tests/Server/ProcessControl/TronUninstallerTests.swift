@@ -54,13 +54,35 @@ struct TronUninstallerTests {
             """
         )
         try createFixtureFile(setup.bearerTokenPath, contents: "auth")
-
         let outcome = await TronUninstaller.unregisterAndClean(
             setup: setup,
             options: TronUninstaller.Options(resetSettings: true, resetCredentials: true)
         )
 
         #expect(outcome == .ok)
+        #expect(!FileManager.default.fileExists(atPath: setup.networkCachePath.path))
+        #expect(!FileManager.default.fileExists(atPath: setup.bearerTokenPath.path))
+    }
+
+    @Test("cleanup preserves internal workspace files and managed state during resets")
+    func cleanupPreservesWorkspaceData() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let setup = makeSetup(tmp: tmp, manager: MockLaunchAgentManager())
+        let workspaceFile = setup.tronHome.appendingPathComponent("workspace/files/notes.md")
+        let workspaceState = setup.tronHome.appendingPathComponent("gateway/workspace-state/index.json")
+        try createFixtureFile(workspaceFile, contents: "durable workspace")
+        try createFixtureFile(workspaceState, contents: "managed state")
+        try createFixtureFile(setup.networkCachePath, contents: "cache")
+        try createFixtureFile(setup.bearerTokenPath, contents: "credential")
+
+        TronUninstaller.cleanLocalState(
+            setup: setup,
+            options: TronUninstaller.Options(resetSettings: true, resetCredentials: true)
+        )
+
+        #expect(FileManager.default.fileExists(atPath: workspaceFile.path))
+        #expect(FileManager.default.fileExists(atPath: workspaceState.path))
         #expect(!FileManager.default.fileExists(atPath: setup.networkCachePath.path))
         #expect(!FileManager.default.fileExists(atPath: setup.bearerTokenPath.path))
     }

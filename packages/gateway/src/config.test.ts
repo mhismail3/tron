@@ -59,6 +59,24 @@ describe("gateway configuration", () => {
     expect(attemptedOverride.pushServiceOrigin).toBe(canonical.pushServiceOrigin);
   });
 
+  it("normalizes the retired default workspace without rekeying identity", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-config-workspace-retirement-"));
+    const path = join(root, "gateway", "gateway.json");
+    await loadConfig([], { TRON_DATA_DIR: root });
+    const before = { version: 1, machineId: "machine", machineName: "Mac", defaultWorkspace: "/old/workspace" };
+    await writeFile(path, `${JSON.stringify(before)}\n`);
+
+    const loaded = await loadConfig([], { TRON_DATA_DIR: root });
+
+    expect(loaded.machineId).toBe(before.machineId);
+    expect(loaded.machineName).toBe(before.machineName);
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      version: 1,
+      machineId: before.machineId,
+      machineName: before.machineName,
+    });
+  });
+
   it("persists one bounded identity and reloads it without rekeying", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-config-"));
     const environment = {

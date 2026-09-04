@@ -126,8 +126,9 @@ ServerPing and GatewayRestartClient share the bounded WebSocket transport
 handshake and receive deadline while retaining frame-specific error taxonomies.
 
 The wrapper and gateway share no in-memory state. Their only shared secrets are
-owner-only gateway files. Legacy `~/.tron/auth.json` is neither wrapper nor
-gateway authentication and is left untouched for explicit migration.
+owner-only gateway files. Provider credentials remain in the Pi runtime store and
+wrapper credentials remain under `gateway/local-auth.json`; neither is shared with
+the other.
 
 ## Gateway payload selection
 

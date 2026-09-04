@@ -217,8 +217,6 @@ final class AppModel {
     /// profile metadata changes observable to SwiftUI without duplicating it.
     private(set) var profileRevision = 0
     private(set) var dashboardPresentationRevision = 0
-    var legacyImportAvailable = false
-    var legacyImportedCount = 0
     var workspace: WorkspaceListing?
     var defaultWorkspace: String?
     var authPrompt: AuthPromptState? { providerAuth.prompt }
@@ -268,7 +266,6 @@ final class AppModel {
     private var extensionEditorSyncGenerations: [SessionPresentationIdentity: Int] = [:]
     private var extensionEditorOperationReceipts: [SessionPresentationIdentity: [String]] = [:]
     private var deviceLoadGeneration = 0
-    private var legacyImportLoadGeneration = 0
     private var catalogRefreshTask: Task<SessionCatalogRefreshOutcome, Never>?
     var sessionCatalogIsLoading: Bool { catalogRefreshTask != nil }
     private var catalogRefreshKey: SessionCatalogLoadKey?
@@ -1082,7 +1079,6 @@ final class AppModel {
         sessionCatalog.invalidateLoads()
         workspaceLoadGeneration &+= 1
         deviceLoadGeneration &+= 1
-        legacyImportLoadGeneration &+= 1
     }
 
     private func clearGatewayProjection() {
@@ -1093,8 +1089,6 @@ final class AppModel {
         sessionCatalog.clear()
         sessionPresentation.clearProfile()
         pairedDevices.removeAll()
-        legacyImportAvailable = false
-        legacyImportedCount = 0
         workspace = nil
         providerAuth.clearProfile()
         settingsTrust.clearProfile()
@@ -1869,34 +1863,6 @@ final class AppModel {
                 setupComplete = false
             }
         }
-    }
-
-    func inspectLegacyImport() async {
-        struct Response: Decodable { let available: Bool; let importedCount: Int }
-        legacyImportLoadGeneration &+= 1
-        let generation = legacyImportLoadGeneration
-        do {
-            let response: Response = try await client.request("legacy.inspect", EmptyParams())
-            guard legacyImportLoadGeneration == generation else { return }
-            legacyImportAvailable = response.available
-            legacyImportedCount = response.importedCount
-        } catch {
-            guard legacyImportLoadGeneration == generation else { return }
-            surface(error)
-        }
-    }
-
-    func importLegacySessions(port: Int = 9849) async throws {
-        struct Params: Codable { let port: Int; let commandId: String }
-        struct Response: Codable { let imported: Int; let skipped: Int }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(port: port, commandId: commandID)
-        let response: Response = try await mutationExecutor.perform(method: "legacy.import", commandID: commandID) {
-            try await client.request("legacy.import", params, timeout: .seconds(600))
-        }
-        legacyImportedCount += response.imported
-        postNotice("Imported \(response.imported) legacy session\(response.imported == 1 ? "" : "s"); skipped \(response.skipped).")
-        await refreshSessions()
     }
 
     func importSession(from url: URL, cwd: String) async throws -> SessionNavigationRoute {

@@ -1082,8 +1082,6 @@ struct ImportSettingsView: View {
     @Environment(AppModel.self) private var model
     let onImported: (AppModel.SessionNavigationRoute) -> Void
     @State private var showSessionImporter = false
-    @State private var port = 9849
-    @State private var importing = false
 
     init(onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
         self.onImported = onImported
@@ -1102,46 +1100,6 @@ struct ImportSettingsView: View {
                     }
                     .buttonStyle(.plain)
                 }
-
-                TronSettingsGroup(
-                    "Legacy migration",
-                    detail: "Optional import from the retired Tron server.",
-                    accent: .tronAmber
-                ) {
-                    VStack(spacing: 0) {
-                        TronValueRow(icon: "tray.and.arrow.down", title: "Previously imported", accent: .tronAmber) {
-                            Text(String(model.legacyImportedCount))
-                                .font(TronTypography.numericValue)
-                        }
-                        TronSettingsDivider(accent: .tronAmber)
-                        TronValueRow(icon: "network", title: "Legacy server port", accent: .tronAmber) {
-                            TextField("Port", value: $port, format: .number)
-                                .keyboardType(.numberPad)
-                                .tronInlineField(numeric: true)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 100)
-                        }
-                    }
-                }
-
-                Button(importing ? "Importing…" : "Import Legacy Sessions") {
-                    importing = true
-                    Task {
-                        defer { importing = false }
-                        do { try await model.importLegacySessions(port: port) }
-                        catch { model.presentError(error) }
-                    }
-                }
-                .buttonStyle(TronActionButtonStyle(role: .primary))
-                .disabled(importing || !model.legacyImportAvailable || !(1...65_535).contains(port))
-
-                TronInfoCard(
-                    icon: "info.circle",
-                    text: model.legacyImportAvailable
-                        ? "Start the retired Tron server on this Mac at the port above before using legacy migration. Existing imports are skipped safely."
-                        : "No secure legacy Tron credential was found on this Mac.",
-                    accent: .tronSlate
-                )
             }
             .padding(20)
         }
@@ -1157,7 +1115,6 @@ struct ImportSettingsView: View {
             isPresented: $showSessionImporter,
             identity: "settings.session-importer"
         )
-        .task { await model.inspectLegacyImport() }
     }
 
     private func handleSessionImport(_ result: Result<[URL], Error>) {

@@ -24,15 +24,11 @@ describe("DeviceStore", () => {
     expect(deviceFile).not.toContain(paired.token);
   });
 
-  it("keeps legacy auth read-only and owns a separate wrapper credential", async () => {
+  it("keeps the wrapper credential in its dedicated gateway store", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-gateway-device-"));
-    const legacy = `${JSON.stringify({ version: 1, bearerToken: "legacy-secret", providers: { old: {} } })}\n`;
-    await writeFile(join(root, "auth.json"), legacy);
-    await chmod(join(root, "auth.json"), 0o600);
     const store = new DeviceStore(root, "machine-id");
     await store.initialize();
 
-    expect(await readFile(join(root, "auth.json"), "utf8")).toBe(legacy);
     expect(JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8"))).toMatchObject({
       version: 2,
       purpose: "local-wrapper-health",

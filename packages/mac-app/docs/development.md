@@ -387,8 +387,8 @@ Pairing requires:
 - a detected Tailscale address;
 - a code whose trimmed length is 8–32 characters.
 
-The wrapper's local credential path is `gateway/local-auth.json`; do not regress
-to legacy `~/.tron/auth.json` and never put the local token in the URL.
+The wrapper's local credential path is `gateway/local-auth.json`; never put the
+local token in the URL. Provider credentials remain in the Pi runtime store.
 
 ## Release
 
