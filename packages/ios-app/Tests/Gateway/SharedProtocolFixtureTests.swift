@@ -16,6 +16,7 @@ struct SharedProtocolFixtureTests {
         let snapshot = try JSONDecoder.gateway.decode(SessionSnapshot.self, from: data)
 
         #expect(snapshot.runtimeGeneration == "fixture-generation")
+        #expect(snapshot.acceptsQueuedPrompts == false)
         #expect(snapshot.transcriptStart == 0)
         #expect(snapshot.transcriptTotal == snapshot.transcript.count)
         #expect(snapshot.transcriptTotal == 11)

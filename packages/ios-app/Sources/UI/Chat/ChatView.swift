@@ -3024,14 +3024,21 @@ struct ChatView: View {
               !model.isReconcilingForeground,
               scrollCoordinator.admitsSubmission,
               scrollCoordinator.command == nil,
+              !submissionPending,
               let target = presentationTarget,
               model.admitsLiveSessionCommands(target),
               let installed = transcriptPresentation.installed,
               installed.tag.presentationGeneration == target.generation,
               let source = transcriptProjectionCapture,
               source.tag.presentationGeneration == target.generation else { return }
-        let behavior = explicitBehavior
-            ?? ChatComposerPolicy.submissionBehavior(phase: selectedAuthoritativeSnapshot?.phase)
+        let snapshotAcceptsQueuedPrompts = selectedAuthoritativeSnapshot.map {
+            $0.acceptsQueuedPrompts ?? ($0.phase == .running)
+        } ?? false
+        // A stale context-menu closure cannot force queue semantics after the
+        // authoritative capability changes; the prompt becomes ordinary.
+        let behavior = ChatComposerPolicy.submissionBehavior(
+            acceptsQueuedPrompts: snapshotAcceptsQueuedPrompts
+        ).map { explicitBehavior ?? $0 }
         guard !hasActiveComposerUploads else {
             model.presentComposerActionError(
                 "Wait for attachments to finish uploading before sending.",
@@ -3099,7 +3106,8 @@ struct ChatView: View {
                     behavior: behavior,
                     resourceInvocation: resourceInvocation,
                     canonicalTranscript: model.transcriptSnapshot(for: sessionID)?.transcript ?? [],
-                    queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? []
+                    queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? [],
+                    runtimeGeneration: selectedAuthoritativeSnapshot?.runtimeGeneration
                 )
                 composerResourcePicker = nil
                 // Transfer an applied sentinel lease directly to the outgoing

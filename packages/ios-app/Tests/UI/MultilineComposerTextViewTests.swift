@@ -90,7 +90,7 @@ struct MultilineComposerTextViewTests {
         ))
     }
 
-    @Test("active chats dismiss the keyboard after steering")
+    @Test("queue behavior follows exact capability instead of broad active phase")
     func activeChatComposerPolicy() {
         for phase in [SessionPhase.running, .compacting, .retrying] {
             #expect(ChatComposerPolicy.isTextEditable(isTranscriptReady: true))
@@ -98,10 +98,12 @@ struct MultilineComposerTextViewTests {
                 phase: phase,
                 hasContent: true
             ) == .send)
-            let behavior = ChatComposerPolicy.submissionBehavior(phase: phase)
-            #expect(behavior == "steer")
-            #expect(!ChatComposerPolicy.preservesFocus(submissionBehavior: behavior))
         }
+        let steering = ChatComposerPolicy.submissionBehavior(acceptsQueuedPrompts: true)
+        let ordinary = ChatComposerPolicy.submissionBehavior(acceptsQueuedPrompts: false)
+        #expect(steering == "steer")
+        #expect(ordinary == nil)
+        #expect(!ChatComposerPolicy.preservesFocus(submissionBehavior: steering))
     }
 
     @Test("stop includes the projected operation kind as advisory metadata")
@@ -198,7 +200,7 @@ struct MultilineComposerTextViewTests {
             phase: .idle,
             hasContent: true
         ) == .send)
-        let behavior = ChatComposerPolicy.submissionBehavior(phase: .idle)
+        let behavior = ChatComposerPolicy.submissionBehavior(acceptsQueuedPrompts: false)
         #expect(behavior == nil)
         #expect(!ChatComposerPolicy.preservesFocus(submissionBehavior: behavior))
         #expect(ChatComposerPolicy.isTextEditable(isTranscriptReady: false))

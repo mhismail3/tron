@@ -30,7 +30,7 @@ Concrete manifestations:
 4. **Resume can mount no recent rows:** fresh open accepts a fitted empty positive-start tail and publishes it without a client compatibility backfill.
 5. **Projection gaps and jumps:** same-session replacement resets scroll state and can clear the old installed projection before the replacement is ready.
 6. **Prepend can wedge:** live projection intake is suppressed during prepend; missing semantic/geometry callbacks have no bounded terminal path.
-7. **Stale steering containers:** composer admission settles only after asynchronously installed presentation/content matching. Attachment-only canonical text can differ from empty display text, and a missed transient queue frame leaves the admission blocking later sends.
+7. **Steering ownership:** the returned queue operation ID remains authoritative through Pi's queue-removal-before-message callback, canonical binding, and local settlement. Runtime-generation replacement restores unresolved accepted input—including the bounded handoff retained after exact queue settlement—for explicit review, while the composer suppresses every second-send path until the first admission settles.
 8. **Duplicate tools/activity:** one logical invocation/activity has several authoritative-looking bodies that are joined through heuristics.
 
 ## Ownership target

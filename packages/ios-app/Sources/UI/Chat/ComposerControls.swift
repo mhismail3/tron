@@ -477,8 +477,10 @@ enum ChatComposerPolicy {
         return nil
     }
 
-    static func submissionBehavior(phase: SessionPhase?) -> String? {
-        phase?.isActive == true ? "steer" : nil
+    static func submissionBehavior(acceptsQueuedPrompts: Bool) -> String? {
+        // Queue delivery follows the Gateway's exact Pi streaming capability,
+        // not broad presentation phases such as compaction or retry.
+        acceptsQueuedPrompts ? "steer" : nil
     }
 
     static func preservesFocus(submissionBehavior: String?) -> Bool {
@@ -525,6 +527,7 @@ struct ComposerTrailingButton: View {
     let mode: ComposerTrailingMode
     let isDisabled: Bool
     let isSending: Bool
+    let submissionPending: Bool
     let offersQueueChoices: Bool
     let onSend: (String?) -> Void
     let onAbort: () -> Void
@@ -576,7 +579,7 @@ struct ComposerTrailingButton: View {
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(accessibilityHint)
         .contextMenu {
-            if mode == .send, offersQueueChoices, !isSending {
+            if mode == .send, offersQueueChoices, !isDisabled, !isSending, !submissionPending {
                 Button("Steer after current turn", systemImage: "arrow.turn.up.right") {
                     onSend("steer")
                 }

@@ -662,10 +662,18 @@ A Gateway advertising
 session snapshot. The pinned Pi queue itself still exposes string arrays rather than
 queue records. RuntimeSlot therefore retains the exact admission ID before accepting another
 queued mutation, publishes it from the same serialized lane, and treats later text arrays only
-as bounded live-runtime delivery evidence. A Gateway process restart does not replay or claim
-identity for an SDK-only queue; reconnect must report only surviving canonical/runtime truth.
+as bounded live-runtime delivery evidence. Every snapshot separately exposes
+`acceptsQueuedPrompts`, derived directly from Pi streaming state rather than broad presentation
+phase or the queue-management CRUD capability. A Gateway process restart does not replay or claim
+identity for an SDK-only queue; reconnect reports only surviving canonical/runtime truth. If the
+runtime generation changes before canonical delivery, iOS restores unresolved accepted work for
+explicit user review without replay. This includes the one bounded local handoff retained after an
+exact queue row already retired the optimistic admission.
 The legacy steering and follow-up string arrays remain a compatibility projection for older
-clients and Gateways; they never authorize entry-level mutation.
+clients and Gateways; they never authorize entry-level mutation. Pi reports steering removal
+before its user-message callback, so RuntimeSlot retains the exact consumed steering
+operation through that callback, writes its canonical binding, and terminalizes only that
+queue operation; the enclosing foreground run keeps its own marker and completion owner.
 `session.queue.replace`
 serializes with prompt admission and clear operations, validates bounded replacement
 state, rejects stale revisions, and rebuilds the pinned runtime queue atomically.
@@ -679,10 +687,13 @@ Because the pinned Pi SDK can clear its streaming flag before the final `agent_s
 the Gateway, ordinary admission additionally waits behind the existing sequenced foreground operation
 owner whenever runtime streaming is false but settlement/compaction/retry state is still active. The
 Gateway re-evaluates delivery behavior after that transition and never invokes an ordinary Agent prompt
-inside the settlement gap. It does not race preflight against a local deadline that could report rejection while
+inside the settlement gap. If Pi becomes idle inside an asynchronous input hook, RuntimeSlot resolves
+that exact admission from the resulting queue update, user-message callback, or handled-input completion
+instead of retaining a stale queue latch. A Pi call rejected before any of those disposition facts
+terminalizes and releases the exact admission rather than leaving the serialized RPC pending. It does not race preflight against a local deadline that could report rejection while
 the same uncancelled runtime call later starts canonical work. While the canonical user
-entry is pending, the snapshot's bounded `pendingPrompt` projection carries the display
-text and requested delivery behavior. The Gateway claims the exact Pi user-message object,
+entry is pending, the snapshot's bounded `pendingPrompt` projection carries ordinary display
+content only; requested queue behavior appears only after Pi actually enqueues it. The Gateway claims the exact Pi user-message object,
 retires the projection only for that same message at persistence, and exposes the prompt
 operation ID as the canonical user's bounded `presentationId`; repeated text therefore
 cannot settle the wrong mobile admission. A known operation ID never falls back to content matching on

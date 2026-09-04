@@ -425,6 +425,11 @@ final class ComposerDraftCoordinator {
         case rejected
     }
 
+    enum SubmissionReconciliation: Equatable {
+        case unchanged
+        case runtimeReplacedBeforeCanonicalDelivery
+    }
+
     private struct SubmissionAdmission: Equatable {
         let id: UInt64
         let snapshot: ComposerSubmissionSnapshot
@@ -435,6 +440,7 @@ final class ComposerDraftCoordinator {
         var canRestoreSubmittedResource: Bool
         let baselineTranscriptIDs: Set<String>
         let lifecycleGeneration: Int
+        let runtimeGeneration: String?
         var transportState: SubmissionTransportState
         var operationID: String?
         var observedQueuedCandidateIDs: Set<String>
@@ -456,7 +462,10 @@ final class ComposerDraftCoordinator {
         let operationID: String
         let snapshot: ComposerSubmissionSnapshot
         let submittedAttachments: [PendingAttachment]
+        let submittedResource: CommandInfo?
+        let resourceMutationRevision: Int
         let baselineTranscriptIDs: Set<String>
+        let runtimeGeneration: String?
     }
 
     private let uploadOperation: ComposerUploadOperation
@@ -491,10 +500,10 @@ final class ComposerDraftCoordinator {
     private var canonicalHandoffReceipts: [SessionPresentationIdentity: CanonicalSubmissionHandoffReceipt] = [:]
     private static let maximumSettledQueueAliases = SessionSnapshot.maximumQueuedMessages
     private var settledQueueAliases: [SessionPresentationIdentity: [String: SettledQueueAlias]] = [:]
-    /// At most one consumed queue lifecycle is retained for the mounted
-    /// presentation until its canonical user entry resolves. Attachments may be
-    /// empty; rich previews therefore remain bounded to one prompt lifecycle.
-    private var settledQueueHandoffs: [SessionPresentationIdentity: SettledQueueHandoff] = [:]
+    /// At most one consumed queue lifecycle is retained per bounded draft scope
+    /// until canonical delivery or explicit recovery. The scope owner survives
+    /// route/runtime replacement without replaying transport.
+    private var settledQueueHandoffs: [ComposerDraftScope: SettledQueueHandoff] = [:]
     /// Scopes whose durable value and attachment thumbnails have completed one
     /// merge. Text edits alone never advance this boundary.
     @ObservationIgnored private var loadedScopes: Set<ComposerDraftScope> = []
@@ -736,10 +745,10 @@ final class ComposerDraftCoordinator {
         target: SessionPresentationIdentity,
         affectedOperationIDs: Set<String>
     ) {
-        guard admits(target) else { return }
-        if let handoff = settledQueueHandoffs[target],
+        guard admits(target), let scope = scope(for: target) else { return }
+        if let handoff = settledQueueHandoffs[scope],
            affectedOperationIDs.contains(handoff.operationID) {
-            settledQueueHandoffs[target] = nil
+            settledQueueHandoffs[scope] = nil
         }
         if let receipt = canonicalHandoffReceipts[target],
            let operationID = receipt.operationID,
@@ -937,11 +946,13 @@ final class ComposerDraftCoordinator {
     /// Reconciles exactly once against authoritative user-message state. A
     /// transport acknowledgement alone is not enough: canonical JSONL/events
     /// remain the sole source of transcript truth.
+    @discardableResult
     func reconcileSubmission(
         target: SessionPresentationIdentity,
         canonicalTranscript: [TranscriptItem],
-        queuedMessages: [SessionSnapshot.QueuedMessage] = []
-    ) {
+        queuedMessages: [SessionSnapshot.QueuedMessage] = [],
+        runtimeGeneration: String? = nil
+    ) -> SubmissionReconciliation {
         let queueIDs = queuedMessages.map(\.id)
         guard Set(queueIDs).count == queueIDs.count,
               queuedMessages.count <= SessionSnapshot.maximumQueuedMessages else {
@@ -949,16 +960,16 @@ final class ComposerDraftCoordinator {
             // or retire an already-settled alias. The projection store rejects
             // the same invalid commit at installation, leaving the current
             // lifecycle row visible while recovery obtains a valid snapshot.
-            return
+            return .unchanged
         }
         guard let scope = scope(for: target),
               var admission = submissionByScope[scope] else {
-            retireSettledQueueAliases(
+            return retireSettledQueueAliases(
                 target: target,
                 authoritativeQueueIDs: Set(queuedMessages.map(\.id)),
-                canonicalTranscript: canonicalTranscript
+                canonicalTranscript: canonicalTranscript,
+                runtimeGeneration: runtimeGeneration
             )
-            return
         }
         let exactOperationMatches: [String] = admission.operationID.map { operationID in
             canonicalTranscript.compactMap { item in
@@ -1011,23 +1022,34 @@ final class ComposerDraftCoordinator {
         }
         admission.observedQueuedCandidateIDs.formUnion(queuedCandidates.map(\.id))
         admission.transcriptObserved = admission.transcriptObserved || transcriptObserved
-        retireSettledQueueAliases(
+        let settledQueueReconciliation = retireSettledQueueAliases(
             target: target,
             authoritativeQueueIDs: Set(queuedMessages.map(\.id)),
-            canonicalTranscript: canonicalTranscript
+            canonicalTranscript: canonicalTranscript,
+            runtimeGeneration: runtimeGeneration
         )
         if canonicalMatches.count > 1 {
             // Do not let an independent queue observation settle an admission
             // while canonical identity is ambiguous in this snapshot.
             submissionByScope[scope] = admission
-            return
+            return settledQueueReconciliation
+        }
+        if admission.transportState == .accepted,
+           let admittedGeneration = admission.runtimeGeneration,
+           let runtimeGeneration,
+           admittedGeneration != runtimeGeneration,
+           !transcriptObserved {
+            // Runtime-only Pi queues cannot survive RuntimeSlot replacement.
+            // Restore for explicit user review, but never replay the prompt.
+            restoreSubmission(admission)
+            return .runtimeReplacedBeforeCanonicalDelivery
         }
         let queuedObserved = admission.operationID.map {
             admission.observedQueuedCandidateIDs.contains($0)
         } ?? false
         guard transcriptObserved || queuedObserved else {
             submissionByScope[scope] = admission
-            return
+            return settledQueueReconciliation
         }
         let newlySettled = !admission.canonicalObserved
         admission.canonicalObserved = true
@@ -1040,6 +1062,7 @@ final class ComposerDraftCoordinator {
         } else {
             submissionByScope[scope] = admission
         }
+        return settledQueueReconciliation
     }
 
     func submissionSnapshot(for target: SessionPresentationIdentity) -> ComposerSubmissionSnapshot? {
@@ -1407,13 +1430,15 @@ final class ComposerDraftCoordinator {
         target: SessionPresentationIdentity,
         behavior: String?,
         canonicalTranscript: [TranscriptItem] = [],
-        queuedMessages: [SessionSnapshot.QueuedMessage] = []
+        queuedMessages: [SessionSnapshot.QueuedMessage] = [],
+        runtimeGeneration: String? = nil
     ) async throws {
         let submission = try beginSubmission(
             target: target,
             behavior: behavior,
             canonicalTranscript: canonicalTranscript,
-            queuedMessages: queuedMessages
+            queuedMessages: queuedMessages,
+            runtimeGeneration: runtimeGeneration
         )
         try await transmitSubmission(submission)
     }
@@ -1426,14 +1451,16 @@ final class ComposerDraftCoordinator {
         behavior: String?,
         resourceInvocation: ComposerResourceInvocation? = nil,
         canonicalTranscript: [TranscriptItem] = [],
-        queuedMessages: [SessionSnapshot.QueuedMessage] = []
+        queuedMessages: [SessionSnapshot.QueuedMessage] = [],
+        runtimeGeneration: String? = nil
     ) throws -> ComposerSubmissionSnapshot {
         try beginSubmissionAdmission(
             target: target,
             behavior: behavior,
             resourceInvocation: resourceInvocation,
             canonicalTranscript: canonicalTranscript,
-            queuedMessages: queuedMessages
+            queuedMessages: queuedMessages,
+            runtimeGeneration: runtimeGeneration
         ).snapshot
     }
 
@@ -1542,6 +1569,7 @@ final class ComposerDraftCoordinator {
         resourceMutationRevisionByScope[scope] = nil
         preparedOpenBySession[sessionID] = nil
         submissionByScope[scope] = nil
+        settledQueueHandoffs[scope] = nil
         if lease?.scope == scope { revokePresentation() }
         return enqueuePersistence { store in await store.remove(scope) }
     }
@@ -1568,6 +1596,7 @@ final class ComposerDraftCoordinator {
         resourceMutationRevisionByScope = resourceMutationRevisionByScope.filter { $0.key.profileID != profileID }
         preparedOpenBySession = preparedOpenBySession.filter { $0.value.scope.profileID != profileID }
         submissionByScope = submissionByScope.filter { $0.key.profileID != profileID }
+        settledQueueHandoffs = settledQueueHandoffs.filter { $0.key.profileID != profileID }
         if lease?.scope.profileID == profileID { revokePresentation() }
         return enqueuePersistence { store in await store.removeProfile(profileID) }
     }
@@ -1870,7 +1899,8 @@ final class ComposerDraftCoordinator {
         behavior: String?,
         resourceInvocation: ComposerResourceInvocation?,
         canonicalTranscript: [TranscriptItem],
-        queuedMessages: [SessionSnapshot.QueuedMessage]
+        queuedMessages: [SessionSnapshot.QueuedMessage],
+        runtimeGeneration: String?
     ) throws -> SubmissionAdmission {
         guard let lease, admits(target) else { throw CancellationError() }
         guard !uploadAdmissions.contains(where: { $0.target == target }),
@@ -1973,6 +2003,7 @@ final class ComposerDraftCoordinator {
             canRestoreSubmittedResource: true,
             baselineTranscriptIDs: Set(canonicalTranscript.map(\.id)),
             lifecycleGeneration: lease.lifecycleGeneration,
+            runtimeGeneration: runtimeGeneration,
             transportState: .sending,
             operationID: nil,
             observedQueuedCandidateIDs: [],
@@ -1984,7 +2015,7 @@ final class ComposerDraftCoordinator {
         // A newly admitted prompt is newer presentation ownership. Any
         // unresolved consumed-queue heuristic from the prior lifecycle can no
         // longer claim a future same-text canonical row.
-        settledQueueHandoffs[target] = nil
+        settledQueueHandoffs[scope] = nil
         submissionByScope[scope] = admission
         setText("", for: scope)
         selectedResourceByScope[scope] = nil
@@ -2161,11 +2192,14 @@ final class ComposerDraftCoordinator {
                     aliases.removeValue(forKey: aliases.keys.sorted().first!)
                 }
                 settledQueueAliases[target] = aliases
-                settledQueueHandoffs[target] = SettledQueueHandoff(
+                settledQueueHandoffs[current.scope] = SettledQueueHandoff(
                     operationID: operationID,
                     snapshot: current.snapshot,
                     submittedAttachments: current.submittedAttachments.map { $0.frozenForHandoff() },
-                    baselineTranscriptIDs: current.baselineTranscriptIDs
+                    submittedResource: current.submittedResource,
+                    resourceMutationRevision: current.resourceMutationRevision,
+                    baselineTranscriptIDs: current.baselineTranscriptIDs,
+                    runtimeGeneration: current.runtimeGeneration
                 )
             }
         }
@@ -2181,11 +2215,20 @@ final class ComposerDraftCoordinator {
     private func retireSettledQueueAliases(
         target: SessionPresentationIdentity,
         authoritativeQueueIDs: Set<String>,
-        canonicalTranscript: [TranscriptItem]
-    ) {
-        if let handoff = settledQueueHandoffs[target],
+        canonicalTranscript: [TranscriptItem],
+        runtimeGeneration: String?
+    ) -> SubmissionReconciliation {
+        guard let scope = scope(for: target) else { return .unchanged }
+        if let handoff = settledQueueHandoffs[scope],
            !authoritativeQueueIDs.contains(handoff.operationID) {
-            let matches = canonicalTranscript.filter {
+            let exactMatches = canonicalTranscript.filter {
+                $0.kind == .message
+                    && $0.role == .user
+                    && ($0.presentationId == handoff.operationID
+                        || $0.semantic?.operationId == handoff.operationID)
+                    && !handoff.baselineTranscriptIDs.contains($0.id)
+            }
+            let fallbackMatches = canonicalTranscript.filter {
                 Self.canonicalUserMessage(
                     $0,
                     matches: handoff.snapshot,
@@ -2193,6 +2236,7 @@ final class ComposerDraftCoordinator {
                     baselineTranscriptIDs: handoff.baselineTranscriptIDs
                 )
             }
+            let matches = exactMatches.isEmpty ? fallbackMatches : exactMatches
             if matches.count == 1 {
                 canonicalHandoffReceipts[target] = CanonicalSubmissionHandoffReceipt(
                     canonicalID: matches[0].id,
@@ -2200,12 +2244,50 @@ final class ComposerDraftCoordinator {
                     operationID: handoff.operationID,
                     submission: handoff.snapshot
                 )
-                settledQueueHandoffs[target] = nil
+                settledQueueHandoffs[scope] = nil
+            } else if let admittedGeneration = handoff.runtimeGeneration,
+                      let runtimeGeneration,
+                      admittedGeneration != runtimeGeneration {
+                restoreSettledQueueHandoff(handoff, target: target)
+                return .runtimeReplacedBeforeCanonicalDelivery
             }
         }
-        guard var aliases = settledQueueAliases[target] else { return }
+        guard var aliases = settledQueueAliases[target] else { return .unchanged }
         aliases = aliases.filter { authoritativeQueueIDs.contains($0.key) }
         settledQueueAliases[target] = aliases.isEmpty ? nil : aliases
+        return .unchanged
+    }
+
+    private func restoreSettledQueueHandoff(
+        _ handoff: SettledQueueHandoff,
+        target: SessionPresentationIdentity
+    ) {
+        guard let scope = scope(for: target) else { return }
+        setText(
+            ComposerDraftTextPolicy.restoredDraft(
+                outgoing: handoff.snapshot.outgoingText,
+                currentDraft: text(for: scope)
+            ),
+            for: scope
+        )
+        attachmentsByScope[scope] = Self.restoredAttachments(
+            captured: handoff.submittedAttachments,
+            current: attachmentsByScope[scope] ?? [],
+            presentationWasReplaced: false
+        )
+        if attachmentsByScope[scope]?.isEmpty == true {
+            attachmentsByScope[scope] = nil
+        }
+        if resourceMutationRevisionByScope[scope, default: 0] == handoff.resourceMutationRevision,
+           selectedResourceByScope[scope] == nil {
+            selectedResourceByScope[scope] = handoff.submittedResource
+        }
+        settledQueueHandoffs[scope] = nil
+        settledQueueAliases[target]?[handoff.operationID] = nil
+        if settledQueueAliases[target]?.isEmpty == true {
+            settledQueueAliases[target] = nil
+        }
+        schedulePersistence(for: scope)
     }
 
     private static func isPossiblySent(_ error: Error) -> Bool {
@@ -2310,7 +2392,6 @@ final class ComposerDraftCoordinator {
         // remain bounded local projections and are never replayed.
         canonicalHandoffReceipts[lease.target] = nil
         settledQueueAliases[lease.target] = nil
-        settledQueueHandoffs[lease.target] = nil
         for (admission, task) in uploadTasks where admission.target == lease.target {
             task.cancel()
         }
@@ -2352,6 +2433,7 @@ final class ComposerDraftCoordinator {
             enqueuePersistence { store in await store.remove(scope) }
             selectedResourceByScope[scope] = nil
             resourceMutationRevisionByScope[scope] = nil
+            settledQueueHandoffs[scope] = nil
             // Safe bounded eviction may retire an accepted presentation-only
             // lifecycle, but never an unresolved transport operation.
             if submissionByScope[scope]?.transportState != .sending {

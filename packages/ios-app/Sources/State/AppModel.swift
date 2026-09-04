@@ -2339,7 +2339,8 @@ final class AppModel {
         behavior: String? = nil,
         resourceInvocation: ComposerResourceInvocation? = nil,
         canonicalTranscript: [TranscriptItem] = [],
-        queuedMessages: [SessionSnapshot.QueuedMessage] = []
+        queuedMessages: [SessionSnapshot.QueuedMessage] = [],
+        runtimeGeneration: String? = nil
     ) throws -> ComposerSubmissionSnapshot {
         guard admitsLiveSessionCommands(target) else { throw CancellationError() }
         return try composerDrafts.beginSubmission(
@@ -2347,7 +2348,8 @@ final class AppModel {
             behavior: behavior,
             resourceInvocation: resourceInvocation,
             canonicalTranscript: canonicalTranscript,
-            queuedMessages: queuedMessages
+            queuedMessages: queuedMessages,
+            runtimeGeneration: runtimeGeneration
         )
     }
 
@@ -2360,14 +2362,16 @@ final class AppModel {
         behavior: String? = nil,
         resourceInvocation: ComposerResourceInvocation? = nil,
         canonicalTranscript: [TranscriptItem] = [],
-        queuedMessages: [SessionSnapshot.QueuedMessage] = []
+        queuedMessages: [SessionSnapshot.QueuedMessage] = [],
+        runtimeGeneration: String? = nil
     ) async throws {
         let submission = try beginComposerSubmission(
             target: target,
             behavior: behavior,
             resourceInvocation: resourceInvocation,
             canonicalTranscript: canonicalTranscript,
-            queuedMessages: queuedMessages
+            queuedMessages: queuedMessages,
+            runtimeGeneration: runtimeGeneration
         )
         try await sendComposer(submission)
     }
@@ -3548,11 +3552,18 @@ extension AppModel: SessionPresentationStoreDelegate {
         target: SessionPresentationTarget
     ) {
         guard snapshot.sessionId == target.sessionID else { return }
-        composerDrafts.reconcileSubmission(
+        let reconciliation = composerDrafts.reconcileSubmission(
             target: target,
             canonicalTranscript: snapshot.transcript,
-            queuedMessages: snapshot.displayedQueuedMessages
+            queuedMessages: snapshot.displayedQueuedMessages,
+            runtimeGeneration: snapshot.runtimeGeneration
         )
+        if reconciliation == .runtimeReplacedBeforeCanonicalDelivery {
+            presentComposerActionError(
+                "The Mac runtime restarted before message delivery could be confirmed. Review the restored draft before sending again.",
+                target: target
+            )
+        }
     }
 
     func sessionPresentationStoreDidFailOperation(

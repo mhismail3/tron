@@ -794,6 +794,8 @@ export interface SessionSnapshot {
   revision: number;
   eventSequence: number;
   phase: SessionPhase;
+  /** Exact live Pi capability; unlike phase, distinguishes nested compaction and settlement gaps. */
+  acceptsQueuedPrompts: boolean;
   name?: string;
   cwd: string;
   parentSessionId?: string;

@@ -4808,10 +4808,18 @@ export default function (pi) {
     const prompting = slot.prompt("handled without agent");
     await waitUntil(() => slot.isBusy);
     await expect(slot.dispose()).rejects.toMatchObject({ code: "busy" });
-    await expect(prompting).resolves.toMatchObject({ operationId: expect.any(String) });
+    const admitted = await prompting;
+    expect(admitted).toMatchObject({ operationId: expect.any(String) });
     await waitUntil(() => !slot.isBusy);
     expect(slot.snapshot()).toMatchObject({ phase: "idle" });
     expect(slot.snapshot().operation).toBeUndefined();
+    const entries = (slot as any).runtime.session.sessionManager.getEntries() as any[];
+    const receipts = entries.filter(entry =>
+      entry.customType === INVOCATION_RECEIPT_TYPE
+        && entry.data?.operationId === admitted.operationId,
+    ).map(entry => entry.data);
+    expect(receipts.map(receipt => receipt.receiptKind)).toEqual(["start", "transition", "terminal"]);
+    expect(receipts.at(-1)).toMatchObject({ lifecycle: "completed" });
     const markerStore = (registry as unknown as { markers: { interruptedSessionIds(): Promise<Set<string>> } }).markers;
     expect((await markerStore.interruptedSessionIds()).has(slot.id)).toBe(false);
   });
@@ -5017,6 +5025,234 @@ export default function (pi) {
     expect(slot.snapshot().queuedItems).toEqual([
       expect.objectContaining({ id: expect.any(String), behavior: "steer", text: "after compaction" }),
     ]);
+  });
+
+  it("binds duplicate consumed steering to each exact queue operation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-steering-ownership-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let releaseResponse!: () => void;
+    const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    const faux = fauxProvider({ provider: "tron-steering-ownership", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      async () => {
+        await responseBarrier;
+        return fauxAssistantMessage("initial complete");
+      },
+      fauxAssistantMessage("steering complete"),
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    const initial = slot.prompt("initial");
+    await waitUntil(() => slot.snapshot().phase === "running");
+    const queued = await slot.prompt("steer me", [], "steer", {
+      text: "steer me",
+      attachmentEnvelope: "",
+      attachmentCount: 0,
+    });
+    const duplicate = await slot.prompt("steer me", [], "steer", {
+      text: "steer me",
+      attachmentEnvelope: "",
+      attachmentCount: 0,
+    });
+    expect(slot.snapshot().queuedItems).toEqual([
+      expect.objectContaining({ id: queued.operationId, behavior: "steer", text: "steer me" }),
+      expect.objectContaining({ id: duplicate.operationId, behavior: "steer", text: "steer me" }),
+    ]);
+
+    releaseResponse();
+    await initial;
+    await waitUntil(() => [queued.operationId, duplicate.operationId].every(operationId =>
+      slot.snapshot().transcript.some(item =>
+        item.kind === "message" && item.role === "user" && item.presentationId === operationId,
+      ),
+    ));
+    await waitUntil(() => !slot.isBusy);
+
+    const entries = (await readFile(slot.sessionFile!, "utf8"))
+      .trimEnd().split("\n").map(line => JSON.parse(line) as any);
+    for (const operationId of [queued.operationId, duplicate.operationId]) {
+      const receipts = entries
+        .filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.operationId === operationId)
+        .map(entry => entry.data);
+      expect(receipts.map(receipt => receipt.receiptKind)).toEqual(["start", "transition", "binding", "terminal"]);
+      expect(receipts.at(-1)).toMatchObject({ lifecycle: "completed" });
+    }
+    expect(slot.snapshot().queuedItems).toEqual([]);
+  });
+
+  it("reclassifies queued intent when Pi becomes idle inside an async input hook", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-queue-disposition-race-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    const entered = join(root, "input-entered");
+    const releaseInput = join(root, "release-input");
+    await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+    await writeFile(join(extensionDir, "delay-queued-input.ts"), `
+      import { existsSync, writeFileSync } from "node:fs";
+      export default function (pi) {
+        pi.on("input", async (event) => {
+          if (event.text !== "became ordinary") return;
+          writeFileSync(${JSON.stringify(entered)}, "entered");
+          while (!existsSync(${JSON.stringify(releaseInput)})) {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+          }
+        });
+      }\n`);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    let releaseResponse!: () => void;
+    const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    const faux = fauxProvider({ provider: "tron-queue-disposition-race", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      async () => {
+        await responseBarrier;
+        return fauxAssistantMessage("initial complete");
+      },
+      fauxAssistantMessage("ordinary complete"),
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust,
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+
+    await slot.prompt("initial");
+    await waitUntil(() => slot.snapshot().acceptsQueuedPrompts);
+    const prompting = slot.prompt("became ordinary", [], "steer");
+    await waitUntil(() => existsSync(entered));
+    releaseResponse();
+    await waitUntil(() => !slot.snapshot().acceptsQueuedPrompts);
+    await writeFile(releaseInput, "release");
+
+    const admitted = await prompting;
+    await waitUntil(() => slot.snapshot().transcript.some(item =>
+      item.kind === "message" && item.role === "user" && item.presentationId === admitted.operationId,
+    ));
+    expect(slot.snapshot().queuedItems).toEqual([]);
+    expect(slot.snapshot().pendingPrompt).toBeUndefined();
+    const entries = (await readFile(slot.sessionFile!, "utf8"))
+      .trimEnd().split("\n").map(line => JSON.parse(line) as any);
+    const receipts = entries
+      .filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.operationId === admitted.operationId)
+      .map(entry => entry.data);
+    expect(receipts.find(receipt => receipt.receiptKind === "transition")).toMatchObject({ lifecycle: "accepted" });
+    expect(receipts.find(receipt => receipt.receiptKind === "binding")).toBeDefined();
+    await waitUntil(() => !slot.isBusy);
+  }, 15_000);
+
+  it("settles a queued admission when the Pi call rejects before queue evidence", async () => {
+    const fixture = await coldFixture("queue-disposition-rejection");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      phase: "running" | "idle";
+      activeOperationId?: string;
+      operation?: { id?: string; kind: "prompt"; startedAt: string };
+      pendingQueueAdmission?: unknown;
+      runtime: { session: {
+        readonly isStreaming: boolean;
+        prompt: (text: string, options?: {
+          streamingBehavior?: "steer" | "followUp";
+          preflightResult?: (accepted: boolean) => void;
+        }) => Promise<void>;
+        getSteeringMessages: () => readonly string[];
+      } };
+    };
+    internal.phase = "running";
+    internal.activeOperationId = "existing-operation";
+    internal.operation = {
+      id: "existing-operation", kind: "prompt", startedAt: new Date().toISOString(),
+    };
+    vi.spyOn(internal.runtime.session, "isStreaming", "get").mockReturnValue(true);
+    vi.spyOn(internal.runtime.session, "getSteeringMessages").mockReturnValue([]);
+    vi.spyOn(internal.runtime.session, "prompt").mockImplementationOnce(async (_text, options) => {
+      expect(options?.streamingBehavior).toBe("steer");
+      options?.preflightResult?.(true);
+      throw new Error("queue admission failed");
+    });
+
+    await expect(slot.prompt("never queued", [], "steer")).rejects.toThrow("queue admission failed");
+    expect(internal.pendingQueueAdmission).toBeUndefined();
+    const entries = (await readFile(slot.sessionFile!, "utf8"))
+      .trimEnd().split("\n").map(line => JSON.parse(line) as any);
+    const starts = entries.filter(entry =>
+      entry.customType === INVOCATION_RECEIPT_TYPE && entry.data?.receiptKind === "start",
+    );
+    const operationId = starts.at(-1)?.data.operationId;
+    expect(operationId).toEqual(expect.any(String));
+    expect(entries.find(entry =>
+      entry.customType === INVOCATION_RECEIPT_TYPE
+        && entry.data?.operationId === operationId
+        && entry.data?.receiptKind === "terminal",
+    )?.data).toMatchObject({ lifecycle: "failed", errorCode: "runtime-prompt-failed" });
+
+    // The synthetic foreground owner belongs only to this test fixture.
+    internal.phase = "idle";
+    internal.activeOperationId = undefined;
+    internal.operation = undefined;
+  });
+
+  it("fails an accepted prompt that rejects before creating agent or canonical work", async () => {
+    const fixture = await coldFixture("accepted-prompt-rejection");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const session = (slot as unknown as {
+      runtime: { session: { prompt: (
+        text: string,
+        options?: { preflightResult?: (accepted: boolean) => void },
+      ) => Promise<void> } };
+    }).runtime.session;
+    vi.spyOn(session, "prompt").mockImplementationOnce(async (_text, options) => {
+      options?.preflightResult?.(true);
+      throw new Error("accepted prompt failed");
+    });
+
+    const admitted = await slot.prompt("fails after acceptance");
+    await waitUntil(() => !slot.isBusy);
+    const entries = (slot as any).runtime.session.sessionManager.getEntries() as any[];
+    const receipts = entries.filter(entry =>
+      entry.customType === INVOCATION_RECEIPT_TYPE
+        && entry.data?.operationId === admitted.operationId,
+    ).map(entry => entry.data);
+    expect(receipts.map(receipt => receipt.receiptKind)).toEqual(["start", "transition", "terminal"]);
+    expect(receipts.at(-1)).toMatchObject({ lifecycle: "failed", errorCode: "runtime-prompt-failed" });
+    expect(fixture.events).toContainEqual(expect.objectContaining({
+      topic: "session.operationFailed",
+      payload: expect.objectContaining({
+        data: expect.objectContaining({ operationId: admitted.operationId }),
+      }),
+    }));
+    expect(slot.snapshot()).toMatchObject({ phase: "idle" });
+    expect(slot.snapshot().operation).toBeUndefined();
   });
 
   it("keeps ordinary prompt admission behind the Gateway settlement transition", async () => {

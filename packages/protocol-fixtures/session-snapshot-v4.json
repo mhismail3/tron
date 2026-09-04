@@ -4,6 +4,7 @@
   "revision": 42,
   "eventSequence": 87,
   "phase": "retrying",
+  "acceptsQueuedPrompts": false,
   "name": "Protocol fixture",
   "cwd": "/workspace/project",
   "parentSessionId": "parent-session",

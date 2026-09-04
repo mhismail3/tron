@@ -209,7 +209,8 @@ struct ChatComposerView: View {
                     mode: trailingMode,
                     isDisabled: isSending || submissionPending || hasActiveUploads || !isCommandReady,
                     isSending: isSending,
-                    offersQueueChoices: sessionFacts?.phase.isActive == true,
+                    submissionPending: submissionPending,
+                    offersQueueChoices: sessionFacts?.acceptsQueuedPrompts == true && !submissionPending,
                     onSend: onSend,
                     onAbort: onAbort
                 )

@@ -116,7 +116,11 @@ type RuntimeQueuedMessage = QueuedMessageState & {
   ordinal: number;
 };
 
-type PendingQueueAdmission = Omit<RuntimeQueuedMessage, "runtimeText" | "ordinal">;
+type QueueAdmissionDisposition = "queued" | "foreground" | "handled" | "failed";
+
+type PendingQueueAdmission = Omit<RuntimeQueuedMessage, "runtimeText" | "ordinal"> & {
+  resolveDisposition: (disposition: QueueAdmissionDisposition) => void;
+};
 
 type CanonicalExtensionRunFact = {
   toolCallId?: string;
@@ -446,6 +450,13 @@ export class RuntimeSlot {
   private extensionShutdownRetryTimer: NodeJS.Timeout | undefined;
   /** Follow-up queue owners removed by Pi immediately before their agent_start. */
   private readonly dequeuedFollowUpOwners: string[] = [];
+  /** Steering queue owners removed immediately before Pi emits message_start.
+   * Steering remains inside the current agent run, so it needs a separate
+   * callback-turn latch rather than follow-up's agent_start transfer. */
+  private readonly dequeuedSteeringOwners: string[] = [];
+  /** Steering owners whose exact user message has crossed message_start and
+   * still needs its canonical binding/terminal receipt persisted. */
+  private readonly consumedSteeringOperationIDs = new Set<string>();
   private readonly unregisterExtensionExpiry: () => void;
   private readonly unregisterProcessExpiry: () => void;
   private readonly processActivities = new Map<string, SessionProcessActivity>();
@@ -840,6 +851,8 @@ export class RuntimeSlot {
       ...this.completionWorkOwners.values(),
       ...this.queuedMessages.map((item) => item.id),
       ...this.dequeuedFollowUpOwners,
+      ...this.dequeuedSteeringOwners,
+      ...this.consumedSteeringOperationIDs,
     ].filter((value): value is string => typeof value === "string"));
   }
 
@@ -2217,6 +2230,14 @@ export class RuntimeSlot {
     owner?: GatewayWorkHandle,
     assistantCompletionId?: string,
   ): Promise<void> {
+    if (operationId) {
+      this.consumedSteeringOperationIDs.delete(operationId);
+      for (let index = this.dequeuedSteeringOwners.indexOf(operationId);
+        index >= 0;
+        index = this.dequeuedSteeringOwners.indexOf(operationId)) {
+        this.dequeuedSteeringOwners.splice(index, 1);
+      }
+    }
     const invocation = this.invocationForOperation(operationId);
     if (!invocation || ["completed", "failed", "interrupted", "outcomeUnknown"].includes(invocation.lifecycle)) return;
     await this.persistInvocationReceipt(makeInvocationReceipt({
@@ -2453,7 +2474,11 @@ export class RuntimeSlot {
           ?? this.queuedMessages.find((item) => item.behavior === "followUp")?.id;
         const preflightOwner = this.pendingExtensionCommand?.id
           ?? queuedOwner
-          ?? this.activeOperationId;
+          ?? this.activeOperationId
+          // A prompt initially offered as queue work can become ordinary only
+          // inside Pi's async input hook. Until queue_update proves otherwise,
+          // its durable preflight owner is the sole valid owner for a new run.
+          ?? this.pendingQueueAdmission?.id;
         const continuesToolSegment = continuationFromSettlement
           && queuedOwner === undefined
           && this.pendingExtensionCommand === undefined
@@ -2744,13 +2769,55 @@ export class RuntimeSlot {
           if (this.pendingPrompt && this.pendingPromptMessage === undefined) {
             this.pendingPromptMessage = event.message;
           } else {
-            const operationId = this.activeOperationId;
+            // Pi removes steering from its string queue and emits queue_update
+            // before this callback. Preserve that exact queue operation across
+            // the event boundary; activeOperationId still belongs to the
+            // enclosing foreground run and cannot identify the steering item.
+            const dequeuedSteeringOperationID = this.dequeuedSteeringOwners.shift();
+            // Pi can stop streaming while an async input hook is deciding a
+            // prompt that the Gateway initially classified for the queue. In
+            // that case no queue_update arrives: the next otherwise-unowned
+            // user object is exact proof that Pi admitted an ordinary prompt.
+            const activeInvocation = this.invocationForOperation(this.activeOperationId);
+            const pendingQueueAdmission = this.pendingQueueAdmission;
+            const reclassifiedAdmission = dequeuedSteeringOperationID === undefined
+              && (activeInvocation === undefined
+                || this.activeOperationId === pendingQueueAdmission?.id)
+              ? pendingQueueAdmission
+              : undefined;
+            if (reclassifiedAdmission) {
+              this.pendingQueueAdmission = undefined;
+              reclassifiedAdmission.resolveDisposition("foreground");
+              const displacedOwner = this.activeOperationId;
+              this.activeOperationId = reclassifiedAdmission.id;
+              const invocation = this.invocationForOperation(reclassifiedAdmission.id);
+              this.operation = {
+                id: reclassifiedAdmission.id,
+                kind: "prompt",
+                startedAt: new Date().toISOString(),
+                ...(invocation?.invocationId ? { invocationId: invocation.invocationId } : {}),
+              };
+              this.activeToolSegmentOwnerId = reclassifiedAdmission.id;
+              const work = this.operationWork.get(reclassifiedAdmission.id)
+                ?? this.beginDerivedOperationWork(reclassifiedAdmission.id, "foreground-agent-operation");
+              work.transition("foreground-agent-operation");
+              void this.enqueueMarkerOwnership(reclassifiedAdmission.id).then(async () => {
+                if (displacedOwner) await this.clearMarkerOwnership(displacedOwner);
+                this.settleOperationWork(displacedOwner);
+              }).catch(() => this.runtime.session.abort());
+            }
+            const operationId = dequeuedSteeringOperationID
+              ?? reclassifiedAdmission?.id
+              ?? this.activeOperationId;
             const invocation = this.invocationForOperation(operationId);
             if (operationId && invocation) {
               this.pendingInvocationUserMessages.set(event.message, {
                 operationId,
                 invocationId: invocation.invocationId,
               });
+              if (dequeuedSteeringOperationID) {
+                this.consumedSteeringOperationIDs.add(dequeuedSteeringOperationID);
+              }
             }
           }
         } else if (event.message.role === "custom") {
@@ -3078,6 +3145,19 @@ export class RuntimeSlot {
               `binding:${invocationID}`,
               this.operationWork.get(operationID),
             );
+            // A steering item is a prompt admission nested inside the existing
+            // foreground run. Its queue operation completes when this exact
+            // canonical user entry is bound; the enclosing run retains its own
+            // activeOperationId and completion lifecycle.
+            if (this.consumedSteeringOperationIDs.delete(operationID)) {
+              await this.terminalizeInvocation(
+                operationID,
+                "completed",
+                undefined,
+                this.operationWork.get(operationID),
+              );
+              this.settleOperationWork(operationID);
+            }
             if (this.pendingPrompt?.id === operationID
               && this.pendingPromptMessage === message) {
               this.pendingPrompt = undefined;
@@ -4641,7 +4721,10 @@ export class RuntimeSlot {
         const admission = this.pendingQueueAdmission?.behavior === behavior
           ? this.pendingQueueAdmission
           : undefined;
-        if (admission) this.pendingQueueAdmission = undefined;
+        if (admission) {
+          this.pendingQueueAdmission = undefined;
+          admission.resolveDisposition("queued");
+        }
         reconciled.push({
           id: admission?.id ?? randomUUID(),
           behavior,
@@ -4671,6 +4754,18 @@ export class RuntimeSlot {
       if (this.activeOperationId) this.beginDerivedOperationWork(this.activeOperationId, "foreground-agent-operation");
     }
     for (const item of removed) {
+      if (item.behavior === "steer" && this.invocationForOperation(item.id)) {
+        // Agent-core's queue_update precedes message_start for steering. Do
+        // not settle this operation or let the enclosing activeOperationId
+        // impersonate it during that exact callback window.
+        if (!this.dequeuedSteeringOwners.includes(item.id)) {
+          this.dequeuedSteeringOwners.push(item.id);
+        }
+        const work = this.operationWork.get(item.id)
+          ?? this.beginDerivedOperationWork(item.id, "queued-mutation");
+        work.transition("foreground-agent-operation");
+        continue;
+      }
       if (item.behavior === "followUp" && this.operationWork.has(item.id)) {
         if (!this.hasActiveAgentRun) {
           // Pi can remove a follow-up immediately before emitting its next
@@ -4849,6 +4944,9 @@ export class RuntimeSlot {
       revision: this.revision,
       eventSequence: sequence,
       phase: this.effectivePhase,
+      // Phase is presentation state; Pi streaming is the exact authority for
+      // whether a new prompt can request steer/follow-up delivery right now.
+      acceptsQueuedPrompts: session.isStreaming,
       ...(session.sessionName ? { name: session.sessionName } : {}),
       cwd: session.sessionManager.getCwd(),
       ...(session.sessionManager.getHeader()?.parentSession ? { parentSessionId: session.sessionManager.getHeader()!.parentSession } : {}),
@@ -5203,7 +5301,7 @@ export class RuntimeSlot {
       const extensionCommandName = parsedCommand?.name;
       const isExactExtensionCommand = extensionCommandName !== undefined
         && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
-      const queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
+      let queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
       const operationId = ownership?.operationId ?? randomUUID();
       if (ownership && this.automationTerminalObservers.has(operationId)) {
         throw new GatewayError("conflict", "Automation operation is already registered", true);
@@ -5233,7 +5331,14 @@ export class RuntimeSlot {
         this.invocations.delete(invocationId);
         throw new GatewayError("busy", "Session is running; choose steer or follow-up");
       }
-      if (queuesIntoActiveRun) {
+      const queueAdmissionDisplay = queueDisplay ?? {
+        text,
+        attachmentEnvelope: "",
+        attachmentCount: images.length,
+        ...(images.length > 0 ? { photoCount: images.length } : {}),
+        ...(images.length > 0 ? { fileAttachmentCount: 0 } : {}),
+      };
+      const validateQueueAdmission = () => {
         this.reconcileQueuedMessages();
         if (this.pendingQueueAdmission) {
           throw new GatewayError(
@@ -5242,32 +5347,15 @@ export class RuntimeSlot {
             true,
           );
         }
-        const display = queueDisplay ?? {
-          text,
-          attachmentEnvelope: "",
-          attachmentCount: images.length,
-          ...(images.length > 0 ? { photoCount: images.length } : {}),
-          ...(images.length > 0 ? { fileAttachmentCount: 0 } : {}),
-        };
         RuntimeSlot.validateQueue([...this.queuedMessages, {
-          text: display.text,
-          attachmentCount: display.attachmentCount,
-          ...(display.resourceInvocation === undefined ? {} : { resourceInvocation: display.resourceInvocation }),
-        }]);
-        this.pendingQueueAdmission = {
-          // The returned operation identity is also the stable projected queue
-          // identity, giving clients an exact settlement receipt.
-          id: operationId, behavior: behavior!, text: display.text,
-          attachmentCount: display.attachmentCount,
-          ...(display.resourceInvocation === undefined ? {} : { resourceInvocation: display.resourceInvocation }),
-          ...(display.photoCount === undefined ? {} : { photoCount: display.photoCount }),
-          ...(display.fileAttachmentCount === undefined
+          text: queueAdmissionDisplay.text,
+          attachmentCount: queueAdmissionDisplay.attachmentCount,
+          ...(queueAdmissionDisplay.resourceInvocation === undefined
             ? {}
-            : { fileAttachmentCount: display.fileAttachmentCount }),
-          ...(display.attachments === undefined ? {} : { attachments: display.attachments }),
-          attachmentEnvelope: display.attachmentEnvelope, images,
-        };
-      }
+            : { resourceInvocation: queueAdmissionDisplay.resourceInvocation }),
+        }]);
+      };
+      if (queuesIntoActiveRun) validateQueueAdmission();
 
       if (ownership) this.automationTerminalObservers.set(operationId, ownership.onTerminal);
       let operationWork!: GatewayWorkHandle;
@@ -5275,6 +5363,9 @@ export class RuntimeSlot {
       let acceptedResolve!: (accepted: boolean) => void;
       const accepted = new Promise<boolean>((resolve) => { acceptedResolve = resolve; });
       let sdkRun: Promise<void>;
+      let queueDisposition: Promise<QueueAdmissionDisposition> | undefined;
+      let resolveQueueDisposition: ((disposition: QueueAdmissionDisposition) => void) | undefined;
+      let queueDispositionFailure: unknown;
       let startPersisted = false;
       try {
         this.invocations.set(invocationId, invocation);
@@ -5310,6 +5401,49 @@ export class RuntimeSlot {
         await this.persistInvocationReceipt(startReceipt, operationWork);
         startPersisted = true;
 
+        // Receipt persistence and extension hooks may outlive the run that was
+        // active at RPC entry. Re-evaluate at the last Gateway-owned boundary,
+        // then let queue_update/message_start provide the exact disposition if
+        // Pi crosses from streaming to idle inside its asynchronous input hook.
+        queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
+        if (session.isStreaming && !behavior && !isExactExtensionCommand) {
+          throw new GatewayError("busy", "Session is running; choose steer or follow-up");
+        }
+        if (queuesIntoActiveRun) {
+          validateQueueAdmission();
+          let dispositionResolved = false;
+          queueDisposition = new Promise<QueueAdmissionDisposition>((resolve) => {
+            resolveQueueDisposition = (disposition) => {
+              if (dispositionResolved) return;
+              dispositionResolved = true;
+              resolve(disposition);
+            };
+          });
+          this.pendingQueueAdmission = {
+            // The returned operation identity is also the stable projected queue
+            // identity, giving clients an exact settlement receipt.
+            id: operationId,
+            behavior: behavior!,
+            text: queueAdmissionDisplay.text,
+            attachmentCount: queueAdmissionDisplay.attachmentCount,
+            ...(queueAdmissionDisplay.resourceInvocation === undefined
+              ? {}
+              : { resourceInvocation: queueAdmissionDisplay.resourceInvocation }),
+            ...(queueAdmissionDisplay.photoCount === undefined
+              ? {}
+              : { photoCount: queueAdmissionDisplay.photoCount }),
+            ...(queueAdmissionDisplay.fileAttachmentCount === undefined
+              ? {}
+              : { fileAttachmentCount: queueAdmissionDisplay.fileAttachmentCount }),
+            ...(queueAdmissionDisplay.attachments === undefined
+              ? {}
+              : { attachments: queueAdmissionDisplay.attachments }),
+            attachmentEnvelope: queueAdmissionDisplay.attachmentEnvelope,
+            images,
+            resolveDisposition: (disposition) => resolveQueueDisposition?.(disposition),
+          };
+        }
+
         if (isExactExtensionCommand) {
           this.pendingExtensionCommand = { id: operationId, kind: "command", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
           // Exact commands run before Pi's preflight callback and can wait on UI
@@ -5324,7 +5458,8 @@ export class RuntimeSlot {
           this.pendingPrompt = {
             id: operationId,
             createdAt: new Date().toISOString(),
-            ...(behavior === undefined ? {} : { behavior }),
+            // Requested queue behavior is advisory until Pi actually enqueues.
+            // A prompt admitted after the run settles remains ordinary.
             text: boundedSummaryText(
               queueDisplay?.text ?? text,
               MAXIMUM_PENDING_PROMPT_BYTES
@@ -5352,7 +5487,7 @@ export class RuntimeSlot {
 
         sdkRun = withInvocationContext({ invocationId, operationId }, () => session.prompt(text, {
           images,
-          ...(queuesIntoActiveRun ? { streamingBehavior: behavior } : {}),
+          ...(queuesIntoActiveRun ? { streamingBehavior: behavior! } : {}),
           source: "rpc",
           preflightResult: acceptedResolve,
         }));
@@ -5402,8 +5537,11 @@ export class RuntimeSlot {
       }
       let runSettled = false;
       let commandSettled = false;
+      let handledWithoutAgent = false;
       let terminalReceiptPersisted = false;
-      let admissionFinalized = false;
+      let admissionAccepted = false;
+      let finalizeAdmission!: () => void;
+      const admissionFinalized = new Promise<void>((resolve) => { finalizeAdmission = resolve; });
       const promptRun = this.lifecycle.trackPrompt(sdkRun, () => {
         runSettled = true;
         this.maybePerformExtensionShutdown();
@@ -5412,17 +5550,27 @@ export class RuntimeSlot {
         ? this.lifecycle.trackCommand(promptRun, () => { commandSettled = true; this.maybePerformExtensionShutdown(); })
         : promptRun;
 
-      const settleWithoutAgent = async () => {
+      let noAgentSettlementStarted = false;
+      const settleWithoutAgent = async (
+        terminalLifecycle: "completed" | "failed" = "completed",
+      ) => {
         if (this.shuttingDown || this.hasActiveAgentRun || queuesIntoActiveRun) return;
         const owned = this.activeOperationId === operationId || this.operation?.id === operationId;
-        if (!owned || this.queuedManualCompactionInFlight) return;
+        if (!owned || this.queuedManualCompactionInFlight || noAgentSettlementStarted) return;
+        noAgentSettlementStarted = true;
         if (this.pendingPrompt?.id === operationId) {
           this.pendingPrompt = undefined;
           this.pendingPromptMessage = undefined;
         }
-        if (this.automationTerminalObservers.has(operationId)) {
-          await this.terminalizeInvocation(operationId, "completed");
-        }
+        // A handled input creates no canonical user/assistant entry. Persist its
+        // terminal outcome for every invocation, not only Automation callers.
+        // A rejected Pi call uses the same no-agent cleanup but remains failed.
+        await this.terminalizeInvocation(
+          operationId,
+          terminalLifecycle,
+          terminalLifecycle === "failed" ? "runtime-prompt-failed" : undefined,
+        );
+        this.lifecycle.cancelPreflight(operationId);
         if (!this.pendingManualCompaction && !operationId.startsWith("automation:")) {
           await this.clearMarkerOwnership(operationId);
         }
@@ -5431,6 +5579,12 @@ export class RuntimeSlot {
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
         if (this.operation?.id === operationId) this.operation = undefined;
         this.settleOperationWork(operationId);
+        if (terminalLifecycle === "failed") {
+          this.emit("session.operationFailed", {
+            operationId,
+            message: "The agent runtime failed before creating canonical input",
+          });
+        }
         if (this.activeOperationId !== undefined || this.hasActiveAgentRun) return;
         this.phase = "idle";
         if (this.pendingManualCompaction) {
@@ -5444,31 +5598,68 @@ export class RuntimeSlot {
       };
 
       void run.then(
-        () => admissionFinalized ? settleWithoutAgent() : undefined,
+        async () => {
+          if (this.pendingQueueAdmission?.id === operationId) {
+            this.pendingQueueAdmission = undefined;
+            resolveQueueDisposition?.("handled");
+          }
+          await admissionFinalized;
+          if (admissionAccepted) await settleWithoutAgent();
+        },
         async (error) => {
-          // RPC rejection owns preflight failures. After admission, canonical
-          // transcript/error state owns execution outcome; neither case should
-          // falsely restore an already accepted composer submission.
+          // Before queue/user disposition, rejection is definitive and wakes
+          // that exact admission below. After disposition, canonical/runtime
+          // lifecycle remains authoritative for already accepted work.
           this.emit("session.diagnostic", safeJson({
             code: "runtime-prompt-failed",
             operationId,
             message: error instanceof Error ? error.message : String(error),
           }));
-          if (admissionFinalized && this.automationTerminalObservers.has(operationId)
-            && !this.hasActiveAgentRun) {
-            await this.terminalizeInvocation(operationId, "failed", "runtime-prompt-failed");
+          acceptedResolve(false);
+          if (this.pendingQueueAdmission?.id === operationId) {
+            this.pendingQueueAdmission = undefined;
+            queueDispositionFailure = error;
+            resolveQueueDisposition?.("failed");
           }
-          if (admissionFinalized) await settleWithoutAgent();
+          await admissionFinalized;
+          if (admissionAccepted) await settleWithoutAgent("failed");
         },
-      );
+      ).catch((error) => this.emit("session.diagnostic", safeJson({
+        code: "runtime-prompt-settlement-failed",
+        operationId,
+        message: error instanceof Error ? error.message : String(error),
+      })));
 
       // Pi's callback is authoritative. A local timeout could reject while the
       // same uncancelled input handler later accepts canonical work.
       const admitted = await accepted;
-      if (queuesIntoActiveRun && admitted) this.reconcileQueuedMessages();
-      if (!queuesIntoActiveRun || !admitted) this.pendingQueueAdmission = undefined;
+      if (queuesIntoActiveRun && admitted) {
+        this.reconcileQueuedMessages();
+        const disposition = await queueDisposition!;
+        queuesIntoActiveRun = disposition === "queued";
+        handledWithoutAgent = disposition === "handled";
+        if (disposition === "failed") {
+          this.lifecycle.resolvePreflight(operationId, true);
+          admissionAccepted = true;
+          await this.terminalizeInvocation(
+            operationId,
+            "failed",
+            "runtime-prompt-failed",
+            operationWork,
+          );
+          this.lifecycle.cancelPreflight(operationId);
+          this.settleOperationWork(operationId);
+          finalizeAdmission();
+          throw queueDispositionFailure instanceof Error
+            ? queueDispositionFailure
+            : new GatewayError("internal", "The agent runtime failed after prompt admission");
+        }
+      }
+      if ((!queuesIntoActiveRun || !admitted) && this.pendingQueueAdmission?.id === operationId) {
+        this.pendingQueueAdmission = undefined;
+      }
       this.lifecycle.resolvePreflight(operationId, admitted);
-      admissionFinalized = true;
+      admissionAccepted = admitted;
       if (!admitted) {
         await this.persistInvocationReceipt(makeInvocationReceipt({
           version: 1,
@@ -5503,6 +5694,7 @@ export class RuntimeSlot {
         this.settleOperationWork(operationId);
         this.revision += 1;
         this.publishSnapshot();
+        finalizeAdmission();
         throw new GatewayError("invalid_request", "The agent runtime rejected the prompt before admission");
       }
 
@@ -5533,9 +5725,14 @@ export class RuntimeSlot {
         lifecycle: queuesIntoActiveRun ? "queued" : "accepted",
         updatedAt: new Date().toISOString(),
       });
+      finalizeAdmission();
       if (isExactExtensionCommand) operationWork.transition("extension-command-prompt-ui");
       else if (queuesIntoActiveRun) operationWork.transition("queued-mutation");
-      else {
+      else if (handledWithoutAgent) {
+        await this.terminalizeInvocation(operationId, "completed", undefined, operationWork);
+        this.lifecycle.cancelPreflight(operationId);
+        this.settleOperationWork(operationId);
+      } else if (!runSettled) {
         operationWork.transition("foreground-agent-operation");
         await this.enqueueMarkerOwnership(operationId);
       }
@@ -5605,9 +5802,14 @@ export class RuntimeSlot {
           await finishCommand();
         }
       } else if (runSettled) {
-        // Handles input action:"handled" (and any other accepted no-agent path)
-        // after the marker exists, without touching a newer operation.
-        await settleWithoutAgent();
+        // Handles input action:"handled" and rejected accepted calls without
+        // touching a newer operation. `finally` can mark runSettled one
+        // microtask before `run` exposes its outcome, so join it explicitly.
+        const terminalLifecycle = await run.then(
+          () => "completed" as const,
+          () => "failed" as const,
+        );
+        await settleWithoutAgent(terminalLifecycle);
       }
       return { operationId };
     });

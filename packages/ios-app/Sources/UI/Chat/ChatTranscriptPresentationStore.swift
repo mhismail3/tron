@@ -7,11 +7,13 @@ import Observation
 struct ChatVisibleSessionFacts: Hashable, Sendable {
     let sessionID: String
     let phase: SessionPhase
+    let acceptsQueuedPrompts: Bool
     let retry: RetryState?
 
     init(snapshot: SessionSnapshot) {
         sessionID = snapshot.sessionId
         phase = snapshot.phase
+        acceptsQueuedPrompts = snapshot.acceptsQueuedPrompts ?? (snapshot.phase == .running)
         retry = snapshot.retry
     }
 }

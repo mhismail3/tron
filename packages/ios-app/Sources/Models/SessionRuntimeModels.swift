@@ -408,6 +408,9 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     var revision: Int
     var eventSequence: Int
     var phase: SessionPhase
+    /// Exact Gateway/Pi admission capability. Older compatible snapshots omit
+    /// it and use the conservative running-phase fallback at presentation.
+    var acceptsQueuedPrompts: Bool? = nil
     var name: String?
     var cwd: String
     var parentSessionId: String?

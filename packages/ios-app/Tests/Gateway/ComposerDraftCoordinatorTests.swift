@@ -997,6 +997,36 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
+    @Test("a pending submission rejects every second admission before transport")
+    func pendingSubmissionRejectsSecondAdmission() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "single-admission", generation: 13)
+            let scope = harness.coordinator.installHostedPresentation(
+                profileID: "profile",
+                target: target,
+                lifecycleGeneration: 1,
+                initialText: "first"
+            )
+            let first = Task { try await harness.coordinator.send(target: target, behavior: "steer") }
+            try await harness.waitForSends(1)
+            harness.coordinator.setText("second", for: scope)
+
+            do {
+                _ = try harness.coordinator.beginSubmission(target: target, behavior: "followUp")
+                Issue.record("a second local admission must remain closed while the first reconciles")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "submission_in_progress")
+            }
+            #expect(harness.sendCalls.count == 1)
+            #expect(harness.coordinator.text(for: scope) == "second")
+
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(first)
+            #expect(harness.sendCalls.count == 1)
+        }
+    }
+
     @Test("one staged resource replaces its predecessor and definitive send failure restores it")
     func selectedResourceLifecycle() async throws {
         try await withTestWatchdog { @MainActor in
@@ -1165,6 +1195,93 @@ struct ComposerDraftCoordinatorTests {
                 canonicalTranscript: [historical, user("new"), exact]
             )
             #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+        }
+    }
+
+    @Test("runtime replacement restores accepted queue work without replay")
+    func runtimeReplacementRestoresAcceptedQueueWork() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "runtime-replaced", generation: 42)
+            let scope = harness.coordinator.installHostedPresentation(
+                profileID: "profile",
+                target: target,
+                lifecycleGeneration: 1,
+                initialText: "review this"
+            )
+            let sending = Task {
+                try await harness.coordinator.send(
+                    target: target,
+                    behavior: "steer",
+                    runtimeGeneration: "runtime-a"
+                )
+            }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+
+            #expect(harness.coordinator.hasPendingSubmission(target: target))
+            #expect(harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [],
+                runtimeGeneration: "runtime-a"
+            ) == .unchanged)
+            #expect(harness.coordinator.hasPendingSubmission(target: target))
+
+            #expect(harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [],
+                runtimeGeneration: "runtime-b"
+            ) == .runtimeReplacedBeforeCanonicalDelivery)
+            #expect(!harness.coordinator.hasPendingSubmission(target: target))
+            #expect(harness.coordinator.text(for: scope) == "review this")
+            #expect(harness.sendCalls.count == 1)
+
+            // Exact queue evidence may retire the optimistic row before Pi
+            // consumes it. Retain one bounded handoff so a later runtime
+            // replacement can restore that accepted-but-lost work too.
+            let queuedSending = Task {
+                try await harness.coordinator.send(
+                    target: target,
+                    behavior: "steer",
+                    runtimeGeneration: "runtime-b"
+                )
+            }
+            try await harness.waitForSends(2)
+            harness.completeSend(index: 1, result: .success(()))
+            try await valueOfOwnedTask(queuedSending)
+            let queued = SessionSnapshot.QueuedMessage(
+                id: "operation-1",
+                behavior: .steer,
+                text: "review this",
+                attachmentCount: 0
+            )
+            #expect(harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [],
+                queuedMessages: [queued],
+                runtimeGeneration: "runtime-b"
+            ) == .unchanged)
+            #expect(!harness.coordinator.hasPendingSubmission(target: target))
+            #expect(harness.coordinator.text(for: scope).isEmpty)
+
+            harness.coordinator.revoke(target)
+            let replacementTarget = SessionPresentationIdentity(
+                sessionID: target.sessionID,
+                generation: target.generation + 1
+            )
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile",
+                target: replacementTarget,
+                lifecycleGeneration: 1
+            )
+            #expect(harness.coordinator.reconcileSubmission(
+                target: replacementTarget,
+                canonicalTranscript: [],
+                runtimeGeneration: "runtime-c"
+            ) == .runtimeReplacedBeforeCanonicalDelivery)
+            #expect(harness.coordinator.text(for: scope) == "review this")
+            #expect(harness.sendCalls.count == 2)
         }
     }
 
