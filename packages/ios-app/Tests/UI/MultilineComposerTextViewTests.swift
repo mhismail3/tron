@@ -34,6 +34,61 @@ struct MultilineComposerTextViewTests {
         ))
     }
 
+    @Test("submission clear rejects a stale UIKit callback before accepting a new draft")
+    func submissionClearFencesStaleUIKitText() {
+        let scope = ComposerDraftScope(profileID: "profile", sessionID: "session")
+        var text = "send this"
+        var revision = ComposerTextAuthority(scope: scope, revision: 1)
+        var focused = true
+        var writes: [String] = []
+        let control = MultilineComposerTextView(
+            text: Binding(
+                get: { text },
+                set: {
+                    writes.append($0)
+                    text = $0
+                    revision = ComposerTextAuthority(scope: scope, revision: revision.revision + 1)
+                }
+            ),
+            isFocused: Binding(get: { focused }, set: { focused = $0 }),
+            authoritativeTextRevision: Binding(get: { revision }, set: { _ in }),
+            isEditable: true,
+            keyboardAppearance: .dark
+        )
+        let coordinator = control.makeCoordinator()
+        let view = makeTextView(coordinator: coordinator, width: 240)
+        view.text = text
+        _ = coordinator.reconcileAuthoritativeText(on: view)
+
+        // Admission clears the draft synchronously, but UITextView still owns
+        // the pre-clear value until SwiftUI's next updateUIView call. A marked-
+        // text/autocorrection callback during responder resignation is stale.
+        text = ""
+        revision = ComposerTextAuthority(scope: scope, revision: revision.revision + 1)
+        coordinator.textViewDidChange(view)
+        #expect(text.isEmpty)
+        #expect(view.text.isEmpty)
+        #expect(writes.isEmpty)
+
+        // Once the authoritative clear is installed, ordinary typing belongs
+        // to the new draft and advances the owner revision normally.
+        view.text = "next draft"
+        coordinator.textViewDidChange(view)
+        #expect(text == "next draft")
+        #expect(writes == ["next draft"])
+        #expect(revision.revision == 3)
+
+        // Revisions are per draft, so equal numbers cannot make a callback from
+        // the previous route authoritative for a replacement draft scope.
+        let replacementScope = ComposerDraftScope(profileID: "profile", sessionID: "replacement")
+        text = "replacement owner"
+        revision = ComposerTextAuthority(scope: replacementScope, revision: 3)
+        coordinator.textViewDidChange(view)
+        #expect(text == "replacement owner")
+        #expect(view.text == "replacement owner")
+        #expect(writes == ["next draft"])
+    }
+
     @Test("external completion selection clamps in UTF-16 coordinates")
     func completionSelectionClamps() {
         var text = "👋 command"

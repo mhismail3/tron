@@ -17,6 +17,7 @@ struct ChatComposerView: View {
     let showsAmbientWorkingBlur: Bool
     let keyboardVisible: Bool
     @Binding var text: String
+    let textRevision: Binding<ComposerTextAuthority>
     @Binding var isFocused: Bool
     @Binding var selection: NSRange
     let responder: ChatComposerResponder
@@ -188,6 +189,7 @@ struct ChatComposerView: View {
                 MultilineComposerTextView(
                     text: $text,
                     isFocused: $isFocused,
+                    authoritativeTextRevision: textRevision,
                     selection: $selection,
                     responder: responder,
                     isEditable: isEditable,

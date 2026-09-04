@@ -1382,6 +1382,27 @@ struct ChatView: View {
         )
     }
 
+    /// Read-through owner version used by the UIKit bridge during callback-turn
+    /// races. Unlike a rendered Int value, this binding observes the coordinator
+    /// synchronously before SwiftUI has produced the next representable update.
+    private var composerTextRevisionBinding: Binding<ComposerTextAuthority> {
+        // Capture the State location and coordinator reference, not this render's
+        // scalar scope/revision values. A delegate callback that precedes the
+        // next updateUIView therefore still reads the current draft owner.
+        let liveScope = $composerScope
+        let drafts = model.composerDrafts
+        return Binding(
+            get: {
+                let scope = liveScope.wrappedValue
+                return ComposerTextAuthority(
+                    scope: scope,
+                    revision: scope.map { drafts.revision(for: $0) } ?? 0
+                )
+            },
+            set: { _ in }
+        )
+    }
+
     private var pendingAttachments: [PendingAttachment] {
         guard let target = presentationTarget else { return [] }
         let submittedIDs = Set(
@@ -2540,6 +2561,7 @@ struct ChatView: View {
             showsAmbientWorkingBlur: showsAmbientWorkingBlur,
             keyboardVisible: keyboardObserver.isVisible,
             text: composerTextBinding,
+            textRevision: composerTextRevisionBinding,
             isFocused: Binding(
                 get: { composerFocused },
                 set: { composerFocused = $0 }

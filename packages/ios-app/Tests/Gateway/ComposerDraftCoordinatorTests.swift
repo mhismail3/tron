@@ -963,6 +963,7 @@ struct ComposerDraftCoordinatorTests {
             #expect(harness.coordinator.isSending(target: target))
             #expect(harness.coordinator.submissionSnapshot(for: target)?.textRevision == 1)
             #expect(harness.coordinator.text(for: scope).isEmpty)
+            #expect(harness.coordinator.revision(for: scope) == 2)
 
             harness.coordinator.setText("newer", for: scope)
             harness.coordinator.installHostedAttachment(

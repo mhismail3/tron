@@ -27,9 +27,18 @@ final class ChatComposerResponder {
 /// UIKit owns selection and the capped editor's internal scroll position. A
 /// vertical SwiftUI TextField can repeatedly relayout at its line cap and lose
 /// the insertion point while typing; this control keeps one stable scroll owner.
+struct ComposerTextAuthority: Equatable, Sendable {
+    let scope: ComposerDraftScope?
+    let revision: Int
+}
+
 struct MultilineComposerTextView: UIViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
+    /// Live draft-owner identity and revision. UIKit delegate callbacks can arrive
+    /// while SwiftUI has not yet installed a route change or synchronous clear.
+    /// This token fences stale edits from repopulating a superseded draft.
+    var authoritativeTextRevision: Binding<ComposerTextAuthority>? = nil
     var selection: Binding<NSRange>? = nil
     var responder: ChatComposerResponder? = nil
     let isEditable: Bool
@@ -88,14 +97,8 @@ struct MultilineComposerTextView: UIViewRepresentable {
             view.keyboardAppearance = keyboardAppearance
             if view.isFirstResponder { view.reloadInputViews() }
         }
-        if view.text != text {
-            view.text = text
-            view.selectedRange = context.coordinator.clampedSelection(
-                selection?.wrappedValue ?? NSRange(location: (text as NSString).length, length: 0),
-                text: text
-            )
-            context.coordinator.requestCaretReveal(on: view)
-        } else if fontChanged {
+        let textChanged = context.coordinator.reconcileAuthoritativeText(on: view)
+        if fontChanged, !textChanged {
             context.coordinator.requestCaretReveal(on: view)
         }
         context.coordinator.reconcileFocus(on: view)
@@ -134,6 +137,8 @@ struct MultilineComposerTextView: UIViewRepresentable {
         private var needsCaretReveal = false
         private var focusReconciliationScheduled = false
         private var isReconcilingLayout = false
+        private var isInstallingAuthoritativeText = false
+        private var installedTextRevision: ComposerTextAuthority?
         private(set) var hasMirroredFocus = false
 
         init(_ parent: MultilineComposerTextView) { self.parent = parent }
@@ -186,15 +191,58 @@ struct MultilineComposerTextView: UIViewRepresentable {
         }
 
         func textViewDidChange(_ textView: UITextView) {
-            if parent.text != textView.text { parent.text = textView.text }
+            guard !isInstallingAuthoritativeText else { return }
+            if hasSupersedingAuthoritativeTextRevision {
+                // Resigning first responder can commit autocorrection/marked text
+                // synchronously after submission admission cleared the owner but
+                // before updateUIView runs. Reinstall the newer owner instead of
+                // treating the stale UIKit value as a fresh draft edit.
+                _ = reconcileAuthoritativeText(on: textView)
+                return
+            }
+            if parent.text != textView.text {
+                parent.text = textView.text
+                installedTextRevision = parent.authoritativeTextRevision?.wrappedValue
+            }
             publishSelection(from: textView)
             requestCaretReveal(on: textView)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
-            guard textView.isFirstResponder else { return }
+            guard !isInstallingAuthoritativeText, textView.isFirstResponder else { return }
+            if hasSupersedingAuthoritativeTextRevision {
+                _ = reconcileAuthoritativeText(on: textView)
+                return
+            }
             publishSelection(from: textView)
             requestCaretReveal(on: textView)
+        }
+
+        @discardableResult
+        func reconcileAuthoritativeText(on view: UITextView) -> Bool {
+            let authoritativeText = parent.text
+            let changed = view.text != authoritativeText
+            isInstallingAuthoritativeText = true
+            if changed {
+                view.text = authoritativeText
+                view.selectedRange = clampedSelection(
+                    parent.selection?.wrappedValue
+                        ?? NSRange(location: (authoritativeText as NSString).length, length: 0),
+                    text: authoritativeText
+                )
+            }
+            installedTextRevision = parent.authoritativeTextRevision?.wrappedValue
+            isInstallingAuthoritativeText = false
+            if changed { requestCaretReveal(on: view) }
+            return changed
+        }
+
+        private var hasSupersedingAuthoritativeTextRevision: Bool {
+            guard let installedTextRevision,
+                  let authoritativeTextRevision = parent.authoritativeTextRevision?.wrappedValue else {
+                return false
+            }
+            return installedTextRevision != authoritativeTextRevision
         }
 
         func clampedSelection(_ selection: NSRange, text: String) -> NSRange {
