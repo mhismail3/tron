@@ -846,21 +846,6 @@ actor GatewayClient {
         }
     }
 
-    func blob(id: String, maximumBytes: Int) async throws -> (Data, String) {
-        guard let profile, let token, let connectionID = connection?.id else {
-            throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
-        }
-        let value = try await boundedBlob(
-            id: id,
-            profile: profile,
-            token: token,
-            maximumBytes: maximumBytes
-        )
-        try requireEpoch(connectionID)
-        guard self.profile?.id == profile.id else { throw CancellationError() }
-        return value
-    }
-
     func blob(
         id: String,
         sessionID: String? = nil,

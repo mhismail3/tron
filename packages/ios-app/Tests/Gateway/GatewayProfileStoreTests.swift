@@ -104,7 +104,7 @@ struct GatewayProfileStoreTests {
         #expect(store.loadError != nil)
         #expect(store.profiles.isEmpty)
         #expect(metadata.saveCount == 0)
-        #expect(throws: ProfileStorageProbeError.self) { try store.refresh() }
+        #expect(throws: ProfileStorageProbeError.self) { try store.reload() }
         #expect(metadata.saveCount == 0)
     }
 

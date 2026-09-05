@@ -4,13 +4,6 @@ import Testing
 
 @Suite("Bounded session export artifacts")
 struct SessionExportArtifactStoreTests {
-    @Test("exports use an archive-specific limit rather than the media limit")
-    func exportCapacityPolicy() {
-        #expect(SessionExportArtifactPolicy.maximumEncodedBytes > 25 * 1_048_576)
-        #expect(SessionExportArtifactPolicy.maximumTotalBytes >= Int64(SessionExportArtifactPolicy.maximumEncodedBytes))
-        #expect(SessionExportArtifactPolicy.maximumArtifacts > 0)
-    }
-
     @Test("versioned and legacy responses enforce their independent exact-size contracts")
     func downloadAdmission() throws {
         let versioned = try SessionExportDownloadAdmission.resolve(
@@ -72,21 +65,13 @@ struct SessionExportArtifactStoreTests {
     }
 
     @Test("artifacts are unique, byte bounded, protected, and backup excluded")
-    func writePolicy() async throws {
+    func adoptionOwnership() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let identifiers = UUIDSequence([
-            UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
-            UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
-        ])
-        let store = SessionExportArtifactStore(
-            root: root,
-            maximumBytes: 8,
-            uuid: identifiers.next
-        )
+        let store = SessionExportArtifactStore(root: root, maximumBytes: 8)
 
-        let first = try await store.write(Data(repeating: 1, count: 8), suggestedName: "../report.html")
-        let second = try await store.write(Data([2]), suggestedName: "report.html")
+        let first = try await adoptFixture(Data(repeating: 1, count: 8), into: store, suggestedName: "../report.html")
+        let second = try await adoptFixture(Data([2]), into: store, suggestedName: "report.html")
         #expect(first.lastPathComponent == "report.html")
         #expect(first.deletingLastPathComponent() != second.deletingLastPathComponent())
         #expect(first.deletingLastPathComponent().deletingLastPathComponent() == root)
@@ -110,7 +95,7 @@ struct SessionExportArtifactStoreTests {
         #endif
         #expect(try Data(contentsOf: first).count == 8)
         await #expect(throws: URLError.self) {
-            try await store.write(Data(repeating: 3, count: 9), suggestedName: "large.jsonl")
+            try await adoptFixture(Data(repeating: 3, count: 9), into: store, suggestedName: "large.jsonl")
         }
     }
 
@@ -127,16 +112,19 @@ struct SessionExportArtifactStoreTests {
         try Data(repeating: 7, count: 8).write(to: source)
         let store = SessionExportArtifactStore(root: root, maximumBytes: 8)
 
-        let artifact = try await store.adopt(source, suggestedName: "../session.jsonl")
+        let reservation = try await store.prepareDownload(expectedBytes: 8)
+        let artifact = try await store.adopt(source, suggestedName: "../session.jsonl", reservation: reservation)
         #expect(!FileManager.default.fileExists(atPath: source.path))
         #expect(artifact.lastPathComponent == "session.jsonl")
         #expect(try Data(contentsOf: artifact) == Data(repeating: 7, count: 8))
 
         let oversized = staging.appending(path: "oversized")
+        let oversizedReservation = try await store.prepareDownload(expectedBytes: 8)
         try Data(repeating: 8, count: 9).write(to: oversized)
         await #expect(throws: URLError.self) {
-            try await store.adopt(oversized, suggestedName: "large.jsonl")
+            try await store.adopt(oversized, suggestedName: "large.jsonl", reservation: oversizedReservation)
         }
+        await store.cancelDownload(oversizedReservation)
         #expect(FileManager.default.fileExists(atPath: oversized.path))
     }
 
@@ -154,7 +142,7 @@ struct SessionExportArtifactStoreTests {
         try FileManager.default.createSymbolicLink(at: root, withDestinationURL: outside)
         let store = SessionExportArtifactStore(root: root, maximumBytes: 8)
         await #expect(throws: URLError.self) {
-            try await store.write(Data([1]), suggestedName: "blocked.jsonl")
+            try await adoptFixture(Data([1]), into: store, suggestedName: "blocked.jsonl")
         }
         #expect((try FileManager.default.contentsOfDirectory(atPath: outside.path)).isEmpty)
     }
@@ -191,7 +179,14 @@ struct SessionExportArtifactStoreTests {
 
         let cancelled = try await store.prepareDownload(expectedBytes: 8)
         await store.cancelDownload(cancelled)
-        let replacement = try await store.write(Data([1]), suggestedName: "replacement.jsonl")
+        try Data([1]).write(to: source)
+        for retired in [reservation, cancelled] {
+            await #expect(throws: URLError.self) {
+                try await store.adopt(source, suggestedName: "retired.jsonl", reservation: retired)
+            }
+            #expect(FileManager.default.fileExists(atPath: source.path))
+        }
+        let replacement = try await adoptFixture(Data([1]), into: store, suggestedName: "replacement.jsonl")
         #expect(FileManager.default.fileExists(atPath: replacement.path))
     }
 
@@ -205,14 +200,14 @@ struct SessionExportArtifactStoreTests {
             maximumTotalBytes: 10,
             maximumArtifacts: 1
         )
-        let first = try await store.write(Data(repeating: 1, count: 6), suggestedName: "first.jsonl")
+        let first = try await adoptFixture(Data(repeating: 1, count: 6), into: store, suggestedName: "first.jsonl")
         await #expect(throws: URLError.self) {
-            try await store.write(Data(repeating: 2, count: 5), suggestedName: "second.jsonl")
+            try await adoptFixture(Data(repeating: 2, count: 5), into: store, suggestedName: "second.jsonl")
         }
         #expect(FileManager.default.fileExists(atPath: first.path))
 
         await store.discard(first)
-        let replacement = try await store.write(Data(repeating: 3, count: 5), suggestedName: "replacement.jsonl")
+        let replacement = try await adoptFixture(Data(repeating: 3, count: 5), into: store, suggestedName: "replacement.jsonl")
         #expect(try Data(contentsOf: replacement).count == 5)
     }
 
@@ -231,7 +226,7 @@ struct SessionExportArtifactStoreTests {
             maximumAge: 100,
             now: { now }
         )
-        let artifact = try await store.write(Data([1]), suggestedName: "current.jsonl")
+        let artifact = try await adoptFixture(Data([1]), into: store, suggestedName: "current.jsonl")
         let old = root.appending(path: "old", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: old, withIntermediateDirectories: true)
         try FileManager.default.setAttributes(
@@ -255,23 +250,31 @@ struct SessionExportArtifactStoreTests {
         #expect(FileManager.default.fileExists(atPath: outsideFile.path))
     }
 
+    /// Only fixture bytes are buffered. Exercise the same reservation and
+    /// file-adoption boundary as AppModel's actual export download.
+    private func adoptFixture(
+        _ data: Data,
+        into store: SessionExportArtifactStore,
+        suggestedName: String
+    ) async throws -> URL {
+        let staging = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        let source = staging.appending(path: "download")
+        try data.write(to: source)
+        let reservation = try await store.prepareDownload(expectedBytes: Int64(data.count))
+        do {
+            return try await store.adopt(source, suggestedName: suggestedName, reservation: reservation)
+        } catch {
+            await store.cancelDownload(reservation)
+            throw error
+        }
+    }
+
     private func temporaryRoot() -> URL {
         FileManager.default.temporaryDirectory.appending(
             path: "SessionExportArtifactStoreTests-\(UUID().uuidString)",
             directoryHint: .isDirectory
         )
-    }
-}
-
-private final class UUIDSequence: @unchecked Sendable {
-    private let lock = NSLock()
-    private var values: [UUID]
-
-    init(_ values: [UUID]) { self.values = values }
-
-    func next() -> UUID {
-        lock.lock()
-        defer { lock.unlock() }
-        return values.removeFirst()
     }
 }

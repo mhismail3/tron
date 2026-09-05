@@ -149,6 +149,77 @@ struct ComposerDraftStoreTests {
         #expect(await store.load(healthy)?.text == "new")
     }
 
+    enum LinkBoundary: CaseIterable, Sendable {
+        case root, profile, session, manifest, payload
+    }
+
+    enum StoreOperation: CaseIterable, Sendable {
+        case load, save, saveEmpty, remove, removeProfile
+    }
+
+    @Test("draft operations reject linked loads and preserve target bytes",
+          arguments: LinkBoundary.allCases, StoreOperation.allCases)
+    func symbolicLinks(boundary: LinkBoundary, operation: StoreOperation) async throws {
+        let parent = temporaryRoot()
+        let outside = temporaryRoot()
+        defer {
+            try? FileManager.default.removeItem(at: parent)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        let root = parent.appending(path: "drafts", directoryHint: .isDirectory)
+        let store = ComposerDraftStore(root: root)
+        let scope = ComposerDraftScope(profileID: "profile", sessionID: "session")
+        let original = ComposerDraftStore.Value(
+            text: "retained draft",
+            attachments: [.init(name: "notes.txt", mimeType: "text/plain", data: Data("exact bytes".utf8))]
+        )
+        await store.save(original, for: scope)
+        #expect(await store.load(scope) == original)
+        let directory = await store.hostedPath(for: scope)
+        let link: URL
+        switch boundary {
+        case .root: link = root
+        case .profile: link = directory.deletingLastPathComponent()
+        case .session: link = directory
+        case .manifest: link = directory.appending(path: "manifest.json")
+        case .payload:
+            let name = try #require(FileManager.default.contentsOfDirectory(atPath: directory.path)
+                .first(where: { $0.hasSuffix(".payload") }))
+            link = directory.appending(path: name)
+        }
+        let isDirectory = try link.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let target = outside.appending(path: "target")
+        try FileManager.default.moveItem(at: link, to: target)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        if isDirectory {
+            try Data("outside sentinel".utf8).write(to: target.appending(path: "sentinel"))
+        }
+        let before = try fileBytes(in: outside)
+
+        switch operation {
+        case .load: #expect(await store.load(scope) == nil)
+        case .save: await store.save(.init(text: "new draft", attachments: []), for: scope)
+        case .saveEmpty: await store.save(.init(text: "", attachments: []), for: scope)
+        case .remove: await store.remove(scope)
+        case .removeProfile: await store.removeProfile(scope.profileID)
+        }
+        #expect(try fileBytes(in: outside) == before)
+    }
+
+    private func fileBytes(in root: URL) throws -> [String: Data] {
+        let enumerator = try #require(FileManager.default.enumerator(
+            at: root, includingPropertiesForKeys: [.isRegularFileKey]
+        ))
+        var files: [String: Data] = [:]
+        for case let url as URL in enumerator {
+            if try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true {
+                files[String(url.path.dropFirst(root.path.count))] = try Data(contentsOf: url)
+            }
+        }
+        return files
+    }
+
     private func temporaryRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appending(path: "composer-draft-store-\(UUID().uuidString)", directoryHint: .isDirectory)

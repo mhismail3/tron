@@ -294,7 +294,7 @@ struct ChatViewScrollHarnessTests {
                     $0.physicalID.hasPrefix(outgoingPrefix) && $0.isVisible
                 })
                 let outgoingID = outgoing.physicalID
-                let released = try await harness.recorder.waitUntil {
+                _ = try await harness.recorder.waitUntil {
                     $0.observation.targetReleaseCount == releaseBaseline + 1
                         && $0.nativeRows.contains {
                             $0.physicalID == outgoingID && $0.isVisible
@@ -302,9 +302,15 @@ struct ChatViewScrollHarnessTests {
                         }
                 }
 
+                // Consuming the release command precedes its native layout.
+                // Observe that layout too, rather than ending on whichever
+                // side of the display callback recorded the release counter.
+                try await harness.driveFrameBoundary()
+                try await harness.driveFrameBoundary()
+                let settled = try #require(harness.recorder.samples.last)
                 let physicalPixel = 1 / max(1, harness.screenScale)
                 let sendSamples = harness.recorder.samples.filter {
-                    $0.frameIndex >= ready.frameIndex && $0.frameIndex <= released.frameIndex
+                    $0.frameIndex >= ready.frameIndex && $0.frameIndex <= settled.frameIndex
                 }
                 // Lazy contentSize/contentOffset can rebase together without
                 // moving visible content. Measure the mounted prior row instead.
@@ -317,7 +323,8 @@ struct ChatViewScrollHarnessTests {
                     .map { $1 - $0 }
                     .filter { abs($0) > physicalPixel }
                 #expect(!(sendDeltas.contains(where: { $0 > 0 })
-                    && sendDeltas.contains(where: { $0 < 0 })))
+                    && sendDeltas.contains(where: { $0 < 0 })),
+                    "Mounted prior-tail positions: \(sendOffsets); admitted deltas: \(sendDeltas)")
                 let samples = sendSamples.filter { $0.frameIndex >= stabilized.frameIndex }
                 let offsets = samples.compactMap { sample in
                     sample.nativeRows.first { $0.physicalID == outgoingID && $0.isVisible }?.frame.maxY
@@ -332,11 +339,12 @@ struct ChatViewScrollHarnessTests {
                             && abs($0.tailGap - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 2
                     }
                 })
-                #expect(released.observation.tailMaterializationCommandCount == commandBaseline + 1)
-                #expect(released.observation.physicalTailRepairCommandCount == repairBaseline)
-                #expect(abs(released.observation.composerHeight - composerHeight) <= 1)
-                #expect(released.observation.physicalRowAppearanceCounts[outgoingID] == 1)
-                #expect(released.observation.physicalRowDisappearanceCounts[outgoingID, default: 0] == 0)
+                #expect(settled.observation.targetReleaseCount == releaseBaseline + 1)
+                #expect(settled.observation.tailMaterializationCommandCount == commandBaseline + 1)
+                #expect(settled.observation.physicalTailRepairCommandCount == repairBaseline)
+                #expect(abs(settled.observation.composerHeight - composerHeight) <= 1)
+                #expect(settled.observation.physicalRowAppearanceCounts[outgoingID] == 1)
+                #expect(settled.observation.physicalRowDisappearanceCounts[outgoingID, default: 0] == 0)
             }
         }
     }

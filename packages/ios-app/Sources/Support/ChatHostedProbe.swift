@@ -46,7 +46,6 @@ struct ChatHostedGeometryTraceSample: Sendable, Equatable {
 struct ChatHostedObservation: Sendable {
     let revision: Int
     let geometryTrace: [ChatHostedGeometryTraceSample]
-    let processRoutes: [String]
     let geometry: ChatTranscriptGeometry
     let visibleRowIDs: [String]
     let rowFrames: [String: CGRect]
@@ -105,7 +104,6 @@ final class ChatHostedProbe {
     private var geometry = ChatTranscriptGeometry.zero
     private var composerHeight: CGFloat = 0
     private var geometryTrace: [ChatHostedGeometryTraceSample] = []
-    private var processRoutes: [String] = []
     private var rowFrames: [String: CGRect] = [:]
     private var rowFrameOrder: [String] = []
     private var rowFrameGeneration: Int?
@@ -179,7 +177,6 @@ final class ChatHostedProbe {
         return ChatHostedObservation(
             revision: revision,
             geometryTrace: geometryTrace,
-            processRoutes: processRoutes,
             geometry: geometry,
             visibleRowIDs: visibleRowIDs,
             rowFrames: rowFrames,
@@ -215,12 +212,6 @@ final class ChatHostedProbe {
             readyFrameCompletionCount: readyFrameCompletionCount,
             isReady: isReady
         )
-    }
-
-    func recordProcessRoute() {
-        processRoutes.append("processes")
-        if processRoutes.count > 32 { processRoutes.removeFirst(processRoutes.count - 32) }
-        revision &+= 1
     }
 
     func updateGeometry(_ value: ChatTranscriptGeometry) {

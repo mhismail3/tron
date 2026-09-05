@@ -83,7 +83,6 @@ enum SessionMountedAuthorityPolicy {
 @MainActor
 @Observable
 final class AppModel {
-    typealias SessionSnapshotInstallMode = SessionSnapshotInstallationMode
     typealias ConnectionState = GatewayConnectionState
 
     typealias AuthPromptState = ProviderAuthPromptState
@@ -773,17 +772,6 @@ final class AppModel {
         // unrelated mounted/catalog reconciliation from the prior epoch.
         connectionState == .connected
             && lifecycle.admission?.connectionID != nil
-    }
-
-    static func soleAdmittedPresentationTarget(
-        generations: [String: Int],
-        revoked: Set<SessionPresentationTarget>
-    ) -> SessionPresentationTarget? {
-        let targets = generations.compactMap { sessionID, generation in
-            let target = SessionPresentationTarget(sessionID: sessionID, generation: generation)
-            return revoked.contains(target) ? nil : target
-        }
-        return targets.count == 1 ? targets[0] : nil
     }
 
     func sessionStructureRevision(for sessionID: String) -> Int {
@@ -2264,54 +2252,6 @@ final class AppModel {
         sessionPresentation.retireConnection()
     }
 
-    static func ownsPresentation(
-        mountedGeneration: Int?,
-        requestedGeneration: Int
-    ) -> Bool {
-        SessionPresentationStore.ownsPresentation(
-            mountedGeneration: mountedGeneration,
-            requestedGeneration: requestedGeneration
-        )
-    }
-
-    static func admitsPresentationIntake(
-        mountedGeneration: Int?,
-        requestedGeneration: Int,
-        isRevoked: Bool
-    ) -> Bool {
-        SessionPresentationStore.admitsPresentationIntake(
-            mountedGeneration: mountedGeneration,
-            requestedGeneration: requestedGeneration,
-            isRevoked: isRevoked
-        )
-    }
-
-    static func ownsSubscription(
-        sessionID: String,
-        subscribedSessionID: String?,
-        installedToken: String?,
-        requestedToken: String
-    ) -> Bool {
-        SessionPresentationStore.ownsSubscription(
-            sessionID: sessionID,
-            subscribedSessionID: subscribedSessionID,
-            installedToken: installedToken,
-            requestedToken: requestedToken
-        )
-    }
-
-    static func shouldClearSubscription(
-        installedToken: String?,
-        closingToken: String,
-        gatewayClosed: Bool
-    ) -> Bool {
-        SessionPresentationStore.shouldClearSubscription(
-            installedToken: installedToken,
-            closingToken: closingToken,
-            gatewayClosed: gatewayClosed
-        )
-    }
-
     func sendSharedContent(
         _ text: String,
         target: SessionPresentationTarget
@@ -3249,18 +3189,6 @@ final class AppModel {
         default:
             break
         }
-    }
-
-    static func installingSnapshot(
-        current: SessionSnapshot?,
-        authoritative: SessionSnapshot,
-        mode: SessionSnapshotInstallMode
-    ) -> SessionSnapshot {
-        SessionPresentationStore.installingSnapshot(
-            current: current,
-            authoritative: authoritative,
-            mode: mode
-        )
     }
 
     private func apply(_ update: SessionSummaryUpdate) {

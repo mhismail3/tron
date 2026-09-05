@@ -65,7 +65,6 @@ actor SessionExportArtifactStore {
     private let maximumArtifacts: Int
     private let maximumAge: TimeInterval
     private let now: @Sendable () -> Date
-    private let uuid: @Sendable () -> UUID
     private var activeArtifacts: Set<URL> = []
     private var reservations: [UUID: Int64] = [:]
 
@@ -78,8 +77,7 @@ actor SessionExportArtifactStore {
         maximumTotalBytes: Int64 = SessionExportArtifactPolicy.maximumTotalBytes,
         maximumArtifacts: Int = SessionExportArtifactPolicy.maximumArtifacts,
         maximumAge: TimeInterval = SessionExportArtifactPolicy.maximumAge,
-        now: @escaping @Sendable () -> Date = Date.init,
-        uuid: @escaping @Sendable () -> UUID = UUID.init
+        now: @escaping @Sendable () -> Date = Date.init
     ) {
         precondition(maximumBytes >= 0)
         precondition(maximumTotalBytes >= Int64(maximumBytes))
@@ -91,7 +89,6 @@ actor SessionExportArtifactStore {
         self.maximumArtifacts = maximumArtifacts
         self.maximumAge = maximumAge
         self.now = now
-        self.uuid = uuid
     }
 
     func prepareDownload(expectedBytes: Int64) throws -> SessionExportArtifactReservation {
@@ -105,33 +102,10 @@ actor SessionExportArtifactStore {
         reservations.removeValue(forKey: reservation.id)
     }
 
-    func write(_ data: Data, suggestedName: String) throws -> URL {
-        guard data.count <= maximumBytes else { throw URLError(.dataLengthExceedsMaximum) }
-        try prepareForIncoming(byteCount: Int64(data.count), additionalDiskBytes: Int64(data.count))
-        let folder = root.appending(path: uuid().uuidString, directoryHint: .isDirectory)
-        do {
-            try FileManager.default.createDirectory(
-                at: folder,
-                withIntermediateDirectories: false,
-                attributes: [.protectionKey: FileProtectionType.complete]
-            )
-            let destination = folder.appending(
-                path: Self.safeFilename(suggestedName),
-                directoryHint: .notDirectory
-            )
-            try data.write(to: destination, options: [.atomic, .completeFileProtection])
-            activeArtifacts.insert(destination)
-            return destination
-        } catch {
-            try? FileManager.default.removeItem(at: folder)
-            throw error
-        }
-    }
-
     func adopt(
         _ source: URL,
         suggestedName: String,
-        reservation: SessionExportArtifactReservation? = nil
+        reservation: SessionExportArtifactReservation
     ) throws -> URL {
         let values = try source.resourceValues(forKeys: [
             .fileSizeKey,
@@ -145,14 +119,12 @@ actor SessionExportArtifactStore {
               fileSize <= maximumBytes else {
             throw URLError(.dataLengthExceedsMaximum)
         }
-        if let reservation {
-            guard reservations.removeValue(forKey: reservation.id) != nil,
-                  Int64(fileSize) <= reservation.maximumBytes else {
-                throw URLError(.cannotCreateFile)
-            }
+        guard reservations.removeValue(forKey: reservation.id) != nil,
+              Int64(fileSize) <= reservation.maximumBytes else {
+            throw URLError(.cannotCreateFile)
         }
         try prepareForIncoming(byteCount: Int64(fileSize), additionalDiskBytes: 0)
-        let folder = root.appending(path: uuid().uuidString, directoryHint: .isDirectory)
+        let folder = root.appending(path: UUID().uuidString, directoryHint: .isDirectory)
         do {
             try FileManager.default.createDirectory(
                 at: folder,

@@ -76,9 +76,6 @@ final class GatewayProfileStore {
         }
     }
 
-    /// Compatibility name for callers that already use the recovery path.
-    func refresh() throws { try reload() }
-
     func save(_ profile: GatewayProfile, token: String, selecting: Bool = true) throws {
         try requireHealthyMetadata()
         guard profile.hasValidEndpoint else { throw GatewayProfileStoreError.invalidEndpoint }

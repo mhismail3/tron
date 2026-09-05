@@ -33,20 +33,6 @@ private struct ChatLazyTailMaterializationRequest: Hashable {
 enum ChatTranscriptLayoutConstants {
     static let rowSpacing: CGFloat = 8
     static let tailAffordanceHeight: CGFloat = 12
-    /// Keep the eager target physically measurable while placing the rest of
-    /// the visual affordance inside the terminal row's target bounds. An exact
-    /// row materialization target and the canonical tail then differ by less
-    /// than the physical alignment tolerance, so release cannot cause a second
-    /// scroll correction.
-    static let tailTargetHeight: CGFloat = 0.5
-
-    static func terminalRowBottomPadding(ownsMaterializationTarget: Bool) -> CGFloat {
-        ownsMaterializationTarget ? tailAffordanceHeight - tailTargetHeight : 0
-    }
-
-    static func tailMarkerHeight(terminalRowOwnsMaterializationTarget: Bool) -> CGFloat {
-        terminalRowOwnsMaterializationTarget ? tailTargetHeight : tailAffordanceHeight
-    }
 }
 
 struct ChatQueuedMessageRenderEntry: Identifiable, Hashable {
@@ -682,15 +668,12 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         ) { displayed in
             physicalRow(displayed, installed: installed)
         }
-        // Exact lazy-row targets retain the visual tail affordance inside the
-        // collection target; release transfers it back to the eager marker.
+        // The exact row target includes the complete affordance. The eager
+        // marker overlaps that same empty band so both targets end identically.
         .padding(
             .bottom,
-            row.id == terminalPhysicalID
-                ? ChatTranscriptLayoutConstants.terminalRowBottomPadding(
-                    ownsMaterializationTarget: terminalRowOwnsMaterializationTarget
-                )
-                : 0
+            row.id == terminalPhysicalID && terminalRowOwnsMaterializationTarget
+                ? ChatTranscriptLayoutConstants.tailAffordanceHeight : 0
         )
         .id(row.id)
     }
@@ -988,9 +971,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     private func tailMarker(terminalRowOwnsMaterializationTarget: Bool) -> some View {
         let rowLayoutEpoch = scrollCoordinator.layoutEpoch
         return Color.clear
-            .frame(height: ChatTranscriptLayoutConstants.tailMarkerHeight(
-                terminalRowOwnsMaterializationTarget: terminalRowOwnsMaterializationTarget
-            ))
+            .frame(height: ChatTranscriptLayoutConstants.tailAffordanceHeight)
             .id("transcript-bottom")
             .accessibilityHidden(true)
             .onGeometryChange(for: ChatSemanticFrameObservation.self) { value in
@@ -1010,5 +991,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     generation: transcriptPresentation.installed?.tag.timelineGeneration
                 )
             }
+            // Keep one full-size measurable marker. While the row owns the
+            // target, overlap its padding instead of splitting the affordance
+            // into fractional heights that round differently at target release.
+            .padding(.top, terminalRowOwnsMaterializationTarget
+                ? -ChatTranscriptLayoutConstants.tailAffordanceHeight : 0)
     }
 }

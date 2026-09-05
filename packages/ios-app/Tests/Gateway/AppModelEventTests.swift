@@ -480,53 +480,6 @@ struct AppModelEventTests {
         #expect(open.subscriptionToken == "subscription-token")
     }
 
-    @Test("subscription cleanup clears only the exact gateway-confirmed owner")
-    func subscriptionOwnership() {
-        #expect(AppModel.shouldClearSubscription(
-            installedToken: "current", closingToken: "current", gatewayClosed: true
-        ))
-        #expect(!AppModel.shouldClearSubscription(
-            installedToken: "current", closingToken: "stale", gatewayClosed: true
-        ))
-        #expect(!AppModel.shouldClearSubscription(
-            installedToken: "current", closingToken: "current", gatewayClosed: false
-        ))
-        #expect(AppModel.ownsPresentation(
-            mountedGeneration: 7,
-            requestedGeneration: 7
-        ))
-        #expect(!AppModel.ownsPresentation(
-            mountedGeneration: 8,
-            requestedGeneration: 7
-        ))
-        #expect(!AppModel.admitsPresentationIntake(
-            mountedGeneration: 7,
-            requestedGeneration: 7,
-            isRevoked: true
-        ))
-        #expect(AppModel.ownsSubscription(
-            sessionID: "session",
-            subscribedSessionID: "session",
-            installedToken: "current",
-            requestedToken: "current"
-        ))
-        #expect(!AppModel.ownsSubscription(
-            sessionID: "session",
-            subscribedSessionID: "session",
-            installedToken: "replacement",
-            requestedToken: "stale"
-        ))
-        let departing = AppModel.SessionPresentationTarget(sessionID: "old", generation: 7)
-        #expect(AppModel.soleAdmittedPresentationTarget(
-            generations: ["old": 7],
-            revoked: [departing]
-        ) == nil)
-        #expect(AppModel.soleAdmittedPresentationTarget(
-            generations: ["old": 7, "new": 8],
-            revoked: [departing]
-        ) == AppModel.SessionPresentationTarget(sessionID: "new", generation: 8))
-    }
-
     @Test("fresh presentation replaces expanded history while reconnect preserves it")
     func snapshotInstallModes() throws {
         let baseline = try loadSnapshot()
@@ -539,7 +492,7 @@ struct AppModelEventTests {
         authoritative.transcriptStart = 15
         authoritative.transcriptTotal = 18
 
-        let fresh = AppModel.installingSnapshot(
+        let fresh = SessionPresentationStore.installingSnapshot(
             current: expanded,
             authoritative: authoritative,
             mode: .freshPresentation
@@ -547,7 +500,7 @@ struct AppModelEventTests {
         #expect(fresh.transcript.map(\.id) == authoritative.transcript.map(\.id))
         #expect(fresh.transcriptStart == 15)
 
-        let reconnected = AppModel.installingSnapshot(
+        let reconnected = SessionPresentationStore.installingSnapshot(
             current: expanded,
             authoritative: authoritative,
             mode: .reconnect
@@ -558,7 +511,7 @@ struct AppModelEventTests {
         var stale = authoritative
         stale.eventSequence = expanded.eventSequence - 1
         stale.runtimeGeneration = expanded.runtimeGeneration
-        let rejectedStale = AppModel.installingSnapshot(
+        let rejectedStale = SessionPresentationStore.installingSnapshot(
             current: expanded,
             authoritative: stale,
             mode: .reconnect

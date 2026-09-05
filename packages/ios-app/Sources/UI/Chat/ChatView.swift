@@ -2608,9 +2608,6 @@ struct ChatView: View {
             glassNamespace: composerGlassNamespace,
             onProcessesTap: {
                 sessionPresentation.showProcesses = true
-                #if HOSTED_TEST
-                hostedProbe?.recordProcessRoute()
-                #endif
             },
             onRemoveAttachment: { id in
                 guard let target = presentationTarget else { return }

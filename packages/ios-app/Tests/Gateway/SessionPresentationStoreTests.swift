@@ -1712,8 +1712,8 @@ struct SessionPresentationStoreTests {
         }
     }
 
-    @Test("closing an old mount cannot clear a newer suspended open intent")
-    func oldClosePreservesNewOpen() async throws {
+    @Test("closing an old mount cannot clear a newer suspended open intent", arguments: [true, false])
+    func oldClosePreservesNewOpen(gatewayClosed: Bool) async throws {
         try await withTestWatchdog { @MainActor in
             let socket = ScriptedGatewaySocket()
             let client = GatewayClient(
@@ -1754,9 +1754,11 @@ struct SessionPresentationStoreTests {
             }
             #expect(store.selectedSessionID == newSnapshot.sessionId)
             #expect(await socket.sentFrames().count == 2)
+            // Both responses retire the exact old token: false means that the
+            // Gateway already retired it, not that the next open must stall.
             await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("response"), "id": .string(id), "ok": .bool(true),
-                "result": .object(["closed": .bool(true)]),
+                "result": .object(["closed": .bool(gatewayClosed)]),
             ])))
             await closing.value
 
@@ -2870,23 +2872,18 @@ struct SessionPresentationStoreTests {
             sessionID: snapshot.sessionId,
             token: "export-token"
         ))
+        #expect(!store.ownsInstalledSubscription(
+            sessionID: snapshot.sessionId,
+            token: "stale"
+        ))
+        #expect(!store.ownsInstalledSubscription(
+            sessionID: "another-session",
+            token: "export-token"
+        ))
         store.revokeIntake(try #require(store.target))
         #expect(!store.ownsInstalledSubscription(
             sessionID: snapshot.sessionId,
             token: "export-token"
-        ))
-
-        #expect(SessionPresentationStore.ownsSubscription(
-            sessionID: "session",
-            subscribedSessionID: "session",
-            installedToken: "new",
-            requestedToken: "new"
-        ))
-        #expect(!SessionPresentationStore.ownsSubscription(
-            sessionID: "session",
-            subscribedSessionID: "session",
-            installedToken: "new",
-            requestedToken: "stale"
         ))
 
         #expect(SessionPresentationStore.admitsTranscriptPageAnchor(

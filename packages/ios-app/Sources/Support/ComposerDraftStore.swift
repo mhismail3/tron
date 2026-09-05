@@ -150,7 +150,7 @@ actor ComposerDraftStore {
             )
             return Value(text: manifest.text, attachments: attachments)
         } catch {
-            try? FileManager.default.removeItem(at: directory)
+            remove(scope)
             return nil
         }
     }
@@ -158,7 +158,7 @@ actor ComposerDraftStore {
     func save(_ value: Value, for scope: ComposerDraftScope) {
         let directory = path(for: scope)
         guard Self.admits(value) else {
-            try? FileManager.default.removeItem(at: directory)
+            remove(scope)
             return
         }
         let profileDirectory = directory.deletingLastPathComponent()
@@ -223,17 +223,32 @@ actor ComposerDraftStore {
             }
             try enforceGlobalBounds(preserving: directory)
         } catch {
-            try? FileManager.default.removeItem(at: staging)
+            if ownsProfileDirectory(scope.profileID) {
+                try? FileManager.default.removeItem(at: staging)
+            }
             // The previous complete directory, if any, remains the last checkpoint.
         }
     }
 
     func remove(_ scope: ComposerDraftScope) {
+        guard ownsProfileDirectory(scope.profileID) else { return }
         try? FileManager.default.removeItem(at: path(for: scope))
     }
 
     func removeProfile(_ profileID: String) {
+        guard Self.isOwnedDirectory(root) else { return }
         try? FileManager.default.removeItem(at: profilePath(profileID))
+    }
+
+    private func ownsProfileDirectory(_ profileID: String) -> Bool {
+        Self.isOwnedDirectory(root) && Self.isOwnedDirectory(profilePath(profileID))
+    }
+
+    private static func isOwnedDirectory(_ url: URL) -> Bool {
+        // Inspect the directory entry itself, without cached URL resource values
+        // or following a link into another in-sandbox owner during cleanup.
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return attributes?[.type] as? FileAttributeType == .typeDirectory
     }
 
     #if HOSTED_TEST
@@ -246,6 +261,7 @@ actor ComposerDraftStore {
             withIntermediateDirectories: true,
             attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
         )
+        guard Self.isOwnedDirectory(root) else { throw CocoaError(.fileReadCorruptFile) }
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         var mutableRoot = root

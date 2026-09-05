@@ -1464,38 +1464,6 @@ final class SessionPresentationStore {
         )
     }
 
-    static func ownsPresentation(mountedGeneration: Int?, requestedGeneration: Int) -> Bool {
-        mountedGeneration == requestedGeneration
-    }
-
-    static func admitsPresentationIntake(
-        mountedGeneration: Int?,
-        requestedGeneration: Int,
-        isRevoked: Bool
-    ) -> Bool {
-        !isRevoked && ownsPresentation(
-            mountedGeneration: mountedGeneration,
-            requestedGeneration: requestedGeneration
-        )
-    }
-
-    static func ownsSubscription(
-        sessionID: String,
-        subscribedSessionID: String?,
-        installedToken: String?,
-        requestedToken: String
-    ) -> Bool {
-        subscribedSessionID == sessionID && installedToken == requestedToken
-    }
-
-    static func shouldClearSubscription(
-        installedToken: String?,
-        closingToken: String,
-        gatewayClosed: Bool
-    ) -> Bool {
-        gatewayClosed && installedToken == closingToken
-    }
-
     @discardableResult
     private func synchronize(
         _ sessionID: String,
@@ -2336,9 +2304,6 @@ final class SessionPresentationStore {
             return reduceSnapshotEvent(event, incoming: incoming)
         }
         guard var current = snapshot else {
-            if event.topic == "session.snapshot", case .sessionSnapshot(let incoming) = event.preparation {
-                return reduceSnapshotEvent(event, incoming: incoming)
-            }
             if event.topic == "session.listChanged" { delegate?.sessionPresentationStoreDidRequestCatalogRefresh() }
             return nil
         }

@@ -39,15 +39,16 @@ struct InAppNoticeCenterTests {
     @Test("keyed replacement refreshes identity and full lifetime")
     func keyedReplacementRefreshesLifetime() async throws {
         let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
+        defer { center.dismissAll() }
         let replacement = InAppNoticeReplacement(key: .packageProgress, scope: .app)
         let id = center.post(notice("first", replacement: replacement, lifetime: .automatic(.seconds(5))))
-        try await clock.waitUntilSleeping(count: 1)
+        try await waitForTimer(clock)
         clock.advance(by: .seconds(3)); center.post(notice("second", replacement: replacement, lifetime: .automatic(.seconds(5))))
-        await Task.yield()
-        try await clock.waitUntilSleeping(count: 1)
-        clock.advance(by: .seconds(3)); await Task.yield()
+        try await waitForTimer(clock)
+        clock.advance(by: .seconds(3))
         #expect(center.notices.contains(where: { $0.id == id }))
-        clock.advance(by: .seconds(5)); await Task.yield(); await Task.yield()
+        clock.advance(by: .seconds(5))
+        try await waitForNoticeCount(0, in: center)
         #expect(center.notices.isEmpty)
     }
 
@@ -65,25 +66,29 @@ struct InAppNoticeCenterTests {
     @Test("semantic duplicates coalesce without extending an automatic deadline")
     func duplicateDoesNotExtendAutomaticLifetime() async throws {
         let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
+        defer { center.dismissAll() }
         let first = notice("syncing", lifetime: .automatic(.seconds(5)))
         let id = center.post(first)
-        try await clock.waitUntilSleeping(count: 1)
+        try await waitForTimer(clock)
         clock.advance(by: .seconds(4))
         let duplicateID = center.post(notice("syncing", id: UUID(), lifetime: .automatic(.seconds(5))))
         #expect(duplicateID == id)
         #expect(center.notices.count == 1)
         #expect(clock.recordedSleeps() == [.seconds(5)])
-        clock.advance(by: .seconds(1)); await Task.yield(); await Task.yield()
+        clock.advance(by: .seconds(1))
+        try await waitForNoticeCount(0, in: center)
         #expect(center.notices.isEmpty)
     }
 
     @Test("a single passive persistent notice is bounded to a standard dwell")
     func passivePersistentNoticeExpires() async throws {
         let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
+        defer { center.dismissAll() }
         center.post(notice("passive"))
         #expect(center.notices.first?.lifetime == .standard)
-        try await clock.waitUntilSleeping(count: 1)
-        clock.advance(by: .seconds(4)); await Task.yield(); await Task.yield()
+        try await waitForTimer(clock)
+        clock.advance(by: .seconds(4))
+        try await waitForNoticeCount(0, in: center)
         #expect(center.notices.isEmpty)
     }
 
@@ -101,13 +106,16 @@ struct InAppNoticeCenterTests {
     @Test("hidden automatic notices wait until foreground")
     func hiddenAutomaticNoticesWaitUntilForeground() async throws {
         let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
+        defer { center.dismissAll() }
         center.post(notice("front", lifetime: .automatic(.seconds(2))))
         center.post(notice("hidden", lifetime: .automatic(.seconds(2))))
-        try await clock.waitUntilSleeping(count: 1)
-        clock.advance(by: .seconds(3)); await Task.yield(); await Task.yield()
+        try await waitForTimer(clock)
+        clock.advance(by: .seconds(3))
+        try await waitForNoticeCount(1, in: center)
         #expect(center.notices.count == 1)
-        try await clock.waitUntilSleeping(count: 1)
-        clock.advance(by: .seconds(2)); await Task.yield(); await Task.yield()
+        try await waitForTimer(clock)
+        clock.advance(by: .seconds(2))
+        try await waitForNoticeCount(0, in: center)
         #expect(center.notices.isEmpty)
     }
 
@@ -145,14 +153,29 @@ struct InAppNoticeCenterTests {
     @Test("background and interaction pause retain remaining lifetime")
     func backgroundAndInteractionPause() async throws {
         let clock = ManualClock(); let center = InAppNoticeCenter(clock: clock.clock)
+        defer { center.dismissAll() }
         center.post(notice("held", lifetime: .automatic(.seconds(5))))
         let id = try #require(center.notices.first?.id)
-        try await clock.waitUntilSleeping(count: 1); clock.advance(by: .seconds(2)); center.setBackgrounded(true)
+        try await waitForTimer(clock); clock.advance(by: .seconds(2)); center.setBackgrounded(true)
         clock.advance(by: .seconds(10)); await Task.yield(); #expect(center.notices.count == 1)
         center.setBackgrounded(false); center.setInteraction(id, active: true); clock.advance(by: .seconds(10)); await Task.yield()
         #expect(center.notices.count == 1)
-        center.setInteraction(id, active: false); try await clock.waitUntilSleeping(count: 1)
-        clock.advance(by: .seconds(3)); await Task.yield(); await Task.yield(); #expect(center.notices.isEmpty)
+        center.setInteraction(id, active: false); try await waitForTimer(clock)
+        clock.advance(by: .seconds(3))
+        try await waitForNoticeCount(0, in: center)
+        #expect(center.notices.isEmpty)
+    }
+
+    private func waitForTimer(_ clock: ManualClock) async throws {
+        try await withTestWatchdog { try await clock.waitUntilSleeping(count: 1) }
+    }
+
+    private func waitForNoticeCount(_ count: Int, in center: InAppNoticeCenter) async throws {
+        // Advancing virtual time resumes the sleeper, not the MainActor timer
+        // continuation. Await the observable result without advancing time again.
+        try await withTestWatchdog { @MainActor in
+            while center.notices.count != count { try await Task.sleep(for: .milliseconds(1)) }
+        }
     }
 
     @Test("scope retirement dismisses only owned notices")

@@ -306,13 +306,6 @@ enum ChatPromptBehavior: Hashable, Sendable {
         }
     }
 
-    var queueBehavior: SessionSnapshot.QueuedMessage.Behavior? {
-        switch self {
-        case .steer: return .steer
-        case .followUp: return .followUp
-        case .ordinary, .unknown: return nil
-        }
-    }
 }
 
 /// Exact-target presentation-only outgoing state. This is never inserted into
@@ -605,11 +598,6 @@ enum ChatTranscriptHandoffCommit: Hashable, Sendable {
         presentation: ChatOutgoingSubmissionPresentation,
         attachments: [PendingAttachment]
     )
-
-    var outgoingPresentation: ChatOutgoingSubmissionPresentation? {
-        guard case .outgoing(let presentation, _) = self else { return nil }
-        return presentation
-    }
 
     var outgoingAttachments: [PendingAttachment] {
         guard case .outgoing(_, let attachments) = self else { return [] }
