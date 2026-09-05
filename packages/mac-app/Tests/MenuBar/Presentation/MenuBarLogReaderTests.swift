@@ -39,6 +39,24 @@ struct MenuBarLogReaderTests {
         #expect(MenuBarLogReader.decodeFrame(data: data) == .malformed)
     }
 
+    @Test("matching log frames require an unambiguous response envelope", arguments: [
+        #"{"type":"event","id":"mac-system-logs","ok":true,"result":{"records":[]}}"#,
+        #"{"id":"mac-system-logs","ok":true,"result":{"records":[]}}"#,
+        #"{"type":"response","id":"mac-system-logs","result":{"records":[]}}"#,
+        #"{"type":"response","id":"mac-system-logs","ok":"true","result":{"records":[]}}"#,
+        #"{"type":"response","id":"mac-system-logs","ok":1,"result":{"records":[]}}"#,
+        #"{"type":"response","id":"mac-system-logs","ok":true,"error":{"message":"failed"},"result":{"records":[]}}"#,
+        #"{"type":"response","id":"mac-system-logs","ok":false,"error":{"message":"failed"},"result":{"records":[]}}"#,
+    ])
+    func rejectsInvalidMatchingEnvelope(body: String) {
+        #expect(MenuBarLogReader.decodeFrame(data: Data(body.utf8)) == .malformed)
+    }
+
+    @Test("unrelated response IDs remain ignorable")
+    func ignoresUnrelatedID() {
+        #expect(MenuBarLogReader.decodeFrame(data: Data(#"{"id":"another-request"}"#.utf8)) == .ignore)
+    }
+
     @Test("explicit log host is used to build the Gateway socket URL")
     func explicitHostBuildsSocketURL() {
         let url = GatewaySocketURL.make(host: "100.64.0.9", port: 9847)

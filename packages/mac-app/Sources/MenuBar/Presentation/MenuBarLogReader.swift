@@ -22,6 +22,9 @@ enum MenuBarLogReader {
     static let requestID = "mac-system-logs"
     static let supportedProtocolVersion = TronGatewayProtocolContract.protocolVersion
     static let minimumProtocolVersion = TronGatewayProtocolContract.minimumProtocolVersion
+    // Preserve URLSession's existing 1-MiB capacity: ordinary 200-record logs
+    // can exceed the shared health probe's smaller 256-KiB admission limit.
+    static let maximumFrameBytes = 1_048_576
 
     static func fetchRecentLogs(
         host: String,
@@ -41,46 +44,29 @@ enum MenuBarLogReader {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        let session = URLSession(configuration: .ephemeral)
-        defer { session.invalidateAndCancel() }
-
-        let task = session.webSocketTask(with: request)
-        task.resume()
-        defer { task.cancel(with: .goingAway, reason: nil) }
-
-        let hello: [String: Any] = [
-            "type": "hello",
-            "protocolVersion": supportedProtocolVersion,
-        ]
-        let payload: [String: Any] = [
-            "type": "request",
-            "id": requestID,
-            "method": "system.logs",
-            "params": ["limit": limit],
-        ]
-        guard let helloData = try? JSONSerialization.data(withJSONObject: hello, options: []),
-              let helloString = String(data: helloData, encoding: .utf8),
-              let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
-              let str = String(data: data, encoding: .utf8) else {
-            return .failure(.unreadableOutput("Could not encode the log request."))
-        }
-
         do {
-            try await task.send(.string(helloString))
-            let helloResponse = try await task.receive()
-            guard let helloRaw = messageData(from: helloResponse),
-                  case .accepted = decodeHello(data: helloRaw) else {
-                return .failure(.unreadableOutput("Gateway protocol is not compatible."))
-            }
-            // Do not pipeline requests before the server has accepted the hello.
-            try await task.send(.string(str))
+            // One transport-owned deadline covers hello, send, and every read.
+            // Cancellation closes the socket even while receive is suspended.
+            let deadline = GatewayWebSocketTransport.Deadline(timeout: timeout)
+            let connection = try await GatewayWebSocketTransport.connect(
+                request: request,
+                protocolVersion: supportedProtocolVersion,
+                minimumProtocolVersion: minimumProtocolVersion,
+                deadline: deadline,
+                maximumFrameBytes: maximumFrameBytes
+            )
+            defer { connection.close() }
+            try await connection.send(jsonObject: [
+                "type": "request",
+                "id": requestID,
+                "method": "system.logs",
+                "params": ["limit": limit],
+            ], deadline: deadline)
 
             for _ in 0..<8 {
-                let message = try await task.receive()
-                guard let raw = messageData(from: message) else {
+                guard let raw = try await connection.receiveData(deadline: deadline) else {
                     return .failure(.unreadableOutput("Could not read the log response."))
                 }
-
                 switch decodeFrame(data: raw) {
                 case .result(let result):
                     return .success(format(result.records))
@@ -92,17 +78,14 @@ enum MenuBarLogReader {
                     return .failure(.unreadableOutput("Unexpected log response."))
                 }
             }
-
             return .failure(.serverUnavailable)
+        } catch GatewayWebSocketTransport.Failure.invalidHello {
+            return .failure(.unreadableOutput("Gateway protocol is not compatible."))
         } catch {
+            // This best-effort API retains its existing nonthrowing failure
+            // presentation; the transport has already retired cancelled work.
             return .failure(.serverUnavailable)
         }
-    }
-
-    enum HelloFrame: Equatable {
-        case accepted
-        case rejected
-        case malformed
     }
 
     enum ResponseFrame: Equatable {
@@ -112,20 +95,6 @@ enum MenuBarLogReader {
         case malformed
     }
 
-    static func decodeHello(data: Data) -> HelloFrame {
-        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-              json["type"] as? String == "hello",
-              let protocolVersion = json["protocolVersion"] as? Int,
-              let serverMinimumProtocolVersion = json["minProtocolVersion"] as? Int else {
-            return .malformed
-        }
-        guard protocolVersion == supportedProtocolVersion,
-              serverMinimumProtocolVersion == Self.minimumProtocolVersion else {
-            return .rejected
-        }
-        return .accepted
-    }
-
     static func decodeFrame(data: Data, expectedID: String = requestID) -> ResponseFrame {
         guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] else {
             return .malformed
@@ -133,16 +102,15 @@ enum MenuBarLogReader {
         guard (json["id"] as? String) == expectedID else {
             return .ignore
         }
-        if let error = json["error"] as? [String: Any] {
-            return .error(error["message"] as? String ?? "Log request failed")
-        }
-        guard json["ok"] as? Bool != false else {
-            return .error("Log request failed")
-        }
         guard let envelope = try? JSONDecoder().decode(GatewayResponseEnvelope<RecentLogsResult>.self, from: data),
-              let result = envelope.result else {
+              envelope.type == "response" else {
             return .malformed
         }
+        if !envelope.ok {
+            guard envelope.result == nil else { return .malformed }
+            return .error(envelope.error?.message ?? "Log request failed")
+        }
+        guard envelope.error == nil, let result = envelope.result else { return .malformed }
         return .result(result)
     }
 
@@ -152,21 +120,17 @@ enum MenuBarLogReader {
         }
         .joined(separator: "\n")
     }
-
-    private static func messageData(from message: URLSessionWebSocketTask.Message) -> Data? {
-        switch message {
-        case .data(let data):
-            return data
-        case .string(let string):
-            return Data(string.utf8)
-        @unknown default:
-            return nil
-        }
-    }
 }
 
-private struct GatewayResponseEnvelope<Result: Decodable & Equatable>: Decodable, Equatable {
+private struct GatewayResponseEnvelope<Result: Decodable>: Decodable {
+    var type: String
+    var ok: Bool
     var result: Result?
+    var error: ErrorFrame?
+
+    struct ErrorFrame: Decodable {
+        var message: String?
+    }
 }
 
 struct RecentLogsResult: Decodable, Equatable {

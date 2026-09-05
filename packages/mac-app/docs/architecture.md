@@ -138,8 +138,15 @@ use one bounded owner-only regular-file/no-symlink descriptor reader, followed
 by separate exact-key schema validation. Stable transport never probes loopback
 when Tailscale resolution is unavailable; Debug admits only the exact lifecycle
 host (`tailscale` or `127.0.0.1`), and loopback Debug is never pairable.
-ServerPing and GatewayRestartClient share the bounded WebSocket transport
-handshake and receive deadline while retaining frame-specific error taxonomies.
+ServerPing, GatewayRestartClient and MenuBarLogReader share the bounded WebSocket
+transport handshake and receive deadline while retaining their error taxonomies.
+After host resolution, log capture uses one five-second deadline across hello,
+send and all receives; cancellation closes the pending socket rather than waiting
+for a response. Its 1-MiB frame capacity preserves ordinary 200-record log replies
+that exceed the health/restart probes' unchanged 256-KiB admission limit. Matching
+log responses require `type=response`, Boolean `ok` and non-conflicting result/error
+fields. No request is sent before hello acceptance, and unrelated frames do not
+reset the deadline or extend the existing eight-frame limit.
 
 The wrapper and gateway share no in-memory state. Their only shared secrets are
 owner-only gateway files. Provider credentials remain in the Pi runtime store and
@@ -161,6 +168,12 @@ not a general secret detector or a change to the private log viewer.
 `DiagnosticsRedactorTests` protects the string boundaries; `FeedbackComposerTests`
 checks the decoded issue body and the exact body used by the clipboard branch.
 Neither requires live logs, credentials, a clipboard write or an issue submission.
+`MenuBarLogReaderTransportTests` also exercises the actual reader against owned
+loopback WebSocket peers: stalled hello/response, cancellation and socket close,
+large/oversized responses, hello admission, frame count and sanitized Gateway
+error export. Its watchdog only releases broken clients; deadline assertions must
+pass before that cleanup. Menu dismissal does not cancel an accepted feedback
+action, and the private viewer's layout, refresh and copy behavior are unchanged.
 
 ## Gateway payload selection
 

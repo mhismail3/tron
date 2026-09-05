@@ -248,13 +248,20 @@ enum GatewayWebSocketTransport {
         let task: any WebSocketTask
         private let session: URLSession
         private let capture: StatusCapture
+        private let maximumFrameBytes: Int
         private let closeLock = NSLock()
         private var didClose = false
 
-        init(task: any WebSocketTask, session: URLSession, capture: StatusCapture) {
+        init(
+            task: any WebSocketTask,
+            session: URLSession,
+            capture: StatusCapture,
+            maximumFrameBytes: Int = GatewayWebSocketTransport.maximumFrameBytes
+        ) {
             self.task = task
             self.session = session
             self.capture = capture
+            self.maximumFrameBytes = maximumFrameBytes
             task.resume()
         }
 
@@ -298,12 +305,12 @@ enum GatewayWebSocketTransport {
             let message = try await bounded(deadline: deadline) { try await self.task.receive() }
             switch message {
             case .data(let data):
-                guard data.count <= GatewayWebSocketTransport.maximumFrameBytes else {
+                guard data.count <= maximumFrameBytes else {
                     throw Failure.invalidMessage
                 }
                 return data
             case .string(let string):
-                guard string.utf8.count <= GatewayWebSocketTransport.maximumFrameBytes else {
+                guard string.utf8.count <= maximumFrameBytes else {
                     throw Failure.invalidMessage
                 }
                 return Data(string.utf8)
@@ -360,27 +367,15 @@ enum GatewayWebSocketTransport {
         protocolVersion: Int,
         minimumProtocolVersion: Int,
         clientID: String? = nil,
-        timeout: TimeInterval = 3
-    ) async throws -> Connection {
-        try await connect(
-            request: request,
-            protocolVersion: protocolVersion,
-            minimumProtocolVersion: minimumProtocolVersion,
-            clientID: clientID,
-            deadline: Deadline(timeout: timeout)
-        )
-    }
-
-    static func connect(
-        request: URLRequest,
-        protocolVersion: Int,
-        minimumProtocolVersion: Int,
-        clientID: String? = nil,
-        deadline: Deadline
+        deadline: Deadline,
+        maximumFrameBytes: Int = GatewayWebSocketTransport.maximumFrameBytes
     ) async throws -> Connection {
         let capture = StatusCapture()
         let session = URLSession(configuration: .ephemeral, delegate: capture, delegateQueue: nil)
-        let connection = Connection(task: session.webSocketTask(with: request), session: session, capture: capture)
+        let connection = Connection(
+            task: session.webSocketTask(with: request), session: session,
+            capture: capture, maximumFrameBytes: maximumFrameBytes
+        )
         var succeeded = false
         defer { if !succeeded { connection.close() } }
         do {
