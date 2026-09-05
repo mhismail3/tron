@@ -776,11 +776,22 @@ between the simulator and physical hardware. Sheet checkpoints must fling-scroll
 Agent Context, Project Resources, Session History, Runtime Behavior, Providers,
 and model selection; dense rows must retain static tinted geometry without visible
 material churn. Open a large instructions/JSON document and verify immediate native
-scrolling. Manage Session checkpoints verify the emerald Configuration order (Model,
-Context Window when supported, Thinking, Rename Session, Terminal), blue Session order
-(Current Branch, Agent Context, Project Resources, Session History, Subagent History),
-and separate gray HTML/JSONL Exports container below. The Session Model picker must inherit
-emerald across title, search, icons, and cards. Project Resources must omit Context Files
+scrolling. Manage Session checkpoints verify two compact emerald summary cards, then the
+unchanged blue Session order (Current Branch, Agent Context, Project Resources, Session
+History, Subagent History) and gray HTML/JSONL Exports. Usage counts and percentage share
+one metadata line above the progress-as-divider; automatic compaction appears only in the
+model card beside Compact Now. The model name matches the remaining-token headline scale;
+provider, Context Window when supported, and Thinking remain clearly labeled. Rename and
+Terminal use a grouped leading icon-only toolbar with accessible labels, not content rows.
+Compact Now must retain idle, running-prompt queue, queued, in-progress, retry, and export
+admission behavior. Slim Change/Compact capsules retain full touch height. Every small
+metadata face is half a point larger only within this sheet. The Session Model picker must
+inherit emerald across title, search, icons, and cards while keeping its ordinary type scale.
+`SessionSummaryLayoutTests` measures the actual native cards/actions, retains light/dark and
+long-name/accessibility captures, and excludes screen safe areas from card-size assertions.
+`ChatCompactPillTests` pins combined usage copy, missing estimates, exact provider/model
+catalog labels, and existing compaction admission; `SessionPresentationStoreTests` protects
+pending model selection and narrow authoritative projection. Project Resources must omit Context Files
 and `AGENTS.md` rows while Agent Context still exposes the assembled instructions.
 `ChatCompactPillTests` pins the resource categories and instruction-preview ownership.
 Confirmation checkpoints verify grey cancellation text, a short trailing

@@ -85,6 +85,11 @@ enum SessionModelSelectionPresentation {
     static func reconciledPending(pending: ModelRef?, authoritative: ModelRef?) -> ModelRef? {
         pending == authoritative ? nil : pending
     }
+
+    static func modelName(_ selection: ModelRef?, catalog: [ModelSummary]) -> String {
+        guard let selection else { return "Choose model" }
+        return catalog.first(where: { $0.ref == selection })?.displayName ?? selection.displayName
+    }
 }
 
 enum SessionContextUsagePresentation: Equatable {
@@ -104,6 +109,11 @@ enum SessionContextUsagePresentation: Equatable {
             window: usage.contextWindow,
             percent: min(max(percent, 0), 100)
         )
+    }
+
+    var usedSummary: String? {
+        guard case .available(let used, let window, let percent) = self else { return nil }
+        return "\(used.formatted(.number.notation(.compactName)))/\(window.formatted(.number.notation(.compactName))) • \(Int(percent.rounded()))% used"
     }
 
     var accessibilityLabel: String {
@@ -179,7 +189,6 @@ struct SessionContextSheet: View {
     let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var destination: ManageSessionDestination?
     @State private var showRename = false
@@ -220,8 +229,8 @@ struct SessionContextSheet: View {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if let snapshot = displayedPresentation {
-                        contextUsageCard(snapshot)
-                        configurationSection(snapshot)
+                        SessionContextUsageCard(snapshot: snapshot)
+                        modelSummaryCard(snapshot)
                         sessionSection(snapshot)
                         exportSection
                     } else {
@@ -231,14 +240,31 @@ struct SessionContextSheet: View {
                     }
                 }
                 .padding(18)
+                .environment(\.tronSettingsSecondaryTextSizeAdjustment, SessionSummaryTypography.metadataSizeAdjustment)
             }
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    if let snapshot = displayedPresentation {
-                        compactToolbarButton(snapshot)
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    Button {
+                        name = displayedPresentation?.name ?? ""
+                        showRename = true
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
                     }
+                    .disabled(displayedPresentation == nil)
+                    .accessibilityLabel("Rename Session")
+                    .accessibilityIdentifier("manage-session-rename")
+                    Button { destination = .terminal } label: {
+                        Image(systemName: "terminal")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
+                    }
+                    .disabled(displayedPresentation == nil)
+                    .accessibilityLabel("Terminal")
+                    .accessibilityIdentifier("manage-session-terminal")
                 }
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: "Manage Session", accent: .tronEmerald)
@@ -332,8 +358,13 @@ struct SessionContextSheet: View {
         }
     }
 
-    private func compactToolbarButton(_ snapshot: SessionContextPresentation) -> some View {
-        Button {
+    private func compactButton(_ snapshot: SessionContextPresentation) -> some View {
+        let state = SessionCompactionControlPolicy.visualState(
+            compactionQueued: snapshot.compactionQueued,
+            submitting: compacting,
+            phase: snapshot.phase
+        )
+        return Button {
             guard SessionCompactionControlPolicy.canRequest(
                 phase: snapshot.phase,
                 operationKind: snapshot.operationKind,
@@ -348,23 +379,15 @@ struct SessionContextSheet: View {
                 catch { surfaceActionError(error) }
             }
         } label: {
-            HStack(spacing: 6) {
-                switch SessionCompactionControlPolicy.visualState(
-                    compactionQueued: snapshot.compactionQueued == true,
-                    submitting: compacting,
-                    phase: snapshot.phase
-                ) {
-                case .queued:
-                    Image(systemName: "clock")
-                case .inProgress:
-                    TronPulseLoadingIndicator(size: 18)
-                case .idle:
-                    Image(systemName: "rectangle.compress.vertical")
-                }
-                Text("Compact")
-            }
-            .tronToolbarAction()
+            TronInlineActionLabel(
+                state == .queued ? "Queued" : state == .inProgress ? "Compacting" : "Compact Now",
+                icon: state == .queued ? "clock" : "rectangle.compress.vertical",
+                isWorking: state == .inProgress
+            )
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Compact Now")
+        .accessibilityIdentifier("manage-session-compact")
         .disabled(!SessionCompactionControlPolicy.canRequest(
             phase: snapshot.phase,
             operationKind: snapshot.operationKind,
@@ -375,133 +398,6 @@ struct SessionContextSheet: View {
         .accessibilityValue(snapshot.compactionQueued == true
             ? "Queued after current work"
             : (compacting || snapshot.phase == .compacting) ? "In progress" : "")
-    }
-
-    private func contextUsageCard(_ snapshot: SessionContextPresentation) -> some View {
-        let usage = SessionContextUsagePresentation(snapshot.contextUsage)
-        let cacheValue = snapshot.stats.latestCacheHitRate.map {
-            "\($0.formatted(.number.precision(.fractionLength(1))))%"
-        } ?? "—"
-        let contextValue: String? = switch usage {
-        case .available(let used, let window, _):
-            "\(used.formatted(.number.notation(.compactName)))/\(window.formatted(.number.notation(.compactName)))"
-        case .unavailable:
-            nil
-        }
-        let refreshPresentation = SessionContextUsageRefreshPresentation(
-            lastTranscriptKind: snapshot.lastTranscriptKind,
-            assistantMessages: snapshot.stats.assistantMessages
-        )
-        let statistics = [
-            (cacheValue, "Cache Hit"),
-            ("\(snapshot.stats.tokens.cacheRead.formatted(.number.notation(.compactName))) / \(snapshot.stats.tokens.cacheWrite.formatted(.number.notation(.compactName)))", "Read / Write"),
-            (snapshot.stats.tokens.input.formatted(.number.notation(.compactName)), "Input"),
-            (snapshot.stats.tokens.output.formatted(.number.notation(.compactName)), "Output"),
-            (snapshot.stats.cost.formatted(.currency(code: "USD")), "Cost"),
-        ]
-
-        return VStack(alignment: .leading, spacing: 9) {
-            switch usage {
-            case .available(let used, let contextWindow, let percent):
-                let remaining = max(0, contextWindow - used)
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text("\(remaining.formatted(.number.notation(.compactName))) tokens left")
-                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 8)
-                    Text("\(Int(percent.rounded()))% used")
-                        .font(TronTypography.secondaryCodeDescription)
-                        .foregroundStyle(Color.tronTextSecondary)
-                }
-                ProgressView(value: percent, total: 100)
-                    .tint(Color.tronEmerald)
-                    .accessibilityLabel("Context used")
-                    .accessibilityValue("\(Int(percent.rounded())) percent")
-            case .unavailable:
-                Text("0% used")
-                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                Text(refreshPresentation.detail)
-                    .font(TronTypography.secondaryDescription)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                ProgressView(value: 0, total: 100)
-                    .tint(Color.tronEmerald)
-                    .accessibilityLabel("Context estimate pending")
-                    .accessibilityValue("Displayed as zero percent until refreshed")
-            }
-
-            contextAndCompactionRow(contextValue: contextValue, snapshot: snapshot)
-
-            Divider().overlay(Color.tronEmerald.opacity(0.14))
-
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(spacing: 6) {
-                    ForEach(0..<statistics.count, id: \.self) { index in
-                        metric(statistics[index].0, statistics[index].1)
-                    }
-                }
-            } else {
-                HStack(spacing: 0) {
-                    ForEach(0..<statistics.count, id: \.self) { index in
-                        metric(statistics[index].0, statistics[index].1)
-                    }
-                }
-            }
-        }
-        .padding(14)
-        .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.14)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(usage.accessibilityLabel)
-    }
-
-    private func contextAndCompactionRow(contextValue: String?, snapshot: SessionContextPresentation) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            if let contextValue {
-                Text(contextValue)
-                    .font(TronTypography.secondaryCodeDescription)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                    .layoutPriority(1)
-                    .accessibilityLabel("Context usage: \(contextValue)")
-            }
-
-            Spacer(minLength: 8)
-
-            Label(
-                "Automatic Compaction: \(SessionCompactionControlPolicy.automaticStatus(snapshot.automaticCompactionEnabled))",
-                systemImage: "arrow.triangle.2.circlepath"
-            )
-            .font(TronTypography.secondaryCodeDescription)
-            .foregroundStyle(Color.tronTextSecondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.75)
-            .truncationMode(.tail)
-            .multilineTextAlignment(.trailing)
-            .layoutPriority(0)
-            .accessibilityLabel("Automatic compaction: \(SessionCompactionControlPolicy.automaticStatus(snapshot.automaticCompactionEnabled))")
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
-        .accessibilityElement(children: .contain)
-    }
-
-    private func metric(_ value: String, _ label: String) -> some View {
-        VStack(spacing: 3) {
-            Text(value)
-                .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .semibold))
-                .foregroundStyle(Color.tronTextPrimary)
-                .lineLimit(1)
-                .multilineTextAlignment(.center)
-                .minimumScaleFactor(0.75)
-            Text(label)
-                .font(TronTypography.secondaryDescription)
-                .foregroundStyle(Color.tronTextSecondary)
-        }
-        .frame(maxWidth: .infinity, minHeight: 42)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(label): \(value)")
     }
 
     private var configurationRowAccent: Color { .tronEmerald }
@@ -529,103 +425,89 @@ struct SessionContextSheet: View {
         ) { destination = .processHistory }
     }
 
-    private func configurationSection(_ snapshot: SessionContextPresentation) -> some View {
-        TronSettingsGroup("Configuration", accent: configurationRowAccent) {
-            VStack(spacing: 0) {
-                TronModelSelectionRow(
-                    selection: Binding(
-                        get: {
-                            SessionModelSelectionPresentation.displayed(
-                                pending: pendingModelSelection,
-                                authoritative: snapshot.model
-                            )
-                        },
-                        set: { selection in
-                            guard let selection,
-                                  selection != SessionModelSelectionPresentation.displayed(
-                                    pending: pendingModelSelection,
-                                    authoritative: snapshot.model
-                                  ) else { return }
-                            pendingModelSelection = selection
-                            Task {
-                                do { try await model.setModel(selection, sessionID: sessionID) }
-                                catch {
-                                    if pendingModelSelection == selection { pendingModelSelection = nil }
-                                    surfaceActionError(error)
-                                }
-                            }
-                        }
-                    ),
-                    models: model.providerCatalog(for: .session(id: sessionID))?.models.filter(\.available) ?? [],
-                    navigationTitle: "Session Model",
-                    accent: configurationRowAccent
-                )
-                if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
-                   let policy = snapshot.contextWindowPolicy {
-                    TronSettingsDivider(accent: configurationRowAccent)
-                    ContextWindowSelectionRow(
-                        selection: Binding(
-                            get: { policy.override },
-                            set: { value in
-                                // Bind the request to the model shown when the
-                                // control was rendered. A late tap after a model
-                                // switch must never mutate the replacement model.
-                                guard !settingContextWindow,
-                                      let current = model.sessionContextPresentation(for: sessionID),
-                                      !current.phase.isActive,
-                                      current.contextWindowPolicy?.model == policy.model else { return }
-                                settingContextWindow = true
-                                Task {
-                                    defer { settingContextWindow = false }
-                                    do { try await model.setContextWindow(value, for: policy.model, sessionID: sessionID, expectedRevision: snapshot.revision, expectedRuntimeGeneration: snapshot.runtimeGeneration) }
-                                    catch { surfaceActionError(error) }
-                                }
-                            }
-                        ),
-                        limits: ContextWindowLimits(
-                            minimum: policy.minimum,
-                            maximum: policy.maximum,
-                            default: policy.default,
-                            longContextThreshold: nil
-                        ),
-                        inheritedValue: policy.default,
-                        effectiveValue: policy.effective,
-                        resetLabel: "Use configured default",
-                        warning: policy.warning,
-                        source: policy.source,
-                        accent: configurationRowAccent
-                    )
-                    .id("\(snapshot.runtimeGeneration):\(policy.model.contextWindowKey):\(snapshot.revision)")
-                    .disabled(snapshot.phase.isActive || settingContextWindow || pendingModelSelection != nil)
+    private func modelSelection(_ snapshot: SessionContextPresentation) -> Binding<ModelRef?> {
+        Binding(
+            get: {
+                SessionModelSelectionPresentation.displayed(pending: pendingModelSelection, authoritative: snapshot.model)
+            },
+            set: { selection in
+                guard let selection,
+                      selection != SessionModelSelectionPresentation.displayed(
+                        pending: pendingModelSelection, authoritative: snapshot.model
+                      ) else { return }
+                pendingModelSelection = selection
+                Task {
+                    do { try await model.setModel(selection, sessionID: sessionID) }
+                    catch {
+                        if pendingModelSelection == selection { pendingModelSelection = nil }
+                        surfaceActionError(error)
+                    }
                 }
-                TronSettingsDivider(accent: configurationRowAccent)
-                TronThinkingSelectionRow(
+            }
+        )
+    }
+
+    private func modelSummaryCard(_ snapshot: SessionContextPresentation) -> some View {
+        let selection = modelSelection(snapshot)
+        let catalog = model.providerCatalog(for: .session(id: sessionID))?.models ?? []
+        return SessionModelSummaryCard(
+            selection: selection,
+            catalog: catalog,
+            automaticCompactionEnabled: snapshot.automaticCompactionEnabled
+        ) {
+            if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
+               let policy = snapshot.contextWindowPolicy {
+                ContextWindowSelectionRow(
                     selection: Binding(
-                        get: { snapshot.thinkingLevel },
-                        set: { level in
-                            guard level != snapshot.thinkingLevel else { return }
+                        get: { policy.override },
+                        set: { value in
+                            // Bind the request to the model shown when the
+                            // control was rendered. A late tap after a model
+                            // switch must never mutate the replacement model.
+                            guard !settingContextWindow,
+                                  let current = model.sessionContextPresentation(for: sessionID),
+                                  !current.phase.isActive,
+                                  current.contextWindowPolicy?.model == policy.model else { return }
+                            settingContextWindow = true
                             Task {
-                                do { try await model.setThinking(level, sessionID: sessionID) }
+                                defer { settingContextWindow = false }
+                                do { try await model.setContextWindow(value, for: policy.model, sessionID: sessionID, expectedRevision: snapshot.revision, expectedRuntimeGeneration: snapshot.runtimeGeneration) }
                                 catch { surfaceActionError(error) }
                             }
                         }
                     ),
-                    levels: snapshot.availableThinkingLevels,
+                    limits: ContextWindowLimits(
+                        minimum: policy.minimum,
+                        maximum: policy.maximum,
+                        default: policy.default,
+                        longContextThreshold: nil
+                    ),
+                    inheritedValue: policy.default,
+                    effectiveValue: policy.effective,
+                    resetLabel: "Use configured default",
+                    warning: policy.warning,
+                    source: policy.source,
                     accent: configurationRowAccent
                 )
-                TronSettingsDivider(accent: configurationRowAccent)
-                manageRow(icon: "pencil", title: "Rename Session", accent: configurationRowAccent) {
-                    name = snapshot.name ?? ""
-                    showRename = true
-                }
-                TronSettingsDivider(accent: configurationRowAccent)
-                manageRow(
-                    icon: "terminal",
-                    title: "Terminal",
-                    subtitle: "Open or reattach the retained Mac terminal",
-                    accent: configurationRowAccent
-                ) { destination = .terminal }
+                .id("\(snapshot.runtimeGeneration):\(policy.model.contextWindowKey):\(snapshot.revision)")
+                .disabled(snapshot.phase.isActive || settingContextWindow || pendingModelSelection != nil)
             }
+            TronThinkingSelectionRow(
+                selection: Binding(
+                    get: { snapshot.thinkingLevel },
+                    set: { level in
+                        guard level != snapshot.thinkingLevel else { return }
+                        Task {
+                            do { try await model.setThinking(level, sessionID: sessionID) }
+                            catch { surfaceActionError(error) }
+                        }
+                    }
+                ),
+                levels: snapshot.availableThinkingLevels,
+                accent: configurationRowAccent
+            )
+        } compactAction: {
+            compactButton(snapshot)
         }
     }
 
@@ -717,7 +599,7 @@ struct SessionContextSheet: View {
                     }
                 case .notRepository:
                     TronSettingsRow(icon: "folder", title: "Current Branch", subtitle: "Browse workspace files", accent: sessionRowAccent) {
-                        Text("No Git").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                        Text("No Git").font(TronTypography.sans(size: TronTypography.sizeCaption + SessionSummaryTypography.metadataSizeAdjustment)).foregroundStyle(Color.tronTextSecondary)
                     }
                 case .loaded(let branch, let dirty, let changeCount):
                     let workingTreeStatus = dirty
@@ -732,7 +614,7 @@ struct SessionContextSheet: View {
                         accent: sessionRowAccent
                     ) {
                         Text(workingTreeStatus)
-                            .font(TronTypography.codeContent)
+                            .font(TronTypography.code(size: TronTypography.sizeBody2 + SessionSummaryTypography.metadataSizeAdjustment))
                             .foregroundStyle(Color.tronTextPrimary)
                             .lineLimit(1)
                     }
@@ -744,7 +626,7 @@ struct SessionContextSheet: View {
                         subtitleRole: .dynamicValue,
                         accent: sessionRowAccent
                     ) {
-                        Text("Unavailable").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
+                        Text("Unavailable").font(TronTypography.sans(size: TronTypography.sizeCaption + SessionSummaryTypography.metadataSizeAdjustment)).foregroundStyle(Color.tronTextSecondary)
                     }
                 }
             }

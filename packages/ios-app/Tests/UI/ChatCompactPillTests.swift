@@ -116,6 +116,28 @@ struct ChatCompactPillTests {
         ) == .awaitingRefresh)
     }
 
+    @Test("usage summary combines counts with bounded percentage without inventing estimates")
+    func combinedUsageSummary() {
+        let usage = SessionContextUsagePresentation(.init(tokens: 162_000, contextWindow: 272_000, percent: 59.56))
+        #expect(usage.usedSummary == "162K/272K • 60% used")
+        #expect(SessionContextUsagePresentation(.init(tokens: 0, contextWindow: 272_000, percent: 0)).usedSummary == "0/272K • 0% used")
+        #expect(SessionContextUsagePresentation(.init(tokens: 300_000, contextWindow: 272_000, percent: 110)).usedSummary == "300K/272K • 100% used")
+        #expect(SessionContextUsagePresentation(nil).usedSummary == nil)
+        #expect(SessionContextUsagePresentation(.init(tokens: nil, contextWindow: 272_000, percent: nil)).usedSummary == nil)
+    }
+
+    @Test("model summary uses the exact selected provider and catalog name with a stable fallback")
+    func modelSummaryName() {
+        let first = ModelSummary(provider: "first", id: "same-id", name: "First Model", reasoning: true, input: ["text"], contextWindow: 272_000, maxTokens: 8_192, available: true)
+        let second = ModelSummary(provider: "second", id: "same-id", name: "Second Model", reasoning: true, input: ["text"], contextWindow: 272_000, maxTokens: 8_192, available: true)
+        let catalog = [first, second]
+        let displayed = SessionModelSelectionPresentation.displayed(pending: second.ref, authoritative: first.ref)
+        #expect(SessionModelSelectionPresentation.modelName(displayed, catalog: catalog) == "Second Model")
+        #expect(SessionModelSelectionPresentation.modelName(first.ref, catalog: catalog) == "First Model")
+        #expect(SessionModelSelectionPresentation.modelName(first.ref, catalog: []) == first.ref.displayName)
+        #expect(SessionModelSelectionPresentation.modelName(nil, catalog: catalog) == "Choose model")
+    }
+
     @Test("Manage Session export rows keep stable identities and one progress owner")
     func sessionExportPresentation() {
         #expect(SessionExportPresentationPolicy.canStart(activeFormat: nil))
