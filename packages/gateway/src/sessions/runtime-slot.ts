@@ -20,6 +20,7 @@ import {
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
+import { abortAwareStream } from "../runtime/abort-aware-stream.js";
 import { contextWindowExtension, SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import type {
   ChatOrigin,
@@ -1202,6 +1203,7 @@ export class RuntimeSlot {
         // bash schema is nevertheless the exact SDK definition registered here.
         customTools: [directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition],
       });
+      created.session.agent.streamFunction = abortAwareStream(created.session.agent.streamFunction);
       contextPolicy = new SessionContextWindowPolicy(created.session);
       this.contextPolicies.set(created.session, contextPolicy);
       return { ...created, services, diagnostics: services.diagnostics };

@@ -709,6 +709,18 @@ binding, and post-admission runtime failures emit non-settling `session.diagnost
 lying about accepted execution. Definitive transport rejection/no-agent settlement clears
 the same owner, so iOS can reconstruct an in-flight prompt across navigation without replay.
 
+Every session runtime installs an abort-aware adapter on the public Agent stream boundary,
+shared by ordinary responses and compaction/branch summaries. The pinned SDK's lazy request
+setup can report an already-aborted signal as an ordinary assistant error; after cancelled
+between-turn compaction, that misclassification can trigger a replacement automatic compaction
+while Stop waits for idle. The adapter preserves streamed progress, content, usage, and successful
+results, but classifies terminal errors as `aborted` when their exact request signal is aborted.
+Pi's existing cancellation guard then prevents post-run retry/compaction of that cancelled response.
+It does not infer cancellation from error text, disable future compaction, or synthesize idle;
+Stop still waits for real runtime settlement and durable invocation/marker retirement. The focused
+`runtime-compaction.integration.test.ts` exercises this sequence against the pinned SDK and proves
+that the next explicit prompt can compact normally.
+
 Manual compaction has a separate Gateway-owned single-entry maintenance admission. Its
 synchronous claim covers pending, direct, and queued execution, so a second request is rejected
 rather than serialized behind the first. An idle request starts canonical compaction immediately.
