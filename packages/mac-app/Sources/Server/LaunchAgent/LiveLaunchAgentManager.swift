@@ -39,7 +39,10 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         let currentVariant = MacRuntimeVariant.detect()
         let service = SMAppService.agent(plistName: "\(label).plist")
         let status = ExistingInstallDetector.serviceStatus(label: label)
-        let runtime = await runtimeInfo(label: label)
+        let runtime: LaunchAgentRuntimeInfo?
+        do { runtime = try await readRuntimeInfo(label: label) } catch {
+            return .unknown(message: "Could not inspect the LaunchAgent. No registration changes were made.")
+        }
         let runningParent = runtime?.parentBundleIdentifier
         let shouldReplaceStaleRuntime = Self.runtimeRequiresReplacement(
             runtimeInfo: runtime,
@@ -92,7 +95,10 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             break
         }
 
-        let externalPortBound = await isPortBound(profile.port)
+        let externalPortBound: Bool
+        do { externalPortBound = try await isPortBound(profile.port) } catch {
+            return .unknown(message: "Could not verify port ownership. No registration changes were made.")
+        }
         if Self.shouldRefuseExternalServer(status: status, runningParentBundleIdentifier: runningParent, portBound: externalPortBound) {
             return .launchdRefused(message: "Another Tron is already running on port \(profile.port). Stop it before installing this Gateway profile.")
         }
@@ -101,8 +107,12 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             case .bootout:
                 let bootout = await Subprocess.run(
                     executable: URL(fileURLWithPath: "/bin/launchctl"),
-                    arguments: ["bootout", "gui/\(currentUID())/\(label)"]
+                    arguments: ["bootout", "gui/\(currentUID())/\(label)"],
+                    policy: .acceptedOperation
                 )
+                guard bootout.exitCode >= 0 else {
+                    return .unknown(message: "Could not confirm the unload command outcome. Inspect Gateway state before retrying.")
+                }
                 guard bootout.exitCode == 0 else {
                     return .launchdRefused(message: bootout.stderr.isEmpty
                         ? "Tron Agent could not unload the stale LaunchAgent before re-registering it."
@@ -149,6 +159,11 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
     ) -> LaunchAgentRegistrationPlan {
         if status == .requiresApproval {
             return .refuse(message: "Approve Tron Agent in Login Items to finish installation.")
+        }
+        // Missing observation is not evidence of a stale running process.
+        // In particular, a cancelled/timed-out ps must never authorize bootout.
+        if runtimeInfo?.pid != nil, runtimeInfo?.processCommand?.isEmpty != false {
+            return .refuse(message: "Could not verify the running Gateway command. No registration changes were made.")
         }
         let stale = shouldReplaceStaleRuntime ?? runtimeRequiresReplacement(
             runtimeInfo: runtimeInfo, profile: profile, expectedHelperPath: expectedHelperPath
@@ -497,8 +512,12 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         }
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/launchctl"),
-            arguments: ["kickstart", "-k", "gui/\(currentUID())/\(label)"]
+            arguments: ["kickstart", "-k", "gui/\(currentUID())/\(label)"],
+            policy: .acceptedOperation
         )
+        guard result.exitCode >= 0 else {
+            return .unknown(message: "Could not confirm the restart command outcome. Inspect Gateway state before retrying.")
+        }
         return result.exitCode == 0
             ? .ok
             : .launchdRefused(message: result.stderr.isEmpty ? result.stdout : result.stderr)
@@ -511,20 +530,26 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         }
     }
 
-    func isLoaded(label: String) async -> Bool {
+    func isLoaded(label: String) async -> Bool? {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/launchctl"),
-            arguments: ["print", "gui/\(currentUID())/\(label)"]
+            arguments: ["print", "gui/\(currentUID())/\(label)"],
+            policy: .observation
         )
-        return result.exitCode == 0
+        return try? Self.runtimeOutputAvailable(result)
     }
 
     func runtimeInfo(label: String) async -> LaunchAgentRuntimeInfo? {
+        try? await readRuntimeInfo(label: label)
+    }
+
+    private func readRuntimeInfo(label: String) async throws -> LaunchAgentRuntimeInfo? {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/launchctl"),
-            arguments: ["print", "gui/\(currentUID())/\(label)"]
+            arguments: ["print", "gui/\(currentUID())/\(label)"],
+            policy: .observation
         )
-        guard result.exitCode == 0 else { return nil }
+        guard try Self.runtimeOutputAvailable(result) else { return nil }
         let pid = parsePID(from: result.stdout)
         let uptime: String?
         let processCommand: String?
@@ -614,12 +639,29 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         return nil
     }
 
-    private func isPortBound(_ port: Int) async -> Bool {
+    private func isPortBound(_ port: Int) async throws -> Bool {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/usr/sbin/lsof"),
-            arguments: ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN"]
+            arguments: ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN"],
+            policy: .observation
         )
-        return result.exitCode == 0 && !result.stdout.isEmpty
+        return try Self.portBound(result)
+    }
+
+    enum ObservationFailure: Error { case unavailable }
+
+    static func runtimeOutputAvailable(_ result: ProcessResult) throws -> Bool {
+        // Negative status belongs to the capture owner (launch, cancellation,
+        // timeout, limit or decode failure), not launchctl's not-loaded result.
+        guard result.exitCode >= 0 else { throw ObservationFailure.unavailable }
+        return result.exitCode == 0
+    }
+
+    static func portBound(_ result: ProcessResult) throws -> Bool {
+        guard result.stderr.isEmpty else { throw ObservationFailure.unavailable }
+        if result.exitCode == 0 { return !result.stdout.isEmpty }
+        if result.exitCode == 1 && result.stdout.isEmpty { return false }
+        throw ObservationFailure.unavailable
     }
 
     private func currentUID() -> Int {

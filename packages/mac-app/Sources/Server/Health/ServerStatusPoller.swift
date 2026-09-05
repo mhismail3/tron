@@ -99,8 +99,9 @@ struct ServerStatusPoller: Sendable {
 
     private static func launchdStateSnapshot(setup: EnvironmentSetup, reason: String) async -> ServerStatusSnapshot {
         let isLoaded = await setup.launchAgentManager.isLoaded(label: setup.launchAgentLabel)
+        guard !Task.isCancelled else { return ServerStatusSnapshot(state: .checking) }
         return ServerStatusSnapshot(
-            state: isLoaded ? .failed(reason: reason) : .paused,
+            state: isLoaded == false ? .paused : .failed(reason: reason),
             tailscaleIP: setup.readTailscaleIPFromSettings()
         )
     }

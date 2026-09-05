@@ -23,7 +23,7 @@ final class MockLaunchAgentManager: LaunchAgentManaging, @unchecked Sendable {
         var loadOutcome: LaunchAgentOutcome = .ok
         var unloadOutcome: LaunchAgentOutcome = .ok
         var restartOutcome: LaunchAgentOutcome = .ok
-        var loaded: Bool = false
+        var loaded: Bool? = false
         var runtimeInfo: LaunchAgentRuntimeInfo?
     }
 
@@ -41,7 +41,7 @@ final class MockLaunchAgentManager: LaunchAgentManaging, @unchecked Sendable {
         get { state.withLock { $0.restartOutcome } }
         set { state.withLock { $0.restartOutcome = newValue } }
     }
-    var loaded: Bool {
+    var loaded: Bool? {
         get { state.withLock { $0.loaded } }
         set { state.withLock { $0.loaded = newValue } }
     }
@@ -75,7 +75,11 @@ final class MockLaunchAgentManager: LaunchAgentManaging, @unchecked Sendable {
         }
     }
 
-    func isLoaded(label: String) async -> Bool {
+    func isRegistered(label: String) async -> Bool {
+        await isLoaded(label: label) == true
+    }
+
+    func isLoaded(label: String) async -> Bool? {
         state.withLock {
             $0.calls.append(Call(kind: .isLoaded, label: label, plistPath: nil))
             return $0.loaded

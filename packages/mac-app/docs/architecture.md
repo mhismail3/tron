@@ -148,6 +148,31 @@ log responses require `type=response`, Boolean `ok` and non-conflicting result/e
 fields. No request is sent before hello acceptance, and unrelated frames do not
 reset the deadline or extend the existing eight-frame limit.
 
+`Subprocess` requires explicit observation or accepted-operation authority. An
+observation has a five-second execution/capture budget and retires its owned
+client on cancellation, timeout or excess output. Capture retains at most 1 MiB
+per stream; incomplete or invalid UTF-8 observation output is never returned as
+success. One owner drains both pipes and processes exit/cancellation wakeups;
+readiness does not rely on periodic polling. After child exit, inherited writers
+have at most one second to close before Tron's read descriptors retire. The
+runner does not kill unrelated descendants or the service being queried.
+Tailscale candidate selection stops on cancellation but still tries another CLI
+for an ordinary not-ready result. Budgets are per command, not five seconds for
+whole host resolution; native launch and process retirement also depend on the OS.
+
+Accepted lifecycle commands instead await authoritative child completion despite
+UI cancellation. Their captured bytes have the same retention cap, before
+replacement text decoding and a bounded note for incomplete capture; clipping
+diagnostics does not fabricate command failure. Command execution itself is not timed out or
+replayed. An unconfirmed command outcome is reported as unknown, not undone.
+Registration refuses failed runtime capture, uncertain port observation, and a
+running PID whose command could not be observed before authorizing any repair.
+Loaded-state capture failure remains unknown: status shows failure rather than
+paused, and menu Restart refuses it before load/repair or a restart request.
+Registration and loaded state remain separate protocol requirements.
+`SubprocessTests` uses owned helpers and FIFO readiness to check cancellation,
+exit, byte limits and descriptor closure without invoking actual lifecycle tools.
+
 The wrapper and gateway share no in-memory state. Their only shared secrets are
 owner-only gateway files. Provider credentials remain in the Pi runtime store and
 wrapper credentials remain under `gateway/local-auth.json`; neither is shared with

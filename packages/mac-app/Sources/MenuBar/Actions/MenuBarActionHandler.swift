@@ -60,7 +60,10 @@ final class MenuBarActionHandler {
         guard await ensureLaunchAgentManagementAllowed(actionTitle: "Restart blocked") else { return }
         applyBusy(.restarting)
 
-        let serviceWasLoaded = await setup.launchAgentManager.isLoaded(label: setup.launchAgentLabel)
+        guard let serviceWasLoaded = await setup.launchAgentManager.isLoaded(label: setup.launchAgentLabel) else {
+            await finishRestartFailure(title: "Restart blocked", message: "Could not inspect the LaunchAgent. No restart was requested.")
+            return
+        }
         let needsRepair: Bool = {
             if case .needsRepair = menuBarController?.snapshot.state { return true }
             return false

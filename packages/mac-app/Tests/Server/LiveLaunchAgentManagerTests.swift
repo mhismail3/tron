@@ -492,6 +492,43 @@ struct LaunchAgentLoaderTests {
         #expect(mock.calls.map(\.kind) == [.load, .restart])
     }
 
+    @Test("capture failure is not a not-loaded runtime observation")
+    func failedRuntimeCaptureCannotAuthorizeRegistration() throws {
+        #expect(throws: LiveLaunchAgentManager.ObservationFailure.self) {
+            try LiveLaunchAgentManager.runtimeOutputAvailable(ProcessResult(exitCode: -1, stdout: "pid = 42", stderr: "timed out"))
+        }
+        #expect(try LiveLaunchAgentManager.runtimeOutputAvailable(ProcessResult(exitCode: 0, stdout: "state = waiting", stderr: "")))
+    }
+
+    @Test("failed port observation is not a free port", arguments: [
+        ProcessResult(exitCode: -1, stdout: "", stderr: "cancelled"),
+        ProcessResult(exitCode: 1, stdout: "", stderr: "permission denied"),
+        ProcessResult(exitCode: 2, stdout: "", stderr: ""),
+        ProcessResult(exitCode: 1, stdout: "partial output", stderr: "")
+    ])
+    func failedPortObservation(result: ProcessResult) {
+        #expect(throws: LiveLaunchAgentManager.ObservationFailure.self) { try LiveLaunchAgentManager.portBound(result) }
+    }
+
+    @Test("normal listener presence and no-match results remain distinct")
+    func normalPortObservation() throws {
+        #expect(try LiveLaunchAgentManager.portBound(ProcessResult(exitCode: 0, stdout: "listener", stderr: "")))
+        #expect(try !LiveLaunchAgentManager.portBound(ProcessResult(exitCode: 1, stdout: "", stderr: "")))
+    }
+
+    @Test("missing running command identity cannot authorize repair")
+    func missingCommandRefusesRegistration() {
+        let plan = LiveLaunchAgentManager.registrationPlan(
+            status: .enabled, currentVariant: .installedRelease,
+            runtimeInfo: LaunchAgentRuntimeInfo(pid: 42, parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier),
+            runningParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+            canManageLaunchAgent: true, expectedHelperPath: "/owned/helper",
+            shouldRefreshCurrentRegistration: true, shouldReplaceStaleRuntime: true
+        )
+        guard case .refuse = plan else { Issue.record("Unavailable identity authorized \(plan)"); return }
+        #expect(plan.steps.isEmpty)
+    }
+
     @Test("registration plan table preserves keep, refuse, takeover, and refresh sequences")
     func registrationPlanMatrix() {
         let helper = "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
@@ -500,7 +537,7 @@ struct LaunchAgentLoaderTests {
             parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
             parentBundleVersion: "1",
             executablePath: helper,
-            processCommand: nil,
+            processCommand: "/Applications/Tron.app/Contents/Resources/Gateway/runtime/node-arm64 /Applications/Tron.app/Contents/Resources/Gateway/app/dist/index.js --host tailscale --port \(TronGatewayProfile.stable.port)",
             gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
             gatewayChannelMarker: TronGatewayProfile.stable.channel
         )

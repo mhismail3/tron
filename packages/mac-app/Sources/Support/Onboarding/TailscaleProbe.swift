@@ -33,10 +33,9 @@ import Foundation
 ///   - `"Starting"` — daemon is coming up; the next poll will settle.
 ///   - `"InUseOtherUser"` — another macOS user has the daemon bound.
 ///
-/// The probe is async because running the subprocess spawns a child
-/// process. Both the file-existence check and the subprocess are fast
-/// enough to run on `.main` (typically <100ms total) but the wizard
-/// awaits it on a background `Task` regardless.
+/// Each CLI observation runs off the caller's actor with a bounded capture
+/// lifetime. Cancellation stops candidate selection; ordinary not-ready results
+/// still allow another executable to prove current connectivity.
 enum TailscaleProbe {
     /// Default probe used by `EnvironmentSetup.live`. Tests inject a
     /// fake instead of mocking Process directly.
@@ -47,7 +46,8 @@ enum TailscaleProbe {
             runProcess: { url in
                 await Subprocess.run(
                     executable: url,
-                    arguments: ["status", "--peers=false", "--json"]
+                    arguments: ["status", "--peers=false", "--json"],
+                    policy: .observation
                 )
             }
         )
@@ -69,7 +69,9 @@ enum TailscaleProbe {
         var sawExecutableCLI = false
         for candidate in cliPaths where FileManager.default.isExecutableFile(atPath: candidate.path) {
             sawExecutableCLI = true
+            guard !Task.isCancelled else { break }
             let result = await runProcess(candidate)
+            guard !Task.isCancelled else { break }
 
             // Non-zero exit covers: daemon not running, transient
             // startup errors, permission errors. All of these are

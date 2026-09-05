@@ -7,7 +7,8 @@ enum ServerProcessProbe {
     static func listenerPIDs(port: Int) async -> Set<Int> {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/usr/sbin/lsof"),
-            arguments: ["-nP", "-t", "-iTCP:\(port)", "-sTCP:LISTEN"]
+            arguments: ["-nP", "-t", "-iTCP:\(port)", "-sTCP:LISTEN"],
+            policy: .observation
         )
         guard result.exitCode == 0 else { return [] }
         return Set(result.stdout.split(whereSeparator: \.isNewline).compactMap {
@@ -18,7 +19,8 @@ enum ServerProcessProbe {
     static func processCommand(pid: Int) async -> String? {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/ps"),
-            arguments: ["-ww", "-p", "\(pid)", "-o", "command="]
+            arguments: ["-ww", "-p", "\(pid)", "-o", "command="],
+            policy: .observation
         )
         guard result.exitCode == 0 else { return nil }
         let command = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -28,7 +30,8 @@ enum ServerProcessProbe {
     static func processStartIdentity(pid: Int) async -> String? {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/ps"),
-            arguments: ["-p", "\(pid)", "-o", "lstart="]
+            arguments: ["-p", "\(pid)", "-o", "lstart="],
+            policy: .observation
         )
         guard result.exitCode == 0 else { return nil }
         let identity = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -38,7 +41,8 @@ enum ServerProcessProbe {
     static func processElapsedTime(pid: Int) async -> String? {
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/ps"),
-            arguments: ["-p", "\(pid)", "-o", "etime="]
+            arguments: ["-p", "\(pid)", "-o", "etime="],
+            policy: .observation
         )
         guard result.exitCode == 0 else { return nil }
         let uptime = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)

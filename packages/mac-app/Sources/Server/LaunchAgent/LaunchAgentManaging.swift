@@ -91,8 +91,8 @@ protocol LaunchAgentManaging: Sendable {
     func restart(label: String) async -> LaunchAgentOutcome
 
     /// True if `launchctl print gui/$UID/<label>` returns a state row.
-    /// Cheaper than load+ping when you only need a yes/no.
-    func isLoaded(label: String) async -> Bool
+    /// Nil means the observation failed; it is not proof that the job is absent.
+    func isLoaded(label: String) async -> Bool?
 
     /// True when ServiceManagement still has a registration, even if launchd
     /// has not loaded the process yet.
@@ -106,12 +106,6 @@ protocol LaunchAgentManaging: Sendable {
 /// Applies the shared service-start policy for registration/start flows.
 /// The menu-bar Restart action deliberately does not use this helper: it asks
 /// the supervised Gateway to drain and lets launchd perform relaunch.
-extension LaunchAgentManaging {
-    func isRegistered(label: String) async -> Bool {
-        await isLoaded(label: label)
-    }
-}
-
 enum LaunchAgentLoader {
     static func ensureLoaded(
         manager: LaunchAgentManaging,

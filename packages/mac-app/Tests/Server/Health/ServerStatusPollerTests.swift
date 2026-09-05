@@ -10,7 +10,7 @@ struct ServerStatusPollerTests {
         tailscaleFromSettings: String? = nil,
         tailscaleStatus: TailscaleStatus = .notInstalled,
         serverPort: Int = 9847,
-        launchAgentLoaded: Bool = false
+        launchAgentLoaded: Bool? = false
     ) -> EnvironmentSetup {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let launchAgentManager = MockLaunchAgentManager()
@@ -128,6 +128,14 @@ struct ServerStatusPollerTests {
         #expect(snapshot.state.tone == .failed)
     }
 
+    @Test("unavailable launchd observation is failed, not paused")
+    func unavailableObservationIsNotPaused() async {
+        let setup = Self.makeSetup(pingResult: .unreachable, launchAgentLoaded: nil)
+        let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
+        #expect(snapshot.state == .failed(reason: "unreachable"))
+        #expect(snapshot.state.tone == .failed)
+    }
+
     @Test("timeout + launchd loaded maps to failed")
     func timeoutSnapshot() async throws {
         let setup = Self.makeSetup(token: "abc123", pingResult: .timeout, launchAgentLoaded: true)
@@ -150,7 +158,7 @@ struct ServerStatusPollerTests {
         #expect(snapshot.state == .failed(reason: "malformed response"))
     }
 
-    @Test("uses cached engine settings Tailscale IP when server doesn't report one")
+    @Test("uses cached Tailscale IP when server doesn't report one")
     func cachedTailscaleFromSettings() async throws {
         let setup = Self.makeSetup(
             token: "abc",
