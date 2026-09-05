@@ -1,4 +1,5 @@
 import { request } from "node:http";
+import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,6 +7,7 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 import { GatewayError } from "../errors.js";
+import { DisplayArtifactStore } from "../display/display-artifact-store.js";
 import { BlobStore, type BlobByteRange, type BlobLease } from "../sessions/blob-store.js";
 import { GatewayServer } from "./server.js";
 
@@ -267,31 +269,40 @@ describe("Gateway blob HTTP leases", () => {
     expect(outOfBounds.headers["content-range"]).toBe("bytes */8");
   });
 
-  it("honors immutable display ETags and releases the admitted lease", async () => {
+  it("honors immutable display ETags and closes the unread file-backed lease without error", async () => {
+    const home = await mkdtemp(join(tmpdir(), "tron-display-etag-"));
+    roots.push(home);
+    const workspace = join(home, "workspace");
+    await mkdir(workspace);
+    await writeFile(join(workspace, "note.txt"), "contents");
+    const store = new DisplayArtifactStore(home, { minimumFreeBytes: 0 });
+    await store.initialize(new Set(["session-1"]));
+    const artifact = await store.ingest(workspace, "note.txt", "session-1");
     const gateway = makeServer(async () => { throw new GatewayError("not_found", "missing"); });
-    const artifactID = "00000000-0000-4000-8000-000000000001";
-    let releases = 0;
-    (gateway as any).options.sessions.acquireDisplayArtifact = async () => ({
-      mimeType: "image/png",
-      size: 8,
-      totalSize: 8,
-      rangeStart: 0,
-      rangeEnd: 7,
-      stream: Readable.from([Buffer.from("contents")]),
-      release: async () => { releases += 1; },
-    });
+    let streamClosed: Promise<{ closed: true } | { error: unknown }> | undefined;
+    (gateway as any).options.sessions.acquireDisplayArtifact = async (sessionID: string, id: string) => {
+      const lease = await store.acquire(id, sessionID);
+      // A fake release counter cannot catch descriptor double-close on 304,
+      // where no pipeline consumes the stream or installs an error listener.
+      streamClosed = once(lease.stream, "close").then(
+        () => ({ closed: true as const }),
+        (error: unknown) => ({ error }),
+      );
+      return lease;
+    };
     servers.push(gateway);
     await gateway.listen();
     const address = (gateway as unknown as { server: { address(): AddressInfo | null } }).server.address();
     if (!address) throw new Error("Gateway did not bind");
     const response = await getPath(
       address.port,
-      `/v1/sessions/session-1/display-artifacts/${artifactID}`,
-      { "if-none-match": `"display-${artifactID}"` },
+      `/v1/sessions/session-1/display-artifacts/${artifact.id}`,
+      { "if-none-match": `"display-${artifact.id}"` },
     );
     expect(response.status).toBe(304);
     expect(response.body).toHaveLength(0);
-    expect(releases).toBe(1);
+    expect(streamClosed).toBeDefined();
+    expect(await streamClosed).toEqual({ closed: true });
   });
 
   it("returns JSON before headers for an unavailable blob", async () => {

@@ -454,7 +454,9 @@ export class DisplayArtifactStore {
       if (!info.isFile() || info.size !== metadata.size) throw new GatewayError("not_found", "Display artifact is unavailable");
       this.activeReaders += 1;
       this.activeReaderCounts.set(id, (this.activeReaderCounts.get(id) ?? 0) + 1);
-      const stream: ReadStream = createReadStream(path, { fd: handle.fd, autoClose: false, start, end });
+      // Share FileHandle's close ownership, including unread conditional GETs.
+      // A raw numeric fd lets stream.destroy() race handle.close() with EBADF.
+      const stream: ReadStream = handle.createReadStream({ autoClose: false, start, end });
       let released = false;
       return {
         mimeType: metadata.mimeType,

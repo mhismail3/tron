@@ -306,9 +306,8 @@ export class PushRegistry {
     if (!installation || installation.enabled !== 1) return json({ error: "installation_unavailable" }, 410);
 
     const bodyHash = await sha256Hex(body);
-    const admission = await this.beginDispatch(requestId, grant, installation.installation_id, bodyHash);
-    if (admission.response) return json(admission.response);
-    if (!admission.admitted) return json({ status: "rate_limited", reason: "rate_limited", retryAfterSeconds: admission.retryAfterSeconds } satisfies RelayResult);
+    const rejection = await this.beginDispatch(requestId, grant.grant_id, installation.installation_id, bodyHash);
+    if (rejection) return rejection;
 
     const route = ROUTES[installation.route];
     let result: RelayResult;
@@ -381,10 +380,13 @@ export class PushRegistry {
     });
   }
 
-  private async beginDispatch(requestId: string, grant: StoredGrant, installationId: string, bodyHash: string): Promise<{
-    response?: RelayResult; admitted: boolean; retryAfterSeconds?: number;
-  }> {
+  private async beginDispatch(requestId: string, grantId: string, installationId: string, bodyHash: string): Promise<Response | undefined> {
     return this.state.storage.transaction(async () => {
+      // Authentication awaits crypto before admission. Read authority and quota
+      // in this transaction so overlapping requests cannot spend a stale count
+      // or admit a grant revoked while its signature was being verified.
+      const grant = this.grant(grantId);
+      if (!grant || grant.enabled !== 1) return json({ error: "invalid_signature" }, 401);
       const now = epochSeconds();
       this.state.storage.sql.exec("DELETE FROM relay_requests WHERE updated_at < ?", now - RECEIPT_RETENTION_SECONDS);
       const existing = this.state.storage.sql.exec<LedgerRow>(
@@ -393,24 +395,21 @@ export class PushRegistry {
       ).toArray()[0];
       if (existing) {
         if (existing.grant_id !== grant.grant_id || existing.body_hash !== bodyHash) {
-          return { response: { status: "permanent_failure", reason: "request_id_conflict" }, admitted: false };
+          return json({ status: "permanent_failure", reason: "request_id_conflict" } satisfies RelayResult);
         }
         if (existing.state === "in_progress") {
           const updatedAt = Number(existing.updated_at);
           const age = Number.isFinite(updatedAt) ? Math.max(0, now - updatedAt) : Number.POSITIVE_INFINITY;
-          return {
-            response: age <= ACTIVE_PROVIDER_ATTEMPT_SECONDS
-              ? { status: "in_progress", reason: "provider_request_in_progress" }
-              : { status: "ambiguous", reason: "provider_outcome_unknown" },
-            admitted: false,
-          };
+          return json(age <= ACTIVE_PROVIDER_ATTEMPT_SECONDS
+            ? { status: "in_progress", reason: "provider_request_in_progress" } satisfies RelayResult
+            : { status: "ambiguous", reason: "provider_outcome_unknown" } satisfies RelayResult);
         }
         if (existing.state === "terminal" && existing.response_json) {
-          try { return { response: JSON.parse(existing.response_json) as RelayResult, admitted: false }; }
-          catch { return { response: { status: "ambiguous", reason: "ledger_result_invalid" }, admitted: false }; }
+          try { return json(JSON.parse(existing.response_json) as RelayResult); }
+          catch { return json({ status: "ambiguous", reason: "ledger_result_invalid" } satisfies RelayResult); }
         }
         this.state.storage.sql.exec("UPDATE relay_requests SET state = 'in_progress', response_json = NULL, updated_at = ? WHERE request_id = ?", epochSeconds(), requestId);
-        return { admitted: true };
+        return undefined;
       }
 
       const hour = hourWindow(now);
@@ -431,7 +430,7 @@ export class PushRegistry {
           "INSERT INTO relay_requests (request_id, grant_id, body_hash, state, response_json, quota_charged, updated_at) VALUES (?, ?, ?, 'terminal', ?, 0, ?)",
           requestId, grant.grant_id, bodyHash, JSON.stringify(result), now,
         );
-        return { response: result, admitted: false };
+        return json(result);
       }
       this.state.storage.sql.exec(
         "UPDATE grants SET hourly_window = ?, hourly_count = ?, daily_window = ?, daily_count = ?, updated_at = ? WHERE grant_id = ?",
@@ -449,7 +448,7 @@ export class PushRegistry {
         "INSERT INTO relay_requests (request_id, grant_id, body_hash, state, response_json, quota_charged, updated_at) VALUES (?, ?, ?, 'in_progress', NULL, 1, ?)",
         requestId, grant.grant_id, bodyHash, now,
       );
-      return { admitted: true };
+      return undefined;
     });
   }
 

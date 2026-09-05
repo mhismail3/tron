@@ -139,6 +139,8 @@ async function seedAssertionInstallation(
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   await reset();
 });
@@ -367,6 +369,100 @@ describe("v3 Worker boundary", () => {
     const response = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({ requestId: "installation-quota-0001" }));
     expect(await response.json()).toMatchObject({ status: "rate_limited" });
     expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  test.each(["hourly", "daily"] as const)("serializes concurrent %s grant quota admission", async (window) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-05T12:00:00Z"));
+    await initializeAndSeed();
+    const limit = window === "hourly" ? 30 : 200;
+    await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
+      state.storage.sql.exec(
+        `UPDATE grants SET ${window}_count = ? WHERE grant_id = ?`,
+        limit - 1, testGrant.grantId,
+      );
+    });
+    const requests = await Promise.all([0, 1].map((index) => signedNotification({
+      requestId: `concurrent-${window}-quota-${index}`,
+    })));
+    const providerFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+
+    // Hold both signatures after the grant lookup, making the stale-read
+    // interleaving deterministic without sleeps or production-only hooks.
+    const sign = crypto.subtle.sign.bind(crypto.subtle);
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    let arrivals = 0;
+    const signatureGate = vi.spyOn(crypto.subtle, "sign").mockImplementation(async (algorithm, key, data) => {
+      const result = await sign(algorithm, key, data);
+      if (algorithm === "HMAC") {
+        arrivals += 1;
+        if (arrivals === 2) release();
+        await barrier;
+      }
+      return result;
+    });
+    try {
+      const responses = await Promise.all(requests.map((request) => SELF.fetch("https://push.test/v3/notifications", request)));
+      const outcomes = await Promise.all(responses.map((response) => response.json<{ status: string }>()));
+      expect(arrivals).toBe(2);
+      expect(outcomes.map((outcome) => outcome.status).sort()).toEqual(["accepted_by_apns", "rate_limited"]);
+      expect(providerFetch).toHaveBeenCalledTimes(1);
+      const count = await runInDurableObject(stub(), async (_instance: PushRegistry, state) =>
+        state.storage.sql.exec<{ count: number }>(
+          `SELECT ${window}_count AS count FROM grants WHERE grant_id = ?`, testGrant.grantId,
+        ).one().count,
+      );
+      expect(count).toBe(limit);
+    } finally {
+      release();
+      signatureGate.mockRestore();
+    }
+  });
+
+  test("rejects a grant revoked while notification authentication is in flight", async () => {
+    await initializeAndSeed();
+    const notification = await signedNotification();
+    const revocation = await signedRevocation();
+    const providerFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+    const sign = crypto.subtle.sign.bind(crypto.subtle);
+    let release!: () => void;
+    let entered!: () => void;
+    const barrier = new Promise<void>((resolve) => { release = resolve; });
+    const authenticating = new Promise<void>((resolve) => { entered = resolve; });
+    const signatureGate = vi.spyOn(crypto.subtle, "sign").mockImplementation(async (algorithm, key, data) => {
+      const result = await sign(algorithm, key, data);
+      if (algorithm === "HMAC" && new TextDecoder().decode(data).startsWith("POST\n")) {
+        entered();
+        await barrier;
+      }
+      return result;
+    });
+    try {
+      // Both handler lifetimes belong to this one test-owned DO request. This
+      // lets the real revoke commit while authentication is held, without an
+      // unresolved SELF response escaping its Workers I/O context.
+      await runInDurableObject(stub(), async (instance: PushRegistry) => {
+        const pending = instance.fetch(new Request("https://push.test/v3/notifications", notification));
+        try {
+          await Promise.race([authenticating, pending.then(() => { throw new Error("Notification bypassed authentication gate"); })]);
+          const revoked = await instance.fetch(new Request(`https://push.test/v3/grants/${testGrant.grantId}`, revocation));
+          expect(await revoked.json()).toEqual({ version: 1, revoked: true });
+          release();
+          const response = await pending;
+          expect(response.status).toBe(401);
+          expect(await response.json()).toEqual({ error: "invalid_signature" });
+          expect(providerFetch).not.toHaveBeenCalled();
+        } finally {
+          release();
+          await pending;
+        }
+      });
+    } finally {
+      signatureGate.mockRestore();
+    }
   });
 
   test("enforces quota before contacting APNs and makes revocation idempotent", async () => {

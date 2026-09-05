@@ -132,8 +132,11 @@ A request-ID reuse with a different grant or body fails permanently.
 Each grant admits at most 30 new requests per hour and 200 per UTC day; each
 installation admits at most 50 per hour and 300 per day across its grants. One
 installation may own at most eight grants, and global installation/grant tables
-are transactionally bounded. Retries of an admitted request do not consume
-another quota unit. The cached APNs provider token is keyed by a cryptographic
+are transactionally bounded. Grant authority and quota counters are re-read inside
+request admission, after asynchronous signature verification, so overlapping
+requests cannot spend the same final quota slot or admit a grant revoked during
+authentication. Retries of an admitted request do not consume another quota unit.
+The cached APNs provider token is keyed by a cryptographic
 fingerprint of the team ID, key ID, and complete private-key contents. APNs
 `InvalidProviderToken` and `ExpiredProviderToken` responses clear that cache and
 remain retryable, so credential replacement and provider invalidation cannot

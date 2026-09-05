@@ -25,6 +25,36 @@ search. Review generated-code inputs and consumers; justify excluding generated
 output and vendored dependencies. Report partial coverage explicitly. Delegated
 reports must identify their actual coverage; verify findings before acting on them.
 
+### Close behavior slices across batches
+
+A batch limits work, not dependencies. Scope each slice around a real operation
+from entrypoint through state ownership, observable result, and retirement, even
+when it crosses packages or processes. Use the file inventory to catch remaining
+helpers, configuration, resources, tests, and docs; following popular flows alone
+is not exhaustive coverage. Split large files by substantive mechanisms, but do
+not mark the whole file fully reviewed until all its parts are inspected.
+
+In the run-owned ledger, link each slice to its files/revisions, material
+functions and decisions, and cross-file boundaries. For each boundary record the
+producer/caller, consumer/owner, required contract, inspection/test evidence, and
+unresolved work. Follow related files outside a batch rather than assuming a
+later reviewer will cover them. Unresolved dependencies stay explicit and prevent
+boundary closure; another lane's summary alone is not evidence. One integrating
+owner reconciles overlapping reviews and cross-owner changes.
+
+Close a slice only after its relevant ends and failure paths are traced and its
+evidence is checked. File coverage and finding resolution are separate: a fully
+reviewed file may have a known unfixed defect. Every finding needs a disposition,
+evidence, and either a complete authorized change or an explicit remaining action,
+blocker, or user-approved deferral. Do not call hardening complete while unresolved
+work is merely parked. Report cumulative coverage and unresolved boundaries after
+each batch, not just files opened or bugs fixed.
+
+Record the revision or content hash underlying each assessment. When an owner,
+contract, registration, configuration, or behavior changes, reopen affected
+reviews and cross-file boundaries, including unchanged consumers. Rerun the
+relevant contract checks; a previously green file is not permanently certified.
+
 ## Follow the mechanism, not the folder
 
 For each capability, trace a real operation from admission to its observable
@@ -63,6 +93,28 @@ removing tests, or validating a disputed mechanism. Use
 [performance](../tron-performance/SKILL.md) for cost claims or comparisons.
 Validate the changed boundary first, then the relevant broader checkpoint. Inspect
 the final diff for unintended behavior changes and displaced complexity.
+
+## Turn verified lessons into maintained contracts
+
+Finish each authorized improvement with the evidence that makes it safe to keep:
+
+- Put the behavioral regression at the owning boundary. Show it fails for the
+  reproduced defect or justified known-bad control, not merely that a new helper
+  returns its own expected value. Inspect test-runner/CI registration; a test
+  outside normal validation does not protect later changes.
+- Update the nearest owner documentation with the current requirement, authority,
+  ordering, failure/recovery contract, and focused regression reference where useful.
+  Add a concise adjacent comment only where the reason or rejected alternative
+  would otherwise be easy to lose. Apply the shared breadcrumb rule, not a comment
+  quota or a permanent defense of today's implementation.
+- Put genuinely cross-cutting rules in AGENTS.md and recurring review procedures
+  in this skill; do not duplicate subsystem facts across instructions. Keep raw
+  experiments, coverage logs, and investigation history in run-owned audit artifacts.
+- Remove superseded code, callers, tests, docs, and misleading comments together.
+  A future replacement may change the mechanism, but must account for the protected
+  requirement and update its evidence and rationale rather than silently erasing
+  them. Tests/checks enforce observable contracts; prose explains the why. Neither
+  alone guarantees that a future change is safe.
 
 Deliver the coverage ledger when applicable, evidence-backed findings and KEEP
 reasons, changes and surviving risks, and actual validation results. Distinguish
