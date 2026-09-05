@@ -24,6 +24,69 @@ struct ChatScrollCoordinatorTests {
         )
     }
 
+    @Test("physical tail uses the short content edge until it fills the container", arguments: [80.0, 240.0, 622.0, 647.0, 1_200.0])
+    func shortContentTailBoundary(contentHeight: Double) throws {
+        let coordinator = ChatScrollCoordinator()
+        defer { coordinator.cancel() }
+        let geometry = ChatTranscriptGeometry(
+            offsetY: max(0, contentHeight + 53 - 675),
+            contentHeight: contentHeight, containerHeight: 675, bottomInset: 53
+        )
+        coordinator.geometryChanged(previous: .zero, current: geometry)
+        coordinator.semanticFrameChanged(
+            renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: min(contentHeight, 675) - 12, width: 100, height: 12)
+        )
+        #expect(coordinator.physicalTailEvidence?.classification == .aligned)
+        #expect(geometry.isNativeUnderflow == (contentHeight <= 622))
+        // Short and long insertions keep the same exact row/layout lease.
+        #expect(coordinator.fullHeightTailInserted(renderedID: "outgoing", layoutTransactionID: 41))
+        #expect(coordinator.command?.destination == .materialize("outgoing"))
+        #expect(coordinator.materializationLayoutTransactionID(for: "outgoing") == 41)
+    }
+
+    @Test("short geometry without aligned marker proof still admits materialization", arguments: [nil, -12.0, 12.0] as [Double?])
+    func unprovenUnderflowRetainsMaterialization(displacement: Double?) {
+        let coordinator = ChatScrollCoordinator()
+        defer { coordinator.cancel() }
+        coordinator.geometryChanged(previous: .zero, current: ChatTranscriptGeometry(
+            offsetY: 0, contentHeight: 622, containerHeight: 675, bottomInset: 53
+        ))
+        if let displacement {
+            coordinator.semanticFrameChanged(
+                renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 610 + displacement, width: 100, height: 12)
+            )
+        }
+        #expect(coordinator.physicalTailEvidence?.classification != .aligned)
+        #expect(coordinator.fullHeightTailInserted(renderedID: "outgoing", layoutTransactionID: 41))
+        #expect(coordinator.command?.destination == .materialize("outgoing"))
+    }
+
+    @Test("marker-owned freshness rejects unrelated semantic revisions")
+    func markerFreshnessIsOwnedByMarkerSample() throws {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        coordinator.semanticFrameChanged(
+            renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+        )
+        let admitted = try #require(coordinator.physicalTailEvidence?.semanticFrameRevision)
+        coordinator.semanticFrameChanged(
+            renderedID: "unrelated", layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 100, width: 100, height: 120)
+        )
+        let resized = ChatTranscriptGeometry(offsetY: 100, contentHeight: 600, containerHeight: 500)
+        coordinator.geometryChanged(previous: bottom, current: resized)
+        #expect(coordinator.physicalTailEvidence?.semanticFrameRevision == admitted)
+        coordinator.semanticFrameChanged(
+            renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 488, width: 100, height: 12)
+        )
+        #expect((coordinator.physicalTailEvidence?.semanticFrameRevision ?? 0) > admitted)
+        #expect(coordinator.physicalTailEvidence?.classification == .aligned)
+    }
+
     @Test("duplicate geometry and semantic frames do not advance physical evidence")
     func duplicateEvidenceIsIdempotent() {
         let coordinator = ChatScrollCoordinator()
@@ -220,7 +283,7 @@ struct ChatScrollCoordinatorTests {
         coordinator.geometryChanged(previous: .zero, current: underflow)
         coordinator.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
-            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 228, width: 100, height: 12)
         )
         #expect(coordinator.physicalTailEvidence?.classification == .aligned)
         coordinator.projectionInstalled()
@@ -885,8 +948,8 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
-    @Test("full-height prompt leases the stable marker for its eager terminal row")
-    func fullHeightPromptUsesStableTail() async throws {
+    @Test("full-height prompt targets its stable lazy host and transfers acknowledgement without readmission")
+    func fullHeightPromptTransfersCanonicalLease() async throws {
         try await withTestWatchdog { @MainActor in
             let frames = ManualViewportFrameScheduler()
             let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
@@ -895,12 +958,15 @@ struct ChatScrollCoordinatorTests {
                 layoutTransactionID: 41
             ))
             let stableCommand = try #require(coordinator.command)
-            #expect(stableCommand.destination == .materialize("transcript-bottom"))
-            #expect(coordinator.requiresEagerTerminalRow(renderedID: "outgoing-row"))
-            #expect(!coordinator.ownsTailMaterializationTarget(renderedID: "outgoing-row"))
+            #expect(stableCommand.destination == .materialize("outgoing-row"))
+            #expect(coordinator.ownsTailMaterializationTarget(renderedID: "outgoing-row"))
             #expect(coordinator.commandApplied(stableCommand))
+            coordinator.canonicalPromptAcknowledged(physicalID: "outgoing-row", semanticID: "canonical-row")
+            #expect(!coordinator.discreteTailInserted(renderedID: "canonical-row", physicalTargetID: "outgoing-row"))
+            #expect(coordinator.command == nil)
+            #expect(coordinator.materializationLayoutTransactionID(for: "outgoing-row") == 41)
             coordinator.semanticFrameChanged(
-                renderedID: "outgoing-row",
+                renderedID: "canonical-row",
                 layoutEpoch: coordinator.layoutEpoch,
                 frame: CGRect(x: 0, y: 320, width: 100, height: 56)
             )
@@ -918,14 +984,35 @@ struct ChatScrollCoordinatorTests {
             #expect(coordinator.targetReleaseGeneration == 1)
             #expect(coordinator.consumeTargetRelease())
             #expect(!coordinator.ownsTailMaterializationTarget(renderedID: "outgoing-row"))
-            #expect(coordinator.requiresEagerTerminalRow(renderedID: "outgoing-row"))
-            coordinator.reconcileMaterializationRows(
-                terminalPhysicalRowID: "assistant-row"
-            ) { id in
+            coordinator.reconcileMaterializationRows { id in
                 id == "outgoing-row" || id == "assistant-row" || id == "transcript-bottom"
             }
-            #expect(!coordinator.requiresEagerTerminalRow(renderedID: "outgoing-row"))
+            #expect(coordinator.command == nil)
         }
+    }
+
+    @Test("materialization does not retarget from transient geometry during its entrance layout")
+    func materializationWaitsForOwnedLayoutBeforeRetargeting() throws {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        #expect(coordinator.fullHeightTailInserted(renderedID: "prompt", layoutTransactionID: 41))
+        let command = try #require(coordinator.command)
+        #expect(coordinator.commandApplied(command))
+        coordinator.semanticFrameChanged(
+            renderedID: "prompt", layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 300, width: 100, height: 56)
+        )
+        coordinator.semanticFrameChanged(
+            renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 1_488, width: 100, height: 12)
+        )
+        #expect(coordinator.command == nil)
+        coordinator.layoutTransactionSettled(41)
+        coordinator.semanticFrameChanged(
+            renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 1_500, width: 100, height: 12)
+        )
+        #expect(coordinator.command?.destination == .tail)
     }
 
     @Test("detached submission declines tail materialization ownership")
@@ -1218,9 +1305,7 @@ struct ChatScrollCoordinatorTests {
             #expect(coordinator.commandApplied(transferred))
 
             coordinator.projectionInstalled()
-            coordinator.reconcileMaterializationRows(
-                terminalPhysicalRowID: "canonical-user-row"
-            ) { id in
+            coordinator.reconcileMaterializationRows { id in
                 id == "canonical-user-row" || id == "transcript-bottom"
             }
             // Canonical replacement retires the removed row's exact target;
@@ -1704,13 +1789,13 @@ struct ChatScrollCoordinatorTests {
         let installedUnderflow = ChatTranscriptGeometry(
             offsetY: 0, contentHeight: 347, containerHeight: 400, bottomInset: 53
         )
-        #expect(ChatTranscriptUnderflowLayoutPolicy.isPhysicallyInstalled(installedUnderflow))
-        #expect(!ChatTranscriptUnderflowLayoutPolicy.isPhysicallyInstalled(.init(
+        #expect(installedUnderflow.isNativeUnderflow)
+        #expect(ChatTranscriptGeometry(
             offsetY: 0, contentHeight: 280, containerHeight: 400, bottomInset: 53
-        )))
-        #expect(!ChatTranscriptUnderflowLayoutPolicy.isPhysicallyInstalled(.init(
+        ).isNativeUnderflow)
+        #expect(!ChatTranscriptGeometry(
             offsetY: 0, contentHeight: 500, containerHeight: 400, bottomInset: 53
-        )))
+        ).isNativeUnderflow)
 
         let positioned = ChatScrollCoordinator()
         let task = Task {
@@ -1719,7 +1804,7 @@ struct ChatScrollCoordinatorTests {
         positioned.geometryChanged(previous: .zero, current: installedUnderflow)
         positioned.semanticFrameChanged(
             renderedID: "transcript-bottom", layoutEpoch: positioned.layoutEpoch,
-            frame: CGRect(x: 0, y: 388, width: 100, height: 12)
+            frame: CGRect(x: 0, y: 335, width: 100, height: 12)
         )
         #expect(await task.value)
         #expect(positioned.command == nil)
@@ -1806,8 +1891,8 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
-    @Test("valid underflow marker inset displacement never arms physical repair")
-    func underflowInsetDisplacementDoesNotRepair() async {
+    @Test("valid underflow marker is aligned without subtracting the composer inset twice")
+    func underflowMarkerIsAligned() async {
         let frames = ManualViewportFrameScheduler()
         let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
         let underflow = ChatTranscriptGeometry(
@@ -1823,8 +1908,8 @@ struct ChatScrollCoordinatorTests {
             frame: CGRect(x: 0, y: 664, width: 100, height: 12)
         )
         await Task.yield()
-        #expect(ChatTranscriptUnderflowLayoutPolicy.isPhysicallyInstalled(underflow))
-        #expect(coordinator.physicalTailEvidence?.classification == .belowViewport)
+        #expect(underflow.isNativeUnderflow)
+        #expect(coordinator.physicalTailEvidence?.classification == .aligned)
         #expect(frames.requestCount == 0)
         #expect(coordinator.command == nil)
     }
@@ -1918,6 +2003,48 @@ struct ChatScrollCoordinatorTests {
             await Task.yield()
             #expect(coordinator.command == nil)
             #expect(coordinator.targetReleaseGeneration == 0)
+        }
+    }
+
+    @Test("alignment and changing displacement cannot renew an exhausted physical repair episode")
+    func physicalRepairJitterDoesNotRenewBudget() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualViewportFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let trace = ChatInteractionTrace()
+            coordinator.configureInteractionTrace(trace, context: trace.beginContext(retainedPresentation: true))
+            coordinator.geometryChanged(previous: .zero, current: self.bottom)
+            for attempt in 0..<2 {
+                let before = frames.requestCount
+                coordinator.semanticFrameChanged(
+                    renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+                    frame: CGRect(x: 0, y: 300 - attempt * 20, width: 100, height: 12)
+                )
+                await frames.waitForRequest(count: before + 1)
+                frames.releaseNext()
+                let command = try await coordinator.hostedNextCommand()
+                #expect(command.origin == .physicalTailRepair)
+                let beforeAck = frames.requestCount
+                #expect(coordinator.commandApplied(command))
+                await frames.waitForRequest(count: beforeAck + 1)
+                frames.releaseNext()
+                await Task.yield()
+                #expect(coordinator.command == nil)
+            }
+            let exhaustedRequests = frames.requestCount
+            for index in 0..<20 {
+                coordinator.semanticFrameChanged(
+                    renderedID: "transcript-bottom", layoutEpoch: coordinator.layoutEpoch,
+                    frame: CGRect(x: 0, y: index.isMultiple(of: 2) ? 388 : 270 - index * 3,
+                                  width: 100, height: 12)
+                )
+                await Task.yield()
+            }
+            #expect(coordinator.command == nil)
+            #expect(frames.requestCount == exhaustedRequests)
+            #expect(trace.diagnosticRecords(limit: 256).filter {
+                $0.record.event == "chat.lease.repair-exhausted"
+            }.count == 1)
         }
     }
 

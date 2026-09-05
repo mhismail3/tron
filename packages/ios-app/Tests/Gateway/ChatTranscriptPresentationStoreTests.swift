@@ -1653,16 +1653,6 @@ struct ChatTranscriptPresentationStoreTests {
                 canonicalAliases: [:]
             )
             #expect(localRows.contains { $0.id == submission.presentationID })
-            let lazyRows = ChatLazyPhysicalTranscriptRows(
-                base: localRows,
-                excludesTerminalRow: true
-            )
-            #expect(lazyRows.count == localRows.count - 1)
-            #expect(!lazyRows.contains { $0.id == submission.presentationID })
-            #expect(ChatLazyPhysicalTranscriptRows(
-                base: localRows,
-                excludesTerminalRow: false
-            ).count == localRows.count)
             let coordinator = ChatScrollCoordinator()
             #expect(coordinator.discreteTailInserted(
                 renderedID: submission.presentationID,
@@ -1700,6 +1690,9 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(item.id == canonicalID)
             #expect(replacement.semanticID == canonicalID)
             #expect(replacement.id == submission.presentationID)
+            // The canonical row owns the outgoing physical host; the local
+            // handoff must not remain as a second materialized row.
+            #expect(aliased.filter { $0.id == submission.presentationID }.count == 1)
             let admittedPhysicalIDs = ChatPhysicalTranscriptRowPolicy.admittedPhysicalIDs(
                 installed: settled,
                 canonicalAliases: [canonicalID: submission.presentationID]
@@ -1707,9 +1700,7 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(admittedPhysicalIDs.contains(submission.presentationID))
             #expect(!admittedPhysicalIDs.contains(canonicalID))
             #expect(admittedPhysicalIDs.contains("transcript-bottom"))
-            coordinator.reconcileMaterializationRows(
-                terminalPhysicalRowID: submission.presentationID
-            ) { admittedPhysicalIDs.contains($0) }
+            coordinator.reconcileMaterializationRows { admittedPhysicalIDs.contains($0) }
             #expect(coordinator.ownsTailMaterializationTarget(
                 renderedID: submission.presentationID
             ))

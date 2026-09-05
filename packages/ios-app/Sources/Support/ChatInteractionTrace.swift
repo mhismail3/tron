@@ -48,6 +48,27 @@ final class ChatInteractionTrace: @unchecked Sendable {
         case released
     }
 
+    enum LeaseStage: String, Sendable {
+        case releaseRequested = "release-requested"
+        case releaseReady = "release-ready"
+        case released
+        case retargeted
+        case canonicalHandoff = "canonical-handoff"
+        case boundedFallback = "bounded-fallback"
+        case repairExhausted = "repair-exhausted"
+    }
+
+    enum LeaseReason: String, Sendable {
+        case displacement
+        case incompleteEvidence = "incomplete-evidence"
+        case boundedFallback = "bounded-fallback"
+        case settledEvidence = "settled-evidence"
+        case frameBoundary = "frame-boundary"
+        case consumed
+        case canonicalAcknowledgement = "canonical-acknowledgement"
+        case attemptLimit = "attempt-limit"
+    }
+
     enum LayoutStage: String, Sendable {
         case joined
         case participantSettled = "participant-settled"
@@ -94,6 +115,17 @@ final class ChatInteractionTrace: @unchecked Sendable {
         var hasCommand: Bool?
         var hasAppliedTarget: Bool?
         var hasPendingRelease: Bool?
+        var geometryRevision: Int?
+        var semanticRevision: Int?
+        var markerRevision: Int?
+        var materializationRevision: Int?
+        var repairAttempts: Int?
+        var layoutSettled: Bool?
+        /// Local bounded identity ordinals, not IDs or reversible hashes.
+        var physicalRowToken: Int?
+        var semanticRowToken: Int?
+        var rowMinY: CGFloat?
+        var rowHeight: CGFloat?
 
         static let empty = State()
     }
@@ -110,6 +142,8 @@ final class ChatInteractionTrace: @unchecked Sendable {
     private let lock = NSLock()
     private var nextSequence = 0
     private var nextContext = 0
+    private var nextIdentity = 0
+    private var identityTokens: [(id: String, token: Int)] = []
     private var lastRecordDate = Date.distantPast
     private var records: [Record] = []
     private let timestampFormatter: ISO8601DateFormatter = {
@@ -127,11 +161,13 @@ final class ChatInteractionTrace: @unchecked Sendable {
         nextContext &+= 1
         let context = nextContext
         lock.unlock()
+        let version = Self.buildComponent(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString"))
+        let build = Self.buildComponent(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion"))
         append(
             context: context,
             level: "info",
             event: "context.begin",
-            details: "retained=\(Self.bit(retainedPresentation))"
+            details: "schema=2 app=\(version) build=\(build) retained=\(Self.bit(retainedPresentation))"
         )
         return context
     }
@@ -250,6 +286,24 @@ final class ChatInteractionTrace: @unchecked Sendable {
         )
     }
 
+    func lease(
+        _ stage: LeaseStage,
+        context: Int,
+        token: Int?,
+        reason: LeaseReason,
+        state: State
+    ) {
+        var values = ["reason=\(reason.rawValue)"]
+        if let token { values.append("token=\(token)") }
+        appendState(state, to: &values)
+        append(
+            context: context,
+            level: stage == .boundedFallback || stage == .repairExhausted ? "warning" : "info",
+            event: "lease.\(stage.rawValue)",
+            details: values.joined(separator: " ")
+        )
+    }
+
     func layout(
         _ stage: LayoutStage,
         context: Int,
@@ -307,6 +361,8 @@ final class ChatInteractionTrace: @unchecked Sendable {
         lock.lock()
         nextSequence = 0
         nextContext = 0
+        nextIdentity = 0
+        identityTokens = []
         lastRecordDate = .distantPast
         records = []
         lock.unlock()
@@ -382,6 +438,40 @@ final class ChatInteractionTrace: @unchecked Sendable {
         if let value = state.hasCommand { values.append("command=\(Self.bit(value))") }
         if let value = state.hasAppliedTarget { values.append("target=\(Self.bit(value))") }
         if let value = state.hasPendingRelease { values.append("release=\(Self.bit(value))") }
+        if let value = state.geometryRevision { values.append("geometryRev=\(value)") }
+        if let value = state.semanticRevision { values.append("semanticRev=\(value)") }
+        if let value = state.markerRevision { values.append("markerRev=\(value)") }
+        if let value = state.materializationRevision { values.append("materializationRev=\(value)") }
+        if let value = state.repairAttempts { values.append("repairs=\(value)") }
+        if let value = state.layoutSettled { values.append("layoutSettled=\(Self.bit(value))") }
+        if let value = state.physicalRowToken { values.append("physicalRow=\(value)") }
+        if let value = state.semanticRowToken { values.append("semanticRow=\(value)") }
+        if let value = state.rowMinY { values.append("rowY=\(Self.scalar(value))") }
+        if let value = state.rowHeight { values.append("rowHeight=\(Self.scalar(value))") }
+    }
+
+    /// At most 64 short identities are retained in memory, never exported.
+    /// Evicted identities get new ordinals rather than false continuity. Cost
+    /// does not scale with transcript history or streamed text.
+    func identityToken(_ value: String?) -> Int? {
+        guard let value, !value.isEmpty, value.utf8.prefix(257).count <= 256 else { return nil }
+        lock.lock()
+        defer { lock.unlock() }
+        if let index = identityTokens.firstIndex(where: { $0.id == value }) {
+            let entry = identityTokens.remove(at: index)
+            identityTokens.append(entry)
+            return entry.token
+        }
+        nextIdentity &+= 1
+        if identityTokens.count == 64 { identityTokens.removeFirst() }
+        identityTokens.append((value, nextIdentity))
+        return nextIdentity
+    }
+
+    private static func buildComponent(_ value: Any?) -> String {
+        guard let value = value as? String, !value.isEmpty, value.utf8.count <= 32,
+              value.utf8.allSatisfy({ (48...57).contains($0) || $0 == 46 }) else { return "unknown" }
+        return value
     }
 
     private static func bit(_ value: Bool) -> Int { value ? 1 : 0 }
@@ -463,7 +553,7 @@ enum ChatInteractionAnomalyPolicy {
         // A short/empty transcript intentionally fills only the viewport above
         // the composer inset. Its marker can differ by that exact inset while
         // native bottom geometry remains correctly installed.
-        if ChatTranscriptUnderflowLayoutPolicy.isPhysicallyInstalled(geometry),
+        if geometry.isNativeUnderflow,
            geometry.isAtCatchUpBoundary,
            !geometry.isPastBottomEdge {
             return false
@@ -479,12 +569,16 @@ enum ChatInteractionAnomalyPolicy {
 @MainActor
 final class ChatInteractionTraceLedger {
     private(set) var context: Int?
+    private var isActive = false
     private var nextSubmissionToken = 0
     private(set) var activeSubmissionToken: Int?
 
     func installContext(_ context: Int) {
         self.context = context
+        isActive = true
     }
+
+    func ownsContext(_ context: Int) -> Bool { isActive && self.context == context }
 
     func beginSubmission() -> Int {
         nextSubmissionToken &+= 1
@@ -493,7 +587,7 @@ final class ChatInteractionTraceLedger {
     }
 
     func ownsSubmission(_ token: Int) -> Bool {
-        activeSubmissionToken == token
+        isActive && activeSubmissionToken == token
     }
 
     func endSubmission(_ token: Int) {
@@ -504,6 +598,7 @@ final class ChatInteractionTraceLedger {
     func retire() {
         // Retain the ended context so late cancellation callbacks cannot create
         // a second owner after the view has disappeared.
+        isActive = false
         activeSubmissionToken = nil
     }
 }

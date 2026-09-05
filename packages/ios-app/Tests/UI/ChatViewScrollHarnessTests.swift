@@ -118,15 +118,12 @@ struct ChatViewScrollHarnessTests {
                         && $0.observation.visibleRowIDs.contains(harness.firstTranscriptID)
                 }
                 #expect(!ready.observation.geometry.isPastBottomEdge)
-                let leadingFrame = try #require(
-                    ready.observation.rowFrames[harness.firstTranscriptID]
-                )
-                let visibleBottom = ready.observation.geometry.containerHeight
-                    - ready.observation.geometry.bottomInset
-                let trailingGap = visibleBottom - leadingFrame.maxY
-                #expect(trailingGap >= 0)
-                #expect(trailingGap <= ChatTranscriptLayoutConstants.rowSpacing
-                    + ChatTranscriptLayoutConstants.tailAffordanceHeight + 12)
+                let leading = try #require(ready.nativeRows.first {
+                    $0.semanticID == harness.firstTranscriptID && $0.isVisible
+                })
+                let trailingGap = try #require(leading.composerClearance)
+                #expect(trailingGap >= -2)
+                #expect(trailingGap <= 32)
 
                 // The hosted window contraction is the keyboard-sized native
                 // viewport boundary. Do not also summon the simulator keyboard,
@@ -137,6 +134,98 @@ struct ChatViewScrollHarnessTests {
                         && $0.observation.visibleRowIDs.contains(harness.firstTranscriptID)
                 }
                 #expect(!focused.observation.geometry.isPastBottomEdge)
+                let contracted = try #require(focused.nativeRows.first {
+                    $0.semanticID == harness.firstTranscriptID && $0.isVisible
+                })
+                #expect(contracted.instance == leading.instance)
+                #expect(try #require(contracted.composerClearance) >= -2)
+                #expect(try #require(contracted.composerClearance) <= 32)
+            }
+        }
+    }
+
+    @Test("short transcript appends remain above the real composer through overflow")
+    func shortTranscriptAppendsClearComposer() async throws {
+        try await withTestWatchdog(timeout: .seconds(15)) {
+            var snapshot = try SessionScenarioBuilder(seed: 1_213).openingTail(targetEncodedBytes: 10_000)
+            snapshot.transcript = [try harnessMessage(id: "short-history")]
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 1
+            snapshot.toolExecutions = []
+            let initial = snapshot
+            try await withHarness(snapshot: initial) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeRows.contains { $0.semanticID == "short-history" }
+                }
+                #expect(!ready.observation.geometry.hasScrollableOverflow)
+                let opening = try #require(ready.nativeRows.first { $0.semanticID == "short-history" })
+                #expect(try #require(opening.composerClearance) >= 0)
+                var next = initial
+                for index in 1...10 {
+                    let id = "short-append-\(index)"
+                    next.transcript.append(try harnessAssistantMessage(
+                        id: id, presentationID: id,
+                        text: Array(repeating: "A growing short conversation must stay above the input.", count: 3).joined(separator: " ")
+                    ))
+                    next.transcriptTotal = next.transcript.count
+                    next.eventSequence += 1
+                    next.revision += 1
+                    let installed = harness.probeObservation.projectionInstallCount
+                    harness.replaceAuthoritativeSnapshot(next)
+                    _ = try await harness.recorder.waitUntil {
+                        $0.observation.projectionInstallCount > installed
+                            && $0.nativeRows.contains { $0.semanticID == id }
+                    }
+                    for _ in 0..<30 { try await harness.driveFrameBoundary() }
+                    let sample = try #require(harness.recorder.samples.last)
+                    let tail = try #require(sample.nativeRows.first { $0.semanticID == id })
+                    let clearance = try #require(tail.composerClearance)
+                    #expect(tail.isVisible)
+                    #expect(clearance >= -2)
+                    #expect(clearance <= 32)
+                }
+                #expect(harness.probeObservation.geometry.hasScrollableOverflow)
+            }
+        }
+    }
+
+    @Test("short streaming response remains above composer as it outgrows the viewport")
+    func shortStreamingResponseClearsComposer() async throws {
+        try await withTestWatchdog(timeout: .seconds(15)) {
+            var snapshot = try SessionScenarioBuilder(seed: 1_214).openingTail(targetEncodedBytes: 10_000)
+            snapshot.transcript = [try harnessMessage(id: "short-history")]
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 1
+            snapshot.toolExecutions = []
+            let initial = snapshot
+            try await withHarness(snapshot: initial) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady }
+                var next = initial
+                next.phase = .running
+                var crossedInsetBand = false
+                for count in [1, 3, 6, 7, 8, 9, 10, 11, 12, 14, 20] {
+                    next.streaming = try harnessAssistantMessage(
+                        id: "growing-response", presentationID: "growing-response",
+                        text: Array(repeating: "Streaming content must remain above the composer while a short session grows.", count: count).joined(separator: " ")
+                    )
+                    next.revision += 1
+                    next.eventSequence += 1
+                    let installed = harness.probeObservation.projectionInstallCount
+                    harness.replaceAuthoritativeSnapshot(next)
+                    _ = try await harness.recorder.waitUntil { $0.observation.projectionInstallCount > installed }
+                    for _ in 0..<30 { try await harness.driveFrameBoundary() }
+                    let sample = try #require(harness.recorder.samples.last)
+                    let geometry = sample.observation.geometry
+                    crossedInsetBand = crossedInsetBand || (geometry.hasScrollableOverflow
+                        && geometry.contentHeight < geometry.containerHeight)
+                    let tail = try #require(sample.nativeRows.first { $0.semanticID == "growing-response" })
+                    let clearance = try #require(tail.composerClearance)
+                    #expect(tail.isVisible)
+                    #expect(clearance >= -2)
+                    #expect(clearance <= 32)
+                }
+                #expect(harness.probeObservation.geometry.hasScrollableOverflow)
+                #expect(crossedInsetBand)
             }
         }
     }
@@ -179,6 +268,9 @@ struct ChatViewScrollHarnessTests {
                         && abs(($0.observation.rowFrames["transcript-bottom"]?.height ?? 0)
                             - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 0.5
                 }
+                let previousTail = try #require(ready.nativeRows.first {
+                    $0.semanticID == harness.lastTranscriptID && $0.isVisible
+                })
                 let commandBaseline = ready.observation.tailMaterializationCommandCount
                 let releaseBaseline = ready.observation.targetReleaseCount
                 let repairBaseline = ready.observation.physicalTailRepairCommandCount
@@ -193,50 +285,169 @@ struct ChatViewScrollHarnessTests {
                     let observation = sample.observation
                     return observation.tailMaterializationCommandCount == commandBaseline + 1
                         && observation.targetReleaseCount == releaseBaseline
-                        && observation.geometry.distanceFromBottom <= 1
-                        && observation.rowFrames.contains { id, frame in
-                            id.hasPrefix(outgoingPrefix) && frame.height > 1
+                        && sample.nativeRows.contains {
+                            $0.physicalID.hasPrefix(outgoingPrefix) && $0.isVisible
+                                && abs($0.tailGap - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 2
                         }
-                        && abs((observation.rowFrames["transcript-bottom"]?.height ?? 0)
-                            - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 0.5
                 }
-                let outgoingID = try #require(stabilized.observation.rowFrames.keys.first {
-                    $0.hasPrefix(outgoingPrefix)
+                let outgoing = try #require(stabilized.nativeRows.first {
+                    $0.physicalID.hasPrefix(outgoingPrefix) && $0.isVisible
                 })
+                let outgoingID = outgoing.physicalID
                 let released = try await harness.recorder.waitUntil {
                     $0.observation.targetReleaseCount == releaseBaseline + 1
-                        && $0.observation.rowFrames[outgoingID] != nil
-                        && abs(($0.observation.rowFrames["transcript-bottom"]?.height ?? 0)
-                            - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 0.5
+                        && $0.nativeRows.contains {
+                            $0.physicalID == outgoingID && $0.isVisible
+                                && abs($0.tailGap - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 2
+                        }
                 }
 
                 let physicalPixel = 1 / max(1, harness.screenScale)
                 let sendSamples = harness.recorder.samples.filter {
                     $0.frameIndex >= ready.frameIndex && $0.frameIndex <= released.frameIndex
                 }
-                // Geometry is current native evidence; the bounded row-frame
-                // map intentionally retains lazy callbacks after unmount.
-                let sendOffsets = sendSamples.map(\.observation.geometry.offsetY)
+                // Lazy contentSize/contentOffset can rebase together without
+                // moving visible content. Measure the mounted prior row instead.
+                let sendOffsets = sendSamples.compactMap { sample in
+                    sample.nativeRows.first {
+                        $0.physicalID == previousTail.physicalID && $0.isVisible
+                    }?.frame.maxY
+                }
                 let sendDeltas = zip(sendOffsets, sendOffsets.dropFirst())
                     .map { $1 - $0 }
                     .filter { abs($0) > physicalPixel }
                 #expect(!(sendDeltas.contains(where: { $0 > 0 })
                     && sendDeltas.contains(where: { $0 < 0 })))
                 let samples = sendSamples.filter { $0.frameIndex >= stabilized.frameIndex }
-                let offsets = samples.map(\.observation.geometry.offsetY)
+                let offsets = samples.compactMap { sample in
+                    sample.nativeRows.first { $0.physicalID == outgoingID && $0.isVisible }?.frame.maxY
+                }
                 let deltas = zip(offsets, offsets.dropFirst()).map { $1 - $0 }
                     .filter { abs($0) > physicalPixel }
                 #expect(!(deltas.contains(where: { $0 > 0 })
                     && deltas.contains(where: { $0 < 0 })))
-                #expect(samples.allSatisfy {
-                    abs(($0.observation.rowFrames["transcript-bottom"]?.height ?? 0)
-                        - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 0.5
+                #expect(samples.allSatisfy { sample in
+                    sample.nativeRows.contains {
+                        $0.physicalID == outgoingID && $0.instance == outgoing.instance && $0.isVisible
+                            && abs($0.tailGap - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 2
+                    }
                 })
                 #expect(released.observation.tailMaterializationCommandCount == commandBaseline + 1)
                 #expect(released.observation.physicalTailRepairCommandCount == repairBaseline)
                 #expect(abs(released.observation.composerHeight - composerHeight) <= 1)
                 #expect(released.observation.physicalRowAppearanceCounts[outgoingID] == 1)
                 #expect(released.observation.physicalRowDisappearanceCounts[outgoingID, default: 0] == 0)
+            }
+        }
+    }
+
+    enum SendHistory: CaseIterable, Sendable { case short, shortToOverflow, long }
+
+    @Test("short and long history preserve the mounted prompt through acknowledgement and successor", arguments: SendHistory.allCases, [false, true])
+    func resumedSendAcknowledgementSuccessor(history: SendHistory, acknowledgeDuringLease: Bool) async throws {
+        try await withTestWatchdog(timeout: .seconds(15)) {
+            let historyCount = history == .long ? 160 : 1
+            var snapshot = try SessionScenarioBuilder(seed: 1_212)
+                .openingTail(targetEncodedBytes: 10_000)
+            snapshot.acceptsQueuedPrompts = false
+            snapshot.transcript = try (0..<historyCount).map { index in
+                try harnessRichAssistantMessage(
+                    id: "mixed-\(index)", presentationID: "mixed-turn-\(index)",
+                    thinkingLines: index.isMultiple(of: 5) ? ["Bounded thinking fixture."] : [],
+                    text: Array(repeating: "Paragraph \(index) with mixed-height history that wraps across the native transcript.",
+                                count: 1 + index % 7).joined(separator: "\n\n")
+                )
+            }
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = snapshot.transcript.count
+            let initial = snapshot
+            try await withHarness(snapshot: initial, enablesComposerSubmission: true) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.isReady && $0.nativeRows.contains {
+                        $0.semanticID == "mixed-turn-\(historyCount - 1)" && $0.isVisible
+                    }
+                }
+                let isShort = history != .long
+                #expect(ready.observation.geometry.hasScrollableOverflow == !isShort)
+                let commandBaseline = ready.observation.tailMaterializationCommandCount
+                let releaseBaseline = ready.observation.targetReleaseCount
+                let maximumSendCommands = history == .shortToOverflow ? 2 : 1
+                let text = history == .shortToOverflow
+                    ? String(repeating: "A large outgoing prompt must cross the viewport without a forced offset. ", count: 40)
+                    : "Keep this resumed conversation stable."
+                try harness.setComposerDraftText(text)
+                harness.submitPrompt()
+                let sent = try await harness.recorder.waitUntil {
+                    (acknowledgeDuringLease
+                        ? $0.observation.targetReleaseCount == releaseBaseline
+                        : $0.observation.targetReleaseCount > releaseBaseline)
+                        && (1...maximumSendCommands).contains($0.observation.tailMaterializationCommandCount - commandBaseline)
+                        && $0.nativeRows.contains {
+                            $0.physicalID.hasPrefix("outgoing-submission:") && $0.isVisible
+                                && (!acknowledgeDuringLease
+                                    || abs($0.tailGap - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 2)
+                        }
+                }
+                let outgoing = try #require(sent.nativeRows.first {
+                    $0.physicalID.hasPrefix("outgoing-submission:") && $0.isVisible
+                })
+                // Fail with the measured native gap rather than waiting for
+                // an exact subpixel geometry value that may never republish.
+                if !acknowledgeDuringLease {
+                    #expect(abs(outgoing.tailGap - ChatTranscriptLayoutConstants.tailAffordanceHeight) <= 2)
+                }
+                #expect(harness.probeObservation.geometry.hasScrollableOverflow == (history != .short))
+                var acknowledged = initial
+                acknowledged.transcript.append(try decodeTranscriptFixture(
+                    TranscriptItem.self,
+                    from: JSONSerialization.data(withJSONObject: [
+                        "id": "canonical-prompt", "parentId": NSNull(),
+                        "presentationId": "hosted-prompt-operation",
+                        "timestamp": "2026-01-01T00:01:00Z", "kind": "message", "role": "user",
+                        "content": [["id": "canonical-text", "ordinal": 0, "type": "text", "text": text]]
+                    ])
+                ))
+                acknowledged.transcriptTotal = acknowledged.transcript.count
+                harness.replaceAuthoritativeSnapshot(acknowledged)
+                let ack = try await harness.recorder.waitUntil {
+                    $0.nativeRows.contains { $0.semanticID == "canonical-prompt" && $0.isVisible }
+                }
+                let canonical = try #require(ack.nativeRows.first { $0.semanticID == "canonical-prompt" })
+                #expect(canonical.physicalID == outgoing.physicalID)
+                #expect(canonical.instance == outgoing.instance)
+                #expect(abs(canonical.frame.maxY - outgoing.frame.maxY) <= 2)
+
+                var response = acknowledged
+                response.transcript.append(try harnessAssistantMessage(
+                    id: "first-successor", presentationID: "first-successor", text: "The first response is now visible."
+                ))
+                response.transcriptTotal = response.transcript.count
+                harness.replaceAuthoritativeSnapshot(response)
+                _ = try await harness.recorder.waitUntil {
+                    $0.nativeRows.contains { $0.semanticID == "first-successor" && $0.isVisible }
+                }
+                // Observe actual display boundaries beyond the old one-second
+                // fallback. No production delay or synthetic offset is injected.
+                for _ in 0..<80 { try await harness.driveFrameBoundary() }
+                let settled = try #require(harness.recorder.samples.last)
+                let prompt = try #require(settled.nativeRows.first { $0.semanticID == "canonical-prompt" })
+                #expect(prompt.isVisible)
+                #expect(prompt.instance == outgoing.instance)
+                #expect(settled.nativeRows.filter { $0.physicalID == outgoing.physicalID }.count == 1)
+                // The successor may already be realized before admission; it
+                // is entitled to at most one materialization, acknowledgement none.
+                #expect(ack.observation.tailMaterializationCommandCount == sent.observation.tailMaterializationCommandCount)
+                #expect(settled.observation.tailMaterializationCommandCount <= commandBaseline + maximumSendCommands + 1)
+                let frames = harness.recorder.samples.filter { $0.frameIndex >= ack.frameIndex }
+                #expect(frames.allSatisfy { sample in
+                    sample.nativeRows.contains {
+                        $0.physicalID == outgoing.physicalID && $0.instance == outgoing.instance && $0.isVisible
+                    }
+                })
+                #expect(abs(try harness.nativeTranscriptSignedTailError()) <= 2)
+                let successor = try #require(settled.nativeRows.first { $0.semanticID == "first-successor" })
+                #expect(try #require(successor.composerClearance) >= -2)
+                #expect(!harness.traceRecords.contains { $0.record.event == "chat.lease.bounded-fallback" })
             }
         }
     }
@@ -834,6 +1045,12 @@ struct ChatViewScrollHarnessTests {
                     $0.observation.projectionInstallCount >= installBaseline + 2
                         && $0.observation.installedProjectionSourceOrdinal == completedOrdinal
                         && $0.observation.lastAnimatedEntranceSourceOrdinal == runningOrdinal
+                        // An installed projection precedes its native/semantic
+                        // geometry publication; it is not a rendered-frame fence.
+                        && $0.observation.rowFrames["tool-run-settled-group"] != nil
+                        && $0.nativeRows.contains {
+                            $0.semanticID == "tool-run-settled-group" && $0.isVisible
+                        }
                 }
                 #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
                 #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
@@ -1337,6 +1554,9 @@ struct ChatViewScrollHarnessTests {
         do {
             try await operation(harness)
         } catch {
+            if let sample = harness.recorder.samples.last {
+                print("Hosted failure frame \(sample.frameIndex): commands=\(sample.observation.tailMaterializationCommandCount) releases=\(sample.observation.targetReleaseCount) rows=\(sample.nativeRows.suffix(8))")
+            }
             await harness.close()
             throw error
         }
@@ -1649,13 +1869,18 @@ final class ChatViewScrollHarness {
         hostingController.view.layoutIfNeeded()
 
         let hostedView = hostingController.view!
-        recorder = PresentedFrameRecorder(probe: probe) { geometry in
-            Self.containsNativeTranscriptScrollView(in: hostedView, matching: geometry)
-        }
+        recorder = PresentedFrameRecorder(
+            probe: probe,
+            nativeGeometryMatches: { geometry in
+                Self.containsNativeTranscriptScrollView(in: hostedView, matching: geometry)
+            },
+            nativeRows: { Self.nativeRows(in: hostedView) }
+        )
         recorder.start()
     }
 
     var probeObservation: ChatHostedObservation { probe.observation }
+    var traceRecords: [GatewayProfileLogRecord] { model.chatInteractionTrace.diagnosticRecords(limit: 256) }
     var screenScale: CGFloat { window.screen.scale }
 
     func replaceAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
@@ -1732,7 +1957,6 @@ final class ChatViewScrollHarness {
     ) -> Bool {
         Self.scrollViews(in: view).contains { scrollView in
             !(scrollView is UITextView)
-                && scrollView.contentSize.height > scrollView.bounds.height
                 && abs(scrollView.contentSize.height - geometry.contentHeight) <= 2
                 && abs(scrollView.bounds.origin.y - geometry.offsetY) <= 2
         }
@@ -1767,9 +1991,7 @@ final class ChatViewScrollHarness {
     }
 
     private func nativeTranscriptScrollView() throws -> UIScrollView {
-        guard let value = Self.scrollViews(in: hostingController.view)
-            .filter({ !($0 is UITextView) && $0.contentSize.height > $0.bounds.height })
-            .max(by: { $0.contentSize.height < $1.contentSize.height }) else {
+        guard let value = Self.nativeTranscriptScrollView(in: hostingController.view) else {
             throw HarnessError.missingTranscript
         }
         return value
@@ -1833,6 +2055,37 @@ final class ChatViewScrollHarness {
         return current + view.subviews.flatMap(scrollViews)
     }
 
+    private static func markers(in view: UIView) -> [ChatHostedNativeRowMarker] {
+        (view as? ChatHostedNativeRowMarker).map { [$0] } ?? view.subviews.flatMap { markers(in: $0) }
+    }
+
+    private static func nativeTranscriptScrollView(in root: UIView) -> UIScrollView? {
+        // This fixed-window harness has one full-size transcript viewport.
+        // Its identity cannot depend on overflowing content or a lazy child
+        // being mounted at the instant an entrance/compaction is sampled.
+        scrollViews(in: root).filter { !($0 is UITextView) }.max {
+            $0.bounds.width * $0.bounds.height < $1.bounds.width * $1.bounds.height
+        }
+    }
+
+    private static func nativeRows(in root: UIView) -> [PresentedFrameRecorder.NativeRow] {
+        guard let scroll = nativeTranscriptScrollView(in: root) else { return [] }
+        let composer = markers(in: root).first { $0.physicalID == ChatHostedNativeRowProbe.composerID }
+        let composerTop = composer.map { $0.convert($0.bounds, to: scroll).minY - scroll.bounds.minY }
+        let viewport = CGRect(x: 0, y: scroll.adjustedContentInset.top, width: scroll.bounds.width,
+                              height: scroll.bounds.height - scroll.adjustedContentInset.top
+                                - scroll.adjustedContentInset.bottom)
+        return markers(in: scroll).filter { $0.window != nil && !$0.isHidden }.map { marker in
+            let frame = marker.convert(marker.bounds, to: scroll)
+                .offsetBy(dx: -scroll.bounds.minX, dy: -scroll.bounds.minY)
+            return .init(physicalID: marker.physicalID, semanticID: marker.semanticID,
+                         instance: marker.hostIdentity, frame: frame,
+                         isVisible: frame.height > 0 && frame.intersects(viewport),
+                         tailGap: viewport.maxY - frame.maxY,
+                         composerClearance: composerTop.map { $0 - frame.maxY })
+        }
+    }
+
     private static func textViews(in view: UIView) -> [UITextView] {
         let current = (view as? UITextView).map { [$0] } ?? []
         return current + view.subviews.flatMap(textViews)
@@ -1841,10 +2094,21 @@ final class ChatViewScrollHarness {
 
 @MainActor
 final class PresentedFrameRecorder: NSObject {
+    struct NativeRow: Sendable, Equatable {
+        let physicalID: String
+        let semanticID: String
+        let instance: UUID
+        let frame: CGRect
+        let isVisible: Bool
+        let tailGap: CGFloat
+        let composerClearance: CGFloat?
+    }
+
     struct Sample: Sendable {
         let frameIndex: Int
         let observation: ChatHostedObservation
         let nativeGeometryMatches: Bool
+        let nativeRows: [NativeRow]
     }
 
     private struct Waiter {
@@ -1855,6 +2119,8 @@ final class PresentedFrameRecorder: NSObject {
 
     private let probe: ChatHostedProbe
     private let nativeGeometryMatches: @MainActor (ChatTranscriptGeometry) -> Bool
+    private let nativeRows: @MainActor () -> [NativeRow]
+    private var lastNativeRows: [NativeRow] = []
     private var displayLink: CADisplayLink?
     private var frameIndex = 0
     private var lastRevision = -1
@@ -1864,10 +2130,12 @@ final class PresentedFrameRecorder: NSObject {
 
     init(
         probe: ChatHostedProbe,
-        nativeGeometryMatches: @escaping @MainActor (ChatTranscriptGeometry) -> Bool
+        nativeGeometryMatches: @escaping @MainActor (ChatTranscriptGeometry) -> Bool,
+        nativeRows: @escaping @MainActor () -> [NativeRow]
     ) {
         self.probe = probe
         self.nativeGeometryMatches = nativeGeometryMatches
+        self.nativeRows = nativeRows
     }
 
     func start() {
@@ -1905,12 +2173,15 @@ final class PresentedFrameRecorder: NSObject {
     @objc private func displayFrame() {
         frameIndex += 1
         let observation = probe.observation
-        guard observation.revision != lastRevision else { return }
+        let rows = nativeRows()
+        guard observation.revision != lastRevision || rows != lastNativeRows else { return }
         lastRevision = observation.revision
+        lastNativeRows = rows
         let sample = Sample(
             frameIndex: frameIndex,
             observation: observation,
-            nativeGeometryMatches: nativeGeometryMatches(observation.geometry)
+            nativeGeometryMatches: nativeGeometryMatches(observation.geometry),
+            nativeRows: rows
         )
         samples.append(sample)
         if samples.count > 256 { samples.removeFirst(samples.count - 256) }

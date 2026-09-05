@@ -49,35 +49,6 @@ enum ChatTranscriptLayoutConstants {
     }
 }
 
-enum ChatTranscriptUnderflowLayoutPolicy {
-    static func minimumContentHeight(containerHeight: CGFloat, bottomInset: CGFloat) -> CGFloat {
-        guard containerHeight.isFinite, bottomInset.isFinite else { return 0 }
-        return max(0, containerHeight - bottomInset)
-    }
-
-    static func isPhysicallyInstalled(_ geometry: ChatTranscriptGeometry) -> Bool {
-        guard geometry.isValid else { return false }
-        let visibleHeight = max(0, geometry.containerHeight - geometry.bottomInset)
-        let minimum = minimumContentHeight(
-            containerHeight: geometry.containerHeight,
-            bottomInset: geometry.bottomInset
-        )
-        let contentBottom = geometry.contentHeight + geometry.bottomInset
-        let maximumOffset = max(0, contentBottom - geometry.containerHeight)
-        if let visibleBottomY = geometry.visibleBottomY {
-            guard visibleBottomY.isFinite else { return false }
-            if visibleBottomY <= contentBottom + 2,
-               geometry.offsetY > maximumOffset + 2 {
-                return false
-            }
-        } else if geometry.offsetY > maximumOffset + 2 {
-            return false
-        }
-        return geometry.contentHeight + 2 >= minimum
-            && geometry.contentHeight <= visibleHeight + 2
-    }
-}
-
 struct ChatQueuedMessageRenderEntry: Identifiable, Hashable {
     let id: String
     let index: Int
@@ -198,26 +169,6 @@ struct ChatPhysicalTranscriptRows: RandomAccessCollection {
             content: .transcript(item, isCommitted: isCommitted)
         )
     }
-}
-
-/// Keeps the persistent lazy collection structurally unchanged while one new
-/// ordinary terminal prompt is hosted eagerly as its sibling. Excluding that
-/// one final element prevents LazyVStack from inventing its height from the
-/// preceding row before the prompt can be measured.
-struct ChatLazyPhysicalTranscriptRows: RandomAccessCollection {
-    typealias Index = ChatPhysicalTranscriptRows.Index
-
-    let base: ChatPhysicalTranscriptRows
-    let excludesTerminalRow: Bool
-
-    var startIndex: Index { base.startIndex }
-    var endIndex: Index {
-        excludesTerminalRow && !base.isEmpty
-            ? base.index(before: base.endIndex)
-            : base.endIndex
-    }
-
-    subscript(position: Index) -> ChatPhysicalTranscriptRow { base[position] }
 }
 
 struct ChatPhysicalToolRunFusion: Hashable {
@@ -357,6 +308,9 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
 
     @State private var displayed: ChatPhysicalTranscriptRow
     @State private var retainedPromptEntrance: ChatPhysicalPromptEntrance?
+    #if HOSTED_TEST
+    @State private var hostedIdentity = UUID()
+    #endif
 
     init(
         row: ChatPhysicalTranscriptRow,
@@ -381,6 +335,13 @@ private struct ChatPhysicalTranscriptReplacementHost<Content: View>: View {
         // `row.id` owns structural continuity. Descendants animate admitted
         // lifecycle and payload values within this persistent host.
         renderedContent
+            #if HOSTED_TEST
+            .background {
+                ChatHostedNativeRowProbe(
+                    physicalID: row.id, semanticID: displayed.semanticID, identity: hostedIdentity
+                )
+            }
+            #endif
             .onAppear { hostedRecorder?.recordPhysicalRowAppearance(id: displayed.id) }
             .onDisappear { hostedRecorder?.recordPhysicalRowDisappearance(id: displayed.id) }
             .onChange(of: row) { _, next in retarget(next) }
@@ -442,7 +403,6 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let hasSettledOpeningOffset: Bool
     let permitsAsynchronousContent: Bool
     let frameScheduler: DisplayFrameScheduler
-    let minimumUnderflowContentHeight: CGFloat
     let reduceMotion: Bool
     let presentationEpoch: Int
     let presentationPhase: ChatOpenPresentationPhase
@@ -472,22 +432,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             )
         }
         let terminalPhysicalID = physicalRows?.last?.id
-        let eagerTerminalRow = physicalRows?.last.flatMap { row in
-            scrollCoordinator.requiresEagerTerminalRow(renderedID: row.id) ? row : nil
-        }
-        let lazyPhysicalRows = physicalRows.map {
-            ChatLazyPhysicalTranscriptRows(
-                base: $0,
-                excludesTerminalRow: eagerTerminalRow != nil
-            )
-        }
         let terminalRowOwnsMaterializationTarget = terminalPhysicalID.map {
             scrollCoordinator.ownsTailMaterializationTarget(renderedID: $0)
         } == true
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if let installed, let lazyPhysicalRows {
+                    if let installed, let physicalRows {
                         if (installed.sourceWindow.originalStart ?? 0) > 0 {
                             stableRow(
                                 semanticID: "earlier-messages",
@@ -499,7 +450,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                             }
                             .id("earlier-messages")
                         }
-                        ForEach(lazyPhysicalRows) { row in
+                        ForEach(physicalRows) { row in
                             physicalRowHost(
                                 row,
                                 terminalPhysicalID: terminalPhysicalID,
@@ -510,30 +461,14 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         }
                     }
                 }
-                if let installed, let eagerTerminalRow {
-                    // Ordinary outgoing prompts have complete natural height.
-                    // Keep the single terminal host eager until a successor row
-                    // arrives so LazyVStack never publishes a neighbor-derived
-                    // estimate as visible transcript geometry.
-                    physicalRowHost(
-                        eagerTerminalRow,
-                        terminalPhysicalID: terminalPhysicalID,
-                        terminalRowOwnsMaterializationTarget:
-                            terminalRowOwnsMaterializationTarget,
-                        installed: installed
-                    )
-                }
-                // The eager sentinel is the lazy collection's bounded target.
                 tailMarker(
                     terminalRowOwnsMaterializationTarget: terminalRowOwnsMaterializationTarget
                 )
             }
-            .padding(.top, 12)
-            // An explicit ScrollPosition target suppresses SwiftUI's advisory
-            // underflow alignment. A measured minimum keeps only short/empty
-            // transcripts composer-aligned; overflowing transcripts are unchanged.
-            .frame(minHeight: minimumUnderflowContentHeight, alignment: .bottom)
+            // Register the complete transcript layout once. Independent row
+            // and marker registrations can disagree as lazy estimates settle.
             .scrollTargetLayout()
+            .padding(.top, 12)
             .chatStableTranscriptUpdates(projectionIdentity: installed?.tag)
             // Physical lift settlement remains hidden. Once settled, one
             // covered `.presenting` frame installs a separate visual entrance;
@@ -748,7 +683,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             physicalRow(displayed, installed: installed)
         }
         // Exact lazy-row targets retain the visual tail affordance inside the
-        // collection target. Marker-targeted eager prompts keep the full marker.
+        // collection target; release transfers it back to the eager marker.
         .padding(
             .bottom,
             row.id == terminalPhysicalID
@@ -957,6 +892,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     private var lazyTailMaterializationRequest: ChatLazyTailMaterializationRequest? {
         guard let installed else { return nil }
         if let id = transcriptPresentation.newestPendingEntranceID,
+           !canonicalSubmissionIDs.contains(id),
            installed.containsDisplayedID(id) {
             let rows = ChatPhysicalTranscriptRowPolicy.rows(
                 installed: installed,

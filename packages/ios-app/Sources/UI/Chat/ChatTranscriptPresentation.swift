@@ -812,6 +812,9 @@ struct ChatTranscriptGeometry: Equatable {
         let contentBottom = contentHeight + bottomInset
         return isValid && contentBottom.isFinite && contentBottom > containerHeight + 2
     }
+    /// Native short-content alignment is legal only for a plausible viewport;
+    /// current marker evidence, not a fabricated minimum height, proves its tail.
+    var isNativeUnderflow: Bool { !hasScrollableOverflow && isPlausibleOpeningViewport }
     var isAtBottom: Bool { isValid && !isPastBottomEdge && distanceFromBottom <= 80 }
     var isAtExactBottom: Bool { isValid && !isPastBottomEdge && distanceFromBottom <= 2 }
     /// Physical scroll settling commonly stops a few points above the computed

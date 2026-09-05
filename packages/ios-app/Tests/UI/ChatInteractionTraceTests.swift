@@ -93,6 +93,54 @@ struct ChatInteractionTraceTests {
         #expect(record?.message.contains("command=0 target=1 release=1") == true)
     }
 
+    @Test("identity correlation is bounded, local, and content-free under trace pressure")
+    func boundedIdentityCorrelation() throws {
+        let trace = ChatInteractionTrace()
+        let context = trace.beginContext(retainedPresentation: true)
+        let privateID = "private-prompt-identity"
+        let physical = try #require(trace.identityToken(privateID))
+        #expect(trace.identityToken(privateID) == physical)
+        let semantic = try #require(trace.identityToken("private-canonical-identity"))
+        trace.lease(.canonicalHandoff, context: context, token: 7,
+                    reason: .canonicalAcknowledgement,
+                    state: .init(geometryRevision: 3, semanticRevision: 9,
+                                 markerRevision: 5, materializationRevision: 2,
+                                 repairAttempts: 1, layoutSettled: false,
+                                 physicalRowToken: physical, semanticRowToken: semantic,
+                                 rowMinY: 340, rowHeight: 44))
+        for index in 0..<300 {
+            _ = trace.identityToken("evicted-\(index)")
+            trace.geometry(.meaningfulChange, context: context, state: .empty)
+        }
+        #expect(trace.identityToken(privateID) != physical)
+        #expect(trace.identityToken(String(repeating: "sensitive", count: 1_000)) == nil)
+        let records = trace.diagnosticRecords(limit: 1_000)
+        #expect(records.count == ChatInteractionTrace.maximumRecords)
+        #expect(records.contains { $0.record.message.contains("schema=2 app=") })
+        let handoff = try #require(records.first { $0.record.event == "chat.lease.canonical-handoff" })
+        #expect(handoff.record.message.contains("geometryRev=3 semanticRev=9 markerRev=5"))
+        #expect(handoff.record.message.contains("physicalRow=\(physical) semanticRow=\(semantic)"))
+        #expect(!records.contains { $0.record.message.contains("private-") || $0.record.message.contains("sensitive") })
+    }
+
+    @Test("retirement revokes checkpoints without masking an active lost projection")
+    @MainActor
+    func retiredContextCannotAdmitCheckpoint() {
+        let ledger = ChatInteractionTraceLedger()
+        ledger.installContext(1)
+        let submission = ledger.beginSubmission()
+        #expect(ledger.ownsContext(1))
+        #expect(ledger.ownsSubmission(submission))
+        #expect(ChatInteractionAnomalyPolicy.lostProjection(expectedRows: 40, currentRows: 0))
+        ledger.retire()
+        #expect(ledger.context == 1)
+        #expect(!ledger.ownsContext(1))
+        #expect(!ledger.ownsSubmission(submission))
+        ledger.installContext(2)
+        #expect(!ledger.ownsContext(1))
+        #expect(ledger.ownsContext(2))
+    }
+
     @Test("anomaly policy distinguishes automatic displacement from reader ownership")
     func anomalyPolicy() {
         let atTail = ChatTranscriptGeometry(

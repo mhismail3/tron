@@ -1,6 +1,34 @@
 #if HOSTED_TEST
 import SwiftUI
 
+/// Test-only mounted UIKit evidence, queried at a display boundary. Unlike the
+/// semantic callback cache, this cannot report a frame after native unmount.
+final class ChatHostedNativeRowMarker: UIView {
+    var physicalID = ""
+    var semanticID = ""
+    var hostIdentity = UUID()
+}
+
+struct ChatHostedNativeRowProbe: UIViewRepresentable {
+    static let composerID = "hosted-composer"
+    let physicalID: String
+    let semanticID: String
+    let identity: UUID
+
+    func makeUIView(context: Context) -> ChatHostedNativeRowMarker {
+        let view = ChatHostedNativeRowMarker()
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        return view
+    }
+
+    func updateUIView(_ view: ChatHostedNativeRowMarker, context: Context) {
+        view.physicalID = physicalID
+        view.semanticID = semanticID
+        view.hostIdentity = identity
+    }
+}
+
 struct ChatHostedScrollState: Sendable {
     let isDetached: Bool
     let hasUnread: Bool

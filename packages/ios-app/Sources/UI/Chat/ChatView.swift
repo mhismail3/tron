@@ -112,6 +112,15 @@ struct ChatView: View {
                 // the keyboard, multiline text, and attachment chips push the
                 // native transcript viewport exactly once and reverse naturally.
                 composer
+                    #if HOSTED_TEST
+                    .background {
+                        ChatHostedNativeRowProbe(
+                            physicalID: ChatHostedNativeRowProbe.composerID,
+                            semanticID: ChatHostedNativeRowProbe.composerID,
+                            identity: UUID()
+                        )
+                    }
+                    #endif
             }
             .overlay(alignment: .top) { topBlur }
             .overlay {
@@ -556,7 +565,7 @@ struct ChatView: View {
             for delay in [Duration.milliseconds(350), .milliseconds(1_250)] {
                 do { try await Task.sleep(for: delay); try Task.checkCancellation() }
                 catch { return }
-                guard interactionTraceLedger.context == context,
+                guard interactionTraceLedger.ownsContext(context),
                       sessionPresentation.open.epoch == epoch,
                       sessionPresentation.open.phase == .ready else { return }
                 let state = interactionTraceState()
@@ -752,25 +761,28 @@ struct ChatView: View {
         installed: InstalledChatTranscript?
     ) {
         guard presentationActivity.allowsViewportObservation else { return }
+        if let installed {
+            for canonicalID in sessionPresentation.canonicalSubmissionHandoffs.ids
+                where installed.containsDisplayedID(canonicalID) {
+                transcriptPresentation.consumeTranscriptEntrance(id: canonicalID)
+                if let physicalID = sessionPresentation.canonicalSubmissionAliases.aliases[canonicalID] {
+                    scrollCoordinator.canonicalPromptAcknowledged(
+                        physicalID: physicalID, semanticID: canonicalID
+                    )
+                }
+            }
+        }
         let admittedPhysicalRowIDs = installed.map {
             ChatPhysicalTranscriptRowPolicy.admittedPhysicalIDs(
                 installed: $0,
                 canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
             )
         } ?? []
-        let terminalPhysicalRowID = installed.flatMap {
-            ChatPhysicalTranscriptRowPolicy.rows(
-                installed: $0,
-                canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
-            ).last?.id
-        }
         // Validate against the exact physical spine rendered by
         // ChatTranscriptScrollView. The store's canonical namespace does not
         // include display-only prompt/tool aliases, so validating it directly
         // can retire a still-mounted materialization target during handoff.
-        scrollCoordinator.reconcileMaterializationRows(
-            terminalPhysicalRowID: terminalPhysicalRowID
-        ) { renderedID in
+        scrollCoordinator.reconcileMaterializationRows { renderedID in
             admittedPhysicalRowIDs.contains(renderedID)
         }
         let projectionLayoutChanged = previousTag.map { previousTag in
@@ -832,9 +844,17 @@ struct ChatView: View {
         canonicalID: String,
         presentationID: String
     ) {
-        _ = sessionPresentation.canonicalSubmissionAliases.insert(
+        guard sessionPresentation.canonicalSubmissionAliases.insert(
             canonicalID: canonicalID,
             presentationID: presentationID
+        ), let context = interactionTraceLedger.context,
+           interactionTraceLedger.ownsContext(context) else { return }
+        var state = interactionTraceState()
+        state.physicalRowToken = model.chatInteractionTrace.identityToken(presentationID)
+        state.semanticRowToken = model.chatInteractionTrace.identityToken(canonicalID)
+        model.chatInteractionTrace.lease(
+            .canonicalHandoff, context: context, token: nil,
+            reason: .canonicalAcknowledgement, state: state
         )
     }
 
@@ -1057,17 +1077,6 @@ struct ChatView: View {
     }
 
     private var transcript: some View {
-        GeometryReader { viewport in
-            transcriptContent(
-                minimumUnderflowContentHeight: ChatTranscriptUnderflowLayoutPolicy.minimumContentHeight(
-                    containerHeight: viewport.size.height,
-                    bottomInset: viewport.safeAreaInsets.bottom
-                )
-            )
-        }
-    }
-
-    private func transcriptContent(minimumUnderflowContentHeight: CGFloat) -> some View {
         ChatTranscriptScrollView(
             transcriptPresentation: transcriptPresentation,
             scrollCoordinator: scrollCoordinator,
@@ -1079,7 +1088,6 @@ struct ChatView: View {
             hasSettledOpeningOffset: hasSettledOpeningOffset,
             permitsAsynchronousContent: scrollCoordinator.permitsAsynchronousTranscriptContent,
             frameScheduler: displayFrameScheduler,
-            minimumUnderflowContentHeight: minimumUnderflowContentHeight,
             reduceMotion: reduceMotion,
             presentationEpoch: sessionPresentation.open.epoch,
             presentationPhase: sessionPresentation.open.phase,
@@ -3285,7 +3293,7 @@ struct ChatView: View {
             ] {
                 do { try await Task.sleep(for: delay); try Task.checkCancellation() }
                 catch { return }
-                guard interactionTraceLedger.context == context,
+                guard interactionTraceLedger.ownsContext(context),
                       interactionTraceLedger.ownsSubmission(token) else { return }
                 let state = interactionTraceState()
                 model.chatInteractionTrace.submission(
