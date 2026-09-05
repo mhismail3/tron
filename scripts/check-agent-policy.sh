@@ -1,38 +1,31 @@
 #!/usr/bin/env bash
-# Keep project skills canonical and prevent unsafe engineering/iOS guidance.
+# Keep the skill catalog canonical and retain shared/platform safety guards.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fail() { echo "agent policy: $*" >&2; exit 1; }
 [[ -f "$ROOT/.agents/skills/tron-ios/SKILL.md" ]] || fail "missing canonical iOS skill"
 [[ -f "$ROOT/.agents/skills/NOTICE.md" ]] || fail "missing skill adaptation notice"
 [[ -f "$ROOT/.agents/README.md" ]] || fail "missing .agents README"
-[[ ! -e "$ROOT/.codex/skills/tron-ios/SKILL.md" ]] || fail "retired Codex iOS skill remains"
-python3 - "$ROOT" <<'PY' || fail "engineering skill suite contract"
+python3 - "$ROOT" <<'PY' || fail "skill catalog contract"
 from pathlib import Path
 import re
 import sys
 
 root = Path(sys.argv[1])
 skills_root = root / ".agents" / "skills"
-expected = {
-    "tron-ios",
-    "tron-documentation-auditor",
-    "tron-codebase-auditor",
-    "tron-test-suite-auditor",
-    "tron-architecture-auditor",
-    "tron-persistence-auditor",
-    "tron-performance-optimizer",
-    "tron-dependency-upgrader",
-    "tron-code-modernizer",
-    "tron-benchmark-comparator",
-    "tron-surgical-change-implementer",
-}
-paths = sorted(skills_root.glob("*/SKILL.md"))
-actual = {path.parent.name for path in paths}
+for harness in (".pi", ".claude", ".codex"):
+    if any((root / harness / "skills").rglob("*.md")):
+        raise SystemExit("project skills must live under .agents/skills, not harness copies")
+
+# The linked catalog owns the inventory; do not mirror its names here.
+catalog = (root / ".agents" / "README.md").read_text()
+expected = set(re.findall(r"\[[^\]]+\]\((skills/[^)]+/SKILL\.md)\)", catalog))
+paths = sorted(skills_root.rglob("SKILL.md"))
+actual = {path.relative_to(root / ".agents").as_posix() for path in paths}
 if actual != expected:
     missing = sorted(expected - actual)
-    unexpected = sorted(actual - expected)
-    raise SystemExit(f"skill inventory mismatch; missing={missing}, unexpected={unexpected}")
+    unlisted = sorted(actual - expected)
+    raise SystemExit(f"skill catalog mismatch; missing={missing}, unlisted={unlisted}")
 
 names = set()
 for path in paths:
@@ -45,7 +38,10 @@ for path in paths:
         key, separator, value = line.partition(":")
         if not separator:
             raise SystemExit(f"{path.relative_to(root)}: malformed frontmatter line {line!r}")
-        fields[key.strip()] = value.strip()
+        key = key.strip()
+        if key in fields:
+            raise SystemExit(f"{path.relative_to(root)}: duplicate frontmatter field: {key}")
+        fields[key] = value.strip()
     if set(fields) != {"name", "description"}:
         raise SystemExit(f"{path.relative_to(root)}: frontmatter must contain only name and description")
     name = fields["name"]
@@ -60,39 +56,14 @@ for path in paths:
         raise SystemExit(f"duplicate skill name: {name}")
     names.add(name)
 
-    if name == "tron-ios":
-        continue
-    body = parts[2]
-    if "## Workflow" not in body or "## Report" not in body:
-        raise SystemExit(f"{path.relative_to(root)}: missing Workflow or Report contract")
-    lowered = body.lower()
-    if "gateway" not in lowered or "never" not in lowered:
-        raise SystemExit(f"{path.relative_to(root)}: missing Tron Gateway safety boundary")
-    if any(marker in source for marker in ("claude plugin", ".codex-plugin", "ln-21-", "ln-31-")):
-        raise SystemExit(f"{path.relative_to(root)}: imported host-specific upstream structure")
-
-for name in (
-    "tron-documentation-auditor",
-    "tron-codebase-auditor",
-    "tron-test-suite-auditor",
-    "tron-architecture-auditor",
-    "tron-persistence-auditor",
-):
-    source = (skills_root / name / "SKILL.md").read_text().lower()
-    if "read-only" not in source:
-        raise SystemExit(f"{name}: audit skill must be explicitly read-only")
-
-notice = (skills_root / "NOTICE.md").read_text()
-if "bf5d418f05140306b9d583368ff1f44b48ee36c2" not in notice or "MIT License" not in notice:
-    raise SystemExit("skill adaptation notice lacks pinned provenance or license")
 PY
 grep -Fq "    '.agents'" "$ROOT/scripts/personal-info-guard.sh" \
   || fail "personal-info guard does not scan canonical agent guidance"
-grep -Fq 'SIGSTOP' "$ROOT/.agents/skills/tron-performance-optimizer/SKILL.md" \
-  || fail "performance skill lacks Gateway work-suspension stop rule"
+grep -Fq 'SIGSTOP' "$ROOT/AGENTS.md" \
+  || fail "shared guidance lacks Gateway work-suspension stop rule"
 # Scan tracked and not-yet-tracked source so the check is trustworthy before
 # commit as well as in CI. Only the untouched external caller and bounded
-# compatibility implementation/tests may spell retired names.
+# compatibility implementation and policy tests may spell retired names.
 python3 - "$ROOT" <<'PY' || fail "stale iOS build guidance outside bounded compatibility"
 from pathlib import Path
 import re
@@ -105,6 +76,7 @@ allowed = {
     "scripts/tron-ios-device",
     "scripts/tron-ios-device-test",
     "scripts/check-agent-policy.sh",
+    "scripts/test-agent-policy.py",
     "packages/ios-app/scripts/test-build-matrix-policy.sh",
 }
 paths = subprocess.check_output(

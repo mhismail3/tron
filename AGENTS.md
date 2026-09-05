@@ -35,6 +35,37 @@
    user authorization, preserve its isolated worktree, and verify both terminal
    run state and release of the Gateway drain.
 
+## Engineering defaults
+
+- **Delete before adding.** Challenge whether a mechanism is needed at all, then
+  simplify what remains. Remove dead code, unused configuration, obsolete tests,
+  and superseded interfaces with their callers. Check runtime registration and
+  generated/external consumers before declaring something dead. There is no
+  change quota; leave coherent code alone and avoid aesthetic rewrites.
+- **No unrequested backward compatibility.** Do not add shims, old aliases,
+  fallback implementations, dual schemas, or migration scaffolding, or carry
+  superseded paths forward, unless the user explicitly approves compatibility.
+  Replace internal contracts atomically. If a live external or persisted-data
+  dependency prevents removal, surface the decision; do not invent a bridge or
+  destroy data to avoid it.
+- **Make ownership distinct.** Each state, resource, and operation lifecycle has
+  one clear authority. Keep boundaries explicit across agents, sessions,
+  transports, and UI projections. Fix misplaced ownership rather than adding
+  flags, caches, timers, retries, or parallel state to compensate. Handle stale
+  work, cancellation, partial failure, bounds, and cleanup at the owning boundary.
+- **Preserve the product.** Cleanup and optimization must preserve UI, UX, and
+  intended behavior unless a product change is explicitly requested. Protect
+  chat identity, scroll continuity, native layout, and composer/keyboard behavior;
+  do not trade correctness or interaction quality for fewer lines or a benchmark.
+- **Leave useful breadcrumbs.** Add concise comments where ownership, an
+  invariant, ordering, or a non-obvious tradeoff would otherwise be easy to break.
+  Explain why; link the owning contract or focused regression when useful. Do not
+  narrate syntax, copy implementation inventories, or leave agent-session diaries.
+  Update or remove breadcrumbs when their reason changes.
+- **Prove rather than imply.** Every mechanism and test must protect a real
+  requirement. Distinguish inspected, inferred, reproduced, and verified evidence.
+  Green tests are not exhaustive review, and fewer lines are not a speedup.
+
 ## Architecture invariants
 
 - One live gateway runtime owns each canonical session.
@@ -53,8 +84,10 @@
 
 ## Agent routing
 
-- Project skills live only under `.agents/skills/`; do not create harness-specific
-  copies or duplicate detailed procedures in this file.
+- Project skills live only under `.agents/skills/`; use the
+  [skill index](.agents/README.md) to select a task procedure. Do not create
+  harness-specific copies. Shared rules belong here, not in repeated skill
+  boilerplate; implementation details belong in their owning code and docs.
 - For iOS build, test, simulator, signing, archive, or physical-device work, load
   `.agents/skills/tron-ios/SKILL.md` and use its routing table.
 - Use repository device helpers rather than inventing scheme/configuration pairs.

@@ -1,13 +1,13 @@
 # Third-party notice
 
-The Tron engineering audit and optimization skills in this directory are adapted
-from the Codebase Audit Suite and Optimization Suite in
+Tron's engineering guidance is derived in part from the Codebase Audit Suite and
+Optimization Suite in
 [levnikolaevich/claude-code-skills](https://github.com/levnikolaevich/claude-code-skills),
 reviewed at commit `bf5d418f05140306b9d583368ff1f44b48ee36c2`.
 
-The adaptations use Tron-specific names, safety boundaries, architecture
-invariants, validation routes, and concise workflows. They do not include the
-upstream Claude Code/Codex plugin manifests or marketplace structure.
+The consolidated procedures use Tron's shared project rules and task-specific
+evidence requirements. This notice preserves attribution for adapted material;
+no upstream plugin manifests or marketplace structure are included.
 
 ## Upstream license
 

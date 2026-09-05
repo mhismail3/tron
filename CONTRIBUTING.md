@@ -73,7 +73,8 @@ reject duplicated version mirrors. Install native project generation with
 remain intentional Apple-toolchain pins. Run
 `python3 scripts/check-documentation-policy.py` after changing documentation
 navigation, commands, or repository paths. Run `scripts/check-agent-policy.sh`
-after changing agent guidance.
+after changing agent guidance. The [agent guidance index](.agents/README.md)
+owns skill routing and the policy-fixture validation commands.
 
 ### Gateway
 

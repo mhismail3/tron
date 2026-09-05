@@ -1,47 +1,35 @@
 # Tron agent guidance
 
-Skills in `.agents/skills/` are the repository-canonical agent guidance. Keep
-implementation truth in the owning source and package documentation; skills
-route work and enforce evidence and safety boundaries rather than duplicating
-volatile implementation inventories.
+[AGENTS.md](../AGENTS.md) owns shared engineering rules, architecture invariants,
+and safety boundaries. Skills add task-specific procedures; they do not grant
+permission to mutate code, data, devices, or a running service. Keep implementation
+facts in the owning source and package docs, not copied into skills.
 
-## Platform skill
-
-- `tron-ios` — required for iOS build, test, simulator, signing, archive,
-  physical-device, scheme, configuration, and artifact work. Detailed truth
-  remains in `packages/ios-app/docs/`.
-
-## Engineering audit suite
-
-These skills are read-only. Use the narrowest owner for the question.
+## Skill catalog
 
 | Skill | Use |
 |---|---|
-| `tron-documentation-auditor` | Documentation trust, navigation, claims, and canonical ownership |
-| `tron-codebase-auditor` | Broad security, delivery, maintainability, concurrency, and lifecycle health |
-| `tron-test-suite-auditor` | Test value, risk coverage, isolation, oracles, and lifecycle |
-| `tron-architecture-auditor` | Implemented boundaries, contracts, dependencies, and ownership |
-| `tron-persistence-auditor` | Canonical stores, consistency, durability, bounds, and resource lifecycle |
+| [tron-code-health](skills/tron-code-health/SKILL.md) | Ownership and architecture review, honest exhaustive coverage, deletion-first simplification, and root-cause hardening |
+| [tron-test-confidence](skills/tron-test-confidence/SKILL.md) | Behavioral oracles, test cleanup, timing/isolation failures, and controlled mutation or ablation |
+| [tron-performance](skills/tron-performance/SKILL.md) | Profiling a demonstrated bottleneck or comparing alternatives under a frozen experiment |
+| [tron-ios](skills/tron-ios/SKILL.md) | Required routing for iOS build, test, simulator, device, signing, archive, and artifact work |
 
-## Engineering optimization suite
+For a broad investigation, start with code health and its coverage ledger. Use
+test confidence to evaluate the evidence, then performance only where a cost or
+comparison warrants measurement. For a bounded task, load only the relevant
+procedure; this is not a mandatory multi-skill pipeline. Dependency and
+configuration changes follow their owning contributor/package runbooks.
 
-These skills may change only the user-approved source/test/documentation scope.
-They never authorize Gateway lifecycle transitions, deployment, release, app
-replacement, device install, production access, unapproved persisted state, or
-OS suspension of Gateway-owned work.
+## Maintaining guidance
 
-| Skill | Use |
-|---|---|
-| `tron-performance-optimizer` | A measured bottleneck with a reproducible before/after metric |
-| `tron-dependency-upgrader` | Version, lockfile, runtime, or toolchain maintenance |
-| `tron-code-modernizer` | Proven net-value replacement or removal of one bounded mechanism |
-| `tron-benchmark-comparator` | Symmetric A/B choice between alternatives |
-| `tron-surgical-change-implementer` | Smallest complete implementation of one approved product change |
+Keep skills under `.agents/skills/`, with a matching directory/frontmatter name,
+a concise description, and a link in the catalog above. Do not create parallel
+harness copies, compatibility aliases, or a separate skill for every subsystem.
+Add a procedure only when it answers a distinct recurring question. Upstream
+attribution for adapted guidance remains in [NOTICE.md](skills/NOTICE.md).
 
-Choose performance optimization for a known bottleneck and benchmark comparison
-for an unbiased choice. Choose dependency upgrade for version movement, code
-modernization for a justified capability replacement, and surgical change for
-ordinary bounded delivery.
-
-Run `scripts/personal-info-guard.sh` and `scripts/check-agent-policy.sh` before finishing. Upstream adaptation
-provenance and license terms are recorded in `skills/NOTICE.md`.
+Run `scripts/check-agent-policy.sh`, `python3 scripts/test-agent-policy.py`,
+`python3 scripts/check-documentation-policy.py`, and
+`scripts/personal-info-guard.sh` after changing guidance. The agent-policy checker
+compares skill directories with this catalog and validates metadata and platform guards;
+it deliberately does not enforce repeated prose or a second hard-coded inventory.
