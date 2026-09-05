@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import shutil
 import subprocess
 import tempfile
@@ -18,27 +19,30 @@ class AgentPolicyTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="tron-agent-policy-")
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
+        # Git must resolve only this fixture, even when invoked from a hook or
+        # an alternate-index workflow; user configuration is not fixture input.
+        self.env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        self.env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
         # Copy the actual guidance so the positive case detects catalog drift.
         # Mutations below provide independent known-bad policy inputs.
         shutil.copytree(ROOT / ".agents", self.root / ".agents")
         for relative in (
             "AGENTS.md",
             "scripts/check-agent-policy.sh",
-            "scripts/personal-info-guard.sh",
         ):
             destination = self.root / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, destination)
         subprocess.run(
             ["git", "init", "--quiet", str(self.root)],
-            check=True, capture_output=True, timeout=10,
+            env=self.env, check=True, capture_output=True, timeout=10,
         )
         self.skill = self.root / ".agents/skills/tron-code-health/SKILL.md"
 
     def check_policy(self, error: str | None = None) -> None:
         result = subprocess.run(
             ["bash", str(self.root / "scripts/check-agent-policy.sh")],
-            cwd=self.root, capture_output=True, text=True, timeout=15,
+            cwd=self.root, env=self.env, capture_output=True, text=True, timeout=15,
         )
         output = result.stdout + result.stderr
         if error is None:

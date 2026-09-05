@@ -28,12 +28,12 @@ cd "$ROOT"
 DEV_USER='m''oose'
 DEV_USER_ENCODED='-Users-'"$DEV_USER"'-'
 
-# Patterns to ban. Each line: <regex>|<short description>
+# Patterns to ban. Split at the final | so regex alternations remain intact.
 PATTERNS=(
-    "/Users/${DEV_USER}|raw home path; should be /Users/<USER> or use paths.rs helpers"
+    "/Users/${DEV_USER}|raw home path; use /Users/<USER> or runtime-resolved home paths"
     "${DEV_USER_ENCODED}|Claude-Code encoded developer path"
     "github\\.com/${DEV_USER}|personal GitHub handle"
-    "\\b${DEV_USER}\\b|plain developer username; use generic product/source wording"
+    "(^|[^[:alnum:]_])${DEV_USER}([^[:alnum:]_]|$)|plain developer username; use generic product/source wording"
     'mhismail3|personal GitHub handle; use a generic placeholder or configured repository URL'
     'mhismail\.com|personal domain; use configured feedback recipient'
     '"mh"[[:space:]]*\+[[:space:]]*"is"[[:space:]]*\+[[:space:]]*"mail"|split personal handle construction'
@@ -41,98 +41,56 @@ PATTERNS=(
     '"tron@"[[:space:]]*\+[[:space:]]*"mh"|split personal feedback email construction'
 )
 
-# Regression-guard files construct personal-info needles from fragments. Each
-# entry is matched as a glob against the file path relative to repo root.
-ALLOWLIST_PATHS=(
-    'scripts/personal-info-guard.sh'
-    '.git/*'
-    'target/*'
-    'node_modules/*'
-    'packages/ios-app/.build/*'
-    'packages/ios-app/TronMobile.xcodeproj/*'
-    '.tron/*'
-)
-
-# Full scans intentionally name every tracked source/documentation root so a
-# root can be added or removed only with a conscious scan-scope edit.
-SCAN_PATHS=(
-    '.agents'
-    '.codex'
-    '.github'
-    '.gitignore'
-    'AGENTS.md'
-    'CONTRIBUTING.md'
-    'README.md'
-    'VERSION.env'
-    'packages/gateway'
-    'packages/ios-app'
-    'packages/mac-app'
-    'scripts'
-)
-
-# Build a single grep-include filter that excludes the allowlist.
-# `git grep` is fast and respects `.gitignore`.
-EXCLUDE_ARGS=()
-for p in "${ALLOWLIST_PATHS[@]}"; do
-    EXCLUDE_ARGS+=(":(exclude)$p")
-done
+# Only this needle-definition file is exempt. Git owns source membership and
+# ignored generated output; tracked files must not disappear behind an allowlist.
+EXCLUDE_SELF=':(top,exclude,literal)scripts/personal-info-guard.sh'
 
 mode="${1:-full}"
 offenders_total=0
-STAGED_PATHS=()
+SCAN_PATHS=()
 
+path_list=$(mktemp "${TMPDIR:-/tmp}/tron-personal-info-guard.XXXXXX") || {
+    echo "personal-info-guard: could not allocate source-file list" >&2
+    exit 2
+}
+trap 'rm -f "$path_list"' EXIT
 if [ "$mode" = "--staged" ]; then
-    staged_list=$(mktemp "${TMPDIR:-/tmp}/tron-personal-info-guard.XXXXXX") || {
-        echo "personal-info-guard: could not allocate staged-file list" >&2
-        exit 2
-    }
-    trap 'rm -f "$staged_list"' EXIT
-    if ! git diff --cached --name-only --diff-filter=ACMR -z > "$staged_list"; then
-        echo "personal-info-guard: failed to read the staged index" >&2
-        exit 2
-    fi
-    while IFS= read -r -d '' staged_file; do
-        STAGED_PATHS+=(":(literal)$staged_file")
-    done < "$staged_list"
-    rm -f "$staged_list"
-    trap - EXIT
+    # The index, not later working-tree edits, owns what will be committed.
+    inventory=(git diff --cached --name-only --diff-filter=ACMR -z)
+    grep_mode=(--cached)
+else
+    inventory=(git ls-files --cached --others --exclude-standard -z)
+    # Inventory already excluded ignored untracked files. Reapplying ignore
+    # rules in grep also hides force-tracked files, violating the full scan.
+    grep_mode=(--untracked --no-exclude-standard)
 fi
+if ! "${inventory[@]}" > "$path_list"; then
+    echo "personal-info-guard: failed to read the source inventory" >&2
+    exit 2
+fi
+while IFS= read -r -d '' source_file; do
+    SCAN_PATHS+=(":(literal)$source_file")
+done < "$path_list"
+rm -f "$path_list"
+trap - EXIT
 
 scan_pattern() {
     local entry="$1"
-    local pattern="${entry%%|*}"
+    local pattern="${entry%|*}"
     local desc="${entry##*|}"
     local hits
     local grep_status
 
-    if [ "$mode" = "--staged" ]; then
-        # Pre-commit gate: scan the *staged blobs*, not the working tree.
-        # The two can differ when the developer staged file A v1, then kept
-        # editing it on disk to v2 — only v1 is about to be committed.
-        # `git grep --cached` reads from the index, which is exactly what
-        # `git commit` will record.
-        #
-        # Restrict to files actually staged (added/modified/copied/renamed —
-        # `--diff-filter=ACMR`) so we don't re-scan the entire index every
-        # commit. The checked loader above retains NUL-delimited names as
-        # literal pathspecs and fails closed before any pattern scan.
-        if [ "${#STAGED_PATHS[@]}" -eq 0 ]; then
-            return
-        fi
-        if hits=$(git grep --cached -nE -e "$pattern" -- \
-            "${STAGED_PATHS[@]}" "${EXCLUDE_ARGS[@]}" 2>&1); then
-            grep_status=0
-        else
-            grep_status=$?
-        fi
+    if [ "${#SCAN_PATHS[@]}" -eq 0 ]; then
+        return
+    fi
+    # NUL-delimited inventory becomes literal pathspecs, including newlines,
+    # spaces and glob characters. No independently maintained root allowlist.
+    if hits=$(git grep "${grep_mode[@]}" -nE -e "$pattern" -- \
+        "${SCAN_PATHS[@]}" "$EXCLUDE_SELF" 2>&1); then
+        grep_status=0
     else
-        # Full repo scan via git grep (respects .gitignore).
-        if hits=$(git grep -nE -e "$pattern" -- \
-            "${SCAN_PATHS[@]}" "${EXCLUDE_ARGS[@]}" 2>&1); then
-            grep_status=0
-        else
-            grep_status=$?
-        fi
+        grep_status=$?
     fi
 
     if [ "$grep_status" -eq 1 ]; then
@@ -166,7 +124,7 @@ if [ "$offenders_total" -gt 0 ]; then
     echo "❌ FAIL — $offenders_total personal-info offender(s) found."
     echo ""
     echo "User-specific values belong in ~/.tron runtime state, not the source tree."
-    echo "The repository guard scans every shipped client and gateway source."
+    echo "The repository guard scans tracked and nonignored untracked source, or staged blobs in --staged mode."
     exit 1
 fi
 

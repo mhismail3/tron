@@ -63,6 +63,17 @@ agent execution, session state, inbox, badge, or reminder policy.
 
 Start with the smallest owner and expand only after it passes.
 
+The privacy guard uses Git's inventory: full scans include every tracked file
+and nonignored untracked file, so new packages, configuration and agent guidance
+need no parallel scan-root list. Ignored generated output is skipped only when
+untracked; tracked files remain in scope. Only the guard's own needle definitions
+are exempt. Pre-commit `--staged` checks changed index blobs, not later working-tree
+edits. Run `python3 scripts/test-personal-info-guard.py` for disposable-repository
+regressions covering those boundaries, literal filenames and fail-closed Git
+errors. Fixtures isolate Git's environment/configuration so an inherited
+alternate index cannot redirect their writes. CI runs them on Linux and macOS;
+pattern syntax must work with both Git regex implementations.
+
 ### Toolchain
 
 Node is pinned exactly by `.node-version`; CI and Mac packaging read that file.

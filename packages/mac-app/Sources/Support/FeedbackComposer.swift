@@ -6,7 +6,8 @@ struct FeedbackIssueOpenPlan: Equatable {
 }
 
 /// Pure GitHub issue composer for the Mac menu bar feedback action.
-/// Redacts log text before it enters the prefilled issue body.
+/// Redacts logs and server failure details at the export boundary, without
+/// changing the private log viewer or the URL/clipboard fallback.
 struct FeedbackIssueComposer {
     static let maxPrefilledURLLength = 7_000
     private static let repoOwner = "tron-owner"
@@ -32,7 +33,7 @@ struct FeedbackIssueComposer {
 
         - App: \(VersionDisplay.label(for: appVersion)) (build \(buildNumber))
         - macOS: \(osVersion)
-        - Server: \(serverDescription)
+        - Server: \(redactor.redactMessage(serverDescription))
 
         ### Recent logs
 

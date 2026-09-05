@@ -57,8 +57,6 @@ for path in paths:
     names.add(name)
 
 PY
-grep -Fq "    '.agents'" "$ROOT/scripts/personal-info-guard.sh" \
-  || fail "personal-info guard does not scan canonical agent guidance"
 grep -Fq 'SIGSTOP' "$ROOT/AGENTS.md" \
   || fail "shared guidance lacks Gateway work-suspension stop rule"
 # Scan tracked and not-yet-tracked source so the check is trustworthy before

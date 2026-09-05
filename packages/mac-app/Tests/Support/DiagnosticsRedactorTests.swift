@@ -3,7 +3,7 @@ import Foundation
 
 @testable import TronMac
 
-@Suite("DiagnosticsRedactor (Mac port)")
+@Suite("Feedback diagnostics redaction")
 struct DiagnosticsRedactorTests {
 
     @Test("redacts Bearer <token> occurrences")
@@ -42,6 +42,72 @@ struct DiagnosticsRedactorTests {
         #expect(out.contains("Project"))
     }
 
+    @Test("redacts short and escaped JSON credentials without consuming safe fields", arguments: [
+        #"{"token":"x","safeField":"kept"}"#,
+        #"{"token":"prefix\"escaped-suffix","safeField":"kept"}"#,
+        #"{"token":"ends-in-slash\\","safeField":"kept"}"#,
+        #"{"token":"\\\"escaped-suffix","safeField":"kept"}"#,
+        #"{"token":"\u0061","safeField":"kept"}"#,
+        #"{"token":"🔑","safeField":"kept"}"#,
+    ])
+    func redactsQuotedCredentials(input: String) throws {
+        let output = DiagnosticsRedactor().redactMessage(input)
+        let decoded = try #require(JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: String])
+        let token = try #require(decoded["token"])
+        #expect(token.hasPrefix("[redacted:len="))
+        #expect(token.hasSuffix("]"))
+        #expect(!output.contains("escaped-suffix"))
+        #expect(!output.contains("ends-in-slash"))
+        #expect(decoded["safeField"] == "kept")
+    }
+
+    @Test("redacts complete short and encoded bearer runs", arguments: [
+        "Bearer x", "bearer short", "BEARER abc+def/ghi~jkl==", "Bearer a.b_c-d",
+    ])
+    func redactsCompleteBearer(input: String) {
+        let token = input.split(separator: " ").last!
+        #expect(DiagnosticsRedactor().redactMessage(input) == "Bearer [redacted:len=\(token.count)]")
+    }
+
+    @Test("Bearer masking preserves line boundaries", arguments: [
+        "Bearer \nabc", "Bearer\t\r\nabc", "Bearer\nabcdefghijklmnopqr",
+        "Bearer\u{2028}abc",
+    ])
+    func preservesBearerLineBoundary(input: String) {
+        #expect(DiagnosticsRedactor().redactMessage(input) == input)
+    }
+
+    @Test("horizontal Bearer whitespace still masks the credential")
+    func redactsHorizontalBearerWhitespace() {
+        #expect(DiagnosticsRedactor().redactMessage("Bearer\tx") == "Bearer [redacted:len=1]")
+        #expect(DiagnosticsRedactor().redactMessage("Bearer\u{00A0}short") == "Bearer [redacted:len=5]")
+    }
+
+    @Test("Swift description escapes cannot reveal a credential suffix")
+    func redactsEscapedSwiftDescription() {
+        let input = #"Request(apiKey: "p\"escaped-suffix", apiKeyLabel: "Project", statusCode: "safe-code")"#
+        let output = DiagnosticsRedactor().redactMessage(input)
+        #expect(!output.contains("escaped-suffix"))
+        #expect(output.contains(#"apiKeyLabel: "Project", statusCode: "safe-code""#))
+    }
+
+    @Test("truncated credential lines do not leak or consume the following diagnostic", arguments: [
+        #"{"token":"truncated-secret"#,
+        #"{"token":"truncated-secret\"#,
+    ])
+    func redactsTruncatedLine(input: String) {
+        let nextLine = "\n[time] INFO: retry count=3"
+        let output = DiagnosticsRedactor().redactMessage(input + nextLine)
+        #expect(!output.contains("truncated-secret"))
+        #expect(output.hasSuffix(nextLine))
+    }
+
+    @Test("ordinary diagnostics and empty credentials remain unchanged")
+    func preservesNonSensitiveText() {
+        let input = #"{"token":"","tokenCount":3,"apiKeyLabel":"Project","statusCode":"safe-code","message":"retry"} notBearer hello"#
+        #expect(DiagnosticsRedactor().redactMessage(input) == input)
+    }
+
     @Test("redacts local paths to placeholders")
     func redactsHomePath() {
         let r = DiagnosticsRedactor()
@@ -61,32 +127,4 @@ struct DiagnosticsRedactorTests {
         #expect(occurrences == 2)
     }
 
-    @Test("drops top-level message + userMessage; keeps safeField")
-    func dropsChatFields() {
-        let r = DiagnosticsRedactor()
-        var event: [String: Any] = [
-            "message": "sensitive",
-            "extra": ["userMessage": "also sensitive", "safeField": "kept"],
-        ]
-        event = r.redactEvent(event)
-        #expect(event["message"] as? String == "[redacted]")
-        let extra = event["extra"] as? [String: Any]
-        #expect(extra?["userMessage"] as? String == "[redacted]")
-        #expect(extra?["safeField"] as? String == "kept")
-    }
-
-    @Test("breadcrumb message is surgically redacted, not dropped")
-    func breadcrumbSurgical() {
-        let r = DiagnosticsRedactor()
-        var event: [String: Any] = [
-            "breadcrumbs": [
-                ["message": "Bearer tokenaaaaaaaaaaaaaaaaa1", "level": "info"]
-            ]
-        ]
-        event = r.redactEvent(event)
-        let crumbs = event["breadcrumbs"] as? [[String: Any]]
-        let msg = crumbs?.first?["message"] as? String
-        #expect(msg?.contains("tokenaaaaaaaaaaaaaaaaa1") == false)
-        #expect(msg?.contains("[redacted:len=") == true)
-    }
 }

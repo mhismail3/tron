@@ -42,6 +42,7 @@ jobs:
           [[ "$changed" == true || "$changed" == false ]] || { echo "invalid graph comparison result" >&2; exit 1; }
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
       - run: scripts/personal-info-guard.sh
+      - run: python3 scripts/test-personal-info-guard.py
       - run: scripts/check-agent-policy.sh
       - run: python3 scripts/test-agent-policy.py
       - run: scripts/tron version check
@@ -55,6 +56,7 @@ jobs:
             scripts/test-gateway-protocol-contract.py \
             scripts/check-documentation-policy.py \
             scripts/test-agent-policy.py \
+            scripts/test-personal-info-guard.py \
             scripts/validate-ios-artifact.py \
             scripts/ios-test-lock.py \
             scripts/ios-test-process.py \
@@ -251,6 +253,7 @@ jobs:
           xcode-version: ${{ steps.mac-toolchain.outputs.xcode }}
       - run: scripts/install-ci-tools.sh xcodegen
       - run: scripts/verify-ci-toolchain.sh node xcode xcodegen
+      - run: python3 scripts/test-personal-info-guard.py
       - run: packages/mac-app/scripts/bundle-gateway.sh
       - run: packages/mac-app/scripts/test-tron-gateway-launcher.sh
       - run: packages/mac-app/scripts/test-gateway-payload-verifier.sh
