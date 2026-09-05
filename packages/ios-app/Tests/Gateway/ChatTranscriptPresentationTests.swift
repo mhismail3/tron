@@ -1028,38 +1028,62 @@ struct ChatTranscriptPresentationTests {
         )
 
         let presentation = try #require(ChatRuntimeWorkingPresentation(
-            phase: snapshot.phase,
-            retry: snapshot.retry
+            phase: snapshot.phase
         ))
         #expect(presentation.message == "Tron is working")
         #expect(presentation.usesAmbientBottomIndicator)
         #expect(ChatNotificationPresentation.runtime(in: snapshot).isEmpty)
     }
 
-    @Test("runtime working presentation follows canonical phase and retry only")
+    @Test("runtime working presentation follows canonical phase only")
     func runtimeWorkingRowPolicy() {
-        let retry = RetryState(
-            source: .agent,
-            attempt: 2,
-            maxAttempts: 4,
-            delayMs: 500,
-            errorMessage: "transient"
-        )
-        let running = ChatRuntimeWorkingPresentation(phase: .running, retry: nil)
+        let running = ChatRuntimeWorkingPresentation(phase: .running)
         #expect(running?.message == "Tron is working")
         #expect(running?.usesAmbientBottomIndicator == true)
 
-        let compacting = ChatRuntimeWorkingPresentation(phase: .compacting, retry: nil)
+        let compacting = ChatRuntimeWorkingPresentation(phase: .compacting)
         #expect(compacting?.message == "Compacting context")
         #expect(compacting?.usesAmbientBottomIndicator == false)
 
-        let retrying = ChatRuntimeWorkingPresentation(phase: .retrying, retry: retry)
-        #expect(retrying?.message == "Retrying provider")
-        #expect(retrying?.retryMessage == "Attempt 2 of 4")
+        let retrying = ChatRuntimeWorkingPresentation(phase: .retrying)
+        #expect(retrying?.message == "Retrying")
         #expect(retrying?.usesAmbientBottomIndicator == false)
 
-        #expect(ChatRuntimeWorkingPresentation(phase: .idle, retry: nil) == nil)
-        #expect(ChatRuntimeWorkingPresentation(phase: .interrupted, retry: retry) == nil)
+        #expect(ChatRuntimeWorkingPresentation(phase: .idle) == nil)
+        #expect(ChatRuntimeWorkingPresentation(phase: .interrupted) == nil)
+    }
+
+    @Test("retry pill is phase-owned and retires as soon as the agent resumes")
+    func retryPillRetiresOnResumption() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .retrying
+        snapshot.retry = RetryState(source: .agent, attempt: 1, maxAttempts: 3, delayMs: 500, errorMessage: "fetch failed")
+        let notifications = ChatNotificationPresentation.runtime(in: snapshot)
+        #expect(notifications.count == 1)
+        let retrying = try #require(notifications.first)
+        #expect(retrying.title == "Retrying")
+        #expect(retrying.detail == nil)
+
+        // Retry attempt metadata can remain until auto_retry_end even though
+        // agent_start has already resumed the provider response.
+        snapshot.phase = .running
+        #expect(ChatNotificationPresentation.runtime(in: snapshot).isEmpty)
+        let resumedFacts = ChatVisibleSessionFacts(snapshot: snapshot)
+        var clearedAttempt = snapshot
+        clearedAttempt.retry = nil
+        #expect(resumedFacts == ChatVisibleSessionFacts(snapshot: clearedAttempt))
+        snapshot.streaming = try message("""
+        {"id":"stream","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"text","type":"text","text":"Continuing"}]}
+        """)
+        #expect(ChatNotificationPresentation.runtime(in: snapshot).isEmpty)
+
+        // A later failure is a new retry phase, not permanently suppressed.
+        snapshot.streaming = nil
+        snapshot.phase = .retrying
+        snapshot.retry = RetryState(source: .agent, attempt: 2, maxAttempts: 3, delayMs: 500, errorMessage: "fetch failed")
+        #expect(ChatNotificationPresentation.runtime(in: snapshot).first?.title == "Retrying")
+        snapshot.phase = .idle
+        #expect(ChatNotificationPresentation.runtime(in: snapshot).isEmpty)
     }
 
     @Test("zero and partial geometry never masquerade as bottom readiness")
@@ -1957,6 +1981,78 @@ struct ChatTranscriptPresentationTests {
         let settled = ChatTranscriptPresentation.timeline(in: settledSnapshot)
         #expect(live.ids == ["stream:turn"])
         #expect(settled.ids == ["stream:turn"])
+    }
+
+    @Test("model attribution waits for message settlement across live and canonical projection")
+    @MainActor
+    func modelAttributionWaitsForSettlement() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
+        snapshot.streaming = try message("""
+        {"id":"stream-live","parentId":null,"presentationId":"stream:turn","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","provider":"openai-codex","modelId":"gpt-5.6-sol","content":[{"id":"answer","ordinal":0,"type":"text","text":"hello"}]}
+        """)
+        func row(_ message: ChatMessagePresentation) -> TranscriptRow {
+            TranscriptRow(
+                item: message.item,
+                streaming: message.streaming,
+                projectedMessageParts: message.parts,
+                showsMessageFooter: message.showsFooter
+            )
+        }
+        let live = ChatTranscriptPresentation.timeline(in: snapshot)
+        guard case .message(let liveMessage) = live.items.first else {
+            Issue.record("Expected live assistant text")
+            return
+        }
+        #expect(row(liveMessage).modelAttribution == nil)
+        // The optimized streaming suffix must obey the same rendering owner.
+        let streamingItem = try #require(snapshot.streaming)
+        let isolated = try #require(ChatTranscriptProjectionKernel.isolatedStreamingTimeline(streamingItem))
+        guard case .message(let isolatedMessage) = isolated.items.first else {
+            Issue.record("Expected isolated live assistant text")
+            return
+        }
+        #expect(row(isolatedMessage).modelAttribution == nil)
+        snapshot.toolExecutions = [tool("call", "read", startedAt: "2026-01-01T00:00:01Z")]
+        guard case .message(let commonMessage) = ChatTranscriptPresentation.timeline(in: snapshot).items.first else {
+            Issue.record("Expected assistant text beside a live tool")
+            return
+        }
+        #expect(row(commonMessage).modelAttribution == nil)
+        snapshot.toolExecutions = []
+
+        // Canonical message completion can precede whole-turn settlement.
+        // Already completed messages must not wait for tools or later replies.
+        let completed = try message("""
+        {"id":"assistant-final","parentId":null,"presentationId":"stream:turn","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","provider":"openai-codex","modelId":"gpt-5.6-sol","content":[{"id":"answer","ordinal":0,"type":"text","text":"hello"}]}
+        """)
+        snapshot.transcript = [completed]
+        snapshot.transcriptTotal = 1
+        let overlap = ChatTranscriptPresentation.timeline(in: snapshot)
+        guard case .message(let overlapMessage) = overlap.items.first else {
+            Issue.record("Expected canonical ownership during stream handoff")
+            return
+        }
+        let label = ModelDisplayFormatting.reference(provider: "openai-codex", model: "gpt-5.6-sol")
+        #expect(overlap.ids == live.ids)
+        #expect(row(overlapMessage).modelAttribution == label)
+        snapshot.streaming = nil
+        let settled = ChatTranscriptPresentation.timeline(in: snapshot)
+        guard case .message(let settledMessage) = settled.items.first else {
+            Issue.record("Expected canonical assistant text")
+            return
+        }
+        #expect(settled.ids == live.ids)
+        #expect(row(settledMessage).modelAttribution == label)
+        #expect(TranscriptRow(item: completed, streaming: true).modelAttribution == nil)
+        #expect(TranscriptRow(item: completed, showsMessageFooter: false).modelAttribution == nil)
+        #expect(TranscriptRow(item: completed, projectedMessageParts: []).modelAttribution == nil)
+        snapshot.phase = .idle
+        guard case .message(let historicalMessage) = ChatTranscriptPresentation.timeline(in: snapshot).items.first else {
+            Issue.record("Expected historical assistant text")
+            return
+        }
+        #expect(row(historicalMessage).modelAttribution == label)
     }
 
     @Test("thinking-only settlement preserves row and run identity after leading trimming")

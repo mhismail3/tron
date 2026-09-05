@@ -684,6 +684,11 @@ moves an entry into the corresponding delivery stage. Attachments remain bound t
 their original queued identity and cannot be fabricated by clients. Queue snapshots
 are bounded to 32 entries, 64 KiB per display message, and 256 KiB total.
 Prompt RPC admission follows the pinned runtime's preflight callback as its sole outcome.
+Provider retry waiting is projected as `retrying`; the pinned SDK's `agent.continue()`
+emits `agent_start` and restores `running` before the resumed response. Retry-attempt
+metadata remains until `auto_retry_end` at assistant completion, so its presence is not
+waiting-state authority. The focused RuntimeRegistry retry-resumption test exercises this
+real SDK sequence and a fresh acquisition during the blocked resumed response.
 Because the pinned Pi SDK can clear its streaming flag before the final `agent_settled` choreography reaches
 the Gateway, ordinary admission additionally waits behind the existing sequenced foreground operation
 owner whenever runtime streaming is false but settlement/compaction/retry state is still active. The

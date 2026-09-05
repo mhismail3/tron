@@ -901,8 +901,11 @@ points behind the composer while only the lower edge extends beneath the native 
 native safe-area motion carries both together. On dismissal it returns to the 68-point height and 44-point device-bottom
 translation, with its strongest edge beyond the layout boundary instead of forming a clipped horizontal seam.
 Reduce Motion uses one static subtle emerald state, while VoiceOver retains a
-nonvisual “Tron is working” status on the active blur. Custom working messages,
-compaction, and provider retry attempts retain explicit compact rows so operational detail is never hidden.
+nonvisual “Tron is working” status on the active blur. Compaction and retry waiting retain
+explicit compact rows. The retry pill says only “Retrying” and is owned solely by the
+canonical retrying phase; running resumes the ambient indicator immediately even when
+attempt metadata remains until the retry finishes. No local timer or transcript-text heuristic
+controls its lifetime.
 A manual compaction accepted during an active turn remains a Gateway-owned pending maintenance
 operation: the optional snapshot flag renders “Compaction queued” without fabricating JSONL, then
 transitions through the existing compacting row to the canonical compaction entry. Completion publishes
@@ -1421,7 +1424,11 @@ native left-edge interactive-pop gesture remains available. Transcript rows ente
 opacity/scale transition, newly appended thinking words fade independently within
 their stable four-line viewport, and tool status/result changes preserve the mounted
 layout without implicit animation. User turns are trailing-aligned while assistant and tool
-content remain leading-aligned. Initial model/thinking entries describe
+content remain leading-aligned. Provider/model attribution is absent while an assistant
+message streams and appears only on its finalized footer-owning text slice, at the same
+boundary that settles Markdown reveal. Canonical completion wins over a lingering matching
+stream projection; historical messages retain attribution even while a later response runs.
+Error notices remain independent of attribution visibility. Initial model/thinking entries describe
 bootstrap configuration and are omitted from chat; later canonical changes are
 shown as compact notification pills. Structured result data expands recursively, with raw
 JSON only as the arbitrary-data fallback. Gateway connection state is driven by
@@ -1430,12 +1437,17 @@ receivers, and uses gateway WebSocket heartbeats to keep Tailscale/iOS idle path
 alive. Canonical settings determine the default model; catalog order is never a
 default-selection policy. Dashboard Settings explicitly exposes only global configuration; project scope,
 trust, and project package actions appear only when Settings is opened from a
-project session. Manage Session has two primary groups: Configuration owns the
-model, thinking level, peer-presented Project Resources sheet, and final Rename action. Rename uses the same clearable native text-entry alert as the dashboard row action, including trimmed nonempty admission and a fixed trailing clear control. Its model row uses the same
-progressive searchable `ModelPicker` sheet as Models and Defaults; a tapped model becomes selected in that sheet immediately while its session mutation is awaiting authoritative confirmation. Its thinking row uses that settings surface's
-shared inline Change control while retaining the session's authoritative available-level list and immediate mutations;
-Session owns Agent Context, recent history/audit actions, terminal, Git evidence, and
-exports. Its Current Branch row is a button in every state, places the branch beneath the row title and the working-tree status at the trailing edge, and is backed only by the
+project session. Manage Session has three groups below its usage summary. The emerald
+Configuration group orders Model, capability-gated Context Window, Thinking, Rename Session,
+and Terminal. Rename uses the same clearable native text-entry alert as the dashboard row
+action, including trimmed nonempty admission and a fixed trailing clear control. Its model
+row uses the same progressive searchable `ModelPicker` sheet as Models and Defaults, with
+the originating row accent applied across the selector's title, controls, and cards; a tapped
+model becomes selected immediately while its session mutation awaits authoritative confirmation.
+Thinking retains the shared inline Change control, authoritative available-level list, and
+immediate mutations. The blue Session group orders Current Branch, Agent Context,
+Project Resources, Session History, and Subagent History, followed by any diagnostics.
+A separate neutral-gray Exports group below owns HTML Export, JSONL Export, and prepared-file sharing. Its Current Branch row is a button in every state, places the branch beneath the row title and the working-tree status at the trailing edge, and is backed only by the
 session-bound `workspace-inspector.v1` projection; it never reuses the path-based New Session
 Git probe or a locally remembered branch. The progressive Workspace sheet owns three
 mobile-native views over that projection: lazy Files navigation rooted at the runtime's
@@ -1471,8 +1483,9 @@ Directory is refreshed only while Files is visible or when the user returns to i
 parallel initial load and stops under coverage, background, or dismissal. Failed directory navigation keeps the prior
 path and rows as one atomic projection instead of labeling stale contents with the requested path. Git/file responses are point-in-time revisions; later workspace truth replaces
 lists atomically and never mutates an already-open diff beneath the reader.
-Configuration row icons use the section's purple palette, while every Session row
-icon—including Git states, exports, sharing, and diagnostics—uses the section's blue palette.
+Configuration row icons and dividers use emerald; Session row icons—including all
+Git states, resource/history destinations, and diagnostics—remain blue. Export and sharing
+rows use their separate group's neutral slate palette.
 The compact top summary owns automatic-compaction status beside a single-line context
 value, followed by the cache-hit/read-write/input/output/cost statistics row, with every
 value kept to one visual line. When the runtime has reset its usage estimate, the card presents a
@@ -1485,7 +1498,9 @@ live session-state updates reuse those immutable rows, and dense cards use the
 static scroll surface rather than one live glass filter per event. Its compact toolbar action invokes Pi's
 canonical compaction through Gateway and can leave one authoritative request queued
 behind an active turn. Project Resources presents resolved extensions, prompts, skills,
-context files, and tools as named rows over the canonical projection; each detail sheet
+and tools as named rows over the canonical projection. Instruction files such as `AGENTS.md`
+have no duplicate row or Context Files section there: their assembled guidance belongs in
+Agent Context and Read Full Instructions. Canonical resource discovery is unchanged. Each detail sheet
 foregrounds kind-specific purpose, invocation, availability, capabilities, schema/guidance,
 and source evidence instead of a generic field table. Project Trust presents a high-signal
 state card with an explicit status icon and decision actions before deferring the complete trust record to raw JSON.

@@ -5590,6 +5590,50 @@ export default function (pi) {
     expect(bytes).toBe(artifact.size);
   }, 30_000);
 
+  it("projects resumed retry attempts as running before their assistant response completes", async () => {
+    const fixture = await coldFixture("retry-resumption");
+    await writeFile(join(fixture.agentDir, "settings.json"), JSON.stringify({
+      retry: { enabled: true, maxRetries: 3, baseDelayMs: 1 },
+    }));
+    const faux = fauxProvider({ provider: "tron-retry-resumption", tokensPerSecond: 10_000 });
+    let releaseResponse!: () => void;
+    const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    let resumed = false;
+    faux.setResponses([
+      fauxAssistantMessage("", { stopReason: "error", errorMessage: "fetch failed" }),
+      async () => {
+        resumed = true;
+        await responseBarrier;
+        return fauxAssistantMessage("Continued successfully");
+      },
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    fixture.runtimeFactory.mockResolvedValue(runtime);
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    try {
+      await slot.prompt("Exercise one transient provider failure");
+      await waitUntil(() => resumed);
+      expect(faux.state.callCount).toBe(2);
+      expect(fixture.events.some(({ topic, payload }) => topic === "session.snapshot"
+        && payload.phase === "retrying" && payload.retry?.attempt === 1)).toBe(true);
+      // The real pinned SDK emits agent_start from agent.continue(). The
+      // attempt metadata remains until message_end; it is not waiting state.
+      const resumedSnapshot = slot.snapshot();
+      expect(resumedSnapshot.phase).toBe("running");
+      expect(resumedSnapshot.retry).toMatchObject({ source: "agent", attempt: 1 });
+      // A fresh open uses this same authority, rather than reconstructing
+      // retry waiting from the still-present attempt metadata.
+      expect((await fixture.registry.acquire(slot.id)).snapshot().phase).toBe("running");
+    } finally {
+      releaseResponse();
+    }
+    await waitUntil(() => slot.snapshot().phase === "idle");
+    expect(slot.snapshot().retry).toBeUndefined();
+  });
+
   it("drains branch summarization through exact SDK settlement", async () => {
     const { manager, registry } = await coldFixture("branch-summary-drain");
     const slot = await registry.acquire(manager.getSessionId());

@@ -4,7 +4,6 @@ enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
     case extensions = "Extensions"
     case prompts = "Prompts"
     case skills = "Skills"
-    case contextFiles = "Context Files"
     case tools = "Tools"
 
     var id: String { rawValue }
@@ -13,7 +12,6 @@ enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
         case .extensions: "extensions"
         case .prompts: "prompts"
         case .skills: "skills"
-        case .contextFiles: "contextFiles"
         case .tools: "tools"
         }
     }
@@ -29,7 +27,6 @@ enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
         case .extensions: "shippingbox"
         case .prompts: "text.quote"
         case .skills: "sparkles"
-        case .contextFiles: "doc.text"
         case .tools: "wrench.and.screwdriver"
         }
     }
@@ -38,7 +35,6 @@ enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
         case .extensions: .tronPurple
         case .prompts: .tronCyan
         case .skills: .tronEmerald
-        case .contextFiles: .tronTeal
         case .tools: .tronAmber
         }
     }
@@ -48,7 +44,6 @@ enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
         case .extensions: "Code modules currently loaded into this session. Extensions can add tools, commands, providers, and lifecycle behavior."
         case .prompts: "Reusable prompt templates available as slash commands."
         case .skills: "On-demand capability guides the agent can load when a task matches."
-        case .contextFiles: "Project instruction files included in the agent's context."
         case .tools: "Actions the active model can call in this session."
         }
     }
@@ -146,14 +141,6 @@ struct ProjectResourceDetailPresentation: Equatable {
             availability = object["disableModelInvocation"]?.boolValue == true
                 ? "Manual invocation only"
                 : "Available to the agent on demand"
-            tools = []
-            commands = []
-            schemaSummary = nil
-            guidance = nil
-        case .contextFiles:
-            purpose = "Project instructions included when assembling the agent's context."
-            invocation = nil
-            availability = "Loaded into agent guidance"
             tools = []
             commands = []
             schemaSummary = nil

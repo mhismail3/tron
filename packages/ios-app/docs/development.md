@@ -776,13 +776,26 @@ between the simulator and physical hardware. Sheet checkpoints must fling-scroll
 Agent Context, Project Resources, Session History, Runtime Behavior, Providers,
 and model selection; dense rows must retain static tinted geometry without visible
 material churn. Open a large instructions/JSON document and verify immediate native
-scrolling. Confirmation checkpoints verify grey cancellation text, a short trailing
+scrolling. Manage Session checkpoints verify the emerald Configuration order (Model,
+Context Window when supported, Thinking, Rename Session, Terminal), blue Session order
+(Current Branch, Agent Context, Project Resources, Session History, Subagent History),
+and separate gray HTML/JSONL Exports container below. The Session Model picker must inherit
+emerald across title, search, icons, and cards. Project Resources must omit Context Files
+and `AGENTS.md` rows while Agent Context still exposes the assembled instructions.
+`ChatCompactPillTests` pins the resource categories and instruction-preview ownership.
+Confirmation checkpoints verify grey cancellation text, a short trailing
 toolbar action, and a sentence-length action in the Liquid Glass container below
 content at both default and accessibility Dynamic Type sizes. Dashboard swipe checks verify emerald Rename and neutral-gray Mark Read and Mark Unread actions. Open Rename from both a dashboard row and Manage Session: the centered trailing circle-x must clear the field, remain fixed while a long name scrolls beneath it, and keep Save disabled for empty or whitespace-only input. Dashboard deletion additionally swipes, cancels, and repeats against the same canonical row; the row must remain mounted until confirmation and no delete request may be sent on cancellation. A confirmed mutation response or replayed completion receipt removes the selected projection immediately, and the authoritative catalog event converges every connected dashboard without view-local row suppression or navigating away and back. Chat checkpoints must also verify
 trailing alignment for user turns, historical transcript/tool insertion motion,
 the Settings gear in the chat toolbar, and the context ring at the trailing edge of an empty idle composer. Resume a cold session and verify that the ring is mounted immediately at zero, visibly disabled while loading, then animates once to the authoritative percentage without changing in-bar geometry; Reduce Motion must update it without the spring. Also verify the nonstructural short bottom blur at default running state, its background-layer
 movement between the device-bottom inset and beneath the keyboard's rounded top corners, static subtle emerald under Reduce Motion,
-retained compact rows for custom/compaction/retry detail, and emerald toolbar/sheet actions. Physical chat spacing acceptance additionally checks that
+retained compact compaction/retry rows, and emerald toolbar/sheet actions. A transient
+provider failure must show only “Retrying”; it must disappear on resumed agent activity,
+not wait for the response to end or the retry-attempt metadata to clear. Provider/model
+attribution must remain absent throughout streaming and appear only when that message
+is finalized, without hiding canonical error notices or attribution on earlier replies.
+`ChatTranscriptPresentationTests` covers retry metadata retained during resumption, repeated
+retry phases, isolated/common live projection, and stable canonical attribution settlement. Physical chat spacing acceptance additionally checks that
 a one-visual-line prompt has intrinsic height, sent photo/file chips stay above and outside prompt glass,
 tool pills retain six-point vertical insets, use the shared metadata-pill 13-point leading symbol or 20%-compensated nominal 13-point pulse shifted one point toward the leading edge and a five-point label gap, and avoid a 44-point label minimum; attachment/context/send visuals share the 16-point metric inside 40-point targets,
 elapsed timing hugs its intrinsic width, and a pending photo's 22-point remove

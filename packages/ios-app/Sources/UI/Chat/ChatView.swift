@@ -1195,8 +1195,7 @@ struct ChatView: View {
     private var showsAmbientWorkingBlur: Bool {
         guard let facts = visibleSessionFacts else { return false }
         return ChatRuntimeWorkingPresentation(
-            phase: facts.phase,
-            retry: facts.retry
+            phase: facts.phase
         )?.usesAmbientBottomIndicator == true
     }
 

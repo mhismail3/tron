@@ -214,6 +214,15 @@ struct ChatCompactPillTests {
         ) == "Independent message")
     }
 
+    @Test("Project Resources excludes instruction files owned by Agent Context")
+    func projectResourceCategories() {
+        #expect(ProjectResourceKind.allCases.map(\.key) == ["extensions", "prompts", "skills", "tools"])
+        let summary = AgentContextSummary(context: .object([
+            "systemPrompt": .string("Project instructions from AGENTS.md"),
+        ]))
+        #expect(summary.instructionPreview == "Project instructions from AGENTS.md")
+    }
+
     @Test("Project resource descriptions normalize producer line breaks")
     func projectResourceDescriptionsNormalizeWhitespace() {
         #expect(

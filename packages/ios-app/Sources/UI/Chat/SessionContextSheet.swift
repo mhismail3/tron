@@ -222,8 +222,8 @@ struct SessionContextSheet: View {
                     if let snapshot = displayedPresentation {
                         contextUsageCard(snapshot)
                         configurationSection(snapshot)
-                        processHistorySection(snapshot)
                         sessionSection(snapshot)
+                        exportSection
                     } else {
                         TronLoadingState(label: "Loading session…")
                             .frame(maxWidth: .infinity)
@@ -504,10 +504,11 @@ struct SessionContextSheet: View {
         .accessibilityLabel("\(label): \(value)")
     }
 
-    private var configurationRowAccent: Color { .tronPurple }
+    private var configurationRowAccent: Color { .tronEmerald }
     private var sessionRowAccent: Color { .tronBlue }
+    private var exportRowAccent: Color { .tronSlate }
 
-    private func processHistorySection(_ snapshot: SessionContextPresentation) -> some View {
+    private func processHistoryRow(_ snapshot: SessionContextPresentation) -> some View {
         let overview = snapshot.processOverview
         let durable = model.gatewayInfo?.capabilities.contains(SessionProcessAdmissionPolicy.historyCapability) == true
         let subtitle: String
@@ -520,22 +521,16 @@ struct SessionContextSheet: View {
         } else {
             subtitle = durable ? "Canonical history available" : "History unavailable"
         }
-        return TronSettingsGroup(
-            "Subagent History",
-            detail: "Delegated sessions for this conversation.",
-            accent: .tronEmerald
-        ) {
-            manageRow(
-                icon: "clock.arrow.circlepath",
-                title: "Subagent History",
-                subtitle: subtitle,
-                accent: .tronEmerald
-            ) { destination = .processHistory }
-        }
+        return manageRow(
+            icon: "clock.arrow.circlepath",
+            title: "Subagent History",
+            subtitle: subtitle,
+            accent: sessionRowAccent
+        ) { destination = .processHistory }
     }
 
     private func configurationSection(_ snapshot: SessionContextPresentation) -> some View {
-        TronSettingsGroup("Configuration", accent: .tronPurple) {
+        TronSettingsGroup("Configuration", accent: configurationRowAccent) {
             VStack(spacing: 0) {
                 TronModelSelectionRow(
                     selection: Binding(
@@ -567,7 +562,7 @@ struct SessionContextSheet: View {
                 )
                 if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
                    let policy = snapshot.contextWindowPolicy {
-                    TronSettingsDivider(accent: .tronPurple)
+                    TronSettingsDivider(accent: configurationRowAccent)
                     ContextWindowSelectionRow(
                         selection: Binding(
                             get: { policy.override },
@@ -603,7 +598,7 @@ struct SessionContextSheet: View {
                     .id("\(snapshot.runtimeGeneration):\(policy.model.contextWindowKey):\(snapshot.revision)")
                     .disabled(snapshot.phase.isActive || settingContextWindow || pendingModelSelection != nil)
                 }
-                TronSettingsDivider(accent: .tronPurple)
+                TronSettingsDivider(accent: configurationRowAccent)
                 TronThinkingSelectionRow(
                     selection: Binding(
                         get: { snapshot.thinkingLevel },
@@ -618,18 +613,18 @@ struct SessionContextSheet: View {
                     levels: snapshot.availableThinkingLevels,
                     accent: configurationRowAccent
                 )
-                TronSettingsDivider(accent: .tronPurple)
-                manageRow(
-                    icon: "shippingbox",
-                    title: "Project Resources",
-                    subtitle: "Extensions, prompts, skills, context files, and tools",
-                    accent: configurationRowAccent
-                ) { destination = .projectResources }
-                TronSettingsDivider(accent: .tronPurple)
+                TronSettingsDivider(accent: configurationRowAccent)
                 manageRow(icon: "pencil", title: "Rename Session", accent: configurationRowAccent) {
                     name = snapshot.name ?? ""
                     showRename = true
                 }
+                TronSettingsDivider(accent: configurationRowAccent)
+                manageRow(
+                    icon: "terminal",
+                    title: "Terminal",
+                    subtitle: "Open or reattach the retained Mac terminal",
+                    accent: configurationRowAccent
+                ) { destination = .terminal }
             }
         }
     }
@@ -645,6 +640,8 @@ struct SessionContextSheet: View {
     private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {
         TronSettingsGroup("Session", detail: snapshot.cwd, detailInline: true, accent: .tronCyan) {
             VStack(spacing: 0) {
+                gitRow
+                divider()
                 manageRow(
                     icon: "doc.text.magnifyingglass",
                     title: "Agent Context",
@@ -653,38 +650,20 @@ struct SessionContextSheet: View {
                 ) { destination = .agentContext }
                 divider()
                 manageRow(
+                    icon: "shippingbox",
+                    title: "Project Resources",
+                    subtitle: "Extensions, prompts, skills, and tools",
+                    accent: sessionRowAccent
+                ) { destination = .projectResources }
+                divider()
+                manageRow(
                     icon: "point.3.connected.trianglepath.dotted",
                     title: "Session History",
                     subtitle: "Review recent history, audit changes, continue, or create a fork",
                     accent: sessionRowAccent
                 ) { destination = .history }
                 divider()
-                manageRow(
-                    icon: "terminal",
-                    title: "Terminal",
-                    subtitle: "Open or reattach the retained Mac terminal",
-                    accent: sessionRowAccent
-                ) { destination = .terminal }
-                divider()
-                gitRow
-                divider()
-                exportRow(
-                    format: "html",
-                    icon: "doc.richtext",
-                    subtitle: "Readable snapshot of committed session activity"
-                )
-                divider()
-                exportRow(
-                    format: "jsonl",
-                    icon: "doc.text",
-                    subtitle: "Complete canonical audit through the captured snapshot"
-                )
-                if let exportedURL {
-                    divider()
-                    ShareLink(item: exportedURL) {
-                        TronSettingsRow(icon: "square.and.arrow.up", title: "Share \(exportedURL.lastPathComponent)", accent: sessionRowAccent)
-                    }
-                }
+                processHistoryRow(snapshot)
                 ForEach(Array(snapshot.diagnostics.enumerated()), id: \.offset) { _, diagnostic in
                     divider()
                     TronSettingsRow(
@@ -693,6 +672,30 @@ struct SessionContextSheet: View {
                         subtitle: diagnostic.type,
                         accent: sessionRowAccent
                     )
+                }
+            }
+        }
+    }
+
+    private var exportSection: some View {
+        TronSettingsGroup("Exports", accent: exportRowAccent) {
+            VStack(spacing: 0) {
+                exportRow(
+                    format: "html",
+                    icon: "doc.richtext",
+                    subtitle: "Readable snapshot of committed session activity"
+                )
+                TronSettingsDivider(accent: exportRowAccent)
+                exportRow(
+                    format: "jsonl",
+                    icon: "doc.text",
+                    subtitle: "Complete canonical audit through the captured snapshot"
+                )
+                if let exportedURL {
+                    TronSettingsDivider(accent: exportRowAccent)
+                    ShareLink(item: exportedURL) {
+                        TronSettingsRow(icon: "square.and.arrow.up", title: "Share \(exportedURL.lastPathComponent)", accent: exportRowAccent)
+                    }
                 }
             }
         }
@@ -778,7 +781,7 @@ struct SessionContextSheet: View {
                 icon: icon,
                 title: SessionExportPresentationPolicy.title(for: format),
                 subtitle: subtitle,
-                accent: sessionRowAccent
+                accent: exportRowAccent
             ) {
                 if SessionExportPresentationPolicy.showsProgress(
                     rowFormat: format,
@@ -951,7 +954,7 @@ private struct AgentContextSheet: View {
                             TronSettingsRow(
                                 icon: "shippingbox",
                                 title: "Project Resources",
-                                subtitle: "Return to Manage Session to inspect extensions, prompts, skills, files, tools, and schemas",
+                                subtitle: "Return to Manage Session to inspect extensions, prompts, skills, tools, and schemas",
                                 accent: .tronTeal
                             )
                         }

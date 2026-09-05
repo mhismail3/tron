@@ -633,25 +633,23 @@ enum ChatTranscriptHandoffCommit: Hashable, Sendable {
 /// an active session reports visible working state.
 struct ChatRuntimeWorkingPresentation: Equatable {
     let message: String
-    let retryMessage: String?
     let phase: SessionPhase
     let usesAmbientBottomIndicator: Bool
 
-    init?(phase: SessionPhase, retry: RetryState?) {
+    init?(phase: SessionPhase) {
         guard phase.isActive else { return nil }
         self.phase = phase
         message = Self.defaultMessage(for: phase)
-        retryMessage = retry.map {
-            "Attempt \($0.attempt)\($0.maxAttempts.map { " of \($0)" } ?? "")"
-        }
-        usesAmbientBottomIndicator = phase == .running && retry == nil
+        // Retry metadata describes the attempt through auto_retry_end. Only
+        // phase owns visible waiting; agent_start resumes ordinary activity.
+        usesAmbientBottomIndicator = phase == .running
     }
 
     private static func defaultMessage(for phase: SessionPhase) -> String {
         switch phase {
         case .running: "Tron is working"
         case .compacting: "Compacting context"
-        case .retrying: "Retrying provider"
+        case .retrying: "Retrying"
         case .interrupted, .idle: ""
         }
     }
@@ -1521,8 +1519,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
         // the current entry even when bounded configuration metadata follows
         // it; inexact windows deliberately retain runtime chrome.
         if let working = ChatRuntimeWorkingPresentation(
-            phase: snapshot.phase,
-            retry: snapshot.retry
+            phase: snapshot.phase
         ), !working.usesAmbientBottomIndicator,
            !canonicalCompactionInstalled {
             let exactNextOrdinal: Int? = {
@@ -1547,7 +1544,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
                     ? "arrow.down.right.and.arrow.up.left"
                     : working.phase == .retrying ? "arrow.clockwise" : "sparkles",
                 title: working.message,
-                detail: working.retryMessage,
+                detail: nil,
                 body: nil,
                 tone: working.phase == .retrying ? .warning : .accent,
                 material: .flat

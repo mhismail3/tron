@@ -10,7 +10,7 @@ struct TronModelSelectionRow: View {
     var accent: Color = .tronPurple
 
     var body: some View {
-        TronProgressiveSheetLink(accessibilityLabel: navigationTitle) {
+        TronProgressiveSheetLink(accessibilityLabel: navigationTitle, accent: accent) {
             ModelPicker(selection: $selection, models: models)
                 .tronNavigationTitle(navigationTitle, accent: accent)
         } label: {

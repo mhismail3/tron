@@ -274,17 +274,8 @@ struct TranscriptRow: View, Equatable {
                         animatesEntrance: streaming
                     )
                 }
-                if showsMessageFooter,
-                   item.role == .assistant,
-                   displayedMessageParts.contains(where: { part in
-                       if case .content(let content) = part {
-                           return content.type == .text && !(content.text ?? "").isEmpty
-                       }
-                       return false
-                   }),
-                   let provider = item.provider,
-                   let modelName = item.modelId {
-                    Text(ModelDisplayFormatting.reference(provider: provider, model: modelName))
+                if let modelAttribution {
+                    Text(modelAttribution)
                         .font(TronFont.mono(10))
                         .foregroundStyle(Color.tronTextSecondary)
                 }
@@ -295,6 +286,22 @@ struct TranscriptRow: View, Equatable {
                 alignment: item.role == .user ? .topTrailing : .topLeading
             )
         }
+    }
+
+    var modelAttribution: String? {
+        // Message settlement, not whole-turn idleness, owns attribution. The
+        // Markdown reveal also settles at this same streaming boundary.
+        guard !streaming, showsMessageFooter,
+              item.role == .assistant,
+              displayedMessageParts.contains(where: { part in
+                  if case .content(let content) = part {
+                      return content.type == .text && !(content.text ?? "").isEmpty
+                  }
+                  return false
+              }),
+              let provider = item.provider,
+              let modelName = item.modelId else { return nil }
+        return ModelDisplayFormatting.reference(provider: provider, model: modelName)
     }
 
     private var displayedMessageParts: [ChatMessagePart] {
