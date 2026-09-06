@@ -228,16 +228,6 @@ export function successfulAssistantCompletion(
   return { id: entry.id, completedAt: entry.timestamp };
 }
 
-export function latestSuccessfulAssistantCompletion(
-  entries: readonly CanonicalCompletionEntry[],
-): CanonicalAssistantCompletion | undefined {
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const completion = successfulAssistantCompletion(entries[index]);
-    if (completion) return completion;
-  }
-  return undefined;
-}
-
 /** Recover only the canonical completion owned by durable run-marker evidence. */
 export function completionOwnedByMarker(
   manager: Pick<SessionManager, "getEntry">,

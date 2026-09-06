@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { atomicWriteJson } from "../util/json.js";
 import { SessionAttentionStore } from "./session-attention-store.js";
-import { completionOwnedByMarker, latestSuccessfulAssistantCompletion, successfulAssistantCompletion } from "./runtime-slot.js";
+import { completionOwnedByMarker, successfulAssistantCompletion } from "./runtime-slot.js";
 
 describe("session attention completion admission", () => {
   it("admits only stop and length assistant terminals, including non-text outcomes", () => {
@@ -15,23 +15,16 @@ describe("session attention completion admission", () => {
       message: { role, stopReason },
     });
     for (const excluded of ["pending", "toolUse", "error", "aborted", "deferred"]) {
-      expect(latestSuccessfulAssistantCompletion([entry(excluded, excluded)])).toBeUndefined();
+      expect(successfulAssistantCompletion(entry(excluded, excluded))).toBeUndefined();
     }
-    expect(latestSuccessfulAssistantCompletion([entry("stop", "stop")])?.id).toBe("stop");
-    expect(latestSuccessfulAssistantCompletion([entry("length", "length")])?.id).toBe("length");
-    expect(latestSuccessfulAssistantCompletion([
-      entry("success", "stop"),
-      entry("tool", "toolUse"),
-      entry("maintenance", "stop", "user"),
-    ])?.id).toBe("success");
-    expect(successfulAssistantCompletion(entry("tool", "toolUse"))).toBeUndefined();
-    expect(successfulAssistantCompletion(entry("aborted", "aborted"))).toBeUndefined();
-    expect(successfulAssistantCompletion(entry("terminal", "stop"))?.id).toBe("terminal");
+    expect(successfulAssistantCompletion(entry("stop", "stop"))?.id).toBe("stop");
+    expect(successfulAssistantCompletion(entry("length", "length"))?.id).toBe("length");
+    expect(successfulAssistantCompletion(entry("user-stop", "stop", "user"))).toBeUndefined();
+    expect(successfulAssistantCompletion({ ...entry("custom-stop", "stop"), type: "custom" })).toBeUndefined();
 
     const entries = [entry("exact", "stop"), entry("newer", "stop")];
     const manager = {
       getEntry: (id: string) => entries.find((candidate) => candidate.id === id),
-      getLeafEntry: () => entries.at(-1),
     };
     expect(completionOwnedByMarker(manager, {
       version: 1,
@@ -43,7 +36,7 @@ describe("session attention completion admission", () => {
     expect(completionOwnedByMarker(manager, {
       version: 1,
       sessionId: "session",
-      operationId: "legacy-too-new",
+      operationId: "unstamped",
       acceptedAt: "2026-01-01T00:00:09.000Z",
     })).toBeUndefined();
   });

@@ -991,9 +991,10 @@ claim for an already-stamped operation is permanent and fails immediately while
 ordinary storage failures retain durable retry, preventing that impossible claim from indefinitely
 blocking later prompts, `session.open`, or administrative drain. Cleanup remains
 scoped to that operation ID. Open/drain
-joins live settlement; after restart, a bounded canonical JSONL scan admits every
-successful completion named by the ordered exact durable stamps, and no markerless
-or temporal completion, before advancing its cursor. Catalog rows and
+joins live settlement; after restart, bounded recovery resolves each exact
+`assistantCompletionId` from ordered durable marker stamps against its canonical
+JSONL entry. It never substitutes another completion or infers unstamped or
+temporal completion before advancing its cursor. Catalog rows and
 revisioned `session.summary` events project
 `completionRevision`, `attentionRevision`, and `isUnread` without changing
 structural `listRevision`. `session.attention.set` uses ordinary command receipts and returns the complete
