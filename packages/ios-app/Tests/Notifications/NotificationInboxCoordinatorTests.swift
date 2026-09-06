@@ -130,7 +130,42 @@ struct NotificationInboxCoordinatorTests {
         #expect(coordinator.notifications.map(\.notification.id) == ["notification-current"])
     }
 
-    private func item(id: String, createdAt: String) -> GatewayNotificationInboxItem {
+    @MainActor
+    @Test("session-read refresh removes only acknowledged alerts and persists newer and other-Gateway unread rows")
+    func sessionReadRefresh() {
+        let suite = "NotificationInboxSessionRead.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let coordinator = NotificationInboxCoordinator(defaults: defaults)
+        let first = GatewayProfile(id: "first", label: "First", host: "first.example", port: 9847, machineId: "machine-first")
+        let second = GatewayProfile(id: "second", label: "Second", host: "second.example", port: 9847, machineId: "machine-second")
+        let original = item(id: "notification-shared", createdAt: "2026-01-01T00:00:00Z")
+        for profile in [first, second] {
+            let generation = coordinator.begin(profileID: profile.id)
+            coordinator.install(profile: profile, snapshot: .init(
+                notifications: [original], revision: "before", unreadCount: 1
+            ), generation: generation)
+        }
+        let stale = coordinator.begin(profileID: first.id)
+        let current = coordinator.begin(profileID: first.id)
+        let acknowledged = item(id: original.id, createdAt: original.createdAt, isUnread: false)
+        let later = item(id: "notification-later", createdAt: "2026-01-01T00:00:01Z")
+        coordinator.install(profile: first, snapshot: .init(
+            notifications: [later, acknowledged], revision: "after", unreadCount: 1
+        ), generation: current)
+        coordinator.install(profile: first, snapshot: .init(
+            notifications: [original], revision: "stale", unreadCount: 1
+        ), generation: stale)
+        let expectedUnread: Set<String> = ["first:notification-later", "second:notification-shared"]
+        #expect(Set(coordinator.notifications.filter(\.notification.isUnread).map(\.id)) == expectedUnread)
+        #expect(coordinator.unreadCount == 2)
+        let restored = NotificationInboxCoordinator(defaults: defaults)
+        #expect(restored.notifications.count == 3)
+        #expect(Set(restored.notifications.filter(\.notification.isUnread).map(\.id)) == expectedUnread)
+        #expect(restored.unreadCount == 2)
+    }
+
+    private func item(id: String, createdAt: String, isUnread: Bool = true) -> GatewayNotificationInboxItem {
         GatewayNotificationInboxItem(
             version: 1,
             id: id,
@@ -140,7 +175,7 @@ struct NotificationInboxCoordinatorTests {
             title: "Finished",
             message: "The agent finished responding.",
             sessionId: "session-abcdefgh",
-            isUnread: true,
+            isUnread: isUnread,
             outcome: .acceptedByAPNs
         )
     }

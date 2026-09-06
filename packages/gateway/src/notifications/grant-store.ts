@@ -234,10 +234,13 @@ export class NotificationGrantStore {
     return this.mutex.run(async () => (await this.requireDocument()));
   }
 
-  async update(update: (current: NotificationDocument) => NotificationDocument): Promise<NotificationDocument> {
+  /** Returning undefined admits a read-only transaction without rewriting credentials. */
+  async update(update: (current: NotificationDocument) => NotificationDocument | undefined): Promise<NotificationDocument> {
     return this.mutex.run(async () => {
       const current = await this.requireDocument();
-      const next = validate(update(structuredClone(current)));
+      const candidate = update(structuredClone(current));
+      if (candidate === undefined) return current;
+      const next = validate(candidate);
       const encoded = Buffer.byteLength(JSON.stringify(next));
       if (encoded > MAXIMUM_DOCUMENT_BYTES) throw new GatewayError("busy", "Notification state exceeds its bounded capacity", true);
       await this.ensureSecureParent();

@@ -396,7 +396,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
       machineId: "machine-observed-test",
-      notifications: { enqueue, suppressAutomatic } as unknown as NotificationService,
+      notifications: { enqueue, suppressAutomatic, markSessionInboxRead: vi.fn(async () => {}) } as unknown as NotificationService,
     });
     registries.push(registry);
     await registry.initialize();
@@ -4373,7 +4373,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
       broadcast: () => {}, sessionSummaryChanged: (summary) => summaries.push(summary), sessionListChanged: () => {},
       machineId: "machine-input-test",
-      notifications: { userInputRequired } as unknown as NotificationService,
+      notifications: { userInputRequired, markSessionInboxRead: vi.fn(async () => {}) } as unknown as NotificationService,
     });
     registries.push(registry);
     await registry.initialize();

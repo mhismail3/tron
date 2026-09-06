@@ -3067,7 +3067,12 @@ export class RuntimeRegistry {
     if (!this.isSubscribed(input.clientId, input.sessionId)) {
       throw new GatewayError("conflict", "Session presentation subscription is not current", true);
     }
-    return this.presentationPresence.set(input);
+    return this.presentationPresence.set(input, () => {
+      // Transport has resolved aliases and admitted the exact mobile token.
+      // Notification persistence must not block chat or die with its socket;
+      // the notification owner retains captured IDs for its background drain.
+      void this.options.notifications?.markSessionInboxRead(input.sessionId).catch(() => {});
+    });
   }
 
   isSessionPresented(sessionId: string): boolean {

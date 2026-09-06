@@ -43,7 +43,7 @@ export class SessionPresentationPresenceRegistry {
     subscriptionToken: string;
     revision: number;
     visible: boolean;
-  }): SessionPresentationPresenceProjection {
+  }, onVisible?: () => void): SessionPresentationPresenceProjection {
     const current = this.leasesByClient.get(input.clientId);
     if (current
       && current.sessionId === input.sessionId
@@ -52,11 +52,18 @@ export class SessionPresentationPresenceRegistry {
       return { visible: this.isLeaseVisible(current), revision: current.revision };
     }
 
+    const opened = input.visible && (!current
+      || current.sessionId !== input.sessionId
+      || current.subscriptionToken !== input.subscriptionToken
+      || !this.isLeaseVisible(current));
     const lease: SessionPresentationPresenceLease = {
       ...input,
       expiresAt: input.visible ? this.now() + this.leaseMilliseconds : 0,
     };
     this.leasesByClient.set(input.clientId, lease);
+    // Renewals maintain visibility, not a new read cut. Only opening/re-entry
+    // may acknowledge alerts; otherwise later notifications could be lost.
+    if (opened) onVisible?.();
     return { visible: input.visible, revision: input.revision };
   }
 

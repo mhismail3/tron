@@ -32,6 +32,7 @@ describe("two-phase session synchronization protocol", () => {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 4, minProtocolVersion: 4, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
+      releaseSessionProcessTranscripts: vi.fn(),
       invoke: async (context: any, method: string, params: any) => {
         const sessionId = params.sessionId as string;
         if (method === "session.open") {
@@ -192,12 +193,18 @@ describe("two-phase session synchronization protocol", () => {
       while (!mobileFrames.some((frame) => frame.id === `${prefix}-open`)) await new Promise((resolve) => setTimeout(resolve, 1));
       const opened = mobileFrames.find((frame) => frame.id === `${prefix}-open`);
       expect(opened.ok).toBe(true);
+      if (prefix === "mobile-c") {
+        mobile.send(JSON.stringify({ type: "request", id: "before-sync-visible", method: "session.presentation.set",
+          params: { sessionId, subscriptionToken: opened.result.subscriptionToken, revision: 1, visible: true } }));
+        await vi.waitFor(() => expect(mobileFrames.find((frame) => frame.id === "before-sync-visible")?.error?.code).toBe("conflict"));
+        expect(sessions.setPresentationVisibility).not.toHaveBeenCalled();
+      }
       mobile.send(JSON.stringify({ type: "request", id: `${prefix}-sync`, method: "session.sync", params: { sessionId, syncToken: opened.result.syncToken } }));
       while (!mobileFrames.some((frame) => frame.id === `${prefix}-sync`)) await new Promise((resolve) => setTimeout(resolve, 1));
       return opened.result.subscriptionToken;
     };
     await mobileOpenSync("mobile-a", "a");
-    await mobileOpenSync("mobile-b", "b");
+    const mobileBToken = await mobileOpenSync("mobile-b", "b");
     const mobileCToken = await mobileOpenSync("mobile-c", "c");
     mobile.send(JSON.stringify({
       type: "request",
@@ -214,6 +221,11 @@ describe("two-phase session synchronization protocol", () => {
       visible: true,
     }));
 
+    mobile.send(JSON.stringify({ type: "request", id: "stale-token-visible", method: "session.presentation.set",
+      params: { sessionId: "c", subscriptionToken: mobileBToken, revision: 2, visible: true } }));
+    await vi.waitFor(() => expect(mobileFrames.find((frame) => frame.id === "stale-token-visible")?.error?.code).toBe("conflict"));
+    expect(sessions.setPresentationVisibility).toHaveBeenCalledOnce();
+
     request("technical-visible", "session.presentation.set", "a", {
       subscriptionToken: openA.result.subscriptionToken,
       revision: 1,
@@ -228,6 +240,13 @@ describe("two-phase session synchronization protocol", () => {
     gateway.broadcastSession("c", "session.progress", { runtimeGeneration: "generation-c", eventSequence: 200, revision: 200, data: { message: "c" } } as any);
     while (!mobileFrames.slice(mobileEventStart).some((frame) => frame.sessionId === "c")) await new Promise((resolve) => setTimeout(resolve, 1));
     expect(mobileFrames.slice(mobileEventStart).filter((frame) => frame.topic === "session.progress").map((frame) => frame.sessionId)).toEqual(["c"]);
+    gateway.rekeySession("c", "canonical-c");
+    mobile.send(JSON.stringify({ type: "request", id: "alias-visible", method: "session.presentation.set",
+      params: { sessionId: "c", subscriptionToken: mobileCToken, revision: 2, visible: true } }));
+    await vi.waitFor(() => expect(mobileFrames.find((frame) => frame.id === "alias-visible")?.ok).toBe(true));
+    expect(sessions.setPresentationVisibility).toHaveBeenLastCalledWith(expect.objectContaining({
+      sessionId: "canonical-c", subscriptionToken: mobileCToken, revision: 2, visible: true,
+    }));
     mobile.close();
     socket.close();
   });

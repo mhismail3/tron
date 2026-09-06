@@ -61,6 +61,9 @@ const notifications = new NotificationService(
   Date.now,
   undefined,
   () => transport?.broadcast("notification.inbox.changed", {}),
+  () => logger.log("warning", "Session notification read state could not be persisted; unread state is retained.", {
+    event: "notification.inbox.read_failed", source: "notifications",
+  }),
 );
 await notifications.initialize();
 

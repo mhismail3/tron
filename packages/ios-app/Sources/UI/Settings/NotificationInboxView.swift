@@ -42,7 +42,7 @@ struct NotificationInboxView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.scenePhase) private var scenePhase
-    @State private var filter: NotificationInboxFilter = .all
+    @State private var filter: NotificationInboxFilter = .unread
     @State private var selectedItem: NotificationInboxItem?
     @State private var openingItemID: String?
     @State private var showsHistory = false

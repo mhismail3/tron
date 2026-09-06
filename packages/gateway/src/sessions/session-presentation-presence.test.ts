@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SessionPresentationPresenceRegistry } from "./session-presentation-presence.js";
 
 describe("SessionPresentationPresenceRegistry", () => {
@@ -24,6 +24,23 @@ describe("SessionPresentationPresenceRegistry", () => {
     });
     now += 101;
     expect(presence.isVisible("session")).toBe(false);
+  });
+
+  it("admits a new read cut after expiry but never on visible renewals or stale revisions", () => {
+    let now = 0;
+    const presence = new SessionPresentationPresenceRegistry(() => now, 100);
+    const opened = vi.fn();
+    const input = { clientId: "phone", sessionId: "session", subscriptionToken: "token", visible: true };
+    presence.set({ ...input, revision: 1 }, opened);
+    now = 50;
+    presence.set({ ...input, revision: 2 }, opened);
+    expect(opened).toHaveBeenCalledTimes(1);
+    now = 151;
+    presence.set({ ...input, revision: 2 }, opened);
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(presence.isVisible("session")).toBe(false);
+    presence.set({ ...input, revision: 3 }, opened);
+    expect(opened).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a session visible while any independent mobile lease remains active", () => {

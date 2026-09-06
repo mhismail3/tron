@@ -156,6 +156,7 @@ describe("NotificationGrantStore and NotificationService", () => {
     const changed = vi.fn();
     let clock = Date.parse("2026-01-01T00:00:00.000Z");
     const { service, relay, store } = await fixture(undefined, () => clock++, undefined, changed);
+    const drains = vi.spyOn(service, "drain");
     await service.upsertGrant({ ...grant, previewsEnabled: true });
     for (let index = 0; index < 3; index += 1) {
       await service.enqueue({
@@ -167,10 +168,12 @@ describe("NotificationGrantStore and NotificationService", () => {
         route: { sessionId: "session-inbox", machineId: "machine-abcdefgh" },
       });
     }
-    await vi.waitFor(async () => expect((await store.snapshot()).pending).toHaveLength(2));
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Join admitted delivery, then drain any rows queued after its snapshot.
+    // A particular intermediate pending count depends on filesystem scheduling.
+    await Promise.all(drains.mock.results.map((result) => result.value));
     await service.drain();
-    await vi.waitFor(() => expect(relay.sent).toHaveLength(3));
+    expect(relay.sent).toHaveLength(3);
+    expect((await store.snapshot()).pending).toHaveLength(0);
     const first = await service.inbox(undefined, 2);
     expect(first.notifications.map((item) => item.title)).toEqual(["Title 2", "Title 1"]);
     expect(first.unreadCount).toBe(3);

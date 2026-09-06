@@ -153,12 +153,15 @@ function retainRevocationAuthority(document: NotificationDocument, now: number):
 export class NotificationService {
   private timer: NodeJS.Timeout | undefined;
   private draining = false;
+  private readonly pendingInboxReadIds = new Set<string>();
+  private inboxReadFlush: Promise<void> | undefined;
   constructor(
     private readonly store: NotificationGrantStore,
     private readonly relay: PushRelayClient,
     private readonly now: () => number = Date.now,
     private readonly rateLimits: NotificationRateLimits = DEFAULT_NOTIFICATION_RATE_LIMITS,
     private readonly inboxChanged: () => void = () => {},
+    private readonly inboxReadFailed: () => void = () => {},
   ) {}
 
   async initialize(): Promise<void> {
@@ -380,6 +383,51 @@ export class NotificationService {
     return { changed };
   }
 
+  /** Capture one canonical cut; retries must never broaden it to later alerts. */
+  async markSessionInboxRead(sessionId: string): Promise<void> {
+    if (!SESSION_ROUTE_ID.test(sessionId)) throw new GatewayError("invalid_request", "Notification session identity is malformed");
+    try { await this.persistInboxReads(sessionId); }
+    catch (error) {
+      try { this.inboxReadFailed(); } catch { /* diagnostics never own read admission */ }
+      throw error;
+    }
+  }
+
+  private async flushInboxReads(): Promise<void> {
+    if (this.inboxReadFlush) return this.inboxReadFlush;
+    if (this.pendingInboxReadIds.size === 0) return;
+    const operation = this.persistInboxReads();
+    this.inboxReadFlush = operation;
+    try { await operation; }
+    finally { this.inboxReadFlush = undefined; }
+  }
+
+  private async persistInboxReads(sessionId?: string): Promise<void> {
+    const ids = new Set<string>();
+    let changed = false;
+    await this.store.update((document) => {
+      const unread = (document.inbox ?? []).filter((entry) => entry.readAt === undefined);
+      const retained = new Set(unread.map((entry) => entry.id));
+      // Capture and mutation share the admission/settlement mutex. Only IDs
+      // survive a failed write, bounded by the canonical inbox's 512 rows.
+      for (const id of this.pendingInboxReadIds) if (!retained.has(id)) this.pendingInboxReadIds.delete(id);
+      for (const entry of unread) if (entry.sessionId === sessionId) this.pendingInboxReadIds.add(entry.id);
+      for (const id of this.pendingInboxReadIds) ids.add(id);
+      const now = this.now();
+      for (const entry of unread) {
+        if (!ids.has(entry.id)) continue;
+        entry.readAt = iso(now);
+        entry.updatedAt = iso(Math.max(now, Date.parse(entry.updatedAt)));
+        changed = true;
+      }
+      return changed ? document : undefined;
+    });
+    // Only a committed transaction retires the captured intent. It outlives
+    // navigation/socket loss; retries never select later rows for that session.
+    for (const id of ids) this.pendingInboxReadIds.delete(id);
+    if (changed) this.publishInboxChanged();
+  }
+
   async suppressAutomatic(input: {
     sessionId: string;
     sourceId: string;
@@ -520,6 +568,9 @@ export class NotificationService {
   }
 
   async drain(): Promise<void> {
+    // Reading an already-open chat is independent of relay availability and
+    // in-flight delivery. Failed writes retain their exact IDs for the next tick.
+    await this.flushInboxReads().catch(() => {});
     if (this.draining || !this.relay.available) return;
     this.draining = true;
     try {
@@ -551,6 +602,9 @@ export class NotificationService {
       // Remote revocation is lower priority than live notifications and bounded
       // to one attempt per drain so an unavailable relay cannot wedge delivery.
       await this.drainRevocations();
+    } catch {
+      // The timer owns recovery from storage failures as well as relay failures.
+      // Durable intents remain pending; a detached rejection must not kill the Gateway.
     } finally { this.draining = false; }
   }
 
