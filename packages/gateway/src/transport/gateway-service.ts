@@ -920,8 +920,13 @@ export class GatewayService {
           }
           return { deleted: true };
         });
-      case "session.prompt":
+      case "session.prompt": {
+        // Pin before receipt I/O, but defer rejection to its operation callback:
+        // an existing receipt remains readable without a live subscription.
+        const releaseSession = typeof params.sessionId === "string" && client.isSubscribed(params.sessionId)
+          ? this.dependencies.sessions.retainLiveSession(params.sessionId) : undefined;
         return this.mutation(client, method, params, async () => {
+          this.requireRetainedSession(client, params, releaseSession);
           const slot = await this.openedSlot(client, params);
           if (params.text !== undefined && typeof params.text !== "string") {
             throw new GatewayError("invalid_request", "text must be a string");
@@ -985,7 +990,8 @@ export class GatewayService {
           }, resolveAdmission);
           void execution.then(resolveAdmission, rejectAdmission);
           return safeJson(await admission);
-        });
+        }).finally(releaseSession);
+      }
       case "session.abort":
         return this.mutation(client, method, params, async () => {
           const sessionId = string(params.sessionId, "sessionId", { max: 200 });
@@ -1379,8 +1385,11 @@ export class GatewayService {
         const slot = await this.openedSlot(client, params);
         return safeJson({ terminals: this.dependencies.terminals.list(slot.id) });
       }
-      case "terminal.open":
+      case "terminal.open": {
+        const releaseSession = typeof params.sessionId === "string" && client.isSubscribed(params.sessionId)
+          ? this.dependencies.sessions.retainLiveSession(params.sessionId) : undefined;
         return this.mutation(client, method, params, async () => {
+          this.requireRetainedSession(client, params, releaseSession);
           const slot = await this.openedSlot(client, params);
           const terminal = this.dependencies.terminals.open(
             slot.id,
@@ -1394,7 +1403,8 @@ export class GatewayService {
           // revoked connection cannot retain terminal ownership.
           if (!client.isRevoked()) client.attachTerminal(terminal.id);
           return safeJson({ terminal, replay: this.dependencies.terminals.attach(terminal.id, 0) });
-        });
+        }).finally(releaseSession);
+      }
       case "terminal.attach": {
         const terminalId = string(params.terminalId, "terminalId", { max: 100 });
         const replay = this.dependencies.terminals.attach(terminalId, params.afterSequence === undefined ? 0 : integer(params.afterSequence, "afterSequence", 0, Number.MAX_SAFE_INTEGER));
@@ -1444,6 +1454,14 @@ export class GatewayService {
     if (!client.ownsTerminal(terminalId)) {
       throw new GatewayError("invalid_request", "Attach the terminal before controlling it");
     }
+  }
+
+  private requireRetainedSession(client: ClientContext, params: Record<string, unknown>, release: (() => void) | undefined): void {
+    const sessionId = string(params.sessionId, "sessionId", { max: 200 });
+    if (!client.isSubscribed(sessionId)) {
+      throw new GatewayError("invalid_request", "Open the session before reading its live runtime projection");
+    }
+    if (!release) throw new GatewayError("busy", "Session runtime is no longer available", true);
   }
 
   private async openedSlot(client: ClientContext, params: Record<string, unknown>) {

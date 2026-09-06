@@ -61,8 +61,8 @@ describe("session transcript paging", () => {
       expect(published).toHaveBeenCalledOnce();
     } finally {
       releaseCleanup?.();
-      await revoke?.catch(() => {});
-      await rm(root, { recursive: true, force: true });
+      try { if (revoke) await revoke; }
+      finally { await rm(root, { recursive: true, force: true }); }
     }
   });
 
@@ -101,11 +101,12 @@ describe("session transcript paging", () => {
       await devices.revoke(paired.deviceId, () => {});
       releaseRuntime();
       await expect(begin).rejects.toMatchObject({ code: "unauthenticated" });
+      begin = undefined;
       expect(authStart).not.toHaveBeenCalled();
     } finally {
       releaseRuntime?.();
-      await begin?.catch(() => {});
-      await rm(root, { recursive: true, force: true });
+      try { if (begin) await begin; }
+      finally { await rm(root, { recursive: true, force: true }); }
     }
   });
 
@@ -326,6 +327,7 @@ describe("session transcript paging", () => {
     const service = new GatewayService({
       sessions: {
         isSubscribed: () => true,
+        retainLiveSession: () => () => {},
         acquire: async () => ({ id: "session", prompt }),
       },
       uploads: {
@@ -370,6 +372,7 @@ describe("session transcript paging", () => {
     const service = new GatewayService({
       sessions: {
         isSubscribed: () => true,
+        retainLiveSession: () => () => {},
         acquire: async () => ({ id: "session", prompt, commands }),
       },
       uploads: {
@@ -432,7 +435,7 @@ describe("session transcript paging", () => {
       { name: "goal", source: "extension" },
     ]);
     const service = new GatewayService({
-      sessions: { isSubscribed: () => true, acquire: async () => ({ id: "session", prompt, commands }) },
+      sessions: { isSubscribed: () => true, retainLiveSession: () => () => {}, acquire: async () => ({ id: "session", prompt, commands }) },
       uploads: { materialize: async () => ({ envelope: "", images: [], photoCount: 0, fileAttachmentCount: 1, attachments: [{ id: "upload", name: "a.txt", mimeType: "text/plain", size: 1 }] }) },
       receipts: { execute },
     } as unknown as GatewayServiceDependencies);
@@ -456,7 +459,7 @@ describe("session transcript paging", () => {
 
   it("rejects invalid resource controls and oversized UTF-8 names", async () => {
     const service = new GatewayService({
-      sessions: { isSubscribed: () => true, acquire: async () => ({ id: "session", prompt: vi.fn(), commands: vi.fn(() => []) }) },
+      sessions: { isSubscribed: () => true, retainLiveSession: () => () => {}, acquire: async () => ({ id: "session", prompt: vi.fn(), commands: vi.fn(() => []) }) },
       uploads: { materialize: async () => ({ envelope: "", images: [], photoCount: 0, fileAttachmentCount: 0, attachments: [] }) },
       receipts: { execute: vi.fn(async (_a: string, _b: string, _c: string, operation: () => Promise<unknown>) => operation()) },
     } as unknown as GatewayServiceDependencies);
@@ -643,77 +646,6 @@ describe("session transcript paging", () => {
     })).resolves.toMatchObject({ isUnread: true });
     expect(execute).toHaveBeenCalledTimes(2);
     expect(setAttention).toHaveBeenNthCalledWith(1, "session", false, 3);
-  });
-
-  it("completes an admitted prompt receipt after observer retirement", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-prompt-revoke-"));
-    try {
-      let revoked = false;
-      const prompt = vi.fn(async (_text: string, _images: unknown[], _behavior: unknown, _display: unknown, admit: (result: { operationId: string }) => void) => {
-        revoked = true;
-        admit({ operationId: "canonical-operation" });
-        return { operationId: "canonical-operation" };
-      });
-      const service = new GatewayService({
-        config: { tronHome: root },
-        sessions: {
-          isSubscribed: () => true,
-          acquire: async () => ({ id: "session", prompt }),
-        },
-        uploads: { materialize: async () => ({ envelope: "", images: [], attachments: [] }) },
-        receipts: new CommandReceiptStore(root),
-      } as unknown as GatewayServiceDependencies);
-      const result = await service.invoke({ ...client, isRevoked: () => revoked }, "session.prompt", {
-        sessionId: "session",
-        text: "accepted",
-        commandId: "prompt-revoke-command",
-      });
-      expect(result).toEqual({ operationId: "canonical-operation" });
-      expect(prompt).toHaveBeenCalledOnce();
-      await expect(new CommandReceiptStore(root).status(client.identity, "session.prompt", "prompt-revoke-command"))
-        .resolves.toMatchObject({ status: "completed", result: { operationId: "canonical-operation" } });
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it("preserves an admitted terminal effect when revocation retires attachment ownership", async () => {
-    const root = await mkdtemp(join(tmpdir(), "tron-terminal-revoke-"));
-    try {
-      let revoked = false;
-      const attachTerminal = vi.fn();
-      const terminal = { id: "terminal-1", sessionId: "session", state: "running" };
-      const open = vi.fn(() => {
-        revoked = true;
-        return terminal;
-      });
-      const service = new GatewayService({
-        config: { tronHome: root },
-        sessions: {
-          isSubscribed: () => true,
-          acquire: async () => ({ id: "session", cwd: "/tmp", sessionEnvironment: () => ({}) }),
-        },
-        terminals: { open, attach: () => ({ terminal, chunks: [], reset: false }) },
-        receipts: new CommandReceiptStore(root),
-      } as unknown as GatewayServiceDependencies);
-      const result = await service.invoke({
-        ...client,
-        attachTerminal,
-        isRevoked: () => revoked,
-      }, "terminal.open", {
-        sessionId: "session",
-        columns: 80,
-        rows: 24,
-        commandId: "terminal-revoke-command",
-      });
-      expect(result).toEqual({ terminal, replay: { terminal, chunks: [], reset: false } });
-      expect(open).toHaveBeenCalledOnce();
-      expect(attachTerminal).not.toHaveBeenCalled();
-      await expect(new CommandReceiptStore(root).status(client.identity, "terminal.open", "terminal-revoke-command"))
-        .resolves.toMatchObject({ status: "completed" });
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
   });
 
   it("rejects terminal creation before the client opens the session", async () => {

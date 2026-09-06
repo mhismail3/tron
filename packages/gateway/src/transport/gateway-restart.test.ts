@@ -153,6 +153,7 @@ describe("Gateway administrative restart", () => {
     const dependencies = {
       sessions: {
         isSubscribed: () => true,
+        retainLiveSession: () => () => {},
         acquire: async () => {
           await slotBarrier;
           return { id: "session", cwd: "/tmp", sessionEnvironment: () => ({}) };

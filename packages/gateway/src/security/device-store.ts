@@ -304,9 +304,9 @@ export class DeviceStore {
     return device ? { kind: "device", deviceId: device.id } : null;
   }
 
-  /** Authenticate and synchronously register the next effect under the
-   * durable credential mutex. The callback must not return a promise: long
-   * effects begin only after this authority cut has been released. */
+  /** Authenticate and synchronously register/start the next effect under the
+   * durable credential mutex. The callback must not return a promise: admitted
+   * streams and provider work run without holding this mutex across awaits. */
   async authenticateAndAdmit<T>(token: string | undefined, register: (identity: { kind: "local" } | DeviceIdentity) => T): Promise<T | null> {
     if (!token) return null;
     return this.mutex.run(async () => {

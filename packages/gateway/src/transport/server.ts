@@ -1342,18 +1342,37 @@ export class GatewayServer {
   private closeRevokedConnectionAfterResponse(connection: Connection): void {
     if (!connection.revoked || !connection.revokeResponseQueued || connection.revokeCloseScheduled) return;
     connection.revokeCloseScheduled = true;
-    connection.outbound.whenIdle(() => {
-      if (connection.socket.readyState === WebSocket.OPEN) connection.socket.close(1008, "device revoked");
-    });
+    let deadline!: NodeJS.Timeout;
+    let closeRequested = false;
+    const requestClose = (force: boolean): void => {
+      if (closeRequested) return;
+      closeRequested = true;
+      clearTimeout(deadline);
+      if (force) {
+        connection.outbound.retire();
+        // A stalled writer or close handshake must not retain capacity until
+        // ws's longer close timeout. The close handler owns normal cleanup.
+        if (connection.socket.readyState !== WebSocket.CLOSED) connection.socket.terminate();
+      } else if (connection.socket.readyState === WebSocket.OPEN) {
+        connection.socket.close(1008, "device revoked");
+      }
+    };
+    deadline = setTimeout(() => requestClose(true), 1_000);
+    deadline.unref();
+    connection.outbound.whenIdle(() => requestClose(false));
   }
 
   private sendOutcome(connection: Connection, value: unknown): "sent" | "fallback" | "failed" {
     if (connection.socket.readyState !== WebSocket.OPEN) return "failed";
     if (connection.revoked) {
       const frame = value as { type?: unknown; id?: unknown };
-      // Revocation retires events and observer delivery, but responses for
-      // requests that crossed admission remain deliverable.
-      if (frame.type !== "response" || typeof frame.id !== "string" || !connection.inFlight.has(frame.id)) return "failed";
+      // Revocation retires events and observer delivery. Already queued frames
+      // drain in order, but only the exact initiating self-revoke response may
+      // be added after the durable cut; accepted work settles canonically.
+      if (frame.type !== "response"
+          || typeof frame.id !== "string"
+          || frame.id !== connection.revokeResponseRequestId
+          || !connection.inFlight.has(frame.id)) return "failed";
     }
     try {
       const direct = JSON.stringify(value);
