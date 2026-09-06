@@ -1716,7 +1716,9 @@ export class RuntimeRegistry {
     if (cached) {
       const ambiguousIDs = this.dynamicAmbiguousSessionIDs(cached);
       const infos = cached.allInfos.filter((session) => !ambiguousIDs.has(session.id));
-      this.ambiguousSessionIds = ambiguousIDs;
+      // Reconciled sidecar rows can change membership just like a full scan.
+      // Publish their identity before returning the matching structural revision.
+      this.updateCatalogIdentity(cached.allInfos, ambiguousIDs);
       return {
         infos: [...infos],
         ambiguousIDs,
@@ -1833,7 +1835,7 @@ export class RuntimeRegistry {
       }));
   }
 
-  private updateCatalogIdentity(infos: CatalogSessionInfo[], ambiguousIDs: Set<string>): void {
+  private updateCatalogIdentity(infos: readonly CatalogSessionInfo[], ambiguousIDs: Set<string>): void {
     const fingerprint = this.catalogIdentityFingerprint(infos);
     if (this.catalogFingerprint === undefined) this.catalogFingerprint = fingerprint;
     else if (this.catalogFingerprint !== fingerprint) {

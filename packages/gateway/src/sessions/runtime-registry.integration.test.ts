@@ -7,6 +7,7 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
+import { SessionListPaginationStore } from "../transport/session-list-pagination.js";
 import { admitsAutomationAction } from "../automations/automation-contract.js";
 import { GatewayAutomationExecutor } from "../automations/automation-executor.js";
 import type { AutomationExecutionHandle } from "../automations/automation-scheduler.js";
@@ -1143,6 +1144,74 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       scanner.mockRestore();
       append.mockRestore();
       reconcile.mockRestore();
+    }
+  });
+
+  it.each([false, true])("publishes reconciled catalog membership without changing an older traversal (restart: %s)", async (restart) => {
+    const fixture = await coldFixture("catalog-membership-revision");
+    let registry = fixture.registry;
+    const pagination = new SessionListPaginationStore();
+    const save = vi.spyOn(CatalogMetadataIndex.prototype, "save");
+    try {
+      const second = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+      second.appendMessage(fauxAssistantMessage("second catalog member"));
+      const originalIDs = [fixture.manager.getSessionId(), second.getSessionId()].sort();
+      await registry.pageSource("all");
+      // Wait for the actual sidecar transaction, not an elapsed delay or a
+      // partially published file, before testing its cold reconstruction.
+      await waitUntil(() => save.mock.results.length > 0);
+      await Promise.all(save.mock.results.map((result) => result.value));
+      if (restart) {
+        await registry.dispose();
+        registries.splice(registries.indexOf(registry), 1);
+        registry = new RuntimeRegistry({
+          agentDir: fixture.agentDir,
+          tronHome: join(fixture.root, "tron"),
+          idleRuntimeMs: 60_000,
+          modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+          trust: new TrustService(fixture.agentDir),
+          broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+        });
+        registries.push(registry);
+        await registry.initialize();
+      }
+      const before = await registry.pageSource("all");
+      const first = await pagination.firstPage("old-reader", "all", before, 1);
+      expect(first.nextCursor).toBeDefined();
+      const scanner = vi.spyOn(registry as unknown as { sessionInfos: () => Promise<unknown[]> }, "sessionInfos");
+      try {
+        // These are distinct, inactive canonical files; no second runtime is
+        // opened on a session already owned by a live slot.
+        const added = SessionManager.create(fixture.cwd, dirname(fixture.sessionFile));
+        added.appendMessage(fauxAssistantMessage("new catalog member"));
+        const afterAdd = await registry.pageSource("all");
+        const addedPage = await pagination.firstPage("new-reader", "all", afterAdd, 10);
+        expect(addedPage.sessions.map((row) => row.id).sort()).toEqual([...originalIDs, added.getSessionId()].sort());
+        expect(afterAdd.listRevision).toBeGreaterThan(before.listRevision);
+        expect(await registry.pageSource("all")).toBe(afterAdd);
+
+        await rm(fixture.sessionFile);
+        const afterRemove = await registry.pageSource("all");
+        const removedPage = await pagination.firstPage("new-reader", "all", afterRemove, 10);
+        expect(removedPage.sessions.map((row) => row.id).sort()).toEqual([second.getSessionId(), added.getSessionId()].sort());
+        expect(afterRemove.listRevision).toBeGreaterThan(afterAdd.listRevision);
+        expect(await registry.pageSource("all")).toBe(afterRemove);
+
+        const last = await pagination.nextPage("old-reader", "all", first.nextCursor!, 10);
+        expect([...first.sessions, ...last.sessions].map((row) => row.id).sort()).toEqual(originalIDs);
+        expect(last.listRevision).toBe(first.listRevision);
+        expect(last.nextCursor).toBeUndefined();
+        expect(pagination.activeLeaseCount).toBe(0);
+        expect(scanner).not.toHaveBeenCalled();
+      } finally { scanner.mockRestore(); }
+    } finally {
+      pagination.releaseClient("old-reader");
+      pagination.releaseClient("new-reader");
+      await Promise.all(save.mock.results.map((result) => result.value));
+      save.mockRestore();
+      await registry.dispose();
+      registries.splice(registries.indexOf(registry), 1);
+      await rm(fixture.root, { recursive: true, force: true });
     }
   });
 

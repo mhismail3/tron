@@ -955,7 +955,11 @@ is bound to the connection, scope, materialization, offset, and revision. Runtim
 leases expire after 30 seconds, are released on disconnect, and are bounded by
 per-client lease quotas plus per-lease/global row and encoded-byte limits with LRU eviction. Runtime `session.summary` revisions remain independent, so activity heartbeats
 and ordinary row updates neither rescan nor tear catalog pagination; a later traversal
-observes newer canonical truth. Clients still fail closed and restart from a nil cursor
+observes newer canonical truth. Both full scans and reconciled durable-index cuts
+publish membership through the same structural revision owner, including the first
+cut after restart. Additions and removals advance `listRevision`; unchanged cuts
+reuse it, and already-leased traversals keep their original rows and revision.
+Clients still fail closed and restart from a nil cursor
 when interoperating with an older Gateway that changes revisions between pages. Model-list
 cursors bind their offset to an exact whole-catalog SHA-256 fingerprint and a 30-second immutable
 runtime-local materialization, so changes cannot mix pages and later pages do not rebuild or rehash
