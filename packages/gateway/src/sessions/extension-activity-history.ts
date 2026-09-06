@@ -184,7 +184,8 @@ export function admitExtensionActivityReceipt(value: unknown, expectedSessionId?
       const seen = new Set<string>();
       let cursor: string | undefined = child.id;
       while (cursor !== undefined) {
-        if (!seen.add(cursor)) return undefined;
+        if (seen.has(cursor)) return undefined;
+        seen.add(cursor);
         cursor = parents.get(cursor);
       }
     }
@@ -284,26 +285,31 @@ export function listExtensionActivityHistory(entries: readonly unknown[], sessio
     offset = Number(encodedOffset);
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > all.length) throw new Error("extension activity history cursor invalid");
   }
-  const selected: typeof all = [];
-  let bytes = 0;
+  const activities: ExtensionRunActivity[] = [];
+  let bytes = 2;
   let omittedBytes = 0;
   let omittedCount = 0;
-  const pageEnd = Math.min(all.length, offset + boundedLimit);
-  for (let index = offset; index < pageEnd; index += 1) {
-    const entry = all[index]!;
-    const summary = extensionReceiptActivity(entry.receipt);
-    const size = Buffer.byteLength(JSON.stringify(summary));
+  const maximumEnd = Math.min(all.length, offset + boundedLimit);
+  let nextOffset = offset;
+  for (let index = offset; index < maximumEnd; index += 1) {
+    const summary = extensionReceiptActivity(all[index]!.receipt);
+    const size = Buffer.byteLength(JSON.stringify(summary)) + 1;
     if (bytes + size > MAX_EXTENSION_HISTORY_BYTES) {
+      // Exhausting this page does not omit canonical history. Leave the row at
+      // the next cursor; only an oversized row on an empty page is consumed.
+      if (activities.length > 0 || omittedCount > 0) break;
       omittedBytes += size;
       omittedCount += 1;
+      nextOffset = index + 1;
       continue;
     }
-    selected.push(entry);
+    activities.push(summary);
     bytes += size;
+    nextOffset = index + 1;
   }
-  const next = pageEnd < all.length ? `${historyRevision}:${pageEnd}` : undefined;
+  const next = nextOffset < all.length ? `${historyRevision}:${nextOffset}` : undefined;
   return {
-    activities: selected.map((entry) => extensionReceiptActivity(entry.receipt)),
+    activities,
     historyRevision,
     ...(next ? { nextCursor: next } : {}),
     ...(omittedCount > 0 ? { omissions: { count: omittedCount, bytes: omittedBytes, reason: "bytes" as const } } : {}),

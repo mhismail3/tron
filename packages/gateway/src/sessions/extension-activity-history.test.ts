@@ -1,5 +1,7 @@
+import { once } from "node:events";
+import { Worker } from "node:worker_threads";
 import { describe, expect, it } from "vitest";
-import { EXTENSION_ACTIVITY_RECEIPT_TYPE, admitExtensionActivityReceipt, extensionActivityHistoryRevision, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, admitExtensionActivityReceipt, extensionActivityHistoryRevision, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import type { ExtensionRunActivity } from "../protocol/types.js";
 import { admitExtensionLifecycleArtifact } from "./extension-run-projection.js";
 
@@ -26,6 +28,106 @@ describe("extension activity canonical receipts", () => {
     const unversionedLegacy = { runId: "run", state: "running", startedAt: 1, lastUpdate: 2 };
     expect(admitExtensionLifecycleArtifact(unversionedLegacy)).toBeUndefined();
     expect(admitExtensionLifecycleArtifact(unversionedLegacy, { exactOwnedLegacy: true })).toBeDefined();
+  });
+
+  it.each([
+    { name: "cycle", parents: ["b", "a", undefined], admitted: false },
+    { name: "ancestry entering a cycle", parents: ["b", "c", "b"], admitted: false },
+    { name: "shared ancestor", parents: [undefined, "a", "a"], admitted: true },
+  ])("settles receipt admission for $name", async ({ parents, admitted }) => {
+    const receipt = {
+      ...makeExtensionActivityReceipt(activity, "session-1")!,
+      summary: { children: ["a", "b", "c"].map((id, index) => ({
+        id, label: id, state: "completed", attention: "none", parentId: parents[index],
+      })) },
+    };
+    // Isolate the real parser so a synchronous cycle regression cannot hang the
+    // test runner. Startup and execution are bounded; cleanup is not a pass.
+    const worker = new Worker(`
+      const { parentPort, workerData } = require("node:worker_threads");
+      import(workerData).then(({ admitExtensionActivityReceipt }) => {
+        parentPort.on("message", receipt => {
+          parentPort.postMessage({ admitted: admitExtensionActivityReceipt(receipt, "session-1") !== undefined });
+        });
+        parentPort.postMessage("ready");
+      });
+    `, {
+      eval: true,
+      execArgv: ["--experimental-strip-types"],
+      workerData: new URL("./extension-activity-history.ts", import.meta.url).href,
+    });
+    try {
+      expect(await once(worker, "message", { signal: AbortSignal.timeout(5_000) })).toEqual(["ready"]);
+      const result = once(worker, "message", { signal: AbortSignal.timeout(1_000) });
+      worker.postMessage(receipt);
+      expect(await result).toEqual([{ admitted }]);
+    } finally {
+      await worker.terminate();
+    }
+  }, 10_000);
+
+  it("pages byte-limited history without losing rows that fit a fresh page", () => {
+    const receipt = {
+      ...makeExtensionActivityReceipt(activity, "session-1")!,
+      summary: { children: Array.from({ length: 64 }, (_, index) => ({
+        id: String(index).padEnd(256, "i"), label: "λ".repeat(128),
+        producerId: "p".repeat(256), sessionOwnerId: "s".repeat(256),
+        childSessionRef: "r".repeat(256), state: "completed", attention: "none",
+      })) },
+    };
+    expect(admitExtensionActivityReceipt(receipt, "session-1")?.summary?.children).toHaveLength(64);
+    const rowBytes = Buffer.byteLength(JSON.stringify(extensionReceiptActivity(admitExtensionActivityReceipt(receipt)!)));
+    expect(rowBytes).toBeLessThan(MAX_EXTENSION_HISTORY_BYTES);
+    expect(rowBytes * 5).toBeGreaterThan(MAX_EXTENSION_HISTORY_BYTES);
+    const entries = Array.from({ length: 5 }, (_, index) => ({
+      id: `entry-${index}`, type: "custom", customType: EXTENSION_ACTIVITY_RECEIPT_TYPE,
+      data: { ...receipt, activityId: `activity-${index}` },
+    }));
+    const expectedIDs = ["activity-4", "activity-3", "activity-2", "activity-1", "activity-0"];
+    const ids: string[] = [];
+    let cursor: string | undefined;
+    let revision: string | undefined;
+    for (let pageIndex = 0; pageIndex < entries.length; pageIndex += 1) {
+      const page = listExtensionActivityHistory(entries, "session-1", cursor, 50);
+      revision ??= page.historyRevision;
+      expect(page.historyRevision).toBe(revision);
+      expect(page.activities.length).toBeGreaterThan(0);
+      expect(Buffer.byteLength(JSON.stringify(page.activities))).toBeLessThanOrEqual(MAX_EXTENSION_HISTORY_BYTES);
+      expect.soft(page.omissions).toBeUndefined();
+      ids.push(...page.activities.map((value) => value.activityId!));
+      if (!page.nextCursor) { cursor = undefined; break; }
+      expect(page.nextCursor).not.toBe(cursor);
+      cursor = page.nextCursor;
+    }
+    expect(cursor).toBeUndefined();
+    expect(ids).toEqual(expectedIDs);
+  });
+
+  it("reports and consumes individually oversized rows without stalling the next page", () => {
+    const receipt = makeExtensionActivityReceipt(activity, "session-1")!;
+    const oversized = { ...receipt, activityId: "oversized", summary: {
+      children: Array.from({ length: 64 }, (_, index) => ({
+        id: String(index).padEnd(256, "\u0001"), label: "\u0001".repeat(256),
+        producerId: "\u0001".repeat(256), sessionOwnerId: "\u0001".repeat(256),
+        childSessionRef: "\u0001".repeat(256), state: "completed", attention: "none",
+      })),
+    } };
+    const admitted = admitExtensionActivityReceipt(oversized, "session-1");
+    expect(admitted?.summary?.children).toHaveLength(64);
+    const oversizedBytes = Buffer.byteLength(JSON.stringify(extensionReceiptActivity(admitted!)));
+    expect(oversizedBytes).toBeGreaterThan(MAX_EXTENSION_HISTORY_BYTES);
+    const entries = [oversized, receipt].map((data, index) => ({
+      id: `entry-${index}`, type: "custom", customType: EXTENSION_ACTIVITY_RECEIPT_TYPE, data,
+    }));
+    const first = listExtensionActivityHistory(entries, "session-1", undefined, 1);
+    expect(first.activities).toEqual([]);
+    expect(first.omissions).toMatchObject({ count: 1, reason: "bytes" });
+    expect(first.omissions!.bytes).toBeGreaterThanOrEqual(oversizedBytes);
+    expect(first.nextCursor).toBeDefined();
+    const second = listExtensionActivityHistory(entries, "session-1", first.nextCursor, 1);
+    expect(second.activities.map((value) => value.activityId)).toEqual([activity.activityId]);
+    expect(second.nextCursor).toBeUndefined();
+    expect(second.omissions).toBeUndefined();
   });
 
   it("round-trips only child identity/rich state and aggregate counts", () => {
@@ -65,7 +167,7 @@ describe("extension activity canonical receipts", () => {
 
   it("derives one order-independent global revision for filtered pages and details", () => {
     const first = makeExtensionActivityReceipt(activity, "session-1")!;
-    const second = { ...first, activityId: "activity-2", runId: "run-2", terminalAt: "2026-01-01T00:00:02.000Z" };
+    const second = { ...first, activityId: "activity-2", runId: "run-2", terminalAt: "2026-01-01T00:00:02.000Z", observedAt: "2026-01-01T00:00:02.000Z" };
     const entries = [
       { id: "one", type: "custom", customType: EXTENSION_ACTIVITY_RECEIPT_TYPE, data: first },
       { id: "two", type: "custom", customType: EXTENSION_ACTIVITY_RECEIPT_TYPE, data: second },
@@ -73,7 +175,9 @@ describe("extension activity canonical receipts", () => {
     const reversed = [...entries].reverse();
     const global = extensionActivityHistoryRevision(entries, "session-1");
     expect(extensionActivityHistoryRevision(reversed, "session-1")).toBe(global);
-    expect(listExtensionActivityHistory(entries, "session-1", undefined, 1, undefined, { runId: "run-2" }).historyRevision).toBe(global);
+    const filtered = listExtensionActivityHistory(entries, "session-1", undefined, 1, undefined, { runId: "run-2" });
+    expect(filtered.activities.map((value) => value.activityId)).toEqual(["activity-2"]);
+    expect(filtered.historyRevision).toBe(global);
     expect(listExtensionActivityHistory(entries, "session-1").historyRevision).toBe(global);
   });
 
@@ -81,7 +185,8 @@ describe("extension activity canonical receipts", () => {
     const sessionOne = makeExtensionActivityReceipt(activity, "session-1")!;
     const sessionTwo = { ...sessionOne, sessionId: "session-2" };
     const makeEntries = (data: typeof sessionOne) => [
-      { id: "same-entry", parentId: "same-parent", type: "custom", customType: EXTENSION_ACTIVITY_RECEIPT_TYPE, data },
+      { id: "same-entry", parentId: null, type: "custom", customType: EXTENSION_ACTIVITY_RECEIPT_TYPE, data },
+      { id: "next-entry", parentId: "same-entry", type: "custom", customType: EXTENSION_ACTIVITY_RECEIPT_TYPE, data: { ...data, activityId: "activity-2" } },
     ];
     const firstEntries = makeEntries(sessionOne);
     const secondEntries = makeEntries(sessionTwo);
@@ -89,10 +194,9 @@ describe("extension activity canonical receipts", () => {
     const second = extensionActivityHistoryRevision(secondEntries, "session-2");
     expect(first).not.toBe(second);
     const firstPage = listExtensionActivityHistory(firstEntries, "session-1", undefined, 1);
-    expect(listExtensionActivityHistory(secondEntries, "session-2").activities).toHaveLength(1);
-    expect(() => listExtensionActivityHistory(secondEntries, "session-2", firstPage.nextCursor)).not.toThrow();
-    const cursor = `${firstPage.historyRevision}:0`;
-    expect(() => listExtensionActivityHistory(secondEntries, "session-2", cursor)).toThrow(/conflict/);
+    expect(listExtensionActivityHistory(secondEntries, "session-2").activities).toHaveLength(2);
+    expect(firstPage.nextCursor).toBeDefined();
+    expect(() => listExtensionActivityHistory(secondEntries, "session-2", firstPage.nextCursor)).toThrow(/conflict/);
   });
 
   it("keeps duplicate activity IDs as revision inputs while deduplicating page content", () => {

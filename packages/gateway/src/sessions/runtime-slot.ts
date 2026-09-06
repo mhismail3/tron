@@ -5389,6 +5389,12 @@ export class RuntimeSlot {
       const extensionCommandName = parsedCommand?.name;
       const isExactExtensionCommand = extensionCommandName !== undefined
         && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
+      // Scheduled plain text can resolve to a command even without a typed
+      // resource. Gate the actual capability in the serialized runtime owner,
+      // before effects, markers or automation completion observers are admitted.
+      if (ownership && isExactExtensionCommand) {
+        throw new GatewayError("invalid_request", "Extension commands cannot be scheduled");
+      }
       let queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
       const operationId = ownership?.operationId ?? randomUUID();
       if (ownership && this.automationTerminalObservers.has(operationId)) {

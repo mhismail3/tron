@@ -4,492 +4,148 @@ import Testing
 
 @Suite("LiveLaunchAgentManager")
 struct LiveLaunchAgentManagerTests {
-    @Test("live manager attempts registration when preflight status is notFound")
-    func attemptsRegisterOnNotFoundAfterDiskValidation() {
-        let outcome = LiveLaunchAgentManager.preRegistrationOutcome(for: .notFound)
-        #expect(outcome == nil)
-    }
-
-    @Test("live manager short-circuits already enabled or approval-required services")
-    func shortCircuitsTerminalPreflightStates() {
-        #expect(
-            LiveLaunchAgentManager.preRegistrationOutcome(
-                for: .enabled,
-                currentVariant: .installedRelease,
-                runningParentBundleIdentifier: "com.tron.mac"
-            ) == .alreadyLoaded
-        )
-        #expect(
-            LiveLaunchAgentManager.preRegistrationOutcome(for: .requiresApproval)
-                == .requiresApproval(message: "Approve Tron Agent in Login Items to finish installation.")
-        )
-    }
-
-    @Test("enabled service without loaded launchd job is re-registered")
-    func enabledServiceWithoutLoadedJobIsNotReady() {
-        #expect(
-            LiveLaunchAgentManager.preRegistrationOutcome(
-                for: .enabled,
-                currentVariant: .xcodeDebug,
-                runningParentBundleIdentifier: nil
-            ) == nil
-        )
-    }
-
-    @Test("debug companion treats an installed release service as already loaded")
-    func debugCompanionWrapsReleaseService() {
-        let variant = MacRuntimeVariant.xcodeDebug
-        #expect(
-            LiveLaunchAgentManager.preRegistrationOutcome(
-                for: .notRegistered,
-                currentVariant: variant,
-                runningParentBundleIdentifier: "com.tron.mac",
-                canManageLaunchAgent: false
-            ) == .alreadyLoaded
-        )
-        #expect(
-            !LiveLaunchAgentManager.shouldBootoutForTakeover(
-                status: .notRegistered,
-                currentVariant: variant,
-                runningParentBundleIdentifier: "com.tron.mac",
-                canManageLaunchAgent: false
-            )
-        )
-    }
-
-    @Test("installed release reclaims stale debug production registration")
-    func installedReleaseReclaimsDebugProductionRegistration() {
-        #expect(
-            LiveLaunchAgentManager.preRegistrationOutcome(
-                for: .notRegistered,
-                currentVariant: .installedRelease,
-                runningParentBundleIdentifier: "com.tron.mac.dev"
-            ) == nil
-        )
-        #expect(
-            LiveLaunchAgentManager.shouldBootoutForTakeover(
-                status: .enabled,
-                currentVariant: .installedRelease,
-                runningParentBundleIdentifier: "com.tron.mac.dev"
-            )
-        )
-    }
-
-    @Test("debug companion never reclaims installed release registration")
-    func debugCompanionDoesNotReclaimInstalledReleaseRegistration() {
-        #expect(
-            !LiveLaunchAgentManager.shouldBootoutForTakeover(
-                status: .enabled,
-                currentVariant: .xcodeDebug,
-                runningParentBundleIdentifier: "com.tron.mac",
-                canManageLaunchAgent: false
-            )
-        )
-    }
-
-    @Test("runtime ownership requires exact Stable parent, supervision, channel, and helper path")
-    func runtimeOwnershipProjectionIsExact() {
-        let helper = "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
-        let runtime = LaunchAgentRuntimeInfo(
-            pid: 42,
-            parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
-            executablePath: helper,
-            processCommand: "/Applications/Tron.app/Contents/Resources/Gateway/runtime/node-arm64 /Applications/Tron.app/Contents/Resources/Gateway/app/dist/index.js --host tailscale --port 9847",
+    private static let helper = "/fixture/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
+    private static let command = "/fixture/Tron.app/Contents/Resources/Gateway/runtime/node-arm64 /fixture/Tron.app/Contents/Resources/Gateway/app/dist/index.js --host tailscale --port 9847"
+    private static var healthy: LaunchAgentRuntimeInfo {
+        LaunchAgentRuntimeInfo(
+            pid: 42, parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+            parentBundleVersion: "2", executablePath: helper, processCommand: command,
             gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
             gatewayChannelMarker: TronGatewayProfile.stable.channel
         )
-        #expect(LiveLaunchAgentManager.runtimeOwnsProfile(
-            runtimeInfo: runtime,
-            profile: .stable,
-            expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
-            expectedHelperPath: helper,
-            fileExists: { _ in true }
-        ))
-        #expect(!LiveLaunchAgentManager.runtimeOwnsProfile(
-            runtimeInfo: runtime,
-            profile: .stable,
-            expectedParentBundleIdentifier: MacRuntimeVariant.debugBundleIdentifier,
-            expectedHelperPath: helper,
-            fileExists: { _ in true }
-        ))
-        #expect(!LiveLaunchAgentManager.runtimeOwnsProfile(
-            runtimeInfo: runtime,
-            profile: .stable,
-            expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
-            expectedHelperPath: helper,
-            expectedSupervisionMarker: "0",
-            fileExists: { _ in true }
-        ))
     }
 
-    @Test("runtime provenance requires both launchctl and exact process payload identity")
-    func runtimeProvenanceUsesLaunchctlAndProcessIdentity() {
-        let helper = "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
-        let command = "/Applications/Tron.app/Contents/Resources/Gateway/runtime/node-arm64 /Applications/Tron.app/Contents/Resources/Gateway/app/dist/index.js --host tailscale --port 9847"
-        #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
-            runtimeInfo: LaunchAgentRuntimeInfo(pid: 42),
-            expectedHelperPath: helper,
-            fileExists: { _ in true }
-        ))
-        #expect(!LiveLaunchAgentManager.runtimeRequiresReplacement(
-            runtimeInfo: LaunchAgentRuntimeInfo(
-                pid: 42,
-                bundleProgram: "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
-                processCommand: command,
-                gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
-                gatewayChannelMarker: TronGatewayProfile.stable.channel
-            ),
-            expectedHelperPath: helper,
-            fileExists: { _ in true }
-        ))
-        #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
-            runtimeInfo: LaunchAgentRuntimeInfo(
-                pid: 42,
-                bundleProgram: "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
-                processCommand: command,
-                gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
-                gatewayChannelMarker: "dev"
-            ),
-            expectedHelperPath: helper,
-            fileExists: { _ in true }
-        ))
-        #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
-            runtimeInfo: LaunchAgentRuntimeInfo(
-                pid: 42,
-                bundleProgram: "Contents/Library/LoginItems/Other.app/Contents/MacOS/tron",
-                processCommand: command
-            ),
-            expectedHelperPath: helper,
-            fileExists: { _ in true }
-        ))
-        #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
-            runtimeInfo: LaunchAgentRuntimeInfo(
-                pid: 42,
-                bundleProgram: "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
-                processCommand: "/Users/test/Library/Developer/Xcode/DerivedData/TronMac/Build/Products/Debug/TronMac.app/Contents/Resources/Gateway/runtime/node-arm64 /Users/test/Library/Developer/Xcode/DerivedData/TronMac/Build/Products/Debug/TronMac.app/Contents/Resources/Gateway/app/dist/index.js --port 9847"
-            ),
-            profile: .stable,
-            expectedHelperPath: helper,
-            fileExists: { _ in true }
-        ))
+    private enum Scenario: CaseIterable {
+        case fresh, unregistered, missingJob, unknownRegistration, approval, current
+        case takeover, takeoverUnregistered, takeoverUnknown
+        case oldBuild, unknownBuild, constraints, supervision, channel, oldHelper, missingHelper
+        case companion, companionMissing, companionStale, missingCommand, stoppedStale
     }
 
-    @Test("stale missing runtime is repaired by a manager build")
-    func staleRuntimeIsRepairedByManagerBuild() {
-        let runtime = LaunchAgentRuntimeInfo(
-            pid: nil,
-            parentBundleIdentifier: "com.tron.mac.dev",
-            executablePath: "/tmp/DerivedData/Deleted.app/Contents/MacOS/tron"
-        )
-        #expect(
-            LiveLaunchAgentManager.runtimeRequiresReplacement(
-                runtimeInfo: runtime,
-                expectedHelperPath: "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
-                fileExists: { _ in false }
-            )
-        )
-        #expect(
-            LiveLaunchAgentManager.preRegistrationOutcome(
-                for: .enabled,
-                currentVariant: .installedRelease,
-                runtimeInfo: runtime,
-                expectedHelperPath: "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
-            ) == nil
-        )
-    }
-
-    @Test("a running helper at an old path is still repaired")
-    func runningStaleRuntimeIsRepaired() {
-        let runtime = LaunchAgentRuntimeInfo(
-            pid: 123,
-            executablePath: "/tmp/old/Tron Agent.app/Contents/MacOS/tron"
-        )
-        #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
-            runtimeInfo: runtime,
-            expectedHelperPath: "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
-            fileExists: { _ in true }
-        ))
-    }
-
-    @Test("takeover unregisters stale enabled registration before register")
-    func takeoverUnregistersEnabledRegistrationBeforeRegister() {
-        #expect(
-            LiveLaunchAgentManager.shouldUnregisterBeforeRegister(
-                status: .enabled,
-                runningParentBundleIdentifier: "com.tron.mac.dev",
-                shouldReplaceStaleRuntime: false,
-                shouldTakeOverRuntime: true,
-                shouldRefreshCurrentRegistration: false
-            )
-        )
-        #expect(
-            !LiveLaunchAgentManager.shouldUnregisterBeforeRegister(
-                status: .notRegistered,
-                runningParentBundleIdentifier: "com.tron.mac.dev",
-                shouldReplaceStaleRuntime: false,
-                shouldTakeOverRuntime: true,
-                shouldRefreshCurrentRegistration: false
-            )
-        )
-        #expect(
-            !LiveLaunchAgentManager.shouldUnregisterBeforeRegister(
-                status: .enabled,
-                runningParentBundleIdentifier: "com.tron.mac",
-                shouldReplaceStaleRuntime: false,
-                shouldTakeOverRuntime: false,
-                shouldRefreshCurrentRegistration: false
-            )
-        )
-        #expect(
-            LiveLaunchAgentManager.shouldUnregisterBeforeRegister(
-                status: .unknown("foreign registration"),
-                runningParentBundleIdentifier: "com.tron.mac.dev",
-                shouldReplaceStaleRuntime: false,
-                shouldTakeOverRuntime: true,
-                shouldRefreshCurrentRegistration: false
-            )
-        )
-    }
-
-    @Test("installed release refreshes same-bundle registration when parent build is stale")
-    func installedReleaseRefreshesStaleParentBundleVersion() {
-        let runtime = LaunchAgentRuntimeInfo(
-            pid: 123,
-            parentBundleIdentifier: "com.tron.mac",
-            parentBundleVersion: "1"
-        )
-        #expect(
-            LiveLaunchAgentManager.shouldRefreshRegistrationForCurrentBundle(
-                status: .enabled,
-                currentVariant: .installedRelease,
-                runtimeInfo: runtime,
-                currentParentBundleVersion: "3"
-            )
-        )
-        #expect(
-            LiveLaunchAgentManager.preRegistrationOutcome(
-                for: .enabled,
-                currentVariant: .installedRelease,
-                runtimeInfo: runtime,
-                shouldRefreshCurrentRegistration: true
-            ) == nil
-        )
-        #expect(
-            LiveLaunchAgentManager.shouldUnregisterBeforeRegister(
-                status: .enabled,
-                runningParentBundleIdentifier: "com.tron.mac",
-                shouldReplaceStaleRuntime: false,
-                shouldTakeOverRuntime: false,
-                shouldRefreshCurrentRegistration: true
-            )
-        )
-    }
-
-    @Test("current parent bundle version is not refreshed")
-    func currentParentBundleVersionDoesNotRefresh() {
-        let runtime = LaunchAgentRuntimeInfo(
-            parentBundleIdentifier: "com.tron.mac",
-            parentBundleVersion: "3"
-        )
-        #expect(
-            !LiveLaunchAgentManager.shouldRefreshRegistrationForCurrentBundle(
-                status: .enabled,
-                currentVariant: .installedRelease,
-                runtimeInfo: runtime,
-                currentParentBundleVersion: "3"
-            )
-        )
-    }
-
-    @Test("installed release refreshes same-bundle registration when supervision marker is stale")
-    func installedReleaseRefreshesStaleGatewaySupervision() {
-        let runtime = LaunchAgentRuntimeInfo(
-            parentBundleIdentifier: "com.tron.mac",
-            gatewaySupervisionMarker: nil
-        )
-        #expect(
-            LiveLaunchAgentManager.shouldRefreshRegistrationForGatewaySupervision(
-                status: .enabled,
-                currentVariant: .installedRelease,
-                runtimeInfo: runtime
-            )
-        )
-        #expect(
-            !LiveLaunchAgentManager.shouldRefreshRegistrationForGatewaySupervision(
-                status: .enabled,
-                currentVariant: .installedRelease,
-                runtimeInfo: LaunchAgentRuntimeInfo(
-                    parentBundleIdentifier: "com.tron.mac",
-                    gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue
-                )
-            )
-        )
-    }
-
-    @Test("installed release refreshes same-bundle registration when launch constraints are stale")
-    func installedReleaseRefreshesStaleLaunchConstraints() {
-        let runtime = LaunchAgentRuntimeInfo(
-            parentBundleIdentifier: "com.tron.mac",
-            parentBundleVersion: "7",
-            needsLaunchConstraintRefresh: true
-        )
-        #expect(
-            LiveLaunchAgentManager.shouldRefreshRegistrationForLaunchConstraints(
-                status: .enabled,
-                currentVariant: .installedRelease,
-                runtimeInfo: runtime
-            )
-        )
-        #expect(
-            LiveLaunchAgentManager.preRegistrationOutcome(
-                for: .enabled,
-                currentVariant: .installedRelease,
-                runtimeInfo: runtime,
-                shouldRefreshCurrentRegistration: true
-            ) == nil
-        )
-        #expect(
-            LiveLaunchAgentManager.shouldUnregisterBeforeRegister(
-                status: .enabled,
-                runningParentBundleIdentifier: "com.tron.mac",
-                shouldReplaceStaleRuntime: false,
-                shouldTakeOverRuntime: false,
-                shouldRefreshCurrentRegistration: true
-            )
-        )
-    }
-
-    @Test("debug companion cannot repair stale production registration")
-    func debugCompanionCannotRepairProductionRegistration() {
-        let runtime = LaunchAgentRuntimeInfo(
-            pid: nil,
-            parentBundleIdentifier: "com.tron.mac.dev",
-            executablePath: "/tmp/DerivedData/Deleted.app/Contents/MacOS/tron"
-        )
-        let outcome = LiveLaunchAgentManager.preRegistrationOutcome(
-            for: .enabled,
-            currentVariant: .xcodeDebug,
-            runtimeInfo: runtime,
-            canManageLaunchAgent: false,
-            expectedHelperPath: "/tmp/Debug/TronMac.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
-        )
-        if case .launchdRefused(let message) = outcome {
-            #expect(message.contains("read-only companion"))
-        } else {
-            Issue.record("debug companion should refuse stale production repair")
+    @Test("registration decisions use runtime/application inputs, not injected policy flags", arguments: Scenario.allCases)
+    private func decisionMatrix(_ scenario: Scenario) {
+        var status: ExistingInstallDetector.ServiceRegistrationStatus = .enabled
+        var runtime: LaunchAgentRuntimeInfo? = Self.healthy
+        var variant: MacRuntimeVariant = .installedRelease
+        var canManage = true
+        var helperExists = true
+        var version: String? = "2"
+        let repair = LaunchAgentRegistrationPlan.change(steps: [.bootout, .unregister, .register])
+        let expected: LaunchAgentRegistrationPlan
+        switch scenario {
+        case .fresh, .unregistered:
+            status = scenario == .fresh ? .notFound : .notRegistered
+            runtime = nil; expected = .change(steps: [.register])
+        case .missingJob:
+            runtime = nil; expected = .change(steps: [.unregister, .register])
+        case .unknownRegistration:
+            status = .unknown("synthetic"); runtime = nil; expected = .change(steps: [.unregister, .register])
+        case .approval:
+            status = .requiresApproval
+            expected = .refuse(message: "Approve Tron Agent in Login Items to finish installation.")
+        case .current:
+            expected = .keep
+        case .takeover, .takeoverUnknown, .takeoverUnregistered:
+            runtime?.parentBundleIdentifier = MacRuntimeVariant.debugBundleIdentifier
+            if scenario == .takeoverUnknown { status = .unknown("synthetic") }
+            if scenario == .takeoverUnregistered { status = .notRegistered }
+            expected = scenario == .takeoverUnregistered ? .change(steps: [.bootout, .register]) : repair
+        case .oldBuild:
+            runtime?.parentBundleVersion = "1"; expected = repair
+        case .unknownBuild:
+            runtime?.parentBundleVersion = "1"; version = nil; expected = .keep
+        case .constraints:
+            runtime?.needsLaunchConstraintRefresh = true; expected = repair
+        case .supervision:
+            runtime?.gatewaySupervisionMarker = nil; expected = repair
+        case .channel:
+            runtime?.gatewayChannelMarker = "dev"; expected = repair
+        case .oldHelper:
+            runtime?.executablePath = "/fixture/old/helper"; expected = repair
+        case .missingHelper:
+            helperExists = false; expected = repair
+        case .companion:
+            canManage = false; variant = .xcodeDebug; expected = .keep
+        case .companionMissing, .companionStale:
+            canManage = false; variant = .xcodeDebug
+            if scenario == .companionMissing { runtime = nil } else { runtime?.gatewaySupervisionMarker = nil }
+            expected = .refuse(message: "This Xcode Debug wrapper is a read-only companion. Use /Applications/Tron.app to manage Stable.")
+        case .missingCommand:
+            runtime?.processCommand = nil
+            expected = .refuse(message: "Could not verify the running Gateway command. No registration changes were made.")
+        case .stoppedStale:
+            runtime?.pid = nil; runtime?.processCommand = nil; expected = repair
         }
+        let plan = LiveLaunchAgentManager.registrationPlan(
+            status: status, currentVariant: variant, runtimeInfo: runtime,
+            canManageLaunchAgent: canManage, expectedHelperPath: Self.helper,
+            currentParentBundleVersion: version, fileExists: { $0 == Self.helper && helperExists }
+        )
+        #expect(plan == expected)
     }
 
-    @Test("external direct server blocks registration")
+    @Test("runtime ownership requires exact parent, supervision, channel and helper identity")
+    func runtimeOwnershipProjectionIsExact() {
+        let runtime = Self.healthy
+        #expect(LiveLaunchAgentManager.runtimeOwnsProfile(
+            runtimeInfo: runtime, profile: .stable,
+            expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+            expectedHelperPath: Self.helper, fileExists: { _ in true }
+        ))
+        #expect(!LiveLaunchAgentManager.runtimeOwnsProfile(
+            runtimeInfo: runtime, profile: .stable,
+            expectedParentBundleIdentifier: MacRuntimeVariant.debugBundleIdentifier,
+            expectedHelperPath: Self.helper, fileExists: { _ in true }
+        ))
+        #expect(!LiveLaunchAgentManager.runtimeOwnsProfile(
+            runtimeInfo: runtime, profile: .stable,
+            expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+            expectedHelperPath: Self.helper, expectedSupervisionMarker: "0", fileExists: { _ in true }
+        ))
+    }
+
+    @Test("relative BundleProgram alone cannot replace exact running command identity")
+    func runtimeProvenanceUsesLaunchctlAndProcessIdentity() {
+        #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
+            runtimeInfo: LaunchAgentRuntimeInfo(pid: 42), expectedHelperPath: Self.helper, fileExists: { _ in true }
+        ))
+        var runtime = Self.healthy
+        runtime.executablePath = nil
+        runtime.bundleProgram = "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
+        #expect(!LiveLaunchAgentManager.runtimeRequiresReplacement(
+            runtimeInfo: runtime, expectedHelperPath: Self.helper, fileExists: { _ in true }
+        ))
+        runtime.gatewayChannelMarker = "dev"
+        #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
+            runtimeInfo: runtime, expectedHelperPath: Self.helper, fileExists: { _ in true }
+        ))
+        runtime.gatewayChannelMarker = "stable"
+        runtime.bundleProgram = "Contents/Library/LoginItems/Other.app/Contents/MacOS/tron"
+        #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
+            runtimeInfo: runtime, expectedHelperPath: Self.helper, fileExists: { _ in true }
+        ))
+        runtime.bundleProgram = "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
+        runtime.processCommand = "/fixture/Other.app/Contents/Resources/Gateway/runtime/node-arm64 /fixture/Other.app/Contents/Resources/Gateway/app/dist/index.js --port 9847"
+        #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
+            runtimeInfo: runtime, expectedHelperPath: Self.helper, fileExists: { _ in true }
+        ))
+    }
+
+    @Test("external direct server blocks registration only without an owned service")
     func externalDirectServerBlocksRegistration() {
-        #expect(
-            LiveLaunchAgentManager.shouldRefuseExternalServer(
-                status: .notRegistered,
-                runningParentBundleIdentifier: nil,
-                portBound: true
-            )
-        )
-        #expect(
-            !LiveLaunchAgentManager.shouldRefuseExternalServer(
-                status: .notFound,
-                runningParentBundleIdentifier: nil,
-                portBound: false
-            )
-        )
-        #expect(
-            !LiveLaunchAgentManager.shouldRefuseExternalServer(
-                status: .notRegistered,
-                runningParentBundleIdentifier: "com.tron.mac",
-                portBound: true
-            )
-        )
+        #expect(LiveLaunchAgentManager.shouldRefuseExternalServer(status: .notRegistered, runningParentBundleIdentifier: nil, portBound: true))
+        #expect(!LiveLaunchAgentManager.shouldRefuseExternalServer(status: .notFound, runningParentBundleIdentifier: nil, portBound: false))
+        #expect(!LiveLaunchAgentManager.shouldRefuseExternalServer(status: .notRegistered, runningParentBundleIdentifier: "com.tron.mac", portBound: true))
     }
 
-    @Test("unregistration is idempotent when ServiceManagement is already clear")
+    @Test("unregistration remains idempotent when ServiceManagement is already clear")
     func unregistrationPreflightHandlesAlreadyClearState() {
-        #expect(
-            LiveLaunchAgentManager.preUnregistrationOutcome(for: .notRegistered) == .ok
-        )
+        #expect(LiveLaunchAgentManager.preUnregistrationOutcome(for: .notRegistered) == .ok)
         if case .binaryMissing(let path) = LiveLaunchAgentManager.preUnregistrationOutcome(for: .notFound) {
             #expect(path.hasSuffix("/Contents/Library/LaunchAgents/com.tron.server.plist"))
-        } else {
-            Issue.record("Expected missing LaunchAgent plist to block unregister")
-        }
+        } else { Issue.record("Expected missing LaunchAgent plist to block unregister") }
         #expect(LiveLaunchAgentManager.preUnregistrationOutcome(for: .enabled) == nil)
         #expect(LiveLaunchAgentManager.preUnregistrationOutcome(for: .requiresApproval) == nil)
-    }
-    @Test("resolved plans execute every step exactly once")
-    func executionParity() async {
-        let plans: [LaunchAgentRegistrationPlan] = [
-            .keep,
-            .refuse(message: "nope"),
-            .register(steps: [.register]),
-            .refresh(steps: [.bootout, .unregister, .register]),
-            .takeover(steps: [.bootout, .unregister, .register]),
-            .bootout(steps: [.bootout, .register]),
-            .unregister(steps: [.unregister])
-        ]
-        for plan in plans {
-            let recorder = LaunchAgentStepRecorder()
-            let result = await LiveLaunchAgentManager.execute(plan) { step in
-                await recorder.append(step)
-                return nil
-            }
-            #expect(result == nil)
-            #expect(await recorder.steps == plan.steps)
-        }
-    }
-}
-
-private actor LaunchAgentStepRecorder {
-    var steps: [LaunchAgentRegistrationPlan.Step] = []
-    func append(_ step: LaunchAgentRegistrationPlan.Step) { steps.append(step) }
-}
-
-@Suite("LaunchAgentLoader")
-struct LaunchAgentLoaderTests {
-    @Test("bootstrap success does not restart")
-    func bootstrapSuccessDoesNotRestart() async throws {
-        let mock = MockLaunchAgentManager()
-        let outcome = await LaunchAgentLoader.ensureLoaded(
-            manager: mock,
-            plistPath: URL(fileURLWithPath: "/tmp/com.tron.server.plist"),
-            label: "com.tron.server"
-        )
-
-        #expect(outcome == .ok)
-        #expect(mock.calls.map(\.kind) == [.load])
-    }
-
-    @Test("already-loaded label is kickstarted after plist write")
-    func alreadyLoadedRestarts() async throws {
-        let mock = MockLaunchAgentManager()
-        mock.loadOutcome = .alreadyLoaded
-
-        let outcome = await LaunchAgentLoader.ensureLoaded(
-            manager: mock,
-            plistPath: URL(fileURLWithPath: "/tmp/com.tron.server.plist"),
-            label: "com.tron.server"
-        )
-
-        #expect(outcome == .ok)
-        #expect(mock.calls.map(\.kind) == [.load, .restart])
-    }
-
-    @Test("restart failure is surfaced to the caller")
-    func restartFailureSurfaces() async throws {
-        let mock = MockLaunchAgentManager()
-        mock.loadOutcome = .alreadyLoaded
-        mock.restartOutcome = .launchdRefused(message: "stale job would not restart")
-
-        let outcome = await LaunchAgentLoader.ensureLoaded(
-            manager: mock,
-            plistPath: URL(fileURLWithPath: "/tmp/com.tron.server.plist"),
-            label: "com.tron.server"
-        )
-
-        #expect(outcome == .launchdRefused(message: "stale job would not restart"))
-        #expect(mock.calls.map(\.kind) == [.load, .restart])
     }
 
     @Test("capture failure is not a not-loaded runtime observation")
@@ -516,55 +172,80 @@ struct LaunchAgentLoaderTests {
         #expect(try !LiveLaunchAgentManager.portBound(ProcessResult(exitCode: 1, stdout: "", stderr: "")))
     }
 
-    @Test("missing running command identity cannot authorize repair")
-    func missingCommandRefusesRegistration() {
-        let plan = LiveLaunchAgentManager.registrationPlan(
-            status: .enabled, currentVariant: .installedRelease,
-            runtimeInfo: LaunchAgentRuntimeInfo(pid: 42, parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier),
-            runningParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
-            canManageLaunchAgent: true, expectedHelperPath: "/owned/helper",
-            shouldRefreshCurrentRegistration: true, shouldReplaceStaleRuntime: true
-        )
-        guard case .refuse = plan else { Issue.record("Unavailable identity authorized \(plan)"); return }
-        #expect(plan.steps.isEmpty)
-    }
-
-    @Test("registration plan table preserves keep, refuse, takeover, and refresh sequences")
-    func registrationPlanMatrix() {
-        let helper = "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
-        let runtime = LaunchAgentRuntimeInfo(
-            pid: 42,
-            parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
-            parentBundleVersion: "1",
-            executablePath: helper,
-            processCommand: "/Applications/Tron.app/Contents/Resources/Gateway/runtime/node-arm64 /Applications/Tron.app/Contents/Resources/Gateway/app/dist/index.js --host tailscale --port \(TronGatewayProfile.stable.port)",
-            gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
-            gatewayChannelMarker: TronGatewayProfile.stable.channel
-        )
-        let cases: [(ExistingInstallDetector.ServiceRegistrationStatus, MacRuntimeVariant, LaunchAgentRuntimeInfo?, Bool, LaunchAgentRegistrationPlan)] = [
-            (.enabled, .installedRelease, runtime, true, .keep),
-            (.requiresApproval, .installedRelease, nil, true, .refuse(message: "Approve Tron Agent in Login Items to finish installation.")),
-            (.notRegistered, .installedRelease, nil, true, .register(steps: [.register])),
-            (.enabled, .installedRelease, runtime, true, .refresh(steps: [.bootout, .unregister, .register]))
-        ]
-        for (status, variant, metadata, canManage, expected) in cases {
-            let plan = LiveLaunchAgentManager.registrationPlan(
-                status: status,
-                currentVariant: variant,
-                runtimeInfo: metadata,
-                runningParentBundleIdentifier: metadata?.parentBundleIdentifier,
-                canManageLaunchAgent: canManage,
-                expectedHelperPath: helper,
-                shouldRefreshCurrentRegistration: expected.steps.contains(.bootout) && expected != .keep,
-                shouldReplaceStaleRuntime: false,
-                shouldTakeOverRuntime: false
-            )
-            if case .refresh = expected {
-                #expect(plan.steps == [.bootout, .unregister, .register])
-            } else {
-                #expect(plan == expected)
+    @Test("live executor awaits each accepted step exactly once, including after cancellation", arguments: [false, true])
+    func executionOrder(cancelled: Bool) async {
+        let recorder = LaunchAgentStepRecorder()
+        let pending = Task {
+            if cancelled { withUnsafeCurrentTask { $0?.cancel() } }
+            return await LiveLaunchAgentManager.execute([.bootout, .unregister, .register]) { step in
+                await recorder.append(step)
+                return nil
             }
         }
+        #expect(await pending.value == nil)
+        #expect(await recorder.steps == [.bootout, .unregister, .register])
+        let empty = await LiveLaunchAgentManager.execute([]) { _ in
+            Issue.record("Empty sequence dispatched a step"); return nil
+        }
+        #expect(empty == nil)
     }
 
+    @Test("live executor returns the first failure without later steps or replay", arguments: [
+        LaunchAgentRegistrationPlan.Step.bootout, .unregister, .register
+    ])
+    func executionStopsAtFailure(failedStep: LaunchAgentRegistrationPlan.Step) async {
+        let recorder = LaunchAgentStepRecorder()
+        let failure = LaunchAgentOutcome.unknown(message: "synthetic accepted outcome")
+        let result = await LiveLaunchAgentManager.execute([.bootout, .unregister, .register]) { step in
+            await recorder.append(step)
+            return step == failedStep ? failure : nil
+        }
+        #expect(result == failure)
+        let expected: [LaunchAgentRegistrationPlan.Step]
+        switch failedStep {
+        case .bootout: expected = [.bootout]
+        case .unregister: expected = [.bootout, .unregister]
+        case .register: expected = [.bootout, .unregister, .register]
+        }
+        #expect(await recorder.steps == expected)
+    }
+}
+
+private actor LaunchAgentStepRecorder {
+    var steps: [LaunchAgentRegistrationPlan.Step] = []
+    func append(_ step: LaunchAgentRegistrationPlan.Step) { steps.append(step) }
+}
+
+@Suite("LaunchAgentLoader")
+struct LaunchAgentLoaderTests {
+    @Test("fresh registration does not force restart")
+    func newlyLoadedDoesNotRestart() async {
+        let mock = MockLaunchAgentManager()
+        let outcome = await LaunchAgentLoader.ensureLoaded(manager: mock, plistPath: URL(fileURLWithPath: "/fixture/agent.plist"), label: "fixture")
+        #expect(outcome == .ok)
+        #expect(mock.calls.map(\.kind) == [.load])
+    }
+
+    @Test("already-loaded registration restarts on explicit service start")
+    func alreadyLoadedRestarts() async {
+        let mock = MockLaunchAgentManager()
+        mock.loadOutcome = .alreadyLoaded
+        let outcome = await LaunchAgentLoader.ensureLoaded(manager: mock, plistPath: URL(fileURLWithPath: "/fixture/agent.plist"), label: "fixture")
+        #expect(outcome == .ok)
+        #expect(mock.calls.map(\.kind) == [.load, .restart])
+    }
+
+    @Test("registration failure prevents restart; restart failure is preserved")
+    func failuresAreNotReplayed() async {
+        let mock = MockLaunchAgentManager()
+        let failure = LaunchAgentOutcome.launchdRefused(message: "synthetic failure")
+        mock.loadOutcome = failure
+        #expect(await LaunchAgentLoader.ensureLoaded(manager: mock, plistPath: URL(fileURLWithPath: "/fixture/agent.plist"), label: "fixture") == failure)
+        #expect(mock.calls.map(\.kind) == [.load])
+        let loaded = MockLaunchAgentManager()
+        loaded.loadOutcome = .alreadyLoaded
+        loaded.restartOutcome = failure
+        #expect(await LaunchAgentLoader.ensureLoaded(manager: loaded, plistPath: URL(fileURLWithPath: "/fixture/agent.plist"), label: "fixture") == failure)
+        #expect(loaded.calls.map(\.kind) == [.load, .restart])
+    }
 }

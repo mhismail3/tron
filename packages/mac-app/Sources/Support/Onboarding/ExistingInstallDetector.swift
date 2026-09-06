@@ -9,11 +9,11 @@ enum ExistingInstallDetector {
         helperBundle: URL = TronPaths.serverHelperBundle,
         helperBinary: URL = TronPaths.serverHelperBinary,
         plistPath: URL = TronPaths.launchAgentPlistPath,
-        bundleVersionResolver: (URL) -> String? = ExistingInstallDetector.readMarketingVersion,
-        bundleSignatureProblemResolver: (URL) -> String? = { ExistingInstallDetector.bundleSignatureProblem(of: $0) },
-        gatewayPayloadProblemResolver: () -> String? = { nil },
-        serviceStatusResolver: () -> ServiceRegistrationStatus = { ExistingInstallDetector.serviceStatus() }
-    ) -> ExistingInstallStatus {
+        bundleVersionResolver: @Sendable (URL) -> String? = ExistingInstallDetector.readMarketingVersion,
+        bundleSignatureProblemResolver: @Sendable (URL) async -> String? = { await ExistingInstallDetector.bundleSignatureProblem(of: $0) },
+        gatewayPayloadProblemResolver: @Sendable () -> String? = { nil },
+        serviceStatusResolver: @Sendable () -> ServiceRegistrationStatus = { ExistingInstallDetector.serviceStatus() }
+    ) async -> ExistingInstallStatus {
         let fm = FileManager.default
         let hasHelper = fm.fileExists(atPath: helperBundle.path)
         let hasBinary = fm.fileExists(atPath: helperBinary.path)
@@ -29,7 +29,7 @@ enum ExistingInstallDetector {
         guard hasPlist else {
             return .partial(reason: "Bundled LaunchAgent plist is missing")
         }
-        if let problem = bundleSignatureProblemResolver(helperBundle) {
+        if let problem = await bundleSignatureProblemResolver(helperBundle) {
             return .partial(reason: problem)
         }
         if let problem = gatewayPayloadProblemResolver() {
@@ -79,8 +79,8 @@ enum ExistingInstallDetector {
         helperBinary: URL = TronPaths.serverHelperBinary,
         plistPath: URL = TronPaths.launchAgentPlistPath,
         profile: TronGatewayProfile = .stable,
-        signatureProblemResolver: ((URL) -> String?)? = nil
-    ) -> String? {
+        signatureProblemResolver: (@Sendable (URL) async -> String?)? = nil
+    ) async -> String? {
         let fm = FileManager.default
         let helperName = helperBundle.lastPathComponent
         guard fm.fileExists(atPath: helperBundle.path) else {
@@ -93,9 +93,9 @@ enum ExistingInstallDetector {
             return "The bundled LaunchAgent plist is missing."
         }
         if let signatureProblemResolver {
-            return signatureProblemResolver(helperBundle)
+            return await signatureProblemResolver(helperBundle)
         }
-        return bundleSignatureProblem(of: helperBundle, expectedBundleIdentifier: profile.launchAgentLabel)
+        return await bundleSignatureProblem(of: helperBundle, expectedBundleIdentifier: profile.launchAgentLabel)
     }
 
     static func validateGatewayPayload(
@@ -248,55 +248,32 @@ enum ExistingInstallDetector {
     /// Returns nil when the helper app's code signature is suitable for TCC.
     static func bundleSignatureProblem(
         of bundle: URL,
-        expectedBundleIdentifier: String = TronPaths.launchAgentLabel
-    ) -> String? {
+        expectedBundleIdentifier: String = TronPaths.launchAgentLabel,
+        run: @Sendable (URL, [String], Subprocess.Policy) async -> ProcessResult = Subprocess.run
+    ) async -> String? {
         let helperName = bundle.lastPathComponent
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
-        process.arguments = ["--verify", "--deep", "--strict", "--verbose=2", bundle.path]
-
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = output
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
+        let executable = URL(fileURLWithPath: "/usr/bin/codesign")
+        // These are disposable observations, not signing or accepted service
+        // mutations. The shared owner drains, bounds and retires each client.
+        let verification = await run(executable, ["--verify", "--deep", "--strict", "--verbose=2", bundle.path], .observation)
+        guard verification.exitCode >= 0 else {
             return "\(helperName) is present but its code signature could not be checked"
         }
-
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        let text = String(data: data, encoding: .utf8) ?? ""
-        guard process.terminationStatus == 0 else {
+        guard verification.exitCode == 0 else {
             return "\(helperName) is present but its code signature is invalid"
         }
-
-        let identity = Process()
-        identity.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
-        identity.arguments = ["-dv", "--verbose=4", bundle.path]
-        let identityOutput = Pipe()
-        identity.standardOutput = identityOutput
-        identity.standardError = identityOutput
-        do {
-            try identity.run()
-            identity.waitUntilExit()
-        } catch {
+        let identity = await run(executable, ["-dv", "--verbose=4", bundle.path], .observation)
+        guard identity.exitCode >= 0 else {
             return "\(helperName) is present but its code signature identity could not be checked"
         }
-        let identityText = String(data: identityOutput.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        guard identity.terminationStatus == 0 else {
+        guard identity.exitCode == 0 else {
             return "\(helperName) is present but its code signature identity is invalid"
         }
-        if let problem = codeSignatureIdentityProblem(
-            identityText,
+        return codeSignatureIdentityProblem(
+            identity.stdout + "\n" + identity.stderr,
             expectedBundleIdentifier: expectedBundleIdentifier,
             helperName: helperName
-        ) {
-            return problem
-        }
-        _ = text
-        return nil
+        )
     }
 
     static func codeSignatureIdentityProblem(
@@ -304,17 +281,23 @@ enum ExistingInstallDetector {
         expectedBundleIdentifier: String = TronPaths.launchAgentLabel,
         helperName: String = "\(TronPaths.agentBundleName).app"
     ) -> String? {
-        let identifier = identityText
-            .split(whereSeparator: \.isNewline)
-            .map(String.init)
-            .first(where: { $0.hasPrefix("Identifier=") })
-            .map { String($0.dropFirst("Identifier=".count)) }
-        guard identifier == expectedBundleIdentifier else {
+        let lines = identityText.split(whereSeparator: \.isNewline)
+        // A successful capture is not proof of complete identity metadata.
+        // Reject absent/duplicate fields rather than trusting a plausible prefix.
+        func uniqueValue(_ key: String) -> String? {
+            let prefix = key + "="
+            let matches = lines.filter { $0.hasPrefix(prefix) }
+            guard matches.count == 1 else { return nil }
+            return String(matches[0].dropFirst(prefix.count))
+        }
+        guard uniqueValue("Identifier") == expectedBundleIdentifier else {
             return "\(helperName) is present but its code signature is not bound to \(expectedBundleIdentifier)"
         }
-        if identityText.contains("Signature=adhoc")
-            || identityText.contains("TeamIdentifier=not set") {
+        if lines.contains("Signature=adhoc") || uniqueValue("TeamIdentifier") == "not set" {
             return "\(helperName) is ad-hoc signed. Build Debug with Apple Development signing so macOS can launch the Login Item."
+        }
+        guard let team = uniqueValue("TeamIdentifier"), !team.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return "\(helperName) is present but its code signature team identity could not be checked"
         }
         return nil
     }

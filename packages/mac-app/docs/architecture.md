@@ -72,6 +72,23 @@ settings/credential resets, preserve both workspace content and the Gateway's
 manual; never remove it as an application or signing repair. The Gateway owns the
 [initialization, backup and restore contract](../../gateway/docs/internal-workspace.md).
 
+## Wizard installation
+
+`WizardState` admits an explicit Install/Retry synchronously and owns one task
+and its stage progress through completion. Duplicate clicks share accepted work;
+Back/forward navigation, step remounts and cancelled view waiters neither cancel
+nor replay it. `InstallStep` renders that shared progress and owns only disposable
+status presentation. This is an in-process lifetime, not a durable installation
+queue across wrapper termination. Failures stop later stages; retry remains an
+explicit user action against fresh validation and ServiceManagement state.
+
+Entry discovery is asynchronous presentation, not installation authority. It is
+retired on cancellation or when an explicit installation supersedes it. Completed
+installation does not repeat discovery whose result is hidden by the authoritative
+install outcome. `WizardInstallationTests` exercises accepted lifetime, duplicate
+admission, first failure, progress continuity and stale observation rejection with
+owned fixtures and synthetic service callbacks.
+
 ## Pairing
 
 Each profile's gateway creates `<profile home>/gateway/enrollment.json` (Stable
@@ -130,10 +147,16 @@ exact supervisor/child start identities, transport host, selected payload, and
 authenticated runtime provenance; elapsed uptime is display-only and cannot
 invalidate an otherwise unchanged admission.
 
-`LaunchAgentRegistrationPlan` computes keep/refuse/takeover/bootout,
-unregister/register, and refresh sequences from one authoritative status and
-runtime metadata snapshot. Live execution runs that plan without re-deriving
-ownership between operations. Bearer, enrollment, and network-cache credentials
+`LaunchAgentRegistrationPlan` chooses keep, refusal or an ordered operation list.
+It derives stale-runtime, takeover and refresh policy once from registration and
+runtime metadata, application identity, helper presence and wrapper authority;
+callers do not override derived decisions or supply a second parent identity.
+Refresh/takeover are reasons for real bootout/unregister/register steps, not
+separate execution modes or no-op steps. Live load and its focused tests share
+one sequential executor: await each accepted step, stop at the first reported
+failure, and never retry or re-derive ownership between steps.
+`LiveLaunchAgentManagerTests` exercises the real planner with synthetic inputs
+and the live executor with controlled callbacks, without changing Login Items. Bearer, enrollment, and network-cache credentials
 use one bounded owner-only regular-file/no-symlink descriptor reader, followed
 by separate exact-key schema validation. Stable transport never probes loopback
 when Tailscale resolution is unavailable; Debug admits only the exact lifecycle
@@ -159,6 +182,16 @@ runner does not kill unrelated descendants or the service being queried.
 Tailscale candidate selection stops on cancellation but still tries another CLI
 for an ordinary not-ready result. Budgets are per command, not five seconds for
 whole host resolution; native launch and process retirement also depend on the OS.
+
+Helper signature verification and identity inspection also use this observation
+owner, preserving the deep/strict verification flags. Their callers await results
+rather than blocking a UI thread on process exit before draining output. Each
+query has its own budget; filesystem validation and the whole installation are
+not covered by one five-second deadline. Identity diagnostics must contain one
+exact bundle identifier and one nonempty team identifier; incomplete/ambiguous
+metadata and ad-hoc signing fail closed before registration. `CodeSignatureProbeTests`
+uses owned executables with the real selected policy to cover noisy, hung,
+cancelled, oversized and failed queries without running signing tools.
 
 Accepted lifecycle commands instead await authoritative child completion despite
 UI cancellation. Their captured bytes have the same retention cap, before

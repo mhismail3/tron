@@ -221,7 +221,8 @@ private actor ProbeCalls {
     func record() { count += 1 }
 }
 
-private final class SubprocessFixture: @unchecked Sendable {
+// Shared by observation-owner tests; each instance owns its helper and FIFOs.
+final class SubprocessFixture: @unchecked Sendable {
     let shell: URL
     let root: URL
     let arguments: [String]
@@ -237,7 +238,7 @@ private final class SubprocessFixture: @unchecked Sendable {
 
     var watchdogFired: Bool { lock.withLock { expired } }
 
-    init(inheritedWriter: Bool = false, stderr: Bool = false) throws {
+    init(inheritedWriter: Bool = false, stderr: Bool = false, customScript: String? = nil) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("tron-process-test-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var transferred = false
@@ -259,7 +260,9 @@ private final class SubprocessFixture: @unchecked Sendable {
         descriptors = [readyFD, releaseFD]
         guard readyFD >= 0, releaseFD >= 0 else { throw POSIXError(.EIO) }
         let script: String
-        if inheritedWriter {
+        if let customScript {
+            script = customScript
+        } else if inheritedWriter {
             // After the runner returns, the fixture releases this holder. A
             // failed write independently proves the runner's read end closed.
             let destination = stderr ? ">&2" : ""

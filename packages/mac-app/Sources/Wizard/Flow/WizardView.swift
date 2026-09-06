@@ -48,8 +48,8 @@ struct WizardView: View {
             }
         }
         .environment(state)
-        .onAppear {
-            state.existingInstallStatus = setup.detectExistingInstall()
+        .task(id: state.needsInstallDetection) {
+            await state.refreshExistingInstall(using: setup.detectExistingInstall)
         }
     }
 }
@@ -378,7 +378,7 @@ struct WizardShell<Content: View>: View {
                 if installCanContinue {
                     state.advance()
                 } else {
-                    state.requestInstall()
+                    state.requestInstall(using: setup)
                 }
             } label: {
                 Text(installPrimaryLabel)
@@ -431,11 +431,9 @@ struct WizardShell<Content: View>: View {
         }
     }
 
-    /// Mirrors the gate previously implemented privately by
-    /// `InstallStep`: the primary CTA advances only after the install
-    /// pipeline has started the helper and `system::ping` has answered.
-    /// Before then, the same CTA starts or retries the pipeline via
-    /// `state.requestInstall()`.
+    /// The primary CTA advances only after the wizard-owned pipeline
+    /// has started the helper and `system::ping` has answered.
+    /// Before then, the same CTA admits the wizard-owned install task.
     private var installCanContinue: Bool {
         guard let outcome = state.installOutcome else { return false }
         return outcome == .success

@@ -66,7 +66,7 @@ struct EnvironmentSetup: Sendable {
     var probePermissions: @Sendable () async -> [Permission: PermissionStatus]
 
     /// Detects whether the bundled Login Item is registered and usable.
-    var detectExistingInstall: @Sendable () -> ExistingInstallStatus
+    var detectExistingInstall: @Sendable () async -> ExistingInstallStatus
 
     /// Returns a user-facing problem when the release app is not running
     /// from `/Applications/Tron.app`.
@@ -74,7 +74,7 @@ struct EnvironmentSetup: Sendable {
 
     /// Returns a user-facing problem when the embedded helper, LaunchAgent
     /// plist, or helper signature is missing/corrupt.
-    var validateBundledHelper: @Sendable () -> String?
+    var validateBundledHelper: @Sendable () async -> String?
 
     /// Returns a user-facing problem when the embedded Gateway entrypoint,
     /// production dependencies, or architecture-specific Node runtime is
@@ -212,12 +212,12 @@ struct EnvironmentSetup: Sendable {
             probeTailscale: { await TailscaleProbe.probe() },
             probePermissions: { await MacPermissionProbe.probeAll() },
             detectExistingInstall: {
-                ExistingInstallDetector.detect(
+                await ExistingInstallDetector.detect(
                     helperBundle: TronPaths.serverHelperBundle(profile: profile),
                     helperBinary: TronPaths.serverHelperBinary(profile: profile),
                     plistPath: plist,
                     bundleSignatureProblemResolver: { bundle in
-                        ExistingInstallDetector.bundleSignatureProblem(of: bundle, expectedBundleIdentifier: profile.launchAgentLabel)
+                        await ExistingInstallDetector.bundleSignatureProblem(of: bundle, expectedBundleIdentifier: profile.launchAgentLabel)
                     },
                     gatewayPayloadProblemResolver: { ExistingInstallDetector.validateGatewayPayload() },
                     serviceStatusResolver: { ExistingInstallDetector.serviceStatus(label: profile.launchAgentLabel) }
@@ -225,7 +225,7 @@ struct EnvironmentSetup: Sendable {
             },
             validateApplicationLocation: { MacRuntimeVariant.detect().locationProblem },
             validateBundledHelper: {
-                ExistingInstallDetector.validateBundledHelper(
+                await ExistingInstallDetector.validateBundledHelper(
                     helperBundle: TronPaths.serverHelperBundle(profile: profile),
                     helperBinary: TronPaths.serverHelperBinary(profile: profile),
                     plistPath: plist,

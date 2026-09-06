@@ -27,9 +27,8 @@ struct WizardStateTests {
         #expect(state.step == .welcome)
         #expect(state.permissionStatuses.isEmpty)
         #expect(state.installOutcome == nil)
-        #expect(state.installRequestID == 0)
-        #expect(state.handledInstallRequestID == 0)
-        #expect(state.hasUnhandledInstallRequest == false)
+        #expect(state.installStages.isEmpty)
+        #expect(state.needsInstallDetection)
         #expect(state.installIsRunning == false)
         #expect(state.pairingPayload == nil)
         #expect(state.tailscaleStatus == nil)
@@ -167,26 +166,17 @@ struct WizardStateTests {
         }
     }
 
-    @Test("install does not start until explicitly requested")
-    func installRequestIsExplicit() {
+    @Test("navigation does not admit an installation")
+    func navigationIsObservational() {
         let (defaults, cleanup) = Self.isolatedDefaults()
         defer { cleanup() }
         let state = WizardState(defaults: defaults)
-        #expect(state.installRequestID == 0)
         state.advance(); state.advance() // install
+        state.goBack(); state.advance()
         #expect(state.step == .install)
-        #expect(state.installRequestID == 0)
+        #expect(!state.installIsRunning)
+        #expect(state.installStages.isEmpty)
         #expect(state.installOutcome == nil)
-
-        state.requestInstall()
-        #expect(state.installRequestID == 1)
-        #expect(state.hasUnhandledInstallRequest == true)
-        state.markInstallRequestHandled(state.installRequestID)
-        #expect(state.handledInstallRequestID == 1)
-        #expect(state.hasUnhandledInstallRequest == false)
-        state.requestInstall()
-        #expect(state.installRequestID == 2)
-        #expect(state.hasUnhandledInstallRequest == true)
     }
 
 }

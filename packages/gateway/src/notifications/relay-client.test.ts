@@ -104,15 +104,18 @@ describe("PushRelayClient", () => {
     await expect(client.send(input)).resolves.toBe("ambiguous");
   });
 
-  it("parses relay rate limits and exact revocation acknowledgements", async () => {
+  it.each([
+    { status: "rate_limited", reason: "rate_limited", retryAfterSeconds: 20 },
+    { status: "retryable", reason: "apns_token_changed", retryAfterSeconds: 30 },
+  ])("preserves $reason outcomes and exact revocation acknowledgements", async (outcome) => {
     let call = 0;
     const client = new PushRelayClient("https://push.example.test", async () => {
       call += 1;
       return call === 1
-        ? new Response(JSON.stringify({ status: "rate_limited", reason: "rate_limited", retryAfterSeconds: 20 }))
+        ? new Response(JSON.stringify(outcome))
         : new Response(JSON.stringify({ version: 1, revoked: true }));
     });
-    await expect(client.send({ grantId: "grant_abcdefgh", secret, requestId: "request_abcdefgh", message: "input", expiresAt: "2026-01-01T00:00:00.000Z" })).resolves.toBe("rate_limited");
+    await expect(client.send({ grantId: "grant_abcdefgh", secret, requestId: "request_abcdefgh", message: "input", expiresAt: "2026-01-01T00:00:00.000Z" })).resolves.toBe(outcome.status);
     await expect(client.revoke("grant_abcdefgh", secret, "request_abcdefgh")).resolves.toBe("revoked");
   });
 

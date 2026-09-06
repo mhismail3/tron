@@ -7,7 +7,6 @@ import {
   type Env,
   type InstallationRegistration,
   type LedgerRow,
-  type NotificationRequest,
   type RegistrationResult,
   type RelayResult,
   type StoredGrant,
@@ -222,11 +221,14 @@ export class PushRegistry {
           );
           installation = this.installationByKey(registration.keyId);
         } else {
-          if (!installation || installation.route !== registration.route || Number(installation.assertion_counter) >= counter) {
+          // Proof verification yields. An assertion cannot revive authority
+          // disabled by a token rejection or replacement attestation meanwhile.
+          if (!installation || installation.enabled !== 1 || installation.route !== registration.route
+            || Number(installation.assertion_counter) >= counter) {
             throw new Error("assertion_replayed");
           }
           this.state.storage.sql.exec(
-            "UPDATE installations SET apns_token = ?, token_hash = ?, assertion_counter = ?, enabled = 1, updated_at = ? WHERE installation_id = ?",
+            "UPDATE installations SET apns_token = ?, token_hash = ?, assertion_counter = ?, updated_at = ? WHERE installation_id = ?",
             registration.apnsToken, tokenHash, counter, now, installation.installation_id,
           );
           installation = this.installationByKey(registration.keyId);
@@ -302,12 +304,9 @@ export class PushRegistry {
     if (!grant || grant.enabled !== 1 || !(await verifyGrantSignature({
       secret: grant.secret, method: "POST", path: "/v3/notifications", timestamp, requestId, body, provided: signature,
     }))) return json({ error: "invalid_signature" }, 401);
-    const installation = this.installation(grant.installation_id);
-    if (!installation || installation.enabled !== 1) return json({ error: "installation_unavailable" }, 410);
-
     const bodyHash = await sha256Hex(body);
-    const rejection = await this.beginDispatch(requestId, grant.grant_id, installation.installation_id, bodyHash);
-    if (rejection) return rejection;
+    const installation = await this.beginDispatch(requestId, grant.grant_id, bodyHash);
+    if (installation instanceof Response) return installation;
 
     const route = ROUTES[installation.route];
     let result: RelayResult;
@@ -320,15 +319,7 @@ export class PushRegistry {
     } catch {
       result = { status: "retryable", reason: "relay_transport_error", retryAfterSeconds: 30 };
     }
-    await this.finishDispatch(requestId, result);
-    if (result.status === "invalid_token") {
-      await this.state.storage.transaction(async () => {
-        const now = epochSeconds();
-        this.state.storage.sql.exec("UPDATE installations SET enabled = 0, updated_at = ? WHERE installation_id = ?", now, installation.installation_id);
-        this.state.storage.sql.exec("UPDATE grants SET enabled = 0, updated_at = ? WHERE installation_id = ?", now, installation.installation_id);
-      });
-    }
-    return json(result);
+    return json(await this.finishDispatch(requestId, installation, result));
   }
 
   private async revoke(request: Request, path: string): Promise<Response> {
@@ -380,13 +371,15 @@ export class PushRegistry {
     });
   }
 
-  private async beginDispatch(requestId: string, grantId: string, installationId: string, bodyHash: string): Promise<Response | undefined> {
+  private async beginDispatch(requestId: string, grantId: string, bodyHash: string): Promise<Response | StoredInstallation> {
     return this.state.storage.transaction(async () => {
-      // Authentication awaits crypto before admission. Read authority and quota
-      // in this transaction so overlapping requests cannot spend a stale count
-      // or admit a grant revoked while its signature was being verified.
+      // Capture authority, current token and quota together after async crypto.
+      // A pre-admission token snapshot can already belong to a retired registration.
       const grant = this.grant(grantId);
       if (!grant || grant.enabled !== 1) return json({ error: "invalid_signature" }, 401);
+      const installation = this.installation(grant.installation_id);
+      if (!installation || installation.enabled !== 1) return json({ error: "installation_unavailable" }, 410);
+      const installationId = installation.installation_id;
       const now = epochSeconds();
       this.state.storage.sql.exec("DELETE FROM relay_requests WHERE updated_at < ?", now - RECEIPT_RETENTION_SECONDS);
       const existing = this.state.storage.sql.exec<LedgerRow>(
@@ -409,7 +402,7 @@ export class PushRegistry {
           catch { return json({ status: "ambiguous", reason: "ledger_result_invalid" } satisfies RelayResult); }
         }
         this.state.storage.sql.exec("UPDATE relay_requests SET state = 'in_progress', response_json = NULL, updated_at = ? WHERE request_id = ?", epochSeconds(), requestId);
-        return undefined;
+        return installation;
       }
 
       const hour = hourWindow(now);
@@ -448,16 +441,32 @@ export class PushRegistry {
         "INSERT INTO relay_requests (request_id, grant_id, body_hash, state, response_json, quota_charged, updated_at) VALUES (?, ?, ?, 'in_progress', NULL, 1, ?)",
         requestId, grant.grant_id, bodyHash, now,
       );
-      return undefined;
+      return installation;
     });
   }
 
-  private async finishDispatch(requestId: string, result: RelayResult): Promise<void> {
-    const terminal = result.status === "accepted_by_apns" || result.status === "permanent_failure" || result.status === "invalid_token";
-    this.state.storage.sql.exec(
-      "UPDATE relay_requests SET state = ?, response_json = ?, updated_at = ? WHERE request_id = ?",
-      terminal ? "terminal" : "retryable", JSON.stringify(result), epochSeconds(), requestId,
-    );
+  private async finishDispatch(requestId: string, installation: StoredInstallation, result: RelayResult): Promise<RelayResult> {
+    return this.state.storage.transaction(async () => {
+      let outcome = result;
+      const now = epochSeconds();
+      if (result.status === "invalid_token") {
+        const current = this.installation(installation.installation_id);
+        if (current?.enabled === 1 && current.apns_token !== installation.apns_token) {
+          // APNs proved non-delivery only for the retired token. Returning
+          // invalid_token would also disable the healthy grant in the Gateway.
+          outcome = { status: "retryable", reason: "apns_token_changed", retryAfterSeconds: 30 };
+        } else {
+          this.state.storage.sql.exec("UPDATE installations SET enabled = 0, updated_at = ? WHERE installation_id = ?", now, installation.installation_id);
+          this.state.storage.sql.exec("UPDATE grants SET enabled = 0, updated_at = ? WHERE installation_id = ?", now, installation.installation_id);
+        }
+      }
+      const terminal = outcome.status === "accepted_by_apns" || outcome.status === "permanent_failure" || outcome.status === "invalid_token";
+      this.state.storage.sql.exec(
+        "UPDATE relay_requests SET state = ?, response_json = ?, updated_at = ? WHERE request_id = ?",
+        terminal ? "terminal" : "retryable", JSON.stringify(outcome), now, requestId,
+      );
+      return outcome;
+    });
   }
 
   private challenge(id: string): ChallengeRow | undefined {

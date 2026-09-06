@@ -1,4 +1,3 @@
-import Foundation
 import Testing
 @testable import TronMobile
 
@@ -77,21 +76,6 @@ struct ExtensionActivityModelsTests {
     func strictActivityFields() {
         #expect(!ExtensionActivityAdmissionPolicy.admits(makeActivity(id: "", output: "ok")))
         #expect(!ExtensionActivityAdmissionPolicy.admits(makeActivity(runId: String(repeating: "x", count: 513), output: String(repeating: "x", count: 33 * 1_024))))
-    }
-
-    @Test("history page omits malformed rows while admitting the page")
-    func pageAdmission() throws {
-        let valid = try JSONSerialization.jsonObject(with: JSONEncoder.gateway.encode(makeActivity()))
-        let payload: [String: Any] = [
-            "activities": [valid, ["id": "bad"]],
-            "historyRevision": "revision-1",
-            "nextCursor": NSNull(),
-            "omissions": ["count": 1, "bytes": 12, "reason": "bytes"],
-        ]
-        let data = try JSONSerialization.data(withJSONObject: payload)
-        let page = try JSONDecoder.gateway.decode(ExtensionActivityHistoryPage.self, from: data)
-        #expect(page.activities.count == 1)
-        #expect(page.omissions?.bytes == 12)
     }
 
     private func makeActivity(

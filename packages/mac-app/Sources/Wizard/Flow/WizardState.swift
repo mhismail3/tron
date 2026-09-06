@@ -56,38 +56,32 @@ final class WizardState {
     /// one helper restart.
     var permissionsRestartInProgress = false
 
-    /// Existing Login Item detection result. Set on entry so the
-    /// Install step can surface clean, approval, partial, or registered
-    /// states. A registered service still has to be started and pinged
-    /// before the wizard advances.
+    /// Presentation-only entry snapshot for the registered-service hint.
+    /// Readiness and current failures come from the explicit installation;
+    /// even a registered service must be started and pinged before advancing.
     var existingInstallStatus: ExistingInstallStatus = .none
 
     /// Outcome of the install pipeline. Set when the install step
     /// completes (or fails). The Pairing step blocks until non-nil.
     var installOutcome: InstallOutcome?
 
-    /// Monotonic user intent counter for the Install step. The wizard
-    /// must never start copying binaries or writing launchd state just
-    /// because the user landed on the page; pressing the Install CTA is
-    /// what increments this value and lets `InstallStep` run.
-    var installRequestID: Int = 0
+    /// Accepted installation outlives the transient step view. This task
+    /// retains its wizard owner through completion; navigation cannot cancel
+    /// it or replay a consumed intent. Progress survives remounting too.
+    private var installTask: Task<Void, Never>?
+    var installStages: [InstallPipelineStage: InstallStageState] = [:]
+    var installIsRunning: Bool { installTask != nil }
 
-    /// Highest install request ID the Install step has consumed. This
-    /// keeps the pipeline idempotent across back/forward navigation:
-    /// SwiftUI remounts `InstallStep` when the user returns to it,
-    /// but a previously handled request must not run again unless the
-    /// user presses Install/Retry and creates a new request ID.
-    private(set) var handledInstallRequestID: Int = 0
+    /// Entry detection is only a presentation hint, never install authority.
+    /// Once an explicit install starts, its result supersedes that observation.
+    var needsInstallDetection: Bool { !installIsRunning && installOutcome == nil }
 
-    var hasUnhandledInstallRequest: Bool {
-        installRequestID > handledInstallRequestID
+    func refreshExistingInstall(using probe: @Sendable () async -> ExistingInstallStatus) async {
+        guard needsInstallDetection else { return }
+        let status = await probe()
+        guard !Task.isCancelled, needsInstallDetection else { return }
+        existingInstallStatus = status
     }
-
-    /// True only while the Install step is actively mutating disk or
-    /// launchd. `WizardShell` reads this to turn the primary CTA into a
-    /// disabled "Installing…" affordance instead of letting a second
-    /// click enqueue another pipeline.
-    var installIsRunning = false
 
     /// Pairing payload assembled at the Pairing-info step. Populated
     /// after `system::ping` succeeds AND we read the bearer token off
@@ -163,15 +157,20 @@ final class WizardState {
         navigate(to: .pairingInfo, direction: .forward)
     }
 
-    /// Explicitly starts or retries the install pipeline. This is the
-    /// only public entry point that may cause `InstallStep` to mutate
-    /// disk/launchd state; view appearance is observational only.
-    func requestInstall() {
-        installRequestID += 1
-    }
-
-    func markInstallRequestHandled(_ requestID: Int) {
-        handledInstallRequestID = max(handledInstallRequestID, requestID)
+    /// Admit synchronously before another click or view task can interleave.
+    /// A caller may await this task, but only this owner retires accepted work.
+    @discardableResult
+    func requestInstall(using setup: EnvironmentSetup) -> Task<Void, Never> {
+        if let installTask { return installTask }
+        installOutcome = nil
+        installStages = Dictionary(uniqueKeysWithValues: InstallPipelineStage.allCases.map { ($0, .pending) })
+        installStages[.validateApplication] = .running
+        let task = Task {
+            defer { installTask = nil }
+            await performInstall(setup: setup)
+        }
+        installTask = task
+        return task
     }
 
     /// Single mutation point for step + direction. Centralises the

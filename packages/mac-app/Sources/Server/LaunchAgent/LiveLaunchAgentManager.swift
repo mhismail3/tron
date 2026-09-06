@@ -29,7 +29,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         guard ExistingInstallDetector.launchAgentPlistIsCurrent(profile: profile, plistPath: plistPath) else {
             return .launchdRefused(message: "The bundled LaunchAgent plist does not match the requested Gateway profile.")
         }
-        if let signatureProblem = ExistingInstallDetector.bundleSignatureProblem(
+        if let signatureProblem = await ExistingInstallDetector.bundleSignatureProblem(
             of: TronPaths.serverHelperBundle(profile: profile),
             expectedBundleIdentifier: profile.launchAgentLabel
         ) {
@@ -44,54 +44,21 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             return .unknown(message: "Could not inspect the LaunchAgent. No registration changes were made.")
         }
         let runningParent = runtime?.parentBundleIdentifier
-        let shouldReplaceStaleRuntime = Self.runtimeRequiresReplacement(
-            runtimeInfo: runtime,
-            profile: profile,
-            expectedHelperPath: helperBinary.path
-        )
-        let shouldTakeOverRuntime = Self.shouldBootoutForTakeover(
-            status: status,
-            currentVariant: currentVariant,
-            runningParentBundleIdentifier: runningParent,
-            canManageLaunchAgent: TronPaths.canManageLaunchAgent(profile: profile)
-        )
-        let shouldRefreshCurrentRegistration = Self.shouldRefreshRegistrationForCurrentBundle(
-            status: status,
-            currentVariant: currentVariant,
-            runtimeInfo: runtime,
-            currentParentBundleVersion: Self.currentParentBundleVersion(),
-            canManageLaunchAgent: TronPaths.canManageLaunchAgent(profile: profile)
-        ) || Self.shouldRefreshRegistrationForLaunchConstraints(
-            status: status,
-            currentVariant: currentVariant,
-            runtimeInfo: runtime,
-            canManageLaunchAgent: TronPaths.canManageLaunchAgent(profile: profile)
-        ) || Self.shouldRefreshRegistrationForGatewaySupervision(
-            status: status,
-            currentVariant: currentVariant,
-            runtimeInfo: runtime,
-            expectedMarker: TronPaths.gatewaySupervisionValue,
-            canManageLaunchAgent: TronPaths.canManageLaunchAgent(profile: profile)
-        )
-
         let plan = Self.registrationPlan(
             status: status,
             currentVariant: currentVariant,
             runtimeInfo: runtime,
-            runningParentBundleIdentifier: runningParent,
             canManageLaunchAgent: TronPaths.canManageLaunchAgent(profile: profile),
             profile: profile,
             expectedHelperPath: helperBinary.path,
-            shouldRefreshCurrentRegistration: shouldRefreshCurrentRegistration,
-            shouldReplaceStaleRuntime: shouldReplaceStaleRuntime,
-            shouldTakeOverRuntime: shouldTakeOverRuntime
+            currentParentBundleVersion: Self.currentParentBundleVersion()
         )
         switch plan {
         case .keep:
             return .alreadyLoaded
         case .refuse(let message):
             return .launchdRefused(message: message)
-        default:
+        case .change:
             break
         }
 
@@ -102,7 +69,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         if Self.shouldRefuseExternalServer(status: status, runningParentBundleIdentifier: runningParent, portBound: externalPortBound) {
             return .launchdRefused(message: "Another Tron is already running on port \(profile.port). Stop it before installing this Gateway profile.")
         }
-        for step in plan.steps {
+        if let failure = await Self.execute(plan.steps, perform: { step in
             switch step {
             case .bootout:
                 let bootout = await Subprocess.run(
@@ -126,9 +93,10 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
                 do { try service.register() } catch {
                     return .launchdRefused(message: error.localizedDescription)
                 }
-            case .refresh:
-                break
             }
+            return nil
+        }) {
+            return failure
         }
 
         switch service.status {
@@ -149,13 +117,11 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         status: ExistingInstallDetector.ServiceRegistrationStatus,
         currentVariant: MacRuntimeVariant,
         runtimeInfo: LaunchAgentRuntimeInfo?,
-        runningParentBundleIdentifier: String?,
         canManageLaunchAgent: Bool,
         profile: TronGatewayProfile = .stable,
         expectedHelperPath: String,
-        shouldRefreshCurrentRegistration: Bool = false,
-        shouldReplaceStaleRuntime: Bool? = nil,
-        shouldTakeOverRuntime: Bool? = nil
+        currentParentBundleVersion: String?,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> LaunchAgentRegistrationPlan {
         if status == .requiresApproval {
             return .refuse(message: "Approve Tron Agent in Login Items to finish installation.")
@@ -165,15 +131,25 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         if runtimeInfo?.pid != nil, runtimeInfo?.processCommand?.isEmpty != false {
             return .refuse(message: "Could not verify the running Gateway command. No registration changes were made.")
         }
-        let stale = shouldReplaceStaleRuntime ?? runtimeRequiresReplacement(
-            runtimeInfo: runtimeInfo, profile: profile, expectedHelperPath: expectedHelperPath
+        let parent = runtimeInfo?.parentBundleIdentifier
+        let stale = runtimeRequiresReplacement(
+            runtimeInfo: runtimeInfo, profile: profile, expectedHelperPath: expectedHelperPath,
+            fileExists: fileExists
         )
-        let takeover = shouldTakeOverRuntime ?? shouldBootoutForTakeover(
+        let takeover = shouldBootoutForTakeover(
             status: status, currentVariant: currentVariant,
-            runningParentBundleIdentifier: runningParentBundleIdentifier,
+            runningParentBundleIdentifier: parent, canManageLaunchAgent: canManageLaunchAgent
+        )
+        let refresh = shouldRefreshRegistrationForCurrentBundle(
+            status: status, currentVariant: currentVariant, runtimeInfo: runtimeInfo,
+            currentParentBundleVersion: currentParentBundleVersion, canManageLaunchAgent: canManageLaunchAgent
+        ) || shouldRefreshRegistrationForLaunchConstraints(
+            status: status, currentVariant: currentVariant, runtimeInfo: runtimeInfo,
+            canManageLaunchAgent: canManageLaunchAgent
+        ) || shouldRefreshRegistrationForGatewaySupervision(
+            status: status, currentVariant: currentVariant, runtimeInfo: runtimeInfo,
             canManageLaunchAgent: canManageLaunchAgent
         )
-        let parent = runtimeInfo?.parentBundleIdentifier ?? runningParentBundleIdentifier
         guard canManageLaunchAgent else {
             if stale || parent == nil {
                 return .refuse(message: "This Xcode Debug wrapper is a read-only companion. Use /Applications/Tron.app to manage Stable.")
@@ -185,90 +161,27 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         case .enabled, .unknown: registrationExists = true
         case .requiresApproval, .notRegistered, .notFound: registrationExists = false
         }
-        let needsUnregister = registrationExists && (parent == nil || stale || takeover || shouldRefreshCurrentRegistration)
+        let repair = stale || takeover || refresh
         var steps: [LaunchAgentRegistrationPlan.Step] = []
-        if stale || takeover || shouldRefreshCurrentRegistration { steps.append(.bootout) }
-        if needsUnregister { steps.append(.unregister) }
-        if stale { return .bootout(steps: steps + [.register]) }
-        if takeover { return .takeover(steps: steps + [.register]) }
-        if shouldRefreshCurrentRegistration { return .refresh(steps: steps + [.register]) }
-        guard let parent else { return .register(steps: steps + [.register]) }
+        if repair { steps.append(.bootout) }
+        if registrationExists && (parent == nil || repair) { steps.append(.unregister) }
+        if repair { return .change(steps: steps + [.register]) }
+        guard let parent else { return .change(steps: steps + [.register]) }
         if parent == currentVariant.expectedParentBundleIdentifier { return .keep }
-        if currentVariant.canTakeOverRegistration(ownedBy: parent) {
-            return .takeover(steps: [.bootout] + (registrationExists ? [.unregister] : []) + [.register])
-        }
         return .refuse(message: "Tron Agent is currently managed by \(parent). Stop that build before installing this one.")
     }
 
     /// Executes the already-resolved plan without re-reading launchd state.
-    /// Keeping this tiny interpreter separate makes step ordering observable
-    /// in tests and prevents a refresh/takeover from silently skipping a
-    /// planned operation.
+    /// This is the live load path's only step loop. Stop on the first reported
+    /// failure; do not add retries or caller-cancellation checks between accepted steps.
     static func execute(
-        _ plan: LaunchAgentRegistrationPlan,
-        perform: @escaping @Sendable (LaunchAgentRegistrationPlan.Step) async -> LaunchAgentOutcome?
+        _ steps: [LaunchAgentRegistrationPlan.Step],
+        perform: (LaunchAgentRegistrationPlan.Step) async -> LaunchAgentOutcome?
     ) async -> LaunchAgentOutcome? {
-        for step in plan.steps {
+        for step in steps {
             if let outcome = await perform(step) { return outcome }
         }
         return nil
-    }
-
-    static func preRegistrationOutcome(
-        for status: ExistingInstallDetector.ServiceRegistrationStatus,
-        currentVariant: MacRuntimeVariant = MacRuntimeVariant.detect(),
-        runtimeInfo: LaunchAgentRuntimeInfo? = nil,
-        runningParentBundleIdentifier: String? = nil,
-        canManageLaunchAgent: Bool = true,
-        profile: TronGatewayProfile = .stable,
-        expectedHelperPath: String = TronPaths.serverHelperBinary.path,
-        shouldRefreshCurrentRegistration: Bool = false
-    ) -> LaunchAgentOutcome? {
-        switch status {
-        case .requiresApproval:
-            return .requiresApproval(message: "Approve Tron Agent in Login Items to finish installation.")
-        case .enabled, .notRegistered, .notFound, .unknown:
-            let runtimeIsStale = runtimeRequiresReplacement(
-                runtimeInfo: runtimeInfo,
-                profile: profile,
-                expectedHelperPath: expectedHelperPath
-            )
-            let resolvedParent = runtimeInfo?.parentBundleIdentifier ?? runningParentBundleIdentifier
-
-            if !canManageLaunchAgent {
-                if runtimeIsStale || resolvedParent == nil {
-                    return .launchdRefused(
-                        message: "This Xcode Debug wrapper is a read-only companion. Use /Applications/Tron.app to manage Stable."
-                    )
-                }
-                return .alreadyLoaded
-            }
-
-            if runtimeIsStale {
-                return nil
-            }
-
-            guard let resolvedParent else {
-                // SMAppService can report an enabled Login Item even when
-                // launchd has no loaded job for the label, e.g. a stale
-                // DerivedData Debug registration. Route through registration
-                // so the current app bundle remains the source of truth.
-                return nil
-            }
-
-            if resolvedParent == currentVariant.expectedParentBundleIdentifier {
-                if shouldRefreshCurrentRegistration {
-                    return nil
-                }
-                return .alreadyLoaded
-            }
-            if currentVariant.canTakeOverRegistration(ownedBy: resolvedParent) {
-                return nil
-            }
-            return .launchdRefused(
-                message: "Tron Agent is currently managed by \(resolvedParent). Stop that build before installing this one."
-            )
-        }
     }
 
     static func shouldBootoutForTakeover(
@@ -297,27 +210,6 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             return false
         }
         return portBound
-    }
-
-    static func shouldUnregisterBeforeRegister(
-        status: ExistingInstallDetector.ServiceRegistrationStatus,
-        runningParentBundleIdentifier: String?,
-        shouldReplaceStaleRuntime: Bool,
-        shouldTakeOverRuntime: Bool,
-        shouldRefreshCurrentRegistration: Bool
-    ) -> Bool {
-        let registrationMayExist: Bool
-        switch status {
-        case .enabled, .unknown:
-            registrationMayExist = true
-        case .requiresApproval, .notRegistered, .notFound:
-            registrationMayExist = false
-        }
-        return registrationMayExist
-            && (runningParentBundleIdentifier == nil
-                || shouldReplaceStaleRuntime
-                || shouldTakeOverRuntime
-                || shouldRefreshCurrentRegistration)
     }
 
     static func shouldRefreshRegistrationForCurrentBundle(

@@ -153,7 +153,11 @@ revalidate the current typed skill or prompt identity inside the selected or
 newly created RuntimeSlot and project Gateway automation provenance instead of
 pretending the input came from a user. Extension commands, attachments,
 arbitrary shell, webhooks, deployment, and Gateway lifecycle actions are not
-automation capabilities.
+automation capabilities. RuntimeSlot also rejects scheduled plain text that
+resolves to an installed extension command, inside its mutation lane and before
+command effects, run markers, or terminal observers are admitted. Omitting a
+typed resource cannot bypass that boundary; explicit user commands remain
+available.
 
 Each occurrence and run is durable before dispatch. Pre-admission transient
 failures may retry with bounded backoff; accepted agent failures do not. A crash
@@ -1471,7 +1475,12 @@ mutation lane. Receipts are bounded, exactly-once by activity identity, and reta
 only child identity, label, lifecycle/attention, and aggregate tool/turn counts;
 child task, output, path, current-tool, and timing fields never persist. They
 remain in raw JSONL/export but are excluded from transcript, tree, and model projection. History cursors
-carry an immutable receipt/branch revision and reject generation mixing.
+carry an immutable receipt/branch revision and reject generation mixing. Receipt
+admission rejects cyclic child ancestry before reconstructing historical trees.
+Pages cap the activity array at 256 KiB and scan at most 50 rows: a row that
+exhausts the current page remains at the next cursor, while an individually
+oversized row advances the cursor with explicit omission metadata. Paging never
+drops an otherwise admissible row merely because an earlier row filled the page.
 
 Artifact discovery is bounded, validates the supported versioned lifecycle
 artifact shape, and prioritizes queued/running/paused then newest observations

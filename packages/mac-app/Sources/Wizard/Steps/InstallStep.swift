@@ -10,7 +10,6 @@ struct InstallStep: View {
     @Bindable var state: WizardState
     @Environment(\.environmentSetup) private var setup
 
-    @State private var stages: [InstallPipelineStage: StageState] = [:]
     @State private var installStatusText: String?
 
     var body: some View {
@@ -41,20 +40,6 @@ struct InstallStep: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .animation(WizardLayout.transitionAnimation, value: installIsComplete)
-        .task {
-            // Detection is observational only. Even an enabled Login
-            // Item registration is not considered ready until the user
-            // explicitly starts the pipeline and `system::ping` answers.
-            prepareTerminalInstallStateIfNeeded()
-        }
-        .task(id: state.installRequestID) {
-            guard state.installRequestID > 0 else { return }
-            guard state.hasUnhandledInstallRequest else {
-                prepareTerminalInstallStateIfNeeded()
-                return
-            }
-            await runPipeline(requestID: state.installRequestID)
-        }
         .task(id: state.installOutcome) {
             guard installIsComplete else {
                 installStatusText = nil
@@ -72,9 +57,9 @@ struct InstallStep: View {
     }
 
     private var currentInstallRunSucceeded: Bool {
-        guard !stages.isEmpty else { return false }
+        guard !state.installStages.isEmpty else { return false }
         return InstallPipelineStage.allCases.allSatisfy { stage in
-            stages[stage] == .succeeded
+            state.installStages[stage] == .succeeded
         }
     }
 
@@ -88,33 +73,8 @@ struct InstallStep: View {
         return false
     }
 
-    private func resetStagesToPending() {
-        for stage in InstallPipelineStage.allCases {
-            stages[stage] = .pending
-        }
-    }
-
-    private func markAlreadyInstalledStagesSucceeded() {
-        for stage in InstallPipelineStage.allCases {
-            stages[stage] = .succeeded
-        }
-    }
-
-    private func prepareTerminalInstallStateIfNeeded() {
-        switch state.installOutcome {
-        case .success:
-            markAlreadyInstalledStagesSucceeded()
-        case nil:
-            if stages.isEmpty {
-                resetStagesToPending()
-            }
-        default:
-            break
-        }
-    }
-
-    private func stageState(for stage: InstallPipelineStage) -> StageState {
-        if let explicitState = stages[stage] {
+    private func stageState(for stage: InstallPipelineStage) -> InstallStageState {
+        if let explicitState = state.installStages[stage] {
             return explicitState
         }
         switch state.installOutcome {
@@ -159,104 +119,6 @@ struct InstallStep: View {
         .animation(WizardLayout.transitionAnimation, value: visibleStages)
     }
 
-    private func runPipeline(requestID: Int) async {
-        guard !state.installIsRunning else { return }
-        guard state.hasUnhandledInstallRequest else {
-            prepareTerminalInstallStateIfNeeded()
-            return
-        }
-        state.markInstallRequestHandled(requestID)
-
-        state.installIsRunning = true
-        defer { state.installIsRunning = false }
-        // Reset state.
-        resetStagesToPending()
-        stages[.validateApplication] = .running
-        state.installOutcome = nil
-
-        // 1. The release app must be running from /Applications/Tron.app.
-        await paceStage()
-        if let locationProblem = setup.validateApplicationLocation() {
-            state.installOutcome = .invalidApplicationLocation(locationProblem)
-            stages[.validateApplication] = .failed(locationProblem)
-            return
-        }
-        stages[.validateApplication] = .succeeded
-
-        // 2. Validate the bundled helper app, LaunchAgent plist, and signature.
-        stages[.validateHelper] = .running
-        await paceStage()
-        if let helperProblem = setup.validateBundledHelper() {
-            state.installOutcome = .helperValidationFailed(helperProblem)
-            stages[.validateHelper] = .failed(helperProblem)
-            return
-        }
-        if let gatewayProblem = setup.validateGatewayPayload() {
-            state.installOutcome = .helperValidationFailed(gatewayProblem)
-            stages[.validateHelper] = .failed(gatewayProblem)
-            return
-        }
-        guard ExistingInstallDetector.launchAgentPlistIsCurrent(
-            plistPath: setup.launchAgentPlistPath,
-            label: setup.launchAgentLabel,
-            port: setup.serverPort
-        ) else {
-            let message = "The bundled LaunchAgent plist is invalid. Reinstall Tron.app."
-            state.installOutcome = .helperValidationFailed(message)
-            stages[.validateHelper] = .failed(message)
-            return
-        }
-        stages[.validateHelper] = .succeeded
-
-        guard setup.canManageLaunchAgent else {
-            let message = "This Xcode Debug wrapper is a read-only companion. Use /Applications/Tron.app to install or manage Stable."
-            stages[.registerAgent] = .failed(message)
-            state.installOutcome = .serviceRegistrationFailed(message)
-            return
-        }
-
-        // 3. Register the bundled Login Item through SMAppService.
-        stages[.registerAgent] = .running
-        await paceStage()
-        let outcome = await LaunchAgentLoader.ensureLoaded(
-            manager: setup.launchAgentManager,
-            plistPath: setup.launchAgentPlistPath,
-            label: setup.launchAgentLabel
-        )
-        switch outcome {
-        case .ok, .alreadyLoaded:
-            stages[.registerAgent] = .succeeded
-        case .requiresApproval(let message):
-            stages[.registerAgent] = .failed(message)
-            state.installOutcome = .serviceRequiresApproval
-            LoginItemsSettingsOpener.open()
-            return
-        case .launchdRefused(let message), .unknown(let message):
-            stages[.registerAgent] = .failed(message)
-            state.installOutcome = .serviceRegistrationFailed(message)
-            return
-        case .binaryMissing(let path):
-            stages[.registerAgent] = .failed("Missing: \(path)")
-            state.installOutcome = .helperValidationFailed("Missing: \(path)")
-            return
-        }
-
-        // 4. Await ping.
-        stages[.awaitPing] = .running
-        await paceStage()
-        let pingOK = await waitForPing()
-        if pingOK {
-            withAnimation(WizardLayout.transitionAnimation) {
-                stages[.awaitPing] = .succeeded
-                state.installOutcome = .success
-            }
-            state.existingInstallStatus = setup.detectExistingInstall()
-        } else {
-            stages[.awaitPing] = .failed("Tron did not respond within 30 seconds")
-            state.installOutcome = .awaitPingTimedOut
-        }
-    }
-
     @ViewBuilder
     private func stageRow(_ stage: InstallPipelineStage) -> some View {
         let stateForStage = stageState(for: stage)
@@ -280,7 +142,7 @@ struct InstallStep: View {
     }
 
     @ViewBuilder
-    private func stageIcon(_ stateForStage: StageState) -> some View {
+    private func stageIcon(_ stateForStage: InstallStageState) -> some View {
         switch stateForStage {
         case .pending:
             Image(systemName: "circle")
@@ -299,14 +161,6 @@ struct InstallStep: View {
                 .foregroundStyle(.red)
                 .help(message)
         }
-    }
-
-    private func paceStage() async {
-        try? await Task.sleep(nanoseconds: InstallStepContent.stagePaceDelayNanoseconds)
-    }
-
-    enum StageState: Equatable {
-        case pending, running, succeeded, failed(String)
     }
 
     private func label(for stage: InstallPipelineStage) -> String {
@@ -368,28 +222,6 @@ struct InstallStep: View {
         .padding(.vertical, InstallStepLayout.summaryCardVerticalPadding)
         .padding(.horizontal, WizardCardLayout.horizontalInset)
         .wizardGlassCard()
-    }
-
-    /// Polls `system::ping` for up to 30 s on a 1 s cadence. Returns true
-    /// the moment the server responds. Treats `.unauthorized` as a
-    /// success signal too — the server is alive; the wizard moves on
-    /// and the pairing step will surface the token.
-    private func waitForPing() async -> Bool {
-        for _ in 0..<30 {
-            let token = setup.readBearerToken()
-            switch await setup.pingServer(token) {
-            case .success(let info) where info.gatewayChannel == setup.profile.channel:
-                return true
-            case .success:
-                break
-            case .unauthorized:
-                return true
-            case .unreachable, .timeout, .malformedResponse:
-                break
-            }
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-        }
-        return false
     }
 
     @ViewBuilder

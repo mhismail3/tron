@@ -86,7 +86,7 @@ async function signedRevocation(requestId = "revoke-request-0000001"): Promise<R
   };
 }
 
-async function assertionRegistration() {
+async function assertionRegistration(apnsToken = testGrant.deviceToken) {
   const keys = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
   const publicKeySpki = base64Url(new Uint8Array(await crypto.subtle.exportKey("spki", keys.publicKey)));
   const challengeResponse = await SELF.fetch("https://push.test/v3/attestation/challenge", { method: "POST" });
@@ -96,7 +96,7 @@ async function assertionRegistration() {
     challengeId: challenge.challengeId,
     challenge: challenge.challenge,
     keyId: testGrant.keyId,
-    apnsToken: testGrant.deviceToken,
+    apnsToken,
     route: "beta" as const,
     bindingHash: testGrant.bindingHash,
   };
@@ -136,6 +136,22 @@ async function seedAssertionInstallation(
     );
   });
   return tokenHash;
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => { resolve = complete; });
+  return { promise, resolve };
+}
+
+async function seedGrantForAssertion(registration: Awaited<ReturnType<typeof assertionRegistration>>) {
+  await initializeAndSeed();
+  await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
+    state.storage.sql.exec(
+      "UPDATE installations SET public_key_spki = ? WHERE installation_id = ?",
+      registration.publicKeySpki, testGrant.installationId,
+    );
+  });
 }
 
 afterEach(async () => {
@@ -243,44 +259,149 @@ describe("v3 Worker boundary", () => {
     expect(state).toEqual({ installation: 0, grant: 0 });
   });
 
+  test("captures the current APNs token in dispatch admission after concurrent registration", async () => {
+    const replacementToken = "cd".repeat(32);
+    const registration = await assertionRegistration(replacementToken);
+    await seedGrantForAssertion(registration);
+    const notification = await signedNotification();
+    const entered = deferred();
+    const release = deferred();
+    const providerFetch = vi.fn(async (_url: string | URL | Request) => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+    const digest = crypto.subtle.digest.bind(crypto.subtle);
+    let bodyHashes = 0;
+    vi.spyOn(crypto.subtle, "digest").mockImplementation(async (algorithm, data) => {
+      const result = await digest(algorithm, data);
+      // HMAC authenticates the first body hash. The second precedes durable
+      // dispatch admission; freeze there without bypassing real authentication.
+      if (new TextDecoder().decode(data) === notification.body && ++bodyHashes === 2) {
+        entered.resolve();
+        await release.promise;
+      }
+      return result;
+    });
+    await runInDurableObject(stub(), async (instance: PushRegistry) => {
+      const pending = instance.fetch(new Request("https://push.test/v3/notifications", notification));
+      try {
+        await Promise.race([entered.promise, pending.then(() => { throw new Error("Dispatch bypassed body-hash gate"); })]);
+        const registered = await instance.fetch(new Request("https://push.test/v3/installations", registration.request));
+        expect(registered.status).toBe(201);
+        release.resolve();
+        expect(await (await pending).json()).toMatchObject({ status: "accepted_by_apns" });
+        expect(bodyHashes).toBe(2);
+        expect(providerFetch.mock.calls.map(([url]) => url)).toEqual([
+          `https://api.sandbox.push.apple.com/3/device/${replacementToken}`,
+        ]);
+      } finally {
+        release.resolve();
+        await pending;
+      }
+    });
+  });
+
+  test.each([true, false])("fences a late APNs token rejection after registration (token changed: %s)", async (tokenChanged) => {
+    const replacementToken = tokenChanged ? "cd".repeat(32) : testGrant.deviceToken;
+    const registration = await assertionRegistration(replacementToken);
+    await seedGrantForAssertion(registration);
+    const notification = await signedNotification();
+    const entered = deferred();
+    const release = deferred();
+    const providerFetch = vi.fn(async (url: string | URL | Request) => {
+      if (url === `https://api.sandbox.push.apple.com/3/device/${testGrant.deviceToken}`) {
+        entered.resolve();
+        await release.promise;
+        return new Response('{"reason":"Unregistered"}', { status: 410 });
+      }
+      return new Response(null, { status: 200 });
+    });
+    vi.stubGlobal("fetch", providerFetch);
+    await runInDurableObject(stub(), async (instance: PushRegistry, state) => {
+      const pending = instance.fetch(new Request("https://push.test/v3/notifications", notification));
+      try {
+        await Promise.race([entered.promise, pending.then(() => { throw new Error("Dispatch bypassed APNs gate"); })]);
+        const registered = await instance.fetch(new Request("https://push.test/v3/installations", registration.request));
+        expect(registered.status).toBe(201);
+        release.resolve();
+        if (!tokenChanged) {
+          expect(await (await pending).json()).toEqual({ status: "invalid_token", reason: "Unregistered" });
+          expect(state.storage.sql.exec("SELECT enabled, assertion_counter FROM installations WHERE installation_id = ?", testGrant.installationId).one())
+            .toMatchObject({ enabled: 0, assertion_counter: 3 });
+          expect(state.storage.sql.exec("SELECT enabled FROM grants WHERE grant_id = ?", testGrant.grantId).one())
+            .toMatchObject({ enabled: 0 });
+          expect(providerFetch).toHaveBeenCalledTimes(1);
+          return;
+        }
+        // invalid_token would also disable the unchanged grant in the Gateway.
+        // An explicit non-delivery for the retired token instead permits the
+        // existing bounded retry with the same request ID and one quota charge.
+        expect(await (await pending).json()).toEqual({
+          status: "retryable", reason: "apns_token_changed", retryAfterSeconds: 30,
+        });
+        expect(state.storage.sql.exec("SELECT enabled, apns_token FROM installations WHERE installation_id = ?", testGrant.installationId).one())
+          .toMatchObject({ enabled: 1, apns_token: replacementToken });
+        expect(state.storage.sql.exec("SELECT enabled, hourly_count FROM grants WHERE grant_id = ?", testGrant.grantId).one())
+          .toMatchObject({ enabled: 1, hourly_count: 1 });
+        const retried = await instance.fetch(new Request("https://push.test/v3/notifications", notification));
+        expect(await retried.json()).toMatchObject({ status: "accepted_by_apns" });
+        const replayed = await instance.fetch(new Request("https://push.test/v3/notifications", notification));
+        expect(await replayed.json()).toMatchObject({ status: "accepted_by_apns" });
+        expect(providerFetch.mock.calls.map(([url]) => url)).toEqual([
+          `https://api.sandbox.push.apple.com/3/device/${testGrant.deviceToken}`,
+          `https://api.sandbox.push.apple.com/3/device/${replacementToken}`,
+        ]);
+        expect(state.storage.sql.exec("SELECT hourly_count FROM grants WHERE grant_id = ?", testGrant.grantId).one())
+          .toMatchObject({ hourly_count: 1 });
+      } finally {
+        release.resolve();
+        await pending;
+      }
+    });
+  });
+
+  test("rejects an assertion whose installation was disabled while proof verification was in flight", async () => {
+    const registration = await assertionRegistration();
+    await seedGrantForAssertion(registration);
+    const notification = await signedNotification();
+    const entered = deferred();
+    const release = deferred();
+    const verify = crypto.subtle.verify.bind(crypto.subtle);
+    vi.spyOn(crypto.subtle, "verify").mockImplementation(async (algorithm, key, signature, data) => {
+      const result = await verify(algorithm, key, signature, data);
+      entered.resolve();
+      await release.promise;
+      return result;
+    });
+    const providerFetch = vi.fn(async () => new Response('{"reason":"Unregistered"}', { status: 410 }));
+    vi.stubGlobal("fetch", providerFetch);
+    await runInDurableObject(stub(), async (instance: PushRegistry, state) => {
+      const pending = instance.fetch(new Request("https://push.test/v3/installations", registration.request));
+      try {
+        await Promise.race([entered.promise, pending.then(() => { throw new Error("Registration bypassed proof gate"); })]);
+        const rejectedToken = await instance.fetch(new Request("https://push.test/v3/notifications", notification));
+        expect(await rejectedToken.json()).toEqual({ status: "invalid_token", reason: "Unregistered" });
+        release.resolve();
+        const response = await pending;
+        expect(response.status).toBe(409);
+        expect(await response.json()).toEqual({ error: "registration_conflict" });
+        expect(providerFetch).toHaveBeenCalledTimes(1);
+        expect(state.storage.sql.exec("SELECT enabled, assertion_counter FROM installations WHERE installation_id = ?", testGrant.installationId).one())
+          .toMatchObject({ enabled: 0, assertion_counter: 1 });
+        expect(state.storage.sql.exec("SELECT grant_id, enabled FROM grants WHERE installation_id = ?", testGrant.installationId).toArray())
+          .toEqual([expect.objectContaining({ grant_id: testGrant.grantId, enabled: 0 })]);
+      } finally {
+        release.resolve();
+        await pending;
+      }
+    });
+  });
+
   test("re-admission rotates a disabled grant so an old revoke cannot disable new authority", async () => {
-    await initializeAndSeed();
-    const keys = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
-    const publicKeySpki = base64Url(new Uint8Array(await crypto.subtle.exportKey("spki", keys.publicKey)));
+    const registration = await assertionRegistration();
+    await seedGrantForAssertion(registration);
     await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
-      state.storage.sql.exec(
-        "UPDATE installations SET public_key_spki = ?, assertion_counter = 1 WHERE installation_id = ?",
-        publicKeySpki,
-        testGrant.installationId,
-      );
       state.storage.sql.exec("UPDATE grants SET enabled = 0 WHERE grant_id = ?", testGrant.grantId);
     });
-    const challengeResponse = await SELF.fetch("https://push.test/v3/attestation/challenge", { method: "POST" });
-    const challenge = await challengeResponse.json<{ challengeId: string; challenge: string }>();
-    const fields = {
-      version: 1 as const,
-      challengeId: challenge.challengeId,
-      challenge: challenge.challenge,
-      keyId: testGrant.keyId,
-      apnsToken: testGrant.deviceToken,
-      route: "beta" as const,
-      bindingHash: testGrant.bindingHash,
-    };
-    const clientDataHash = await sha256(canonicalRegistration(fields));
-    const authenticatorData = new Uint8Array(37);
-    authenticatorData.set(await sha256(utf8(`${env.APPLE_TEAM_ID}.com.tron.mobile.beta`)));
-    new DataView(authenticatorData.buffer).setUint32(33, 2, false);
-    const rawSignature = new Uint8Array(await crypto.subtle.sign(
-      { name: "ECDSA", hash: "SHA-256" },
-      keys.privateKey,
-      ownedBuffer(concatBytes(authenticatorData, clientDataHash)),
-    ));
-    const assertionObject = base64Url(encode({ authenticatorData, signature: rawEcdsaToDer(rawSignature) }));
-    const response = await SELF.fetch("https://push.test/v3/installations", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...fields, proof: "assertion", assertionObject }),
-    });
+    const response = await SELF.fetch("https://push.test/v3/installations", registration.request);
     expect(response.status).toBe(201);
     const replacement = await response.json<{ grantId: string; grantSecret: string }>();
     expect(replacement.grantId).not.toBe(testGrant.grantId);

@@ -23,6 +23,19 @@ struct MacCommandModeServerStarterTests {
         #expect(setup.readRecordedAppVersion() == current)
     }
 
+    @Test("async helper validation failure stops command-mode admission")
+    func helperFailureStopsAdmission() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let current = MacAppVersionIdentity(canonicalVersion: "fixture", buildNumber: "1")
+        let mock = MockLaunchAgentManager()
+        var setup = MacAppStartupMaintenanceTests.makeSetup(tmp: tmp, currentVersion: current, launchAgentManager: mock)
+        setup.validateBundledHelper = { "signature unavailable" }
+        #expect(await MacCommandModeServerStarter.start(setup: setup) == .invalidBundledHelper("signature unavailable"))
+        #expect(mock.calls.isEmpty)
+        #expect(setup.readRecordedAppVersion() == nil)
+    }
+
     @Test("unhealthy command-mode start does not record finalized version")
     func unhealthyStartDoesNotRecordFinalizedVersion() async throws {
         let tmp = TestTempDir.make()

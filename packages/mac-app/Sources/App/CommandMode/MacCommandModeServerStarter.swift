@@ -14,7 +14,7 @@ enum MacCommandModeServerStarter {
         if let problem = setup.validateApplicationLocation() {
             return .invalidApplicationLocation(problem)
         }
-        if let problem = setup.validateBundledHelper() {
+        if let problem = await setup.validateBundledHelper() {
             return .invalidBundledHelper(problem)
         }
         if let problem = setup.validateGatewayPayload() {

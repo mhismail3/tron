@@ -59,8 +59,10 @@ or:
 
 All base64 values are unpadded base64url. APNs tokens are lowercase,
 even-length hex derived from opaque `Data`; no fixed token length is assumed.
-Assertions must carry a strictly increasing authenticator counter. A successful
-response returns an opaque `installationId`, `grantId`, and random
+Assertions must carry a strictly increasing authenticator counter and still own
+an enabled installation when registration commits. Proof verification cannot
+revive an installation disabled concurrently by APNs or replacement attestation.
+A successful response returns an opaque `installationId`, `grantId`, and random
 `grantSecret`. These are capabilities and must not enter logs or session JSONL.
 
 Attestation verification pins Apple's App Attestation Root CA, verifies the
@@ -132,10 +134,11 @@ A request-ID reuse with a different grant or body fails permanently.
 Each grant admits at most 30 new requests per hour and 200 per UTC day; each
 installation admits at most 50 per hour and 300 per day across its grants. One
 installation may own at most eight grants, and global installation/grant tables
-are transactionally bounded. Grant authority and quota counters are re-read inside
-request admission, after asynchronous signature verification, so overlapping
-requests cannot spend the same final quota slot or admit a grant revoked during
-authentication. Retries of an admitted request do not consume another quota unit.
+are transactionally bounded. Grant authority, the current installation token, and
+quota counters are read together inside request admission, after asynchronous
+signature verification, so overlapping requests cannot use a retired token, spend
+the same final quota slot, or admit a grant revoked during authentication. Retries
+of an admitted request do not consume another quota unit.
 The cached APNs provider token is keyed by a cryptographic
 fingerprint of the team ID, key ID, and complete private-key contents. APNs
 `InvalidProviderToken` and `ExpiredProviderToken` responses clear that cache and
@@ -146,7 +149,12 @@ responses, or exception text. The closed APNs request
 retains a 15-second abort bound and the platform-default redirect mode; forcing
 `redirect: "error"` makes deployed Workers reject APNs egress before a provider
 response. APNs invalid-token responses disable the installation and all of its
-grants.
+grants only while the rejected token remains current. If an enabled registration
+has replaced it, that explicit non-delivery instead records `retryable` with
+`apns_token_changed`; the Gateway keeps the grant and can retry the same request
+ID under its existing bounded schedule. Outcome persistence and conditional
+invalidation share one transaction. The Worker regressions exercise rotation at
+both admission and provider completion, including replay without double quota.
 
 `accepted_by_apns` means only that APNs accepted the provider request. It is not
 proof of presentation or human receipt.

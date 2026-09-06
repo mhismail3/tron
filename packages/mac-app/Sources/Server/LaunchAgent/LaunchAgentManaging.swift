@@ -51,24 +51,19 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
     }
 }
 
-/// Pure registration decision. The plan is computed from one launchd status,
-/// one runtime metadata snapshot, and the current wrapper authority; execution
-/// never re-derives ownership between operations.
+/// Registration decision from one status/runtime snapshot, application identity,
+/// helper presence and wrapper authority. Only real operations enter the list;
+/// execution never re-derives policy between them.
 enum LaunchAgentRegistrationPlan: Equatable, Sendable {
-    enum Step: Equatable, Sendable { case bootout, unregister, register, refresh }
+    enum Step: Equatable, Sendable { case bootout, unregister, register }
     case keep
     case refuse(message: String)
-    case takeover(steps: [Step])
-    case bootout(steps: [Step])
-    case unregister(steps: [Step])
-    case register(steps: [Step])
-    case refresh(steps: [Step])
+    case change(steps: [Step])
 
     var steps: [Step] {
         switch self {
         case .keep, .refuse: return []
-        case .takeover(let steps), .bootout(let steps), .unregister(let steps),
-             .register(let steps), .refresh(let steps): return steps
+        case .change(let steps): return steps
         }
     }
 }

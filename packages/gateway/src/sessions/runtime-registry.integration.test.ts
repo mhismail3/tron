@@ -7,11 +7,16 @@ import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
+import { admitsAutomationAction } from "../automations/automation-contract.js";
+import { GatewayAutomationExecutor } from "../automations/automation-executor.js";
+import type { AutomationExecutionHandle } from "../automations/automation-scheduler.js";
+import type { AutomationRecord, AutomationRun } from "../automations/types.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { ExtensionRunActivity, ExtensionToolOrigin, SessionProcessActivity, SessionSummaryUpdate } from "../protocol/types.js";
 import { GatewayWorkRegistry } from "./gateway-work-registry.js";
 import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 import { RunMarkerCompletionConflictError } from "./run-markers.js";
 import { toolSegmentId } from "./projection.js";
@@ -91,6 +96,47 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  });
+
+  it("pages canonical extension receipts through the live session history owner", async () => {
+    const fixture = await coldFixture("extension-history-pages");
+    try {
+      const sessionId = fixture.manager.getSessionId();
+      const receipt: ExtensionActivityReceipt = {
+        version: 1, activityId: "activity", sessionId, toolCallId: "tool", source: "extension", state: "completed",
+        startedAt: "2026-01-01T00:00:00.000Z", terminalAt: "2026-01-01T00:00:01.000Z", observedAt: "2026-01-01T00:00:01.000Z",
+        summary: { children: Array.from({ length: 64 }, (_, index) => ({
+          id: String(index).padEnd(256, "i"), label: "λ".repeat(128),
+          producerId: "p".repeat(256), sessionOwnerId: "s".repeat(256), childSessionRef: "r".repeat(256),
+          state: "completed", attention: "none",
+        })) },
+      };
+      for (let index = 0; index < 5; index += 1) {
+        fixture.manager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, { ...receipt, activityId: `activity-${index}` });
+      }
+      // All fixture writes precede acquisition by the sole live runtime.
+      const slot = await fixture.registry.acquire(sessionId);
+      const ids: string[] = [];
+      let cursor: string | undefined;
+      for (let pageIndex = 0; pageIndex < 5; pageIndex += 1) {
+        const page = slot.extensionActivityHistory(cursor, 50);
+        expect(page.omissions).toBeUndefined();
+        expect(page.activities.length).toBeGreaterThan(0);
+        expect(Buffer.byteLength(JSON.stringify(page.activities))).toBeLessThanOrEqual(MAX_EXTENSION_HISTORY_BYTES);
+        for (const row of page.activities) {
+          ids.push(row.activityId!);
+          expect(slot.extensionActivityDetail(row.activityId!, page.historyRevision)).toEqual(row);
+        }
+        cursor = page.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeUndefined();
+      expect(ids).toEqual(["activity-4", "activity-3", "activity-2", "activity-1", "activity-0"]);
+    } finally {
+      await fixture.registry.dispose();
+      registries.splice(registries.indexOf(fixture.registry), 1);
+      await rm(fixture.root, { recursive: true, force: true });
+    }
   });
 
   it("orders startup phases and acquires one structural evidence cut", async () => {
@@ -7705,6 +7751,63 @@ export default function (pi) {
     await waitUntil(() => slot.catalogPhase === "idle");
     await drain;
     expect(drainSettled).toBe(true);
+  });
+
+  it("rejects scheduled plain-text extension commands before effects or retained operation ownership", async () => {
+    const fixture = await coldFixture("scheduled-literal-command");
+    const { registry, root, cwd, agentDir } = fixture;
+    let handle: AutomationExecutionHandle | undefined;
+    try {
+      const extensionDir = join(cwd, ".pi", "extensions");
+      const sentinel = join(root, "command-effect.txt");
+      await mkdir(extensionDir, { recursive: true });
+      await writeFile(join(extensionDir, "owned-command.ts"), `import { writeFile } from "node:fs/promises";
+        export default function (pi) {
+          pi.registerCommand("owned-command", {
+            handler: async () => { await writeFile(${JSON.stringify(sentinel)}, "executed"); },
+          });
+        }\n`);
+      await new TrustService(agentDir).set(cwd, true);
+      const slot = await registry.acquire(fixture.manager.getSessionId());
+      expect(slot.commands()).toContainEqual(expect.objectContaining({ name: "owned-command", source: "extension" }));
+      const action = { kind: "sessionPrompt" as const, text: "/owned-command argument" };
+      expect(admitsAutomationAction(action)).toBe(true);
+      const record: AutomationRecord = {
+        schemaVersion: 2, id: "10000000-0000-4000-8000-000000000001", revision: 1, stateRevision: 1,
+        name: "Scheduled prompt", activation: "enabled", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+        provenance: { kind: "local" }, target: { kind: "existingSession", sessionId: slot.id },
+        trigger: { kind: "once", at: "2026-01-01T01:00:00.000Z" }, misfirePolicy: "latest", overlapPolicy: "skip",
+        executionDeadlineSeconds: 3_600, action, nextOccurrenceAt: "2026-01-01T01:00:00.000Z",
+        consecutiveFailureCount: 0, history: [],
+      };
+      const run: AutomationRun = {
+        runId: "10000000-0000-4000-8000-000000000002", occurrenceId: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        automationRevision: 1, scheduledFor: "2026-01-01T01:00:00.000Z", triggerSnapshot: record.trigger,
+        actionSnapshot: action, targetSnapshot: record.target, executionSessionId: slot.id, state: "admitting",
+        createdAt: "2026-01-01T01:00:00.000Z", preAdmissionAttemptCount: 0,
+        operationId: "automation:10000000-0000-4000-8000-000000000002",
+      };
+      const work = registry.administrativeWorkRegistry;
+      const executor = new GatewayAutomationExecutor(registry, work, undefined, undefined);
+      await expect.soft(executor.start(record, run).then((admitted) => { handle = admitted; return admitted; }))
+        .rejects.toMatchObject({ retryable: false, reason: "agent-admission-rejected" });
+      expect.soft(existsSync(sentinel)).toBe(false);
+      expect.soft(work.size).toBe(0);
+      expect.soft(slot.isEvictionProtected).toBe(false);
+      expect((await registry.automationRecoveryEvidence(slot.id, run.operationId!)).marker).toBeUndefined();
+
+      // The same installed command remains available to an explicit user.
+      await slot.prompt(action.text);
+      expect(await readFile(sentinel, "utf8")).toBe("executed");
+      expect(work.size).toBe(0);
+    } finally {
+      // A broken admission still belongs only to this fixture: release its
+      // returned handle before disposing the synthetic runtime and files.
+      await handle?.acknowledgeTerminal?.();
+      await registry.dispose();
+      registries.splice(registries.indexOf(registry), 1);
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("persists extension notifications as centered non-context rows with exact command provenance", async () => {

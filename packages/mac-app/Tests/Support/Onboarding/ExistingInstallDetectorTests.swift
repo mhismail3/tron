@@ -5,12 +5,12 @@ import Testing
 @Suite("ExistingInstallDetector")
 struct ExistingInstallDetectorTests {
     @Test("clean app bundle with unregistered service is not installed")
-    func cleanUnregisteredService() throws {
+    func cleanUnregisteredService() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let paths = try makeHelperFixture(in: tmp)
 
-        let result = ExistingInstallDetector.detect(
+        let result = await ExistingInstallDetector.detect(
             helperBundle: paths.helperBundle,
             helperBinary: paths.helperBinary,
             plistPath: paths.plistPath,
@@ -23,12 +23,12 @@ struct ExistingInstallDetectorTests {
     }
 
     @Test("enabled service reports registered version")
-    func enabledServiceIsRegistered() throws {
+    func enabledServiceIsRegistered() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let paths = try makeHelperFixture(in: tmp)
 
-        let result = ExistingInstallDetector.detect(
+        let result = await ExistingInstallDetector.detect(
             helperBundle: paths.helperBundle,
             helperBinary: paths.helperBinary,
             plistPath: paths.plistPath,
@@ -41,12 +41,12 @@ struct ExistingInstallDetectorTests {
     }
 
     @Test("incomplete Gateway payload is surfaced before registration state")
-    func incompleteGatewayPayloadIsPartial() throws {
+    func incompleteGatewayPayloadIsPartial() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let paths = try makeHelperFixture(in: tmp)
 
-        let result = ExistingInstallDetector.detect(
+        let result = await ExistingInstallDetector.detect(
             helperBundle: paths.helperBundle,
             helperBinary: paths.helperBinary,
             plistPath: paths.plistPath,
@@ -64,12 +64,12 @@ struct ExistingInstallDetectorTests {
     }
 
     @Test("requiresApproval maps to install blocking state")
-    func requiresApproval() throws {
+    func requiresApproval() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let paths = try makeHelperFixture(in: tmp)
 
-        let result = ExistingInstallDetector.detect(
+        let result = await ExistingInstallDetector.detect(
             helperBundle: paths.helperBundle,
             helperBinary: paths.helperBinary,
             plistPath: paths.plistPath,
@@ -82,12 +82,12 @@ struct ExistingInstallDetectorTests {
     }
 
     @Test("missing bundled plist is partial")
-    func missingPlistIsPartial() throws {
+    func missingPlistIsPartial() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let paths = try makeHelperFixture(in: tmp, includePlist: false)
 
-        let result = ExistingInstallDetector.detect(
+        let result = await ExistingInstallDetector.detect(
             helperBundle: paths.helperBundle,
             helperBinary: paths.helperBinary,
             plistPath: paths.plistPath,
@@ -104,15 +104,15 @@ struct ExistingInstallDetectorTests {
     }
 
     @Test("bundled helper validation owns file and signature failures")
-    func bundledHelperValidationOwnsFailures() throws {
+    func bundledHelperValidationOwnsFailures() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let helper = tmp.appendingPathComponent("Tron Agent.app", isDirectory: true)
         let binary = helper.appendingPathComponent("Contents/MacOS/tron", isDirectory: false)
         let plist = tmp.appendingPathComponent("com.tron.server.plist", isDirectory: false)
 
-        func validate(signatureProblem: String? = nil) -> String? {
-            ExistingInstallDetector.validateBundledHelper(
+        func validate(signatureProblem: String? = nil) async -> String? {
+            await ExistingInstallDetector.validateBundledHelper(
                 helperBundle: helper,
                 helperBinary: binary,
                 plistPath: plist,
@@ -120,30 +120,30 @@ struct ExistingInstallDetectorTests {
             )
         }
 
-        #expect(validate() == "Tron Agent.app is missing from the application bundle.")
+        #expect(await validate() == "Tron Agent.app is missing from the application bundle.")
 
         try FileManager.default.createDirectory(at: helper, withIntermediateDirectories: true)
-        #expect(validate() == "Tron Agent.app is missing its tron executable.")
+        #expect(await validate() == "Tron Agent.app is missing its tron executable.")
 
         try FileManager.default.createDirectory(at: binary.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data().write(to: binary)
-        #expect(validate() == "The bundled LaunchAgent plist is missing.")
+        #expect(await validate() == "The bundled LaunchAgent plist is missing.")
 
         try Data("<plist/>".utf8).write(to: plist)
-        #expect(validate() == nil)
+        #expect(await validate() == nil)
         #expect(
-            validate(signatureProblem: "Tron Agent.app signature is invalid")
+            await validate(signatureProblem: "Tron Agent.app signature is invalid")
                 == "Tron Agent.app signature is invalid"
         )
     }
 
     @Test("invalid helper signature is partial")
-    func invalidSignatureIsPartial() throws {
+    func invalidSignatureIsPartial() async throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let paths = try makeHelperFixture(in: tmp)
 
-        let result = ExistingInstallDetector.detect(
+        let result = await ExistingInstallDetector.detect(
             helperBundle: paths.helperBundle,
             helperBinary: paths.helperBinary,
             plistPath: paths.plistPath,
@@ -286,6 +286,18 @@ struct ExistingInstallDetectorTests {
         try modifiedData.write(to: plist)
 
         #expect(!ExistingInstallDetector.launchAgentPlistIsCurrent(plistPath: plist))
+    }
+
+    @Test("incomplete or ambiguous signature identity cannot authorize registration", arguments: [
+        "Identifier=com.tron.server",
+        "Identifier=com.tron.server\nTeamIdentifier=",
+        "Identifier=com.tron.server\nTeamIdentifier=TEAM123456\nIdentifier=other.bundle",
+        "Identifier=com.tron.server\nTeamIdentifier=TEAM123456\nTeamIdentifier=OTHER12345"
+    ])
+    func incompleteIdentityRejected(_ identity: String) {
+        #expect(ExistingInstallDetector.codeSignatureIdentityProblem(
+            identity, expectedBundleIdentifier: "com.tron.server", helperName: "Fixture Agent.app"
+        ) != nil)
     }
 
     @Test("ad-hoc helper signature is rejected before SMAppService registration")
