@@ -10,8 +10,6 @@ import {
   parseSessionEntries,
   SessionManager,
   SettingsManager,
-  type FileEntry,
-  type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { installKimiK3Policy } from "../providers/kimi-k3-policy.js";
@@ -72,6 +70,7 @@ import {
   type CatalogMetadataAccumulator,
   applyCatalogMetadataEntry,
 } from "./catalog-metadata-index.js";
+import { branchFromParsedSession, type ParsedSessionBranch } from "./session-branch.js";
 
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 /** A read-only child observer may page only canonical sessions that fit this
@@ -128,34 +127,6 @@ function orderDashboardSessions<T extends DashboardOrderableSession>(sessions: r
   });
 }
 
-function branchFromParsedSession(entries: FileEntry[]): {
-  sessionId: string;
-  parentSession?: string;
-  branch: SessionEntry[];
-  leafEntryId?: string;
-} | undefined {
-  const header = entries[0];
-  if (!header || header.type !== "session" || !header.id) return undefined;
-  const sessionEntries = entries.slice(1).filter((entry): entry is SessionEntry => entry.type !== "session");
-  const byID = new Map(sessionEntries.map((entry) => [entry.id, entry]));
-  const leaf = sessionEntries[sessionEntries.length - 1];
-  const reversed: SessionEntry[] = [];
-  const seen = new Set<string>();
-  let cursor = leaf;
-  while (cursor) {
-    if (!seen.add(cursor.id)) return undefined;
-    reversed.push(cursor);
-    cursor = cursor.parentId === null ? undefined : byID.get(cursor.parentId);
-    if (reversed[reversed.length - 1]!.parentId !== null && cursor === undefined) return undefined;
-  }
-  return {
-    sessionId: header.id,
-    ...(header.parentSession ? { parentSession: header.parentSession } : {}),
-    branch: reversed.reverse(),
-    ...(leaf ? { leafEntryId: leaf.id } : {}),
-  };
-}
-
 async function readOpenedSessionHeader(
   handle: Awaited<ReturnType<typeof open>>,
   byteCount: number,
@@ -181,7 +152,7 @@ async function readOpenedSessionHeader(
 async function readOpenedSession(
   handle: Awaited<ReturnType<typeof open>>,
   byteCount: number,
-): Promise<ReturnType<typeof branchFromParsedSession>> {
+): Promise<ParsedSessionBranch | undefined> {
   if (!Number.isSafeInteger(byteCount) || byteCount < 0) return undefined;
   if (byteCount > MAX_READ_ONLY_SUBAGENT_SESSION_BYTES) {
     throw new GatewayError(

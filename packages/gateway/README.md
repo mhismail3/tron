@@ -1445,9 +1445,10 @@ header because exact tool/run ownership plus the separately validated session-ow
 authoritative. Session names and `session_info` never participate in admission. Replacement
 or ambiguity closes/fails the lease. Transcript projection
 parses the already-open, identity-pinned descriptor through a pure read-only branch adapter
-under an explicit 64 MiB per-session parse budget, so a replace/read/swap-back race cannot
-redirect parsing to another inode and a legitimate but unbounded child file cannot exhaust
-Gateway memory.
+under an explicit 64 MiB per-session parse budget. The adapter follows the selected leaf to
+its root, rejects missing parents and ancestry cycles, and preserves the header identity and
+selected branch order; a replace/read/swap-back race cannot redirect parsing to another inode
+and a legitimate but unbounded child file cannot exhaust Gateway memory.
 Read-only open/page/refresh never call `RuntimeRegistry.acquire` for the child and the
 lease keeps no second transcript mirror. Only the separately advertised exact-lease abort
 may reacquire the already-owned parent runtime, and only to invoke its existing settled
