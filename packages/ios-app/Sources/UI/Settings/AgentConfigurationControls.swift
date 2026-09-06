@@ -44,6 +44,7 @@ struct ContextWindowSelectionRow: View {
     var accent: Color = .tronTeal
     @State private var customText = ""
     @State private var editingCustom = false
+    @Environment(\.controlSize) private var controlSize
 
     private var displayValue: String {
         if let effectiveValue {
@@ -74,7 +75,9 @@ struct ContextWindowSelectionRow: View {
             value: displayValue,
             accent: accent
         ) {
-            TronInlineMenu("Change", accent: accent) {
+            TronInlineMenu(controlSize == .small
+                ? (effectiveValue ?? selection ?? inheritedValue ?? limits.default).formatted()
+                : "Change", accent: accent) {
                 Button(resetLabel) { selection = nil }
                 Button("Maximum (\(limits.maximum.formatted()))") { selection = limits.maximum }
                 Button("Custom token limit…") {
@@ -82,6 +85,8 @@ struct ContextWindowSelectionRow: View {
                     editingCustom = true
                 }
             }
+            .accessibilityLabel("Context Window")
+            .accessibilityValue(displayValue)
         }
         .alert("Context Window", isPresented: $editingCustom) {
             TextField("Whole number of tokens", text: $customText)
@@ -102,19 +107,22 @@ struct TronThinkingSelectionRow: View {
     @Binding var selection: String
     let levels: [String]
     var accent: Color = .tronPurple
+    @Environment(\.controlSize) private var controlSize
 
     var body: some View {
         AgentConfigurationValueRow(
             icon: "brain",
             title: "Thinking",
-            value: selection.capitalized,
+            value: ThinkingLevelPresentation.title(selection),
             accent: accent
         ) {
-            TronInlineMenu("Change", accent: accent) {
+            TronInlineMenu(controlSize == .small ? ThinkingLevelPresentation.title(selection) : "Change", accent: accent) {
                 ForEach(levels, id: \.self) { level in
-                    Button(level.capitalized) { selection = level }
+                    Button(ThinkingLevelPresentation.title(level)) { selection = level }
                 }
             }
+            .accessibilityLabel("Thinking")
+            .accessibilityValue(ThinkingLevelPresentation.title(selection))
         }
     }
 }
@@ -129,25 +137,10 @@ private struct AgentConfigurationValueRow<Control: View>: View {
     let accent: Color
     @ViewBuilder let control: () -> Control
     @Environment(\.controlSize) private var controlSize
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
 
     var body: some View {
         if controlSize == .small {
-            let layout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
-            layout {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment, weight: .semibold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                    Text(value)
-                        .font(TronSettingsSecondaryRole.dynamicValue.font(sizeAdjustment: secondaryTextSizeAdjustment))
-                        .foregroundStyle(Color.tronTextSecondary)
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
+            TronSettingsRow(icon: icon, title: title, accent: accent) {
                 control()
             }
         } else {

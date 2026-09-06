@@ -35,7 +35,8 @@ The orb appears when there is:
 
 Tapping the orb opens **Subagents**, with **Active** and **Recently finished** sections.
 Manage Session owns **Subagent History**, which adds canonical **Earlier** rows. Both sheets
-open at the large detent. Rows omit per-row animated orbs and redundant lifecycle pills,
+start at medium and allow expansion to large. Subagent History uses blue navigation
+chrome to match its Manage Session row. Rows omit per-row animated orbs and redundant lifecycle pills,
 place standardized compact mode/tool/turn pills beneath the title, and right-align plain
 duration text. Container color alone carries lifecycle meaning: amber for in-progress, green
 for successful completion, and red for failure or interruption. The bounded active sheet
@@ -45,9 +46,9 @@ subagent activity affordance. Its matched-geometry glass shell is the only geome
 from the input bar; the content fades over a synchronously drawn Canvas so live transcript
 updates cannot queue a stale orb frame or introduce a second move/scale path. Tool/path,
 counts, and bounded output remain distinct metadata when supplied. A row with a validated child session
-presents a standardized large-detent bottom sheet containing the canonical-live, read-only
-transcript viewer; it never pushes a second navigation route. Short or empty transcript
-content aligns to the top while overflowing newest pages retain tail-opening intent. Rows
+presents a standardized medium-first bottom sheet containing the canonical-live, read-only
+transcript viewer; it never pushes a second navigation route. Short, empty, and overflowing
+newest pages retain tail-opening intent. Rows
 without a validated child session remain informative and expose no mutation controls.
 
 Accessibility uses “Subagents” and “Subagent History.” Reduce Motion uses the deterministic
@@ -172,7 +173,7 @@ iOS checks must cover:
 - mixed legacy command/subagent input presents only subagents;
 - only synchronous/asynchronous subagent rows mount;
 - active extension lifecycle with omitted `remainingMs` admits while `current + 0` fails;
-- subagent-only composer gating, large-detent bottom sheets, compact Liquid Glass active
+- subagent-only composer gating, medium-first expandable sheets, compact Liquid Glass active
   cards, scroll-optimized history rows, duration-scaled orb state, history filter, and
   accessibility copy; and
 - read-only append merge, top alignment for undersized content, tail-opening intent, and

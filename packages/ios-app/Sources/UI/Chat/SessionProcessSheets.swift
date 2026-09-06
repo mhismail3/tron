@@ -97,7 +97,7 @@ struct ProcessHistorySheet: View {
     @State private var store: SessionProcessHistoryStore?
     @State private var generation = 0
     @State private var selectedProcess: SessionProcessActivity?
-    @State private var detent: PresentationDetent = .large
+    @State private var detent: PresentationDetent = .medium
 
     var body: some View {
         NavigationStack {
@@ -105,8 +105,9 @@ struct ProcessHistorySheet: View {
                 if let store { history(store) }
                 else { TronLoadingState(label: "Preparing subagent history…") }
             }
-            .tronNavigationTitle("Subagent History")
+            .tronNavigationTitle("Subagent History", accent: .tronBlue)
             .toolbar { doneToolbar }
+            .tint(Color.tronBlue)
         }
         .tronManagedSheet(
             item: $selectedProcess,
@@ -141,7 +142,7 @@ struct ProcessHistorySheet: View {
             Button { dismiss() } label: {
                 Image(systemName: "checkmark")
                     .font(TronTypography.buttonSM)
-                    .foregroundStyle(Color.tronEmerald)
+                    .foregroundStyle(Color.tronBlue)
             }
             .accessibilityLabel("Done")
         }

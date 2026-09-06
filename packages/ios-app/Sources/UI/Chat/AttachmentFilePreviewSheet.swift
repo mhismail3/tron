@@ -195,7 +195,6 @@ struct AttachmentFilePreviewSheet: View {
     let source: AttachmentFilePreviewSource
 
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
     @State private var phase: Phase = .loading
 
     private enum Phase {
@@ -205,29 +204,7 @@ struct AttachmentFilePreviewSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            content
-                .background(Color.tronBackground)
-                .navigationTitle("")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .principal) {
-                        TronSheetTitle(title: name, accent: .tronBlue)
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button { dismiss() } label: {
-                            Image(systemName: "checkmark")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronBlue)
-                        }
-                        .accessibilityLabel("Done")
-                    }
-                }
-        }
-        .tronTopBlur(.sheet)
-        .presentationDetents([.large])
-        .presentationDragIndicator(.hidden)
-        .tronPresentation()
+        TronDocumentSheet(title: name) { content }
         .task(id: source.loadID) { await load() }
         .onDisappear { cancelRemoteLoad() }
     }

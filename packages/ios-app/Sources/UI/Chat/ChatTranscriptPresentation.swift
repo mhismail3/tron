@@ -1452,7 +1452,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
             return ChatNotificationPresentation(
                 id: "notification-\(item.id)", semanticID: item.id,
                 icon: "brain", title: "Thinking changed",
-                detail: item.level?.capitalized ?? "Changed",
+                detail: item.level.map(ThinkingLevelPresentation.title) ?? "Changed",
                 body: nil, tone: .accent, material: .flat
             )
         case .label:

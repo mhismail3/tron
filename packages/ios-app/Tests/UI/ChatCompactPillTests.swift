@@ -170,27 +170,6 @@ struct ChatCompactPillTests {
         )) == .loaded(branch: "Detached · bbbbbbbb", dirty: false, changeCount: 0))
     }
 
-    @Test("Agent Context summarizes capabilities without retaining inventories")
-    func agentContextSummary() {
-        let summary = AgentContextSummary(context: .object([
-            "systemPrompt": .string(String(repeating: "a", count: 1_000)),
-            "activeTools": .array([.string("read"), .string("edit")]),
-            "availableTools": .array([.object(["name": .string("read")]), .object(["name": .string("edit")]), .object(["name": .string("bash")])]),
-            "commands": .array([.string("one")]),
-            "stats": .object(["totalMessages": .number(8), "toolCalls": .number(3)]),
-            "contextUsage": .object(["tokens": .number(120), "contextWindow": .number(1_000)]),
-        ]))
-
-        #expect(summary.activeToolCount == 2)
-        #expect(summary.availableToolCount == 3)
-        #expect(summary.commandCount == 1)
-        #expect(summary.messageCount == 8)
-        #expect(summary.toolCallCount == 3)
-        #expect(summary.contextTokens == 120)
-        #expect(summary.contextWindow == 1_000)
-        #expect(summary.instructionPreview.count == AgentContextSummary.maximumInstructionPreviewCharacters + 1)
-    }
-
     @Test("workspace history graph preserves branch and merge lanes")
     func workspaceHistoryGraph() {
         func commit(_ oid: String, parents: [String]) -> SessionWorkspaceCommit {
@@ -236,13 +215,9 @@ struct ChatCompactPillTests {
         ) == "Independent message")
     }
 
-    @Test("Project Resources excludes instruction files owned by Agent Context")
+    @Test("Project Resources excludes instruction files owned by Agent Instructions")
     func projectResourceCategories() {
         #expect(ProjectResourceKind.allCases.map(\.key) == ["extensions", "prompts", "skills", "tools"])
-        let summary = AgentContextSummary(context: .object([
-            "systemPrompt": .string("Project instructions from AGENTS.md"),
-        ]))
-        #expect(summary.instructionPreview == "Project instructions from AGENTS.md")
     }
 
     @Test("Project resource descriptions normalize producer line breaks")

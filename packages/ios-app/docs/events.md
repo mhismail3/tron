@@ -279,7 +279,7 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   bottom distance is bounded for display only: a visible rect beyond the physical content edge is
   not tail settlement. A deliberately detached reader retains the same viewport authority;
 - structure/context/resource invalidations reload an already-presented History,
-  Manage Session, Agent Context, or Project Resources surface from the runtime. Context,
+  Manage Session, Agent Instructions, or Project Resources surface from the runtime. Context,
   tree, and resource reads each carry a subscription-scoped request generation, so an older
   overlapping completion cannot overwrite newer evidence. Manage Session and its Workspace
   sheet read `workspace-inspector.v1` through the open session, so Gateway derives the root

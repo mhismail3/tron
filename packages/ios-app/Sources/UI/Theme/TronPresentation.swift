@@ -1286,6 +1286,8 @@ struct TronSettingsRow<Trailing: View>: View {
     let trailing: Trailing
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
+    @Environment(\.controlSize) private var controlSize
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
         icon: String,
@@ -1312,31 +1314,44 @@ struct TronSettingsRow<Trailing: View>: View {
     }
 
     var body: some View {
+        // A compact action already owns its 44-point hit area. Pad the labels,
+        // not that target, so these rows size like ordinary Session rows.
+        let labelsOwnInsets = controlSize == .small && !dynamicTypeSize.isAccessibilitySize
         HStack(alignment: .center, spacing: TronSpacing.xl) {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(settingsTheme?.accent ?? accent)
                 .frame(width: 22, height: 22, alignment: .center)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(titleFont)
-                    .foregroundStyle(titleColor)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(subtitleRole.font(sizeAdjustment: secondaryTextSizeAdjustment))
-                        .foregroundStyle(subtitleColor)
-                        .lineLimit(subtitleLineLimit)
-                        .truncationMode(.tail)
-                        .fixedSize(horizontal: false, vertical: subtitleLineLimit == nil)
+            // Compact value actions still use standard row insets; at larger
+            // accessibility sizes they sit below the label, not beside a sliver.
+            let stacksAction = controlSize == .small && dynamicTypeSize.isAccessibilitySize
+            let layout = stacksAction
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: TronSpacing.md))
+                : AnyLayout(HStackLayout(alignment: .center, spacing: TronSpacing.xl))
+            layout {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(titleFont)
+                        .foregroundStyle(titleColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(subtitleRole.font(sizeAdjustment: secondaryTextSizeAdjustment))
+                            .foregroundStyle(subtitleColor)
+                            .lineLimit(subtitleLineLimit)
+                            .truncationMode(.tail)
+                            .fixedSize(horizontal: false, vertical: subtitleLineLimit == nil)
+                    }
                 }
+                .padding(.vertical, labelsOwnInsets ? TronSpacing.xl : 0)
+                if !stacksAction { Spacer(minLength: TronSpacing.md) }
+                trailing
             }
-            Spacer(minLength: TronSpacing.md)
-            trailing
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, TronSpacing.xl)
+        .padding(.vertical, labelsOwnInsets ? 0 : TronSpacing.xl)
         .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)

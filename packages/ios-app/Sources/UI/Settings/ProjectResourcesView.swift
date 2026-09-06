@@ -224,19 +224,19 @@ struct ProjectResourcesView: View {
                             systemImage: "arrow.clockwise",
                             isWorking: loading || reloading
                         )
-                        .tronToolbarAction()
+                        .tronToolbarAction(accent: .tronBlue)
                     }
                     .disabled(loading || reloading)
                     .accessibilityValue(loading || reloading ? "In progress" : "")
                 }
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Project Resources")
+                    TronSheetTitle(title: "Project Resources", accent: .tronBlue)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronSettingsAccent()
+                            .foregroundStyle(Color.tronBlue)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -258,7 +258,7 @@ struct ProjectResourcesView: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .tint(Color.tronEmerald)
+        .tint(Color.tronBlue)
     }
 
     private func resourceGroup(_ section: ProjectResourceOverviewSection) -> some View {
@@ -310,17 +310,6 @@ struct ProjectResourcesView: View {
         return .array(values)
     }
 
-    private func resourceTitle(_ value: JSONValue, fallback: String) -> String {
-        if let text = value.stringValue { return text }
-        guard let object = value.objectValue else { return fallback }
-        for key in ["label", "name", "title", "path", "id"] {
-            if let text = object[key]?.stringValue, !text.isEmpty {
-                return key == "path" ? URL(fileURLWithPath: text).lastPathComponent : text
-            }
-        }
-        return fallback
-    }
-
     private func resourceSubtitle(_ value: JSONValue) -> String? {
         guard let object = value.objectValue else { return nil }
         if let description = object["description"]?.stringValue, !description.isEmpty {
@@ -348,8 +337,7 @@ struct ProjectResourcesView: View {
                 values = raw?.arrayValue ?? []
             }
             let rows = values.enumerated().map { index, value in
-                let fallback = "Unnamed \(kind.rawValue.dropLast())"
-                let title = resourceTitle(value, fallback: fallback)
+                let title = ProjectResourceTitlePresentation.title(kind: kind, value: value)
                 let semanticID = value.objectValue?["id"]?.stringValue
                     ?? value.objectValue?["path"]?.stringValue
                     ?? value.objectValue?["name"]?.stringValue
@@ -498,11 +486,12 @@ private struct ProjectResourceDetailSheet: View {
                     Button(action: onDone) {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .tronSettingsAccent()
+                            .foregroundStyle(selection.kind.accent)
                     }
                     .accessibilityLabel("Done")
                 }
             }
+            .tint(selection.kind.accent)
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])

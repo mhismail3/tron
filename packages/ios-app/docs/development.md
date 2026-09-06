@@ -773,26 +773,52 @@ pass; interactive PTY input remains a manual device check. Compare captures to t
 references before declaring parity. A signed install, launch, and screenshot are
 required together because default toolbar Liquid Glass can differ materially
 between the simulator and physical hardware. Sheet checkpoints must fling-scroll
-Agent Context, Project Resources, Session History, Runtime Behavior, Providers,
+Agent Instructions, Project Resources, Session History, Runtime Behavior, Providers,
 and model selection; dense rows must retain static tinted geometry without visible
 material churn. Open a large instructions/JSON document and verify immediate native
 scrolling. Manage Session checkpoints verify two compact emerald summary cards, then the
-unchanged blue Session order (Current Branch, Agent Context, Project Resources, Session
+blue Session order (Current Branch, Agent Instructions, Project Resources, Session
 History, Subagent History) and gray HTML/JSONL Exports. Usage counts and percentage share
 one metadata line above the progress-as-divider; automatic compaction appears only in the
 model card beside Compact Now. The model name matches the remaining-token headline scale;
-provider, Context Window when supported, and Thinking remain clearly labeled. Rename and
+the serif provider line sits closely beneath it and the action reads Switch Model. Context
+Window, Thinking, and Automatic Compaction use the same icon column, indented dividers,
+label scale, and padding as the Session rows. Context Window when supported and Thinking
+show their values in trailing menu capsules. Verify default,
+maximum, and custom token choices plus Thinking changes update as the popup closes, revert
+on failure, and cannot carry into another model/runtime. Extra-high labels read Extra High
+across defaults, session controls, transcript notices, and history while raw values remain
+unchanged. Statistic values match their captions' point size. Current Branch places the
+working-tree status beneath the title and the branch name at the trailing edge. Rename and
 Terminal use a grouped leading icon-only toolbar with accessible labels, not content rows.
 Compact Now must retain idle, running-prompt queue, queued, in-progress, retry, and export
-admission behavior. Slim Change/Compact capsules retain full touch height. Every small
+admission behavior. Slim action/value capsules retain full touch height. Every small
 metadata face is half a point larger only within this sheet. The Session Model picker must
 inherit emerald across title, search, icons, and cards while keeping its ordinary type scale.
 `SessionSummaryLayoutTests` measures the actual native cards/actions, retains light/dark and
 long-name/accessibility captures, and excludes screen safe areas from card-size assertions.
+Compact action rows must match equivalent ordinary Session row heights without adding row
+padding around an already 44-point action target; the regression compares rendered rows
+with and without actions instead of relying only on a loose total-card height bound.
 `ChatCompactPillTests` pins combined usage copy, missing estimates, exact provider/model
 catalog labels, and existing compaction admission; `SessionPresentationStoreTests` protects
-pending model selection and narrow authoritative projection. Project Resources must omit Context Files
-and `AGENTS.md` rows while Agent Context still exposes the assembled instructions.
+pending model selection and narrow authoritative projection. `SessionSettingPresentationTests`
+covers immediate pending choices, reset semantics, exact-request rollback, scope replacement,
+and shared Extra High labels without rewriting authored content. Project Resources must omit Context Files
+and `AGENTS.md` rows. Agent Instructions opens the full document directly with no summary
+or capabilities screen, using the same large-only blue document chrome as workspace file
+previews: custom top blur, icon-only Done, and no opaque bottom bar. Project Resources,
+Session History, and Subagent History titles and toolbar actions must be blue. Resource
+detail titles and Done actions match their category. Verify package/inline extension names
+instead of index filenames, friendly skill/prompt/tool titles, and unchanged raw invocations.
+`ProjectResourceTitlePresentationTests` pins those naming boundaries. `SessionSheetPresentationTests`
+presents actual native sheets, verifies large document detents, the custom blur and hidden
+bottom toolbar, full selectable instructions, and medium-first subagent lists on repeated
+presentations. The populated Agent Instructions sheet is rendered in light and dark mode:
+its text viewport must reach behind the navigation bar and through the bottom safe area,
+while native insets keep the first line visible on opening. Scrolled text must fade beneath
+the custom blur, not stop at a solid horizontal cutoff; counting a blur view alone does not
+verify this boundary. Expanding a sheet must survive data refresh and returning from its child.
 `ChatCompactPillTests` pins the resource categories and instruction-preview ownership.
 Confirmation checkpoints verify grey cancellation text, a short trailing
 toolbar action, and a sentence-length action in the Liquid Glass container below

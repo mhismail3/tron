@@ -23,14 +23,14 @@ final class SessionSummaryLayoutTests: XCTestCase {
         }
     }
 
-    func testModelSummaryWrapsLongNamesAndAccessibilityTextWithoutWidening() async throws {
+    private func modelSummary(name: String) -> some View {
         let selected = ModelSummary(
-            provider: "test-provider", id: "long-model",
-            name: "A Model With A Deliberately Long Display Name",
+            provider: "test-provider", id: "test-model",
+            name: name,
             reasoning: true, input: ["text"], contextWindow: 272_000,
             maxTokens: 8_192, available: true
         )
-        let content = SessionModelSummaryCard(
+        return SessionModelSummaryCard(
             selection: .constant(selected.ref), catalog: [selected], automaticCompactionEnabled: true
         ) {
             ContextWindowSelectionRow(
@@ -39,6 +39,7 @@ final class SessionSummaryLayoutTests: XCTestCase {
                 inheritedValue: 272_000, effectiveValue: 272_000,
                 resetLabel: "Use configured default", source: "model", accent: .tronEmerald
             )
+            TronSettingsDivider(accent: .tronEmerald)
             TronThinkingSelectionRow(selection: .constant("xhigh"), levels: ["off", "high", "xhigh"], accent: .tronEmerald)
         } compactAction: {
             Button {} label: {
@@ -47,6 +48,58 @@ final class SessionSummaryLayoutTests: XCTestCase {
             .buttonStyle(.plain)
         }
         .environment(\.tronSettingsSecondaryTextSizeAdjustment, SessionSummaryTypography.metadataSizeAdjustment)
+    }
+
+    func testModelActionsDoNotAddHeightToStandardRows() async throws {
+        let adjustment = SessionSummaryTypography.metadataSizeAdjustment
+        let thinkingReference = try await render(
+            TronSettingsRow(icon: "brain", title: "Thinking"), width: 404
+        )
+        let thinking = try await render(
+            TronThinkingSelectionRow(selection: .constant("xhigh"), levels: ["off", "xhigh"])
+                .controlSize(.small), width: 404
+        )
+        XCTAssertEqual(thinking.height, thinkingReference.height, accuracy: 0.5)
+
+        let reference = try await render(
+            TronSettingsRow(icon: "rectangle.compress.vertical", title: "Automatic Compaction",
+                            subtitle: "Enabled", subtitleRole: .dynamicValue)
+                .environment(\.tronSettingsSecondaryTextSizeAdjustment, adjustment), width: 404
+        )
+        let compaction = try await render(
+            TronSettingsRow(icon: "rectangle.compress.vertical", title: "Automatic Compaction",
+                            subtitle: "Enabled", subtitleRole: .dynamicValue) {
+                Button {} label: { TronInlineActionLabel("Compact Now", icon: "rectangle.compress.vertical") }
+                    .buttonStyle(.plain)
+            }
+            .controlSize(.small)
+            .environment(\.tronSettingsSecondaryTextSizeAdjustment, adjustment), width: 404
+        )
+        XCTAssertEqual(compaction.height, reference.height, accuracy: 0.5)
+        let regular = try await render(
+            TronSettingsRow(icon: "brain", title: "Thinking") {
+                TronInlineMenu("Change") { Button("Extra High") {} }
+            }.controlSize(.regular), width: 404
+        )
+        // This correction is local to compact targets, not global Settings spacing.
+        XCTAssertEqual(regular.height, 60, accuracy: 0.5)
+    }
+
+    func testModelSummaryDisplaysValueActionsInLightAndDark() async throws {
+        for scheme: ColorScheme in [.light, .dark] {
+            let size = try await render(
+                modelSummary(name: "Example Model").environment(\.colorScheme, scheme),
+                width: 404, name: "model-summary-values-\(scheme)"
+            )
+            XCTAssertEqual(size.width, 404, accuracy: 1)
+            // Compact actions share the standard rows' insets rather than
+            // adding their 44-point targets on top of another 24-point padding.
+            XCTAssertLessThan(size.height, 250)
+        }
+    }
+
+    func testModelSummaryWrapsLongNamesAndAccessibilityTextWithoutWidening() async throws {
+        let content = modelSummary(name: "A Model With A Deliberately Long Display Name")
         let normal = try await render(content, width: 320, name: "model-summary-long-name")
         let accessible = try await render(
             content.environment(\.dynamicTypeSize, .accessibility3),
@@ -56,7 +109,7 @@ final class SessionSummaryLayoutTests: XCTestCase {
         XCTAssertEqual(normal.width, 320, accuracy: 1)
         XCTAssertEqual(accessible.width, 320, accuracy: 1)
         XCTAssertGreaterThan(accessible.height, normal.height)
-        XCTAssertLessThan(normal.height, 340)
+        XCTAssertLessThan(normal.height, 400)
         // Accessibility must stack actions below full-width labels instead of
         // forcing a long model name into the narrow space beside its button.
         XCTAssertLessThan(accessible.height, 900)
@@ -71,7 +124,8 @@ final class SessionSummaryLayoutTests: XCTestCase {
         XCTAssertEqual(SessionSummaryTypography.metadataSizeAdjustment, 0.5)
         XCTAssertEqual(SessionSummaryTypography.detail, TronTypography.sans(size: TronTypography.sizeSecondary + 0.5))
         XCTAssertEqual(SessionSummaryTypography.value, TronTypography.code(size: TronTypography.sizeSecondary + 0.5))
-        XCTAssertEqual(SessionSummaryTypography.metric, TronTypography.code(size: TronTypography.sizeBody2 + 0.5, weight: .semibold))
+        // Values and captions share the same point scale, not necessarily the same family/weight.
+        XCTAssertEqual(SessionSummaryTypography.metric, TronTypography.code(size: TronTypography.sizeSecondary + 0.5, weight: .semibold))
         XCTAssertEqual(SessionSummaryTypography.headline, TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
         XCTAssertEqual(TronSettingsSecondaryRole.informational.font, TronTypography.secondaryDescription)
     }

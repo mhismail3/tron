@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum ManageSessionDestination: String, Identifiable {
-    case agentContext, projectResources, history, processHistory, terminal, workspace
+    case agentInstructions, projectResources, history, processHistory, terminal, workspace
     var id: String { rawValue }
 }
 
@@ -149,41 +149,6 @@ enum SessionWorkspaceRowPresentation: Equatable {
     }
 }
 
-struct AgentContextSummary: Equatable {
-    static let maximumInstructionPreviewCharacters = 900
-
-    let instructions: String
-    let instructionPreview: String
-    let activeToolCount: Int
-    let availableToolCount: Int
-    let commandCount: Int
-    let messageCount: Int?
-    let toolCallCount: Int?
-    let contextTokens: Int?
-    let contextWindow: Int?
-
-    init(context: JSONValue?) {
-        let root = context?.objectValue ?? [:]
-        instructions = root["systemPrompt"]?.stringValue ?? "Instructions are unavailable."
-        if instructions.count > Self.maximumInstructionPreviewCharacters {
-            instructionPreview = String(instructions.prefix(Self.maximumInstructionPreviewCharacters)) + "…"
-        } else {
-            instructionPreview = instructions
-        }
-        activeToolCount = root["activeTools"]?.arrayValue?.count ?? 0
-        availableToolCount = root["availableTools"]?.arrayValue?.count
-            ?? root["tools"]?.arrayValue?.count
-            ?? 0
-        commandCount = root["commands"]?.arrayValue?.count ?? 0
-        let stats = root["stats"]?.objectValue
-        messageCount = stats?["totalMessages"]?.intValue
-        toolCallCount = stats?["toolCalls"]?.intValue
-        let usage = root["contextUsage"]?.objectValue
-        contextTokens = usage?["tokens"]?.intValue
-        contextWindow = usage?["contextWindow"]?.intValue
-    }
-}
-
 struct SessionContextSheet: View {
     let sessionID: String
     let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
@@ -203,6 +168,8 @@ struct SessionContextSheet: View {
     @State private var fallbackNoticeScope = InAppNoticeScope.presentation(UUID())
     @State private var presentation: SessionContextPresentation?
     @State private var pendingModelSelection: ModelRef?
+    @State private var pendingContextWindow: SessionPendingSetting<Int?>?
+    @State private var pendingThinking: SessionPendingSetting<String>?
     @State private var settingContextWindow = false
     @State private var forkNavigation = ChatForkNavigationOwner()
 
@@ -301,8 +268,8 @@ struct SessionContextSheet: View {
                 onDismiss: completeForkNavigationAfterHistoryDismissal
             ) { route in
                 switch route {
-                case .agentContext:
-                    AgentContextSheet(sessionID: sessionID)
+                case .agentInstructions:
+                    AgentInstructionsSheet(sessionID: sessionID)
                 case .projectResources:
                     ProjectResourcesView(sessionID: sessionID)
                 case .history:
@@ -436,6 +403,8 @@ struct SessionContextSheet: View {
                         pending: pendingModelSelection, authoritative: snapshot.model
                       ) else { return }
                 pendingModelSelection = selection
+                pendingContextWindow = nil
+                pendingThinking = nil
                 Task {
                     do { try await model.setModel(selection, sessionID: sessionID) }
                     catch {
@@ -457,22 +426,32 @@ struct SessionContextSheet: View {
         ) {
             if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
                let policy = snapshot.contextWindowPolicy {
+                let pendingWindow = pendingContextWindow?.admitted(in: snapshot)
                 ContextWindowSelectionRow(
                     selection: Binding(
-                        get: { policy.override },
+                        get: { pendingWindow.map(\.value) ?? policy.override },
                         set: { value in
                             // Bind the request to the model shown when the
                             // control was rendered. A late tap after a model
                             // switch must never mutate the replacement model.
-                            guard !settingContextWindow,
+                            guard !settingContextWindow, pendingModelSelection == nil,
                                   let current = model.sessionContextPresentation(for: sessionID),
                                   !current.phase.isActive,
+                                  current.runtimeGeneration == snapshot.runtimeGeneration,
                                   current.contextWindowPolicy?.model == policy.model else { return }
+                            let pending = SessionPendingSetting(value, snapshot: snapshot)
+                            pendingContextWindow = pending
                             settingContextWindow = true
                             Task {
                                 defer { settingContextWindow = false }
-                                do { try await model.setContextWindow(value, for: policy.model, sessionID: sessionID, expectedRevision: snapshot.revision, expectedRuntimeGeneration: snapshot.runtimeGeneration) }
-                                catch { surfaceActionError(error) }
+                                do {
+                                    try await model.setContextWindow(value, for: policy.model, sessionID: sessionID, expectedRevision: snapshot.revision, expectedRuntimeGeneration: snapshot.runtimeGeneration)
+                                    pendingContextWindow = pendingContextWindow?.confirming(pending.id)
+                                    if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
+                                } catch {
+                                    pendingContextWindow = pendingContextWindow?.rejecting(pending.id)
+                                    surfaceActionError(error)
+                                }
                             }
                         }
                     ),
@@ -483,23 +462,37 @@ struct SessionContextSheet: View {
                         longContextThreshold: nil
                     ),
                     inheritedValue: policy.default,
-                    effectiveValue: policy.effective,
+                    effectiveValue: pendingWindow.map { $0.value ?? policy.default } ?? policy.effective,
                     resetLabel: "Use configured default",
                     warning: policy.warning,
-                    source: policy.source,
+                    source: pendingWindow == nil ? policy.source : "pending",
                     accent: configurationRowAccent
                 )
                 .id("\(snapshot.runtimeGeneration):\(policy.model.contextWindowKey):\(snapshot.revision)")
                 .disabled(snapshot.phase.isActive || settingContextWindow || pendingModelSelection != nil)
+                TronSettingsDivider(accent: configurationRowAccent)
             }
             TronThinkingSelectionRow(
                 selection: Binding(
-                    get: { snapshot.thinkingLevel },
+                    get: { pendingThinking?.admitted(in: snapshot)?.value ?? snapshot.thinkingLevel },
                     set: { level in
-                        guard level != snapshot.thinkingLevel else { return }
+                        guard level != (pendingThinking?.admitted(in: snapshot)?.value ?? snapshot.thinkingLevel),
+                              pendingModelSelection == nil,
+                              let current = model.sessionContextPresentation(for: sessionID),
+                              current.runtimeGeneration == snapshot.runtimeGeneration,
+                              current.model == snapshot.model,
+                              current.availableThinkingLevels.contains(level) else { return }
+                        let pending = SessionPendingSetting(level, snapshot: snapshot)
+                        pendingThinking = pending
                         Task {
-                            do { try await model.setThinking(level, sessionID: sessionID) }
-                            catch { surfaceActionError(error) }
+                            do {
+                                try await model.setThinking(level, sessionID: sessionID)
+                                pendingThinking = pendingThinking?.confirming(pending.id)
+                                if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
+                            } catch {
+                                pendingThinking = pendingThinking?.rejecting(pending.id)
+                                surfaceActionError(error)
+                            }
                         }
                     }
                 ),
@@ -517,6 +510,12 @@ struct SessionContextSheet: View {
             pending: pendingModelSelection,
             authoritative: value?.model
         )
+        pendingContextWindow = pendingContextWindow?.reconciled(
+            authoritative: value?.contextWindowPolicy?.override, snapshot: value
+        )
+        pendingThinking = pendingThinking?.reconciled(
+            authoritative: value?.thinkingLevel ?? "", snapshot: value
+        )
     }
 
     private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {
@@ -526,10 +525,10 @@ struct SessionContextSheet: View {
                 divider()
                 manageRow(
                     icon: "doc.text.magnifyingglass",
-                    title: "Agent Context",
-                    subtitle: "Instructions, current context, and active capabilities",
+                    title: "Agent Instructions",
+                    subtitle: "Read the complete assembled instructions",
                     accent: sessionRowAccent
-                ) { destination = .agentContext }
+                ) { destination = .agentInstructions }
                 divider()
                 manageRow(
                     icon: "shippingbox",
@@ -608,12 +607,12 @@ struct SessionContextSheet: View {
                     TronSettingsRow(
                         icon: "arrow.triangle.branch",
                         title: "Current Branch",
-                        subtitle: branch,
+                        subtitle: workingTreeStatus,
                         subtitleRole: .dynamicValue,
                         subtitleLineLimit: 1,
                         accent: sessionRowAccent
                     ) {
-                        Text(workingTreeStatus)
+                        Text(branch)
                             .font(TronTypography.code(size: TronTypography.sizeBody2 + SessionSummaryTypography.metadataSizeAdjustment))
                             .foregroundStyle(Color.tronTextPrimary)
                             .lineLimit(1)
@@ -754,156 +753,5 @@ struct SessionContextSheet: View {
                 model.presentError(error, scope: noticeScope)
             }
         }
-    }
-}
-
-private struct AgentContextSheet: View {
-    let sessionID: String
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.tronPresentationActivity) private var presentationActivity
-    @State private var showInstructions = false
-
-    var body: some View {
-        let summary = AgentContextSummary(context: model.context)
-        NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: 18) {
-                    Label("This is the context currently assembled for the agent. Project resource inventories and schemas are kept in Project Resources.", systemImage: "info.circle")
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .tronScrollSurface(accent: .tronPurple, tintOpacity: 0.08)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        TronSettingsGroup(
-                            "Instructions",
-                            detail: "Assembled runtime guidance",
-                            accent: .tronPurple,
-                            surfaceStyle: .scrollOptimized
-                        ) {
-                            Text(summary.instructionPreview)
-                                .font(TronTypography.bodySM)
-                                .foregroundStyle(Color.tronTextPrimary)
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(14)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        Button { showInstructions = true } label: {
-                            TronSettingsRow(
-                                icon: "doc.plaintext",
-                                title: "Read Full Instructions",
-                                subtitle: "Open the complete assembled guidance",
-                                accent: .tronPurple
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .tronGlassSurface(accent: .tronPurple, tintOpacity: 0.10, interactive: true)
-                        .accessibilityIdentifier("agent-context-full-instructions")
-                    }
-
-                    TronSettingsGroup("Current Context", accent: .tronCyan, surfaceStyle: .scrollOptimized) {
-                        VStack(spacing: 0) {
-                            contextMetricRow(
-                                icon: "gauge.with.dots.needle.50percent",
-                                title: "Context Window",
-                                value: contextWindowLabel(summary)
-                            )
-                            TronSettingsDivider(accent: .tronCyan)
-                            contextMetricRow(icon: "bubble.left.and.bubble.right", title: "Session Messages", value: countLabel(summary.messageCount))
-                            TronSettingsDivider(accent: .tronCyan)
-                            contextMetricRow(icon: "wrench.and.screwdriver", title: "Tool Calls", value: countLabel(summary.toolCallCount))
-                        }
-                    }
-
-                    TronSettingsGroup(
-                        "Capabilities",
-                        detail: "Detailed inventory lives in Project Resources",
-                        accent: .tronTeal,
-                        surfaceStyle: .scrollOptimized
-                    ) {
-                        VStack(spacing: 0) {
-                            contextMetricRow(
-                                icon: "wrench.and.screwdriver",
-                                title: "Tool Access",
-                                value: "\(summary.activeToolCount) of \(summary.availableToolCount) active"
-                            )
-                            TronSettingsDivider(accent: .tronTeal)
-                            contextMetricRow(icon: "command", title: "Available Commands", value: summary.commandCount.formatted())
-                            TronSettingsDivider(accent: .tronTeal)
-                            TronSettingsRow(
-                                icon: "shippingbox",
-                                title: "Project Resources",
-                                subtitle: "Return to Manage Session to inspect extensions, prompts, skills, tools, and schemas",
-                                accent: .tronTeal
-                            )
-                        }
-                    }
-
-                    TronTechnicalJSONRow(
-                        value: model.context ?? .null,
-                        sheetTitle: "Agent Context JSON"
-                    )
-                }
-                .padding(18)
-            }
-            .defaultScrollAnchor(.top)
-            .tronScrollEdgeChrome()
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Agent Context", accent: .tronPurple) }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
-                    }
-                    .accessibilityLabel("Done")
-                }
-            }
-            .task(id: "\(model.sessionContextRevision(for: sessionID)):\(presentationActivity.allowsPresentationPublication)") {
-                guard presentationActivity.allowsPresentationPublication else { return }
-                await model.loadContext(sessionID: sessionID)
-            }
-            .tronManagedSheet(
-                isPresented: $showInstructions,
-                identity: "session.\(sessionID).agent-context.instructions"
-            ) {
-                NavigationStack {
-                    TronReadOnlyTextView(text: summary.instructions)
-                        .tronTopBlurSurface()
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .principal) { TronSheetTitle(title: "Instructions", accent: .tronPurple) }
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button { showInstructions = false } label: {
-                                    TronToolbarTextLabel("Done", systemImage: "checkmark")
-                                }
-                                .tronToolbarAction()
-                            }
-                        }
-                }
-                .tronTopBlur(.sheet)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
-            }
-        }
-        .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .tint(Color.tronEmerald)
-    }
-
-    private func contextWindowLabel(_ summary: AgentContextSummary) -> String {
-        guard let tokens = summary.contextTokens, let window = summary.contextWindow else { return "Unavailable" }
-        return "\(tokens.formatted(.number.notation(.compactName))) of \(window.formatted(.number.notation(.compactName)))"
-    }
-
-    private func countLabel(_ count: Int?) -> String { count?.formatted() ?? "Unavailable" }
-
-    private func contextMetricRow(icon: String, title: String, value: String) -> some View {
-        TronValueRow(icon: icon, title: title, value: value, accent: .tronCyan)
     }
 }

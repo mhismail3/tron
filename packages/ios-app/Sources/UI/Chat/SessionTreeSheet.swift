@@ -86,6 +86,17 @@ enum SessionHistoryPolicy {
 enum SessionHistoryPreview {
     static let maximumCharacters = 240
 
+    static func preview(_ node: SessionTreeNode) -> String {
+        let value = node.kind == "thinkingChange"
+            ? ThinkingLevelPresentation.title(node.preview)
+            : node.preview
+        return plain(value.ifEmpty(node.kind.humanized))
+    }
+
+    static func title(_ node: SessionTreeNode) -> String {
+        node.label.map(plain) ?? preview(node)
+    }
+
     static func plain(_ value: String) -> String {
         // Gateway previews are already bounded. Bound again before applying a
         // handful of presentation-only regexes so history rows never become a
@@ -136,7 +147,7 @@ private struct SessionHistoryRowPresentation: Identifiable, Hashable, Sendable {
 
     init(node: SessionTreeNode) {
         self.node = node
-        title = SessionHistoryPreview.plain(node.label ?? node.preview.ifEmpty(node.kind.humanized))
+        title = SessionHistoryPreview.title(node)
         if node.role == .user { kindLabel = "Prompt" }
         else if node.role == .assistant { kindLabel = "Response" }
         else if node.role == .toolResult { kindLabel = "Tool result" }
@@ -238,16 +249,16 @@ struct SessionTreeSheet: View {
                             systemImage: "arrow.clockwise",
                             isWorking: reloading
                         )
-                        .tronToolbarAction()
+                        .tronToolbarAction(accent: .tronBlue)
                     }
                     .disabled(reloading)
                 }
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Session History") }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Session History", accent: .tronBlue) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .foregroundStyle(Color.tronBlue)
                     }
                     .accessibilityLabel("Done")
                 }
@@ -302,6 +313,7 @@ struct SessionTreeSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+        .tint(Color.tronBlue)
     }
 
     private func runtimeSummary(_ snapshot: SessionSnapshot) -> some View {
@@ -603,7 +615,7 @@ private struct HistoryEntryDetailsSheet: View {
                         VStack(spacing: 0) {
                             TronSettingsRow(
                                 icon: node.role == .user ? "person.crop.circle" : "clock.arrow.circlepath",
-                                title: SessionHistoryPreview.plain(node.label ?? node.preview.ifEmpty(node.kind.humanized)),
+                                title: SessionHistoryPreview.title(node),
                                 subtitle: node.timestamp,
                                 accent: node.isCurrentPath ? .tronEmerald : .tronPurple
                             )
@@ -787,7 +799,7 @@ private struct NavigationSheet: View {
         ) {
             TronSettingsRow(
                 icon: node.role == .user ? "person.crop.circle" : "point.3.connected.trianglepath.dotted",
-                title: SessionHistoryPreview.plain(node.label ?? node.preview.ifEmpty(node.kind.humanized)),
+                title: SessionHistoryPreview.title(node),
                 subtitle: node.timestamp
             )
         }
@@ -863,7 +875,7 @@ struct ForkConfirmationSheet: View {
                     TronSettingsGroup(node.role == .user ? "Selected Prompt" : "Selected Entry", accent: .tronTeal) {
                         TronSettingsRow(
                             icon: node.role == .user ? "person.crop.circle" : "point.3.connected.trianglepath.dotted",
-                            title: SessionHistoryPreview.plain(node.preview.ifEmpty(node.kind.humanized)),
+                            title: SessionHistoryPreview.preview(node),
                             subtitle: node.timestamp,
                             accent: .tronTeal
                         )

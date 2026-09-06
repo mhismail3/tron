@@ -8,7 +8,7 @@ enum SessionSummaryTypography {
     static var headline: Font { TronTypography.sans(size: TronTypography.sizeXL, weight: .bold) }
     static var detail: Font { TronSettingsSecondaryRole.informational.font(sizeAdjustment: metadataSizeAdjustment) }
     static var value: Font { TronSettingsSecondaryRole.dynamicValue.font(sizeAdjustment: metadataSizeAdjustment) }
-    static var metric: Font { TronTypography.code(size: TronTypography.sizeBody2 + metadataSizeAdjustment, weight: .semibold) }
+    static var metric: Font { TronTypography.code(size: TronTypography.sizeSecondary + metadataSizeAdjustment, weight: .semibold) }
 }
 
 /// Value-only composition. SessionContextSheet keeps mutation admission,
@@ -22,48 +22,43 @@ struct SessionModelSummaryCard<Controls: View, CompactAction: View>: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             actionLayout {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(SessionModelSelectionPresentation.modelName(selection, catalog: catalog))
                         .font(SessionSummaryTypography.headline)
                         .foregroundStyle(Color.tronTextPrimary)
                     if let provider = selection?.displayProviderName {
                         Text(provider)
-                            .font(SessionSummaryTypography.value)
+                            .font(SessionSummaryTypography.detail)
                             .foregroundStyle(Color.tronTextSecondary)
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                TronProgressiveSheetLink(accessibilityLabel: "Change Session Model", accent: .tronEmerald) {
+                TronProgressiveSheetLink(accessibilityLabel: "Switch Model", accent: .tronEmerald) {
                     ModelPicker(selection: $selection, models: catalog.filter(\.available))
                         .tronNavigationTitle("Session Model", accent: .tronEmerald)
                         .environment(\.tronSettingsSecondaryTextSizeAdjustment, 0)
                         .controlSize(.regular)
                 } label: {
-                    TronInlineActionLabel("Change")
+                    TronInlineActionLabel("Switch Model")
                 }
             }
-            Divider().overlay(Color.tronEmerald.opacity(0.14))
+            .padding(14)
+            TronSettingsDivider(accent: .tronEmerald)
             controls()
-            Divider().overlay(Color.tronEmerald.opacity(0.14))
-            actionLayout {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Automatic Compaction")
-                        .font(TronTypography.sans(size: TronTypography.sizeSecondary + SessionSummaryTypography.metadataSizeAdjustment, weight: .semibold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                    Text(SessionCompactionControlPolicy.automaticStatus(automaticCompactionEnabled))
-                        .font(SessionSummaryTypography.value)
-                        .foregroundStyle(Color.tronTextSecondary)
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityElement(children: .combine)
-                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
+            TronSettingsDivider(accent: .tronEmerald)
+            TronSettingsRow(
+                icon: "rectangle.compress.vertical",
+                title: "Automatic Compaction",
+                subtitle: SessionCompactionControlPolicy.automaticStatus(automaticCompactionEnabled),
+                subtitleRole: .dynamicValue,
+                accent: .tronEmerald
+            ) {
                 compactAction()
             }
         }
-        .padding(14)
         .controlSize(.small)
         .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.14)
         .accessibilityIdentifier("session-model-summary")
