@@ -93,6 +93,23 @@ performance fixture on a device another workflow owns. Runtime build role and
 push route are emitted into `Info.plist`, but the final signed entitlements and
 provisioning profile remain authoritative for Apple service environments.
 
+Hosted tests define `HOSTED_TEST` and expose test-only helpers. A green test build
+does not prove the shipping app compiles. Changes to app views or their model APIs
+also require a non-hosted compile using the canonical device configuration:
+
+```bash
+scripts/tron ios generate
+(cd packages/ios-app && xcodebuild build -project TronMobile.xcodeproj \
+  -scheme 'Tron Device' -configuration LocalDevice \
+  -destination 'generic/platform=iOS' -derivedDataPath build/device-compile-derived-data \
+  CODE_SIGNING_ALLOWED=NO)
+```
+
+This compile-only check neither installs an app nor validates signing. Keep
+physical installs on `scripts/tron-ios-device`; its signed-artifact and Gateway
+protocol checks remain required. Production views use `authoritativeSnapshot(for:)`
+for session-scoped facts, not the hosted-only AppModel selection conveniences.
+
 ## Connection recovery diagnostics
 
 The WebSocket hello attempt has one monotonic deadline covering both the hello send and receive. Its exact socket is closed before a timed-out or canceled operation is joined. Foreground liveness waits ten seconds between independent probes and observes each pong callback with an eight-second bound; successful probes are not logged. Logs can be opened and refreshed while Connecting, Reconnecting, or Offline: the bounded in-memory iOS connection ring is shown immediately with profile ownership, stage, outcome, duration, fixed retirement reason, numeric platform code, and overflow count where applicable, while unavailable Gateway records are retained as stale. It contains no URLs, tokens, prompts, or arbitrary transport error text and is not persisted. Remote log RPCs are skipped until diagnostic readiness so opening Logs cannot interfere with hello; cached remote rows remain visible. Probe durations measure the actual pong wait and transport durations measure the retired epoch's age. Native URL-loading error codes survive failure normalization; intentional cancellation is categorized separately.

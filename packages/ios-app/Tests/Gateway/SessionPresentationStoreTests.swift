@@ -155,6 +155,34 @@ struct SessionPresentationStoreTests {
         #expect(model.authoritativeSnapshot(for: snapshot.sessionId) == snapshot)
     }
 
+    @Test("compaction settings read only the requested authoritative session snapshot")
+    func compactionSettingsSnapshotAuthority() throws {
+        let model = AppModel()
+        var snapshot = try SessionScenarioBuilder(seed: 8_114).openingTail(targetEncodedBytes: 4_096)
+        let sources = Dictionary(uniqueKeysWithValues: ["enabled", "reserveTokens", "keepRecentTokens", "thinkingLevel", "instructions"].map { ($0, "global") })
+        let configuration = CompactionConfiguration(
+            enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000,
+            thinkingLevel: "low", instructions: "Preserve the API contract", source: sources,
+            model: snapshot.model, requestedThinkingLevel: "low", effectiveThinkingLevel: "low", reason: nil
+        )
+        snapshot.compactionPolicy = CompactionPolicyProjection(
+            next: configuration,
+            currentBudgets: .init(enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000),
+            active: nil, extensionMayOverride: false, warning: nil
+        )
+        model.installHostedSnapshotWithoutPresentation(snapshot)
+        #expect(model.authoritativeSnapshot(for: snapshot.sessionId)?.compactionPolicy == nil)
+        model.installHostedAuthoritativeSnapshot(snapshot)
+        #expect(model.authoritativeSnapshot(for: snapshot.sessionId)?.compactionPolicy == snapshot.compactionPolicy)
+        #expect(model.authoritativeSnapshot(for: "another-session")?.compactionPolicy == nil)
+
+        var replacement = snapshot
+        replacement.sessionId = "replacement-session"
+        model.installHostedAuthoritativeSnapshot(replacement)
+        #expect(model.authoritativeSnapshot(for: snapshot.sessionId)?.compactionPolicy == nil)
+        #expect(model.authoritativeSnapshot(for: replacement.sessionId)?.compactionPolicy == replacement.compactionPolicy)
+    }
+
     @Test("Manage Session model picker displays an in-flight selection until authority confirms it")
     func modelPickerSelectionReconcilesWithAuthority() {
         let original = ModelRef(provider: "provider", id: "original")

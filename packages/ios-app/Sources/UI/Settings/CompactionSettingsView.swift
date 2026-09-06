@@ -78,7 +78,7 @@ struct CompactionSettingsView: View {
     private var allowsProjectScope: Bool { projectCWD != nil }
     private var supportsPolicy: Bool { model.gatewayInfo?.capabilities.contains("compaction-policy.v1") == true }
     private var sessionPolicy: CompactionPolicyProjection? {
-        guard let projectSessionID, model.selectedSessionID == projectSessionID else { return nil }
+        guard let projectSessionID else { return nil }
         return model.authoritativeSnapshot(for: projectSessionID)?.compactionPolicy
     }
     private var sourceDescription: String {
