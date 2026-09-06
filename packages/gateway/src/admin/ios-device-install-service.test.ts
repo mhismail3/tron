@@ -217,6 +217,7 @@ describe("IosDeviceInstallService", () => {
       beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
       setPresentationVisibility: () => ({ visible: true, revision: 1 }), unsubscribe: () => true,
       attachTerminal: () => {}, detachTerminal: () => {}, ownsTerminal: () => false,
+      isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
     };
     expect((gateway.info() as Record<string, unknown>).capabilities).toContain("ios-device-install.v2");
     const configured = await gateway.invoke(client, "device.install.config", {

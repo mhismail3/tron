@@ -27,7 +27,7 @@ function makeServer(
     host: "127.0.0.1",
     port,
     maxFrameBytes: 64 * 1_024,
-    devices: { authenticate: async () => ({ id: "device" }) } as never,
+    devices: { authenticateAndAdmit: async (_token: unknown, register: (identity: { id: string }) => unknown) => register({ id: "device" }) } as never,
     uploads: { acquire: acquireUpload } as never,
     sessions: {
       acquireBlob,

@@ -1,4 +1,9 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { CommandReceiptStore } from "./command-receipts.js";
+import { DeviceStore } from "../security/device-store.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "./gateway-service.js";
 
 const client: ClientContext = {
@@ -13,9 +18,98 @@ const client: ClientContext = {
   attachTerminal: () => {},
   detachTerminal: () => {},
   ownsTerminal: () => false,
+  isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
 };
 
 describe("session transcript paging", () => {
+  it("publishes durable self-revocation before install cleanup and preserves idempotence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-service-revoke-"));
+    let releaseCleanup: (() => void) | undefined;
+    let revoke: Promise<unknown> | undefined;
+    try {
+      const devices = new DeviceStore(root, "machine");
+      await devices.initialize();
+      const enrollment = await devices.ensureEnrollment();
+      const paired = await devices.pair(enrollment.code, "Phone");
+      const cleanupGate = new Promise<void>((resolve) => { releaseCleanup = resolve; });
+      const removeDevice = vi.fn(async () => cleanupGate);
+      const published = vi.fn();
+      const service = new GatewayService({
+        config: { tronHome: root },
+        devices,
+        sessions: {},
+        receipts: new CommandReceiptStore(root),
+        iosDeviceInstallService: { removeDevice, isUsable: false } as never,
+      } as unknown as GatewayServiceDependencies);
+
+      revoke = service.invoke({ ...client, identity: paired.deviceId, revokeDevice: published }, "device.revoke", {
+        deviceId: paired.deviceId,
+        commandId: "revoke-command-1",
+      });
+      await vi.waitFor(() => expect(removeDevice).toHaveBeenCalledOnce());
+      expect(published).toHaveBeenCalledOnce();
+      expect(JSON.parse(await readFile(join(root, "gateway", "devices.json"), "utf8")).devices).toEqual([]);
+      expect(await devices.authenticateAndAdmit(paired.token, (identity) => identity)).toBeNull();
+      releaseCleanup();
+      await expect(revoke).resolves.toEqual({ revoked: true });
+
+      await expect(service.invoke({ ...client, identity: paired.deviceId }, "device.revoke", {
+        deviceId: paired.deviceId,
+        commandId: "revoke-command-2",
+      })).resolves.toEqual({ revoked: false });
+      expect(removeDevice).toHaveBeenCalledOnce();
+      expect(published).toHaveBeenCalledOnce();
+    } finally {
+      releaseCleanup?.();
+      try { if (revoke) await revoke; }
+      finally { await rm(root, { recursive: true, force: true }); }
+    }
+  });
+
+  it("does not recreate an auth owner after runtime resolution loses device authority", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-service-auth-revoke-"));
+    let releaseRuntime: (() => void) | undefined;
+    let begin: Promise<unknown> | undefined;
+    try {
+      const devices = new DeviceStore(root, "machine");
+      await devices.initialize();
+      const enrollment = await devices.ensureEnrollment();
+      const paired = await devices.pair(enrollment.code, "Phone");
+      let enterRuntime!: () => void;
+      const runtimeEntered = new Promise<void>((resolve) => { enterRuntime = resolve; });
+      const runtimeGate = new Promise<void>((resolve) => { releaseRuntime = resolve; });
+      const authStart = vi.fn(() => "operation");
+      const service = new GatewayService({
+        config: { tronHome: root },
+        devices,
+        sessions: {
+          acquire: async () => {
+            enterRuntime();
+            await runtimeGate;
+            return { modelRuntime: {} };
+          },
+        },
+        auth: { start: authStart },
+      } as unknown as GatewayServiceDependencies);
+
+      begin = service.invoke({ ...client, identity: paired.deviceId }, "auth.begin", {
+        providerId: "provider",
+        authType: "api_key",
+        sessionId: "session",
+      });
+      await runtimeEntered;
+      await devices.revoke(paired.deviceId, () => {});
+      releaseRuntime();
+      await expect(begin).rejects.toMatchObject({ code: "unauthenticated" });
+      begin = undefined;
+      expect(authStart).not.toHaveBeenCalled();
+    } finally {
+      releaseRuntime?.();
+      try { if (begin) await begin; }
+      finally { await rm(root, { recursive: true, force: true }); }
+    }
+  });
+
   it("removes retired legacy RPCs without removing canonical JSONL import", async () => {
     const importFromJsonl = vi.fn(async () => ({ id: "canonical-session" }));
     const release = vi.fn(async () => {});
@@ -180,7 +274,7 @@ describe("session transcript paging", () => {
     const closedService = new GatewayService({
       sessions: { isSubscribed: () => false, acquire },
     } as unknown as GatewayServiceDependencies);
-    await expect(closedService.invoke(client, "session.transcript", {
+    await expect(closedService.invoke({ ...client, isSubscribed: () => false }, "session.transcript", {
       sessionId: "session",
       before: 1,
     })).rejects.toMatchObject({ code: "invalid_request" });
@@ -202,7 +296,7 @@ describe("session transcript paging", () => {
       receipts: { execute },
     } as unknown as GatewayServiceDependencies);
 
-    await expect(closedService.invoke(client, "session.prompt", {
+    await expect(closedService.invoke({ ...client, isSubscribed: () => false }, "session.prompt", {
       sessionId: "session",
       text: "hello",
       commandId: "command-1",
@@ -210,7 +304,7 @@ describe("session transcript paging", () => {
     expect(acquire).not.toHaveBeenCalled();
     expect(prompt).not.toHaveBeenCalled();
 
-    await expect(closedService.invoke(client, "session.rename", {
+    await expect(closedService.invoke({ ...client, isSubscribed: () => false }, "session.rename", {
       sessionId: "session",
       name: "Dashboard rename",
       commandId: "command-2",
@@ -233,6 +327,7 @@ describe("session transcript paging", () => {
     const service = new GatewayService({
       sessions: {
         isSubscribed: () => true,
+        retainLiveSession: () => () => {},
         acquire: async () => ({ id: "session", prompt }),
       },
       uploads: {
@@ -277,6 +372,7 @@ describe("session transcript paging", () => {
     const service = new GatewayService({
       sessions: {
         isSubscribed: () => true,
+        retainLiveSession: () => () => {},
         acquire: async () => ({ id: "session", prompt, commands }),
       },
       uploads: {
@@ -339,7 +435,7 @@ describe("session transcript paging", () => {
       { name: "goal", source: "extension" },
     ]);
     const service = new GatewayService({
-      sessions: { isSubscribed: () => true, acquire: async () => ({ id: "session", prompt, commands }) },
+      sessions: { isSubscribed: () => true, retainLiveSession: () => () => {}, acquire: async () => ({ id: "session", prompt, commands }) },
       uploads: { materialize: async () => ({ envelope: "", images: [], photoCount: 0, fileAttachmentCount: 1, attachments: [{ id: "upload", name: "a.txt", mimeType: "text/plain", size: 1 }] }) },
       receipts: { execute },
     } as unknown as GatewayServiceDependencies);
@@ -363,7 +459,7 @@ describe("session transcript paging", () => {
 
   it("rejects invalid resource controls and oversized UTF-8 names", async () => {
     const service = new GatewayService({
-      sessions: { isSubscribed: () => true, acquire: async () => ({ id: "session", prompt: vi.fn(), commands: vi.fn(() => []) }) },
+      sessions: { isSubscribed: () => true, retainLiveSession: () => () => {}, acquire: async () => ({ id: "session", prompt: vi.fn(), commands: vi.fn(() => []) }) },
       uploads: { materialize: async () => ({ envelope: "", images: [], photoCount: 0, fileAttachmentCount: 0, attachments: [] }) },
       receipts: { execute: vi.fn(async (_a: string, _b: string, _c: string, operation: () => Promise<unknown>) => operation()) },
     } as unknown as GatewayServiceDependencies);
@@ -567,7 +663,7 @@ describe("session transcript paging", () => {
       receipts: { execute },
     } as unknown as GatewayServiceDependencies);
 
-    await expect(service.invoke(client, "terminal.open", {
+    await expect(service.invoke({ ...client, isSubscribed: () => false }, "terminal.open", {
       sessionId: "session",
       columns: 80,
       rows: 24,

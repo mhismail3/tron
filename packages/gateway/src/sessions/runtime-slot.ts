@@ -341,7 +341,7 @@ export class RuntimeSlot {
   private phase: SessionPhase;
   private disposed = false;
   private readonly stateChangeWaiters = new Set<() => void>();
-  private automationLeaseCount = 0;
+  private retainedLeaseCount = 0;
   private readonly automationTerminalObservers = new Map<string, (terminal: AutomationOperationTerminal) => Promise<void> | void>();
   private snapshotTimer: NodeJS.Timeout | undefined;
   private progressFlushTimer: NodeJS.Timeout | undefined;
@@ -745,20 +745,20 @@ export class RuntimeSlot {
     return this.lifecycle.preventsOperationalQuiescence
       || this.pendingAssistantCompletion !== undefined
       || this.activeExports > 0
-      || this.automationLeaseCount > 0;
+      || this.retainedLeaseCount > 0;
   }
-  /** Retained presentation and exact automation admission protect automatic idle eviction. */
-  get isEvictionProtected(): boolean { return this.lifecycle.preventsEviction || this.automationLeaseCount > 0; }
+  /** Retained operation and exact automation leases protect automatic idle eviction. */
+  get isEvictionProtected(): boolean { return this.lifecycle.preventsEviction || this.retainedLeaseCount > 0; }
 
-  retainAutomationLease(): () => void {
+  retainLease(): () => void {
     this.assertUsable();
-    this.automationLeaseCount += 1;
+    this.retainedLeaseCount += 1;
     this.touch();
     let released = false;
     return () => {
       if (released) return;
       released = true;
-      this.automationLeaseCount = Math.max(0, this.automationLeaseCount - 1);
+      this.retainedLeaseCount = Math.max(0, this.retainedLeaseCount - 1);
       this.touch();
     };
   }

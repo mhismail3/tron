@@ -137,6 +137,10 @@ export interface ClientContext {
   attachTerminal(terminalId: string): void;
   detachTerminal(terminalId: string): void;
   ownsTerminal(terminalId: string): boolean;
+  /** Request-scoped observer/authority fences supplied by GatewayServer. */
+  isSubscribed(sessionId: string): boolean;
+  isRevoked(): boolean;
+  revokeDevice(deviceId: string): void;
   /** Direct connection-local event delivery for opaque read-only leases. */
   sendEvent?(topic: string, sessionId: string, payload: JsonValue): void;
 }
@@ -163,7 +167,6 @@ export interface GatewayServiceDependencies {
   logger: GatewayLogger;
   receipts: CommandReceiptStore;
   requestRestart: () => void;
-  deviceRevoked: (deviceId: string) => void;
   sessionDeleted: (sessionId: string) => void;
   broadcast: (topic: string, payload: JsonValue) => void;
   notifications?: NotificationService;
@@ -385,11 +388,8 @@ export class GatewayService {
         const deviceId = string(params.deviceId, "deviceId", { max: 100 });
         return this.mutation(client, method, params, () => this.withMobileIdentityLane(deviceId, async () => {
           await this.dependencies.notifications?.removeDevice(deviceId);
-          const revoked = await this.dependencies.devices.revoke(deviceId);
-          if (revoked) {
-            await this.iosDeviceInstallService.removeDevice(deviceId);
-            this.dependencies.deviceRevoked(deviceId);
-          }
+          const revoked = await this.dependencies.devices.revoke(deviceId, () => client.revokeDevice(deviceId));
+          if (revoked) await this.iosDeviceInstallService.removeDevice(deviceId);
           return { revoked };
         }));
       }
@@ -510,6 +510,7 @@ export class GatewayService {
         }
         const cursor = optionalString(params.cursor, "cursor", 64);
         const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 100);
+        this.requireObserverAdmission(client);
         return safeJson(this.automationPages.page(client.id, this.requireAutomations().list(), cursor, limit));
       }
       case "automation.schedule.preview": {
@@ -534,14 +535,17 @@ export class GatewayService {
         const through = string(params.through, "through", { max: 64 });
         const displayTimezone = string(params.displayTimezone, "displayTimezone", { max: 128 });
         validateTimelineWindow(from, through, displayTimezone);
-        return safeJson(this.requireAutomations().timelinePage(
+        this.requireObserverAdmission(client);
+        const page = this.requireAutomations().timelinePage(
           client.id,
           from,
           through,
           displayTimezone,
           cursor,
           limit,
-        ));
+        );
+        this.requireObserverAdmission(client);
+        return safeJson(page);
       }
       case "automation.get": {
         if (Object.keys(params).some((key) => key !== "automationId")) throw new GatewayError("invalid_request", "Automation get accepts only automationId");
@@ -624,14 +628,25 @@ export class GatewayService {
         const scope = params.scope === undefined ? "user" : oneOf(params.scope, "scope", ["user", "all"] as const);
         const cursor = optionalString(params.cursor, "cursor", 96);
         const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 500);
+        this.requireObserverAdmission(client);
         if (cursor !== undefined) {
-          return safeJson(await this.sessionListPages.nextPage(client.id, scope, cursor, limit));
+          const page = await this.sessionListPages.nextPage(client.id, scope, cursor, limit);
+          if (client.isRevoked()) {
+            this.sessionListPages.releaseClient(client.id);
+            throw new GatewayError("unauthenticated", "This device is no longer authorized");
+          }
+          return safeJson(page);
         }
         const source = await awaitWhileClientConnected(
           this.dependencies.sessions.pageSource(scope),
           client.signal,
         );
-        return safeJson(await this.sessionListPages.firstPage(client.id, scope, source, limit));
+        const page = await this.sessionListPages.firstPage(client.id, scope, source, limit);
+        if (client.isRevoked()) {
+          this.sessionListPages.releaseClient(client.id);
+          throw new GatewayError("unauthenticated", "This device is no longer authorized");
+        }
+        return safeJson(page);
       }
       case "session.create": {
         const created = await this.mutation(client, method, params, async () => {
@@ -840,7 +855,8 @@ export class GatewayService {
         if (!binding?.runId) throw new GatewayError("not_found", "Subagent session ownership is unavailable");
         const live = slot.processChildSessionPath(processId);
         const abortAuthority = slot.processSubagentAbortAuthority(processId, binding.runId);
-        return safeJson(await this.processTranscriptLeases.open(
+        this.requireObserverAdmission(client);
+        const lease = await this.processTranscriptLeases.open(
           client.id,
           slot.id,
           processId,
@@ -849,7 +865,12 @@ export class GatewayService {
           live?.path,
           client.sendEvent,
           abortAuthority,
-        ));
+        );
+        if (client.isRevoked()) {
+          this.processTranscriptLeases.releaseClient(client.id);
+          throw new GatewayError("unauthenticated", "This device is no longer authorized");
+        }
+        return safeJson(lease);
       }
       case "session.processTranscript.page": {
         const leaseId = string(params.leaseId, "leaseId", { max: 200 });
@@ -900,8 +921,13 @@ export class GatewayService {
           }
           return { deleted: true };
         });
-      case "session.prompt":
+      case "session.prompt": {
+        // Pin before receipt I/O, but defer rejection to its operation callback:
+        // an existing receipt remains readable without a live subscription.
+        const releaseSession = typeof params.sessionId === "string" && client.isSubscribed(params.sessionId)
+          ? this.dependencies.sessions.retainLiveSession(params.sessionId) : undefined;
         return this.mutation(client, method, params, async () => {
+          this.requireRetainedSession(client, params, releaseSession);
           const slot = await this.openedSlot(client, params);
           if (params.text !== undefined && typeof params.text !== "string") {
             throw new GatewayError("invalid_request", "text must be a string");
@@ -965,7 +991,8 @@ export class GatewayService {
           }, resolveAdmission);
           void execution.then(resolveAdmission, rejectAdmission);
           return safeJson(await admission);
-        });
+        }).finally(releaseSession);
+      }
       case "session.abort":
         return this.mutation(client, method, params, async () => {
           const sessionId = string(params.sessionId, "sessionId", { max: 200 });
@@ -1134,17 +1161,25 @@ export class GatewayService {
         return this.models(await this.modelRuntime(params), params.cursor, params.limit);
       case "auth.begin": {
         const sessionId = optionalString(params.sessionId, "sessionId", 200);
-        const operationId = this.dependencies.auth.start(
+        const providerId = string(params.providerId, "providerId", { max: 120 });
+        const authType = oneOf(params.authType, "authType", ["api_key", "oauth"] as const) as AuthType;
+        const commandId = params.commandId === undefined
+          ? undefined
+          : string(params.commandId, "commandId", { min: 8, max: 160 });
+        const modelRuntime = await this.modelRuntime(params);
+        const start = () => this.dependencies.auth.start(
           client.id,
-          string(params.providerId, "providerId", { max: 120 }),
-          oneOf(params.authType, "authType", ["api_key", "oauth"] as const) as AuthType,
-          await this.modelRuntime(params),
+          providerId,
+          authType,
+          modelRuntime,
           client.identity,
-          params.commandId === undefined
-            ? undefined
-            : string(params.commandId, "commandId", { min: 8, max: 160 }),
+          commandId,
           sessionId === undefined ? "global" : `session:${sessionId}`,
         );
+        const operationId = client.isLocal
+          ? start()
+          : await this.dependencies.devices.admitDevice(client.identity, start);
+        if (!operationId) throw new GatewayError("unauthenticated", "The authenticated mobile device is no longer paired");
         return { operationId };
       }
       case "auth.respond": {
@@ -1354,8 +1389,11 @@ export class GatewayService {
         const slot = await this.openedSlot(client, params);
         return safeJson({ terminals: this.dependencies.terminals.list(slot.id) });
       }
-      case "terminal.open":
+      case "terminal.open": {
+        const releaseSession = typeof params.sessionId === "string" && client.isSubscribed(params.sessionId)
+          ? this.dependencies.sessions.retainLiveSession(params.sessionId) : undefined;
         return this.mutation(client, method, params, async () => {
+          this.requireRetainedSession(client, params, releaseSession);
           const slot = await this.openedSlot(client, params);
           const terminal = this.dependencies.terminals.open(
             slot.id,
@@ -1364,9 +1402,13 @@ export class GatewayService {
             params.rows === undefined ? 30 : integer(params.rows, "rows", 5, 300),
             slot.sessionEnvironment(),
           );
-          client.attachTerminal(terminal.id);
+          // Revocation retires the connection observer, not this already
+          // admitted canonical PTY effect. Keep its result even though a
+          // revoked connection cannot retain terminal ownership.
+          if (!client.isRevoked()) client.attachTerminal(terminal.id);
           return safeJson({ terminal, replay: this.dependencies.terminals.attach(terminal.id, 0) });
-        });
+        }).finally(releaseSession);
+      }
       case "terminal.attach": {
         const terminalId = string(params.terminalId, "terminalId", { max: 100 });
         const replay = this.dependencies.terminals.attach(terminalId, params.afterSequence === undefined ? 0 : integer(params.afterSequence, "afterSequence", 0, Number.MAX_SAFE_INTEGER));
@@ -1418,9 +1460,17 @@ export class GatewayService {
     }
   }
 
+  private requireRetainedSession(client: ClientContext, params: Record<string, unknown>, release: (() => void) | undefined): void {
+    const sessionId = string(params.sessionId, "sessionId", { max: 200 });
+    if (!client.isSubscribed(sessionId)) {
+      throw new GatewayError("invalid_request", "Open the session before reading its live runtime projection");
+    }
+    if (!release) throw new GatewayError("busy", "Session runtime is no longer available", true);
+  }
+
   private async openedSlot(client: ClientContext, params: Record<string, unknown>) {
     const sessionId = string(params.sessionId, "sessionId", { max: 200 });
-    if (!this.dependencies.sessions.isSubscribed(client.id, sessionId)) {
+    if (!client.isSubscribed(sessionId)) {
       throw new GatewayError("invalid_request", "Open the session before reading its live runtime projection");
     }
     return this.dependencies.sessions.acquire(sessionId);
@@ -1428,6 +1478,10 @@ export class GatewayService {
 
   private async slot(params: Record<string, unknown>) {
     return this.dependencies.sessions.acquire(string(params.sessionId, "sessionId", { max: 200 }));
+  }
+
+  private requireObserverAdmission(client: ClientContext): void {
+    if (client.isRevoked()) throw new GatewayError("unauthenticated", "This device is no longer authorized");
   }
 
   private async requirePairedDevice(deviceId: string): Promise<void> {

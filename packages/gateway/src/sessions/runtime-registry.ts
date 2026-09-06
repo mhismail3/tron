@@ -1375,7 +1375,7 @@ export class RuntimeRegistry {
         || slot.persistedSessionFile === undefined) {
         throw new GatewayError("busy", "Automation target is being removed or is not yet persisted", true);
       }
-      return { slot, release: slot.retainAutomationLease() };
+      return { slot, release: slot.retainLease() };
     });
   }
 
@@ -2293,7 +2293,7 @@ export class RuntimeRegistry {
             || owner?.operationId !== operationId || owner.automationId !== automationId) {
             throw new GatewayError("conflict", "Automation execution session identity is already owned");
           }
-          return { slot: current, release: current.retainAutomationLease() };
+          return { slot: current, release: current.retainLease() };
         }
         this.requireLiveSlotCapacity();
         this.reservedSlotStarts += 1;
@@ -2319,7 +2319,7 @@ export class RuntimeRegistry {
         if (this.slots.has(sessionId)) {
           throw new GatewayError("conflict", "Automation execution session identity is already owned");
         }
-        const release = slot!.retainAutomationLease();
+        const release = slot!.retainLease();
         this.automationSessionOwners.set(slot!, { operationId, automationId });
         this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
         reserved = false;
@@ -2600,6 +2600,19 @@ export class RuntimeRegistry {
       return { path: canonical, fileIdentity: `${opened.dev}:${opened.ino}` };
     } catch { return undefined; }
     finally { await handle?.close().catch(() => {}); }
+  }
+
+  /** Retain one already-live session operation before its first await. The
+   * release uses the slot's shared automation/operation lease authority. */
+  retainLiveSession(sessionId: string): (() => void) | undefined {
+    this.assertSlotAdmissionOpen();
+    const slot = this.slots.get(sessionId);
+    if (!slot || slot.isDisposed || this.deletingSessionIds.has(sessionId)
+      || this.ambiguousSessionIds.has(sessionId)) return undefined;
+    const eviction = this.idleEvictions.get(sessionId);
+    if (eviction?.slot === slot && eviction.committed) return undefined;
+    this.cancelIdleEviction(sessionId, slot);
+    return slot.retainLease();
   }
 
   async acquire(sessionId: string): Promise<RuntimeSlot> {

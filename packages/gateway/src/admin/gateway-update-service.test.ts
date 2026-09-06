@@ -291,6 +291,7 @@ describe("Gateway update control plane", () => {
       id: "phone", identity: "device", isLocal: false,
       beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
       unsubscribe: () => true, attachTerminal: () => {}, detachTerminal: () => {}, ownsTerminal: () => false,
+      isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
     };
     await expect(new GatewayService(base).invoke(client, "system.info", {}))
       .resolves.toMatchObject({ gatewayChannel: "stable" });
@@ -315,6 +316,7 @@ describe("Gateway update control plane", () => {
       id: "phone", identity: "device", isLocal: false,
       beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
       unsubscribe: () => true, attachTerminal: () => {}, detachTerminal: () => {}, ownsTerminal: () => false,
+      isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
     };
     await expect(new GatewayService(base).invoke(client, "gateway.rollback", { channel: "dev", commandId: "command-1" }))
       .rejects.toMatchObject({ code: "invalid_request" });

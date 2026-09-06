@@ -13,6 +13,7 @@ const client: ClientContext = {
   attachTerminal: () => {},
   detachTerminal: () => {},
   ownsTerminal: () => false,
+  isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
 };
 
 function drain(blockerCount = 0) {
@@ -152,6 +153,7 @@ describe("Gateway administrative restart", () => {
     const dependencies = {
       sessions: {
         isSubscribed: () => true,
+        retainLiveSession: () => () => {},
         acquire: async () => {
           await slotBarrier;
           return { id: "session", cwd: "/tmp", sessionEnvironment: () => ({}) };

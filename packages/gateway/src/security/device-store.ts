@@ -80,6 +80,13 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): b
   return Object.keys(value).every((key) => allowed.has(key)) && Object.keys(value).length === keys.length;
 }
 
+function requireSynchronousResult<T>(value: T): T {
+  if (value && typeof (value as { then?: unknown }).then === "function") {
+    throw new Error("Device admission callback must return synchronously");
+  }
+  return value;
+}
+
 function isLocalAuthDocument(value: unknown): value is LocalAuthDocument {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const document = value as Record<string, unknown>;
@@ -286,8 +293,7 @@ export class DeviceStore {
     });
   }
 
-  async authenticate(token: string | undefined): Promise<{ kind: "local" } | DeviceIdentity | null> {
-    if (!token) return null;
+  private async authenticateLocked(token: string): Promise<{ kind: "local" } | DeviceIdentity | null> {
     const localActual = tokenHash(token);
     const localExpected = tokenHash(this.localToken);
     if (localActual.length === localExpected.length && timingSafeEqual(localActual, localExpected)) {
@@ -296,6 +302,26 @@ export class DeviceStore {
     const document = await this.readDevices();
     const device = document.devices.find((candidate) => equalHash(token, candidate.tokenHash));
     return device ? { kind: "device", deviceId: device.id } : null;
+  }
+
+  /** Authenticate and synchronously register/start the next effect under the
+   * durable credential mutex. The callback must not return a promise: admitted
+   * streams and provider work run without holding this mutex across awaits. */
+  async authenticateAndAdmit<T>(token: string | undefined, register: (identity: { kind: "local" } | DeviceIdentity) => T): Promise<T | null> {
+    if (!token) return null;
+    return this.mutex.run(async () => {
+      const identity = await this.authenticateLocked(token);
+      return identity ? requireSynchronousResult(register(identity)) : null;
+    });
+  }
+
+  /** Revalidate a device and synchronously create one owner-bound operation. */
+  async admitDevice<T>(deviceId: string, register: () => T): Promise<T | undefined> {
+    return this.mutex.run(async () => {
+      const document = await this.readDevices();
+      if (!document.devices.some((device) => device.id === deviceId)) return undefined;
+      return requireSynchronousResult(register());
+    });
   }
 
   async listDevices(): Promise<DeviceListEntry[]> {
@@ -309,12 +335,15 @@ export class DeviceStore {
     return document.devices.some((device) => device.id === deviceId);
   }
 
-  async revoke(deviceId: string): Promise<boolean> {
+  async revoke(deviceId: string, onRevoked: () => void): Promise<boolean> {
     return this.mutex.run(async () => {
       const document = await this.readDevices();
       const next = document.devices.filter((device) => device.id !== deviceId);
       if (next.length === document.devices.length) return false;
       await atomicWriteJson(this.devicePath, { version: 1, devices: next });
+      // The replacement above is the authority cut. Publication is deliberately
+      // synchronous and precedes install cleanup or any other long effect.
+      onRevoked();
       return true;
     });
   }

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -18,7 +19,7 @@ describe("DeviceStore", () => {
     const enrollment = await store.ensureEnrollment();
     const paired = await store.pair(enrollment.code, "Phone");
 
-    expect(await store.authenticate(paired.token)).toEqual({ kind: "device", deviceId: paired.deviceId });
+    expect(await store.authenticateAndAdmit(paired.token, (identity) => identity)).toEqual({ kind: "device", deviceId: paired.deviceId });
     await expect(store.pair(enrollment.code, "Other")).rejects.toThrow();
     const deviceFile = await readFile(join(root, "gateway", "devices.json"), "utf8");
     expect(deviceFile).not.toContain(paired.token);
@@ -57,7 +58,7 @@ describe("DeviceStore", () => {
     await writeFile(path, `${JSON.stringify(document)}\n`);
     expect(await store.listDevices()).toEqual([expect.objectContaining({ id: paired.deviceId })]);
     expect(await readFile(path, "utf8")).toContain("lastSeenAt");
-    await store.revoke(paired.deviceId);
+    await store.revoke(paired.deviceId, () => {});
     expect(await readFile(path, "utf8")).not.toContain("lastSeenAt");
   });
 
@@ -75,7 +76,7 @@ describe("DeviceStore", () => {
 
     document.devices = [original, { ...original, tokenHash: distinctHash }];
     await writeFile(path, `${JSON.stringify(document)}\n`);
-    await expect(store.authenticate("not-a-token")).rejects.toMatchObject({ code: "conflict" });
+    await expect(store.authenticateAndAdmit("not-a-token", (identity) => identity)).rejects.toMatchObject({ code: "conflict" });
 
     document.devices = [{ ...original, createdAt: "2026-02-30T10:00:00Z" }];
     await writeFile(path, `${JSON.stringify(document)}\n`);
@@ -209,13 +210,38 @@ describe("DeviceStore", () => {
     expect(() => new DeviceStore(root, "x".repeat(257))).toThrow("Machine identity is invalid");
   });
 
-  it("revokes one paired device", async () => {
-    const { store } = await fixture();
+  it("does not publish or retire authority when durable revocation fails", async () => {
+    const { root, store } = await fixture();
     const enrollment = await store.ensureEnrollment();
     const paired = await store.pair(enrollment.code, "Phone");
-    expect(await store.hasDevice(paired.deviceId)).toBe(true);
-    expect(await store.revoke(paired.deviceId)).toBe(true);
-    expect(await store.hasDevice(paired.deviceId)).toBe(false);
-    expect(await store.authenticate(paired.token)).toBeNull();
+    const gatewayPath = join(root, "gateway");
+    let publications = 0;
+    // Pairing schedules invitation regeneration; settle that owned write before
+    // changing directory permissions for the failure injection.
+    await store.ensureEnrollment();
+    await chmod(gatewayPath, 0o500);
+    try {
+      await expect(store.revoke(paired.deviceId, () => { publications += 1; })).rejects.toBeDefined();
+    } finally {
+      await chmod(gatewayPath, 0o700);
+    }
+    expect(publications).toBe(0);
+    expect(await store.authenticateAndAdmit(paired.token, (identity) => identity)).toEqual({ kind: "device", deviceId: paired.deviceId });
+  });
+
+  it("publishes revocation after the durable replacement and only once", async () => {
+    const { root, store } = await fixture();
+    const enrollment = await store.ensureEnrollment();
+    const paired = await store.pair(enrollment.code, "Phone");
+    const devicePath = join(root, "gateway", "devices.json");
+    let publications = 0;
+    expect(await store.revoke(paired.deviceId, () => {
+      publications += 1;
+      expect(readFileSync(devicePath, "utf8")).not.toContain(paired.deviceId);
+    })).toBe(true);
+    expect(publications).toBe(1);
+    expect(await store.authenticateAndAdmit(paired.token, (identity) => identity)).toBeNull();
+    expect(await store.revoke(paired.deviceId, () => { publications += 1; })).toBe(false);
+    expect(publications).toBe(1);
   });
 });
