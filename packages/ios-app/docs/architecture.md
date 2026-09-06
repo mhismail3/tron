@@ -498,7 +498,24 @@ and duplicate compound identities. Gateway cursors bind offsets to an exact whol
 so mutation cannot mix generations. Model pickers key rows by that compound identity, so equal model
 names from distinct providers remain stable. Profile retirement synchronously discards catalogs and auth routing.
 Its forced refresh and logout commands use the shared receipt executor before reloading the
-exact captured target. Models and Defaults exposes a separate forced-refresh action row below its
+exact captured target.
+
+Compaction Settings consolidates automatic compaction and advanced reserve/recent controls
+formerly duplicated under Models and Defaults and Runtime Behavior. The existing scoped draft
+store/coordinator owns edits, target switching and confirmed writes. `compaction-policy.v1`
+adds independent thinking (default: inherit conversation), bounded optional focus and an
+explicit standard reset that preserves budgets. The editor uses the Gateway's UTF-16 limit.
+Thinking/focus apply at the next compaction; enabled/budgets apply at idle prompt or manual
+compaction admission. A live authoritative session projection separately displays the selected
+model, requested/resolved next thinking, actual current budgets and captured running policy.
+Global Settings does not derive a model from saved defaults. Extension-override and invalid
+settings warnings are displayed without claiming authority over independent extension generation.
+Snapshot admission validates policy bounds and rejects active policy on an idle snapshot;
+existing sequence/runtime-generation reconciliation prevents a delayed compaction snapshot
+from resurrecting a completed operation. `SettingsDraftStoreTests` and
+`SessionSnapshotEventAdmissionTests` cover reset, bounds, decoding and retirement.
+
+Models and Defaults exposes a separate forced-refresh action row below its
 model controls for the displayed catalog target, reloads successful updates and cached fallbacks
 before reporting provider failures or timeout, and
 never mutates the settings draft, saved defaults, or credentials. Models with

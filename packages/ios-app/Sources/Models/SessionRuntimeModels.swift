@@ -408,6 +408,44 @@ struct ContextWindowPolicy: Codable, Hashable, Sendable {
     let warning: String?
 }
 
+struct CompactionConfiguration: Codable, Hashable, Sendable {
+    let enabled: Bool
+    let reserveTokens: Int
+    let keepRecentTokens: Int
+    let thinkingLevel: String
+    let instructions: String
+    let source: [String: String]
+    let model: ModelRef?
+    let requestedThinkingLevel: String
+    let effectiveThinkingLevel: String?
+    let reason: String?
+
+    var isValid: Bool {
+        let levels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+        return (1_024...1_000_000).contains(reserveTokens)
+            && (0...1_000_000).contains(keepRecentTokens)
+            && (thinkingLevel == "inherit" || levels.contains(thinkingLevel))
+            && levels.contains(requestedThinkingLevel)
+            && (effectiveThinkingLevel.map { levels.contains($0) } ?? (model == nil))
+            && instructions.utf16.count <= 4_000
+            && Set(source.keys) == Set(["enabled", "reserveTokens", "keepRecentTokens", "thinkingLevel", "instructions"])
+            && source.values.allSatisfy { ["global", "project", "default"].contains($0) }
+    }
+}
+
+struct CompactionPolicyProjection: Codable, Hashable, Sendable {
+    struct Budgets: Codable, Hashable, Sendable {
+        let enabled: Bool
+        let reserveTokens: Int
+        let keepRecentTokens: Int
+    }
+    let next: CompactionConfiguration
+    let currentBudgets: Budgets
+    let active: CompactionConfiguration?
+    let extensionMayOverride: Bool
+    let warning: String?
+}
+
 struct SessionSnapshot: Codable, Hashable, Sendable {
     /// Gateway's bounded authoritative queue capacity. Rich queue projections
     /// exceeding this limit are invalid and must not reach row rendering.
@@ -462,6 +500,7 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     var isCachedProjection: Bool? = nil
     /// Optional on rolling gateways that do not advertise context-window.v1.
     var contextWindowPolicy: ContextWindowPolicy? = nil
+    var compactionPolicy: CompactionPolicyProjection? = nil
 
     struct PromptAttachment: Codable, Hashable, Identifiable, Sendable {
         let id: String

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { SettingsManager, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { contextWindowLimits, contextWindowMinimum, contextWindowPreferences, MAX_CONTEXT_PREFERENCES, parseContextModelKey, validateContextWindow } from "../providers/context-window-policy.js";
+import { resolveCompactionPolicy, COMPACTION_POLICY_INSTRUCTION_LIMIT, COMPACTION_THINKING_LEVELS } from "../runtime/compaction-policy.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import { updateJsonLocked } from "../util/json.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, string } from "../util/validation.js";
@@ -120,12 +121,14 @@ export class SettingsService {
     // flag is false. Use an agent-dir-bound manager for a truly global-only
     // projection and a cwd-bound manager only after project trust resolves.
     const manager = SettingsManager.create(projectTrusted ? cwd : this.agentDir, this.agentDir, { projectTrusted });
+    if (manager.drainErrors().length) throw new GatewayError("conflict", "Canonical settings could not be loaded");
     const global = manager.getGlobalSettings() as Record<string, unknown>;
     const project = projectTrusted ? manager.getProjectSettings() as Record<string, unknown> : {};
     const effective = merge(global, project);
     const defaultProvider = manager.getDefaultProvider();
     const defaultModel = manager.getDefaultModel();
     const rawRetry = manager.getRetrySettings();
+    const compactionPolicy = resolveCompactionPolicy(global, project, projectTrusted);
     const result = {
       scope: { cwd, projectTrusted },
       documents: {
@@ -139,7 +142,7 @@ export class SettingsService {
         contextWindowMinimum: contextWindowMinimum(manager.getCompactionSettings()),
         thinkingBudgets: manager.getThinkingBudgets() ?? null,
         transport: manager.getTransport(),
-        compaction: manager.getCompactionSettings(),
+        compaction: { ...manager.getCompactionSettings(), ...compactionPolicy },
         branchSummary: manager.getBranchSummarySettings(),
         retry: { ...rawRetry, provider: manager.getProviderRetrySettings() },
         httpIdleTimeoutMs: manager.getHttpIdleTimeoutMs(),
@@ -284,6 +287,8 @@ export class SettingsService {
       enabled: (value) => boolean(value, "compaction.enabled"),
       reserveTokens: (value) => integer(value, "compaction.reserveTokens", 1_024, 1_000_000),
       keepRecentTokens: (value) => integer(value, "compaction.keepRecentTokens", 0, 1_000_000),
+      thinkingLevel: (value) => oneOf(value, "compaction.thinkingLevel", COMPACTION_THINKING_LEVELS),
+      instructions: (value) => rawString(value, "compaction.instructions", COMPACTION_POLICY_INSTRUCTION_LIMIT),
     });
     if ("branchSummary" in patch) next.branchSummary = this.nested(next.branchSummary, patch.branchSummary, "branchSummary", {
       reserveTokens: (value) => integer(value, "branchSummary.reserveTokens", 1_024, 1_000_000),
@@ -358,7 +363,8 @@ export class SettingsService {
     const patch = object(raw, name);
     const value: Record<string, unknown> = { ...object(existing ?? {}, `existing ${name}`) };
     for (const [key, validate] of Object.entries(validators)) {
-      if (patch[key] !== undefined) value[key] = validate(patch[key]);
+      if (name === "compaction" && patch[key] === null) delete value[key];
+      else if (patch[key] !== undefined) value[key] = validate(patch[key]);
     }
     return value;
   }

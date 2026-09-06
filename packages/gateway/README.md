@@ -725,7 +725,15 @@ Pi's existing cancellation guard then prevents post-run retry/compaction of that
 It does not infer cancellation from error text, disable future compaction, or synthesize idle;
 Stop still waits for real runtime settlement and durable invocation/marker retirement. The focused
 `runtime-compaction.integration.test.ts` exercises this sequence against the pinned SDK and proves
-that the next explicit prompt can compact normally.
+that the next explicit prompt can compact normally. Pre-prompt compaction is different:
+Pi has not created its Agent abort signal yet. The existing invocation cancellation set
+therefore fences the exact public `preflightResult` admission callback as well. Gateway
+projects its owned preflight as running while auth/preparation is pending. Stop at
+`compaction_start` also revokes compaction admission before a late SDK controller can
+start generation. Automatic compaction additionally checks its enclosing prompt's
+cancellation after summary auth, since the display operation ID may rotate after Stop. A rejected preflight joins its SDK promise, persists an interrupted
+(`user-abort`) or failed receipt, retires the exact marker, and only then publishes idle.
+No cancellation is inferred from the spinner, and a late Stop cannot cancel a successor.
 
 Manual compaction has a separate Gateway-owned single-entry maintenance admission. Its
 synchronous claim covers pending, direct, and queued execution, so a second request is rejected
@@ -826,6 +834,45 @@ append stages an entry but disk persistence fails, the RPC reports an uncertain
 outcome and publishes the actual live projection rather than fabricating rollback
 or blindly replaying the command. An explicitly issued new command always records
 its desired value, even when it matches a previously staged in-memory value.
+
+`compaction-policy.v1` exposes compaction configuration in the dedicated iOS Settings
+page. Pi 0.84.4 still owns preparation, generation, auth, retry callbacks, split ordering,
+summary validation, canonical checkpointing and continuation. The public
+`session_before_compact` hook captures the exact operation signal; the request adapter
+changes only matching-signal, matching-conversation-model requests. It never generates a
+replacement result, copies SDK prompts, or launches fallback summaries. Standard behavior
+is an argument-for-argument pass-through of the built-in generator.
+
+Canonical global/project `compaction` settings add `thinkingLevel` (`inherit`, `off`,
+`minimal`, `low`, `medium`, `high`, `xhigh`, `max`) and `instructions` (at most 4,000 UTF-16
+units). Defaults remain inherited conversation thinking and empty focus; Low is opt-in
+pending real-provider quality evaluation. The SDK clamps requested thinking to model
+capabilities; the projection describes requested/resolved settings, not measured provider
+reasoning use. Focus is appended to a cloned summary system context for both history and
+split-prefix passes. One-off manual instructions retain the SDK's history-only behavior.
+Chat and branch-summary requests are untouched. Concision is an instruction, not a hard
+combined output limit, and no provider latency/quality improvement is claimed by fixture tests.
+
+Thinking/focus are captured once at each compaction, including its retries and split calls.
+Enabled/reserve/recent controls are narrowly applied at the next idle prompt or manual
+compaction admission, never inside an active run. No broad settings/resource reload occurs.
+Settings writes refresh live projections without mutating prepared work. `SessionSnapshot`
+contains `compactionPolicy.next`, `currentBudgets`, and optional `active` configuration;
+terminal events clear the captured policy before the owner publishes the end snapshot.
+Sources are global/project/default, and global Settings never invents a session model.
+Absent project fields inherit; null patches delete overrides; explicit inherit/empty restore
+standard generation without changing budgets. Malformed initial configuration rejects
+runtime creation. A failed read in an existing runtime preserves the last valid policy with
+a bounded warning; idle admission rejects until settings are valid again.
+
+Other extensions may merely observe compaction (including subagents). Their registration
+must not prevent loading the session. `extensionMayOverride` warns that an extension can
+supply its own summary; independent extension generation is not claimed as controlled by
+Tron's request policy. SDK cancellation/custom-result ordering remains authoritative.
+`compaction-policy.test.ts` compares real SDK baseline/adapted requests and checkpoints,
+including split summaries, retries, branch summaries, reload and failures.
+`runtime-compaction.integration.test.ts` exercises real preflight/between-turn Stop,
+early manual cancellation, overflow continuation, saved/active settings and durable receipts.
 
 Settings projections include
 scope-owned documents and effective values, but write-only proxy credentials are removed

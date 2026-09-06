@@ -83,6 +83,33 @@ struct SettingsDraftStoreTests {
         #expect(draft.patch(comparedTo: baseline).objectValue?.isEmpty == true)
     }
 
+    @Test("compaction instructions use the Gateway UTF-16 bound without cutting scalars")
+    func compactionInstructionLimit() {
+        let bounded = CompactionSettingsDraft.boundedInstructions(String(repeating: "😀", count: 2_001))
+        #expect(bounded.count == 2_000)
+        #expect(bounded.utf16.count == 4_000)
+    }
+
+    @Test("compaction standard reset changes policy fields without changing budgets")
+    func compactionPolicyDraft() {
+        var baseline = CompactionSettingsDraft()
+        baseline.thinkingLevel = "low"
+        baseline.instructions = "focus"
+        var restored = baseline
+        restored.restoreStandard()
+        #expect(restored.patch(comparedTo: baseline).objectValue?["compaction"]?.objectValue == [
+            "thinkingLevel": .string("inherit"),
+            "instructions": .string("")
+        ])
+        #expect(restored.reserveTokens == baseline.reserveTokens)
+        #expect(restored.keepRecentTokens == baseline.keepRecentTokens)
+        var standard = CompactionSettingsDraft()
+        standard.restoreStandard()
+        #expect(standard.patch(comparedTo: CompactionSettingsDraft()).objectValue?["compaction"]?.objectValue == [
+            "thinkingLevel": .string("inherit"), "instructions": .string("")
+        ])
+    }
+
     @Test("custom context tokens are committed only as valid whole numbers")
     func contextWindowInput() {
         let limits = ContextWindowLimits(minimum: 37_408, maximum: 1_050_000, default: 272_000, longContextThreshold: 272_000)

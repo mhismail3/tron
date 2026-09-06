@@ -3,7 +3,6 @@ import SwiftUI
 struct AgentDefaultsDraft: Equatable {
     var selectedModel: ModelRef?
     var thinking = "medium"
-    var compaction = true
     var retry = true
     var trust = "ask"
     /// Sparse values owned by this settings scope. Effective inherited values
@@ -23,9 +22,6 @@ struct AgentDefaultsDraft: Equatable {
     func patch(comparedTo baseline: Self) -> JSONValue {
         var patch: [String: JSONValue] = [:]
         if thinking != baseline.thinking { patch["defaultThinkingLevel"] = .string(thinking) }
-        if compaction != baseline.compaction {
-            patch["compaction"] = .object(["enabled": .bool(compaction)])
-        }
         if retry != baseline.retry { patch["retry"] = .object(["enabled": .bool(retry)]) }
         if trust != baseline.trust { patch["defaultProjectTrust"] = .string(trust) }
         if selectedModel != baseline.selectedModel {
@@ -139,14 +135,6 @@ struct AgentDefaultsSettingsView: View {
                 }
                 TronSettingsGroup("Context", accent: .tronTeal) {
                     VStack(spacing: 0) {
-                        TronToggleRow(
-                            icon: "arrow.triangle.2.circlepath",
-                            title: "Automatic Compaction",
-                            detail: "Summarize context before the model window fills",
-                            accent: .tronTeal,
-                            isOn: $draft.compaction
-                        )
-                        TronSettingsDivider(accent: .tronTeal)
                         TronToggleRow(
                             icon: "arrow.clockwise",
                             title: "Automatic Retry",
@@ -328,7 +316,6 @@ struct AgentDefaultsSettingsView: View {
         let projected = AgentDefaultsDraft(
             selectedModel: selectedModel,
             thinking: value["defaultThinkingLevel"]?.stringValue ?? "medium",
-            compaction: value["compaction"]?.objectValue?["enabled"]?.boolValue ?? true,
             retry: value["retry"]?.objectValue?["enabled"]?.boolValue ?? true,
             trust: value["defaultProjectTrust"]?.stringValue ?? "ask",
             modelContextWindows: scopedContextWindows,

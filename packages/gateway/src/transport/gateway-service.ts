@@ -268,6 +268,7 @@ export class GatewayService {
         "skill-prompt.v1",
         "restart-drain.v1",
         "context-window.v1",
+        "compaction-policy.v1",
         "drain-status.v1",
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
         ...(this.iosDeviceInstallService.isUsable ? [IOS_DEVICE_INSTALL_CAPABILITY] : []),
@@ -1203,6 +1204,9 @@ export class GatewayService {
             projectTrusted: scope === "project" && resolved.trusted,
             ...(settingsSlot ? { modelRuntime: settingsSlot.modelRuntime } : {}),
           });
+          if (params.patch && typeof params.patch === "object" && "compaction" in params.patch) {
+            this.dependencies.sessions.refreshCompactionPolicies(scope, resolved.cwd);
+          }
           this.dependencies.broadcast("settings.changed", { scope, cwd: resolved.cwd });
           return safeJson(result);
         });

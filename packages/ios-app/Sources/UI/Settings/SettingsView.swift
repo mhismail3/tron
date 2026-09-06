@@ -75,11 +75,20 @@ struct SettingsView: View {
                         settingsDivider(accent: .tronPurple)
                         settingsLink(
                             "Runtime Behavior",
-                            summary: "Prompt queue, retries, and compaction behavior",
+                            summary: "Prompt queue and retry behavior",
                             icon: "gearshape.2",
                             accent: .tronPurple
                         ) {
                             RuntimeBehaviorSettingsView(projectCWD: projectCWD)
+                        }
+                        settingsDivider(accent: .tronPurple)
+                        settingsLink(
+                            "Compaction",
+                            summary: "Automatic summaries, focus, and context budgets",
+                            icon: "arrow.triangle.2.circlepath",
+                            accent: .tronPurple
+                        ) {
+                            CompactionSettingsView(projectCWD: projectCWD, projectSessionID: projectSessionID)
                         }
                         settingsDivider(accent: .tronPurple)
                         settingsLink(

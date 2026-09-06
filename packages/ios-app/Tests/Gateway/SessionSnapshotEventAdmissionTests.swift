@@ -1,8 +1,41 @@
+import Foundation
 import Testing
 @testable import TronMobile
 
 @Suite("Live session snapshot admission")
 struct SessionSnapshotEventAdmissionTests {
+    @Test("compaction policy survives decoding and cannot resurrect a completed operation")
+    func compactionPolicyReconciliation() throws {
+        var running = try SessionScenarioBuilder(seed: 7_701).openingTail(targetEncodedBytes: 8_192)
+        running.phase = .compacting
+        running.activeToolSegmentId = nil
+        let sources = Dictionary(uniqueKeysWithValues: ["enabled", "reserveTokens", "keepRecentTokens", "thinkingLevel", "instructions"].map { ($0, "global") })
+        let configuration = CompactionConfiguration(
+            enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000,
+            thinkingLevel: "low", instructions: "Keep the API contract", source: sources,
+            model: running.model, requestedThinkingLevel: "low", effectiveThinkingLevel: "low", reason: "threshold"
+        )
+        let budgets = CompactionPolicyProjection.Budgets(enabled: true, reserveTokens: 16_384, keepRecentTokens: 20_000)
+        running.compactionPolicy = CompactionPolicyProjection(next: configuration, currentBudgets: budgets, active: configuration, extensionMayOverride: true, warning: nil)
+        let decoded = try JSONDecoder().decode(SessionSnapshot.self, from: JSONEncoder().encode(running))
+        #expect(decoded.compactionPolicy?.active?.instructions == "Keep the API contract")
+        #expect(SessionSnapshotTranscriptAdmissionPolicy.admit(decoded))
+        var completed = decoded
+        completed.phase = .idle
+        completed.eventSequence += 1
+        completed.revision += 1
+        completed.compactionPolicy = CompactionPolicyProjection(next: configuration, currentBudgets: budgets, active: nil, extensionMayOverride: true, warning: nil)
+        #expect(admission(current: decoded, incoming: completed) == .install)
+        #expect(admission(current: completed, incoming: decoded) == .ignore)
+        var invalid = completed
+        invalid.eventSequence += 1
+        invalid.compactionPolicy = decoded.compactionPolicy
+        #expect(admission(current: completed, incoming: invalid) == .resynchronize(completed.sessionId))
+        var replacement = completed
+        replacement.runtimeGeneration = "new-runtime"
+        #expect(SessionRebaselineAdmission.evaluate(current: decoded, incoming: replacement) == .install)
+    }
+
     @Test("only the exact next cursor for the installed runtime may update live state")
     func exactNextCursor() throws {
         let current = try SessionScenarioBuilder(seed: 51).openingTail(targetEncodedBytes: 8_192)

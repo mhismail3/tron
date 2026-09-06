@@ -2862,6 +2862,12 @@ export class RuntimeRegistry {
     if (publish) slots.forEach((slot) => slot.commitReload());
   }
 
+  refreshCompactionPolicies(scope: "global" | "project", cwd: string): void {
+    for (const slot of this.slots.values()) {
+      if (scope === "global" || slot.cwd === cwd) slot.refreshCompactionPolicy();
+    }
+  }
+
   async commitProjectReload(cwdInput: string): Promise<void> {
     const cwd = await this.options.trust.canonicalDirectory(cwdInput);
     await this.mutex.run(() => {

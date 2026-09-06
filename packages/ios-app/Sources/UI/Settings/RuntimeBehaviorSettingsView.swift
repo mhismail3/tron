@@ -4,9 +4,6 @@ struct RuntimeBehaviorDraft: Equatable {
     var transport = "auto"
     var steeringMode = "one-at-a-time"
     var followUpMode = "one-at-a-time"
-    var compactionEnabled = true
-    var compactionReserve = 16_384
-    var compactionRecent = 20_000
     var branchReserve = 16_384
     var branchSkipPrompt = false
     var retryEnabled = true
@@ -33,11 +30,6 @@ struct RuntimeBehaviorDraft: Equatable {
         if transport != baseline.transport { patch["transport"] = .string(transport) }
         if steeringMode != baseline.steeringMode { patch["steeringMode"] = .string(steeringMode) }
         if followUpMode != baseline.followUpMode { patch["followUpMode"] = .string(followUpMode) }
-        var compaction: [String: JSONValue] = [:]
-        if compactionEnabled != baseline.compactionEnabled { compaction["enabled"] = .bool(compactionEnabled) }
-        if compactionReserve != baseline.compactionReserve { compaction["reserveTokens"] = .number(Double(compactionReserve)) }
-        if compactionRecent != baseline.compactionRecent { compaction["keepRecentTokens"] = .number(Double(compactionRecent)) }
-        if !compaction.isEmpty { patch["compaction"] = .object(compaction) }
         var branch: [String: JSONValue] = [:]
         if branchReserve != baseline.branchReserve { branch["reserveTokens"] = .number(Double(branchReserve)) }
         if branchSkipPrompt != baseline.branchSkipPrompt { branch["skipPrompt"] = .bool(branchSkipPrompt) }
@@ -115,20 +107,8 @@ struct RuntimeBehaviorSettingsView: View {
                         }
                     }
                 }
-                TronSettingsGroup("Compaction", accent: .tronTeal, surfaceStyle: .scrollOptimized) {
+                TronSettingsGroup("Branch Summaries", accent: .tronTeal, surfaceStyle: .scrollOptimized) {
                     VStack(spacing: 0) {
-                        TronToggleRow(
-                            icon: "arrow.triangle.2.circlepath",
-                            title: "Automatic compaction",
-                            detail: "Summarize context before the model window fills",
-                            accent: .tronTeal,
-                            isOn: $draft.compactionEnabled
-                        )
-                        TronSettingsDivider(accent: .tronTeal)
-                        numberRow("gauge.with.dots.needle.33percent", "Reserve tokens", "Tokens reserved before compaction", value: $draft.compactionReserve, accent: .tronTeal)
-                        TronSettingsDivider(accent: .tronTeal)
-                        numberRow("text.line.last.and.arrowtriangle.forward", "Keep recent tokens", "Recent context retained verbatim", value: $draft.compactionRecent, accent: .tronTeal)
-                        TronSettingsDivider(accent: .tronTeal)
                         numberRow("arrow.triangle.branch", "Branch summary reserve", "Tokens reserved for branch summaries", value: $draft.branchReserve, accent: .tronTeal)
                         TronSettingsDivider(accent: .tronTeal)
                         TronToggleRow(
@@ -309,11 +289,6 @@ struct RuntimeBehaviorSettingsView: View {
         loaded.transport = value.string("transport", fallback: loaded.transport)
         loaded.steeringMode = value.string("steeringMode", fallback: loaded.steeringMode)
         loaded.followUpMode = value.string("followUpMode", fallback: loaded.followUpMode)
-        if let compaction = value["compaction"]?.objectValue {
-            loaded.compactionEnabled = compaction.bool("enabled", fallback: loaded.compactionEnabled)
-            loaded.compactionReserve = compaction.int("reserveTokens", fallback: loaded.compactionReserve)
-            loaded.compactionRecent = compaction.int("keepRecentTokens", fallback: loaded.compactionRecent)
-        }
         if let branch = value["branchSummary"]?.objectValue {
             loaded.branchReserve = branch.int("reserveTokens", fallback: loaded.branchReserve)
             loaded.branchSkipPrompt = branch.bool("skipPrompt", fallback: loaded.branchSkipPrompt)

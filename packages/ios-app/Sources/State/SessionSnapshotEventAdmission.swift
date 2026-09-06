@@ -3,6 +3,7 @@ enum SessionSnapshotTranscriptAdmissionPolicy {
 
     static func admit(_ snapshot: SessionSnapshot) -> Bool {
         guard admitsContextWindowPolicy(snapshot),
+              admitsCompactionPolicy(snapshot),
               admitsItems(snapshot.transcript),
               snapshot.streaming.map(admitsItem) ?? true,
               snapshot.activeToolSegmentId.map({
@@ -30,6 +31,17 @@ enum SessionSnapshotTranscriptAdmissionPolicy {
 
     static func admitsItem(_ item: TranscriptItem) -> Bool {
         !item.id.isEmpty && item.id.utf8.count <= maximumItemIdentityUTF8Bytes
+    }
+
+    private static func admitsCompactionPolicy(_ snapshot: SessionSnapshot) -> Bool {
+        guard let policy = snapshot.compactionPolicy else { return true }
+        guard policy.next.isValid, policy.next.model == snapshot.model,
+              (1_024...1_000_000).contains(policy.currentBudgets.reserveTokens),
+              (0...1_000_000).contains(policy.currentBudgets.keepRecentTokens),
+              policy.warning.map({ $0.utf8.count <= 4_096 }) ?? true else { return false }
+        guard let active = policy.active else { return true }
+        return active.isValid && ["manual", "threshold", "overflow"].contains(active.reason ?? "")
+            && (snapshot.phase == .compacting || snapshot.phase == .retrying)
     }
 
     private static func admitsContextWindowPolicy(_ snapshot: SessionSnapshot) -> Bool {

@@ -21,6 +21,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
+import { compactionPolicyExtension, CompactionOperationPolicy } from "../runtime/compaction-policy.js";
 import { contextWindowExtension, SessionContextWindowPolicy } from "../providers/context-window-policy.js";
 import type {
   ChatOrigin,
@@ -318,6 +319,7 @@ export interface RuntimeDrainBlockerFact {
  */
 export class RuntimeSlot {
   private readonly contextPolicies = new WeakMap<AgentSession, SessionContextWindowPolicy>();
+  private readonly compactionPolicies = new WeakMap<AgentSession, CompactionOperationPolicy>();
   private runtime!: AgentSessionRuntime;
   private unsubscribe: (() => void) | undefined;
   private readonly lane = new AsyncMutex();
@@ -1131,6 +1133,7 @@ export class RuntimeSlot {
       // model files remain canonical through their shared file paths.
       const modelRuntime = await this.dependencies.createModelRuntime();
       let contextPolicy: SessionContextWindowPolicy | undefined;
+      let compactionPolicy: CompactionOperationPolicy | undefined;
       this.resourceReloadOptions = {
         // Reload must re-read the canonical decision. Capturing the value from
         // runtime creation would leave project code loaded after trust changes.
@@ -1144,6 +1147,14 @@ export class RuntimeSlot {
         resourceLoaderOptions: {
           extensionFactories: [
             { name: "tron-context-window", factory: contextWindowExtension(() => contextPolicy) },
+            { name: "tron-compaction-policy", factory: compactionPolicyExtension(
+              () => compactionPolicy,
+              // Summary auth can finish after Stop but before compaction_start
+              // rotates the display ID. Automatic work retains its prompt fence.
+              (event) => (this.operation?.id !== undefined && this.abortedOperations.has(this.operation.id))
+                || (event.reason !== "manual" && this.activeOperationId !== undefined && this.abortedOperations.has(this.activeOperationId)),
+              () => { this.revision += 1; this.publishSnapshot(); },
+            ) },
             { name: "tron-core", factory: createTronCoreExtension(this.dependencies.workspace) },
             {
               name: "tron-display",
@@ -1193,7 +1204,9 @@ export class RuntimeSlot {
         // bash schema is nevertheless the exact SDK definition registered here.
         customTools: [directBashProcesses.toolDefinition(trust.cwd) as unknown as ToolDefinition],
       });
-      created.session.agent.streamFunction = abortAwareStream(created.session.agent.streamFunction);
+      compactionPolicy = new CompactionOperationPolicy(created.session, this.dependencies.agentDir);
+      created.session.agent.streamFunction = compactionPolicy.wrap(abortAwareStream(created.session.agent.streamFunction));
+      this.compactionPolicies.set(created.session, compactionPolicy);
       contextPolicy = new SessionContextWindowPolicy(created.session);
       this.contextPolicies.set(created.session, contextPolicy);
       return { ...created, services, diagnostics: services.diagnostics };
@@ -2719,6 +2732,7 @@ export class RuntimeSlot {
           }
         }
         this.compactionBaselineEntryId = undefined;
+        if (completedOperation?.id) this.abortedOperations.delete(completedOperation.id);
         // Hooks may append canonical entries after the compaction. A single-row
         // delta cannot describe that branch and consumes the client's next
         // cursor when rejected. Publish one immediate bounded authority frame.
@@ -4958,6 +4972,7 @@ export class RuntimeSlot {
         })();
     const contextUsage = derived.stats.contextUsage;
     const contextWindowPolicy = this.contextPolicies.get(session)?.snapshot();
+    const compactionPolicy = this.compactionPolicies.get(session)?.snapshot();
     const stats = derived.stats;
     const latestCacheHitRate = derived.latestCacheHitRate;
     // Pi exposes streamingMessage before an async message_start hook returns,
@@ -5031,6 +5046,7 @@ export class RuntimeSlot {
       availableThinkingLevels: session.getAvailableThinkingLevels(),
       ...(contextUsage ? { contextUsage } : {}),
       ...(contextWindowPolicy ? { contextWindowPolicy } : {}),
+      ...(compactionPolicy ? { compactionPolicy } : {}),
       stats: {
         userMessages: stats.userMessages,
         assistantMessages: stats.assistantMessages,
@@ -5385,6 +5401,11 @@ export class RuntimeSlot {
       if (ownership && isExactExtensionCommand) {
         throw new GatewayError("invalid_request", "Extension commands cannot be scheduled");
       }
+      if (!session.isStreaming) {
+        await session.settingsManager.flush();
+        this.compactionPolicies.get(session)?.applyBudgets();
+        this.contextPolicies.get(session)?.apply();
+      }
       let queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
       const operationId = ownership?.operationId ?? randomUUID();
       if (ownership && this.automationTerminalObservers.has(operationId)) {
@@ -5537,6 +5558,9 @@ export class RuntimeSlot {
           this.publishSnapshot();
         } else if (!queuesIntoActiveRun) {
           this.activeOperationId = operationId;
+          // Gateway owns preflight even before Pi creates an Agent controller
+          // (including auth and compaction preparation). It is not idle work.
+          this.phase = "running";
           this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString(), invocationId, lifecycle: "staged" };
           this.pendingPromptMessage = undefined;
           this.pendingPrompt = {
@@ -5573,7 +5597,16 @@ export class RuntimeSlot {
           images,
           ...(queuesIntoActiveRun ? { streamingBehavior: behavior! } : {}),
           source: "rpc",
-          preflightResult: acceptedResolve,
+          preflightResult: (accepted) => {
+            // Pi has no active Agent signal during pre-prompt compaction. Stop
+            // must also revoke this exact pending prompt at SDK admission; an
+            // aborted summary alone does not prevent Agent.prompt() starting.
+            if (accepted && this.abortedOperations.has(operationId)) {
+              acceptedResolve(false);
+              throw new GatewayError("cancelled", "Prompt stopped before agent admission");
+            }
+            acceptedResolve(accepted);
+          },
         }));
         // Pi awaits an extension command handler before invoking its preflight
         // callback. The Gateway has already durably admitted the exact command
@@ -5694,7 +5727,7 @@ export class RuntimeSlot {
           // Before queue/user disposition, rejection is definitive and wakes
           // that exact admission below. After disposition, canonical/runtime
           // lifecycle remains authoritative for already accepted work.
-          this.emit("session.diagnostic", safeJson({
+          if (!this.abortedOperations.has(operationId)) this.emit("session.diagnostic", safeJson({
             code: "runtime-prompt-failed",
             operationId,
             message: error instanceof Error ? error.message : String(error),
@@ -5745,6 +5778,12 @@ export class RuntimeSlot {
       this.lifecycle.resolvePreflight(operationId, admitted);
       admissionAccepted = admitted;
       if (!admitted) {
+        // A preflight callback is a disposition, not SDK settlement. Join the
+        // exact promise before retiring its marker or publishing idle.
+        await run.catch(() => {});
+        const stopped = this.abortedOperations.has(operationId);
+        const terminalLifecycle = stopped ? "interrupted" : "failed";
+        const errorCode = stopped ? "user-abort" : "preflight-rejected";
         await this.persistInvocationReceipt(makeInvocationReceipt({
           version: 1,
           receiptId: `terminal:${invocationId}`,
@@ -5754,17 +5793,17 @@ export class RuntimeSlot {
           sessionId: this.id,
           source: invocationSource,
           ...(invocationName ? { name: invocationName } : {}),
-          lifecycle: "failed",
-          errorCode: "preflight-rejected",
+          lifecycle: terminalLifecycle,
+          errorCode,
           origin: invocation.origin,
           sequence: this.revision + 1,
           createdAt: new Date().toISOString(),
         }), operationWork);
         await this.notifyAutomationTerminal({
-          lifecycle: "failed",
+          lifecycle: terminalLifecycle,
           operationId,
           invocationId,
-          errorCode: "preflight-rejected",
+          errorCode,
         });
         this.invocations.delete(invocationId);
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
@@ -5776,10 +5815,15 @@ export class RuntimeSlot {
         if (this.pendingExtensionCommand?.id === operationId) this.pendingExtensionCommand = undefined;
         await this.clearMarkerOwnership(operationId);
         this.settleOperationWork(operationId);
+        this.abortedOperations.delete(operationId);
+        if (this.activeOperationId === undefined && !this.hasActiveAgentRun && !this.queuedManualCompactionInFlight) this.phase = "idle";
+        this.hooks.settled(this.id);
         this.revision += 1;
         this.publishSnapshot();
         finalizeAdmission();
-        throw new GatewayError("invalid_request", "The agent runtime rejected the prompt before admission");
+        throw new GatewayError(stopped ? "cancelled" : "invalid_request", stopped
+          ? "Prompt stopped before agent admission"
+          : "The agent runtime rejected the prompt before admission");
       }
 
       try {
@@ -5919,6 +5963,7 @@ export class RuntimeSlot {
     const invocationOperationId = agentOperationId
       ?? (target?.kind === "prompt" || target?.kind === "command" ? target.id : undefined);
     if (invocationOperationId) this.abortedOperations.add(invocationOperationId);
+    if (target?.kind === "compaction" && target.id) this.abortedOperations.add(target.id);
 
     const session = this.runtime.session;
     for (const cancel of [
@@ -5950,6 +5995,14 @@ export class RuntimeSlot {
       }
     }
 
+    this.revision += 1;
+    this.publishSnapshot();
+  }
+
+  /** Settings writes only refresh the bounded projection. Budget application
+   * stays at idle admission, never inside an active turn or prepared summary. */
+  refreshCompactionPolicy(): void {
+    try { this.compactionPolicies.get(this.runtime.session)?.refresh(); } catch { /* Published warning is authoritative. */ }
     this.revision += 1;
     this.publishSnapshot();
   }
@@ -6322,11 +6375,15 @@ export class RuntimeSlot {
     this.revision += 1;
     this.publishSnapshot();
     try {
+      await this.runtime.session.settingsManager.flush();
+      this.compactionPolicies.get(this.runtime.session)?.applyBudgets();
+      this.contextPolicies.get(this.runtime.session)?.apply();
       await this.runtime.session.compact(instructions);
     } catch (error) {
       operationError = error;
     }
 
+    if (this.operation?.id) this.abortedOperations.delete(this.operation.id);
     if (queued) {
       // The queued command inherited the foreground marker. Reliable cleanup
       // keeps the accepted-work token live through durable deletion.

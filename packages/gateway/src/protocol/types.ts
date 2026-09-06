@@ -806,6 +806,27 @@ export interface ContextWindowPolicy {
   warning?: string;
 }
 
+export interface CompactionConfiguration {
+  enabled: boolean;
+  reserveTokens: number;
+  keepRecentTokens: number;
+  thinkingLevel: "inherit" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  instructions: string;
+  source: Record<"enabled" | "reserveTokens" | "keepRecentTokens" | "thinkingLevel" | "instructions", "global" | "project" | "default">;
+}
+export interface ResolvedCompactionConfiguration extends CompactionConfiguration {
+  model?: ModelRef;
+  requestedThinkingLevel: Exclude<CompactionConfiguration["thinkingLevel"], "inherit">;
+  effectiveThinkingLevel: Exclude<CompactionConfiguration["thinkingLevel"], "inherit"> | null;
+}
+export interface CompactionPolicyProjection {
+  next: ResolvedCompactionConfiguration;
+  currentBudgets: Pick<CompactionConfiguration, "enabled" | "reserveTokens" | "keepRecentTokens">;
+  active?: ResolvedCompactionConfiguration & { reason: "manual" | "threshold" | "overflow" };
+  extensionMayOverride: boolean;
+  warning?: string;
+}
+
 export interface SessionSnapshot {
   sessionId: string;
   runtimeGeneration: string;
@@ -822,6 +843,7 @@ export interface SessionSnapshot {
   availableThinkingLevels: string[];
   contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
   contextWindowPolicy?: ContextWindowPolicy;
+  compactionPolicy?: CompactionPolicyProjection;
   stats: SessionStats;
   queueRevision: number;
   queuedItems: QueuedMessageState[];

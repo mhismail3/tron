@@ -94,7 +94,14 @@ describe("SettingsService", () => {
     }, { cwd, scope: "global", projectTrusted: false });
 
     const document = service.get(cwd, false) as { effective: Record<string, unknown> };
-    expect(document.effective.compaction).toEqual({ enabled: false, reserveTokens: 20_000, keepRecentTokens: 10_000 });
+    expect(document.effective.compaction).toEqual({
+      enabled: false,
+      reserveTokens: 20_000,
+      keepRecentTokens: 10_000,
+      thinkingLevel: "inherit",
+      instructions: "",
+      source: { enabled: "global", reserveTokens: "global", keepRecentTokens: "global", thinkingLevel: "default", instructions: "default" },
+    });
     expect(document.effective.branchSummary).toEqual({ reserveTokens: 8_000, skipPrompt: true });
     expect(document.effective.transport).toBe("websocket");
     expect(document.effective.sessionDir).toBe("/tmp/sessions");
@@ -102,6 +109,24 @@ describe("SettingsService", () => {
       extensions: ["/tmp/extension.ts"],
       packages: [{ source: "npm:test", autoload: false, skills: ["**"] }],
     });
+  });
+
+  it("resolves compaction policy by scope and validates bounded focus instructions", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "tron-settings-policy-"));
+    const cwd = join(agentDir, "project");
+    await mkdir(cwd);
+    const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    const service = new SettingsService(agentDir, models);
+    await service.update({ compaction: { thinkingLevel: "low", instructions: "global focus" } }, { cwd, scope: "global", projectTrusted: false });
+    const inherited = service.get(cwd, false) as any;
+    expect(inherited.effective.compaction).toMatchObject({ thinkingLevel: "low", instructions: "global focus", source: { thinkingLevel: "global" } });
+    await service.update({ compaction: { thinkingLevel: "inherit", instructions: "" } }, { cwd, scope: "project", projectTrusted: true });
+    const reset = service.get(cwd, true) as any;
+    expect(reset.effective.compaction).toMatchObject({ thinkingLevel: "inherit", instructions: "", source: { thinkingLevel: "project", instructions: "project" } });
+    await service.update({ compaction: { thinkingLevel: null, instructions: null } }, { cwd, scope: "project", projectTrusted: true });
+    expect((service.get(cwd, true) as any).effective.compaction).toMatchObject({ thinkingLevel: "low", instructions: "global focus", source: { thinkingLevel: "global" } });
+    await expect(service.update({ compaction: { instructions: "x".repeat(4_001) } }, { cwd, scope: "global", projectTrusted: false })).rejects.toThrow(/4000/);
+    await expect(service.update({ compaction: { thinkingLevel: "low" } }, { cwd, scope: "project", projectTrusted: false })).rejects.toMatchObject({ code: "trust_required" });
   });
 
   it("rejects a runtime session-directory change until restart", async () => {
