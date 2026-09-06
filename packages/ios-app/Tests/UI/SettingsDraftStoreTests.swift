@@ -110,6 +110,77 @@ struct SettingsDraftStoreTests {
         ])
     }
 
+    @Test("project compaction overrides can be deleted without changing budgets")
+    func compactionProjectInheritance() {
+        var baseline = CompactionSettingsDraft()
+        baseline.thinkingLevel = "low"
+        baseline.instructions = "project focus"
+        var global = CompactionSettingsDraft()
+        global.thinkingLevel = "high"
+        global.instructions = "global focus"
+        var project = baseline
+        project.useGlobalPolicy(from: global)
+
+        #expect(project.patch(comparedTo: baseline).objectValue?[
+            "compaction"
+        ]?.objectValue == [
+            "thinkingLevel": .null,
+            "instructions": .null,
+        ])
+        #expect(project.reserveTokens == baseline.reserveTokens)
+        #expect(project.keepRecentTokens == baseline.keepRecentTokens)
+        #expect(project.afterSuccessfulSave().useGlobalFields.isEmpty)
+
+        project.setThinkingLevel("medium")
+        #expect(project.patch(comparedTo: baseline).objectValue?["compaction"]?.objectValue == [
+            "thinkingLevel": .string("medium"),
+            "instructions": .null,
+        ])
+        project.useGlobalPolicy(from: global)
+        project.setInstructions("new project focus")
+        #expect(project.patch(comparedTo: baseline).objectValue?["compaction"]?.objectValue == [
+            "thinkingLevel": .null,
+            "instructions": .string("new project focus"),
+        ])
+    }
+
+    @Test("compaction reset intent is cleared before a later budget-only save")
+    func compactionResetThenBudgetEdit() {
+        let target = SettingsTarget.global
+        var baseline = CompactionSettingsDraft()
+        baseline.thinkingLevel = "low"
+        baseline.instructions = "focus"
+
+        var store = ScopedSettingsDraftStore<CompactionSettingsDraft>()
+        let installed = store.install(baseline, for: target)
+        #expect(installed)
+
+        var reset = baseline
+        reset.restoreStandard()
+        store.update(reset, for: target)
+        let resetRevision = store.revision(for: target)!
+        #expect(reset.patch(comparedTo: baseline).objectValue?["compaction"]?.objectValue == [
+            "thinkingLevel": .string("inherit"),
+            "instructions": .string("")
+        ])
+        let markedSaved = store.markSaved(
+            submitted: reset,
+            resulting: reset.afterSuccessfulSave(),
+            for: target,
+            expectedRevision: resetRevision
+        )
+        #expect(markedSaved)
+        #expect(store.draft(for: target)?.restoreStandardRequested == false)
+
+        var budgetEdit = store.draft(for: target)!
+        budgetEdit.reserveTokens += 1
+        store.update(budgetEdit, for: target)
+        let budgetPatch = budgetEdit.patch(comparedTo: store.baseline(for: target)!).objectValue
+        #expect(budgetPatch == [
+            "compaction": .object(["reserveTokens": .number(Double(budgetEdit.reserveTokens))])
+        ])
+    }
+
     @Test("custom context tokens are committed only as valid whole numbers")
     func contextWindowInput() {
         let limits = ContextWindowLimits(minimum: 37_408, maximum: 1_050_000, default: 272_000, longContextThreshold: 272_000)

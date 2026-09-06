@@ -20,6 +20,11 @@ struct SessionSnapshotEventAdmissionTests {
         let decoded = try JSONDecoder().decode(SessionSnapshot.self, from: JSONEncoder().encode(running))
         #expect(decoded.compactionPolicy?.active?.instructions == "Keep the API contract")
         #expect(SessionSnapshotTranscriptAdmissionPolicy.admit(decoded))
+        var successor = decoded
+        successor.phase = .running
+        successor.eventSequence += 1
+        successor.revision += 1
+        #expect(SessionSnapshotTranscriptAdmissionPolicy.admit(successor))
         var completed = decoded
         completed.phase = .idle
         completed.eventSequence += 1

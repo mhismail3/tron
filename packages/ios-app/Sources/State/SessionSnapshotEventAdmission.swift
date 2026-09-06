@@ -40,8 +40,11 @@ enum SessionSnapshotTranscriptAdmissionPolicy {
               (0...1_000_000).contains(policy.currentBudgets.keepRecentTokens),
               policy.warning.map({ $0.utf8.count <= 4_096 }) ?? true else { return false }
         guard let active = policy.active else { return true }
+        // The SDK can admit the successor Agent turn before compaction_end;
+        // active is still authoritative during that running handoff. It must
+        // not survive into an idle/settled frame.
         return active.isValid && ["manual", "threshold", "overflow"].contains(active.reason ?? "")
-            && (snapshot.phase == .compacting || snapshot.phase == .retrying)
+            && (snapshot.phase == .compacting || snapshot.phase == .retrying || snapshot.phase == .running)
     }
 
     private static func admitsContextWindowPolicy(_ snapshot: SessionSnapshot) -> Bool {

@@ -125,6 +125,8 @@ describe("SettingsService", () => {
     expect(reset.effective.compaction).toMatchObject({ thinkingLevel: "inherit", instructions: "", source: { thinkingLevel: "project", instructions: "project" } });
     await service.update({ compaction: { thinkingLevel: null, instructions: null } }, { cwd, scope: "project", projectTrusted: true });
     expect((service.get(cwd, true) as any).effective.compaction).toMatchObject({ thinkingLevel: "low", instructions: "global focus", source: { thinkingLevel: "global" } });
+    await service.update({ compaction: { thinkingLevel: "high", instructions: "changed global focus" } }, { cwd, scope: "global", projectTrusted: false });
+    expect((service.get(cwd, true) as any).effective.compaction).toMatchObject({ thinkingLevel: "high", instructions: "changed global focus", source: { thinkingLevel: "global", instructions: "global" } });
     await expect(service.update({ compaction: { instructions: "x".repeat(4_001) } }, { cwd, scope: "global", projectTrusted: false })).rejects.toThrow(/4000/);
     await expect(service.update({ compaction: { thinkingLevel: "low" } }, { cwd, scope: "project", projectTrusted: false })).rejects.toMatchObject({ code: "trust_required" });
   });
@@ -140,6 +142,46 @@ describe("SettingsService", () => {
       { sessionDir: "/tmp/other-sessions" },
       { cwd, scope: "global", projectTrusted: false },
     )).rejects.toThrow(/restart is required/);
+  });
+
+  it("rejects unrelated writes before committing malformed compaction settings", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "tron-invalid-compaction-write-"));
+    const cwd = join(agentDir, "project");
+    await mkdir(cwd);
+    const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    const service = new SettingsService(agentDir, models);
+    const settingsPath = join(agentDir, "settings.json");
+    const original = JSON.stringify({ compaction: { thinkingLevel: "not-a-level" }, marker: "preserve" });
+    await writeFile(settingsPath, original);
+
+    await expect(service.update(
+      { hideThinkingBlock: true },
+      { cwd, scope: "global", projectTrusted: false },
+    )).rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(settingsPath, "utf8")).toBe(original);
+
+    const projectPath = join(cwd, ".pi");
+    await mkdir(projectPath);
+    const projectOriginal = JSON.stringify({ marker: "project" });
+    await writeFile(join(projectPath, "settings.json"), projectOriginal);
+    await expect(service.update(
+      { hideThinkingBlock: true },
+      { cwd, scope: "project", projectTrusted: true },
+    )).rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(join(projectPath, "settings.json"), "utf8")).toBe(projectOriginal);
+
+    await service.update({ compaction: { thinkingLevel: "inherit" } }, { cwd, scope: "global", projectTrusted: false });
+    const invalidProject = JSON.stringify({ compaction: { keepRecentTokens: -1 }, marker: "project" });
+    await writeFile(join(projectPath, "settings.json"), invalidProject);
+    await expect(service.update({ hideThinkingBlock: true }, { cwd, scope: "project", projectTrusted: true }))
+      .rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(join(projectPath, "settings.json"), "utf8")).toBe(invalidProject);
+
+    await writeFile(settingsPath, '{"compaction":');
+    await writeFile(join(projectPath, "settings.json"), projectOriginal);
+    await expect(service.update({ hideThinkingBlock: true }, { cwd, scope: "project", projectTrusted: true }))
+      .rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(join(projectPath, "settings.json"), "utf8")).toBe(projectOriginal);
   });
 
   it("rejects settings that generic JSON projection would silently alter", async () => {

@@ -731,21 +731,29 @@ therefore fences the exact public `preflightResult` admission callback as well. 
 projects its owned preflight as running while auth/preparation is pending. Stop at
 `compaction_start` also revokes compaction admission before a late SDK controller can
 start generation. Automatic compaction additionally checks its enclosing prompt's
-cancellation after summary auth, since the display operation ID may rotate after Stop. A rejected preflight joins its SDK promise, persists an interrupted
+cancellation after summary auth, since the display operation ID may rotate after Stop. The
+pinned SDK exposes no cancellation signal for its auth/preflight wait, so Stop may return a
+retryable pending/conflict outcome after the bounded grace; Gateway does not claim settlement
+until the exact receipt completes. A rejected preflight joins its SDK promise, persists an interrupted
 (`user-abort`) or failed receipt, retires the exact marker, and only then publishes idle.
 No cancellation is inferred from the spinner, and a late Stop cannot cancel a successor.
 
 Manual compaction has a separate Gateway-owned single-entry maintenance admission. Its
 synchronous claim covers pending, direct, and queued execution, so a second request is rejected
 rather than serialized behind the first. An idle request starts canonical compaction immediately.
-A request accepted during an active agent run publishes `compactionQueued`, retains the run marker,
+A request accepted during an active agent run publishes `compactionQueued`, persists its own exact run marker,
 and keeps its command receipt pending until the exact compaction starts after final `agent_settled`
 and completes or fails. Handoff revalidates that no newer agent run owns the session, and queued
-completion awaits durable marker removal before publishing settled. Every successful or failed
+completion awaits durable marker removal before publishing settled. Each preceding prompt retires
+its own marker independently, even if newer prompts defer the handoff; compaction never sweeps a
+successor's marker. Every successful or failed
 `compaction_end` publishes one immediate fitted authoritative snapshot with the current canonical
 tail/leaf and restored prompt/automatic-idle state; manual work remains compacting until its durable
-marker retires. The compaction operation identity is retained on the projected canonical compaction
-entry as presentation-only metadata, so compacting and compacted content occupy one physical row even
+marker retires. Manual admission keeps its operation ID and start time through the SDK's
+`compaction_start`. A hook-launched successor gets its own visible Stop identity at `agent_start`;
+older cleanup retains its captured compaction owner across SDK and marker awaits and cannot erase
+the successor's abort intent, phase, or marker. The
+compaction operation identity is retained on the projected canonical compaction entry as presentation-only metadata, so compacting and compacted content occupy one physical row even
 when bounded transcript ranges change precision. Hooks may append after the compaction entry, so
 the Gateway does not spend a cursor on a single-entry delta that is already a non-leaf.
 Gateway shutdown synchronously
@@ -847,8 +855,10 @@ Canonical global/project `compaction` settings add `thinkingLevel` (`inherit`, `
 `minimal`, `low`, `medium`, `high`, `xhigh`, `max`) and `instructions` (at most 4,000 UTF-16
 units). Defaults remain inherited conversation thinking and empty focus; Low is opt-in
 pending real-provider quality evaluation. The SDK clamps requested thinking to model
-capabilities; the projection describes requested/resolved settings, not measured provider
-reasoning use. Focus is appended to a cloned summary system context for both history and
+capabilities; the projection describes the SDK request level, not measured provider
+reasoning use or a provider guarantee. In particular, an effective `off` request may
+be represented by omitted reasoning fields and leave the provider's own default behavior
+in control. Focus is appended to a cloned summary system context for both history and
 split-prefix passes. One-off manual instructions retain the SDK's history-only behavior.
 Chat and branch-summary requests are untouched. Concision is an instruction, not a hard
 combined output limit, and no provider latency/quality improvement is claimed by fixture tests.
@@ -861,18 +871,31 @@ contains `compactionPolicy.next`, `currentBudgets`, and optional `active` config
 terminal events clear the captured policy before the owner publishes the end snapshot.
 Sources are global/project/default, and global Settings never invents a session model.
 Absent project fields inherit; null patches delete overrides; explicit inherit/empty restore
-standard generation without changing budgets. Malformed initial configuration rejects
-runtime creation. A failed read in an existing runtime preserves the last valid policy with
+standard generation without changing budgets. Project editors can instead delete
+thinking/focus overrides with null patches to resume global inheritance. Malformed initial
+configuration rejects runtime creation. A failed read in an existing runtime preserves the last valid policy with
 a bounded warning; idle admission rejects until settings are valid again.
 
 Other extensions may merely observe compaction (including subagents). Their registration
 must not prevent loading the session. `extensionMayOverride` warns that an extension can
 supply its own summary; independent extension generation is not claimed as controlled by
-Tron's request policy. SDK cancellation/custom-result ordering remains authoritative.
+Tron's request policy. The pinned SDK can also let an unawaited extension
+`sendMessage(..., { triggerTurn: true })` begin an auxiliary run from `session_compact`
+before the original pre-prompt request is admitted. Gateway gives that auxiliary turn a
+distinct owner and uses the public `preflightResult` callback to reject the displaced,
+unadmitted request with a retryable `busy` error. The caller must explicitly retry after
+settlement; Gateway neither starts a second overlapping Agent prompt nor replays the input.
+This remains true if the auxiliary turn finishes before the compaction hook returns; the
+still-live compaction owner is restored until its own terminal event. The callback cannot
+prevent the extension's trigger turn itself or cancel the SDK's earlier auth wait.
+SDK cancellation/custom-result ordering remains authoritative.
 `compaction-policy.test.ts` compares real SDK baseline/adapted requests and checkpoints,
 including split summaries, retries, branch summaries, reload and failures.
 `runtime-compaction.integration.test.ts` exercises real preflight/between-turn Stop,
 early manual cancellation, overflow continuation, saved/active settings and durable receipts.
+It also covers uncancellable auth through Stop grace expiry and a public `session_compact`
+extension's fire-and-forget successor through manual cleanup, Stop, and marker retirement,
+plus preflight displacement with both running and already-settled auxiliary turns.
 
 Settings projections include
 scope-owned documents and effective values, but write-only proxy credentials are removed

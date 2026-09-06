@@ -7,11 +7,31 @@ struct CompactionSettingsDraft: Equatable {
     var reserveTokens = 16_384
     var keepRecentTokens = 20_000
     var restoreStandardRequested = false
+    enum GenerationField: Hashable { case thinking, focus }
+    var useGlobalFields: Set<GenerationField> = []
 
     mutating func restoreStandard() {
         thinkingLevel = "inherit"
         instructions = ""
         restoreStandardRequested = true
+        useGlobalFields.removeAll()
+    }
+
+    mutating func setThinkingLevel(_ level: String) {
+        thinkingLevel = level
+        useGlobalFields.remove(.thinking)
+    }
+
+    mutating func setInstructions(_ value: String) {
+        instructions = Self.boundedInstructions(value)
+        useGlobalFields.remove(.focus)
+    }
+
+    mutating func useGlobalPolicy(from inherited: Self) {
+        thinkingLevel = inherited.thinkingLevel
+        instructions = inherited.instructions
+        restoreStandardRequested = false
+        useGlobalFields = [.thinking, .focus]
     }
 
     static func boundedInstructions(_ value: String) -> String {
@@ -26,11 +46,20 @@ struct CompactionSettingsDraft: Equatable {
         return String(result)
     }
 
+    func afterSuccessfulSave() -> Self {
+        var saved = self
+        saved.restoreStandardRequested = false
+        saved.useGlobalFields.removeAll()
+        return saved
+    }
+
     func patch(comparedTo baseline: Self) -> JSONValue {
         var compaction: [String: JSONValue] = [:]
         if enabled != baseline.enabled { compaction["enabled"] = .bool(enabled) }
-        if thinkingLevel != baseline.thinkingLevel || restoreStandardRequested { compaction["thinkingLevel"] = .string(thinkingLevel) }
-        if instructions != baseline.instructions || restoreStandardRequested { compaction["instructions"] = .string(instructions) }
+        if useGlobalFields.contains(.thinking) { compaction["thinkingLevel"] = .null }
+        else if thinkingLevel != baseline.thinkingLevel || restoreStandardRequested { compaction["thinkingLevel"] = .string(thinkingLevel) }
+        if useGlobalFields.contains(.focus) { compaction["instructions"] = .null }
+        else if instructions != baseline.instructions || restoreStandardRequested { compaction["instructions"] = .string(instructions) }
         if reserveTokens != baseline.reserveTokens { compaction["reserveTokens"] = .number(Double(reserveTokens)) }
         if keepRecentTokens != baseline.keepRecentTokens { compaction["keepRecentTokens"] = .number(Double(keepRecentTokens)) }
         return .object(compaction.isEmpty ? [:] : ["compaction": .object(compaction)])
@@ -78,11 +107,11 @@ struct CompactionSettingsView: View {
                             isOn: $draft.enabled
                         )
                         TronSettingsDivider(accent: .tronTeal)
-                        TronValueRow(icon: "brain", title: "Summary thinking", detail: "Same conversation model; resolved to its capabilities", value: draft.thinkingLevel == "inherit" ? "Inherit conversation" : draft.thinkingLevel.capitalized, accent: .tronTeal) {
+                        TronValueRow(icon: "brain", title: "Summary thinking", detail: "Same conversation model; SDK-resolved request level (provider defaults may still apply)", value: draft.thinkingLevel == "inherit" ? "Inherit conversation" : draft.thinkingLevel.capitalized, accent: .tronTeal) {
                             TronInlineMenu("Change", accent: .tronTeal) {
-                                Button("Inherit conversation") { draft.thinkingLevel = "inherit" }
+                                Button("Inherit conversation") { draft.setThinkingLevel("inherit") }
                                 ForEach(["off", "minimal", "low", "medium", "high", "xhigh", "max"], id: \.self) { level in
-                                    Button(level.capitalized) { draft.thinkingLevel = level }
+                                    Button(level.capitalized) { draft.setThinkingLevel(level) }
                                 }
                             }.disabled(!supportsPolicy)
                         }
@@ -100,6 +129,13 @@ struct CompactionSettingsView: View {
                             .foregroundStyle(Color.tronTextSecondary)
                         Button("Restore standard behavior") { draft.restoreStandard() }
                             .disabled(!supportsPolicy)
+                        if scope == .project, let inherited = globalProjectionDraft() {
+                            Button("Use global values") { draft.useGlobalPolicy(from: inherited) }
+                                .disabled(!supportsPolicy)
+                            Text("Removes this project's thinking and focus overrides so future global changes are inherited. Save to apply.")
+                                .font(TronTypography.secondaryDescription)
+                                .foregroundStyle(Color.tronTextSecondary)
+                        }
                         Text("Restores inherited conversation thinking and empty focus. Automatic compaction and token budgets are unchanged. Save to apply.")
                             .font(TronTypography.secondaryDescription)
                             .foregroundStyle(Color.tronTextSecondary)
@@ -187,7 +223,7 @@ struct CompactionSettingsView: View {
     }
 
     private var instructionsBinding: Binding<String> {
-        Binding(get: { draft.instructions }, set: { draft.instructions = CompactionSettingsDraft.boundedInstructions($0) })
+        Binding(get: { draft.instructions }, set: { draft.setInstructions($0) })
     }
 
     private func numberRow(_ icon: String, _ title: String, _ detail: String, value: Binding<Int>) -> some View {
@@ -226,6 +262,18 @@ struct CompactionSettingsView: View {
         )
     }
 
+    private func globalProjectionDraft() -> CompactionSettingsDraft? {
+        // The scoped response already includes the canonical global document;
+        // avoid a second request and a different-time inheritance preview.
+        guard let target = settingsTarget,
+              let global = model.settings(for: target)?.objectValue?["documents"]?.objectValue?["global"]?.objectValue else { return nil }
+        let compaction = global["compaction"]?.objectValue ?? [:]
+        return CompactionSettingsDraft(
+            thinkingLevel: compaction.string("thinkingLevel", fallback: "inherit"),
+            instructions: compaction.string("instructions", fallback: "")
+        )
+    }
+
     private func save() async {
         guard let target = settingsTarget else { return }
         drafts.update(draft, for: target)
@@ -237,7 +285,15 @@ struct CompactionSettingsView: View {
         do {
             try await model.updateSettings(submitted.patch(comparedTo: baseline), target: target)
             guard target == settingsTarget, draft == submitted else { return }
-            _ = drafts.markSaved(submitted, for: target, expectedRevision: revision)
+            let resultingDraft = (projectionDraft(target: target) ?? submitted).afterSuccessfulSave()
+            if drafts.markSaved(
+                submitted: submitted,
+                resulting: resultingDraft,
+                for: target,
+                expectedRevision: revision
+            ) {
+                draft = resultingDraft
+            }
         } catch { model.presentError(error) }
     }
 }

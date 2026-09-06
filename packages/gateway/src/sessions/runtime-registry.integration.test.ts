@@ -19,7 +19,7 @@ import { CatalogMetadataIndex } from "./catalog-metadata-index.js";
 import { INVOCATION_RECEIPT_TYPE, makeInvocationReceipt } from "./invocation-receipts.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, MAX_EXTENSION_HISTORY_BYTES, type ExtensionActivityReceipt } from "./extension-activity-history.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
-import { RunMarkerCompletionConflictError } from "./run-markers.js";
+import { RunMarkerCompletionConflictError, type RunMarkerStore } from "./run-markers.js";
 import { toolSegmentId } from "./projection.js";
 
 async function collectStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
@@ -5149,6 +5149,70 @@ export default function (pi) {
     ]);
   });
 
+  it("preserves a successor operation and abort intent across compaction_end", async () => {
+    const fixture = await coldFixture("compaction-successor-ownership");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      phase: "running" | "compacting";
+      activeOperationId?: string;
+      operation?: { id?: string; kind: "prompt" | "compaction"; startedAt: string };
+      abortedOperations: Set<string>;
+      onEvent: (event: unknown) => void;
+      runtime: { session: { readonly isStreaming: boolean } };
+    };
+    const streaming = vi.spyOn(internal.runtime.session, "isStreaming", "get").mockReturnValue(true);
+    internal.phase = "running";
+    internal.activeOperationId = "original-operation";
+    internal.operation = { id: "original-operation", kind: "prompt", startedAt: new Date().toISOString() };
+
+    internal.onEvent({ type: "compaction_start", reason: "threshold" });
+    const compactionID = internal.operation?.id;
+    expect(internal.operation?.kind).toBe("compaction");
+    expect(compactionID).toBeDefined();
+    internal.abortedOperations.add(compactionID!);
+
+    internal.operation = { id: "successor-operation", kind: "prompt", startedAt: new Date().toISOString() };
+    internal.activeOperationId = "successor-operation";
+    internal.phase = "running";
+    internal.abortedOperations.add("successor-operation");
+    internal.onEvent({ type: "compaction_end", reason: "threshold", result: undefined, aborted: false, willRetry: false });
+
+    expect(slot.snapshot()).toMatchObject({
+      phase: "running",
+      operation: { id: "successor-operation", kind: "prompt" },
+    });
+    expect(internal.abortedOperations.has(compactionID!)).toBe(false);
+    expect(internal.abortedOperations.has("successor-operation")).toBe(true);
+    streaming.mockRestore();
+  });
+
+  it("leaves a successor running when manual compaction settles after an awaited failure", async () => {
+    const fixture = await coldFixture("manual-compaction-successor-cleanup");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const internal = slot as unknown as {
+      phase: "idle" | "running" | "compacting";
+      operation?: { id?: string; kind: "prompt" | "compaction"; startedAt: string };
+      abortedOperations: Set<string>;
+      runtime: { session: { compact: (instructions?: string) => Promise<unknown> } };
+    };
+    vi.spyOn(internal.runtime.session, "compact").mockImplementation(async () => {
+      const compactionID = internal.operation?.id;
+      expect(internal.operation?.kind).toBe("compaction");
+      if (compactionID) internal.abortedOperations.add(compactionID);
+      internal.operation = { id: "manual-successor", kind: "prompt", startedAt: new Date().toISOString() };
+      internal.phase = "running";
+      internal.abortedOperations.add("manual-successor");
+      throw new Error("manual compaction failed after successor start");
+    });
+
+    await expect(slot.compact()).rejects.toThrow("manual compaction failed after successor start");
+    expect(slot.snapshot()).toMatchObject({
+      phase: "running",
+      operation: { id: "manual-successor", kind: "prompt" },
+    });
+    expect(internal.abortedOperations.has("manual-successor")).toBe(true);
+  });
+
   it("rotates provisional tool segment authority across automatic compaction", async () => {
     const fixture = await coldFixture("compaction-tool-segment-boundary");
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
@@ -6122,12 +6186,15 @@ export default function (pi) {
     });
     let releaseMarker!: () => void;
     const markerBarrier = new Promise<void>((resolve) => { releaseMarker = resolve; });
-    const markerStore = (slot as unknown as {
-      dependencies: { markers: { clear: (sessionId: string) => Promise<void> } };
-    }).dependencies.markers;
-    const clearMarker = vi.spyOn(markerStore, "clear").mockImplementation(async () => markerBarrier);
+    const markerStore = (slot as unknown as { dependencies: { markers: RunMarkerStore } }).dependencies.markers;
+    const originalClear = markerStore.clear.bind(markerStore);
+    let promptOperationId: string;
+    const clearMarker = vi.spyOn(markerStore, "clear").mockImplementation(async (sessionId, operationId) => {
+      if (operationId !== promptOperationId) await markerBarrier;
+      await originalClear(sessionId, operationId);
+    });
 
-    await slot.prompt("start");
+    promptOperationId = (await slot.prompt("start")).operationId;
     await waitUntil(() => slot.isBusy);
     const queuedCompaction = slot.compact("Preserve exact decisions");
     await waitUntil(() => slot.snapshot().compactionQueued === true);
@@ -6153,7 +6220,7 @@ export default function (pi) {
     let queuedSettled = false;
     void queuedCompaction.then(() => { queuedSettled = true; }, () => {});
     releaseCompaction();
-    await waitUntil(() => clearMarker.mock.calls.length === 1);
+    await waitUntil(() => clearMarker.mock.calls.some(([, id]) => id !== promptOperationId));
     await Promise.resolve();
     expect(queuedSettled).toBe(false);
     expect(registry.activeSessionIds()).toContain(slot.id);
@@ -6162,6 +6229,7 @@ export default function (pi) {
     await waitUntil(() => !slot.isBusy);
     expect(slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
     expect(registry.activeSessionIds()).not.toContain(slot.id);
+    expect(await markerStore.evidenceFor(slot.id)).toEqual([]);
   });
 
   it("reasserts exact marker ownership when cleanup races terminal completion stamping", async () => {
@@ -6357,19 +6425,24 @@ export default function (pi) {
       runtime: { session: { compact: (instructions?: string) => Promise<unknown> } };
     }).runtime.session;
     vi.spyOn(session, "compact").mockResolvedValue({});
-    const markerStore = (slot as unknown as {
-      dependencies: { markers: { clear: (sessionId: string) => Promise<void> } };
-    }).dependencies.markers;
-    const clearMarker = vi.spyOn(markerStore, "clear")
-      .mockRejectedValueOnce(new Error("marker removal failed"));
+    const markerStore = (slot as unknown as { dependencies: { markers: RunMarkerStore } }).dependencies.markers;
+    const originalClear = markerStore.clear.bind(markerStore);
+    let promptOperationId: string;
+    let maintenanceAttempts = 0;
+    const clearMarker = vi.spyOn(markerStore, "clear").mockImplementation(async (sessionId, operationId) => {
+      if (operationId !== promptOperationId && ++maintenanceAttempts === 1) throw new Error("marker removal failed");
+      await originalClear(sessionId, operationId);
+    });
 
-    await slot.prompt("start");
+    promptOperationId = (await slot.prompt("start")).operationId;
     await waitUntil(() => slot.isBusy);
     const queuedCompaction = slot.compact();
     await waitUntil(() => slot.snapshot().compactionQueued === true);
     releaseResponse();
     await expect(queuedCompaction).resolves.toEqual({ queued: true });
-    expect(clearMarker).toHaveBeenCalledTimes(2);
+    expect(maintenanceAttempts).toBe(2);
+    expect(clearMarker.mock.calls.every(([, id]) => id !== undefined)).toBe(true);
+    expect(await markerStore.evidenceFor(slot.id)).toEqual([]);
     expect(slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
     expect(slot.snapshot().operation).toBeUndefined();
     clearMarker.mockRestore();
@@ -6512,6 +6585,7 @@ export default function (pi) {
       pendingPrompt: { id: string; createdAt: string; text: string; attachmentCount: number };
       phase: string;
       operation: unknown;
+      compactionOperation: unknown;
       onEvent: (event: unknown) => void;
     };
     const parent = internal.runtime.session.sessionManager.appendMessage(
@@ -6527,6 +6601,7 @@ export default function (pi) {
     };
     internal.phase = "compacting";
     internal.operation = { kind: "compaction" };
+    internal.compactionOperation = internal.operation;
     internal.onEvent({
       type: "compaction_end", reason: "threshold",
       result: { summary: "summary", firstKeptEntryId: parent, tokensBefore: 4_096 },
@@ -6646,6 +6721,8 @@ export default function (pi) {
     await waitUntil(() => compact.mock.calls.length === 1);
     await expect(queuedCompaction).resolves.toEqual({ queued: true });
     await waitUntil(() => !slot.isBusy);
+    const markers = (slot as unknown as { dependencies: { markers: RunMarkerStore } }).dependencies.markers;
+    expect(await markers.evidenceFor(slot.id)).toEqual([]);
   });
 
   it("cancels pending compaction and drains its runtime during registry shutdown", async () => {

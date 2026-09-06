@@ -504,14 +504,21 @@ Compaction Settings consolidates automatic compaction and advanced reserve/recen
 formerly duplicated under Models and Defaults and Runtime Behavior. The existing scoped draft
 store/coordinator owns edits, target switching and confirmed writes. `compaction-policy.v1`
 adds independent thinking (default: inherit conversation), bounded optional focus and an
-explicit standard reset that preserves budgets. The editor uses the Gateway's UTF-16 limit.
-Thinking/focus apply at the next compaction; enabled/budgets apply at idle prompt or manual
+explicit standard reset that preserves budgets; project scope also offers deletion of thinking/focus
+fields to resume global inheritance. Deletion intent is per field: editing thinking after
+choosing global values must not turn the untouched focus back into a project override.
+The scoped response's global document provides the inheritance preview, and a confirmed save
+installs the authoritative resolved values while consuming one-shot edit intent. The editor
+uses the Gateway's UTF-16 limit. The effective
+thinking level is the SDK-resolved request level, not a provider guarantee (Off may omit a reasoning
+field and leave provider defaults in control). Thinking/focus apply at the next compaction; enabled/budgets apply at idle prompt or manual
 compaction admission. A live authoritative session projection separately displays the selected
 model, requested/resolved next thinking, actual current budgets and captured running policy.
 Global Settings does not derive a model from saved defaults. Extension-override and invalid
 settings warnings are displayed without claiming authority over independent extension generation.
-Snapshot admission validates policy bounds and rejects active policy on an idle snapshot;
-existing sequence/runtime-generation reconciliation prevents a delayed compaction snapshot
+Snapshot admission validates policy bounds, admits captured active policy during the
+running successor handoff, and rejects it on an idle snapshot; existing
+sequence/runtime-generation reconciliation prevents a delayed compaction snapshot
 from resurrecting a completed operation. `SettingsDraftStoreTests` and
 `SessionSnapshotEventAdmissionTests` cover reset, bounds, decoding and retirement.
 

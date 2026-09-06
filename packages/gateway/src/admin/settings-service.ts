@@ -210,9 +210,11 @@ export class SettingsService {
     const path = options.scope === "global"
       ? join(this.agentDir, "settings.json")
       : join(options.cwd, ".pi", "settings.json");
-    const global = options.scope === "project"
-      ? SettingsManager.create(options.cwd, this.agentDir, { projectTrusted: true }).getGlobalSettings() as Record<string, unknown>
+    const inherited = options.scope === "project"
+      ? SettingsManager.create(options.cwd, this.agentDir, { projectTrusted: true })
       : undefined;
+    if (inherited?.drainErrors().length) throw new GatewayError("conflict", "Canonical settings could not be loaded");
+    const global = inherited?.getGlobalSettings() as Record<string, unknown> | undefined;
     await updateJsonLocked<SettingsDocument>(path, {}, (current) => {
       const next = this.applyPatch(current, patch);
       if ("modelContextWindows" in patch) {
@@ -247,6 +249,12 @@ export class SettingsService {
         SETTINGS_DOCUMENT_NODES,
         SETTINGS_DOCUMENT_OBJECT_DEPTH,
       );
+      // `updateJsonLocked` commits the callback result before the response is
+      // projected by get(). Validate the complete effective policy here so a
+      // stale hand-edited compaction value cannot turn a durable unrelated
+      // update into a failed RPC.
+      if (global === undefined) resolveCompactionPolicy(next, {}, false);
+      else resolveCompactionPolicy(global, next, true);
       return next;
     });
     return this.get(options.cwd, options.scope === "project" && options.projectTrusted);

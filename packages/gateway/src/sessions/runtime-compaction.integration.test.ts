@@ -9,6 +9,7 @@ import { SettingsService } from "../admin/settings-service.js";
 import type { SessionSnapshot } from "../protocol/types.js";
 import { INVOCATION_RECEIPT_TYPE } from "./invocation-receipts.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
+import type { RunMarkerStore } from "./run-markers.js";
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
   const deadline = performance.now() + timeoutMs;
@@ -138,7 +139,7 @@ describe.sequential("compaction cancellation with the pinned runtime", () => {
 const disposals: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposals.splice(0).reverse()) await dispose(); });
 
-async function boundaryFixture(historyRepeats = 8_000) {
+async function boundaryFixture(historyRepeats = 8_000, extension?: (root: string) => string) {
   const root = await mkdtemp(join(tmpdir(), "tron-compaction-boundary-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
@@ -146,6 +147,10 @@ async function boundaryFixture(historyRepeats = 8_000) {
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({ compaction: {
     enabled: false, reserveTokens: 120_000, keepRecentTokens: 13_000, thinkingLevel: "low", instructions: "Retain the API contract",
   } }));
+  if (extension) {
+    await mkdir(join(agentDir, "extensions"));
+    await writeFile(join(agentDir, "extensions", "continuation.ts"), extension(root));
+  }
   const faux = fauxProvider({ provider: "tron-compaction-boundary", models: [{ id: "fixture", reasoning: true }], tokensPerSecond: 1_000_000, tokenSize: { min: 100_000, max: 100_000 } });
   const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
   runtime.registerNativeProvider(faux.provider);
@@ -179,6 +184,19 @@ async function boundaryFixture(historyRepeats = 8_000) {
     observe: (callback: typeof onSnapshot) => { onSnapshot = callback; },
     entries: async () => (await readFile(slot.sessionFile!, "utf8")).trim().split("\n").map(line => JSON.parse(line)),
   };
+}
+
+function compactionContinuationExtension(root: string): string {
+  return `
+    import { existsSync } from "node:fs";
+    import { setTimeout } from "node:timers/promises";
+    export default function(pi) {
+      pi.on("session_compact", async () => {
+        pi.sendMessage({ customType: "compaction-continuation", content: "Continue after compaction", display: false }, { triggerTurn: true });
+        while (!existsSync(${JSON.stringify(join(root, "release-hook"))})) await setTimeout(5);
+      });
+    }
+  `;
 }
 
 async function expectSettled(item: Awaited<ReturnType<typeof boundaryFixture>>) {
@@ -245,14 +263,15 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     } finally { release?.(); await outcome; await stopping?.catch(() => {}); }
   });
 
-  it.each(["preflight", "post-run"] as const)("keeps Stop authoritative while %s compaction auth is still preparing", async mode => {
-    const item = await boundaryFixture(mode === "preflight" ? 8_000 : 10);
+  it.each(["preflight", "preflight-grace", "post-run"] as const)("keeps Stop authoritative while %s compaction auth is still preparing", async mode => {
+    const preflight = mode !== "post-run";
+    const item = await boundaryFixture(preflight ? 8_000 : 10);
     await item.update({ enabled: true });
     let entered = false;
     let release!: () => void;
     const original = item.session.modelRuntime.getAuth.bind(item.session.modelRuntime);
     const auth = vi.spyOn(item.session.modelRuntime, "getAuth").mockImplementation(async (...args) => {
-      if (!entered && (mode === "preflight" || item.faux.state.callCount >= 2)) {
+      if (!entered && (preflight || item.faux.state.callCount >= 2)) {
         entered = true;
         await new Promise<void>(resolve => { release = resolve; });
       }
@@ -267,18 +286,27 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     try {
       await waitUntil(() => entered);
       expect(item.slot.snapshot().phase).toBe("running");
-      stopping = item.slot.abort("agent", item.slot.snapshot().operation!.id);
+      const operationId = item.slot.snapshot().operation!.id;
+      stopping = item.slot.abort("agent", operationId);
+      if (mode === "preflight-grace") {
+        await expect(stopping).rejects.toMatchObject({ code: "conflict", retryable: true, message: "Foreground work did not stop" });
+        expect(item.slot.snapshot()).toMatchObject({ phase: "running", operation: { id: operationId } });
+        expect(item.registry.administrativeWorkRegistry.size).toBeGreaterThan(0);
+        const receipts = (await item.entries()).filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.operationId === operationId);
+        expect(receipts.map(entry => entry.data.receiptKind)).toEqual(["start"]);
+        expect(receipts[0].data.lifecycle).toBe("staged");
+      }
       release();
-      await stopping;
-      if (mode === "preflight") expect(await prompting).toBeInstanceOf(Error);
+      if (mode !== "preflight-grace") await stopping;
+      if (preflight) expect(await prompting).toBeInstanceOf(Error);
       else expect(await prompting).toMatchObject({ operationId: expect.any(String) });
       await expectSettled(item);
-      expect(item.faux.state.callCount).toBe(mode === "preflight" ? 1 : 2);
-      expect((await item.entries()).filter(entry => entry.message?.role === "user")).toHaveLength(mode === "preflight" ? 1 : 2);
+      expect(item.faux.state.callCount).toBe(preflight ? 1 : 2);
+      expect((await item.entries()).filter(entry => entry.message?.role === "user")).toHaveLength(preflight ? 1 : 2);
       expect((await item.entries()).filter(entry => entry.type === "compaction")).toHaveLength(0);
       expect((await item.entries()).filter(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.receiptKind === "terminal").at(-1)?.data.lifecycle).toBe("interrupted");
     } finally { release?.(); auth.mockRestore(); await prompting; await stopping?.catch(() => {}); }
-  });
+  }, 10_000);
 
   it("honors Stop after Gateway manual admission but before the SDK creates its controller", async () => {
     const item = await boundaryFixture();
@@ -331,6 +359,122 @@ describe.sequential("compaction operation admission and authoritative reconcilia
     expect(compacting).toBeGreaterThanOrEqual(0);
     expect(finalIdle).toBeGreaterThan(compacting);
     expect(states.slice(finalIdle).every(snapshot => snapshot.phase === "idle")).toBe(true);
+  });
+
+  it("retires late manual Stop intent after durable marker cleanup", async () => {
+    const item = await boundaryFixture();
+    item.faux.setResponses(Array.from({ length: 3 }, () => fauxAssistantMessage("Preserved API contract")));
+    const internal = item.slot as unknown as { dependencies: { markers: RunMarkerStore }; abortedOperations: Set<string> };
+    const original = internal.dependencies.markers.clear.bind(internal.dependencies.markers);
+    let release!: () => void;
+    let clearing = false;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const clear = vi.spyOn(internal.dependencies.markers, "clear").mockImplementation(async (...args) => {
+      clearing = true;
+      await barrier;
+      await original(...args);
+    });
+    const compacting = item.slot.compact();
+    let stopping: Promise<void> | undefined;
+    try {
+      await waitUntil(() => clearing);
+      const id = item.slot.snapshot().operation!.id!;
+      stopping = item.slot.abort("compaction", id);
+      expect(internal.abortedOperations.has(id)).toBe(true);
+      release();
+      await compacting;
+      await stopping;
+      await expectSettled(item);
+      expect(internal.abortedOperations.has(id)).toBe(false);
+      expect((await item.entries()).filter(entry => entry.type === "compaction")).toHaveLength(1);
+    } finally { release(); clear.mockRestore(); await compacting.catch(() => {}); await stopping?.catch(() => {}); }
+  });
+
+  it("preserves a real extension-triggered successor across manual compaction cleanup and Stop", async () => {
+    const item = await boundaryFixture(8_000, compactionContinuationExtension);
+    let successorSignal: AbortSignal | undefined;
+    let releaseSuccessor: (() => void) | undefined;
+    item.faux.setResponses(Array.from({ length: 5 }, () => async (context, options) => {
+      if (context.systemPrompt?.includes("User-configured summary focus:")) return fauxAssistantMessage("Preserved the API contract.");
+      successorSignal = options?.signal;
+      await new Promise<void>(resolve => { releaseSuccessor = resolve; });
+      return fauxAssistantMessage("Successor response");
+    }));
+    const compacting = item.slot.compact();
+    let stopping: Promise<void> | undefined;
+    try {
+      await waitUntil(() => successorSignal !== undefined);
+      const successor = item.slot.snapshot();
+      expect(successor).toMatchObject({ phase: "running", operation: { kind: "prompt" }, compactionPolicy: { active: { reason: "manual" } } });
+      const start = item.snapshots.length;
+      stopping = item.slot.abort(undefined, successor.operation!.id);
+      await waitUntil(() => successorSignal!.aborted);
+      await writeFile(join(item.root, "release-hook"), "release");
+      await compacting;
+      expect(item.slot.snapshot()).toMatchObject({ phase: "running", operation: { id: successor.operation!.id } });
+      expect(item.slot.snapshot().compactionPolicy?.active).toBeUndefined();
+      expect(item.snapshots.slice(start).every(snapshot => snapshot.phase !== "idle")).toBe(true);
+      const markers = JSON.parse(await readFile(join(item.root, "tron", "gateway", "runtime-markers", `${item.slot.id}.json`), "utf8"));
+      expect(markers.operations.map((operation: { operationId: string }) => operation.operationId)).toEqual([successor.operation!.id]);
+      releaseSuccessor!();
+      await stopping;
+      await expectSettled(item);
+      const entries = await item.entries();
+      expect(entries.filter(entry => entry.type === "compaction")).toHaveLength(1);
+      expect(entries.filter(entry => entry.message?.role === "assistant").at(-1)?.message.stopReason).toBe("aborted");
+    } finally {
+      await writeFile(join(item.root, "release-hook"), "release");
+      releaseSuccessor?.();
+      await compacting.catch(() => {});
+      await stopping?.catch(() => {});
+    }
+  });
+
+  it.each(["running", "settled"] as const)("rejects preflight displaced by a %s public compaction continuation without misattribution or replay", async state => {
+    const item = await boundaryFixture(8_000, compactionContinuationExtension);
+    await item.update({ enabled: true });
+    let stagedId: string | undefined;
+    item.observe(snapshot => {
+      if (snapshot.operation?.lifecycle === "staged") stagedId ??= snapshot.operation.id;
+    });
+    let releaseSuccessor: (() => void) | undefined;
+    let cleaningUp = false;
+    item.faux.setResponses(Array.from({ length: 5 }, () => async (context) => {
+      if (cleaningUp) return fauxAssistantMessage("Cleanup response");
+      if (context.systemPrompt?.includes("User-configured summary focus:")) return fauxAssistantMessage("Preserved API contract.");
+      await new Promise<void>(resolve => { releaseSuccessor = resolve; });
+      return fauxAssistantMessage("Extension continuation completed");
+    }));
+    const prompting = item.slot.prompt("The original pending request must not be lost or replayed").catch(error => error);
+    try {
+      await waitUntil(() => releaseSuccessor !== undefined);
+      const successorId = item.slot.snapshot().operation!.id;
+      expect(stagedId).toBeDefined();
+      expect(successorId).not.toBe(stagedId);
+      if (state === "settled") {
+        releaseSuccessor!();
+        await waitUntil(() => !item.session.isStreaming && item.slot.snapshot().phase === "compacting");
+        expect(item.slot.snapshot()).toMatchObject({ operation: { kind: "compaction" }, compactionPolicy: { active: { reason: "threshold" } } });
+      }
+      await writeFile(join(item.root, "release-hook"), "release");
+      expect(await prompting).toMatchObject({ code: "busy", retryable: true });
+      if (state === "running") expect(item.slot.snapshot()).toMatchObject({ phase: "running", operation: { id: successorId } });
+      releaseSuccessor!();
+      await expectSettled(item);
+      const entries = await item.entries();
+      expect(entries.filter(entry => entry.message?.role === "user")).toHaveLength(1);
+      expect(entries.find(entry => entry.customType === INVOCATION_RECEIPT_TYPE && entry.data.operationId === stagedId && entry.data.receiptKind === "terminal")?.data.lifecycle).toBe("failed");
+      await item.update({ enabled: false });
+      item.faux.setResponses([fauxAssistantMessage("A later explicit request succeeded")]);
+      await item.slot.prompt("A new explicit request");
+      await expectSettled(item);
+      expect((await item.entries()).filter(entry => entry.message?.role === "user")).toHaveLength(2);
+    } finally {
+      cleaningUp = true;
+      await writeFile(join(item.root, "release-hook"), "release");
+      releaseSuccessor?.();
+      await prompting;
+    }
   });
 
   it("publishes saved, active and next policy independently; successful completion is one canonical checkpoint", async () => {

@@ -142,6 +142,8 @@ type OpenedExtensionArtifact = {
 
 type PendingManualCompaction = {
   instructions?: string;
+  operationId: string;
+  work: GatewayWorkHandle;
   resolve: () => void;
   reject: (error: unknown) => void;
 };
@@ -527,6 +529,10 @@ export class RuntimeSlot {
   private readonly pendingContextMessages: PendingContextMessage[] = [];
   private pendingManualCompaction: PendingManualCompaction | undefined;
   private compactionBaselineEntryId: string | undefined;
+  /** Exact operation installed at compaction_start. A hook may launch a
+   * successor before compaction_end, so the current operation is not reliable
+   * completion ownership. */
+  private compactionOperation: SessionOperationState | undefined;
   private manualCompactionClaim: symbol | undefined;
   private queuedManualCompactionInFlight = false;
   private shuttingDown = false;
@@ -2386,6 +2392,7 @@ export class RuntimeSlot {
         this.completionOwnershipQueue.shift();
         item.fallbackWork?.settle();
       }
+      this.startPendingManualCompaction();
     })().finally(() => {
       this.pendingReceiptWrites.delete(operation);
       if (this.attentionBarrier === operation) this.attentionBarrier = undefined;
@@ -2428,7 +2435,7 @@ export class RuntimeSlot {
         completion.id,
       );
       if (completion.operationId) this.abortedOperations.delete(completion.operationId);
-      if (!this.pendingManualCompaction && !completion.operationId?.startsWith("automation:")) {
+      if (!completion.operationId?.startsWith("automation:")) {
         await this.clearMarkerOwnership(completion.operationId, item.fallbackWork);
       }
       const completionWorkOwner = completion.operationId ?? this.completionWorkOwners.get(completion.id);
@@ -2444,16 +2451,16 @@ export class RuntimeSlot {
         return;
       }
       if (this.pendingManualCompaction) {
-        // The already-accepted compaction inherits the run marker. Start it only
-        // after the preceding response's attention fact is durable.
+        // Compaction owns a separate marker. Start it only after the preceding
+        // response's attention fact and exact marker retirement are durable.
         this.phase = "idle";
         this.revision += 1;
         this.publishSnapshot();
-        this.startPendingManualCompaction();
         return;
       }
       this.hooks.settled(this.id);
-      this.phase = "idle";
+      this.phase = this.compactionOperation ? "compacting" : "idle";
+      this.operation ??= this.compactionOperation;
       this.revision += 1;
       this.publishSnapshot();
     } catch (error) {
@@ -2508,6 +2515,14 @@ export class RuntimeSlot {
         const dequeuedOwner = this.dequeuedFollowUpOwners[0];
         const queuedOwner = dequeuedOwner
           ?? this.queuedMessages.find((item) => item.behavior === "followUp")?.id;
+        if (this.compactionOperation && this.pendingPrompt?.id === this.activeOperationId
+          && this.invocationForOperation(this.activeOperationId)?.lifecycle === "staged") {
+          // An extension triggerTurn during pre-prompt compaction is not the
+          // pending user's admitted turn. Give it a separate owner; the public
+          // preflight callback will reject the displaced request without replay.
+          this.activeOperationId = undefined;
+          this.operation = undefined;
+        }
         const preflightOwner = this.pendingExtensionCommand?.id
           ?? queuedOwner
           ?? this.activeOperationId
@@ -2580,6 +2595,10 @@ export class RuntimeSlot {
           else this.prepareAssistantOwnedToolSegment();
         }
         const activeInvocation = this.invocationForOperation(this.activeOperationId);
+        // A public session_compact hook can start the next Agent turn before
+        // compaction_end. Keep the captured compaction owner for its cleanup,
+        // but give the live turn its own visible Stop identity now.
+        if (this.operation?.kind === "compaction") this.operation = undefined;
         this.operation ??= {
           id: this.activeOperationId,
           kind: "prompt",
@@ -2615,11 +2634,13 @@ export class RuntimeSlot {
         this.streamPresentationId = undefined;
         this.streamStartedAt = undefined;
         this.finalizedStreamPresentationId = undefined;
-        this.phase = "idle";
+        // A short extension turn can finish before the outer compaction hook.
+        // Restore that still-live owner instead of publishing false idle.
+        this.phase = this.compactionOperation ? "compacting" : "idle";
         const settledOperationId = this.activeOperationId;
         this.activeOperationId = undefined;
         this.ownToolSegment(undefined);
-        this.operation = undefined;
+        this.operation = this.compactionOperation;
         this.retry = undefined;
         this.toolExecutions.clear();
         this.toolInvocationGroups.clear();
@@ -2627,23 +2648,6 @@ export class RuntimeSlot {
         this.nextToolOrder = 0;
         if (!this.hasCurrentDashboardWork()) this.stopActivityHeartbeat();
         this.clearToolProgressTimers();
-        if (this.pendingManualCompaction) {
-          // The independently admitted compaction token already owns the queued
-          // mutation, so the settled foreground token can retire without a gap.
-          this.settleOperationWork(settledOperationId);
-          // The accepted compaction command owns the existing run marker. If the
-          // prompt produced a successful response, attention commits before the
-          // canonical compaction is allowed to inherit that marker.
-          if (this.pendingAssistantCompletion) {
-            this.phase = "running";
-            this.publishSnapshot();
-            void this.beginAttentionSettlement(this.pendingAssistantCompletion).catch(() => {});
-          } else {
-            this.publishSnapshot();
-            this.startPendingManualCompaction();
-          }
-          break;
-        }
         // A command-triggered turn owns a distinct foreground token. The
         // command may still be unwinding when agent_settled arrives; only skip
         // this lane if the command itself somehow owns the settled identity.
@@ -2677,12 +2681,19 @@ export class RuntimeSlot {
             // The foreground token remains the exact owner; do not create a second
             // receipt token or report drain completion while marker I/O is active.
             void markerClear.then(
-              () => undefined,
-              (error) => this.emit("session.diagnostic", safeJson({
-                code: "terminal-receipt-persistence-failed",
-                operationId: settledOperationId,
-                message: error instanceof Error ? error.message : String(error),
-              })),
+              () => this.startPendingManualCompaction(),
+              (error) => {
+                const pending = this.pendingManualCompaction;
+                if (pending) {
+                  this.pendingManualCompaction = undefined;
+                  pending.reject(error);
+                }
+                this.emit("session.diagnostic", safeJson({
+                  code: "terminal-receipt-persistence-failed",
+                  operationId: settledOperationId,
+                  message: error instanceof Error ? error.message : String(error),
+                }));
+              },
             ).finally(() => {
               this.abortedOperations.delete(settledOperationId);
               this.settleOperationWork(settledOperationId);
@@ -2710,19 +2721,25 @@ export class RuntimeSlot {
         // preflight compaction receives a distinct runtime identity so repeated
         // maintenance within one prompt can never collide with the prompt row
         // or another canonical compaction.
-        this.operation = {
+        const compactionOperation: SessionOperationState = {
           id: this.operation?.kind === "compaction"
             ? (this.operation.id ?? randomUUID())
             : randomUUID(),
           kind: "compaction",
-          startedAt: new Date().toISOString(),
+          // Manual admission already owns this identity, including its start
+          // time. SDK preparation must not invalidate Stop/cleanup matching.
+          startedAt: this.operation?.kind === "compaction" && event.reason === "manual"
+            ? this.operation.startedAt : new Date().toISOString(),
           reason: event.reason,
         };
+        this.operation = compactionOperation;
+        this.compactionOperation = compactionOperation;
         this.publishSnapshot();
         break;
       case "compaction_end": {
-        this.retry = undefined;
-        const completedOperation = this.operation;
+        const completedOperation = this.compactionOperation;
+        const ownerStillCurrent = completedOperation !== undefined && this.operationMatches(completedOperation);
+        if (ownerStillCurrent) this.retry = undefined;
         if (completedOperation?.kind === "compaction" && completedOperation.id) {
           const canonicalCompaction = [...this.sessionManager.getBranch()]
             .reverse()
@@ -2732,7 +2749,17 @@ export class RuntimeSlot {
           }
         }
         this.compactionBaselineEntryId = undefined;
+        this.compactionOperation = undefined;
+        // Retire only the completed compaction's abort intent. This remains
+        // safe when a successor replaced `operation`, because its identity is
+        // fenced by the captured compaction owner.
         if (completedOperation?.id) this.abortedOperations.delete(completedOperation.id);
+        // A successor may have started from a compaction hook before this event;
+        // never rebuild its phase or operation from the completed compaction.
+        if (!ownerStillCurrent) {
+          this.publishSnapshot();
+          break;
+        }
         // Hooks may append canonical entries after the compaction. A single-row
         // delta cannot describe that branch and consumes the client's next
         // cursor when rejected. Publish one immediate bounded authority frame.
@@ -2751,7 +2778,7 @@ export class RuntimeSlot {
             kind: "prompt",
             startedAt: new Date().toISOString(),
           };
-        } else if (completedOperation?.kind === "compaction"
+        } else if (completedOperation.kind === "compaction"
           && completedOperation.reason === "manual") {
           // The wrapper still owns durable marker retirement. Canonical presence
           // suppresses the spinner, while phase remains truthful until cleanup.
@@ -5468,6 +5495,7 @@ export class RuntimeSlot {
       let acceptedResolve!: (accepted: boolean) => void;
       const accepted = new Promise<boolean>((resolve) => { acceptedResolve = resolve; });
       let sdkRun: Promise<void>;
+      let preflightFailure: GatewayError | undefined;
       let queueDisposition: Promise<QueueAdmissionDisposition> | undefined;
       let resolveQueueDisposition: ((disposition: QueueAdmissionDisposition) => void) | undefined;
       let queueDispositionFailure: unknown;
@@ -5601,9 +5629,19 @@ export class RuntimeSlot {
             // Pi has no active Agent signal during pre-prompt compaction. Stop
             // must also revoke this exact pending prompt at SDK admission; an
             // aborted summary alone does not prevent Agent.prompt() starting.
-            if (accepted && this.abortedOperations.has(operationId)) {
-              acceptedResolve(false);
-              throw new GatewayError("cancelled", "Prompt stopped before agent admission");
+            if (accepted) {
+              if (this.abortedOperations.has(operationId)) {
+                preflightFailure = new GatewayError("cancelled", "Prompt stopped before agent admission");
+              } else if (!isExactExtensionCommand && !queuesIntoActiveRun && this.activeOperationId !== operationId) {
+                preflightFailure = new GatewayError("busy", "An extension started a turn during prompt preparation; retry after it settles", true);
+              }
+              if (preflightFailure) {
+                acceptedResolve(false);
+                throw preflightFailure;
+              }
+              // agent_start can fire synchronously before this Gateway promise
+              // resumes. Record the SDK's disposition now, not one turn later.
+              this.invocations.set(invocationId, { ...invocation, lifecycle: "accepted" });
             }
             acceptedResolve(accepted);
           },
@@ -5688,7 +5726,7 @@ export class RuntimeSlot {
           terminalLifecycle === "failed" ? "runtime-prompt-failed" : undefined,
         );
         this.lifecycle.cancelPreflight(operationId);
-        if (!this.pendingManualCompaction && !operationId.startsWith("automation:")) {
+        if (!operationId.startsWith("automation:")) {
           await this.clearMarkerOwnership(operationId);
         }
         // Marker I/O may suspend behind a newer run. Clear only this run's live
@@ -5821,6 +5859,7 @@ export class RuntimeSlot {
         this.revision += 1;
         this.publishSnapshot();
         finalizeAdmission();
+        if (preflightFailure) throw preflightFailure;
         throw new GatewayError(stopped ? "cancelled" : "invalid_request", stopped
           ? "Prompt stopped before agent admission"
           : "The agent runtime rejected the prompt before admission");
@@ -6299,15 +6338,26 @@ export class RuntimeSlot {
           throw new GatewayError("conflict", "Manual compaction ownership changed", true);
         }
         if (this.hasActiveAgentRun) {
+          // Accepted maintenance owns its own durable marker, never a prior
+          // prompt's. A handoff can be deferred behind more than one run.
+          await this.trackOwnershipWrite(
+            () => this.retryDurableWrite(`marker:mark:${operationId}`, () => this.dependencies.markers.mark(this.id, operationId)),
+            work,
+          );
+          this.assertUsable();
           queuedCompletion = new Promise<void>((resolve, reject) => {
             this.pendingManualCompaction = {
               ...(instructions === undefined ? {} : { instructions }),
+              operationId,
+              work,
               resolve,
               reject,
             };
           });
           this.revision += 1;
           this.publishSnapshot();
+          // The preceding run may have settled while the marker write awaited.
+          this.startPendingManualCompaction();
           return true;
         }
 
@@ -6334,11 +6384,11 @@ export class RuntimeSlot {
       if (this.pendingManualCompaction !== pending || this.shuttingDown) return;
       // Another prompt can enter SDK preflight before this lane handoff runs.
       // Leave the exact compaction pending for that newer run's final settlement.
-      if (this.hasActiveAgentRun) return;
+      if (this.hasActiveAgentRun || this.pendingAssistantCompletion || this.completionOwnershipQueue.length > 0) return;
       this.pendingManualCompaction = undefined;
       this.queuedManualCompactionInFlight = true;
       try {
-        await this.performManualCompaction(pending.instructions, true);
+        await this.performManualCompaction(pending.instructions, true, pending.operationId, pending.work);
         pending.resolve();
       } catch (error) {
         pending.reject(error);
@@ -6356,12 +6406,11 @@ export class RuntimeSlot {
   private async performManualCompaction(
     instructions: string | undefined,
     queued: boolean,
-    operationId?: string,
-    work?: GatewayWorkHandle,
+    operationId: string,
+    work: GatewayWorkHandle,
   ): Promise<void> {
     let operationError: unknown;
     if (!queued) {
-      if (!operationId || !work) throw new Error("Direct compaction ownership is missing");
       await this.trackOwnershipWrite(
         () => this.retryDurableWrite(`marker:mark:${operationId}`, () => this.dependencies.markers.mark(this.id, operationId)),
         work,
@@ -6369,7 +6418,8 @@ export class RuntimeSlot {
     }
     const startedAt = new Date().toISOString();
     this.phase = "compacting";
-    this.operation = { ...(operationId ? { id: operationId } : {}), kind: "compaction", startedAt, reason: "manual" };
+    this.operation = { id: operationId, kind: "compaction", startedAt, reason: "manual" };
+    const compactionOwner = this.operation;
     this.noteDashboardActivity(startedAt);
     if (!this.activityHeartbeat) this.startActivityHeartbeat();
     this.revision += 1;
@@ -6383,22 +6433,23 @@ export class RuntimeSlot {
       operationError = error;
     }
 
-    if (this.operation?.id) this.abortedOperations.delete(this.operation.id);
+    await this.clearMarkerOwnership(operationId, work);
     if (queued) {
-      // The queued command inherited the foreground marker. Reliable cleanup
-      // keeps the accepted-work token live through durable deletion.
-      await this.clearMarkerOwnership();
       this.queuedManualCompactionInFlight = false;
       this.hooks.settled(this.id);
-    } else {
-      await this.clearMarkerOwnership(operationId, work);
     }
 
-    this.phase = "idle";
-    this.operation = undefined;
-    this.retry = undefined;
-    this.noteDashboardActivity();
-    if (!this.hasCurrentDashboardWork()) this.stopActivityHeartbeat();
+    // Stop and a successor can arrive during marker I/O too. Retire the exact
+    // cancellation intent after that await, then re-check presentation ownership.
+    this.abortedOperations.delete(operationId);
+    const ownerStillCurrent = this.operationMatches(compactionOwner);
+    if (ownerStillCurrent) {
+      this.phase = "idle";
+      this.operation = undefined;
+      this.retry = undefined;
+      this.noteDashboardActivity();
+      if (!this.hasCurrentDashboardWork()) this.stopActivityHeartbeat();
+    }
     this.revision += 1;
     this.publishSnapshot();
     if (operationError !== undefined) throw operationError;

@@ -258,7 +258,7 @@ and Defaults, Runtime Behavior, Compaction, Resource Locations, and Custom Model
 The three scoped settings sheets seed each target baseline only once and compare the value currently presented by
 SwiftUI directly with it, so refresh, enablement, and late-response admission do not wait for a subsequent `onChange`
 callback or accidentally adopt an edit as a new baseline; a successful exact-draft save installs the resulting
-baseline and disables Save again, while edits made during the request stay dirty.
+baseline and disables Save again, while edits made during the request stay dirty. One-shot settings actions, such as Compaction's Restore standard behavior, are cleared in the resulting draft after their request succeeds so a later unrelated budget edit remains sparse.
 Custom-model field bindings advance their revision in the same setter transaction and apply the same exact-revision
 completion rule. Every textual toolbar action uses the shared system-weight label with a leading SF Symbol (or its
 in-progress indicator); toolbar typography does not impose bold, semibold, or medium text. Save actions across settings and other editable sheets use the shared outline `externaldrive` floppy-disk-style symbol rather than a download or generic confirmation glyph. The dashboard Settings
