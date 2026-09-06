@@ -17,7 +17,12 @@ function makeServer(overrides: {
     host: "127.0.0.1",
     port: 0,
     maxFrameBytes: 64 * 1_024,
-    devices: { authenticate: overrides.authenticate ?? (async () => ({ id: "device" })) } as never,
+    devices: {
+      authenticateAndAdmit: async (_token: unknown, register: (identity: unknown) => unknown) => {
+        const authenticated = await (overrides.authenticate ?? (async () => ({ id: "device" })))();
+        return authenticated ? register(authenticated) : null;
+      },
+    } as never,
     uploads: {} as never,
     sessions: { acquireBlob: async () => undefined } as never,
     auth: {} as never,

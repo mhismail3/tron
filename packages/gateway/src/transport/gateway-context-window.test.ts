@@ -5,7 +5,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommandReceiptStore } from "./command-receipts.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "./gateway-service.js";
 
-const client = { id: "phone", identity: "device:context-test", isLocal: false } as ClientContext;
+const client = {
+  id: "phone", identity: "device:context-test", isLocal: false,
+  isSubscribed: (sessionId: string) => sessionId === "owned",
+  isRevoked: () => false,
+  revokeDevice: () => {},
+} as ClientContext;
 
 describe("context window transport", () => {
   const roots: string[] = [];
@@ -57,9 +62,9 @@ describe("context window transport", () => {
       sessions: { isSubscribed: () => true, acquire: async () => ({ cwd: "/tmp/context-project", modelRuntime: runtime }) },
     } as unknown as GatewayServiceDependencies);
     const params = { commandId: "project-context-1", scope: "project", sessionId: "session", cwd: "/tmp/context-project", patch: { modelContextWindows: { "project/model": 100_000 } } };
-    await service.invoke(client, "settings.update", params);
+    await service.invoke({ ...client, isSubscribed: () => true }, "settings.update", params);
     expect(update).toHaveBeenCalledWith(params.patch, { cwd: params.cwd, scope: "project", projectTrusted: true, modelRuntime: runtime });
-    await expect(service.invoke(client, "settings.update", { ...params, cwd: "/tmp/different-project", commandId: "project-context-2" })).rejects.toMatchObject({ code: "conflict" });
+    await expect(service.invoke({ ...client, isSubscribed: () => true }, "settings.update", { ...params, cwd: "/tmp/different-project", commandId: "project-context-2" })).rejects.toMatchObject({ code: "conflict" });
     expect(update).toHaveBeenCalledOnce();
   });
 });

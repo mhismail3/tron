@@ -6,6 +6,7 @@ const client = (): ClientContext => ({
   beginSynchronization: () => "sync", establishSynchronization() {}, completeSynchronization() {},
   setPresentationVisibility: () => ({ visible: true, revision: 1 }), unsubscribe: () => true,
   attachTerminal() {}, detachTerminal() {}, ownsTerminal: () => false,
+  isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
 });
 
 function fixture() {

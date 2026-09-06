@@ -14,6 +14,7 @@ const client: ClientContext = {
   attachTerminal: () => {},
   detachTerminal: () => {},
   ownsTerminal: () => false,
+  isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
 };
 
 describe("Gateway workspace inspection dispatch", () => {
@@ -58,7 +59,7 @@ describe("Gateway workspace inspection dispatch", () => {
       sessions: { isSubscribed: () => false },
       workspaceInspector: {} as WorkspaceInspectionService,
     } as unknown as GatewayServiceDependencies);
-    await expect(service.invoke(client, "session.workspace.inspect", { sessionId: "session" }))
+    await expect(service.invoke({ ...client, isSubscribed: () => false }, "session.workspace.inspect", { sessionId: "session" }))
       .rejects.toMatchObject({ code: "invalid_request" });
   });
 });

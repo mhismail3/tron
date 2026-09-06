@@ -13,6 +13,7 @@ const client: ClientContext = {
   attachTerminal: () => {},
   detachTerminal: () => {},
   ownsTerminal: () => false,
+  isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
 };
 
 function drain(blockerCount = 0) {

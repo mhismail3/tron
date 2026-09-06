@@ -37,6 +37,7 @@ const client = (id: string, signal?: AbortSignal): ClientContext => ({
   attachTerminal: () => {},
   detachTerminal: () => {},
   ownsTerminal: () => false,
+  isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
 });
 
 describe("SessionListPaginationStore", () => {

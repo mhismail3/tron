@@ -265,6 +265,10 @@ interface Connection {
   pendingSessionOpens: Map<string, string>;
   outbound: OrderedOutboundQueue;
   closeInitiated: boolean;
+  revoked: boolean;
+  revokeResponseRequestId?: string;
+  revokeResponseQueued: boolean;
+  revokeCloseScheduled: boolean;
   admittedAt: number;
   helloTimer: NodeJS.Timeout;
 }
@@ -535,17 +539,36 @@ export class GatewayServer {
     this.broadcast("session.listChanged", {});
   }
 
-  disconnectDevice(deviceId: string): void {
-    // Revocation retires the stable device owner, not merely its disposable
-    // sockets. Unlike an ordinary disconnect, its provider-auth work must not
-    // remain resumable.
+  disconnectDevice(deviceId: string, origin?: { connectionId: string; requestId: string; deviceId: string }): void {
+    // The durable device replacement has already happened. Fence transport
+    // admission and observer ownership synchronously, while accepted RPCs are
+    // allowed to finish independently of the socket's physical close.
     this.options.auth.cancelOwner(deviceId);
-    const timer = setTimeout(() => {
-      for (const client of this.clients.values()) {
-        if (!client.isLocal && client.identity === deviceId) client.socket.close(1008, "device revoked");
+    for (const client of this.clients.values()) {
+      if (client.isLocal || client.identity !== deviceId) continue;
+      client.revoked = true;
+      for (const synchronization of client.synchronizations.values()) {
+        clearTimeout(synchronization.timeout);
+        synchronization.barrier.abort(synchronization.requestId);
       }
-    }, 100);
-    timer.unref();
+      client.synchronizations.clear();
+      client.subscriptionTokens.clear();
+      client.terminals.clear();
+      client.pendingSessionOpens.clear();
+      this.options.sessions.unsubscribeClient(client.id);
+      const isInitiatingRequest = origin?.connectionId === client.id
+        && origin.deviceId === deviceId
+        && client.inFlight.has(origin.requestId);
+      if (isInitiatingRequest) {
+        // The initiating request must enqueue its successful response before
+        // the close. An earlier queued frame is drained first by this queue.
+        client.revokeResponseRequestId = origin.requestId;
+        client.revokeResponseQueued = false;
+      } else {
+        client.socket.close(1008, "device revoked");
+      }
+      this.options.service.releaseClient(client.id);
+    }
   }
 
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -575,143 +598,143 @@ export class GatewayServer {
         return sendJson(response, 200, { ...result, ...this.options.service.info() as Record<string, JsonValue> });
       }
 
-      const authenticated = await this.options.devices.authenticate(bearer(request));
-      if (!authenticated) return sendJson(response, 401, { error: { code: "unauthenticated", message: "Pairing token is invalid" } });
+      const admitted = await this.options.devices.authenticateAndAdmit(bearer(request), (authenticated) => {
+        void this.handleAuthenticatedHttp(request, response, url).catch((error) => this.handleHttpError(request, response, error));
+        return true;
+      });
+      if (admitted === null) return sendJson(response, 401, { error: { code: "unauthenticated", message: "Pairing token is invalid" } });
+      return;
 
-      if (request.method === "POST" && url.pathname === "/v1/uploads") {
-        await this.options.uploads.withBodyAdmission(async () => {
-          const name = url.searchParams.get("name") ?? "attachment";
-          const mimeType = request.headers["content-type"] ?? "application/octet-stream";
-          const rawDeclared = request.headers["content-length"];
-          const declaredBytes = rawDeclared === undefined ? undefined : Number(rawDeclared);
-          const upload = await this.options.uploads.saveStream(
-            name,
-            mimeType,
-            completeRequestBody(request),
-            declaredBytes,
-          );
-          sendJson(response, 201, { upload: { id: upload.id, name: upload.name, mimeType: upload.mimeType, size: upload.size } });
+
+    } catch (error) {
+      this.handleHttpError(request, response, error);
+    }
+  }
+
+  private handleHttpError(request: IncomingMessage, response: ServerResponse, error: unknown): void {
+    if (response.headersSent) {
+      response.destroy(error instanceof Error ? error : undefined);
+      return;
+    }
+    const failure = publicError(error);
+    const status = failure.code === "unauthenticated" ? 401
+      : failure.code === "not_found" ? 404
+        : failure.code === "invalid_request" ? 400
+          : failure.code === "conflict" ? 409
+            : failure.code === "busy" ? 503
+              : 500;
+    if (!request.complete) {
+      response.setHeader("connection", "close");
+      response.once("finish", () => request.destroy());
+    }
+    sendJson(response, status, { error: failure });
+  }
+
+  private async handleAuthenticatedHttp(request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> {
+    if (request.method === "POST" && url.pathname === "/v1/uploads") {
+      await this.options.uploads.withBodyAdmission(async () => {
+        const name = url.searchParams.get("name") ?? "attachment";
+        const mimeType = request.headers["content-type"] ?? "application/octet-stream";
+        const rawDeclared = request.headers["content-length"];
+        const declaredBytes = rawDeclared === undefined ? undefined : Number(rawDeclared);
+        const upload = await this.options.uploads.saveStream(name, mimeType, completeRequestBody(request), declaredBytes);
+        sendJson(response, 201, { upload: { id: upload.id, name: upload.name, mimeType: upload.mimeType, size: upload.size } });
+      });
+      return;
+    }
+    if (request.method === "DELETE" && url.pathname.startsWith("/v1/uploads/")) {
+      const id = decodeURIComponent(url.pathname.slice("/v1/uploads/".length));
+      await this.options.uploads.discard(id);
+      response.writeHead(204, { "cache-control": "no-store" });
+      response.end();
+      return;
+    }
+    if (request.method === "GET" && url.pathname.startsWith("/v1/uploads/")) {
+      const id = decodeURIComponent(url.pathname.slice("/v1/uploads/".length));
+      const lease = await this.options.uploads.acquire(id);
+      try {
+        response.writeHead(200, {
+          "content-type": lease.mimeType,
+          "content-length": lease.size,
+          "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(lease.name)}`,
+          "cache-control": "private, max-age=300",
+          "x-content-type-options": "nosniff",
         });
+        await pipeline(lease.stream, response);
+      } finally {
+        await lease.release();
+      }
+      return;
+    }
+    const displayRoute = /^\/v1\/sessions\/([^/]+)\/display-artifacts\/([^/]+)$/.exec(url.pathname);
+    if (request.method === "GET" && displayRoute) {
+      const sessionID = decodeURIComponent(displayRoute[1]!);
+      const artifactID = decodeURIComponent(displayRoute[2]!);
+      let requestedRange: BlobByteRange | undefined;
+      try {
+        requestedRange = parseBlobByteRange(request.headers.range);
+      } catch (error) {
+        if (!(error instanceof GatewayError) || error.code !== "invalid_request") throw error;
+        sendJson(response, 416, { error: publicError(error) });
         return;
       }
-      if (request.method === "DELETE" && url.pathname.startsWith("/v1/uploads/")) {
-        const id = decodeURIComponent(url.pathname.slice("/v1/uploads/".length));
-        await this.options.uploads.discard(id);
-        response.writeHead(204, { "cache-control": "no-store" });
-        response.end();
-        return;
-      }
-      if (request.method === "GET" && url.pathname.startsWith("/v1/uploads/")) {
-        const id = decodeURIComponent(url.pathname.slice("/v1/uploads/".length));
-        const lease = await this.options.uploads.acquire(id);
-        try {
-          response.writeHead(200, {
-            "content-type": lease.mimeType,
-            "content-length": lease.size,
-            "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(lease.name)}`,
-            "cache-control": "private, max-age=300",
-            "x-content-type-options": "nosniff",
-          });
-          await pipeline(lease.stream, response);
-        } finally {
-          await lease.release();
-        }
-        return;
-      }
-      const displayRoute = /^\/v1\/sessions\/([^/]+)\/display-artifacts\/([^/]+)$/.exec(url.pathname);
-      if (request.method === "GET" && displayRoute) {
-        const sessionID = decodeURIComponent(displayRoute[1]!);
-        const artifactID = decodeURIComponent(displayRoute[2]!);
-        let requestedRange: BlobByteRange | undefined;
-        try {
-          requestedRange = parseBlobByteRange(request.headers.range);
-        } catch (error) {
-          if (!(error instanceof GatewayError) || error.code !== "invalid_request") throw error;
+      let lease: Awaited<ReturnType<RuntimeRegistry["acquireDisplayArtifact"]>>;
+      try {
+        lease = await this.options.sessions.acquireDisplayArtifact(sessionID, artifactID, requestedRange);
+      } catch (error) {
+        const details = error instanceof GatewayError && error.details && typeof error.details === "object"
+          ? error.details as { rangeUnsatisfiable?: unknown; totalSize?: unknown }
+          : undefined;
+        if (error instanceof GatewayError && error.code === "invalid_request"
+          && details?.rangeUnsatisfiable === true && Number.isSafeInteger(details.totalSize)) {
+          response.setHeader("content-range", `bytes */${details.totalSize}`);
           sendJson(response, 416, { error: publicError(error) });
           return;
         }
-        let lease: Awaited<ReturnType<RuntimeRegistry["acquireDisplayArtifact"]>>;
-        try {
-          lease = await this.options.sessions.acquireDisplayArtifact(sessionID, artifactID, requestedRange);
-        } catch (error) {
-          const details = error instanceof GatewayError && error.details && typeof error.details === "object"
-            ? error.details as { rangeUnsatisfiable?: unknown; totalSize?: unknown }
-            : undefined;
-          if (error instanceof GatewayError && error.code === "invalid_request"
-            && details?.rangeUnsatisfiable === true && Number.isSafeInteger(details.totalSize)) {
-            response.setHeader("content-range", `bytes */${details.totalSize}`);
-            sendJson(response, 416, { error: publicError(error) });
-            return;
-          }
-          throw error;
+        throw error;
+      }
+      const etag = `\"display-${artifactID}\"`;
+      try {
+        if (request.headers["if-none-match"] === etag) {
+          response.writeHead(304, { etag, "cache-control": "private, immutable, max-age=31536000" });
+          response.end();
+          return;
         }
-        const etag = `\"display-${artifactID}\"`;
-        try {
-          if (request.headers["if-none-match"] === etag) {
-            response.writeHead(304, {
-              etag,
-              "cache-control": "private, immutable, max-age=31536000",
-            });
-            response.end();
-            return;
-          }
-          response.writeHead(requestedRange ? 206 : 200, {
-            "content-type": lease.mimeType,
-            "content-length": lease.size,
-            "accept-ranges": "bytes",
-            etag,
-            ...(requestedRange
-              ? { "content-range": `bytes ${lease.rangeStart}-${lease.rangeEnd}/${lease.totalSize}` }
-              : {}),
-            "cache-control": "private, immutable, max-age=31536000",
-            "x-content-type-options": "nosniff",
-          });
-          await pipeline(lease.stream, response);
-        } finally {
-          await lease.release();
-        }
-        return;
+        response.writeHead(requestedRange ? 206 : 200, {
+          "content-type": lease.mimeType,
+          "content-length": lease.size,
+          "accept-ranges": "bytes",
+          etag,
+          ...(requestedRange ? { "content-range": `bytes ${lease.rangeStart}-${lease.rangeEnd}/${lease.totalSize}` } : {}),
+          "cache-control": "private, immutable, max-age=31536000",
+          "x-content-type-options": "nosniff",
+        });
+        await pipeline(lease.stream, response);
+      } finally {
+        await lease.release();
       }
-      if (request.method === "GET" && url.pathname.startsWith("/v1/blobs/")) {
-        const id = decodeURIComponent(url.pathname.slice("/v1/blobs/".length));
-        const requestedRange = parseBlobByteRange(request.headers.range);
-        const lease = await this.options.sessions.acquireBlob(id, requestedRange);
-        try {
-          response.writeHead(requestedRange ? 206 : 200, {
-            "content-type": lease.mimeType,
-            "content-length": lease.size,
-            "accept-ranges": "bytes",
-            ...(requestedRange
-              ? { "content-range": `bytes ${lease.rangeStart}-${lease.rangeEnd}/${lease.totalSize}` }
-              : {}),
-            "cache-control": "private, max-age=300",
-            "x-content-type-options": "nosniff",
-          });
-          await pipeline(lease.stream, response);
-        } finally {
-          await lease.release();
-        }
-        return;
-      }
-      sendJson(response, 404, { error: { code: "not_found", message: "Route not found" } });
-    } catch (error) {
-      if (response.headersSent) {
-        response.destroy(error instanceof Error ? error : undefined);
-        return;
-      }
-      const failure = publicError(error);
-      const status = failure.code === "unauthenticated" ? 401
-        : failure.code === "not_found" ? 404
-          : failure.code === "invalid_request" ? 400
-            : failure.code === "conflict" ? 409
-              : failure.code === "busy" ? 503
-                : 500;
-      if (!request.complete) {
-        response.setHeader("connection", "close");
-        response.once("finish", () => request.destroy());
-      }
-      sendJson(response, status, { error: failure });
+      return;
     }
+    if (request.method === "GET" && url.pathname.startsWith("/v1/blobs/")) {
+      const id = decodeURIComponent(url.pathname.slice("/v1/blobs/".length));
+      const requestedRange = parseBlobByteRange(request.headers.range);
+      const lease = await this.options.sessions.acquireBlob(id, requestedRange);
+      try {
+        response.writeHead(requestedRange ? 206 : 200, {
+          "content-type": lease.mimeType,
+          "content-length": lease.size,
+          "accept-ranges": "bytes",
+          ...(requestedRange ? { "content-range": `bytes ${lease.rangeStart}-${lease.rangeEnd}/${lease.totalSize}` } : {}),
+          "cache-control": "private, max-age=300",
+          "x-content-type-options": "nosniff",
+        });
+        await pipeline(lease.stream, response);
+      } finally {
+        await lease.release();
+      }
+      return;
+    }
+    sendJson(response, 404, { error: { code: "not_found", message: "Route not found" } });
   }
 
   private async handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
@@ -727,26 +750,27 @@ export class GatewayServer {
         socket.destroy();
         return;
       }
-      const authenticated = await this.options.devices.authenticate(bearer(request));
-      if (!authenticated) {
+      const admission = await this.options.devices.authenticateAndAdmit(bearer(request), (authenticated) => {
+        const identity = authenticated.kind === "local" ? "local-wrapper" : authenticated.deviceId;
+        const maximumConnections = this.options.maximumConnections ?? 32;
+        const maximumPerIdentity = this.options.maximumConnectionsPerIdentity ?? 4;
+        const identityConnections = [...this.clients.values()].filter((client) => client.identity === identity).length;
+        if (this.clients.size >= maximumConnections || identityConnections >= maximumPerIdentity) {
+          this.options.logger.log("warning", "Rejected socket upgrade at connection capacity", { event: "connection.capacity", source: "transport" });
+          socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+          socket.destroy();
+          return false;
+        }
+        this.sockets.handleUpgrade(request, socket, head, (webSocket) => {
+          this.admit(webSocket, identity, authenticated.kind === "local");
+        });
+        return true;
+      });
+      if (admission === null) {
         this.options.logger.log("warning", "Rejected unauthenticated socket upgrade", { event: "connection.rejected", source: "transport" });
         socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
         socket.destroy();
-        return;
       }
-      const identity = authenticated.kind === "local" ? "local-wrapper" : authenticated.deviceId;
-      const maximumConnections = this.options.maximumConnections ?? 32;
-      const maximumPerIdentity = this.options.maximumConnectionsPerIdentity ?? 4;
-      const identityConnections = [...this.clients.values()].filter((client) => client.identity === identity).length;
-      if (this.clients.size >= maximumConnections || identityConnections >= maximumPerIdentity) {
-        this.options.logger.log("warning", "Rejected socket upgrade at connection capacity", { event: "connection.capacity", source: "transport" });
-        socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
-        socket.destroy();
-        return;
-      }
-      this.sockets.handleUpgrade(request, socket, head, (webSocket) => {
-        this.admit(webSocket, identity, authenticated.kind === "local");
-      });
     } catch {
       socket.destroy();
     }
@@ -797,6 +821,9 @@ export class GatewayServer {
       pendingSessionOpens: new Map(),
       outbound,
       closeInitiated: false,
+      revoked: false,
+      revokeResponseQueued: false,
+      revokeCloseScheduled: false,
       admittedAt: performance.now(),
       helloTimer: setTimeout(() => socket.close(1008, "hello required"), 5_000),
     };
@@ -834,6 +861,18 @@ export class GatewayServer {
       this.options.logger.log("info", `Client ${connection.id} handshake accepted (${connection.presentationOnly ? "mobile" : "local"})`, { event: "connection.handshake", source: "transport" });
       clearTimeout(connection.helloTimer);
       this.send(connection, { type: "hello", ...this.options.service.info() as Record<string, JsonValue> });
+      return;
+    }
+
+    if (connection.revoked) {
+      if (frame.type === "request" && typeof frame.id === "string") {
+        this.send(connection, {
+          type: "response",
+          id: frame.id,
+          ok: false,
+          error: publicError(new GatewayError("unauthenticated", "This device is no longer authorized")),
+        });
+      }
       return;
     }
 
@@ -875,6 +914,8 @@ export class GatewayServer {
     }
     connection.inFlight.add(frame.id);
     const requestController = new AbortController();
+    const admittedSubscriptionIds = new Set(connection.subscriptionTokens.keys());
+    const admittedTerminalIds = new Set(connection.terminals);
     connection.requestControllers.set(frame.id, requestController);
     this.options.logger.log("info", `RPC request ${frame.method} from client ${connection.id}`, { event: "rpc.request", source: "transport" });
     const rpcStartedAt = performance.now();
@@ -971,6 +1012,7 @@ export class GatewayServer {
         isLocal: connection.isLocal,
         signal: requestController.signal,
         beginSynchronization: (sessionId) => {
+          if (connection.revoked) throw new GatewayError("unauthenticated", "This device is no longer authorized");
           // Runtime acquire may yield to a fork before this call. Resolve the
           // request's ID before installing the subscription and barrier so
           // ownership is attached to the canonical slot.
@@ -1063,6 +1105,7 @@ export class GatewayServer {
           });
         },
         setPresentationVisibility: (sessionId, subscriptionToken, revision, visible) => {
+          if (connection.revoked) throw new GatewayError("unauthenticated", "This device is no longer authorized");
           sessionId = resolveSessionId(sessionId);
           if (!connection.presentationOnly) {
             throw new GatewayError("invalid_request", "Only a mobile presentation connection may publish chat visibility");
@@ -1096,6 +1139,7 @@ export class GatewayServer {
           return true;
         },
         attachTerminal: (terminalId) => {
+          if (connection.revoked) throw new GatewayError("unauthenticated", "This device is no longer authorized");
           if (!canAttachTerminal(
             connection.subscriptionTokens,
             terminalId,
@@ -1106,7 +1150,14 @@ export class GatewayServer {
           connection.terminals.add(terminalId);
         },
         detachTerminal: (terminalId) => connection.terminals.delete(terminalId),
-        ownsTerminal: (terminalId) => connection.terminals.has(terminalId),
+        ownsTerminal: (terminalId) => connection.terminals.has(terminalId) || admittedTerminalIds.has(terminalId),
+        isSubscribed: (sessionId) => connection.subscriptionTokens.has(sessionId) || admittedSubscriptionIds.has(sessionId),
+        isRevoked: () => connection.revoked,
+        revokeDevice: (deviceId) => this.disconnectDevice(deviceId, {
+          connectionId: connection.id,
+          requestId,
+          deviceId,
+        }),
         sendEvent: (topic, sessionId, payload) => {
           this.send(connection, { type: "event", topic, sessionId, payload });
         },
@@ -1139,6 +1190,10 @@ export class GatewayServer {
       const responseSentIntact = this.send(connection, { type: "response", id: frame.id, ok: true, result });
       responseAttempted = true;
       if (responseSentIntact) rpcOutcome = "success";
+      if (responseSentIntact && connection.revoked && connection.revokeResponseRequestId === frame.id) {
+        connection.revokeResponseQueued = true;
+        this.closeRevokedConnectionAfterResponse(connection);
+      }
       if (!responseSentIntact) {
         const ownerRequestIDs = new Set([
           requestId,
@@ -1250,7 +1305,11 @@ export class GatewayServer {
       }
       if (!responseAttempted) {
         responseAttempted = true;
-        this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(error) });
+        const responseSent = this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(error) });
+        if (responseSent && connection.revoked && connection.revokeResponseRequestId === frame.id) {
+          connection.revokeResponseQueued = true;
+          this.closeRevokedConnectionAfterResponse(connection);
+        }
       }
     } finally {
       if (sessionOpenID !== undefined) {
@@ -1280,8 +1339,22 @@ export class GatewayServer {
     return this.sendOutcome(connection, value) === "sent";
   }
 
+  private closeRevokedConnectionAfterResponse(connection: Connection): void {
+    if (!connection.revoked || !connection.revokeResponseQueued || connection.revokeCloseScheduled) return;
+    connection.revokeCloseScheduled = true;
+    connection.outbound.whenIdle(() => {
+      if (connection.socket.readyState === WebSocket.OPEN) connection.socket.close(1008, "device revoked");
+    });
+  }
+
   private sendOutcome(connection: Connection, value: unknown): "sent" | "fallback" | "failed" {
     if (connection.socket.readyState !== WebSocket.OPEN) return "failed";
+    if (connection.revoked) {
+      const frame = value as { type?: unknown; id?: unknown };
+      // Revocation retires events and observer delivery, but responses for
+      // requests that crossed admission remain deliverable.
+      if (frame.type !== "response" || typeof frame.id !== "string" || !connection.inFlight.has(frame.id)) return "failed";
+    }
     try {
       const direct = JSON.stringify(value);
       if (direct === undefined) return "failed";
@@ -1319,7 +1392,9 @@ export class GatewayServer {
     }
     connection.synchronizations.clear();
     connection.subscriptionTokens.clear();
-    for (const controller of connection.requestControllers.values()) controller.abort();
+    // Revoked accepted requests retain their controller until their own
+    // completion; ordinary disconnects still abort disposable work.
+    if (!connection.revoked) for (const controller of connection.requestControllers.values()) controller.abort();
     connection.requestControllers.clear();
     this.options.sessions.unsubscribeClient(connection.id);
     this.options.service.releaseClient(connection.id);

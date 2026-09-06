@@ -13,6 +13,7 @@ const client = (isLocal = false, identity = "device_abcdefgh"): ClientContext =>
   id: `connection-${identity}`, identity: isLocal ? "local-wrapper" : identity, isLocal,
   beginSynchronization: () => "sync", establishSynchronization() {}, completeSynchronization() {}, unsubscribe: () => true,
   attachTerminal() {}, detachTerminal() {}, ownsTerminal: () => false,
+  isSubscribed: () => true, isRevoked: () => false, revokeDevice: () => {},
 });
 
 function deferred() {
@@ -84,7 +85,6 @@ async function fixture() {
   const service = new GatewayService({
     config: { tronHome: root }, notifications, devices,
     receipts: { execute: async (_identity: string, _method: string, _command: string, operation: () => Promise<unknown>) => operation() },
-    deviceRevoked() {},
   } as any);
   return { service, calls, devices, notifications, registered, upserts };
 }

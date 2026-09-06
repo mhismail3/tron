@@ -63,7 +63,7 @@ async function fixture(maximumBytes = 8): Promise<{
     host: "127.0.0.1",
     port: 0,
     maxFrameBytes: 64 * 1_024,
-    devices: { authenticate: async () => ({ id: "device" }) } as never,
+    devices: { authenticateAndAdmit: async (_token: unknown, register: (identity: { id: string }) => unknown) => register({ id: "device" }) } as never,
     uploads,
     sessions: {} as never,
     auth: {} as never,
