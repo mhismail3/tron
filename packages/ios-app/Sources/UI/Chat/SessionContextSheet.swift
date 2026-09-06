@@ -424,9 +424,37 @@ struct SessionContextSheet: View {
             catalog: catalog,
             automaticCompactionEnabled: snapshot.automaticCompactionEnabled
         ) {
+            TronThinkingSelectionRow(
+                selection: Binding(
+                    get: { pendingThinking?.admitted(in: snapshot)?.value ?? snapshot.thinkingLevel },
+                    set: { level in
+                        guard level != (pendingThinking?.admitted(in: snapshot)?.value ?? snapshot.thinkingLevel),
+                              pendingModelSelection == nil,
+                              let current = model.sessionContextPresentation(for: sessionID),
+                              current.runtimeGeneration == snapshot.runtimeGeneration,
+                              current.model == snapshot.model,
+                              current.availableThinkingLevels.contains(level) else { return }
+                        let pending = SessionPendingSetting(level, snapshot: snapshot)
+                        pendingThinking = pending
+                        Task {
+                            do {
+                                try await model.setThinking(level, sessionID: sessionID)
+                                pendingThinking = pendingThinking?.confirming(pending.id)
+                                if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
+                            } catch {
+                                pendingThinking = pendingThinking?.rejecting(pending.id)
+                                surfaceActionError(error)
+                            }
+                        }
+                    }
+                ),
+                levels: snapshot.availableThinkingLevels,
+                accent: configurationRowAccent
+            )
             if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
                let policy = snapshot.contextWindowPolicy {
                 let pendingWindow = pendingContextWindow?.admitted(in: snapshot)
+                TronSettingsDivider(accent: configurationRowAccent)
                 ContextWindowSelectionRow(
                     selection: Binding(
                         get: { pendingWindow.map(\.value) ?? policy.override },
@@ -470,35 +498,7 @@ struct SessionContextSheet: View {
                 )
                 .id("\(snapshot.runtimeGeneration):\(policy.model.contextWindowKey):\(snapshot.revision)")
                 .disabled(snapshot.phase.isActive || settingContextWindow || pendingModelSelection != nil)
-                TronSettingsDivider(accent: configurationRowAccent)
             }
-            TronThinkingSelectionRow(
-                selection: Binding(
-                    get: { pendingThinking?.admitted(in: snapshot)?.value ?? snapshot.thinkingLevel },
-                    set: { level in
-                        guard level != (pendingThinking?.admitted(in: snapshot)?.value ?? snapshot.thinkingLevel),
-                              pendingModelSelection == nil,
-                              let current = model.sessionContextPresentation(for: sessionID),
-                              current.runtimeGeneration == snapshot.runtimeGeneration,
-                              current.model == snapshot.model,
-                              current.availableThinkingLevels.contains(level) else { return }
-                        let pending = SessionPendingSetting(level, snapshot: snapshot)
-                        pendingThinking = pending
-                        Task {
-                            do {
-                                try await model.setThinking(level, sessionID: sessionID)
-                                pendingThinking = pendingThinking?.confirming(pending.id)
-                                if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
-                            } catch {
-                                pendingThinking = pendingThinking?.rejecting(pending.id)
-                                surfaceActionError(error)
-                            }
-                        }
-                    }
-                ),
-                levels: snapshot.availableThinkingLevels,
-                accent: configurationRowAccent
-            )
         } compactAction: {
             compactButton(snapshot)
         }

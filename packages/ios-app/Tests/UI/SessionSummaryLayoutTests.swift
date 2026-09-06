@@ -49,14 +49,14 @@ final class SessionSummaryLayoutTests: XCTestCase {
         return SessionModelSummaryCard(
             selection: .constant(selected.ref), catalog: [selected], automaticCompactionEnabled: true
         ) {
+            TronThinkingSelectionRow(selection: .constant("xhigh"), levels: ["off", "high", "xhigh"], accent: .tronEmerald)
+            TronSettingsDivider(accent: .tronEmerald)
             ContextWindowSelectionRow(
                 selection: .constant(nil),
                 limits: ContextWindowLimits(minimum: 1_000, maximum: 1_048_576, default: 272_000, longContextThreshold: nil),
                 inheritedValue: 272_000, effectiveValue: 272_000,
                 resetLabel: "Use configured default", source: "model", accent: .tronEmerald
             )
-            TronSettingsDivider(accent: .tronEmerald)
-            TronThinkingSelectionRow(selection: .constant("xhigh"), levels: ["off", "high", "xhigh"], accent: .tronEmerald)
         } compactAction: {
             Button {} label: {
                 TronInlineActionLabel("Compact Now", icon: "rectangle.compress.vertical")

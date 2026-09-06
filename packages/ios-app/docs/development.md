@@ -781,9 +781,9 @@ blue Session order (Current Branch, Agent Instructions, Project Resources, Sessi
 History, Subagent History) and gray HTML/JSONL Exports. Usage counts and percentage share
 one metadata line above the progress-as-divider; automatic compaction appears only in the
 model card beside Compact Now. The model name matches the remaining-token headline scale;
-the serif provider line sits closely beneath it and the action reads Switch Model. Context
-Window, Thinking, and Automatic Compaction use the same icon column, indented dividers,
-label scale, and padding as the Session rows. Context Window when supported and Thinking
+the serif provider line sits closely beneath it and the action reads Switch Model. Thinking,
+Context Window (when supported), and Automatic Compaction appear in that order, using the
+same icon column, indented dividers, label scale, and padding as the Session rows. Context Window when supported and Thinking
 show their values in trailing menu capsules. Verify default,
 maximum, and custom token choices plus Thinking changes update as the popup closes, revert
 on failure, and cannot carry into another model/runtime. Extra-high labels read Extra High
