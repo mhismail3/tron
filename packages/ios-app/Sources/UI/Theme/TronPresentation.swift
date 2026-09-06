@@ -73,11 +73,22 @@ struct TronSettingsVisualTheme {
     }
 }
 
+// A sheet can enlarge secondary copy without changing headings or the global
+// type scale. Keep this scoped to its content, not progressive destinations.
+private struct TronSettingsSecondaryTextSizeAdjustmentKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
 private struct TronSettingsVisualThemeKey: EnvironmentKey {
     static let defaultValue: TronSettingsVisualTheme? = nil
 }
 
 extension EnvironmentValues {
+    var tronSettingsSecondaryTextSizeAdjustment: CGFloat {
+        get { self[TronSettingsSecondaryTextSizeAdjustmentKey.self] }
+        set { self[TronSettingsSecondaryTextSizeAdjustmentKey.self] = newValue }
+    }
+
     var tronSettingsVisualTheme: TronSettingsVisualTheme? {
         get { self[TronSettingsVisualThemeKey.self] }
         set { self[TronSettingsVisualThemeKey.self] = newValue }
@@ -1181,6 +1192,7 @@ struct TronSettingsGroup<Content: View>: View {
     let surfaceStyle: TronSettingsGroupSurfaceStyle
     let content: Content
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
 
     init(
         _ title: String,
@@ -1210,7 +1222,7 @@ struct TronSettingsGroup<Content: View>: View {
                         .accessibilityAddTraits(.isHeader)
                     Spacer(minLength: TronSpacing.sm)
                     Text(detail)
-                        .font(detailRole.font)
+                        .font(detailRole.font(sizeAdjustment: secondaryTextSizeAdjustment))
                         .foregroundStyle(Color.tronTextMuted)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -1226,7 +1238,7 @@ struct TronSettingsGroup<Content: View>: View {
                         .accessibilityAddTraits(.isHeader)
                     if let detail {
                         Text(detail)
-                            .font(detailRole.font)
+                            .font(detailRole.font(sizeAdjustment: secondaryTextSizeAdjustment))
                             .foregroundStyle(Color.tronTextMuted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -1251,10 +1263,12 @@ enum TronSettingsSecondaryRole: Equatable, Sendable {
     /// Live state or a user-selectable setting value.
     case dynamicValue
 
-    @MainActor var font: Font {
+    @MainActor var font: Font { font(sizeAdjustment: 0) }
+
+    @MainActor func font(sizeAdjustment: CGFloat) -> Font {
         switch self {
-        case .informational: TronTypography.secondaryDescription
-        case .dynamicValue: TronTypography.secondaryCodeDescription
+        case .informational: TronTypography.sans(size: TronTypography.sizeSecondary + sizeAdjustment)
+        case .dynamicValue: TronTypography.code(size: TronTypography.sizeSecondary + sizeAdjustment)
         }
     }
 }
@@ -1271,6 +1285,7 @@ struct TronSettingsRow<Trailing: View>: View {
     let subtitleColor: Color
     let trailing: Trailing
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
 
     init(
         icon: String,
@@ -1310,7 +1325,7 @@ struct TronSettingsRow<Trailing: View>: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if let subtitle {
                     Text(subtitle)
-                        .font(subtitleRole.font)
+                        .font(subtitleRole.font(sizeAdjustment: secondaryTextSizeAdjustment))
                         .foregroundStyle(subtitleColor)
                         .lineLimit(subtitleLineLimit)
                         .truncationMode(.tail)
@@ -1636,8 +1651,6 @@ struct TronInlineMenu<Content: View>: View {
     let title: String
     let accent: Color
     let content: Content
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
 
     init(_ title: String, accent: Color = .tronAccentText, @ViewBuilder content: () -> Content) {
         self.title = title
@@ -1646,20 +1659,48 @@ struct TronInlineMenu<Content: View>: View {
     }
 
     var body: some View {
-        let resolvedAccent = settingsTheme?.accent ?? accent
         Menu { content } label: {
-            Text(title)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(
-                    TronSettingsButtonContrastPolicy.usesWhiteForeground(in: colorScheme)
-                        ? .white
-                        : resolvedAccent
-                )
-                .padding(.horizontal, 10)
-                .frame(minHeight: 36)
-                .glassEffect(.regular.tint(resolvedAccent.opacity(0.10)).interactive(), in: Capsule())
+            TronInlineActionLabel(title, accent: accent)
         }
         .accessibilityLabel(title)
+    }
+}
+
+/// A shared visual label for menus and sheet actions. Small controls have a
+/// slimmer capsule, not a smaller tap target.
+struct TronInlineActionLabel: View {
+    let title: String
+    var icon: String?
+    var isWorking = false
+    var accent: Color = .tronEmerald
+    @Environment(\.controlSize) private var controlSize
+    @Environment(\.tronSettingsVisualTheme) private var settingsTheme
+
+    init(_ title: String, icon: String? = nil, isWorking: Bool = false, accent: Color = .tronEmerald) {
+        self.title = title
+        self.icon = icon
+        self.isWorking = isWorking
+        self.accent = accent
+    }
+
+    var body: some View {
+        let resolvedAccent = settingsTheme?.accent ?? accent
+        HStack(spacing: 5) {
+            if isWorking {
+                TronPulseLoadingIndicator(accent: resolvedAccent, size: 14)
+            } else if let icon {
+                Image(systemName: icon)
+            }
+            Text(title)
+                .fixedSize(horizontal: controlSize == .small, vertical: true)
+        }
+        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+        .tronSettingsButtonForeground(resolvedAccent)
+        .padding(.horizontal, 10)
+        .frame(minHeight: controlSize == .small ? 28 : 36)
+        .glassEffect(.regular.tint(resolvedAccent.opacity(0.10)).interactive(), in: Capsule())
+        .padding(.vertical, controlSize == .small ? 8 : 0)
+        .contentShape(Rectangle())
     }
 }
 

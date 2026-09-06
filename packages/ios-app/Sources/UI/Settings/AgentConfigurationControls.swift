@@ -67,7 +67,7 @@ struct ContextWindowSelectionRow: View {
     }
 
     var body: some View {
-        TronValueRow(
+        AgentConfigurationValueRow(
             icon: "gauge.with.dots.needle.50percent",
             title: "Context Window",
             detail: detail,
@@ -94,7 +94,7 @@ struct ContextWindowSelectionRow: View {
         } message: {
             Text("Enter \(limits.minimum.formatted())–\(limits.maximum.formatted()) tokens. Larger windows may increase cost or allowance usage and do not restore previously compacted history.")
         }
-        .accessibilityHint("Choose the default, maximum, or explicitly apply a supported custom token limit.")
+        .accessibilityHint("\(detail) Choose the default, maximum, or explicitly apply a supported custom token limit.")
     }
 }
 
@@ -104,7 +104,7 @@ struct TronThinkingSelectionRow: View {
     var accent: Color = .tronPurple
 
     var body: some View {
-        TronValueRow(
+        AgentConfigurationValueRow(
             icon: "brain",
             title: "Thinking",
             value: selection.capitalized,
@@ -114,6 +114,45 @@ struct TronThinkingSelectionRow: View {
                 ForEach(levels, id: \.self) { level in
                     Button(level.capitalized) { selection = level }
                 }
+            }
+        }
+    }
+}
+
+/// The same mutation controls fit either ordinary settings rows or a compact
+/// model summary. Only presentation changes; validation and menus stay shared.
+private struct AgentConfigurationValueRow<Control: View>: View {
+    let icon: String
+    let title: String
+    var detail: String? = nil
+    let value: String
+    let accent: Color
+    @ViewBuilder let control: () -> Control
+    @Environment(\.controlSize) private var controlSize
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.tronSettingsSecondaryTextSizeAdjustment) private var secondaryTextSizeAdjustment
+
+    var body: some View {
+        if controlSize == .small {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+            layout {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment, weight: .semibold))
+                        .foregroundStyle(Color.tronTextPrimary)
+                    Text(value)
+                        .font(TronSettingsSecondaryRole.dynamicValue.font(sizeAdjustment: secondaryTextSizeAdjustment))
+                        .foregroundStyle(Color.tronTextSecondary)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
+                control()
+            }
+        } else {
+            TronValueRow(icon: icon, title: title, detail: detail, value: value, accent: accent) {
+                control()
             }
         }
     }

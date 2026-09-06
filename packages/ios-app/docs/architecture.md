@@ -1441,17 +1441,24 @@ receivers, and uses gateway WebSocket heartbeats to keep Tailscale/iOS idle path
 alive. Canonical settings determine the default model; catalog order is never a
 default-selection policy. Dashboard Settings explicitly exposes only global configuration; project scope,
 trust, and project package actions appear only when Settings is opened from a
-project session. Manage Session has three groups below its usage summary. The emerald
-Configuration group orders Model, capability-gated Context Window, Thinking, Rename Session,
-and Terminal. Rename uses the same clearable native text-entry alert as the dashboard row
-action, including trimmed nonempty admission and a fixed trailing clear control. Its model
-row uses the same progressive searchable `ModelPicker` sheet as Models and Defaults, with
-the originating row accent applied across the selector's title, controls, and cards; a tapped
-model becomes selected immediately while its session mutation awaits authoritative confirmation.
-Thinking retains the shared inline Change control, authoritative available-level list, and
-immediate mutations. The blue Session group orders Current Branch, Agent Context,
+project session. Manage Session begins with two emerald summary cards: usage and model.
+The model card replaces the Configuration section. Its selected model name uses the same
+large bold reading-family heading as remaining tokens, with the provider beneath it; exact
+provider/model identity chooses the catalog display name. Model, capability-gated Context
+Window, and Thinking retain their shared selection controls with slim Change capsules.
+Small actions keep a 28-point visual capsule inside a 44-point target; regular settings
+menus retain their existing size. Accessibility text stacks the model and setting actions
+below their full-width labels instead of forcing names into a narrow side column. Automatic Compaction status and Compact Now occupy the
+model card's final row. The leading native toolbar group contains only Rename Session and
+Terminal icons, mirroring the dashboard's grouped actions, while Done stays trailing.
+Rename keeps the dashboard's clearable native text-entry alert and trimmed nonempty admission.
+The model action opens the progressive searchable `ModelPicker` with emerald title, controls,
+and cards; an in-flight choice appears immediately without replacing canonical authority.
+Context-window model/revision guards, Thinking's available-level list, and compaction
+queue/export/active-operation admission stay owned by the existing session mutations.
+The blue Session group orders Current Branch, Agent Context,
 Project Resources, Session History, and Subagent History, followed by any diagnostics.
-A separate neutral-gray Exports group below owns HTML Export, JSONL Export, and prepared-file sharing. Its Current Branch row is a button in every state, places the branch beneath the row title and the working-tree status at the trailing edge, and is backed only by the
+A separate neutral-gray Exports group below owns HTML Export, JSONL Export, and prepared-file sharing. The Session group's Current Branch row is a button in every state, places the branch beneath the row title and the working-tree status at the trailing edge, and is backed only by the
 session-bound `workspace-inspector.v1` projection; it never reuses the path-based New Session
 Git probe or a locally remembered branch. The progressive Workspace sheet owns three
 mobile-native views over that projection: lazy Files navigation rooted at the runtime's
@@ -1487,20 +1494,25 @@ Directory is refreshed only while Files is visible or when the user returns to i
 parallel initial load and stops under coverage, background, or dismissal. Failed directory navigation keeps the prior
 path and rows as one atomic projection instead of labeling stale contents with the requested path. Git/file responses are point-in-time revisions; later workspace truth replaces
 lists atomically and never mutates an already-open diff beneath the reader.
-Configuration row icons and dividers use emerald; Session row icons—including all
+The model summary's controls and dividers use emerald; Session row icons—including all
 Git states, resource/history destinations, and diagnostics—remain blue. Export and sharing
 rows use their separate group's neutral slate palette.
-The compact top summary owns automatic-compaction status beside a single-line context
-value, followed by the cache-hit/read-write/input/output/cost statistics row, with every
-value kept to one visual line. When the runtime has reset its usage estimate, the card presents a
+The usage summary combines counts and percentage as `162K/272K • 60% used` beside the
+remaining-token heading, moving that complete metadata line below the heading only when
+width or Dynamic Type requires it. The progress line directly separates this header from
+the cache-hit/read-write/input/output/cost statistics; there is no second divider or
+compaction label in the usage card. All Manage Session secondary text is one-half point
+larger than its corresponding ordinary type scale, including metric values, labels,
+workspace status, and group details; headings are unchanged. A content-scoped adjustment
+keeps shared settings rows consistent without enlarging other sheets or model-picker text. When the runtime has reset its usage estimate, the card presents a
 qualified zero-percent fresh state instead of an unavailable headline; a trailing canonical compaction
 entry adds concise “Compacted” context, and the copy makes clear that the next response refreshes the
 estimate. History owns the concise runtime
 phase/message/tool summary. History row previews and relative timestamps are
 prepared once off the main actor when the bounded tree or selected mode changes;
 live session-state updates reuse those immutable rows, and dense cards use the
-static scroll surface rather than one live glass filter per event. Its compact toolbar action invokes Pi's
-canonical compaction through Gateway and can leave one authoritative request queued
+static scroll surface rather than one live glass filter per event. Manage Session's model-card
+Compact Now action invokes Pi's canonical compaction through Gateway and can leave one authoritative request queued
 behind an active turn. Project Resources presents resolved extensions, prompts, skills,
 and tools as named rows over the canonical projection. Instruction files such as `AGENTS.md`
 have no duplicate row or Context Files section there: their assembled guidance belongs in
