@@ -883,12 +883,20 @@ option symbols are emerald while text retains native system styling, and activat
 and Add Commands on the first option tap. Record the command/skill panel frame by frame: its material must reveal upward on the same continuous height curve that reduces the transcript viewport, with no full-size flash, delayed chat jump, or second settle. Rapid open/filter/dismiss retargets must continue from the current presentation; dismissal returns downward toward the composer, and a detached reader's visible message must not move to the tail. Verify `@` opens the cyan skill glass, query typing filters without caret
 jumps, selection removes only the active token and places one tool-height removable skill chip below photo/file chips, and
 a newer skill replaces it. Picker rows use compact icon circles and friendly bold titles. Both the row info action
-and selected chip open the same medium-first titled detail sheet, which shows description, exact invocation,
-resource type/source/scope/origin/path, argument hint, byte/truncation facts, and the lazily fetched bounded source
-content. Markdown front matter already projected as title/description is hidden from the body; ordinary producer
+and selected chip open the same medium-first titled detail sheet. Its main body contains only description and
+lazily fetched content. The top-left info button opens a separate medium-first Resource Info sheet containing the
+existing exact invocation, type/source/scope/origin/path, argument hint, and byte facts; it does not fetch again.
+Both toolbar symbols and the info sheet's Done match the resource title accent. Check info → Done returns to the
+same reading position without clearing the body or reloading it. Command and prompt excerpts stop after 480
+characters or 10 source lines, whichever comes first; skills retain their full admitted body. Any local or Gateway
+omission gets one muted-gray Content truncated note below the excerpt, not an amber warning above it. Markdown front matter already projected as title/description is hidden from the body; ordinary producer
 hard-wraps in skill/prompt prose and list continuations become natural layout wraps, while blank lines, block
 boundaries, fenced code, intentional Markdown hard breaks, malformed front matter, and extension source remain
-preserved. The body uses the static scroll surface shared by provider rows rather than Liquid Glass. Verify `/` at the leading command boundary opens the purple command glass, selection
+preserved before preview bounding. The body uses the static scroll surface shared by provider rows rather than Liquid Glass.
+`ComposerResourcePickerTests` pins Unicode-safe excerpts, exact boundaries, source truncation, and unchanged skill
+bodies. Native sheet tests check toolbar paint in isolated action regions and that the short main sheet has no
+metadata table; resource-card layout tests bound rendered excerpt height. Static info-sheet captures do not replace
+the manual info-button round-trip check. Verify `/` at the leading command boundary opens the purple command glass, selection
 completes editable command text with a trailing space, and deleting either active trigger dismisses its picker.
 Producer-triggered extension/subagent session messages remain one tool-height status row with a bold owner title,
 icon, status, and duration when supplied; tapping retains the complete message, provenance, and payload sheet.

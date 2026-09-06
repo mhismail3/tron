@@ -84,6 +84,86 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testComposerResourceDetailsKeepMetadataSecondaryAndMatchToolbarPaint() async throws {
+        try await withModel { model in
+            for (source, accent): (CommandInfo.Source, Color) in [(.skill, .tronCyan), (.prompt, .tronPurple), (.extension, .tronIndigo)] {
+                let entry = try XCTUnwrap(ComposerResourceEntry(command: CommandInfo(
+                    name: source == .skill ? "skill:review" : "review",
+                    description: "Review the selected changes.", argumentHint: "Optional focus",
+                    source: source, sourcePath: "/resources/review.md",
+                    resourceSource: "project resources", resourceScope: .project, resourceOrigin: .topLevel
+                )))
+                try await self.withSheet(ComposerResourceDetailSheet(
+                    sessionID: nil, entry: entry, accent: accent, prefix: source == .skill ? "@" : "/"
+                ).environment(model)) { controller in
+                    let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                    self.assertToolbarPaint(accent, bar: bar, leading: true, controller: controller)
+                    self.assertToolbarPaint(accent, bar: bar, leading: false, controller: controller)
+                    let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                    // With a short description and no fetched body, a main-sheet
+                    // resource table would exceed this independently measured bound.
+                    XCTAssertLessThan(scroll.contentSize.height, 250)
+                    self.capture(controller, name: "resource-detail-\(source)")
+                }
+                let metadata = [
+                    TronTechnicalMetadataItem(title: "Type", value: source.rawValue, icon: "sparkles"),
+                    .init(title: "Invocation", value: source == .skill ? "@review" : "/review", icon: "terminal"),
+                    .init(title: "Source file", value: "/resources/review.md", icon: "doc.text"),
+                ]
+                try await self.withSheet(ComposerResourceInfoSheet(items: metadata, accent: accent)) { controller in
+                    XCTAssertEqual(controller.sheetPresentationController?.selectedDetentIdentifier, .medium)
+                    let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                    self.assertToolbarPaint(accent, bar: bar, leading: false, controller: controller)
+                    self.capture(controller, name: "resource-info-\(source)")
+                }
+            }
+        }
+    }
+
+    private func capture(_ controller: UIViewController, name: String) {
+        let image = UIGraphicsImageRenderer(size: controller.view.bounds.size).image { _ in
+            controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    /// SwiftUI paints these symbols without public UIButton/customView nodes.
+    /// In this short-title fixture each outer quarter contains only its action;
+    /// sample actual paint there rather than the bar's inherited UIKit tint.
+    private func assertToolbarPaint(_ accent: Color, bar: UINavigationBar, leading: Bool, controller: UIViewController) {
+        let regionWidth = bar.bounds.width / 4
+        let region = CGRect(x: leading ? 0 : bar.bounds.width - regionWidth, y: 0, width: regionWidth, height: bar.bounds.height)
+        let frame = bar.convert(region, to: controller.view)
+        let image = UIGraphicsImageRenderer(size: controller.view.bounds.size).image { _ in
+            controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        }
+        guard let crop = image.cgImage?.cropping(to: CGRect(
+            x: frame.minX * image.scale, y: frame.minY * image.scale,
+            width: frame.width * image.scale, height: frame.height * image.scale
+        )) else { return XCTFail("Toolbar control must have a rendered frame") }
+        let width: Int = crop.width, height: Int = crop.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        pixels.withUnsafeMutableBytes { buffer in
+            let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                    bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(crop, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(accent).resolvedColor(with: controller.traitCollection).getRed(&r, green: &g, blue: &b, alpha: &a)
+        var matches = 0
+        for index in stride(from: 0, to: pixels.count, by: 4) {
+            let red = abs(CGFloat(pixels[index]) / 255 - r)
+            let green = abs(CGFloat(pixels[index + 1]) / 255 - g)
+            let blue = abs(CGFloat(pixels[index + 2]) / 255 - b)
+            if red < 0.05, green < 0.05, blue < 0.05, pixels[index + 3] > 230 { matches += 1 }
+        }
+        XCTAssertGreaterThan(matches, 3, "Toolbar symbol must match its resource title color")
+    }
+
     private func withModel(_ body: (AppModel) async throws -> Void) async throws {
         let suiteName = "session-sheet-tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

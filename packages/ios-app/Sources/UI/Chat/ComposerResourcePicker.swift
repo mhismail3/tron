@@ -78,6 +78,28 @@ struct ComposerResourceEntry: Identifiable, Hashable, Sendable {
 }
 
 enum ComposerResourceContentPresentation {
+    struct Preview: Equatable {
+        let text: String
+        let isTruncated: Bool
+    }
+
+    /// A command/prompt preview is a short reading surface, not the transport's
+    /// much larger source allowance. Skill documents retain their full body.
+    static func preview(_ content: String, source: CommandInfo.Source, sourceTruncated: Bool) -> Preview {
+        let text = body(content, source: source)
+        guard source != .skill else { return Preview(text: text, isTruncated: sourceTruncated) }
+        var end = text.index(text.startIndex, offsetBy: 480, limitedBy: text.endIndex) ?? text.endIndex
+        var lines = 1
+        for index in text[..<end].indices where text[index].isNewline {
+            if lines == 10, text.index(after: index) < text.endIndex {
+                end = index
+                break
+            }
+            lines += 1
+        }
+        return Preview(text: String(text[..<end]), isTruncated: sourceTruncated || end < text.endIndex)
+    }
+
     static func body(_ content: String, source: CommandInfo.Source) -> String {
         guard source != .extension else { return content }
 
@@ -602,17 +624,13 @@ struct ComposerResourceDetailSheet: View {
     @State private var loadError: String?
     @State private var loadRevision = 0
     @State private var detent: PresentationDetent = .medium
+    @State private var showsResourceInfo = false
 
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: TronSpacing.section) {
                     summary
-                    TronTechnicalMetadataSection(
-                        title: "Resource",
-                        items: metadata,
-                        accent: accent
-                    )
                     contentSection
                 }
                 .padding(18)
@@ -622,6 +640,14 @@ struct ComposerResourceDetailSheet: View {
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showsResourceInfo = true } label: {
+                        Image(systemName: "info.circle")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(accent)
+                    }
+                    .accessibilityLabel("Resource Info")
+                }
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: entry.friendlyName, accent: accent)
                 }
@@ -629,11 +655,15 @@ struct ComposerResourceDetailSheet: View {
                     Button { dismiss() } label: {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
+                            .foregroundStyle(accent)
                     }
                     .accessibilityLabel("Done")
                 }
             }
+            .tint(accent)
+        }
+        .tronManagedSheet(isPresented: $showsResourceInfo, identity: "composer.resource-info.\(entry.id)") {
+            ComposerResourceInfoSheet(items: metadata, accent: accent)
         }
         .task(id: "\(entry.id):\(loadRevision)") { await loadDetail() }
         .tronTopBlur(.sheet)
@@ -698,9 +728,11 @@ struct ComposerResourceDetailSheet: View {
         return items
     }
 
-    private var displayedContent: String? {
+    private var displayedContent: ComposerResourceContentPresentation.Preview? {
         detail?.content.map {
-            ComposerResourceContentPresentation.body($0, source: entry.source)
+            ComposerResourceContentPresentation.preview(
+                $0, source: entry.source, sourceTruncated: detail?.contentTruncated == true
+            )
         }
     }
 
@@ -730,24 +762,8 @@ struct ComposerResourceDetailSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             TronTechnicalSectionLabel("Content")
             Group {
-                if let content = displayedContent, !content.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        if detail?.contentTruncated == true {
-                            Label("Showing the first 96 KiB of the source", systemImage: "text.badge.minus")
-                                .font(TronTypography.caption)
-                                .foregroundStyle(Color.tronAmber)
-                        }
-                        if entry.source == .extension {
-                            Text(content)
-                                .font(TronTypography.codeContent)
-                                .foregroundStyle(Color.tronTextPrimary)
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                        } else {
-                            TronMarkdownView(text: content, streaming: false)
-                                .textSelection(.enabled)
-                        }
-                    }
+                if let content = displayedContent, !content.text.isEmpty {
+                    ComposerResourceContentBody(preview: content, source: entry.source)
                 } else if let loadError {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(loadError)
