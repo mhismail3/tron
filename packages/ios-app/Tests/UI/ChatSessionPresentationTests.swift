@@ -128,6 +128,8 @@ struct ChatSessionPresentationTests {
         #expect(ChatOpeningAttemptPolicy.isUnsettled(.presented))
         #expect(!ChatOpeningAttemptPolicy.isUnsettled(.ready))
         #expect(!ChatOpeningAttemptPolicy.isUnsettled(.failed("retry")))
+        #expect(ChatOpeningAttemptPolicy.isFailed(.failed("retry")))
+        #expect(!ChatOpeningAttemptPolicy.isFailed(.ready))
         #expect(ChatOpeningAttemptPolicy.shouldFailUnsettledAttempt(
             completedOwnedTask: true,
             taskCancelled: false,
@@ -171,6 +173,22 @@ struct ChatSessionPresentationTests {
 
         passive.modelPresentationGeneration = nil
         #expect(passive.needsOpeningResume)
+
+        let failed = ChatSessionPresentation(sessionID: "session-c")
+        let failedEpoch = failed.open.begin()
+        let didFail = failed.open.fail(
+            sessionID: "session-c", epoch: failedEpoch, message: "timeout"
+        )
+        #expect(didFail)
+        #expect(!failed.needsOpeningResume)
+        #expect(failed.shouldBeginOpening(retryingFailure: true))
+        let retiring = Task<Void, Never> {}
+        let retiringGeneration = failed.installOpeningTask(retiring)!
+        failed.cancelOpeningTask()
+        #expect(!failed.shouldBeginOpening(retryingFailure: true))
+        #expect(failed.finishOpeningTask(retiringGeneration))
+        #expect(!failed.needsOpeningResume)
+        #expect(failed.shouldBeginOpening(retryingFailure: true))
     }
 
     @Test("a drained cancelled opening publishes a new surface-task edge")

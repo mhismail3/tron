@@ -860,6 +860,45 @@ struct ChatTranscriptGeometry: Equatable {
     }
 }
 
+/// Bridges SwiftUI's animation completion callback to the cancellable opening
+/// task. `withCheckedContinuation` alone cannot observe task cancellation, so a
+/// covered/backgrounded opening could remain leased forever after its phase had
+/// already reached `.presented`.
+@MainActor
+final class ChatOpeningAnimationWaiter {
+    private var continuation: CheckedContinuation<Bool, Never>?
+    private var resolved = false
+
+    func wait(
+        start: (@escaping (Bool) -> Void) -> Void
+    ) async -> Bool {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                guard !Task.isCancelled else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                self.continuation = continuation
+                start { [weak self] result in
+                    self?.finish(result)
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.finish(false)
+            }
+        }
+    }
+
+    private func finish(_ result: Bool) {
+        guard !resolved, let continuation else { return }
+        resolved = true
+        self.continuation = nil
+        continuation.resume(returning: result)
+    }
+
+}
+
 enum ChatOpenPresentationPhase: Equatable {
     case opening
     case positioning

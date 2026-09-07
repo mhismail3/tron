@@ -295,7 +295,7 @@ exact initial transcript projection, and a physically verified viewport at the m
 after transcript and queue rows. Rows remain fully realizable beneath that opaque cover;
 an opacity-zero lazy stack is never used as a layout gate. The eight-point positioning lift resolves behind that cover, and the cover is removed only after
 current non-lifted marker and geometry evidence, two physically unchanged presented frames regardless of duplicate SwiftUI observation callbacks, and consumption of
-the exact opening-target release. One still-covered frame then installs the settled transcript at zero opacity and an eight-point visual offset; the cover fades while that immutable commit rises into place, with interaction, repair, paging, and live projection intake still leased until animation completion and the next ready display-link frame. Reduce Motion keeps only the short fade. Automatic projection intake remains
+the exact opening-target release. One still-covered frame then installs the settled transcript at zero opacity and an eight-point visual offset; the cover fades while that immutable commit rises into place, with interaction, repair, paging, and live projection intake still leased until animation completion and the next ready display-link frame. The animation completion bridge is cancellation-aware: coverage or scene retirement drains the opening lease even if SwiftUI never delivers its completion, without admitting a stale epoch. Reduce Motion keeps only the short fade. Automatic projection intake remains
 coalesced through that complete transaction. The first complete same-session/presentation/runtime commit may
 position and reveal even if streaming has advanced its payload; only the newest desired source is submitted
 after that lease ends. Runtime or presentation replacement still fails closed. Opening uses one exact
@@ -334,7 +334,7 @@ hooks are absent from Development and Release builds and own no session policy
 or runtime state. The
 composer remains mounted and visible throughout opening so transient synchronization
 cannot remove the primary chat control; sending stays disabled until the authoritative
-baseline is ready. A cancelled opening lease publishes a fresh resume edge when it drains, so a foregrounded connected chat cannot remain non-scrollable with disabled composer actions until an unrelated navigation gesture changes presentation activity. A failed transport/sync open shows an explicit retry surface. Once that mounted chat is ready, reconnect and
+baseline is ready. A cancelled opening lease publishes a fresh resume edge when it drains, so a foregrounded connected chat cannot remain non-scrollable with disabled composer actions until an unrelated navigation gesture changes presentation activity. Failed attempts do not automatically reopen from task-revision, connection, or foreground callbacks; the explicit Retry intent survives an old lease's drain without overlapping session opens. The hosted reveal-cancellation regression checks stale-callback rejection, the enabled attachment/native-scroll controls, and a visible outgoing submission after resumption. A failed transport/sync open shows an explicit retry surface. Once that mounted chat is ready, reconnect and
 resynchronization merge compatible live tails with history explicitly loaded in
 that viewport; a detached reader keeps its frozen commit until returning to the tail. Explicit earlier-page loads
 remain request-only, are scoped to the exact mount generation/cursor, and restore the

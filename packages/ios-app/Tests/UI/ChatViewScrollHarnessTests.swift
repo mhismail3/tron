@@ -501,6 +501,88 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("cancelled reveal drains and active resume re-enables the real chat surface")
+    func cancelledRevealResumesThroughReadyControls() async throws {
+        try await withTestWatchdog(timeout: .seconds(20)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_231).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(
+                snapshot: snapshot,
+                enablesComposerSubmission: true,
+                enablesPresentationCover: true,
+                holdsOpeningRevealCompletions: true
+            ) { harness in
+                let firstCapture = try await harness.recorder.waitUntil {
+                    $0.observation.openingRevealCompletionCaptureCount == 1
+                        && !$0.observation.isReady
+                }
+                #expect(!firstCapture.observation.isReady)
+                harness.setCovered(true)
+                try await harness.waitForCoverTransition(presented: true)
+                harness.setCovered(false)
+                try await harness.waitForCoverTransition(presented: false)
+
+                // A second captured callback proves the old opening lease
+                // drained and the active surface started a successor attempt.
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.openingRevealCompletionCaptureCount == 2
+                        && !$0.observation.isReady
+                }
+                harness.releaseOpeningRevealCompletion()
+                try await DisplayFrameScheduler.displayLink.nextFrame()
+                #expect(!harness.probeObservation.isReady)
+
+                harness.releaseOpeningRevealCompletion()
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.observation.readyFrameCompletionCount >= 1
+                        && $0.nativeGeometryMatches
+                }
+                #expect(ready.observation.openingRevealCompletionCaptureCount == 2)
+                #expect(try harness.isAttachmentButtonEnabled())
+                #expect(try harness.isNativeTranscriptInteractionEnabled())
+                #expect(abs(try harness.nativeTranscriptSignedTailError()) <= 2)
+
+                // The same production readiness gate now admits send. This
+                // would be rejected while the successor is still presented.
+                try harness.setComposerDraftText("resumed send")
+                harness.submitPrompt()
+                let sent = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.nativeRows.contains {
+                            $0.physicalID.hasPrefix("outgoing-submission:") && $0.isVisible
+                        }
+                }
+                #expect(sent.observation.isReady)
+                #expect(!sent.observation.geometry.isPastBottomEdge)
+                #expect(sent.nativeRows.contains {
+                    $0.physicalID.hasPrefix("outgoing-submission:") && $0.isVisible
+                })
+
+                // Exercise the mounted native scroll surface after readiness;
+                // a projection-only oracle would not prove this interaction.
+                try harness.displaceNativeTranscriptFromTail(by: 180)
+                let bottom = sent.observation.geometry
+                let away = ChatTranscriptGeometry(
+                    offsetY: max(0, bottom.offsetY - 180),
+                    contentHeight: bottom.contentHeight,
+                    containerHeight: bottom.containerHeight,
+                    bottomInset: bottom.bottomInset
+                )
+                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
+                harness.driveNativeOwnership(true)
+                harness.driveGeometry(previous: bottom, current: away)
+                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
+                let displaced = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.observation.isDetached
+                        && $0.observation.geometry.distanceFromBottom > 100
+                }
+                #expect(displaced.observation.isReady)
+                #expect(try harness.nativeTranscriptDistanceFromTail() > 100)
+            }
+        }
+    }
+
     @Test("hosted aggregate counters and retained row frames are bounded")
     func hostedEvidenceBounds() {
         let probe = ChatHostedProbe()
@@ -512,6 +594,14 @@ struct ChatViewScrollHarnessTests {
         }
         #expect(probe.observation.rowFrames.count == 256)
         #expect(probe.observation.semanticFrameCallbackCount == 300)
+
+        probe.holdOpeningRevealCompletionsForTesting()
+        for index in 0..<300 {
+            #expect(probe.captureOpeningRevealCompletionForTesting({}) == (index < 2))
+        }
+        #expect(probe.observation.openingRevealCompletionCaptureCount == 2)
+        #expect(probe.observation.openingRevealCompletionOverflowCount == 298)
+        probe.discardOpeningRevealCompletionsForTesting()
     }
 
     @Test("hosted probe counts semantic remounts across projection installs")
@@ -1587,19 +1677,23 @@ struct ChatViewScrollHarnessTests {
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         enablesComposerSubmission: Bool = false,
         enablesPresentationCover: Bool = false,
+        holdsOpeningRevealCompletions: Bool = false,
         operation: @escaping @MainActor @Sendable (ChatViewScrollHarness) async throws -> Void
     ) async throws {
         let harness: ChatViewScrollHarness
         if enablesComposerSubmission {
             harness = try await ChatViewScrollHarness.composerSubmissionHarness(
                 snapshot: snapshot,
-                displayFrameScheduler: displayFrameScheduler
+                displayFrameScheduler: displayFrameScheduler,
+                enablesPresentationCover: enablesPresentationCover,
+                holdsOpeningRevealCompletions: holdsOpeningRevealCompletions
             )
         } else {
             harness = try ChatViewScrollHarness(
                 snapshot: snapshot,
                 displayFrameScheduler: displayFrameScheduler,
-                enablesPresentationCover: enablesPresentationCover
+                enablesPresentationCover: enablesPresentationCover,
+                holdsOpeningRevealCompletions: holdsOpeningRevealCompletions
             )
         }
         do {
@@ -1786,7 +1880,8 @@ final class ChatViewScrollHarness {
         snapshot: SessionSnapshot,
         displayFrameScheduler: DisplayFrameScheduler,
         performanceSignposts: (any PerformanceSignposting)? = nil,
-        enablesPresentationCover: Bool = false
+        enablesPresentationCover: Bool = false,
+        holdsOpeningRevealCompletions: Bool = false
     ) throws {
         let dependencies = try Self.makeDependencies(enablesComposerSubmission: false)
         try self.init(
@@ -1795,14 +1890,17 @@ final class ChatViewScrollHarness {
             performanceSignposts: performanceSignposts,
             dependencies: dependencies,
             installsSubscribedSnapshot: false,
-            enablesPresentationCover: enablesPresentationCover
+            enablesPresentationCover: enablesPresentationCover,
+            holdsOpeningRevealCompletions: holdsOpeningRevealCompletions
         )
     }
 
     static func composerSubmissionHarness(
         snapshot: SessionSnapshot,
         displayFrameScheduler: DisplayFrameScheduler,
-        performanceSignposts: (any PerformanceSignposting)? = nil
+        performanceSignposts: (any PerformanceSignposting)? = nil,
+        enablesPresentationCover: Bool = false,
+        holdsOpeningRevealCompletions: Bool = false
     ) async throws -> ChatViewScrollHarness {
         let dependencies = try makeDependencies(enablesComposerSubmission: true)
         guard let socket = dependencies.socket, let profile = dependencies.profile else {
@@ -1819,7 +1917,9 @@ final class ChatViewScrollHarness {
                 displayFrameScheduler: displayFrameScheduler,
                 performanceSignposts: performanceSignposts,
                 dependencies: dependencies,
-                installsSubscribedSnapshot: true
+                installsSubscribedSnapshot: true,
+                enablesPresentationCover: enablesPresentationCover,
+                holdsOpeningRevealCompletions: holdsOpeningRevealCompletions
             )
         } catch {
             await dependencies.model.teardown()
@@ -1890,7 +1990,8 @@ final class ChatViewScrollHarness {
         performanceSignposts: (any PerformanceSignposting)?,
         dependencies: Dependencies,
         installsSubscribedSnapshot: Bool,
-        enablesPresentationCover: Bool = false
+        enablesPresentationCover: Bool = false,
+        holdsOpeningRevealCompletions: Bool = false
     ) throws {
         self.snapshot = snapshot
         transcriptIDs = Set(snapshot.transcript.map(\.id)).union(["transcript-bottom"])
@@ -1919,6 +2020,9 @@ final class ChatViewScrollHarness {
         }
 
         let probe = ChatHostedProbe()
+        if holdsOpeningRevealCompletions {
+            probe.holdOpeningRevealCompletionsForTesting()
+        }
         self.probe = probe
         let sessionID = snapshot.sessionId
         let root = AnyView(
@@ -1957,6 +2061,9 @@ final class ChatViewScrollHarness {
     }
 
     func setCovered(_ value: Bool) { cover.presented = value }
+    func releaseOpeningRevealCompletion() {
+        probe.releaseOpeningRevealCompletionForTesting()
+    }
     var chatSurfaceActivity: PresentationSurfaceActivity { cover.coordinator.activity(for: cover.rootToken) }
     var coverTransitionSettled: Bool {
         guard let presented = hostingController.presentedViewController else { return false }
@@ -2082,6 +2189,12 @@ final class ChatViewScrollHarness {
         abs(try nativeTranscriptSignedTailError())
     }
 
+    func isNativeTranscriptInteractionEnabled() throws -> Bool {
+        let scrollView = try nativeTranscriptScrollView()
+        return scrollView.isScrollEnabled && scrollView.isUserInteractionEnabled
+            && scrollView.panGestureRecognizer.isEnabled
+    }
+
     private func nativeTranscriptScrollView() throws -> UIScrollView {
         guard let value = Self.nativeTranscriptScrollView(in: hostingController.view) else {
             throw HarnessError.missingTranscript
@@ -2113,6 +2226,15 @@ final class ChatViewScrollHarness {
         }
     }
 
+    func isAttachmentButtonEnabled() throws -> Bool {
+        guard let button = Self.buttons(in: hostingController.view).first(where: {
+            $0.accessibilityLabel == "Add attachment"
+        }) else {
+            throw HarnessError.missingComposer
+        }
+        return button.isEnabled
+    }
+
     func cleanup() {
         retireHostedView()
         retireStorage()
@@ -2132,6 +2254,7 @@ final class ChatViewScrollHarness {
 
     private func retireHostedView() {
         probe.cancelPresentation()
+        probe.discardOpeningRevealCompletionsForTesting()
         recorder.stop()
         window.isHidden = true
         window.rootViewController = nil
@@ -2186,6 +2309,11 @@ final class ChatViewScrollHarness {
     private static func textViews(in view: UIView) -> [UITextView] {
         let current = (view as? UITextView).map { [$0] } ?? []
         return current + view.subviews.flatMap(textViews)
+    }
+
+    private static func buttons(in view: UIView) -> [UIButton] {
+        let current = (view as? UIButton).map { [$0] } ?? []
+        return current + view.subviews.flatMap(buttons)
     }
 }
 

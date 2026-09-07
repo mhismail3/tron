@@ -79,6 +79,8 @@ struct ChatHostedObservation: Sendable {
     let prependSemanticFrameWaiting: Bool
     let prependCompletionResult: PerformanceResult?
     let readyFrameCompletionCount: Int
+    let openingRevealCompletionCaptureCount: Int
+    let openingRevealCompletionOverflowCount: Int
     let isReady: Bool
 
     var composerHeight: CGFloat { geometryTrace.last?.composerHeight ?? 0 }
@@ -100,6 +102,8 @@ enum ChatHostedScrollCallbackMode: Sendable {
 
 @MainActor
 final class ChatHostedProbe {
+    private static let maximumHeldOpeningRevealCompletions = 2
+
     let scrollCallbackMode: ChatHostedScrollCallbackMode
     private var geometry = ChatTranscriptGeometry.zero
     private var composerHeight: CGFloat = 0
@@ -139,6 +143,10 @@ final class ChatHostedProbe {
     private var prependSemanticFrameWaiting = false
     private var prependCompletionResult: PerformanceResult?
     private var readyFrameCompletionCount = 0
+    private var openingRevealCompletionCaptureCount = 0
+    private var openingRevealCompletionOverflowCount = 0
+    private var holdOpeningRevealCompletions = false
+    private var openingRevealCompletions: [() -> Void] = []
     private var geometryControl: ((ChatTranscriptGeometry, ChatTranscriptGeometry, Bool) -> Void)?
     private var phaseControl: ((ScrollPhase, ScrollPhase, ChatTranscriptGeometry?) -> Void)?
     private var nativeControl: ((Bool) -> Void)?
@@ -210,6 +218,8 @@ final class ChatHostedProbe {
             prependSemanticFrameWaiting: prependSemanticFrameWaiting,
             prependCompletionResult: prependCompletionResult,
             readyFrameCompletionCount: readyFrameCompletionCount,
+            openingRevealCompletionCaptureCount: openingRevealCompletionCaptureCount,
+            openingRevealCompletionOverflowCount: openingRevealCompletionOverflowCount,
             isReady: isReady
         )
     }
@@ -589,6 +599,39 @@ final class ChatHostedProbe {
 
     func recordReadyFrameCompletion() {
         readyFrameCompletionCount &+= 1
+        revision &+= 1
+    }
+
+    func holdOpeningRevealCompletionsForTesting() {
+        holdOpeningRevealCompletions = true
+    }
+
+    @discardableResult
+    func captureOpeningRevealCompletionForTesting(_ completion: @escaping () -> Void) -> Bool {
+        guard holdOpeningRevealCompletions else { return false }
+        guard openingRevealCompletions.count < Self.maximumHeldOpeningRevealCompletions else {
+            // The hosted gate deliberately admits only the first attempt and
+            // its successor. Further callbacks run immediately rather than
+            // retaining presentation state without a release owner.
+            openingRevealCompletionOverflowCount &+= 1
+            revision &+= 1
+            return false
+        }
+        openingRevealCompletions.append(completion)
+        openingRevealCompletionCaptureCount &+= 1
+        revision &+= 1
+        return true
+    }
+
+    func discardOpeningRevealCompletionsForTesting() {
+        openingRevealCompletions.removeAll(keepingCapacity: false)
+        revision &+= 1
+    }
+
+    func releaseOpeningRevealCompletionForTesting() {
+        guard !openingRevealCompletions.isEmpty else { return }
+        let completion = openingRevealCompletions.removeFirst()
+        completion()
         revision &+= 1
     }
 

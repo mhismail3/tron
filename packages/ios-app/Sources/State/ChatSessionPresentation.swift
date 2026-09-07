@@ -42,6 +42,11 @@ enum ChatOpeningAttemptPolicy {
             || phase == .presented
     }
 
+    static func isFailed(_ phase: ChatOpenPresentationPhase) -> Bool {
+        if case .failed = phase { return true }
+        return false
+    }
+
     static func shouldFailUnsettledAttempt(
         completedOwnedTask: Bool,
         taskCancelled: Bool,
@@ -142,9 +147,15 @@ final class ChatSessionPresentation {
     /// Backgrounding retires only disposable UI work. An admitted composer
     /// transport is owned by ComposerDraftCoordinator and intentionally remains
     /// alive so an accepted prompt can reconcile after reconnect.
-    var needsOpeningResume: Bool {
-        (open.phase != .ready || modelPresentationGeneration == nil)
-            && openingTask == nil
+    var needsOpeningResume: Bool { shouldBeginOpening(retryingFailure: false) }
+
+    func shouldBeginOpening(retryingFailure: Bool) -> Bool {
+        guard openingTask == nil else { return false }
+        // A failed attempt owns an explicit Retry action. Automatic task-revision
+        // wakeups must not retry it, but a user's Retry survives the old lease's
+        // drain rather than requiring a second tap.
+        if ChatOpeningAttemptPolicy.isFailed(open.phase) { return retryingFailure }
+        return open.phase != .ready || modelPresentationGeneration == nil
     }
 
     struct OpeningTaskLease {

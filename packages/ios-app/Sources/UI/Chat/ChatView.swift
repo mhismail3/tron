@@ -389,8 +389,7 @@ struct ChatView: View {
             guard scenePhase == .active,
                   presentationActivity.allowsPresentationPublication,
                   state == .connected,
-                  (sessionPresentation.needsOpeningResume
-                    || transcriptPresentation.installed == nil) else { return }
+                  admitsAutomaticOpeningResume else { return }
             beginOpeningAfterForegroundWhenConnected()
         }
         .onChange(of: model.foregroundReconciliationGeneration) { _, _ in
@@ -672,8 +671,7 @@ struct ChatView: View {
             sessionPresentation.suspendForBackground()
         } else if current == .active,
                   presentationActivity.allowsPresentationPublication {
-            if sessionPresentation.needsOpeningResume
-                || transcriptPresentation.installed == nil {
+            if admitsAutomaticOpeningResume {
                 // Foregrounding does not necessarily change connection state or
                 // publish a reconciliation generation. Resume explicitly instead
                 // of waiting for an unrelated model event.
@@ -691,8 +689,7 @@ struct ChatView: View {
         reconcileSessionPresentationVisibility()
         guard scenePhase == .active,
               presentationActivity.allowsPresentationPublication else { return }
-        if sessionPresentation.needsOpeningResume
-            || transcriptPresentation.installed == nil {
+        if admitsAutomaticOpeningResume {
             beginOpeningAfterForegroundWhenConnected()
         } else {
             scrollCoordinator.foregroundViewportBecameActive(
@@ -1606,6 +1603,11 @@ struct ChatView: View {
 
     private var isTranscriptReady: Bool { sessionPresentation.open.phase == .ready }
 
+    private var admitsAutomaticOpeningResume: Bool {
+        !ChatOpeningAttemptPolicy.isFailed(sessionPresentation.open.phase)
+            && (sessionPresentation.needsOpeningResume || transcriptPresentation.installed == nil)
+    }
+
     private var hasSettledOpeningOffset: Bool {
         switch sessionPresentation.open.phase {
         case .revealing, .presenting, .presented, .ready:
@@ -1666,7 +1668,7 @@ struct ChatView: View {
                     .font(TronTypography.bodySM)
                     .foregroundStyle(Color.tronTextSecondary)
                     .multilineTextAlignment(.center)
-                Button("Retry") { Task { await beginOpeningPresentation() } }
+                Button("Retry") { Task { await beginOpeningPresentation(retryingFailure: true) } }
                     .buttonStyle(.plain)
                     .chatTranscriptPill()
             }
@@ -1704,7 +1706,7 @@ struct ChatView: View {
     }
 
     @MainActor
-    private func beginOpeningPresentation() async {
+    private func beginOpeningPresentation(retryingFailure: Bool = false) async {
         if let active = sessionPresentation.activeOpeningTaskLease {
             await active.task.value
             _ = sessionPresentation.finishOpeningTask(active.generation)
@@ -1712,11 +1714,11 @@ struct ChatView: View {
                   scenePhase == .active,
                   presentationActivity.allowsPresentationPublication,
                   model.admitsSessionPresentationOpen,
-                  sessionPresentation.needsOpeningResume else { return }
+                  sessionPresentation.shouldBeginOpening(retryingFailure: retryingFailure) else { return }
             // Retry and foreground resume serialize behind the exact drained
             // lease. Re-entering also coalesces multiple waiters on any newer
             // task installed by an earlier waiter.
-            await beginOpeningPresentation()
+            await beginOpeningPresentation(retryingFailure: retryingFailure)
             return
         }
         let task = Task { @MainActor in
@@ -1724,7 +1726,7 @@ struct ChatView: View {
         }
         guard let generation = sessionPresentation.installOpeningTask(task) else {
             task.cancel()
-            await beginOpeningPresentation()
+            await beginOpeningPresentation(retryingFailure: retryingFailure)
             return
         }
         let deadlineTask = Task { @MainActor in
@@ -2260,7 +2262,8 @@ struct ChatView: View {
         guard !Task.isCancelled,
               sessionPresentation.open.epoch == epoch,
               sessionPresentation.open.phase == .presenting else { return false }
-        let completed: Bool = await withCheckedContinuation { continuation in
+        let animationWaiter = ChatOpeningAnimationWaiter()
+        let completed = await animationWaiter.wait { complete in
             withAnimation(
                 transcriptRevealAnimation,
                 completionCriteria: .logicallyComplete
@@ -2270,10 +2273,19 @@ struct ChatView: View {
                     epoch: epoch
                 )
             } completion: {
-                continuation.resume(returning:
-                    sessionPresentation.open.epoch == epoch
-                        && sessionPresentation.open.phase == .presented
-                )
+                let finish = {
+                    complete(
+                        sessionPresentation.open.epoch == epoch
+                            && sessionPresentation.open.phase == .presented
+                    )
+                }
+                #if HOSTED_TEST
+                if hostedProbe?.captureOpeningRevealCompletionForTesting(finish) != true {
+                    finish()
+                }
+                #else
+                finish()
+                #endif
             }
         }
         guard completed,
