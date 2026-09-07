@@ -102,7 +102,7 @@ describe("WebSocket connection and outbound capacity", () => {
       sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
       service: {
-        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 4, minProtocolVersion: 4, machineId: "machine", machineName: "test", capabilities: [] }),
+        info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5, machineId: "machine", machineName: "test", capabilities: [] }),
         terminalBelongsToSession: () => false,
         releaseClient: vi.fn(),
         invoke: vi.fn(),
@@ -119,7 +119,7 @@ describe("WebSocket connection and outbound capacity", () => {
       if (frame.topic === "test.large") sequences.push(frame.payload.sequence);
     });
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
     await waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.handshake"));
 
     const payload = "x".repeat(512 * 1_024);
@@ -179,7 +179,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${paired.token}` } });
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
     await waitUntil(() => frames.some((frame) => frame.type === "hello"));
     const response = new Promise<Record<string, unknown>>((resolve) => socket.on("message", (raw) => {
       const frame = JSON.parse(raw.toString()) as Record<string, unknown>;
@@ -251,7 +251,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const frames: any[] = [];
     target.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await bounded(new Promise<void>((resolve) => target?.once("open", () => resolve())), "stalled self-revoke open");
-    target.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
+    target.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
     await bounded(waitUntil(() => frames.some((frame) => frame.type === "hello")), "stalled self-revoke hello");
 
     // Keep one earlier frame permanently in the real connection-local queue.
@@ -306,7 +306,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 4, minProtocolVersion: 4, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       invoke: vi.fn(async (_client: unknown, method: string) => ({ method })),
@@ -332,8 +332,8 @@ describe("WebSocket connection and outbound capacity", () => {
       new Promise<void>((resolve) => target.once("open", () => resolve())),
       new Promise<void>((resolve) => local.once("open", () => resolve())),
     ]);
-    target.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
-    local.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
+    target.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
+    local.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
     await waitUntil(() => localFrames.some((frame) => frame.type === "hello")
       && logger.log.mock.calls.filter((call) => call[2]?.event === "connection.handshake").length === 2);
 
@@ -425,7 +425,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const port = await unusedPort();
     const logger = { log: vi.fn() };
     const service = {
-      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 4, minProtocolVersion: 4, machineId: "machine", machineName: "test", capabilities: [] }),
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 5, minProtocolVersion: 5, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
       invoke: vi.fn(),
@@ -450,7 +450,7 @@ describe("WebSocket connection and outbound capacity", () => {
     const frames: any[] = [];
     first.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await new Promise<void>((resolve) => first.once("open", () => resolve()));
-    first.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
+    first.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
     await waitUntil(() => frames.some((frame) => frame.type === "hello"));
 
     const rejected = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });

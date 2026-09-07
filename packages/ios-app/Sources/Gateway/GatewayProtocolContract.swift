@@ -4,6 +4,6 @@ import Foundation
 /// `config/GatewayProtocol.json` is the repository authority; build policy
 /// verifies these compile-time values and the final signed artifact metadata.
 enum TronGatewayProtocolContract {
-    static let protocolVersion = 4
-    static let minimumProtocolVersion = 4
+    static let protocolVersion = 5
+    static let minimumProtocolVersion = 5
 }

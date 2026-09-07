@@ -1,10 +1,10 @@
 import { lstatSync, readFileSync } from "node:fs";
 
 export const GATEWAY_VERSION = "0.1.0-beta.7";
-// Protocol v4 makes chat invocation/context semantics explicit. There is no
-// v3 runtime path: every mobile peer must understand the typed projection.
-export const PROTOCOL_VERSION = 4;
-export const MIN_PROTOCOL_VERSION = 4;
+// Protocol v5 makes fork-boundary gap metadata explicit. There is no
+// v4 runtime path: every mobile peer must understand the typed projection.
+export const PROTOCOL_VERSION = 5;
+export const MIN_PROTOCOL_VERSION = 5;
 
 // package.json is the sole Pi SDK version authority. Keep this runtime check
 // strict so a malformed or partially updated package cannot report a false

@@ -192,14 +192,14 @@ struct DashboardStateOwnerTests {
         ) == Set([secondRemote.id]))
 
         let matchingInfo = GatewayInfo(
-            gatewayVersion: "1", piVersion: "1", protocolVersion: 4, minProtocolVersion: 4,
+            gatewayVersion: "1", piVersion: "1", protocolVersion: 5, minProtocolVersion: 5,
             machineId: other.machineId, machineGroupID: other.machineGroupID,
             machineName: "Other", capabilities: []
         )
         #expect(DashboardGatewayConnectionPool.admitsIdentity(matchingInfo, for: other))
         #expect(!DashboardGatewayConnectionPool.admitsIdentity(
             GatewayInfo(
-                gatewayVersion: "1", piVersion: "1", protocolVersion: 4, minProtocolVersion: 4,
+                gatewayVersion: "1", piVersion: "1", protocolVersion: 5, minProtocolVersion: 5,
                 machineId: "wrong", machineGroupID: other.machineGroupID,
                 machineName: "Other", capabilities: []
             ),
@@ -224,7 +224,7 @@ struct DashboardStateOwnerTests {
             let pool = DashboardGatewayConnectionPool(clientFactory: {
                 GatewayClient(socketFactory: socketFactory.factory)
             })
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":4,"minProtocolVersion":4,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
 
             pool.reconcile(
                 profiles: [selected, remote],
@@ -283,7 +283,7 @@ struct DashboardStateOwnerTests {
                 clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
                 clock: clock.clock
             )
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":4,"minProtocolVersion":4,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
             pool.reconcile(
                 profiles: [selected, remote],
                 selectedProfileID: selected.id,
@@ -350,7 +350,7 @@ struct DashboardStateOwnerTests {
                 GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
             })
             pool.delegate = recorder
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":4,"minProtocolVersion":4,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
             pool.reconcile(
                 profiles: [selected, remote],
                 selectedProfileID: selected.id,
@@ -433,7 +433,7 @@ struct DashboardStateOwnerTests {
                 GatewayClient(socketFactory: socketFactory.factory)
             })
             pool.delegate = recorder
-            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":4,"minProtocolVersion":4,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":5,"minProtocolVersion":5,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
             await oldSocket.enqueue(hello)
             pool.reconcile(
                 profiles: [selected, remote], selectedProfileID: selected.id,

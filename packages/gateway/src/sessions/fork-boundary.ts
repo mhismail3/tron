@@ -99,8 +99,9 @@ export function resolveForkBoundaryAnchor(
 
 /** Locate the transition on the CURRENT selected branch. A retained anchor is
  * usable even before the child has appended anything; later snapshots need no
- * parent disk I/O. Hidden entries and labels are mapped by the projection's
- * actual displayable entries, keeping filtering policy in its existing owner. */
+ * parent disk I/O. `displayedEntries` is the canonical projection owner's
+ * already-filtered sequence, so counting its rows before the raw anchor derives
+ * the stable gap without reimplementing projectability here. */
 export function projectForkBoundary(
   branch: SessionEntry[],
   displayedEntries: SessionEntry[],
@@ -109,13 +110,14 @@ export function projectForkBoundary(
   if (!anchor) return undefined;
   const inheritedIndex = branch.findIndex(entry => entry.id === anchor.inheritedEntryId);
   if (inheritedIndex < 0) return undefined;
-  const firstChildIndex = branch.findIndex((entry, index) => index > inheritedIndex && entry.type !== "label");
-  if (firstChildIndex < 0) return undefined;
-  const displayedIDs = new Set(displayedEntries.map(entry => entry.id));
-  const displayEntry = branch.slice(firstChildIndex).find(entry => displayedIDs.has(entry.id));
-  return displayEntry ? {
+  const rawIndexByID = new Map(branch.map((entry, index) => [entry.id, index]));
+  const gapOrdinal = displayedEntries.reduce(
+    (count, entry) => (rawIndexByID.get(entry.id)! <= inheritedIndex ? count + 1 : count),
+    0,
+  );
+  return {
     kind: anchor.kind,
-    entryId: branch[firstChildIndex]!.id,
-    displayEntryId: displayEntry.id,
-  } : undefined;
+    inheritedAnchorId: anchor.inheritedEntryId,
+    gapOrdinal,
+  };
 }

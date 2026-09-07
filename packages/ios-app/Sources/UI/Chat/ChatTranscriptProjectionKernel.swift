@@ -1240,15 +1240,41 @@ enum ChatTranscriptProjectionKernel {
             transcriptStart: transcriptStart,
             additionalVisibleCallIDs: streamingFragment?.toolCallIDs ?? []
         ).map { $0.source.id })
+        // The Gateway gap is in canonical projected-entry coordinates. Own it
+        // on the following page ([start, end)); a terminal non-empty page also
+        // owns gap == total so the marker remains visible at the true tail.
+        // Empty transcript [0, 0] is the sole empty-page exception. Malformed
+        // bounds fail closed rather than allowing ordinal arithmetic to trap.
+        let pageStart = max(0, transcriptStart ?? 0)
+        let (computedPageEnd, pageEndOverflow) = pageStart.addingReportingOverflow(fragments.count)
+        let pageEnd = pageEndOverflow ? pageStart : computedPageEnd
+        let pageTotal = transcriptTotal.map { max(0, $0) }
+        let boundaryInPage = forkBoundary.map { boundary in
+            guard !pageEndOverflow,
+                  pageTotal.map({ pageEnd <= $0 }) ?? true,
+                  boundary.gapOrdinal >= pageStart else { return false }
+            if boundary.gapOrdinal < pageEnd { return true }
+            guard boundary.gapOrdinal == pageEnd,
+                  pageTotal == pageEnd else { return false }
+            return pageStart < pageEnd || (pageStart == 0 && pageEnd == 0)
+        } ?? false
+        var boundaryInserted = false
+        func insertForkBoundary() {
+            guard !boundaryInserted, boundaryInPage, let forkBoundary else { return }
+            // A boundary is also a tool-group barrier: inherited tool-only rows
+            // must never merge with the child run across this pill.
+            flushTools()
+            appendRendered(.notification(ChatNotificationPresentation.forkBoundary(forkBoundary)), origin: .canonical)
+            boundaryInserted = true
+        }
         // A projected tool result can be folded into an earlier call's row.
         // Insert the boundary before visibility filtering so that folding (or
         // bootstrap-configuration suppression) cannot swallow the fork pill.
-        for fragment in fragments {
-            if let forkBoundary, fragment.source.id == forkBoundary.displayEntryId {
-                // A boundary is also a tool-group barrier: inherited tool-only
-                // rows must never merge with the child run across this pill.
-                flushTools()
-                appendRendered(.notification(ChatNotificationPresentation.forkBoundary(forkBoundary)), origin: .canonical)
+        for (offset, fragment) in fragments.enumerated() {
+            let (globalOrdinal, ordinalOverflow) = pageStart.addingReportingOverflow(offset)
+            if let forkBoundary, boundaryInPage, !ordinalOverflow,
+               globalOrdinal == forkBoundary.gapOrdinal {
+                insertForkBoundary()
             }
             guard visibleIDs.contains(fragment.source.id) else { continue }
             let tools = toolPresentations(in: fragment.source, results: results).map { canonical in
@@ -1260,6 +1286,10 @@ enum ChatTranscriptProjectionKernel {
             }
             toolsInspected += tools.count
             appendFragment(fragment, tools: tools, streaming: false)
+        }
+        if let forkBoundary, boundaryInPage,
+           forkBoundary.gapOrdinal == pageEnd {
+            insertForkBoundary()
         }
 
         let streamingTools = streamingFragment.map { fragment in

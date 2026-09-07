@@ -78,13 +78,13 @@ struct ChatTranscriptProjectionKernelTests {
           {"id":"child","parentId":"inherited","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"new-call","ordinal":0,"type":"toolCall","toolCallId":"new-call","name":"write","arguments":{},"toolSegmentId":"shared-segment"}]}
         ]
         """)
-        let boundary = try TranscriptForkBoundary(kind: .sessionFork, entryId: "child", displayEntryId: "child")
+        let boundary = try TranscriptForkBoundary(kind: .sessionFork, inheritedAnchorId: "inherited", gapOrdinal: 1)
         let projection = ChatTranscriptProjectionKernel.readOnlyTranscript(
             snapshot.transcript, transcriptStart: 0, transcriptTotal: snapshot.transcript.count,
             isActive: false, forkBoundary: boundary
         )
         #expect(Array(projection.timeline.ids) == [
-            "tool-run-old-call", "notification-fork-boundary-sessionFork-child", "tool-run-new-call"
+            "tool-run-old-call", "notification-fork-boundary-sessionFork-inherited", "tool-run-new-call"
         ])
         #expect(projection.isValid)
     }
@@ -98,7 +98,7 @@ struct ChatTranscriptProjectionKernelTests {
           {"id":"child","parentId":"result","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","content":[{"id":"task","ordinal":0,"type":"text","text":"child task"}]}
         ]
         """)
-        let boundary = try TranscriptForkBoundary(kind: .subagentFork, entryId: "result", displayEntryId: "result")
+        let boundary = try TranscriptForkBoundary(kind: .subagentFork, inheritedAnchorId: "result", gapOrdinal: 2)
         snapshot.forkBoundary = boundary
         snapshot.transcriptStart = 0
         snapshot.transcriptTotal = 3
@@ -114,27 +114,102 @@ struct ChatTranscriptProjectionKernelTests {
             Issue.record("Expected fork pill at the folded result boundary")
             return
         }
-        #expect(notification.title == "Subagent fork point")
+        #expect(notification.title == "Subagent created")
         #expect(!notification.showsProgress)
         let tail = ChatTranscriptProjectionKernel.readOnlyTranscript(
             Array(snapshot.transcript.suffix(1)), transcriptStart: 2, transcriptTotal: 3,
             isActive: false, forkBoundary: boundary
         )
-        #expect(!tail.timeline.ids.contains(markerID))
+        #expect(tail.timeline.ids.filter { $0 == markerID }.count == 1)
+        let head = ChatTranscriptProjectionKernel.readOnlyTranscript(
+            Array(snapshot.transcript.prefix(2)), transcriptStart: 0, transcriptTotal: 3,
+            isActive: false, forkBoundary: boundary
+        )
+        #expect(!head.timeline.ids.contains(markerID))
         #expect(readOnly.timeline.ids.filter { $0 == markerID }.count == 1)
         snapshot.forkBoundary = nil
         #expect(!ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline.ids.contains(markerID))
     }
 
+    @Test("prompt-only fork keeps the same tail marker after the first child append")
+    func promptOnlyForkBoundary() throws {
+        for kind in [TranscriptForkBoundary.Kind.sessionFork, .subagentFork] {
+            var snapshot = try fixture(transcript: """
+            [
+              {"id":"inherited","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"prompt","ordinal":0,"type":"text","text":"Copied prompt"}]},
+              {"id":"child","parentId":"inherited","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"user","content":[{"id":"next","ordinal":0,"type":"text","text":"Continue"}]}
+            ]
+            """)
+            let child = snapshot.transcript.removeLast()
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 1
+            let boundary = try TranscriptForkBoundary(kind: kind, inheritedAnchorId: "inherited", gapOrdinal: 1)
+            snapshot.forkBoundary = boundary
+            let markerID = "notification-fork-boundary-\(kind.rawValue)-inherited"
+            let initial = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+            let readOnly = ChatTranscriptProjectionKernel.readOnlyTranscript(
+                snapshot.transcript, transcriptStart: 0, transcriptTotal: 1,
+                isActive: false, forkBoundary: boundary
+            )
+            #expect(initial.isValid && readOnly.isValid)
+            #expect(Array(initial.timeline.ids) == ["inherited", markerID])
+            guard case .notification(let notification) = initial.timeline.items[1] else {
+                Issue.record("Expected fork notification after the inherited prompt")
+                return
+            }
+            #expect(notification.title == (kind == .sessionFork ? "Session forked" : "Subagent created"))
+            #expect(readOnly.timeline.ids == initial.timeline.ids)
+
+            snapshot.transcript.append(child)
+            snapshot.transcriptTotal = 2
+            let appended = ChatTranscriptProjectionKernel.incremental(
+                snapshot: snapshot, previous: initial, canonicalSourceUnchanged: false
+            )
+            #expect(appended.isValid)
+            #expect(Array(appended.timeline.ids) == ["inherited", markerID, "child"])
+            #expect(ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline.ids == appended.timeline.ids)
+        }
+    }
+
+    @Test("empty projected transcript retains a proven gap-zero fork marker")
+    func emptyForkBoundary() throws {
+        let boundary = try TranscriptForkBoundary(kind: .subagentFork, inheritedAnchorId: "hidden-anchor", gapOrdinal: 0)
+        let projection = ChatTranscriptProjectionKernel.readOnlyTranscript(
+            [], transcriptStart: 0, transcriptTotal: 0, isActive: false, forkBoundary: boundary
+        )
+        #expect(Array(projection.timeline.ids) == ["notification-fork-boundary-subagentFork-hidden-anchor"])
+        #expect(projection.isValid)
+    }
+
+    @Test("malformed fork bounds fail closed without moving the marker")
+    func malformedForkBoundaryBounds() throws {
+        let snapshot = try fixture(transcript: """
+        [{"id":"child","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"text","ordinal":0,"type":"text","text":"child"}]}]
+        """)
+        let beyondTotal = try TranscriptForkBoundary(kind: .sessionFork, inheritedAnchorId: "anchor", gapOrdinal: 2)
+        let beyondTotalProjection = ChatTranscriptProjectionKernel.readOnlyTranscript(
+            snapshot.transcript, transcriptStart: 0, transcriptTotal: 1, isActive: false,
+            forkBoundary: beyondTotal
+        )
+        #expect(!beyondTotalProjection.timeline.ids.contains("notification-fork-boundary-sessionFork-anchor"))
+
+        let endBeyondTotal = try TranscriptForkBoundary(kind: .sessionFork, inheritedAnchorId: "anchor", gapOrdinal: 1)
+        let endBeyondTotalProjection = ChatTranscriptProjectionKernel.readOnlyTranscript(
+            snapshot.transcript, transcriptStart: 1, transcriptTotal: 0, isActive: false,
+            forkBoundary: endBeyondTotal
+        )
+        #expect(!endBeyondTotalProjection.timeline.ids.contains("notification-fork-boundary-sessionFork-anchor"))
+    }
+
     @Test("fork boundary decoding rejects malformed identities and survives page round trips")
     func forkBoundaryDecoding() throws {
-        let boundary = try TranscriptForkBoundary(kind: .sessionFork, entryId: "raw", displayEntryId: "display")
+        let boundary = try TranscriptForkBoundary(kind: .sessionFork, inheritedAnchorId: "raw", gapOrdinal: 0)
         let page = try ProcessTranscriptPage(items: [], start: 0, end: 0, total: 0,
             nextEntryId: nil, leafEntryId: nil, forkBoundary: boundary)
         let data = try JSONEncoder().encode(page)
         #expect(try JSONDecoder().decode(ProcessTranscriptPage.self, from: data).forkBoundary == boundary)
         for value in ["", String(repeating: "x", count: 513)] {
-            let invalid = try JSONSerialization.data(withJSONObject: ["kind": "sessionFork", "entryId": value, "displayEntryId": "display"])
+            let invalid = try JSONSerialization.data(withJSONObject: ["kind": "sessionFork", "inheritedAnchorId": value, "gapOrdinal": 0])
             #expect(throws: DecodingError.self) { try JSONDecoder().decode(TranscriptForkBoundary.self, from: invalid) }
         }
     }

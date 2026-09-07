@@ -41,7 +41,7 @@ describe("bounded outbound gateway frames", () => {
       type: "hello",
       gatewayVersion: "1.0.0",
       piVersion: "1.0.0",
-      protocolVersion: 4,
+      protocolVersion: 5,
       minProtocolVersion: 4,
       machineId: "i".repeat(256),
       machineName: "n".repeat(1_024),

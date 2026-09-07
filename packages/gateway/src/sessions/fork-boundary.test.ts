@@ -31,14 +31,16 @@ describe("canonical fork boundaries", () => {
     const parent = file("parent", [message("root", null), label("source-label", "root"), message("shared", "source-label"), message("other-branch", "root")]);
     const child = file("child", [message("root", null), message("shared", "root"), label("new-label", "shared"),
       { type: "custom", customType: "private-state", id: "hidden", parentId: "new-label", timestamp }, message("task", "hidden")]);
-    expect(page(child, parent).forkBoundary).toEqual({ kind: "subagentFork", entryId: "hidden", displayEntryId: "task" });
+    expect(page(child, parent).forkBoundary).toEqual({ kind: "subagentFork", inheritedAnchorId: "shared", gapOrdinal: 2 });
   });
 
   it("pruned/sanitized payloads retain their inherited identity and never move the fork into parent history", () => {
     const parent = file("parent", [message("root", null, "Original large prompt"), message("shared", "root")]);
     const child = file("child", [message("root", null, "Pruned inherited summary"), message("shared", "root"), message("task", "shared")]);
-    expect(page(child, parent).forkBoundary?.entryId).toBe("task");
-    expect(page(file("child", [message("root", null, "Pruned inherited summary")]), parent).forkBoundary).toBeUndefined();
+    expect(page(child, parent).forkBoundary).toEqual({ kind: "subagentFork", inheritedAnchorId: "shared", gapOrdinal: 2 });
+    expect(page(file("child", [message("root", null, "Pruned inherited summary")]), parent).forkBoundary).toEqual({
+      kind: "subagentFork", inheritedAnchorId: "root", gapOrdinal: 1,
+    });
   });
 
   it("retains one anchor before first child append without another parent read", () => {
@@ -48,9 +50,22 @@ describe("canonical fork boundaries", () => {
     const branch = branchFromParsedSession(child)!.branch;
     const project = () => projectTranscriptPage({ getBranch: () => branch }, new BlobStore(), undefined, undefined,
       undefined, undefined, undefined, undefined, undefined, anchor);
-    expect(project().forkBoundary).toBeUndefined();
+    expect(project().forkBoundary).toEqual({ kind: "sessionFork", inheritedAnchorId: "root", gapOrdinal: 1 });
+    const boundary = project().forkBoundary;
     branch.push(message("task", "root") as SessionEntry);
-    expect(project().forkBoundary).toEqual({ kind: "sessionFork", entryId: "task", displayEntryId: "task" });
+    expect(project().forkBoundary).toEqual(boundary);
+  });
+
+  it("annotates a proven hidden-only inherited tail at gap zero", () => {
+    const hidden = (id: string, parentId: string | null) => ({
+      type: "custom", customType: "private-state", id, parentId, timestamp,
+    });
+    const parent = file("parent", [hidden("hidden-root", null)]);
+    const child = file("child", [hidden("hidden-root", null)]);
+    expect(page(child, parent).forkBoundary).toEqual({
+      kind: "subagentFork", inheritedAnchorId: "hidden-root", gapOrdinal: 0,
+    });
+    expect(page(child, parent).total).toBe(0);
   });
 
   it("keeps exact counts and page anchors across a boundary outside the initial page", () => {
@@ -101,13 +116,24 @@ describe("canonical fork boundaries", () => {
       const child = SessionManager.open(parent.getSessionFile()!, root);
       child.createBranchedSession(shared);
       const task = child.appendMessage({ role: "user", content: "child task", timestamp: 2 });
-      child.appendCompaction("summary", task, 100);
       const entries = (manager: SessionManager): FileEntry[] => [manager.getHeader()!, ...manager.getEntries()];
-      expect(page(entries(child), entries(parent)).forkBoundary?.entryId).toBe(task);
+      const beforeNextPrompt = page(entries(child), entries(parent)).forkBoundary;
+      child.appendMessage({ role: "user", content: "next child prompt", timestamp: 3 });
+      expect(page(entries(child), entries(parent)).forkBoundary).toEqual(beforeNextPrompt);
+      child.appendCompaction("summary", task, 100);
+      const childEntries = entries(child);
+      const parentIDs = new Set(entries(parent).map(entry => entry.id));
+      const inheritedAnchor = childEntries.slice(1)
+        .filter(entry => entry.type !== "label" && parentIDs.has(entry.id)).at(-1)!.id;
+      expect(page(childEntries, entries(parent)).forkBoundary).toEqual({
+        kind: "subagentFork", inheritedAnchorId: inheritedAnchor, gapOrdinal: 2,
+      });
       const nested = SessionManager.open(child.getSessionFile()!, root);
       nested.createBranchedSession(task);
       const nestedTask = nested.appendMessage({ role: "user", content: "nested task", timestamp: 3 });
-      expect(page(entries(nested), entries(child)).forkBoundary?.entryId).toBe(nestedTask);
+      expect(page(entries(nested), entries(child)).forkBoundary).toEqual({
+        kind: "subagentFork", inheritedAnchorId: task, gapOrdinal: 3,
+      });
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 });

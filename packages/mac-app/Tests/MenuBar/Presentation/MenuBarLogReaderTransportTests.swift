@@ -242,7 +242,7 @@ private final class LogPeer: @unchecked Sendable {
                 if frame["type"] as? String == "hello" {
                     self.eventSink.yield(.hello)
                     if self.plan != .holdHello {
-                        self.send(self.plan == .invalidHello ? #"{"type":"hello","protocolVersion":0,"minProtocolVersion":0}"# : #"{"type":"hello","protocolVersion":4,"minProtocolVersion":4}"#, on: connection)
+                        self.send(self.plan == .invalidHello ? #"{"type":"hello","protocolVersion":0,"minProtocolVersion":0}"# : #"{"type":"hello","protocolVersion":5,"minProtocolVersion":5}"#, on: connection)
                     }
                 } else if frame["type"] as? String == "request" {
                     self.eventSink.yield(.request)

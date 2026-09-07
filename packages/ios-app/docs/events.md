@@ -1,6 +1,6 @@
 # Gateway events
 
-## Protocol v4 chat semantics
+## Protocol v5 chat semantics
 
 Session events are live invalidation hints; the authoritative snapshot and
 canonical Pi JSONL determine transcript order and lifecycle truth. Typed chat
@@ -119,7 +119,7 @@ admits and reduces mounted-session topics:
   path allowed to replace a cursor or runtime baseline. The same snapshot carries the full
   bounded queue projection (at most 32 authoritative items, including total attachment count and optional photo/file counts)
   and queue revision; queue updates therefore replace the visible
-  queued-message cards atomically rather than applying per-row mobile deltas. Protocol v4 requires
+  queued-message cards atomically rather than applying per-row mobile deltas. Protocol v5 requires
   both rich fields; iOS admits Edit/Remove only for that authoritative pair. A mutation response
   never rewrites queue projection locally: clear,
   edit, reorder, and remove keep controls inert until a strictly newer sequenced queue revision
@@ -366,7 +366,7 @@ Session subscription ownership is token-scoped end to end. The open response rem
 provisional until sync acknowledgement and exact route-intent revalidation; both sync and subscription
 credentials must be nonempty, printable UTF-8 tokens no larger than 200 bytes. Baseline plus its
 already-drained contiguous event suffix then publish in one MainActor turn. The fitted tail mounts immediately regardless of its display-bearing count; earlier-page reads begin only from the mounted presentation and cannot make the conversation unavailable. A stale or failed
-attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. Protocol-v4
+attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. Protocol-v5
 peers always provide explicit subscription ownership. If a reconnect installs a new runtime generation for the same canonical session,
 iOS clears context/tree/resource/command projections, invalidates their in-flight request generations,
 and advances all three public reload revisions before publishing the replacement. Secondary read successes

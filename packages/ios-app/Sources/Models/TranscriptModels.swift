@@ -160,30 +160,30 @@ private protocol TranscriptPayload: Codable, Hashable, Sendable {
 struct TranscriptForkBoundary: Codable, Hashable, Sendable {
     enum Kind: String, Codable, Hashable, Sendable { case sessionFork, subagentFork }
     let kind: Kind
-    let entryId: String
-    let displayEntryId: String
+    let inheritedAnchorId: String
+    let gapOrdinal: Int
 
-    init(kind: Kind, entryId: String, displayEntryId: String) throws {
-        guard !entryId.isEmpty, entryId.utf8.count <= 512,
-              !displayEntryId.isEmpty, displayEntryId.utf8.count <= 512 else {
+    init(kind: Kind, inheritedAnchorId: String, gapOrdinal: Int) throws {
+        guard !inheritedAnchorId.isEmpty, inheritedAnchorId.utf8.count <= 512,
+              gapOrdinal >= 0 else {
             throw GatewayFailure(code: "invalid_response", message: "Invalid transcript fork boundary", retryable: true, details: nil)
         }
-        self.kind = kind; self.entryId = entryId; self.displayEntryId = displayEntryId
+        self.kind = kind; self.inheritedAnchorId = inheritedAnchorId; self.gapOrdinal = gapOrdinal
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let kind = try values.decode(Kind.self, forKey: .kind)
-        let entryId = try values.decode(String.self, forKey: .entryId)
-        let displayEntryId = try values.decode(String.self, forKey: .displayEntryId)
-        guard !entryId.isEmpty, entryId.utf8.count <= 512,
-              !displayEntryId.isEmpty, displayEntryId.utf8.count <= 512 else {
-            throw DecodingError.dataCorruptedError(forKey: .entryId, in: values, debugDescription: "Invalid transcript fork boundary")
+        let inheritedAnchorId = try values.decode(String.self, forKey: .inheritedAnchorId)
+        let gapOrdinal = try values.decode(Int.self, forKey: .gapOrdinal)
+        guard !inheritedAnchorId.isEmpty, inheritedAnchorId.utf8.count <= 512,
+              gapOrdinal >= 0 else {
+            throw DecodingError.dataCorruptedError(forKey: .inheritedAnchorId, in: values, debugDescription: "Invalid transcript fork boundary")
         }
-        self.kind = kind; self.entryId = entryId; self.displayEntryId = displayEntryId
+        self.kind = kind; self.inheritedAnchorId = inheritedAnchorId; self.gapOrdinal = gapOrdinal
     }
 
-    private enum CodingKeys: String, CodingKey { case kind, entryId, displayEntryId }
+    private enum CodingKeys: String, CodingKey { case kind, inheritedAnchorId, gapOrdinal }
 }
 
 struct ExtensionToolOrigin: Codable, Hashable, Sendable {

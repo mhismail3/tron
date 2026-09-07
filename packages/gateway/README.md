@@ -1,6 +1,6 @@
 # Tron Gateway
 
-## Protocol v4 chat semantics
+## Protocol v5 chat semantics
 
 The Gateway is the sole live owner of invocation, operation, and activity
 identity. Canonical Pi JSONL remains authoritative; Gateway-owned bounded
@@ -12,18 +12,18 @@ terminal record after an accepted start is `outcomeUnknown` and is never
 automatically replayed.
 
 Transcript order is canonical branch order, never timestamp or activity recency.
-The v4 projection separates inbound context, agent output/invocations, ambient
+The v5 projection separates inbound context, agent output/invocations, ambient
 status, and hidden state. `custom_message` is model input; `custom`/`appendEntry`
 is extension state. Producer attribution is only exact at a Gateway callback
 boundary, receipt, trusted adapter, or registered tool ownership; unknown remains
 unknown. Every projection is bounded by count and byte limits and malformed
 recognized data fails closed for authoritative resynchronization.
 
-Protocol v4 deliberately has no v3 runtime path. The deployed v3 update helper
-cannot promote a candidate whose required range is strictly v4, so that one-time
+Protocol v5 deliberately has no v4 runtime path. The deployed v4 update helper
+cannot promote a candidate whose required range is strictly v5, so that one-time
 major transition must use the Mac app's manual local Release reinstall runbook:
-install the Mac app containing the v4 Gateway payload while preserving
-`~/.tron`, verify the registered Gateway, and only then install a v4-only iOS
+install the Mac app containing the v5 Gateway payload while preserving
+`~/.tron`, verify the registered Gateway, and only then install a v5-only iOS
 client. The repository protocol manifest is projected into Gateway payload,
 Mac app, and iOS app metadata; launch/build/install validators require one exact
 range. A replacement launcher's bundled payload is the migration bootstrap when
@@ -31,7 +31,7 @@ a previously selected external payload advertises an older range. Same-major
 promotion and rollback treat that rejected external pointer as bounded history
 and use the validated signed bundle as their recovery authority; they never
 require the incompatible payload to become admissible again. Do not widen the
-advertised minimum or allow a mixed v3/v4 pair merely to bypass that handoff.
+advertised minimum or allow a mixed v4/v5 pair merely to bypass that handoff.
 Ordinary same-major updates continue through the owned Gateway update flow.
 
 Tron Gateway is the minimal always-running Mac service behind the Tron iPhone
@@ -462,7 +462,7 @@ A separate supervised macOS control plane advertises `ios-device-install.v2`. Re
 Every WebSocket starts with:
 
 ```json
-{"type":"hello","protocolVersion":4}
+{"type":"hello","protocolVersion":5}
 ```
 
 The hello, pairing response, and authenticated `system.info` identify the runtime
@@ -862,7 +862,7 @@ outcome and publishes the actual live projection rather than fabricating rollbac
 or blindly replaying the command. An explicitly issued new command always records
 its desired value, even when it matches a previously staged in-memory value.
 
-Forked transcript projections carry an optional, disposable `forkBoundary` annotation. At runtime bind/rebind and tree navigation, Gateway validates the selected child's contiguous inherited identity/ancestry against the catalog-admitted immediate parent's complete canonical tree. It retains only one inherited-entry anchor, not a transcript mirror; snapshots map that anchor onto the current branch without parent I/O, including after the first child append. Read-only subagent pages derive the anchor from their admitted parent runtime and include the projected annotation in their revision. Regenerated labels are normalized out of ancestry; sanitized/pruned payloads with preserved identities remain inherited. Missing, ambiguous, cyclic, replaced or oversized parents omit the annotation without blocking chat. A header-only relationship or a fork with no retained context cannot establish a marker. Parent reads are inode-fenced and capped at 64 MiB; derived graph scans are linear and capped at 100,000 entries. The annotation identifies the first child entry and its first projectable descendant without changing canonical IDs, counts, or paging anchors. iOS inserts the `Session fork point` / `Subagent fork point` pill before row filtering and flushes tool grouping, so folded tool results cannot swallow it. `fork-boundary.test.ts`, focused runtime-registry fork regressions, process-transcript lease tests, and `ChatTranscriptProjectionKernelTests` cover ancestry, the actual SDK fork behavior, reopen, wire propagation, and rendering.
+Forked transcript projections carry an optional, disposable `forkBoundary` annotation. At runtime bind/rebind and tree navigation, Gateway validates the selected child's contiguous inherited identity/ancestry against the catalog-admitted immediate parent's complete canonical tree. It retains only one inherited-entry anchor, not a transcript mirror; snapshots map that anchor onto the current branch without parent I/O, including after the first child append. Read-only subagent pages derive the anchor from their admitted parent runtime and include the projected annotation in their revision. Regenerated labels are normalized out of ancestry; sanitized/pruned payloads with preserved identities remain inherited. Missing, ambiguous, cyclic, replaced or oversized parents omit the annotation without blocking chat. A header-only relationship or a fork with no retained context cannot establish a marker. Parent reads are inode-fenced and capped at 64 MiB; derived graph scans are linear and capped at 100,000 entries. The annotation carries the stable inherited anchor ID plus its gap ordinal (0...total) in the canonical projected sequence, so inherited-only and hidden-only branches still have a boundary and later child appends cannot move it. It does not change canonical IDs, counts, or paging anchors. iOS owns the gap insertion before visibility folding, including the true canonical tail before streaming, and flushes tool grouping; page ownership is one-sided so adjacent pages cannot duplicate it. `fork-boundary.test.ts`, focused runtime-registry fork regressions, process-transcript lease tests, and `ChatTranscriptProjectionKernelTests` cover ancestry, the actual SDK fork behavior, reopen, wire propagation, paging, hidden tails, and rendering.
 
 `compaction-policy.v1` exposes compaction configuration in the dedicated iOS Settings
 page. Pi 0.84.4 still owns preparation, generation, auth, retry callbacks, split ordering,
@@ -1106,7 +1106,7 @@ durable attention replacement, clears manual unread, and publishes no transient
 unread summary. Successful `session.open` returns its current completion revision,
 and first-party clients acknowledge it only after installing the snapshot and
 retry transient acknowledgement failure against that same absolute revision.
-Protocol-v4 clients require the complete attention and presentation contract;
+Protocol-v5 clients require the complete attention and presentation contract;
 they do not attach to an earlier Gateway that lacks the method or revisioned
 response.
 Delete removes attention metadata, true identity replacement moves it without
@@ -1139,7 +1139,7 @@ large active runs therefore remain openable; no canonical Pi content is modified
 discarded. Canonical non-image upload
 envelopes retain their runtime-owned readable paths, but the mobile transcript
 projection replaces those tags with bounded name/type/size metadata on an
-ordinary text part and never sends the Mac path to clients. Protocol-v4 clients therefore receive the safe filename instead of the
+ordinary text part and never sends the Mac path to clients. Protocol-v5 clients therefore receive the safe filename instead of the
 Mac path for a new content discriminant. A page carries and echoes the next projected entry as its branch anchor plus the current runtime
 generation and leaf identity. Raw canonical parent links may pass through filtered session-info,
 hidden custom, or extension-receipt entries and therefore never define projected-row adjacency.
@@ -1167,7 +1167,7 @@ Each row includes the runtime loader's source, scope, origin, and path when avai
 `session.commandDetail` read requires one exact current `source:name` identity and returns
 that selected prompt, skill, or extension source document only; content is UTF-8 bounded
 to 96 KiB with original byte count and explicit truncation metadata, so catalog loading
-never reads or copies every resource body. Protocol-v4 `session.prompt` accepts one typed
+never reads or copies every resource body. Protocol-v5 `session.prompt` accepts one typed
 `resourceInvocation` with source, canonical name, and visible arguments. The Gateway revalidates
 exact live `(source,name)` identity and extension-command precedence before constructing Pi's
 normalized leading invocation. Pending and queued projections retain the same typed resource;

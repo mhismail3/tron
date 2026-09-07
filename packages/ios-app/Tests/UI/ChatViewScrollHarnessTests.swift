@@ -1906,7 +1906,7 @@ final class ChatViewScrollHarness {
         guard let socket = dependencies.socket, let profile = dependencies.profile else {
             throw HarnessError.invalidAuthorityBoundary
         }
-        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":4,"minProtocolVersion":4,"machineId":"hosted-machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":5,"minProtocolVersion":5,"machineId":"hosted-machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
         do {
             try await dependencies.model.connectHostedGateway(
                 profile: profile,

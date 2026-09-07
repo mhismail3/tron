@@ -19,8 +19,8 @@ for scheme in schemes:
     assert source.count(f"  {scheme}:\n") == 1, scheme
 assert "  Tron:\n" not in source
 assert '"${CONFIGURATION:-}" == "Release"' in source
-assert 'TRON_GATEWAY_PROTOCOL_VERSION: "4"' in source
-assert 'TRON_GATEWAY_MIN_PROTOCOL_VERSION: "4"' in source
+assert 'TRON_GATEWAY_PROTOCOL_VERSION: "5"' in source
+assert 'TRON_GATEWAY_MIN_PROTOCOL_VERSION: "5"' in source
 assert 'verify-gateway-protocol-contract.py' in source
 # Release is the sole archive/analyze/profile scheme and has no run/test action.
 release = source[source.index("  Tron Release:"):]

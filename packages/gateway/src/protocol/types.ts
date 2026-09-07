@@ -1,6 +1,6 @@
 import type { DisplayProjection } from "../display/display-contract.js";
 
-// Tron protocol v4 is a typed, bounded mobile contract. Pi objects must be
+// Tron protocol v5 is a typed, bounded mobile contract. Pi objects must be
 // projected into these values rather than serialized directly; Pi JSONL and
 // configuration files remain canonical.
 export type JsonPrimitive = string | number | boolean | null;
@@ -436,8 +436,8 @@ export interface SessionProcessHistoryPage {
 
 export interface TranscriptForkBoundary {
   kind: "sessionFork" | "subagentFork";
-  entryId: string;
-  displayEntryId: string;
+  inheritedAnchorId: string;
+  gapOrdinal: number;
 }
 
 export interface ProcessTranscriptLease {

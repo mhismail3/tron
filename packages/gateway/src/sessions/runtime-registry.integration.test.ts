@@ -3733,8 +3733,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       fork.getSessionId(), admission.path, slot.id, process!.processId, "fork-run",
     );
     expect(projected.total).toBeGreaterThan(0);
-    expect(projected.forkBoundary).toEqual({
-      kind: "subagentFork", entryId: firstChildEntry, displayEntryId: firstChildEntry,
+    expect(projected.forkBoundary).toMatchObject({
+      kind: "subagentFork", inheritedAnchorId: expect.any(String), gapOrdinal: 2,
     });
   });
 
@@ -8435,6 +8435,14 @@ export default function (pi) {
       messageCount: 1,
     });
 
+    // The retained prompt-only fork must carry one boundary through both
+    // snapshot/page seams before Pi materializes the first child response.
+    const prePromptBoundary = slot.snapshot().forkBoundary;
+    expect(prePromptBoundary).toMatchObject({
+      kind: "sessionFork", inheritedAnchorId: userEntry!.id, gapOrdinal: expect.any(Number),
+    });
+    expect(slot.transcriptPage().forkBoundary).toEqual(prePromptBoundary);
+
     // The first child completion materializes Pi's reserved JSONL. Catalog
     // authority must cross from the live parent ID to the canonical header/path
     // without losing identity, classification, or retained history.
@@ -8443,8 +8451,7 @@ export default function (pi) {
     await waitUntil(() => !slot.isBusy);
     expect(slot.persistedSessionFile).toBeDefined();
     const boundary = slot.snapshot().forkBoundary;
-    const childInput = slot.snapshot().transcript.find((item) => item.role === "user" && item.id !== userEntry!.id)!;
-    expect(boundary).toMatchObject({ kind: "sessionFork", displayEntryId: childInput.id });
+    expect(boundary).toEqual(prePromptBoundary);
     expect(slot.transcriptPage().forkBoundary).toEqual(boundary);
     expect(slot.snapshot().transcript.filter((item) => item.role === "user" || item.role === "assistant")).toEqual([
       expect.objectContaining({ role: "user", content: [expect.objectContaining({ text: "fork this" })] }),

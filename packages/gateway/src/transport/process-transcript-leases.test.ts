@@ -8,7 +8,7 @@ import { ProcessTranscriptLeaseStore } from "./process-transcript-leases.js";
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
-function page(revision: string, total = 0, fileIdentity = "1:1", forkBoundary?: { kind: "sessionFork" | "subagentFork"; entryId: string; displayEntryId: string }) {
+function page(revision: string, total = 0, fileIdentity = "1:1", forkBoundary?: { kind: "sessionFork" | "subagentFork"; inheritedAnchorId: string; gapOrdinal: number }) {
   return { items: [], start: 0, end: 0, total, revision, fileIdentity, ...(forkBoundary ? { forkBoundary } : {}) };
 }
 
@@ -50,7 +50,7 @@ describe("ProcessTranscriptLeaseStore", () => {
     roots.push(root);
     const path = join(root, "child.jsonl");
     await writeFile(path, "{}\n");
-    const boundary = { kind: "subagentFork" as const, entryId: "hidden", displayEntryId: "child" };
+    const boundary = { kind: "subagentFork" as const, inheritedAnchorId: "hidden", gapOrdinal: 0 };
     let reads = 0;
     const sessions = {
       resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),

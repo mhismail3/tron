@@ -25,7 +25,7 @@ class GatewayProtocolContractTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def write_info(self, path: Path, protocol: str = "4", minimum: str = "4") -> None:
+    def write_info(self, path: Path, protocol: str = "5", minimum: str = "5") -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("wb") as handle:
             plistlib.dump({
@@ -33,7 +33,7 @@ class GatewayProtocolContractTests(unittest.TestCase):
                 "TRONGatewayMinProtocolVersion": minimum,
             }, handle)
 
-    def make_payload(self, path: Path, protocol: str = "4", minimum: str = "4") -> None:
+    def make_payload(self, path: Path, protocol: str = "5", minimum: str = "5") -> None:
         version = path / "app" / "dist" / "version.js"
         version.parent.mkdir(parents=True, exist_ok=True)
         version.write_text(

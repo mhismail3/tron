@@ -136,7 +136,7 @@ async function fixture() {
     socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
     await until(() => opened || error !== undefined);
     if (error) throw error;
-    socket.send(JSON.stringify({ type: "hello", protocolVersion: 4 }));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 5 }));
     await until(() => frames.some((frame) => frame.type === "hello"));
     return {
       socket, frames, closed: () => closed,
