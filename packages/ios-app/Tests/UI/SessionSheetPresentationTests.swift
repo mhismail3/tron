@@ -5,6 +5,54 @@ import XCTest
 
 @MainActor
 final class SessionSheetPresentationTests: XCTestCase {
+    func testServerFilterStartsMediumAndExpandsBeforeScrolling() async throws {
+        for presentation in 0..<2 {
+            try await withSheet(TronDashboardFilterSheet(
+                title: "Filter Servers", accent: .tronEmerald,
+                detents: [.medium, .large], onDone: {}
+            ) {
+                TronDashboardFilterSectionTitle(title: "Servers")
+                ForEach(0..<20) { index in
+                    TronDashboardFilterOption(
+                        title: "Server \(index)", detail: "Available sessions",
+                        selected: index == 0, accent: .tronEmerald, inactiveAccent: .tronCyan
+                    ) {}
+                }
+            }) { controller in
+                let sheet = try XCTUnwrap(controller.sheetPresentationController)
+                XCTAssertEqual(Set(sheet.detents.map(\.identifier)), [.medium, .large])
+                guard sheet.detents.contains(where: { $0.identifier == .large }) else { return }
+                XCTAssertEqual(sheet.selectedDetentIdentifier, .medium, "Reopening must not retain the previous large detent")
+                XCTAssertTrue(sheet.prefersScrollingExpandsWhenScrolledToEdge, "Content gestures must expand before scrolling")
+                let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                XCTAssertGreaterThan(scroll.contentSize.height, scroll.bounds.height)
+                self.capture(controller, name: "server-filter-medium-\(presentation)")
+                let mediumHeight = controller.view.bounds.height
+                sheet.selectedDetentIdentifier = .large
+                controller.presentationController?.containerView?.layoutIfNeeded()
+                controller.view.layoutIfNeeded()
+                XCTAssertEqual(sheet.selectedDetentIdentifier, .large)
+                XCTAssertGreaterThan(controller.view.bounds.height, mediumHeight, "The native sheet must actually expand")
+                XCTAssertTrue(scroll.isScrollEnabled, "The large sheet must keep its native scroll owner")
+                scroll.setContentOffset(CGPoint(x: 0, y: 150), animated: false)
+                XCTAssertEqual(scroll.contentOffset.y, 150, accuracy: 1)
+                self.capture(controller, name: "server-filter-expanded-scrolled-\(presentation)")
+            }
+        }
+    }
+
+    func testAutomationFilterRetainsItsMediumOnlyPresentation() async throws {
+        try await withSheet(TronDashboardFilterSheet(
+            title: "View Automations", accent: .tronAutomation, detents: [.medium], onDone: {}
+        ) {
+            TronDashboardFilterSectionTitle(title: "View")
+        }) { controller in
+            let sheet = try XCTUnwrap(controller.sheetPresentationController)
+            XCTAssertEqual(sheet.detents.map(\.identifier), [.medium])
+            XCTAssertEqual(sheet.selectedDetentIdentifier, .medium)
+        }
+    }
+
     func testManageSessionShowsHeaderlessSessionAndExportCards() async throws {
         var snapshot = try SessionScenarioBuilder(seed: 7_820).openingTail(targetEncodedBytes: 4_096)
         snapshot.contextUsage = ContextUsage(tokens: 157_000, contextWindow: 272_000, percent: 58)

@@ -221,9 +221,6 @@ struct AutomationsDashboardView: View {
         }
         .tronManagedSheet(isPresented: $showingFilters, identity: "automation.filters") {
             automationFilterSheet
-                .tronTopBlur(.sheet)
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.hidden)
         }
         .tronManagedSheet(isPresented: $datePickerPresented, identity: "automation.date-picker") {
             NavigationStack {
@@ -575,6 +572,7 @@ struct AutomationsDashboardView: View {
         TronDashboardFilterSheet(
             title: "View Automations",
             accent: .tronAutomation,
+            detents: [.medium],
             onDone: { showingFilters = false }
         ) {
             TronDashboardFilterSectionTitle(

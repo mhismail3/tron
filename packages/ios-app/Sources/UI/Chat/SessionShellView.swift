@@ -127,9 +127,6 @@ struct SessionShellView: View {
                 identity: "dashboard.server-filter"
             ) {
                 serverFilterSheet
-                    .tronTopBlur(.sheet)
-                    .presentationDetents([.medium])
-                    .presentationDragIndicator(.hidden)
             }
             .tronManagedSheet(
                 item: $sessionToDelete,
@@ -466,6 +463,7 @@ struct SessionShellView: View {
         TronDashboardFilterSheet(
             title: "Filter Servers",
             accent: .tronEmerald,
+            detents: [.medium, .large],
             onDone: { showingServerFilter = false }
         ) {
             TronDashboardFilterSectionTitle(title: "View")
