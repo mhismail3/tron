@@ -202,6 +202,7 @@ final class ChatScrollCoordinator {
     private let clock: MonotonicClock
     private let openingTailTimeout: Duration
     private var presentation = 0
+    private var viewportActivation = 0
     private var sequence = 0
     private var geometry = ChatTranscriptGeometry.zero
     private var geometryRevision = 0
@@ -903,6 +904,17 @@ final class ChatScrollCoordinator {
     func submitted() {
         reduceViewport(.submitted)
         traceGeometry(.submissionBaseline)
+    }
+
+    /// Retires native callbacks captured by the previous viewport tree. A
+    /// callback can arrive after uncovering with a stale `true` activity value,
+    /// so activity booleans alone are not an admission fence.
+    func viewportActivationChanged(_ activation: Int) {
+        viewportActivation = activation
+    }
+
+    func admitsViewportCallback(capturedActivation: Int) -> Bool {
+        viewportObservationActive && capturedActivation == viewportActivation
     }
 
     /// Cancels disposable repair work while another surface covers the native

@@ -2,15 +2,18 @@ import SwiftUI
 
 struct ChatSemanticFrameObservation: Equatable {
     let layoutEpoch: Int
+    let viewportActivation: Int
     let frame: CGRect
     let entranceAdmissionTag: ChatTranscriptProjectionTag?
 
     init(
         layoutEpoch: Int,
+        viewportActivation: Int,
         frame: CGRect,
         entranceAdmissionTag: ChatTranscriptProjectionTag? = nil
     ) {
         self.layoutEpoch = layoutEpoch
+        self.viewportActivation = viewportActivation
         self.frame = frame
         self.entranceAdmissionTag = entranceAdmissionTag
     }

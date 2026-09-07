@@ -11,9 +11,9 @@ struct SessionProcessesSheet: View {
     var body: some View {
         NavigationStack {
             Group {
-                let sections = SessionProcessProjection.sections(snapshot?.processActivities ?? [])
+                let sections = SessionProcessProjection.sections(activities)
                 if !sections.active.isEmpty || !sections.recent.isEmpty {
-                    processList(activities: snapshot?.processActivities ?? [])
+                    processList(activities: activities)
                 } else {
                     SessionProcessPlaceholder(
                         title: "No active subagents",
@@ -39,7 +39,9 @@ struct SessionProcessesSheet: View {
         .accessibilityIdentifier("session-processes-sheet")
     }
 
-    private var snapshot: SessionSnapshot? { model.authoritativeSnapshot(for: sessionID) }
+    private var activities: [SessionProcessActivity] {
+        model.sessionProcessPresentation(for: sessionID)?.activities ?? []
+    }
 
     @ToolbarContentBuilder
     private var doneToolbar: some ToolbarContent {
@@ -149,8 +151,9 @@ struct ProcessHistorySheet: View {
     }
 
     private var mountedProcesses: [SessionProcessActivity] {
-        guard let snapshot = model.authoritativeSnapshot(for: sessionID) else { return [] }
-        return SessionProcessAdmissionPolicy.admitted(snapshot.processActivities ?? [])
+        SessionProcessAdmissionPolicy.admitted(
+            model.sessionProcessPresentation(for: sessionID)?.activities ?? []
+        )
     }
 
     @ViewBuilder
@@ -660,7 +663,7 @@ struct ReadOnlySubagentSessionSheet: View {
     private var mountedActivity: SessionProcessActivity? {
         SessionProcessProjection.mountedActivity(
             selected: process,
-            activities: model.authoritativeSnapshot(for: parentSessionID)?.processActivities ?? []
+            activities: model.sessionProcessPresentation(for: parentSessionID)?.activities ?? []
         )
     }
 

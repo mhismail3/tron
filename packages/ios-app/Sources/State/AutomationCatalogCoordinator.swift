@@ -214,6 +214,7 @@ final class AutomationTimelineCoordinator {
     private(set) var canLoadMore = true
     private var generation = 0
     private var loadTask: Task<Void, Never>?
+    private var presentationActive = true
     private var anchor = Date.now
     private var loadedThrough = Date.now
     private var loadedWindowCount = 0
@@ -224,7 +225,13 @@ final class AutomationTimelineCoordinator {
         self.endpoints = endpoints
     }
 
+    func setPresentationActive(_ active: Bool) {
+        presentationActive = active
+        if !active { cancel() }
+    }
+
     func load(start: Date = .now, timezone: TimeZone = .current) {
+        guard presentationActive else { return }
         generation &+= 1
         loadTask?.cancel()
         anchor = max(start, .now)
@@ -236,7 +243,7 @@ final class AutomationTimelineCoordinator {
     }
 
     func loadNext() {
-        guard canLoadMore, !isLoading, !isLoadingMore else { return }
+        guard presentationActive, canLoadMore, !isLoading, !isLoadingMore else { return }
         generation &+= 1
         loadTask?.cancel()
         startWindow(reset: false)

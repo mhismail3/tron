@@ -50,6 +50,7 @@ struct AgentDefaultsDraft: Equatable {
 
 struct AgentDefaultsSettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     let allowsProjectScope: Bool
     let providerTarget: ProviderCatalogTarget
     let projectCWD: String?
@@ -182,12 +183,16 @@ struct AgentDefaultsSettingsView: View {
             guard let target = settingsTarget else { return }
             drafts.update(value, for: target)
         }
-        .task(id: AgentDefaultsLoadID(
-            settingsTarget: settingsTarget,
-            providerTarget: catalogTarget,
-            settingsInvalidationGeneration: model.settingsInvalidationGeneration,
-            providerInvalidationGeneration: model.providerInvalidationGeneration
+        .task(id: PresentationActivityTaskID(
+            source: AgentDefaultsLoadID(
+                settingsTarget: settingsTarget,
+                providerTarget: catalogTarget,
+                settingsInvalidationGeneration: model.settingsInvalidationGeneration,
+                providerInvalidationGeneration: model.providerInvalidationGeneration
+            ),
+            presentationActive: presentationActivity.allowsPresentationPublication
         )) {
+            guard presentationActivity.allowsPresentationPublication else { return }
             if !allowsProjectScope { scope = .global }
             await refresh()
         }
@@ -292,6 +297,8 @@ struct AgentDefaultsSettingsView: View {
         async let catalogReady = model.refreshProviders(target: requestedCatalogTarget)
         let (loadedSettings, _) = await (settingsReady, catalogReady)
         guard loadedSettings,
+              presentationActivity.allowsPresentationPublication,
+              !Task.isCancelled,
               target == settingsTarget,
               requestedCatalogTarget == catalogTarget else { return }
         load(target: target, catalogTarget: requestedCatalogTarget)

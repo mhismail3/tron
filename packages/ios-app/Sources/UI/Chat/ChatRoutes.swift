@@ -29,14 +29,15 @@ struct ChatRoutes: ViewModifier {
     @Binding var showContext: Bool
     @Binding var showSettings: Bool
     @Binding var queuedMessageEditor: QueuedMessageEditorRoute?
-    let installed: InstalledChatTranscript?
+    let queueCommit: QueuedMessageManagementCommit?
     let mutatingQueuedMessageIDs: Set<String>
     let onUpdateQueuedMessage: (
+        QueuedMessageManagementCommit,
         String,
         String,
         SessionSnapshot.QueuedMessage.Behavior
     ) -> Void
-    let onRemoveQueuedMessage: (String) -> Void
+    let onRemoveQueuedMessage: (QueuedMessageManagementCommit, String) -> Void
     @Binding var cameraPresented: Bool
     @Binding var photosPresented: Bool
     @Binding var photos: [PhotosPickerItem]
@@ -84,15 +85,15 @@ struct ChatRoutes: ViewModifier {
                 item: $queuedMessageEditor,
                 identity: { "chat.\(sessionID).queue.\($0.id)" }
             ) { route in
-                if let commit = QueuedMessageManagementPolicy.installedCommit(for: installed),
+                if let commit = queueCommit,
                    let message = commit.items.first(where: { $0.id == route.id }) {
                     QueuedMessageEditorSheet(
                         message: message,
                         isSaving: mutatingQueuedMessageIDs.contains(message.id),
                         onSave: { text, behavior in
-                            onUpdateQueuedMessage(message.id, text, behavior)
+                            onUpdateQueuedMessage(commit, message.id, text, behavior)
                         },
-                        onDelete: { onRemoveQueuedMessage(message.id) }
+                        onDelete: { onRemoveQueuedMessage(commit, message.id) }
                     )
                 } else {
                     QueueEditingUnavailableSheet()

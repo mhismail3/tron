@@ -65,6 +65,11 @@
 - **Prove rather than imply.** Every mechanism and test must protect a real
   requirement. Distinguish inspected, inferred, reproduced, and verified evidence.
   Green tests are not exhaustive review, and fewer lines are not a speedup.
+- **Presentation reads are disposable; mutations are not.** Surface-owned loads,
+  polls, and previews must carry the managed presentation activity and an exact
+  latest-request fence through every await before publishing values, errors, or
+  loading flags. Keep accepted domain commands with their owning mutation/receipt
+  coordinator rather than applying blanket cancellation to them.
 
 ## Architecture invariants
 

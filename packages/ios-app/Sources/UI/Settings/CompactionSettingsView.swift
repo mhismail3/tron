@@ -68,6 +68,7 @@ struct CompactionSettingsDraft: Equatable {
 
 struct CompactionSettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     let projectCWD: String?
     let projectSessionID: String?
     @State private var scope: SettingsScope = .global
@@ -170,7 +171,11 @@ struct CompactionSettingsView: View {
                 TronSaveToolbarButton(isSaving: saving, isEnabled: hasUnsavedChanges) { Task { await save() } }
             }
         }
-        .task(id: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration)) {
+        .task(id: PresentationActivityTaskID(
+            source: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration),
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication else { return }
             if !allowsProjectScope { scope = .global }
             await load()
         }
@@ -245,7 +250,10 @@ struct CompactionSettingsView: View {
     private func load() async {
         guard let target = settingsTarget else { return }
         _ = drafts.seedBaselineIfMissing(draft, for: target)
-        guard await model.refreshSettings(target: target), target == settingsTarget,
+        guard await model.refreshSettings(target: target),
+              presentationActivity.allowsPresentationPublication,
+              !Task.isCancelled,
+              target == settingsTarget,
               let loaded = projectionDraft(target: target), drafts.install(loaded, for: target, ifCurrent: draft) else { return }
         draft = loaded
     }

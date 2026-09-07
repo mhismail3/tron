@@ -237,7 +237,12 @@ struct WorkspaceInspectorSheet: View {
                     .accessibilityLabel("Done")
                 }
             }
-            .task(id: sessionID) {
+            .task(id: PresentationActivityTaskID(
+                source: "\(sessionID):\(scenePhase == .active)",
+                presentationActive: presentationActivity.allowsPresentationPublication
+            )) {
+                guard presentationActivity.allowsPresentationPublication,
+                      scenePhase == .active else { return }
                 await owner.loadInitial(service: model.workspaceInspection, sessionID: sessionID)
                 guard !Task.isCancelled else { return }
                 await reconcileWhileVisible()
@@ -251,6 +256,12 @@ struct WorkspaceInspectorSheet: View {
                     Task { await owner.loadHistory(service: model.workspaceInspection, sessionID: sessionID, append: false) }
                 case .changes:
                     break
+                }
+            }
+            .onChange(of: presentationActivity.allowsPresentationPublication && scenePhase == .active) { _, active in
+                if !active {
+                    owner.cancel()
+                    detailRequests.cancel()
                 }
             }
             .onDisappear {

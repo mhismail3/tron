@@ -460,6 +460,47 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("a real managed sheet freezes covered chat and uncovers to the latest native frame")
+    func managedSheetFreezesCoveredChat() async throws {
+        try await withTestWatchdog(timeout: .seconds(15)) {
+            let snapshot = try SessionScenarioBuilder(seed: 1_229).openingTail(targetEncodedBytes: 10_000)
+            try await withHarness(snapshot: snapshot, enablesPresentationCover: true) { harness in
+                _ = try await harness.recorder.waitUntil { $0.observation.isReady && $0.nativeGeometryMatches }
+                harness.setCovered(true)
+                try await harness.waitForCoverTransition(presented: true)
+                #expect(harness.chatSurfaceActivity == .presentingDescendant)
+                let baseline = harness.probeObservation
+                for index in 1...3 {
+                    var current = snapshot
+                    current.phase = .running
+                    current.revision += index
+                    current.eventSequence += index
+                    current.streaming = try harnessMessage(id: "covered-latest-\(index)")
+                    harness.replaceAuthoritativeSnapshot(current)
+                    try await DisplayFrameScheduler.displayLink.nextFrame()
+                }
+                // The recorder intentionally omits unchanged frames. Wait for
+                // actual display boundaries, not nonexistent changed samples.
+                for _ in 0..<3 { try await DisplayFrameScheduler.displayLink.nextFrame() }
+                let frozen = harness.probeObservation
+                #expect(frozen.projectionInstallCount == baseline.projectionInstallCount)
+                #expect(frozen.projectionWorkAdmissionCount == baseline.projectionWorkAdmissionCount)
+                #expect(frozen.semanticFrameCallbackCount == baseline.semanticFrameCallbackCount)
+                harness.setCovered(false)
+                try await harness.waitForCoverTransition(presented: false)
+                let returned = try await harness.recorder.waitUntil {
+                    $0.observation.isReady
+                        && $0.observation.projectionInstallCount > frozen.projectionInstallCount
+                        && $0.observation.targetReleaseCount > frozen.targetReleaseCount
+                        && $0.nativeRows.contains { $0.semanticID == "covered-latest-3" && $0.isVisible }
+                        && $0.nativeGeometryMatches
+                }
+                #expect(returned.observation.projectionInstallCount == frozen.projectionInstallCount + 1)
+                #expect(abs(try harness.nativeTranscriptSignedTailError()) <= 2)
+            }
+        }
+    }
+
     @Test("hosted aggregate counters and retained row frames are bounded")
     func hostedEvidenceBounds() {
         let probe = ChatHostedProbe()
@@ -1545,6 +1586,7 @@ struct ChatViewScrollHarnessTests {
         snapshot: SessionSnapshot,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         enablesComposerSubmission: Bool = false,
+        enablesPresentationCover: Bool = false,
         operation: @escaping @MainActor @Sendable (ChatViewScrollHarness) async throws -> Void
     ) async throws {
         let harness: ChatViewScrollHarness
@@ -1556,7 +1598,8 @@ struct ChatViewScrollHarnessTests {
         } else {
             harness = try ChatViewScrollHarness(
                 snapshot: snapshot,
-                displayFrameScheduler: displayFrameScheduler
+                displayFrameScheduler: displayFrameScheduler,
+                enablesPresentationCover: enablesPresentationCover
             )
         }
         do {
@@ -1689,6 +1732,27 @@ private func harnessMessage(id: String) throws -> TranscriptItem {
     )
 }
 
+@MainActor @Observable
+private final class HarnessCoverState {
+    var presented = false
+    var rootToken: PresentationSurfaceToken?
+    let coordinator = PresentationActivityCoordinator()
+}
+
+private struct HarnessManagedSurface: View {
+    let content: AnyView
+    @Bindable var cover: HarnessCoverState
+
+    var body: some View {
+        TronPresentationSurface(id: "harness-chat", onMount: { cover.rootToken = $0 }) {
+            content.tronManagedSheet(isPresented: $cover.presented, identity: "harness-cover") {
+                Text("Covered chat").presentationDetents([.medium])
+            }
+        }
+        .environment(\.tronPresentationActivityCoordinator, cover.coordinator)
+    }
+}
+
 @MainActor
 final class ChatViewScrollHarness {
     let snapshot: SessionSnapshot
@@ -1716,11 +1780,13 @@ final class ChatViewScrollHarness {
     private let defaults: UserDefaults
     private let window: UIWindow
     private let hostingController: UIHostingController<AnyView>
+    private let cover = HarnessCoverState()
 
     convenience init(
         snapshot: SessionSnapshot,
         displayFrameScheduler: DisplayFrameScheduler,
-        performanceSignposts: (any PerformanceSignposting)? = nil
+        performanceSignposts: (any PerformanceSignposting)? = nil,
+        enablesPresentationCover: Bool = false
     ) throws {
         let dependencies = try Self.makeDependencies(enablesComposerSubmission: false)
         try self.init(
@@ -1728,7 +1794,8 @@ final class ChatViewScrollHarness {
             displayFrameScheduler: displayFrameScheduler,
             performanceSignposts: performanceSignposts,
             dependencies: dependencies,
-            installsSubscribedSnapshot: false
+            installsSubscribedSnapshot: false,
+            enablesPresentationCover: enablesPresentationCover
         )
     }
 
@@ -1822,7 +1889,8 @@ final class ChatViewScrollHarness {
         displayFrameScheduler: DisplayFrameScheduler,
         performanceSignposts: (any PerformanceSignposting)?,
         dependencies: Dependencies,
-        installsSubscribedSnapshot: Bool
+        installsSubscribedSnapshot: Bool,
+        enablesPresentationCover: Bool = false
     ) throws {
         self.snapshot = snapshot
         transcriptIDs = Set(snapshot.transcript.map(\.id)).union(["transcript-bottom"])
@@ -1864,7 +1932,8 @@ final class ChatViewScrollHarness {
             }
             .environment(model)
         )
-        hostingController = UIHostingController(rootView: root)
+        hostingController = UIHostingController(rootView: enablesPresentationCover
+            ? AnyView(HarnessManagedSurface(content: root, cover: cover)) : root)
         guard let windowScene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else {
             throw HarnessError.missingWindowScene
         }
@@ -1885,6 +1954,21 @@ final class ChatViewScrollHarness {
             nativeRows: { Self.nativeRows(in: hostedView) }
         )
         recorder.start()
+    }
+
+    func setCovered(_ value: Bool) { cover.presented = value }
+    var chatSurfaceActivity: PresentationSurfaceActivity { cover.coordinator.activity(for: cover.rootToken) }
+    var coverTransitionSettled: Bool {
+        guard let presented = hostingController.presentedViewController else { return false }
+        return !presented.isBeingPresented && presented.transitionCoordinator == nil
+    }
+    var uncoverTransitionSettled: Bool { hostingController.presentedViewController == nil }
+    func waitForCoverTransition(presented: Bool) async throws {
+        for _ in 0..<180 {
+            if presented ? coverTransitionSettled : uncoverTransitionSettled { return }
+            try await DisplayFrameScheduler.displayLink.nextFrame()
+        }
+        throw HarnessError.coverTransitionDidNotSettle
     }
 
     var probeObservation: ChatHostedObservation { probe.observation }
@@ -2035,6 +2119,11 @@ final class ChatViewScrollHarness {
     }
 
     func close() async {
+        if hostingController.presentedViewController != nil {
+            await withCheckedContinuation { continuation in
+                hostingController.dismiss(animated: false) { continuation.resume() }
+            }
+        }
         retireHostedView()
         await model.teardown()
         await client.close()
@@ -2218,4 +2307,5 @@ enum HarnessError: Error {
     case missingTranscript
     case missingWindowScene
     case missingComposer
+    case coverTransitionDidNotSettle
 }

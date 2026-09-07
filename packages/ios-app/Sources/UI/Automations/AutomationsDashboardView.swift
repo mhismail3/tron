@@ -52,6 +52,7 @@ struct AutomationsDashboardView: View {
     let onOpenSession: @MainActor (String, String) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding private var viewPreferences: AutomationDashboardViewPreferences
     @State private var search = ""
@@ -82,6 +83,10 @@ struct AutomationsDashboardView: View {
 
     private var availableBuckets: [AutomationProfileCatalog] {
         model.automationCatalog.buckets.filter { eligibleProfileIDs.contains($0.id) }
+    }
+
+    private var allowsTimelineWork: Bool {
+        presentationActivity.allowsPresentationPublication && scenePhase == .active && mode == .upcoming
     }
 
     private var mode: AutomationDashboardViewMode { viewPreferences.mode }
@@ -160,17 +165,30 @@ struct AutomationsDashboardView: View {
         .toolbar { toolbar }
         .tronPresentation()
         .tronSettingsVisualTheme(accent: .tronAutomation)
-        .task(id: presentationActivity.allowsPresentationPublication) {
-            guard presentationActivity.allowsPresentationPublication else { return }
-            reconcileViewPreferences()
-            model.automationCatalog.activate()
-            if timeline == nil {
-                let coordinator = AutomationTimelineCoordinator(endpoints: { @MainActor in
-                    model.automationCatalog.allEndpoints()
-                })
-                timeline = coordinator
-                if mode == .upcoming { coordinator.load(start: selectedDate) }
+        .task(id: PresentationActivityTaskID(
+            source: scenePhase,
+            presentationActive: presentationActivity.allowsDataPublication
+        )) {
+            // Descendant detail/form screens consume the narrow catalog's
+            // revisions. Timeline derivation is dashboard-only work below.
+            if presentationActivity.allowsDataPublication, scenePhase == .active {
+                if presentationActivity.allowsPresentationPublication { reconcileViewPreferences() }
+                model.automationCatalog.activate()
+            } else {
+                model.automationCatalog.deactivate()
             }
+        }
+        .onChange(of: allowsTimelineWork, initial: true) { _, active in
+            if active {
+                reconcileViewPreferences()
+                if timeline == nil {
+                    timeline = AutomationTimelineCoordinator(endpoints: { @MainActor in
+                        model.automationCatalog.allEndpoints()
+                    })
+                }
+            }
+            timeline?.setPresentationActive(active)
+            if active, mode == .upcoming { timeline?.load(start: selectedDate) }
         }
         .task(id: timeline?.isLoading == true) {
             guard timeline?.isLoading == true else {
@@ -182,7 +200,7 @@ struct AutomationsDashboardView: View {
             } catch {
                 return
             }
-            guard !Task.isCancelled,
+            guard !Task.isCancelled, allowsTimelineWork,
                   AutomationTimelinePresentationPolicy.showsRefreshIndicator(
                     isLoading: timeline?.isLoading == true,
                     delayElapsed: true
@@ -201,11 +219,11 @@ struct AutomationsDashboardView: View {
             }
         }
         .onChange(of: model.profileRevision) { _, _ in
-            reconcileViewPreferences()
-            model.automationCatalog.reload()
+            if presentationActivity.allowsPresentationPublication { reconcileViewPreferences() }
+            model.automationCatalog.invalidate()
         }
         .onChange(of: model.connectionState) { _, _ in
-            model.automationCatalog.reload()
+            model.automationCatalog.invalidate()
         }
         .onDisappear {
             model.automationCatalog.deactivate()

@@ -530,6 +530,22 @@ final class AppModel {
         sessionPresentation.contextPresentation(for: sessionID)
     }
 
+    func sessionHistoryPresentation(for sessionID: String) -> SessionHistoryPresentation? {
+        sessionPresentation.historyPresentation(for: sessionID)
+    }
+
+    func sessionProcessPresentation(for sessionID: String) -> SessionProcessPresentation? {
+        sessionPresentation.processPresentation(for: sessionID)
+    }
+
+    func sessionQueuePresentation(for sessionID: String) -> SessionQueuePresentation? {
+        sessionPresentation.queuePresentation(for: sessionID)
+    }
+
+    func sessionToolDetailSource(for sessionID: String) -> SessionToolDetailSource? {
+        sessionPresentation.toolDetailSource(for: sessionID)
+    }
+
     func transcriptSnapshot(for sessionID: String) -> SessionSnapshot? {
         sessionPresentation.transcriptSnapshot(for: sessionID)
     }

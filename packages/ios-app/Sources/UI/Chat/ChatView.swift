@@ -148,17 +148,17 @@ struct ChatView: View {
         }
         .modifier(ChatRoutes(
             sessionID: sessionID,
-            projectCWD: model.authoritativeSnapshot(for: sessionID)?.cwd,
+            projectCWD: model.sessionContextPresentation(for: sessionID)?.cwd,
             onForkCreated: onForkCreated,
             showContext: $sessionPresentation.showContext,
             showSettings: $sessionPresentation.showSettings,
             queuedMessageEditor: $sessionPresentation.queuedMessageEditor,
-            installed: transcriptPresentation.installed,
+            queueCommit: queueEditorCommit,
             mutatingQueuedMessageIDs: sessionPresentation.mutatingQueuedMessageIDs,
-            onUpdateQueuedMessage: { id, text, behavior in
-                Task { await updateQueuedMessage(id, text: text, behavior: behavior) }
+            onUpdateQueuedMessage: { commit, id, text, behavior in
+                Task { await updateQueuedMessage(id, text: text, behavior: behavior, commit: commit) }
             },
-            onRemoveQueuedMessage: { id in Task { await removeQueuedMessage(id) } },
+            onRemoveQueuedMessage: { commit, id in Task { await removeQueuedMessage(id, commit: commit) } },
             cameraPresented: attachmentPresentationBinding(for: .camera),
             photosPresented: attachmentPresentationBinding(for: .photos),
             photos: $sessionPresentation.photos,
@@ -210,9 +210,9 @@ struct ChatView: View {
                 sessionPresentation.cancelImports()
             }
         }
-        .onChange(of: transcriptPresentation.installed) { _, installed in
-            guard sessionPresentation.queuedMessageEditor != nil,
-                  QueuedMessageManagementPolicy.installedCommit(for: installed) == nil else { return }
+        .onChange(of: queueEditorCommit) { _, commit in
+            guard let editor = sessionPresentation.queuedMessageEditor,
+                  commit?.items.contains(where: { $0.id == editor.id }) != true else { return }
             sessionPresentation.queuedMessageEditor = nil
         }
         .task(id: composerResourceCatalogIdentity) {
@@ -407,6 +407,7 @@ struct ChatView: View {
             if previous.allowsViewportObservation,
                !current.allowsViewportObservation {
                 viewportActivation &+= 1
+                scrollCoordinator.viewportActivationChanged(viewportActivation)
                 scrollCoordinator.viewportObservationChanged(isActive: false)
                 if ChatOpeningAttemptPolicy.isUnsettled(sessionPresentation.open.phase) {
                     // A covered transcript cannot publish the native geometry
@@ -422,14 +423,21 @@ struct ChatView: View {
                     hasDeferredViewportProjection = true
                 }
             }
-            if previous.allowsDataPublication,
-               !current.allowsDataPublication {
+            if previous.allowsPresentationPublication,
+               !current.allowsPresentationPublication {
+                // Retire a build/ready frame already admitted before cover, not
+                // just future source callbacks. Descendant facts have their own
+                // state selectors; the covered native transcript stays installed.
                 transcriptPresentation.suspendPendingWork()
+            }
+            if !current.allowsDataPublication {
                 deferredViewportProjectionBaseline = nil
                 hasDeferredViewportProjection = false
             }
             if !previous.allowsViewportObservation,
                current.allowsViewportObservation {
+                viewportActivation &+= 1
+                scrollCoordinator.viewportActivationChanged(viewportActivation)
                 scrollCoordinator.viewportObservationChanged(isActive: true)
                 if scenePhase == .active,
                    !sessionPresentation.needsOpeningResume,
@@ -478,10 +486,14 @@ struct ChatView: View {
                 clearSettledQueueMutationPresentationState()
             }
             if presentationActivity.allowsViewportObservation {
-                reconcileInstalledProjectionForViewport(
-                    previousTag: previousTag,
-                    installed: installed
-                )
+                if hasDeferredViewportProjection {
+                    reconcileDeferredViewportProjectionIfNeeded()
+                } else {
+                    reconcileInstalledProjectionForViewport(
+                        previousTag: previousTag,
+                        installed: installed
+                    )
+                }
             }
             #if HOSTED_TEST
             if let installed {
@@ -650,6 +662,7 @@ struct ChatView: View {
         reconcileSessionPresentationVisibility(sceneActive: current == .active)
         if current == .background {
             viewportActivation &+= 1
+            scrollCoordinator.viewportActivationChanged(viewportActivation)
             abandonLayoutTransaction()
             // Retire page/opening/correction tasks and native target leases;
             // durable pinned/detached intent remains in the coordinator.
@@ -737,15 +750,18 @@ struct ChatView: View {
         _ = layoutTransaction.animation
     }
 
-    /// Projection data can advance while a descendant sheet is visible, but
-    /// the covered transcript must not mutate scroll, morph, or layout owners.
-    /// Reconcile the newest complete installation once the viewport is active.
+    /// Keep the pre-cover baseline until the latest complete source installs.
+    /// Lazy estimates can otherwise leave a pinned uncover at an empty tail:
+    /// suppressed entrances do not trigger ordinary new-row materialization.
     private func reconcileDeferredViewportProjectionIfNeeded() {
         guard hasDeferredViewportProjection else { return }
         let baseline = deferredViewportProjectionBaseline
+        let installed = transcriptPresentation.installed
+        if baseline?.tag == installed?.tag,
+           let source = transcriptProjectionSource,
+           source != installed?.tag { return }
         deferredViewportProjectionBaseline = nil
         hasDeferredViewportProjection = false
-        let installed = transcriptPresentation.installed
         guard baseline?.tag != installed?.tag else { return }
         if let baseline {
             scrollCoordinator.transcriptProjectionWillChange(from: baseline)
@@ -754,6 +770,19 @@ struct ChatView: View {
             previousTag: baseline?.tag,
             installed: installed
         )
+        guard let installed, scrollCoordinator.canAutomaticallyFollow else { return }
+        let rows = ChatPhysicalTranscriptRowPolicy.rows(
+            installed: installed, canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
+        )
+        let previousTail = baseline.flatMap {
+            ChatPhysicalTranscriptRowPolicy.rows(
+                installed: $0, canonicalAliases: sessionPresentation.canonicalSubmissionAliases.aliases
+            ).last
+        }
+        guard let tail = rows.last, tail.id != previousTail?.id else { return }
+        // Reuse the exact native target/settlement lease; detached readers
+        // never enter this path and no entrance animation is replayed.
+        scrollCoordinator.discreteTailInserted(renderedID: tail.semanticID, physicalTargetID: tail.id)
     }
 
     private func reconcileInstalledProjectionForViewport(
@@ -939,7 +968,7 @@ struct ChatView: View {
         _ capture: ChatTranscriptProjectionCapture,
         permitsQueueMutationDeferral: Bool = true
     ) {
-        guard presentationActivity.allowsDataPublication,
+        guard presentationActivity.allowsPresentationPublication,
               !scrollCoordinator.defersAutomaticLiveProjectionIntake,
               !scrollCoordinator.isPrependingHistory,
               capture.tag.presentationGeneration == sessionPresentation.modelPresentationGeneration,
@@ -1090,6 +1119,7 @@ struct ChatView: View {
             frameScheduler: displayFrameScheduler,
             reduceMotion: reduceMotion,
             presentationEpoch: sessionPresentation.open.epoch,
+            viewportActivation: viewportActivation,
             presentationPhase: sessionPresentation.open.phase,
             admitsGeometryCallbacks: admitsScrollGeometryCallbacks,
             admitsNativeCallbacks: admitsNativeScrollCallbacks,
@@ -1139,7 +1169,7 @@ struct ChatView: View {
                         reconcileInteractionDraftsIfAuthoritative()
                     }
             }
-            if presentationActivity.allowsDataPublication,
+            if presentationActivity.allowsPresentationPublication,
                !scrollCoordinator.defersAutomaticLiveProjectionIntake {
                 Color.clear
                     .onChange(of: transcriptProjectionSource, initial: true) { _, source in
@@ -2407,7 +2437,9 @@ struct ChatView: View {
 
     @MainActor
     private func executePendingScrollCommand() {
-        guard let command = scrollCoordinator.command else { return }
+        guard presentationActivity.allowsViewportObservation,
+              scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation),
+              let command = scrollCoordinator.command else { return }
         performanceTracker.beginScrollCommand()
         let update = {
             switch command.destination {
@@ -2899,13 +2931,23 @@ struct ChatView: View {
         composerResourceResults = []
     }
 
+    private var queueEditorCommit: QueuedMessageManagementCommit? {
+        let installed = QueuedMessageManagementPolicy.installedCommit(for: transcriptPresentation.installed)
+        guard sessionPresentation.queuedMessageEditor != nil else { return installed }
+        guard queueManagementCapabilityForProjection else { return nil }
+        guard let queue = model.sessionQueuePresentation(for: sessionID) else { return installed }
+        guard queue.runtimeGeneration == transcriptPresentation.installed?.tag.runtimeGeneration else { return nil }
+        return QueuedMessageManagementCommit(expectedRevision: queue.revision, items: queue.items)
+    }
+
     @MainActor
     private func updateQueuedMessage(
         _ id: String,
         text: String,
-        behavior: SessionSnapshot.QueuedMessage.Behavior
+        behavior: SessionSnapshot.QueuedMessage.Behavior,
+        commit: QueuedMessageManagementCommit
     ) async {
-        await mutateQueue(affectedID: id) { items in
+        await mutateQueue(affectedID: id, presentedCommit: commit) { items in
             guard let index = items.firstIndex(where: { $0.id == id }) else {
                 throw CancellationError()
             }
@@ -2915,8 +2957,8 @@ struct ChatView: View {
     }
 
     @MainActor
-    private func removeQueuedMessage(_ id: String) async {
-        await mutateQueue(affectedID: id) { items in
+    private func removeQueuedMessage(_ id: String, commit: QueuedMessageManagementCommit) async {
+        await mutateQueue(affectedID: id, presentedCommit: commit) { items in
             guard items.contains(where: { $0.id == id }) else { throw CancellationError() }
             items.removeAll { $0.id == id }
         }
@@ -2947,23 +2989,27 @@ struct ChatView: View {
         target: SessionPresentationIdentity,
         presentationGeneration: Int
     ) async -> Bool {
-        guard transcriptPresentation.installed?.queueRevision.map({ $0 > expectedRevision }) != true else {
-            return true
-        }
+        if let queue = model.sessionQueuePresentation(for: sessionID),
+           queue.revision > expectedRevision { return true }
         guard await model.restoreMountedPresentationAfterReconnect(),
               presentationTarget == target,
               sessionPresentation.modelPresentationGeneration == presentationGeneration else {
             return false
         }
-        guard let installed = try? await installCurrentTranscriptProjection(
-            presentationGeneration: presentationGeneration
-        ) else { return false }
-        return installed.queueRevision.map { $0 > expectedRevision } == true
+        guard let queue = model.sessionQueuePresentation(for: sessionID),
+              queue.revision > expectedRevision else { return false }
+        // Receipt reconciliation continues behind the editor; installing a chat
+        // frame waits for the native viewport's uncover, not for command success.
+        if presentationActivity.allowsPresentationPublication {
+            _ = try? await installCurrentTranscriptProjection(presentationGeneration: presentationGeneration)
+        }
+        return true
     }
 
     @MainActor
     private func mutateQueue(
         affectedID: String,
+        presentedCommit: QueuedMessageManagementCommit? = nil,
         mutation: (inout [SessionSnapshot.QueuedMessage]) throws -> Void
     ) async {
         guard sessionPresentation.mutatingQueuedMessageIDs.isEmpty,
@@ -2972,13 +3018,11 @@ struct ChatView: View {
         let commit: QueuedMessageManagementCommit
         let previousItems: [SessionSnapshot.QueuedMessage]
         do {
-            guard let installed = transcriptPresentation.installed,
-                  let prepared = try QueuedMessageManagementPolicy.mutationCommit(
-                    for: installed,
-                    mutation: mutation
-                  ) else { return }
-            previousItems = installed.queuedMessages
-            commit = prepared
+            guard let source = presentedCommit ?? QueuedMessageManagementPolicy.installedCommit(for: transcriptPresentation.installed) else { return }
+            previousItems = source.items
+            var items = source.items
+            try mutation(&items)
+            commit = QueuedMessageManagementCommit(expectedRevision: source.expectedRevision, items: items)
         } catch {
             return
         }

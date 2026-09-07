@@ -78,12 +78,16 @@ enum SessionExportPresentationPolicy {
 }
 
 enum SessionModelSelectionPresentation {
-    static func displayed(pending: ModelRef?, authoritative: ModelRef?) -> ModelRef? {
-        pending ?? authoritative
+    static func displayed(pending: SessionPendingModelSelection?, authoritative: ModelRef?) -> ModelRef? {
+        pending?.value ?? authoritative
     }
 
-    static func reconciledPending(pending: ModelRef?, authoritative: ModelRef?) -> ModelRef? {
-        pending == authoritative ? nil : pending
+    static func reconciledPending(
+        pending: SessionPendingModelSelection?,
+        authoritative: ModelRef?,
+        runtimeGeneration: String?
+    ) -> SessionPendingModelSelection? {
+        pending?.reconciled(authoritative: authoritative, runtimeGeneration: runtimeGeneration)
     }
 
     static func modelName(_ selection: ModelRef?, catalog: [ModelSummary]) -> String {
@@ -167,7 +171,7 @@ struct SessionContextSheet: View {
     @State private var capturedNoticeScope: InAppNoticeScope?
     @State private var fallbackNoticeScope = InAppNoticeScope.presentation(UUID())
     @State private var presentation: SessionContextPresentation?
-    @State private var pendingModelSelection: ModelRef?
+    @State private var pendingModelSelection: SessionPendingModelSelection?
     @State private var pendingContextWindow: SessionPendingSetting<Int?>?
     @State private var pendingThinking: SessionPendingSetting<String>?
     @State private var settingContextWindow = false
@@ -178,9 +182,13 @@ struct SessionContextSheet: View {
     }
 
     private var displayedPresentation: SessionContextPresentation? {
-        presentation ?? (
-            presentationActivity.allowsPresentationPublication ? presentationSource : nil
-        )
+        guard let presentation else {
+            return presentationActivity.allowsPresentationPublication ? presentationSource : nil
+        }
+        // Keep the installed semantic frame and control identity stable while
+        // the authoritative revision advances for ordinary progress. Admission
+        // callers read the latest revision directly from AppModel.
+        return presentation
     }
 
     private var noticeScope: InAppNoticeScope {
@@ -401,14 +409,28 @@ struct SessionContextSheet: View {
                 guard let selection,
                       selection != SessionModelSelectionPresentation.displayed(
                         pending: pendingModelSelection, authoritative: snapshot.model
-                      ) else { return }
-                pendingModelSelection = selection
+                      ),
+                      let current = model.sessionContextPresentation(for: sessionID),
+                      current.runtimeGeneration == snapshot.runtimeGeneration,
+                      current.model == snapshot.model else { return }
+                let pending = SessionPendingModelSelection(selection, snapshot: current)
+                pendingModelSelection = pending
                 pendingContextWindow = nil
                 pendingThinking = nil
                 Task {
-                    do { try await model.setModel(selection, sessionID: sessionID) }
-                    catch {
-                        if pendingModelSelection == selection { pendingModelSelection = nil }
+                    do {
+                        guard let admitted = model.sessionContextPresentation(for: sessionID),
+                              pending.admitted(in: admitted) != nil else {
+                            pendingModelSelection = pendingModelSelection?.rejecting(pending.id)
+                            return
+                        }
+                        try await model.setModel(selection, sessionID: sessionID)
+                        pendingModelSelection = pendingModelSelection?.confirming(pending.id)
+                        if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        pendingModelSelection = pendingModelSelection?.rejecting(pending.id)
                         surfaceActionError(error)
                     }
                 }
@@ -473,7 +495,10 @@ struct SessionContextSheet: View {
                             Task {
                                 defer { settingContextWindow = false }
                                 do {
-                                    try await model.setContextWindow(value, for: policy.model, sessionID: sessionID, expectedRevision: snapshot.revision, expectedRuntimeGeneration: snapshot.runtimeGeneration)
+                                    guard let admission = model.authoritativeSnapshot(for: sessionID),
+                                          admission.runtimeGeneration == snapshot.runtimeGeneration,
+                                          admission.contextWindowPolicy?.model == policy.model else { return }
+                                    try await model.setContextWindow(value, for: policy.model, sessionID: sessionID, expectedRevision: admission.revision, expectedRuntimeGeneration: admission.runtimeGeneration)
                                     pendingContextWindow = pendingContextWindow?.confirming(pending.id)
                                     if presentationActivity.allowsPresentationPublication { reconcilePresentation(presentationSource) }
                                 } catch {
@@ -496,7 +521,7 @@ struct SessionContextSheet: View {
                     source: pendingWindow == nil ? policy.source : "pending",
                     accent: configurationRowAccent
                 )
-                .id("\(snapshot.runtimeGeneration):\(policy.model.contextWindowKey):\(snapshot.revision)")
+                .id("\(snapshot.runtimeGeneration):\(policy.model.contextWindowKey)")
                 .disabled(snapshot.phase.isActive || settingContextWindow || pendingModelSelection != nil)
             }
         } compactAction: {
@@ -508,7 +533,8 @@ struct SessionContextSheet: View {
         if presentation != value { presentation = value }
         pendingModelSelection = SessionModelSelectionPresentation.reconciledPending(
             pending: pendingModelSelection,
-            authoritative: value?.model
+            authoritative: value?.model,
+            runtimeGeneration: value?.runtimeGeneration
         )
         pendingContextWindow = pendingContextWindow?.reconciled(
             authoritative: value?.contextWindowPolicy?.override, snapshot: value
@@ -648,6 +674,7 @@ struct SessionContextSheet: View {
             do {
                 let inspection = try await model.workspaceInspection.inspect(sessionID: sessionID)
                 guard generation == workspaceLoadGeneration,
+                      presentationActivity.allowsPresentationPublication,
                       presentation?.cwd == snapshot.cwd,
                       !Task.isCancelled else { return }
                 workspacePresentation = SessionWorkspaceRowPresentation.resolve(inspection)
@@ -655,6 +682,8 @@ struct SessionContextSheet: View {
                 return
             } catch {
                 guard generation == workspaceLoadGeneration,
+                      !Task.isCancelled,
+                      presentationActivity.allowsPresentationPublication,
                       presentation?.cwd == snapshot.cwd else { return }
                 workspacePresentation = .failed(error.localizedDescription)
             }

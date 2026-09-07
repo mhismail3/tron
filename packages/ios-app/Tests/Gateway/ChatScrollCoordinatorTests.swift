@@ -1335,6 +1335,22 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.canInstallPersistentBottomPosition)
     }
 
+    @Test("late native callbacks from before cover are rejected after uncover")
+    func lateNativeCallbackCannotCrossViewportActivation() {
+        let coordinator = ChatScrollCoordinator()
+        defer { coordinator.cancel() }
+        #expect(coordinator.admitsViewportCallback(capturedActivation: 0))
+        coordinator.viewportActivationChanged(1)
+        coordinator.viewportObservationChanged(isActive: false)
+        #expect(!coordinator.admitsViewportCallback(capturedActivation: 0))
+        #expect(!coordinator.admitsViewportCallback(capturedActivation: 1))
+        coordinator.viewportActivationChanged(2)
+        coordinator.viewportObservationChanged(isActive: true)
+        #expect(!coordinator.admitsViewportCallback(capturedActivation: 0))
+        #expect(!coordinator.admitsViewportCallback(capturedActivation: 1))
+        #expect(coordinator.admitsViewportCallback(capturedActivation: 2))
+    }
+
     @Test("foreground revalidation is idempotent for one native activation")
     func foregroundRevalidationIsIdempotent() {
         let coordinator = ChatScrollCoordinator()

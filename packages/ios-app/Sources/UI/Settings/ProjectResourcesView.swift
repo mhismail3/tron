@@ -256,7 +256,10 @@ struct ProjectResourcesView: View {
                     .accessibilityLabel("Done")
                 }
             }
-            .task(id: "\(model.sessionResourceRevision(for: sessionID)):\(presentationActivity.allowsPresentationPublication)") {
+            .task(id: PresentationActivityTaskID(
+                source: model.sessionResourceRevision(for: sessionID),
+                presentationActive: presentationActivity.allowsPresentationPublication
+            )) {
                 guard presentationActivity.allowsPresentationPublication else { return }
                 if overviewSections.isEmpty { installOverview() }
                 await load()
@@ -372,6 +375,8 @@ struct ProjectResourcesView: View {
     private func reload() {
         guard !loading, !reloading else { return }
         reloading = true
+        // Reload changes runtime resources. Keep that admitted mutation alive;
+        // its authoritative resource revision drives the disposable read task.
         Task {
             defer { reloading = false }
             do { try await model.reloadResources(sessionID: sessionID) }
@@ -386,7 +391,8 @@ struct ProjectResourcesView: View {
         let generation = loadGeneration
         loading = true
         defer {
-            if generation == loadGeneration { loading = false }
+            if generation == loadGeneration, !Task.isCancelled,
+               presentationActivity.allowsPresentationPublication { loading = false }
         }
         await model.loadResources(sessionID: sessionID)
         guard !Task.isCancelled,
@@ -401,6 +407,7 @@ private struct ProjectResourceDetailSheet: View {
     let selection: ProjectResourceSelection
     let onDone: () -> Void
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @State private var promptDetail: CommandResourceDetail?
     @State private var promptLoadError: String?
     @State private var loadRevision = 0
@@ -520,7 +527,11 @@ private struct ProjectResourceDetailSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
-        .task(id: "\(selection.id):\(model.sessionResourceRevision(for: sessionID)):\(loadRevision)") {
+        .task(id: PresentationActivityTaskID(
+            source: "\(selection.id):\(model.sessionResourceRevision(for: sessionID)):\(loadRevision)",
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication else { return }
             await loadPromptContent()
         }
     }
@@ -529,9 +540,7 @@ private struct ProjectResourceDetailSheet: View {
         VStack(alignment: .leading, spacing: TronSpacing.sm) {
             TronTechnicalSectionLabel("Content")
             Group {
-                if let promptDetail {
-                    ProjectResourcePromptContent(detail: promptDetail)
-                } else if let promptLoadError {
+                if let promptLoadError {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(promptLoadError)
                             .font(TronTypography.bodySM)
@@ -540,6 +549,8 @@ private struct ProjectResourceDetailSheet: View {
                             .font(TronTypography.buttonSM)
                             .foregroundStyle(selection.kind.accent)
                     }
+                } else if let promptDetail {
+                    ProjectResourcePromptContent(detail: promptDetail)
                 } else {
                     TronLoadingState(label: "Loading prompt content…", accent: selection.kind.accent)
                 }
@@ -552,7 +563,6 @@ private struct ProjectResourceDetailSheet: View {
 
     private func loadPromptContent() async {
         guard selection.kind == .prompts else { return }
-        promptDetail = nil
         promptLoadError = nil
         guard let command = selection.promptCommand else {
             promptLoadError = "This prompt has no available content identity. Reload Project Resources and try again."
@@ -562,13 +572,13 @@ private struct ProjectResourceDetailSheet: View {
             // The resource catalog intentionally contains metadata only. Read
             // the loaded template on demand, never an arbitrary Mac file path.
             let detail = try await model.commandDetail(sessionID: sessionID, command: command)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }
             promptDetail = detail
         } catch is CancellationError {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }
             promptLoadError = "Prompt content is unavailable while the session is disconnected or busy. Try again when it is ready."
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, presentationActivity.allowsPresentationPublication else { return }
             promptLoadError = error.localizedDescription
         }
     }

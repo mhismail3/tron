@@ -68,6 +68,7 @@ struct RuntimeBehaviorDraft: Equatable {
 
 struct RuntimeBehaviorSettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     let projectCWD: String?
     @State private var scope: SettingsScope = .global
     @State private var draft = RuntimeBehaviorDraft()
@@ -183,7 +184,11 @@ struct RuntimeBehaviorSettingsView: View {
                 }
             }
         }
-        .task(id: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration)) {
+        .task(id: PresentationActivityTaskID(
+            source: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration),
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication else { return }
             if !allowsProjectScope { scope = .global }
             await load()
         }
@@ -276,6 +281,8 @@ struct RuntimeBehaviorSettingsView: View {
         // preserve any edit that arrives before that response.
         _ = drafts.seedBaselineIfMissing(draft, for: target)
         guard await model.refreshSettings(target: target),
+              presentationActivity.allowsPresentationPublication,
+              !Task.isCancelled,
               target == settingsTarget,
               let loaded = projectionDraft(target: target),
               drafts.install(loaded, for: target, ifCurrent: draft) else { return }

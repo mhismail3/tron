@@ -17,6 +17,29 @@ private final class AutomationRequestScript {
     }
 }
 
+@MainActor
+private final class DeferredTimelineRequest {
+    var calls = 0
+    var finished = 0
+    var returnedFromCancelledTask = false
+    var continuation: CheckedContinuation<JSONValue, Error>?
+
+    func request(_ method: String, _ params: JSONValue, _ timeout: Duration) async throws -> JSONValue {
+        calls += 1
+        defer {
+            finished += 1
+            returnedFromCancelledTask = Task.isCancelled
+        }
+        return try await withCheckedThrowingContinuation { continuation = $0 }
+    }
+
+    func finish(_ result: Result<JSONValue, Error>) {
+        let current = continuation
+        continuation = nil
+        current?.resume(with: result)
+    }
+}
+
 @Suite("Automation catalog ownership")
 @MainActor
 struct AutomationCoordinatorTests {
@@ -213,6 +236,35 @@ struct AutomationCoordinatorTests {
         #expect(coordinator.days.count == 1)
         #expect(coordinator.days.first?.items.first?.occurrence.kind == .series)
         #expect(coordinator.days.first?.items.first?.occurrence.count == 60)
+    }
+
+    @Test("covered Upcoming cancels reads, rejects late failures and restarts on return")
+    func coveredTimelineOwnsReadLifetime() async throws {
+        let request = DeferredTimelineRequest()
+        let endpoint = AutomationGatewayEndpoint(profile: profile(), client: AutomationRPCClient(request: request.request))
+        let coordinator = AutomationTimelineCoordinator(endpoints: { [endpoint] })
+        defer { coordinator.cancel(); request.finish(.failure(CancellationError())) }
+        coordinator.load()
+        try await eventually { request.calls == 1 }
+        coordinator.setPresentationActive(false)
+        coordinator.load()
+        coordinator.loadNext()
+        #expect(request.calls == 1)
+        #expect(!coordinator.isLoading)
+        request.finish(.failure(GatewayPossiblySentError(failure: GatewayFailure(
+            code: "possibly_sent", message: "A cancelled read may have reached the Mac.", retryable: false, details: nil
+        ))))
+        try await eventually { request.finished == 1 }
+        #expect(request.returnedFromCancelledTask)
+        #expect(coordinator.errorMessage == nil)
+        #expect(coordinator.days.isEmpty)
+        coordinator.setPresentationActive(true)
+        coordinator.load()
+        try await eventually { request.calls == 2 }
+        #expect(coordinator.isLoading)
+        request.finish(.success(.object(["catalogRevision": .number(1), "items": .array([])])))
+        try await eventually { !coordinator.isLoading }
+        #expect(coordinator.errorMessage == nil)
     }
 
     private func profile() -> AutomationDashboardProfile {

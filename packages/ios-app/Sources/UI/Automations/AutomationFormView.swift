@@ -31,6 +31,8 @@ struct AutomationFormView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedProfileID = ""
     @State private var name = ""
     @State private var description = ""
@@ -65,6 +67,9 @@ struct AutomationFormView: View {
     @State private var errorMessage: String?
     @State private var preview: [String] = []
     @State private var isPreviewing = false
+    @State private var previewGeneration = 0
+    @State private var presentationReadGeneration = 0
+    @State private var trustReadGeneration = 0
     @State private var initialized = false
     @State private var confirmingSave = false
 
@@ -143,12 +148,18 @@ struct AutomationFormView: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
-        .task { await loadExisting() }
+        .task(id: PresentationActivityTaskID(
+            source: "\(selection?.id ?? "new"):\(model.profileRevision):\(model.foregroundReconciliationGeneration):\(scenePhase == .active)",
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
+            await loadExisting()
+        }
         .tronManagedSheet(isPresented: $showingWorkspaceBrowser, identity: "automation.workspace-browser") {
             WorkspaceBrowser(shortcuts: recentWorkspaces, initialPath: workspacePath) { value in
                 workspacePath = value
                 workspaceTrustInspection = nil
-                Task { await inspectWorkspaceTrust(value) }
             }
         }
         .tronManagedSheet(isPresented: $confirmingWorkspaceTrust, identity: "automation.workspace-trust") {
@@ -160,10 +171,27 @@ struct AutomationFormView: View {
                 onConfirm: { Task { await setWorkspaceTrust(true) } }
             )
         }
-        .task(id: trigger) {
-            guard initialized else { return }
+        .task(id: PresentationActivityTaskID(
+            source: "\(selectedProfileID):\(trigger):\(initialized):\(model.profileRevision):\(scenePhase == .active)",
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard initialized,
+                  presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
             do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
             await loadPreview()
+        }
+        .task(id: PresentationActivityTaskID(
+            source: "\(selectedProfileID):\(workspacePath):\(targetMode):\(initialized):\(ownsMutationGateway):\(scenePhase == .active)",
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard initialized, presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active, targetMode == .workspace else { return }
+            await inspectWorkspaceTrust(workspacePath)
+        }
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, _ in
+            presentationReadGeneration &+= 1
+            previewGeneration &+= 1
         }
         .onChange(of: actionKind) { _, next in
             if next == .notification {
@@ -590,9 +618,19 @@ struct AutomationFormView: View {
 
     private func inspectWorkspaceTrust(_ path: String) async {
         guard let trustTarget = TrustTarget(cwd: path), ownsMutationGateway else { return }
+        trustReadGeneration &+= 1
+        let generation = trustReadGeneration
+        let presentationGeneration = presentationReadGeneration
         do {
             let inspection = try await model.inspectTrust(target: trustTarget)
-            guard workspacePath == path, ownsMutationGateway else { return }
+            guard !Task.isCancelled,
+                  generation == trustReadGeneration,
+                  presentationGeneration == presentationReadGeneration,
+                  presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active,
+                  workspacePath == path,
+                  targetMode == .workspace,
+                  ownsMutationGateway else { return }
             if let canonical = inspection.objectValue?["cwd"]?.stringValue,
                AutomationAdmissionPolicy.validWorkspacePath(canonical) {
                 workspacePath = canonical
@@ -601,6 +639,14 @@ struct AutomationFormView: View {
         } catch is CancellationError {
             return
         } catch {
+            guard !Task.isCancelled,
+                  generation == trustReadGeneration,
+                  presentationGeneration == presentationReadGeneration,
+                  presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active,
+                  workspacePath == path,
+                  targetMode == .workspace,
+                  ownsMutationGateway else { return }
             errorMessage = (error as? GatewayFailure)?.message ?? "Project trust is unavailable."
         }
     }
@@ -777,7 +823,8 @@ struct AutomationFormView: View {
         }
         let intervalIsValid = targetMode == .existingSession
             || AutomationAdmissionPolicy.admitsNewSessionInterval(trigger)
-        return !trimmedName.isEmpty
+        return initialized && (!isEditing || loadedRevision != nil)
+            && !trimmedName.isEmpty
             && trimmedName.utf8.count <= 256
             && description.utf8.count <= 2_048
             && !actionContent.isEmpty
@@ -847,15 +894,23 @@ struct AutomationFormView: View {
 
     private func loadExisting() async {
         guard !initialized else { return }
-        initialized = true
         selectedProfileID = selection?.profileID ?? model.profiles.selected?.id ?? endpoints.first?.profile.id ?? ""
-        guard let selection, let client else {
+        let requestedPresentationGeneration = presentationReadGeneration
+        guard let selection else {
             targetSessionID = sessions.first?.id ?? ""
-            await loadPreview()
+            initialized = true
+            return
+        }
+        guard let client else {
+            errorMessage = "This Gateway is unavailable."
             return
         }
         do {
             let record = try await client.get(id: selection.summary.id)
+            guard !Task.isCancelled,
+                  requestedPresentationGeneration == presentationReadGeneration,
+                  presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
             loadedRevision = record.revision
             loadedActivation = record.activation
             name = record.name
@@ -869,7 +924,6 @@ struct AutomationFormView: View {
                 targetMode = .workspace
                 workspacePath = cwd
                 targetSessionID = ""
-                await inspectWorkspaceTrust(cwd)
             }
             actionKind = record.action.typedKind ?? .sessionPrompt
             actionContent = record.action.content
@@ -888,25 +942,65 @@ struct AutomationFormView: View {
             if let anchor = record.trigger.anchorAt, let date = GatewayTimestamp.parse(anchor) { intervalAnchor = date }
             setInterval(record.trigger.everySeconds ?? 3_600)
             if let storedTime = record.trigger.localTime { setLocalTime(storedTime) }
-            await loadPreview()
+            // Install the complete draft without a suspension point. Separate
+            // activity-keyed preview/trust reads cannot partially initialize it.
+            initialized = true
+        } catch is CancellationError {
+            return
         } catch {
+            guard !Task.isCancelled,
+                  requestedPresentationGeneration == presentationReadGeneration,
+                  presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
             errorMessage = (error as? GatewayFailure)?.message ?? "Unable to load automation."
         }
     }
 
     private func loadPreview() async {
-        guard initialized, let client, AutomationAdmissionPolicy.admits(trigger) else {
+        guard initialized, !Task.isCancelled,
+              presentationActivity.allowsPresentationPublication,
+              scenePhase == .active else { return }
+        guard let client, AutomationAdmissionPolicy.admits(trigger) else {
             preview = []
+            isPreviewing = false
             return
         }
+        previewGeneration &+= 1
+        let generation = previewGeneration
+        let requestedTrigger = trigger
+        let requestedProfileID = selectedProfileID
+        let requestedPresentationGeneration = presentationReadGeneration
         isPreviewing = true
-        defer { isPreviewing = false }
+        defer {
+            if !Task.isCancelled, generation == previewGeneration,
+               requestedPresentationGeneration == presentationReadGeneration,
+               presentationActivity.allowsPresentationPublication, scenePhase == .active {
+                isPreviewing = false
+            }
+        }
         do {
-            preview = try await client.preview(trigger: trigger, limit: 5).occurrences
+            let occurrences = try await client.preview(trigger: requestedTrigger, limit: 5).occurrences
+            guard !Task.isCancelled,
+                  generation == previewGeneration,
+                  requestedTrigger == trigger,
+                  requestedProfileID == selectedProfileID,
+                  requestedPresentationGeneration == presentationReadGeneration,
+                  presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
+            preview = occurrences
             errorMessage = nil
         } catch is CancellationError {
             return
         } catch {
+            guard !Task.isCancelled,
+                  generation == previewGeneration,
+                  requestedTrigger == trigger,
+                  requestedProfileID == selectedProfileID,
+                  requestedPresentationGeneration == presentationReadGeneration,
+                  presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
+            // A previous trigger's dates must not masquerade as this trigger's
+            // preview. The initialized editing draft itself remains untouched.
             preview = []
             errorMessage = (error as? GatewayFailure)?.message ?? "Schedule preview is unavailable."
         }

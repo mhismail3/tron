@@ -48,4 +48,12 @@ generated_project="$generated_root/TronMobile.xcodeproj/project.pbxproj"
 grep -Fq 'tron-notification.caf' "$generated_project" \
   || fail "generated project omitted the notification sound"
 
-echo "iOS source policy passed (iPhone is portrait-only; iPad supports all orientations; project.yml owns resources)"
+# Presentation activity is an ownership boundary. Raw SwiftUI sheets would
+# bypass token registration and let covered work publish, so the only direct
+# sheet calls must remain inside the managed modifier implementation.
+/usr/bin/python3 "$ROOT/scripts/presentation-source-policy.py" --self-test \
+  || fail "managed presentation policy regressions failed"
+/usr/bin/python3 "$ROOT/scripts/presentation-source-policy.py" "$ROOT/Sources" \
+  || fail "raw native sheet escaped its managed owner"
+
+echo "iOS source policy passed (orientation/resources and managed presentation ownership)"

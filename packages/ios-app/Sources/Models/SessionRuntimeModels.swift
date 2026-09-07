@@ -546,7 +546,6 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
 /// is deliberately absent so its publication cannot invalidate that surface.
 struct SessionContextPresentation: Hashable, Sendable {
     let runtimeGeneration: String
-    let revision: Int
     let sessionID: String
     let phase: SessionPhase
     let operationKind: SessionOperationState.Kind?
@@ -566,7 +565,6 @@ struct SessionContextPresentation: Hashable, Sendable {
 
     init(_ snapshot: SessionSnapshot) {
         runtimeGeneration = snapshot.runtimeGeneration
-        revision = snapshot.revision
         sessionID = snapshot.sessionId
         phase = snapshot.phase
         operationKind = snapshot.operation?.kind

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ProvidersSettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     let sessionID: String?
     @State private var providers: [ProviderSummary] = []
     @State private var displayedTarget: ProviderCatalogTarget?
@@ -9,6 +10,7 @@ struct ProvidersSettingsView: View {
     @State private var loading = false
     @State private var loadFailed = false
     @State private var loadGeneration = 0
+    @State private var manualReloadGeneration = 0
 
     private var target: ProviderCatalogTarget {
         sessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
@@ -53,17 +55,23 @@ struct ProvidersSettingsView: View {
                 TronReloadToolbarButton(isReloading: reloading, action: reload)
             }
         }
-        .task(id: ProviderCatalogLoadID(target: target, invalidationGeneration: model.providerInvalidationGeneration)) {
+        .task(id: PresentationActivityTaskID(
+            source: "\(target):\(model.providerInvalidationGeneration):\(manualReloadGeneration)",
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication else { return }
             await loadProviders(for: target)
         }
     }
 
     private func reload() {
-        guard !reloading else { return }
-        Task { await loadProviders(for: target, manual: true) }
+        guard !reloading, presentationActivity.allowsPresentationPublication else { return }
+        reloading = true
+        manualReloadGeneration &+= 1
     }
 
-    private func loadProviders(for requestedTarget: ProviderCatalogTarget, manual: Bool = false) async {
+    private func loadProviders(for requestedTarget: ProviderCatalogTarget) async {
+        guard presentationActivity.allowsPresentationPublication else { return }
         loadGeneration &+= 1
         let generation = loadGeneration
 
@@ -81,9 +89,10 @@ struct ProvidersSettingsView: View {
         }
 
         loading = providers.isEmpty
-        if manual { reloading = true }
         defer {
-            if generation == loadGeneration {
+            if generation == loadGeneration,
+               !Task.isCancelled,
+               presentationActivity.allowsPresentationPublication {
                 loading = false
                 reloading = false
             }
@@ -92,6 +101,7 @@ struct ProvidersSettingsView: View {
         let succeeded = await model.refreshProviders(target: requestedTarget)
         guard generation == loadGeneration,
               requestedTarget == target,
+              presentationActivity.allowsPresentationPublication,
               !Task.isCancelled else { return }
 
         if let catalog = model.providerCatalog(for: requestedTarget) {

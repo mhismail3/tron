@@ -52,7 +52,6 @@ struct GatewayProtocolContractTests {
         #expect(snapshot.contextWindowPolicy?.maximum == 1_000)
         #expect(snapshot.contextWindowPolicy?.override == nil)
         let presentation = SessionContextPresentation(snapshot)
-        #expect(presentation.revision == snapshot.revision)
         #expect(presentation.runtimeGeneration == snapshot.runtimeGeneration)
         #expect(presentation.contextWindowPolicy == snapshot.contextWindowPolicy)
         #expect(SessionSnapshotTranscriptAdmissionPolicy.admit(snapshot))

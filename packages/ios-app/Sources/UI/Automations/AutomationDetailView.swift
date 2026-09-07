@@ -5,6 +5,8 @@ struct AutomationDetailView: View {
     let onOpenSession: (@MainActor (String, String) -> Void)?
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(\.scenePhase) private var scenePhase
     @State private var record: GatewayAutomationRecord?
     @State private var runs: [GatewayAutomationRunSummary] = []
     @State private var selectedRun: GatewayAutomationRun?
@@ -12,6 +14,10 @@ struct AutomationDetailView: View {
     @State private var errorMessage: String?
     @State private var formPresented = false
     @State private var confirmation: AutomationDetailConfirmation?
+    @State private var loadRevision = 0
+    @State private var runLoadGeneration = 0
+    @State private var presentationReadGeneration = 0
+    @State private var runLoadTask: Task<Void, Never>?
 
     init(selection: AutomationSummarySelection, onOpenSession: (@MainActor (String, String) -> Void)? = nil) {
         self.selection = selection
@@ -57,16 +63,27 @@ struct AutomationDetailView: View {
         }
         .tronSettingsVisualTheme(accent: .tronAutomation)
         .tronTopBlur(.sheet).presentationDetents([.large]).presentationDragIndicator(.hidden)
-        .task { await load() }
-        .onChange(of: currentRevisionTag) { _, _ in
-            guard !formPresented else { return }
-            Task { await load() }
+        .task(id: PresentationActivityTaskID(
+            source: "\(selection.id):\(currentRevisionTag):\(loadRevision):\(presentationReadGeneration):\(model.profileRevision):\(model.foregroundReconciliationGeneration):\(scenePhase == .active)",
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
+            await load()
         }
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
+            presentationReadGeneration &+= 1
+            if !active { cancelRunRead() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { cancelRunRead() }
+        }
+        .onDisappear { cancelRunRead() }
         .onChange(of: model.profileRevision) { _, _ in
             if !model.profiles.profiles.contains(where: { $0.id == selection.profileID }) { dismiss() }
         }
         .tronManagedSheet(isPresented: $formPresented, identity: "automation.edit.\(selection.id)") {
-            AutomationFormView(selection: selection) { formPresented = false; Task { await load() } }
+            AutomationFormView(selection: selection) { formPresented = false; loadRevision &+= 1 }
         }
         .tronManagedSheet(item: $selectedRun, identity: { "automation.run.\($0.runId)" }) { run in
             AutomationRunDetailView(
@@ -74,7 +91,7 @@ struct AutomationDetailView: View {
                 run: run,
                 automationRevision: record?.revision ?? selection.summary.revision,
                 onOpenSession: { sessionID in openExecutionSession(sessionID) },
-                onResolved: { Task { await load() } }
+                onResolved: { loadRevision &+= 1 }
             )
         }
         .alert(item: $confirmation) { action in
@@ -155,7 +172,7 @@ struct AutomationDetailView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(runs.enumerated()), id: \.element.id) { index, run in
-                        Button { Task { await selectRun(run) } } label: { runSummary(run) }
+                        Button { selectRun(run) } label: { runSummary(run) }
                             .buttonStyle(.plain)
                         if index < runs.count - 1 { TronSettingsDivider(accent: .tronAutomation) }
                     }
@@ -268,19 +285,90 @@ struct AutomationDetailView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
     }
-    private func errorState(_ message: String) -> some View { VStack(spacing: 12) { Image(systemName: "exclamationmark.triangle").font(TronTypography.sans(size: 30, weight: .semibold)).foregroundStyle(Color.tronAmber); Text(message).font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary); Button("Retry") { Task { await load() } }.buttonStyle(TronActionButtonStyle(role: .primary)) }.frame(maxWidth: .infinity, minHeight: 220) }
-    private func selectRun(_ summary: GatewayAutomationRunSummary) async { guard let client else { return }; do { selectedRun = try await client.run(id: selection.summary.id, runId: summary.runId) } catch { errorMessage = (error as? GatewayFailure)?.message ?? "Unable to load run." } }
+    private func errorState(_ message: String) -> some View { VStack(spacing: 12) { Image(systemName: "exclamationmark.triangle").font(TronTypography.sans(size: 30, weight: .semibold)).foregroundStyle(Color.tronAmber); Text(message).font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary); Button("Retry") { loadRevision &+= 1 }.buttonStyle(TronActionButtonStyle(role: .primary)) }.frame(maxWidth: .infinity, minHeight: 220) }
+    private func cancelRunRead() {
+        runLoadGeneration &+= 1
+        runLoadTask?.cancel()
+        runLoadTask = nil
+    }
+
+    private func selectRun(_ summary: GatewayAutomationRunSummary) {
+        cancelRunRead()
+        runLoadTask = Task { await loadRun(summary) }
+    }
+
+    private func loadRun(_ summary: GatewayAutomationRunSummary) async {
+        guard presentationActivity.allowsPresentationPublication,
+              scenePhase == .active,
+              let client else { return }
+        runLoadGeneration &+= 1
+        let generation = runLoadGeneration
+        let presentationGeneration = presentationReadGeneration
+        defer { if generation == runLoadGeneration { runLoadTask = nil } }
+        do {
+            let run = try await client.run(id: selection.summary.id, runId: summary.runId)
+            guard !Task.isCancelled,
+                  generation == runLoadGeneration,
+                  presentationGeneration == presentationReadGeneration,
+                  presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
+            selectedRun = run
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled,
+                  generation == runLoadGeneration,
+                  presentationGeneration == presentationReadGeneration,
+                  presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
+            errorMessage = (error as? GatewayFailure)?.message ?? "Unable to load run."
+        }
+    }
     private func load() async {
-        guard let client else { errorMessage = "This Gateway is unavailable."; isLoading = false; return }
+        guard presentationActivity.allowsPresentationPublication,
+              scenePhase == .active else { return }
+        guard let client else {
+            errorMessage = "This Gateway is unavailable."
+            isLoading = false
+            return
+        }
+        let generation = loadRevision
+        let presentationGeneration = presentationReadGeneration
         isLoading = record == nil
         errorMessage = nil
+        defer {
+            if !Task.isCancelled, generation == loadRevision,
+               presentationGeneration == presentationReadGeneration,
+               presentationActivity.allowsPresentationPublication, scenePhase == .active {
+                isLoading = false
+            }
+        }
         do {
-            record = try await client.get(id: selection.summary.id)
-            runs = try await client.runs(id: selection.summary.id).runs
-            isLoading = false
+            let loadedRecord = try await client.get(id: selection.summary.id)
+            guard !Task.isCancelled,
+                  generation == loadRevision,
+                  presentationGeneration == presentationReadGeneration,
+                  presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
+            let loadedRuns = try await client.runs(id: selection.summary.id).runs
+            guard !Task.isCancelled,
+                  generation == loadRevision,
+                  presentationGeneration == presentationReadGeneration,
+                  presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
+            // Install this read's related values atomically. The RPCs are not a
+            // server transaction; later catalog invalidations trigger a new read.
+            record = loadedRecord
+            runs = loadedRuns
+        } catch is CancellationError {
+            return
         } catch {
+            guard !Task.isCancelled,
+                  generation == loadRevision,
+                  presentationGeneration == presentationReadGeneration,
+                  presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
             errorMessage = (error as? GatewayFailure)?.message ?? "Unable to load automation."
-            isLoading = false
         }
     }
     private func execute(_ action: AutomationDetailConfirmation) async {
@@ -300,7 +388,7 @@ struct AutomationDetailView: View {
                 return
             }
             model.automationCatalog.invalidate(profileID: selection.profileID)
-            await load()
+            loadRevision &+= 1
         } catch {
             errorMessage = (error as? GatewayFailure)?.message ?? "Automation action failed."
         }

@@ -178,7 +178,7 @@ struct ToolChipInstrumentationSample: Equatable, Sendable {
     let transitionToken: Int
 }
 
-private struct ToolRunResolvedState: Equatable {
+struct ToolRunResolvedState: Equatable {
     let installationTag: ChatTranscriptProjectionTag
     let run: ChatToolRunPresentation
     let tools: [ChatToolPresentation]
@@ -216,34 +216,11 @@ struct ToolRunView: View {
                 identity: "chat.tool-run.\(run.id)"
             ) {
                 if let resolvedState {
-                    if resolvedState.run.displayCount == 1, let tool = resolvedState.tools.first {
-                        NavigationStack {
-                            ToolDetailSheet(
-                                tool: tool,
-                                density: detailDetent == .large ? .expanded : .glance
-                            )
-                            .tronToolDetailNavigationChrome()
-                            .toolbar {
-                                ToolbarItem(placement: .principal) {
-                                    ToolDetailNavigationTitle(tool: tool)
-                                }
-                                ToolbarItem(placement: .confirmationAction) {
-                                    Button { self.resolvedState = nil } label: {
-                                        Image(systemName: "checkmark")
-                                            .font(TronTypography.buttonSM)
-                                            .foregroundStyle(Color.tronEmerald)
-                                    }
-                                    .accessibilityLabel("Done")
-                                }
-                            }
-                        }
-                        .tronTopBlur(.toolDetail)
-                        .presentationDetents([.medium, .large], selection: $detailDetent)
-                        .presentationDragIndicator(.hidden)
-                        .tronPresentation()
-                    } else {
-                        ToolRunDetailSheet(run: resolvedState.run, tools: resolvedState.tools)
-                    }
+                    LiveToolRunDetails(
+                        initial: resolvedState,
+                        detent: $detailDetent,
+                        onDismiss: { self.resolvedState = nil }
+                    )
                 }
             }
             .onChange(of: installationTag) { _, currentTag in
@@ -282,6 +259,67 @@ struct ToolRunView: View {
             return
         }
         resolvedState = ToolRunResolvedState(installationTag: tag, run: run, tools: details)
+    }
+}
+
+/// A visible detail owns only its selected calls. Chat can stop installing
+/// transcript frames without freezing the detail or its technical descendants.
+struct LiveToolRunDetails: View {
+    let initial: ToolRunResolvedState
+    @Binding var detent: PresentationDetent
+    let onDismiss: () -> Void
+    @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var activity
+    @State private var currentTools: [ChatToolPresentation]?
+
+    private var source: SessionToolDetailSource? {
+        model.sessionToolDetailSource(for: initial.installationTag.sessionID)
+    }
+
+    var body: some View {
+        let tools = currentTools ?? initial.tools
+        let run = ChatToolRunPresentation(tools: tools.map(\.descriptor), anchorID: initial.run.anchorID)
+        Group {
+            if run.displayCount == 1, let tool = tools.first {
+                NavigationStack {
+                    ToolDetailSheet(tool: tool, density: detent == .large ? .expanded : .glance)
+                        .tronToolDetailNavigationChrome()
+                        .toolbar {
+                            ToolbarItem(placement: .principal) { ToolDetailNavigationTitle(tool: tool) }
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button(action: onDismiss) {
+                                    Image(systemName: "checkmark")
+                                        .font(TronTypography.buttonSM)
+                                        .foregroundStyle(Color.tronEmerald)
+                                }
+                                .accessibilityLabel("Done")
+                            }
+                        }
+                }
+                .tronTopBlur(.toolDetail)
+                .presentationDetents([.medium, .large], selection: $detent)
+                .presentationDragIndicator(.hidden)
+                .tronPresentation()
+            } else {
+                ToolRunDetailSheet(run: run, tools: tools)
+            }
+        }
+        .background {
+            if activity.allowsDataPublication {
+                Color.clear.onChange(of: source, initial: true) { _, source in
+                    // An offline gap retains the last complete read-only
+                    // detail. A proven replacement runtime retires its owner.
+                    guard let source else { return }
+                    guard source.runtimeGeneration == initial.installationTag.runtimeGeneration else {
+                        currentTools = nil
+                        onDismiss()
+                        return
+                    }
+                    let next = ChatTranscriptProjectionKernel.detailTools(retained: currentTools ?? initial.tools, source: source)
+                    if next != currentTools { currentTools = next }
+                }
+            }
+        }
     }
 }
 

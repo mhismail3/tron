@@ -1,5 +1,41 @@
 import Foundation
 
+struct SessionPendingModelSelection: Equatable {
+    let id = UUID()
+    let value: ModelRef
+    let sessionID: String
+    let runtimeGeneration: String
+    private var confirmed = false
+
+    init(_ value: ModelRef, snapshot: SessionContextPresentation) {
+        self.value = value
+        sessionID = snapshot.sessionID
+        runtimeGeneration = snapshot.runtimeGeneration
+    }
+
+    func admitted(in snapshot: SessionContextPresentation) -> Self? {
+        guard sessionID == snapshot.sessionID,
+              runtimeGeneration == snapshot.runtimeGeneration else { return nil }
+        return self
+    }
+
+    func confirming(_ requestID: UUID) -> Self {
+        guard id == requestID else { return self }
+        var copy = self
+        copy.confirmed = true
+        return copy
+    }
+
+    func rejecting(_ requestID: UUID) -> Self? {
+        id == requestID ? nil : self
+    }
+
+    func reconciled(authoritative: ModelRef?, runtimeGeneration: String?) -> Self? {
+        guard runtimeGeneration == self.runtimeGeneration else { return nil }
+        return confirmed && value == authoritative ? nil : self
+    }
+}
+
 /// A single in-flight UI choice, never a canonical setting. Keep reset-to-nil
 /// distinct from no pending choice, and fence both display and late failures
 /// to the exact request and model/runtime that admitted it.

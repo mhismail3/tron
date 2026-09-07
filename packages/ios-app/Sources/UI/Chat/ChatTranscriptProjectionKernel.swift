@@ -152,6 +152,60 @@ struct ChatReadOnlyTranscriptProjection: Hashable, Sendable {
 }
 
 enum ChatTranscriptProjectionKernel {
+    /// Resolve only a visible descendant's exact calls, independently of the
+    /// covered transcript installation. Share canonical/result precedence and
+    /// terminal/segment semantics with the main assembler, not a second renderer.
+    static func detailTools(
+        retained: [ChatToolPresentation],
+        source: SessionToolDetailSource
+    ) -> [ChatToolPresentation] {
+        let ids = Set(retained.map(\.id))
+        var results: [String: TranscriptItem] = [:]
+        for item in source.canonical where item.role == .toolResult {
+            if let id = item.toolCallId, ids.contains(id) { results[id] = item }
+        }
+        var canonical: [String: ChatToolPresentation] = [:]
+        for item in source.canonical where item.role != .toolResult {
+            for tool in toolPresentations(in: item, results: results) where ids.contains(tool.id) {
+                canonical[tool.id] = tool
+            }
+        }
+        if let streaming = source.streaming {
+            for tool in toolPresentations(in: streaming, results: results)
+                where ids.contains(tool.id) && canonical[tool.id] == nil {
+                canonical[tool.id] = tool
+            }
+        }
+        let executions = Dictionary(source.executions.map { ($0.toolCallId, $0) }, uniquingKeysWith: { _, latest in latest })
+        return retained.map { previous in
+            // A canonical result may enter the admitted tail after its call
+            // scrolled out. Retain the known request metadata for that exact ID.
+            let base: ChatToolPresentation
+            if let joined = canonical[previous.id] {
+                base = !previous.isRunning && joined.isRunning ? previous : joined
+            } else if let result = results[previous.id] {
+                let terminal = toolResultPresentation(result)
+                base = ChatToolPresentation(
+                    descriptor: terminal.descriptor,
+                    payload: ChatToolPayload(
+                        request: previous.request,
+                        response: terminal.response,
+                        content: terminal.content,
+                        fallbackContent: terminal.fallbackContent
+                    )
+                )
+            } else {
+                base = previous
+            }
+            return foregroundPresentation(
+                resolved(base, live: executions[previous.id]),
+                phase: source.phase,
+                acceptsQueuedPrompts: source.acceptsQueuedPrompts,
+                activeToolSegmentId: source.activeToolSegmentId
+            )
+        }
+    }
+
     static func fragment(for item: TranscriptItem) -> ChatTranscriptProjectionFragment {
         var atoms: [ChatTranscriptProjectionRawAtom] = []
         if item.kind == .message { atoms.append(.conversationStart) }

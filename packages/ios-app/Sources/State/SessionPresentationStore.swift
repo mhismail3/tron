@@ -184,12 +184,24 @@ final class SessionPresentationStore {
     private(set) var snapshot: SessionSnapshot? {
         didSet {
             let next = snapshot.map(SessionContextPresentation.init)
-            if sessionContextPresentation != next {
-                sessionContextPresentation = next
-            }
+            // Presentation equality excludes the transport cursor. Mutation
+            // admission reads the current authoritative snapshot at the action.
+            if sessionContextPresentation != next { sessionContextPresentation = next }
+            let history = snapshot.map(SessionHistoryPresentation.init)
+            if historyPresentation != history { historyPresentation = history }
+            let processes = snapshot.map(SessionProcessPresentation.init)
+            if processPresentation != processes { processPresentation = processes }
+            let queue = snapshot.map(SessionQueuePresentation.init)
+            if queuePresentation != queue { queuePresentation = queue }
+            let tools = snapshot.map(SessionToolDetailSource.init)
+            if toolDetailSource != tools { toolDetailSource = tools }
         }
     }
     private(set) var sessionContextPresentation: SessionContextPresentation?
+    private var historyPresentation: SessionHistoryPresentation?
+    private var processPresentation: SessionProcessPresentation?
+    private var queuePresentation: SessionQueuePresentation?
+    private var toolDetailSource: SessionToolDetailSource?
     private(set) var chatCanonicalGeneration = 0
     private(set) var chatTimelineGeneration = 0
     private(set) var isAuthoritative = false
@@ -295,9 +307,31 @@ final class SessionPresentationStore {
 
     func contextPresentation(for sessionID: String) -> SessionContextPresentation? {
         guard isAuthoritative,
-              ownsSession(sessionID),
-              sessionContextPresentation?.sessionID == sessionID else { return nil }
-        return sessionContextPresentation
+              let presentation = sessionContextPresentation,
+              presentation.sessionID == sessionID else { return nil }
+        // Keep this accessor semantic: progress-only authoritative revisions
+        // must not invalidate Manage Session visuals or observation tracking.
+        return presentation
+    }
+
+    func historyPresentation(for sessionID: String) -> SessionHistoryPresentation? {
+        guard isAuthoritative, historyPresentation?.sessionID == sessionID else { return nil }
+        return historyPresentation
+    }
+
+    func processPresentation(for sessionID: String) -> SessionProcessPresentation? {
+        guard isAuthoritative, processPresentation?.sessionID == sessionID else { return nil }
+        return processPresentation
+    }
+
+    func queuePresentation(for sessionID: String) -> SessionQueuePresentation? {
+        guard isAuthoritative, queuePresentation?.sessionID == sessionID else { return nil }
+        return queuePresentation
+    }
+
+    func toolDetailSource(for sessionID: String) -> SessionToolDetailSource? {
+        guard isAuthoritative, toolDetailSource?.sessionID == sessionID else { return nil }
+        return toolDetailSource
     }
 
     var mountedTranscriptCoverage: MountedTranscriptCoverage? {

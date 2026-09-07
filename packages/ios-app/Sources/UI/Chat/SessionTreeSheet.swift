@@ -203,7 +203,7 @@ struct SessionTreeSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
-                    if let snapshot = model.authoritativeSnapshot(for: sessionID) {
+                    if let snapshot = model.sessionHistoryPresentation(for: sessionID) {
                         runtimeSummary(snapshot)
                     }
                     historyOverview
@@ -220,7 +220,7 @@ struct SessionTreeSheet: View {
                         ForEach(visibleRows) { row in
                             TreeNodeRow(
                                 row: row,
-                                leafID: model.authoritativeSnapshot(for: sessionID)?.leafEntryId,
+                                leafID: model.sessionHistoryPresentation(for: sessionID)?.leafEntryId,
                                 select: {
                                     selection = SessionHistorySelection(node: row.node, action: .details)
                                 },
@@ -316,7 +316,7 @@ struct SessionTreeSheet: View {
         .tint(Color.tronBlue)
     }
 
-    private func runtimeSummary(_ snapshot: SessionSnapshot) -> some View {
+    private func runtimeSummary(_ snapshot: SessionHistoryPresentation) -> some View {
         HStack(alignment: .center, spacing: SessionHistoryCardMetrics.contentSpacing) {
             runtimeIcon
             VStack(alignment: .leading, spacing: 4) {
@@ -344,7 +344,7 @@ struct SessionTreeSheet: View {
             .accessibilityHidden(true)
     }
 
-    private func runtimeStatistics(_ snapshot: SessionSnapshot) -> some View {
+    private func runtimeStatistics(_ snapshot: SessionHistoryPresentation) -> some View {
         Text("\(snapshot.stats.totalMessages.formatted()) messages · \(snapshot.stats.toolCalls.formatted()) tool calls")
             .font(TronTypography.secondaryDescription)
             .foregroundStyle(Color.tronTextSecondary)
@@ -352,7 +352,7 @@ struct SessionTreeSheet: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func runtimePhase(_ snapshot: SessionSnapshot) -> some View {
+    private func runtimePhase(_ snapshot: SessionHistoryPresentation) -> some View {
         Text(snapshot.phase.rawValue.capitalized)
             .font(TronTypography.secondaryCodeDescription)
             .foregroundStyle(Color.tronTextSecondary)
@@ -605,7 +605,7 @@ private struct HistoryEntryDetailsSheet: View {
     @State private var label = ""
     @State private var forkNavigation = ChatForkNavigationOwner()
 
-    private var leafID: String? { model.authoritativeSnapshot(for: sessionID)?.leafEntryId }
+    private var leafID: String? { model.sessionHistoryPresentation(for: sessionID)?.leafEntryId }
 
     var body: some View {
         NavigationStack {
@@ -745,7 +745,7 @@ private struct NavigationSheet: View {
     @State private var working = false
 
     private var leafID: String? {
-        model.authoritativeSnapshot(for: sessionID)?.leafEntryId
+        model.sessionHistoryPresentation(for: sessionID)?.leafEntryId
     }
 
     private var canNavigate: Bool {

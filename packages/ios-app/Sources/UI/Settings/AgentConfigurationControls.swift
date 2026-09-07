@@ -99,6 +99,10 @@ struct ContextWindowSelectionRow: View {
         } message: {
             Text("Enter \(limits.minimum.formatted())–\(limits.maximum.formatted()) tokens. Larger windows may increase cost or allowance usage and do not restore previously compacted history.")
         }
+        .tronManagedSystemPresentation(
+            isPresented: $editingCustom,
+            identity: "settings.context-window-input"
+        )
         .accessibilityHint("\(detail) Choose the default, maximum, or explicitly apply a supported custom token limit.")
     }
 }

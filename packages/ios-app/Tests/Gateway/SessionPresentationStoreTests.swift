@@ -184,23 +184,31 @@ struct SessionPresentationStoreTests {
     }
 
     @Test("Manage Session model picker displays an in-flight selection until authority confirms it")
-    func modelPickerSelectionReconcilesWithAuthority() {
+    func modelPickerSelectionReconcilesWithAuthority() throws {
+        let context = SessionContextPresentation(try SessionScenarioBuilder(seed: 8_105).openingTail(targetEncodedBytes: 4_096))
         let original = ModelRef(provider: "provider", id: "original")
         let firstSelection = ModelRef(provider: "provider", id: "first")
         let latestSelection = ModelRef(provider: "provider", id: "latest")
 
         #expect(SessionModelSelectionPresentation.displayed(
-            pending: firstSelection,
+            pending: SessionPendingModelSelection(firstSelection, snapshot: context),
             authoritative: original
         ) == firstSelection)
+        let pending = SessionPendingModelSelection(latestSelection, snapshot: context)
         #expect(SessionModelSelectionPresentation.reconciledPending(
-            pending: latestSelection,
-            authoritative: firstSelection
-        ) == latestSelection)
+            pending: pending,
+            authoritative: firstSelection,
+            runtimeGeneration: context.runtimeGeneration
+        ) == pending)
+        // Authority can arrive before the exact RPC completion; retain that
+        // request until both pieces of evidence agree, including A → B → A.
+        #expect(pending.reconciled(authoritative: latestSelection, runtimeGeneration: context.runtimeGeneration) == pending)
         #expect(SessionModelSelectionPresentation.reconciledPending(
-            pending: latestSelection,
-            authoritative: latestSelection
+            pending: pending.confirming(pending.id),
+            authoritative: latestSelection,
+            runtimeGeneration: context.runtimeGeneration
         ) == nil)
+        #expect(pending.reconciled(authoritative: firstSelection, runtimeGeneration: "replacement") == nil)
     }
 
     @Test("Manage Session projection does not publish streaming-only snapshot churn")

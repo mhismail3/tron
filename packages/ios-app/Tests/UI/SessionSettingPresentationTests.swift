@@ -34,6 +34,19 @@ struct SessionSettingPresentationTests {
         #expect(SessionHistoryPreview.title(node(kind: "thinkingChange", label: "xhigh")) == "xhigh")
     }
 
+    @Test("progress revisions are causal fences, not Manage Session visual changes")
+    func progressRevisionDoesNotInvalidateSemanticPresentation() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 7_810).openingTail(targetEncodedBytes: 4_096)
+        snapshot.revision = 10
+        let before = SessionContextPresentation(snapshot)
+        snapshot.revision = 11
+        let progress = SessionContextPresentation(snapshot)
+        #expect(before == progress)
+        #expect(snapshot.revision == 11)
+        let pending = SessionPendingSetting("high", snapshot: before)
+        #expect(pending.admitted(in: progress)?.value == "high")
+    }
+
     @Test("a pending menu choice is visible before authority changes, then retires on confirmation")
     func immediateSelection() throws {
         var snapshot = try SessionScenarioBuilder(seed: 7_811).openingTail(targetEncodedBytes: 4_096)

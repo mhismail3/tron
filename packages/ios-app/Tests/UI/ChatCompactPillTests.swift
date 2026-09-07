@@ -127,11 +127,14 @@ struct ChatCompactPillTests {
     }
 
     @Test("model summary uses the exact selected provider and catalog name with a stable fallback")
-    func modelSummaryName() {
+    func modelSummaryName() throws {
         let first = ModelSummary(provider: "first", id: "same-id", name: "First Model", reasoning: true, input: ["text"], contextWindow: 272_000, maxTokens: 8_192, available: true)
         let second = ModelSummary(provider: "second", id: "same-id", name: "Second Model", reasoning: true, input: ["text"], contextWindow: 272_000, maxTokens: 8_192, available: true)
         let catalog = [first, second]
-        let displayed = SessionModelSelectionPresentation.displayed(pending: second.ref, authoritative: first.ref)
+        let context = SessionContextPresentation(try SessionScenarioBuilder(seed: 8_110).openingTail(targetEncodedBytes: 4_096))
+        let displayed = SessionModelSelectionPresentation.displayed(
+            pending: SessionPendingModelSelection(second.ref, snapshot: context), authoritative: first.ref
+        )
         #expect(SessionModelSelectionPresentation.modelName(displayed, catalog: catalog) == "Second Model")
         #expect(SessionModelSelectionPresentation.modelName(first.ref, catalog: catalog) == "First Model")
         #expect(SessionModelSelectionPresentation.modelName(first.ref, catalog: []) == first.ref.displayName)

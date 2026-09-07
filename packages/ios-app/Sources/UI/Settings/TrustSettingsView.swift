@@ -48,6 +48,7 @@ struct ProjectTrustSummary: Equatable, Sendable {
 
 struct TrustSettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.tronPresentationActivity) private var presentationActivity
     @Environment(\.tronSettingsVisualTheme) private var settingsTheme
     let target: TrustTarget?
     @State private var inspection: JSONValue?
@@ -89,7 +90,13 @@ struct TrustSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Project Trust")
-        .task(id: TrustLoadID(target: target, invalidationGeneration: model.trustRevision)) { await load() }
+        .task(id: PresentationActivityTaskID(
+            source: TrustLoadID(target: target, invalidationGeneration: model.trustRevision),
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication else { return }
+            await load()
+        }
     }
 
     private func trustSummaryCard(_ summary: ProjectTrustSummary) -> some View {
@@ -207,15 +214,20 @@ struct TrustSettingsView: View {
     }
 
     private func load() async {
-        guard let target else { return }
+        guard presentationActivity.allowsPresentationPublication,
+              let target else { return }
         do {
             let value = try await model.inspectTrust(target: target)
-            guard target == self.target else { return }
+            guard !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  target == self.target else { return }
             inspection = value
         } catch is CancellationError {
             return
         } catch {
-            guard target == self.target else { return }
+            guard !Task.isCancelled,
+                  presentationActivity.allowsPresentationPublication,
+                  target == self.target else { return }
             model.presentError(error)
         }
     }

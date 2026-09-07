@@ -1719,10 +1719,45 @@ dismissal lease retains the exact retiring generation until SwiftUI's dismissal
 callback, so cancellation and rapid re-presentation cannot retire a replacement.
 All app-owned sheets and binding-owned system picker
 and alert boundaries use the managed presentation modifiers; direct sheet
-ownership outside that boundary is rejected by source-policy tests. Disposable
-view loads and polls include surface presentation activity in their task identities: cover
-cancels them, uncover restarts from current canonical inputs, and user-started
-mutations remain owned by their domain coordinators. The dashboard retains one
-atomic rows/activity snapshot while covered, and Manage Session observes a
-state-owned narrow projection that excludes streaming-only transcript churn.
+ownership outside that boundary is rejected by `scripts/test-source-policy.sh`.
+The lexical guard rejects raw native sheet calls outside that owner, including
+whitespace variants; it is not a proof of arbitrary system-picker/alert binding
+semantics. Those bindings retain behavioral lifecycle tests.
+
+Disposable view loads and polls include surface activity in their task identities:
+cover cancels them and uncover restarts from current inputs. Success, error, and
+loading-state publication must reject cancellation as well as stale source/request
+ownership: cancellation of a sent read can throw `GatewayPossiblySentError`, not
+`CancellationError`. Automatic and manual reloads share the surface's latest-read
+lane. Keep useful last-complete data; Automation detail publishes record and run
+reads together (not as a server transaction), and form preview/trust refreshes
+never replace an initialized draft. Upcoming timeline demand stops under a sheet;
+its catalog remains active to supply visible descendants' narrow revision facts.
+Accepted saves, trust changes, terminal connections, canonical event intake,
+receipt reconciliation, and foreground notification observation retain their domain
+owners and are not cancelled merely because a surface is covered.
+
+Manage Session's semantic projection contains no causal revision. Context-window
+commands read the current authoritative revision/runtime at admission, while
+pending settings retain exact request/runtime identity and wait for both RPC
+confirmation and authoritative agreement. Native controls retain runtime/model
+identity rather than being recreated on every progress revision. History, process,
+queue, and tool-detail selectors belong to the session presentation store and
+publish only changed bounded facts, never another canonical journal. A visible
+queue editor passes its displayed queue revision/items into mutation admission;
+a tool sheet resolves its selected calls from current bounded facts with the
+existing live/canonical/terminal rules. An offline gap retains its last complete
+read-only detail; a proven runtime replacement retires the old detail owner.
+Neither requires a covered chat installation.
+
+Cover suspends already-admitted transcript preparation as well as future intake,
+retaining the installed frame. Native geometry and command callbacks carry an
+activation that changes on cover and uncover, so delayed pre-cover geometry cannot
+be admitted after reactivation. Exact target-lease cleanup remains allowed while
+covered. Uncover retains its pre-cover baseline until the current source installs;
+a new pinned tail uses the existing exact materialization/settlement lease so lazy
+height estimates cannot leave the latest row invisible. Detached readers do not
+enter that path. This reconciles the native viewport without resetting chat
+identity. The dashboard likewise retains its atomic rows/activity snapshot
+while covered.
 The stack is never persisted and is not a second state authority.

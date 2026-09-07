@@ -73,7 +73,7 @@ scripts/tron-ios-simulator install
 ```
 
 The generated Xcode project is not architectural truth; edit `project.yml` and
-source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `packages/ios-app/scripts/test-source-policy.sh` from the repository root to guard this boundary and the bundled notification sound.
+source files, then regenerate. Because the application uses a checked-in plist, `Sources/Info.plist` is the sole runtime orientation authority: iPhone is portrait-only while iPad supports portrait, upside-down portrait, and both landscape orientations. Do not add competing `INFOPLIST_KEY_UISupportedInterfaceOrientations*` settings to `project.yml`; run `packages/ios-app/scripts/test-source-policy.sh` from the repository root to guard this boundary, the bundled notification sound, and the rule that app-owned sheets use the activity-managed presentation modifiers.
 
 ### Build matrix
 

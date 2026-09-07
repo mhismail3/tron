@@ -19,6 +19,7 @@ extension ChatHostedProbe: ChatTranscriptHostedRecording {}
 
 private struct ChatScrollGeometryObservation: Equatable {
     let geometry: ChatTranscriptGeometry
+    let viewportActivation: Int
     let presentationEpoch: Int
     let presentationPhase: ChatOpenPresentationPhase
 }
@@ -391,6 +392,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
     let frameScheduler: DisplayFrameScheduler
     let reduceMotion: Bool
     let presentationEpoch: Int
+    let viewportActivation: Int
     let presentationPhase: ChatOpenPresentationPhase
     let admitsGeometryCallbacks: Bool
     let admitsNativeCallbacks: Bool
@@ -483,7 +485,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         .scrollPosition($scrollPosition)
         .tronScrollEdgeChrome()
         .onChange(of: scrollPosition.isPositionedByUser) { _, positionedByUser in
-            guard admitsNativeCallbacks else { return }
+            guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation),
+                  admitsNativeCallbacks else { return }
             if positionedByUser {
                 performanceTracker.discardScroll()
                 transcriptPresentation.discardPendingEntrances()
@@ -494,11 +497,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         .onScrollGeometryChange(for: ChatScrollGeometryObservation.self) { value in
             ChatScrollGeometryObservation(
                 geometry: ChatTranscriptGeometry(value),
+                viewportActivation: viewportActivation,
                 presentationEpoch: presentationEpoch,
                 presentationPhase: presentationPhase
             )
         } action: { previous, observation in
-            guard observation.presentationEpoch == presentationEpoch else { return }
+            guard scrollCoordinator.admitsViewportCallback(capturedActivation: observation.viewportActivation),
+                  observation.presentationEpoch == presentationEpoch else { return }
             let current = observation.geometry
             let prior = previous.geometry
             hostedRecorder?.updateGeometry(current)
@@ -527,7 +532,8 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             }
         }
         .onScrollPhaseChange { oldPhase, newPhase, context in
-            guard admitsNativeCallbacks else { return }
+            guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation),
+                  admitsNativeCallbacks else { return }
             if newPhase == .interacting || newPhase == .tracking || newPhase == .decelerating {
                 performanceTracker.discardScroll()
                 transcriptPresentation.discardPendingEntrances()
@@ -539,21 +545,35 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 finalGeometry: ChatTranscriptGeometry(context.geometry)
             )
         }
-        .onChange(of: scrollCoordinator.commandRevision) { _, _ in onExecuteCommand() }
-        .onChange(of: scrollCoordinator.viewportMode) { _, mode in onApplyViewportMode(mode) }
+        .onChange(of: scrollCoordinator.commandRevision) { _, _ in
+            // Coordinator-owned output does not depend on native input delivery.
+            guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
+            onExecuteCommand()
+        }
+        .onChange(of: scrollCoordinator.viewportMode) { _, mode in
+            guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
+            onApplyViewportMode(mode)
+        }
         .onChange(of: scrollCoordinator.targetReleaseGeneration) { _, _ in
+            // Cleanup consumes the current exact target lease, not captured
+            // geometry. It remains admitted while the viewport is covered.
             guard scrollCoordinator.consumeTargetRelease() else { return }
             onReleaseCommandTarget()
-            onAutomaticProjectionIntakeAvailable()
+            if scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation) {
+                onAutomaticProjectionIntakeAvailable()
+            }
         }
         .onChange(of: scrollCoordinator.tailSettlementGeneration) { _, _ in
+            guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
             onApplyViewportMode(.pinned)
             onAutomaticProjectionIntakeAvailable()
         }
         .onChange(of: scrollCoordinator.pinnedPositionRevision) { _, _ in
+            guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
             onApplyViewportMode(.pinned)
         }
         .onChange(of: scrollCoordinator.layoutEpoch) { _, _ in
+            guard scrollCoordinator.admitsViewportCallback(capturedActivation: viewportActivation) else { return }
             scrollCoordinator.installedLayoutEpochChanged()
         }
         .task(id: lazyTailMaterializationRequest) {
@@ -926,10 +946,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             .onGeometryChange(for: ChatSemanticFrameObservation.self) { value in
                 ChatSemanticFrameObservation(
                     layoutEpoch: rowLayoutEpoch,
+                    viewportActivation: viewportActivation,
                     frame: value.frame(in: .scrollView(axis: .vertical)),
                     entranceAdmissionTag: entranceAdmissionTag
                 )
             } action: { sample in
+                guard scrollCoordinator.admitsViewportCallback(capturedActivation: sample.viewportActivation),
+                      admitsNativeCallbacks else { return }
                 scrollCoordinator.semanticFrameChanged(
                     renderedID: semanticID,
                     layoutEpoch: sample.layoutEpoch,
@@ -937,7 +960,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 )
                 let currentInstalled = transcriptPresentation.installed
                 let currentState = transcriptPresentation.entranceState(for: semanticID)
-                if ChatEntranceGeometryAdmissionPolicy.admits(
+                if admitsGeometryCallbacks, ChatEntranceGeometryAdmissionPolicy.admits(
                     observation: sample,
                     installedTag: currentInstalled?.tag,
                     installedContainsRenderedID:
@@ -977,10 +1000,13 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             .onGeometryChange(for: ChatSemanticFrameObservation.self) { value in
                 ChatSemanticFrameObservation(
                     layoutEpoch: rowLayoutEpoch,
+                    viewportActivation: viewportActivation,
                     frame: value.frame(in: .scrollView(axis: .vertical)),
                     entranceAdmissionTag: nil
                 )
             } action: { sample in
+                guard scrollCoordinator.admitsViewportCallback(capturedActivation: sample.viewportActivation),
+                      admitsNativeCallbacks else { return }
                 scrollCoordinator.semanticFrameChanged(
                     renderedID: "transcript-bottom",
                     layoutEpoch: sample.layoutEpoch,

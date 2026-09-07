@@ -2478,6 +2478,7 @@ struct ChatTranscriptPresentationTests {
         )
         let observation = ChatSemanticFrameObservation(
             layoutEpoch: 7,
+            viewportActivation: 0,
             frame: CGRect(x: 0, y: 10, width: 100, height: 30),
             entranceAdmissionTag: displayedTag
         )

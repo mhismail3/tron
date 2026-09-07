@@ -12,6 +12,7 @@ struct PairedDeviceDetailView: View {
     @State private var status: IosDeviceInstallStatus?
     @State private var loading = false
     @State private var loadGeneration = 0
+    @State private var statusReadGeneration = 0
     @State private var configuringSource = false
     @State private var confirmingInstall = false
     @State private var confirmingRevoke = false
@@ -66,19 +67,35 @@ struct PairedDeviceDetailView: View {
                 .accessibilityLabel("Done")
             }
         }
-        .task(id: "\(authorized.id):\(usesServer)") {
+        .task(id: PresentationActivityTaskID(
+            source: "\(authorized.id):\(serverConnected):\(model.foregroundReconciliationGeneration):\(scenePhase == .active)",
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
+            guard presentationActivity.allowsPresentationPublication,
+                  scenePhase == .active else { return }
             await reload()
         }
-        .task(id: installPollIdentity) {
+        .task(id: PresentationActivityTaskID(
+            source: "\(installPollIdentity):\(scenePhase == .active)",
+            presentationActive: presentationActivity.allowsPresentationPublication
+        )) {
             guard installActive,
                   presentationActivity.allowsPresentationPublication,
                   scenePhase == .active else { return }
             while !Task.isCancelled, status?.state.isActive == true {
                 do { try await Task.sleep(for: .seconds(2)) }
                 catch { return }
+                guard !Task.isCancelled,
+                      presentationActivity.allowsPresentationPublication,
+                      scenePhase == .active,
+                      status?.state.isActive == true else { return }
                 await loadStatus()
             }
         }
+        .onChange(of: presentationActivity.allowsPresentationPublication) { _, active in
+            if !active { loadGeneration &+= 1; statusReadGeneration &+= 1 }
+        }
+        .onDisappear { loadGeneration &+= 1; statusReadGeneration &+= 1 }
         .tronManagedSheet(
             isPresented: $configuringSource,
             identity: "settings.device.\(authorized.id).source"
@@ -270,58 +287,59 @@ struct PairedDeviceDetailView: View {
         "\(authorized.id):\(status?.commandId ?? "none"):\(status?.state.rawValue ?? "none"):\(scenePhase == .active)"
     }
 
+    private var admitsReadResult: Bool {
+        !Task.isCancelled && presentationActivity.allowsPresentationPublication && scenePhase == .active
+    }
+
     private func reload() async {
+        guard admitsReadResult else { return }
         loadGeneration &+= 1
         let generation = loadGeneration
         guard serverConnected else {
-            config = nil
-            status = nil
             loading = false
             return
         }
         loading = true
-        var installerUnsupported = false
+        defer {
+            if generation == loadGeneration, admitsReadResult { loading = false }
+        }
         do {
-            let loadedConfig = try await model.loadIosDeviceInstallConfig(for: authorized)
-            guard generation == loadGeneration else { return }
-            config = loadedConfig
+            let loaded = try await model.loadIosDeviceInstallConfig(for: authorized)
+            guard generation == loadGeneration, admitsReadResult else { return }
+            config = loaded
         } catch is CancellationError {
             return
         } catch let failure as GatewayFailure where failure.code == "unsupported" {
-            guard generation == loadGeneration else { return }
+            guard generation == loadGeneration, admitsReadResult else { return }
             config = nil
-            installerUnsupported = true
+            status = nil
+            return
         } catch {
-            guard generation == loadGeneration else { return }
+            guard generation == loadGeneration, admitsReadResult else { return }
             model.presentError(error)
         }
-        guard generation == loadGeneration else { return }
-        if installerUnsupported {
-            status = nil
-            loading = false
-            return
-        }
-        do {
-            let loadedStatus = try await model.loadIosDeviceInstallStatus(for: authorized)
-            guard generation == loadGeneration else { return }
-            status = loadedStatus
-        } catch is CancellationError {
-            return
-        } catch let failure as GatewayFailure where failure.code == "unsupported" {
-            guard generation == loadGeneration else { return }
-            status = nil
-        } catch {
-            guard generation == loadGeneration else { return }
-            model.presentError(error)
-        }
-        guard generation == loadGeneration else { return }
-        loading = false
+        guard generation == loadGeneration, admitsReadResult else { return }
+        // Initial, polling and post-command status reads share one latest lane.
+        await loadStatus()
     }
 
     private func loadStatus() async {
-        do { status = try await model.loadIosDeviceInstallStatus(for: authorized) }
-        catch is CancellationError { return }
-        catch { model.presentError(error) }
+        guard admitsReadResult else { return }
+        statusReadGeneration &+= 1
+        let generation = statusReadGeneration
+        do {
+            let loaded = try await model.loadIosDeviceInstallStatus(for: authorized)
+            guard generation == statusReadGeneration, admitsReadResult else { return }
+            status = loaded
+        } catch is CancellationError {
+            return
+        } catch let failure as GatewayFailure where failure.code == "unsupported" {
+            guard generation == statusReadGeneration, admitsReadResult else { return }
+            status = nil
+        } catch {
+            guard generation == statusReadGeneration, admitsReadResult else { return }
+            model.presentError(error)
+        }
     }
 
     private func useServer() async {
