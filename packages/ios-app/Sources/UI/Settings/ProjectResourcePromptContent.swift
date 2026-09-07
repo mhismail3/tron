@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Project Resources is the complete template reader, not the composer's
-/// short preview. Only the Gateway's explicit transport bound may truncate it.
+/// Project Resources keeps the complete admitted template body, like prompt
+/// details in Commands. Only the Gateway's explicit transport bound truncates it.
 struct ProjectResourcePromptContent: View {
     let detail: CommandResourceDetail
 

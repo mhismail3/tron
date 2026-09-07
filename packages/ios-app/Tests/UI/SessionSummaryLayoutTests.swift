@@ -29,20 +29,18 @@ final class SessionSummaryLayoutTests: XCTestCase {
         }
     }
 
-    func testCommandResourcePreviewDoesNotBecomeATallSourceContainer() async throws {
-        for source: CommandInfo.Source in [.extension, .prompt] {
-            let text = String(repeating: "Read the selected resource before continuing. ", count: 1_500)
-            let preview = ComposerResourceContentPresentation.preview(text, source: source, sourceTruncated: true)
-            let size = try await render(
-                ComposerResourceContentBody(preview: preview, source: source)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .tronScrollSurface(accent: .tronPurple, cornerRadius: 16, tintOpacity: 0.06),
-                width: 320, name: "resource-preview-\(source)"
-            )
-            XCTAssertEqual(size.width, 320, accuracy: 1)
-            XCTAssertLessThan(size.height, 350, "Source previews should not render the transport's 96-KiB body")
-        }
+    func testExtensionResourcePreviewDoesNotBecomeATallSourceContainer() async throws {
+        let text = String(repeating: "Read the selected resource before continuing. ", count: 1_500)
+        let preview = ComposerResourceContentPresentation.preview(text, source: .extension, sourceTruncated: true)
+        let size = try await render(
+            ComposerResourceContentBody(preview: preview, source: .extension)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .tronScrollSurface(accent: .tronIndigo, cornerRadius: 16, tintOpacity: 0.06),
+            width: 320, name: "resource-preview-extension"
+        )
+        XCTAssertEqual(size.width, 320, accuracy: 1)
+        XCTAssertLessThan(size.height, 350, "Extension previews should not render the transport's 96-KiB body")
     }
 
     func testLeftAlignedSettingValuesUseTheSameReadingFontAsDescriptions() async throws {

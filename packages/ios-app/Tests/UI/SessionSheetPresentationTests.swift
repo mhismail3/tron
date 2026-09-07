@@ -124,7 +124,29 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
-    func testProjectPromptBodyIncludesContentBeyondComposerPreviewLimit() async throws {
+    func testCommandPromptContentContainerShowsCompleteScrollableBody() async throws {
+        let content = (0..<40).map { "## Instruction \($0)\n\nComplete this step before continuing.\n" }.joined(separator: "\n") + "\nFINAL PROMPT INSTRUCTION"
+        let preview = ComposerResourceContentPresentation.preview(content, source: .prompt, sourceTruncated: false)
+        for scheme: ColorScheme in [.light, .dark] {
+            try await withSheet(TronDocumentSheet(title: "Prompt") {
+                ScrollView {
+                    ComposerResourceContentBody(preview: preview, source: .prompt)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .tronScrollSurface(accent: .tronPurple, cornerRadius: 16, tintOpacity: 0.06)
+                        .padding(18)
+                }.tronScrollEdgeChrome()
+            }.preferredColorScheme(scheme)) { controller in
+                let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                XCTAssertGreaterThan(scroll.contentSize.height, 2_000, "Prompt containers must include instructions beyond the extension excerpt limit")
+                scroll.setContentOffset(CGPoint(x: 0, y: scroll.contentSize.height - scroll.bounds.height), animated: false)
+                controller.view.layoutIfNeeded()
+                self.capture(controller, name: "command-prompt-final-instructions-\(scheme)")
+            }
+        }
+    }
+
+    func testProjectPromptBodyIncludesContentBeyondShortPreviewLimit() async throws {
         let content = (0..<40).map { "## Instruction \($0)\n\nComplete this step before continuing.\n" }.joined(separator: "\n") + "\nFINAL PROMPT INSTRUCTION"
         let detail = CommandResourceDetail(
             name: "review", description: nil, argumentHint: nil, source: .prompt,
@@ -137,7 +159,7 @@ final class SessionSheetPresentationTests: XCTestCase {
             }.tronScrollEdgeChrome()
         }) { controller in
             let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
-            XCTAssertGreaterThan(scroll.contentSize.height, 2_000, "Full prompt instructions must not use the 480-character composer preview")
+            XCTAssertGreaterThan(scroll.contentSize.height, 2_000, "No local excerpt limit should discard prompt instructions")
             scroll.setContentOffset(CGPoint(x: 0, y: scroll.contentSize.height - scroll.bounds.height), animated: false)
             controller.view.layoutIfNeeded()
             self.capture(controller, name: "project-prompt-final-instructions")

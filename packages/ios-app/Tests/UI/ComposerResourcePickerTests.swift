@@ -181,24 +181,36 @@ struct ComposerResourcePickerTests {
         #expect(ComposerResourceContentPresentation.body(skill, source: .extension) == skill)
     }
 
-    @Test("command and prompt previews are bounded independently of the source read")
+    @Test("extension previews are bounded independently of the source read")
     func boundedDetailPreviews() {
-        for source: CommandInfo.Source in [.extension, .prompt] {
-            let full = String(repeating: "abcdefghij", count: 400)
-            let preview = ComposerResourceContentPresentation.preview(full, source: source, sourceTruncated: false)
-            #expect(preview.text == String(full.prefix(480)))
-            #expect(preview.isTruncated)
-        }
-        let lines = (1...20).map { "line \($0)" }.joined(separator: "\r\n")
-        let preview = ComposerResourceContentPresentation.preview(lines, source: .extension, sourceTruncated: false)
-        #expect(preview.text == (1...10).map { "line \($0)" }.joined(separator: "\r\n"))
+        let full = String(repeating: "abcdefghij", count: 400)
+        let preview = ComposerResourceContentPresentation.preview(full, source: .extension, sourceTruncated: false)
+        #expect(preview.text == String(full.prefix(480)))
         #expect(preview.isTruncated)
+        let lines = (1...20).map { "line \($0)" }.joined(separator: "\r\n")
+        let linePreview = ComposerResourceContentPresentation.preview(lines, source: .extension, sourceTruncated: false)
+        #expect(linePreview.text == (1...10).map { "line \($0)" }.joined(separator: "\r\n"))
+        #expect(linePreview.isTruncated)
         let unicode = String(repeating: "👨‍👩‍👧‍👦", count: 481)
         #expect(ComposerResourceContentPresentation.preview(unicode, source: .extension, sourceTruncated: false)
             .text == String(unicode.prefix(480)))
     }
 
-    @Test("truncation notes reflect local or server omissions without shortening skills")
+    @Test("prompt and skill details keep their full admitted body", arguments: [CommandInfo.Source.prompt, .skill])
+    func fullMarkdownResourceDetails(source: CommandInfo.Source) {
+        let paragraph = String(repeating: "Read the complete instructions. ", count: 500)
+        // Keep this below 480 characters to catch the line cap independently.
+        let steps = (1...20).map { "- Step \($0)" }.joined(separator: "\n")
+        let unicode = String(repeating: "👨‍👩‍👧‍👦", count: 481)
+        for content in [paragraph, steps, unicode] {
+            #expect(ComposerResourceContentPresentation.preview(content, source: source, sourceTruncated: false)
+                == .init(text: content, isTruncated: false))
+            #expect(ComposerResourceContentPresentation.preview(content, source: source, sourceTruncated: true)
+                == .init(text: content, isTruncated: true))
+        }
+    }
+
+    @Test("truncation notes reflect actual local or Gateway omissions")
     func detailPreviewOmissions() {
         let exact = String(repeating: "x", count: 480)
         let uncut = ComposerResourceContentPresentation.preview(exact, source: .extension, sourceTruncated: false)
@@ -208,10 +220,6 @@ struct ComposerResourcePickerTests {
         #expect(ComposerResourceContentPresentation.preview(tenLines, source: .extension, sourceTruncated: false)
             == .init(text: tenLines, isTruncated: false))
         #expect(ComposerResourceContentPresentation.preview(exact, source: .extension, sourceTruncated: true).isTruncated)
-        let skill = String(repeating: "Skill guidance. ", count: 500)
-        #expect(ComposerResourceContentPresentation.preview(skill, source: .skill, sourceTruncated: false)
-            == .init(text: skill, isTruncated: false))
-        #expect(ComposerResourceContentPresentation.preview(skill, source: .skill, sourceTruncated: true).isTruncated)
         let prompt = "---\ndescription: A summary\n---\nRead carefully.\nKeep $@ unchanged."
         #expect(ComposerResourceContentPresentation.preview(prompt, source: .prompt, sourceTruncated: false)
             == .init(text: "Read carefully. Keep $@ unchanged.", isTruncated: false))

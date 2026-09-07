@@ -83,11 +83,11 @@ enum ComposerResourceContentPresentation {
         let isTruncated: Bool
     }
 
-    /// A command/prompt preview is a short reading surface, not the transport's
-    /// much larger source allowance. Skill documents retain their full body.
+    /// Prompt and skill instructions retain their full admitted body. Only
+    /// extension source uses a short excerpt instead of the transport allowance.
     static func preview(_ content: String, source: CommandInfo.Source, sourceTruncated: Bool) -> Preview {
         let text = body(content, source: source)
-        guard source != .skill else { return Preview(text: text, isTruncated: sourceTruncated) }
+        guard source == .extension else { return Preview(text: text, isTruncated: sourceTruncated) }
         var end = text.index(text.startIndex, offsetBy: 480, limitedBy: text.endIndex) ?? text.endIndex
         var lines = 1
         for index in text[..<end].indices where text[index].isNewline {
