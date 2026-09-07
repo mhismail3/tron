@@ -4,6 +4,14 @@ import Testing
 
 @Suite("Notification inbox")
 struct NotificationInboxCoordinatorTests {
+    @Test("Automatic terminal alerts do not imply successful completion")
+    func terminalCategoryPresentation() throws {
+        let kind = try JSONDecoder().decode(NotificationInboxKind.self, from: Data(#""agent_finished""#.utf8))
+        #expect(kind.label == "Agent finished")
+        #expect(kind.icon == "stop.circle.fill")
+        #expect(NotificationInboxKind.ask.label == "Input needed")
+    }
+
     @Test("Gateway pages strictly admit bounded notification rows")
     func pageAdmission() throws {
         let data = Data(#"""

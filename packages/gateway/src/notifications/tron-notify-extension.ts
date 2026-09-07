@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import type { ExtensionContext, ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { NotificationAdmissionStatus } from "./notification-service.js";
 
 export interface TronNotificationEnqueue {
@@ -13,59 +13,50 @@ export interface TronNotificationEnqueue {
   }): Promise<NotificationAdmissionStatus>;
 }
 
-function latestSuccessfulAssistantEntry(ctx: ExtensionContext): { id: string } | undefined {
-  const entry = ctx.sessionManager.getBranch().findLast((candidate) => candidate.type === "message"
-    && candidate.message.role === "assistant");
-  if (entry?.type !== "message" || entry.message.role !== "assistant") return undefined;
-  return entry.message.stopReason === "stop" || entry.message.stopReason === "length" ? entry : undefined;
+export type AgentTerminalOutcome = "completed" | "limited" | "failed" | "stopped" | "unknown" | "interrupted";
+
+const terminalMessages: Record<AgentTerminalOutcome, string> = {
+  completed: "The agent finished responding.",
+  limited: "The agent reached its response limit.",
+  failed: "The agent stopped because of an error.",
+  stopped: "The agent was stopped.",
+  unknown: "The agent stopped without a final response.",
+  interrupted: "The agent was interrupted before its outcome could be confirmed.",
+};
+
+/** Static product copy only: provider errors and partial responses stay in chat. */
+export async function notifyTronAgentTerminal(input: {
+  sessionId: string;
+  sourceId: string;
+  outcome: AgentTerminalOutcome;
+  sessionTitle: string;
+  machineId?: string;
+  observed: boolean;
+  suppressAutomatic: (input: { sessionId: string; sourceId: string; kind: "agent_finished" }) => Promise<"suppressed">;
+  enqueue: TronNotificationEnqueue;
+}): Promise<void> {
+  if (!input.machineId) return;
+  const identity = { sessionId: input.sessionId, sourceId: input.sourceId, kind: "agent_finished" as const };
+  if (input.observed) {
+    await input.suppressAutomatic(identity);
+    return;
+  }
+  await input.enqueue({
+    ...identity,
+    title: input.sessionTitle,
+    message: terminalMessages[input.outcome],
+    route: { sessionId: input.sessionId, machineId: input.machineId },
+  });
 }
 
-/** First-party inline Pi extension. Its closure is the entire push capability. */
+/** First-party inline Pi extension. Its closures are the entire push capability. */
 export function createTronNotifyExtension(input: {
   sessionId: () => string;
   sessionTitle: () => string;
   machineId?: string;
-  isAutomaticCompletionSuppressed: (completionId: string) => boolean;
-  suppressAutomatic: (input: { sessionId: string; sourceId: string; kind: "agent_finished" }) => Promise<"suppressed">;
   enqueue: TronNotificationEnqueue;
 }): ExtensionFactory {
   return (pi) => {
-    let finalRunCompletedSuccessfully = false;
-
-    pi.on("agent_start", () => {
-      finalRunCompletedSuccessfully = false;
-    });
-
-    pi.on("agent_end", (event) => {
-      const assistant = event.messages.findLast((message) => message.role === "assistant");
-      finalRunCompletedSuccessfully = assistant?.role === "assistant"
-        && (assistant.stopReason === "stop" || assistant.stopReason === "length");
-    });
-
-    pi.on("agent_settled", async (_event, ctx) => {
-      // A later extension may already have started a continuation. Its
-      // agent_start/agent_end events own the next eventual idle settlement.
-      if (!ctx.isIdle()) return;
-      const shouldNotify = finalRunCompletedSuccessfully;
-      finalRunCompletedSuccessfully = false;
-      if (!shouldNotify || !input.machineId) return;
-      const completion = latestSuccessfulAssistantEntry(ctx);
-      if (!completion) return;
-      const sessionId = input.sessionId();
-      if (input.isAutomaticCompletionSuppressed(completion.id)) {
-        await input.suppressAutomatic({ sessionId, sourceId: completion.id, kind: "agent_finished" });
-        return;
-      }
-      await input.enqueue({
-        sessionId,
-        sourceId: completion.id,
-        kind: "agent_finished",
-        title: input.sessionTitle(),
-        message: "The agent finished responding.",
-        route: { sessionId, machineId: input.machineId },
-      });
-    });
-
     pi.registerTool({
       name: "notify",
       label: "Notify",

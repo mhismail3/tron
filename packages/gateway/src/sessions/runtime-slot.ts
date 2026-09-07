@@ -100,7 +100,7 @@ import {
 import type { ExtensionActivityHistoryPage } from "./extension-activity-history.js";
 import type { NotificationService } from "../notifications/notification-service.js";
 import type { GatewayWorkHandle, GatewayWorkKind, GatewayWorkRegistry } from "./gateway-work-registry.js";
-import { createTronNotifyExtension } from "../notifications/tron-notify-extension.js";
+import { createTronNotifyExtension, notifyTronAgentTerminal, type AgentTerminalOutcome } from "../notifications/tron-notify-extension.js";
 import { createTronDisplayExtension } from "../display/tron-display-extension.js";
 import { createTronScheduleExtension, type ScheduleToolOperations } from "../automations/tron-schedule-extension.js";
 import type { DisplayArtifactStore } from "../display/display-artifact-store.js";
@@ -360,6 +360,9 @@ export class RuntimeSlot {
   private readonly canonicalizedStreamingMessages = new WeakSet<object>();
   /** Exact successful canonical assistant completion awaiting durable attention admission. */
   private pendingAssistantCompletion: CanonicalAssistantCompletion | undefined;
+  /** Only an admitted agent_start may own a terminal candidate. Later SDK
+   * progress can reconstruct a projection even for a drain-rejected run. */
+  private notificationRun: { assistant?: AgentMessage } | undefined;
   /** One foreground-observation decision is shared by durable attention and
    * automatic completion notification policy for the same canonical entry. */
   private readonly completionDispositions = new Map<string, boolean>();
@@ -1184,8 +1187,6 @@ export class RuntimeSlot {
                 sessionId: () => this.id,
                 sessionTitle: () => this.notificationTitle(),
                 ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
-                isAutomaticCompletionSuppressed: (completionId) => this.completionObserved(completionId),
-                suppressAutomatic: (input) => notifications.suppressAutomatic(input),
                 enqueue: (input) => notifications.enqueue(input),
               }),
             }] : []),
@@ -2081,10 +2082,52 @@ export class RuntimeSlot {
     return observed;
   }
 
+  private async notifyAgentTerminal(sourceId: string, outcome: AgentTerminalOutcome): Promise<void> {
+    const notifications = this.dependencies.notifications;
+    if (!notifications) return;
+    try {
+      await notifyTronAgentTerminal({
+        sessionId: this.id,
+        sourceId,
+        outcome,
+        sessionTitle: this.notificationTitle(),
+        ...(this.dependencies.machineId ? { machineId: this.dependencies.machineId } : {}),
+        observed: this.completionObserved(sourceId),
+        suppressAutomatic: (input) => notifications.suppressAutomatic(input),
+        enqueue: (input) => notifications.enqueue(input),
+      });
+    } catch {
+      // Push admission is best-effort and must never fail canonical settlement.
+      this.emit("session.diagnostic", { code: "terminal-notification-failed" });
+    }
+  }
+
+  private takeAgentTerminal(operationId: string | undefined): { sourceId: string; outcome: AgentTerminalOutcome } | undefined {
+    const run = this.notificationRun;
+    this.notificationRun = undefined;
+    if (!run || !operationId) return;
+    const { assistant } = run;
+    // Match the exact final run object, not the latest successful history row.
+    // Retry errors remain canonical even when Pi removes them from model context.
+    const entry = assistant && this.sessionManager.getBranch().findLast((candidate) =>
+      candidate.type === "message" && candidate.message === assistant);
+    const invocation = this.invocationForOperation(operationId);
+    const sourceId = entry?.id ?? (invocation ? `terminal:${invocation.invocationId}` : operationId);
+    const reason = assistant?.role === "assistant" ? assistant.stopReason : undefined;
+    const outcome: AgentTerminalOutcome = this.abortedOperations.has(operationId) || reason === "aborted" ? "stopped"
+      : reason === "error" ? "failed"
+      : reason === "length" ? "limited"
+      : reason === "stop" ? "completed"
+      : "unknown";
+    // Observation belongs to the terminal boundary, before receipt I/O can
+    // suspend and a phone can open/close the chat or a successor can start.
+    this.completionObserved(sourceId);
+    return { sourceId, outcome };
+  }
+
   private notificationTitle(): string {
-    // agent_settled extension handlers run before RuntimeSlot's deferred summary
-    // projection necessarily catches up. Read the canonical active branch here
-    // so a new session's first completion cannot be titled "New session".
+    // Read canonical input rather than a deferred summary projection so a new
+    // session's first terminal notification cannot be titled "New session".
     const rawName = this.sessionManager.getSessionName()?.trim();
     const firstUser = this.sessionManager.getBranch().find((entry) => entry.type === "message"
       && entry.message.role === "user");
@@ -2510,6 +2553,8 @@ export class RuntimeSlot {
       : new Date().toISOString());
     switch (event.type) {
       case "agent_start": {
+        const precedingAssistant = this.notificationRun?.assistant;
+        this.notificationRun = undefined;
         const continuationFromSettlement = this.pendingAssistantCompletion !== undefined
           || this.pendingAssistantBindings.size > 0;
         const dequeuedOwner = this.dequeuedFollowUpOwners[0];
@@ -2571,14 +2616,30 @@ export class RuntimeSlot {
           this.operation = undefined;
           this.activeOperationId = undefined;
           if (this.pendingExtensionCommand?.id === rejectedOperationId) this.pendingExtensionCommand = undefined;
-          this.settleOperationWork(rejectedOperationId);
           this.emit("session.operationFailed", {
             message: "Extension continuation was rejected after the administrative drain cutoff",
           });
-          void this.runtime.session.abort();
+          const rejectedInvocation = this.invocationForOperation(rejectedOperationId);
+          const precedingEntry = continuationFromSettlement && precedingAssistant
+            ? this.sessionManager.getBranch().findLast((entry) => entry.type === "message" && entry.message === precedingAssistant)
+            : undefined;
+          const rejectedSource = precedingEntry?.id
+            ?? (rejectedInvocation ? `terminal:${rejectedInvocation.invocationId}` : rejectedOperationId);
+          if (rejectedSource) this.completionObserved(rejectedSource);
+          void this.runtime.session.abort().then(async () => {
+            // The preceding completion already owns its terminal receipt. A
+            // rejected extension continuation must not overwrite that receipt
+            // with a contradictory interruption under the same invocation ID.
+            if (continuationFromSettlement) await this.reconcileAttention();
+            else await this.terminalizeInvocation(rejectedOperationId, "interrupted", "drain-cutoff");
+            if (rejectedSource) await this.notifyAgentTerminal(rejectedSource, "stopped");
+          }).catch(() => {
+            this.emit("session.diagnostic", { code: "drain-cutoff-settlement-failed" });
+          }).finally(() => this.settleOperationWork(rejectedOperationId));
           this.publishSnapshot();
           break;
         }
+        this.notificationRun = {};
         if (dequeuedOwner && preflightOwner === dequeuedOwner) this.dequeuedFollowUpOwners.shift();
         if (queuedOwner && preflightOwner === queuedOwner && this.activeOperationId !== queuedOwner) {
           this.activeOperationId = undefined;
@@ -2612,6 +2673,12 @@ export class RuntimeSlot {
         this.publishSnapshot();
         break;
       }
+      case "agent_end":
+        if (this.notificationRun) {
+          const assistant = event.messages.findLast((message) => message.role === "assistant");
+          this.notificationRun = assistant ? { assistant } : {};
+        }
+        break;
       case "agent_settled":
         if (this.shuttingDown) break;
         // An extension completion can trigger the next turn while the previous
@@ -2638,6 +2705,14 @@ export class RuntimeSlot {
         // Restore that still-live owner instead of publishing false idle.
         this.phase = this.compactionOperation ? "compacting" : "idle";
         const settledOperationId = this.activeOperationId;
+        const terminalNotification = this.takeAgentTerminal(settledOperationId);
+        const terminalLifecycle = terminalNotification?.outcome === "stopped" ? "interrupted" as const
+          : terminalNotification?.outcome === "failed" ? "failed" as const
+          : terminalNotification?.outcome === "unknown" ? "outcomeUnknown" as const
+          : "completed" as const;
+        const terminalErrorCode = terminalLifecycle === "interrupted"
+          ? (settledOperationId && this.abortedOperations.has(settledOperationId) ? "user-abort" : "agent-aborted")
+          : terminalLifecycle === "failed" ? "agent-error" : undefined;
         this.activeOperationId = undefined;
         this.ownToolSegment(undefined);
         this.operation = this.compactionOperation;
@@ -2664,20 +2739,34 @@ export class RuntimeSlot {
             // barrier that prevents a snapshot from outrunning attention truth.
             this.phase = "running";
             this.publishSnapshot();
-            void this.beginAttentionSettlement(this.pendingAssistantCompletion).catch(() => {});
+            const completion = this.pendingAssistantCompletion;
+            void (async () => {
+              // An earlier success can still await attention while a queued
+              // follow-up fails. Its receipt cannot stand in for this exact
+              // terminal owner (or overwrite its failure when owners coincide).
+              if (terminalLifecycle !== "completed") {
+                await this.terminalizeInvocation(settledOperationId, terminalLifecycle, terminalErrorCode);
+              }
+              await this.beginAttentionSettlement(completion);
+              if (settledOperationId && settledOperationId !== completion.operationId) {
+                await this.clearMarkerOwnership(settledOperationId);
+                this.abortedOperations.delete(settledOperationId);
+                this.settleOperationWork(settledOperationId);
+              }
+              if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
+            })().catch(() => {});
             break;
           }
           if (settledOperationId) {
             this.operationWork.get(settledOperationId)?.transition("terminal-receipt-persistence");
-            const terminalLifecycle = this.abortedOperations.has(settledOperationId)
-              ? "interrupted" as const
-              : "completed" as const;
             const markerClear = this.terminalizeInvocation(
               settledOperationId,
               terminalLifecycle,
-              terminalLifecycle === "interrupted" ? "user-abort" : undefined,
-            )
-              .then(() => this.clearMarkerOwnership(settledOperationId));
+              terminalErrorCode,
+            ).then(async () => {
+              if (terminalNotification) await this.notifyAgentTerminal(terminalNotification.sourceId, terminalNotification.outcome);
+              await this.clearMarkerOwnership(settledOperationId);
+            });
             // The foreground token remains the exact owner; do not create a second
             // receipt token or report drain completion while marker I/O is active.
             void markerClear.then(
@@ -5713,6 +5802,7 @@ export class RuntimeSlot {
         const owned = this.activeOperationId === operationId || this.operation?.id === operationId;
         if (!owned || this.queuedManualCompactionInFlight || noAgentSettlementStarted) return;
         noAgentSettlementStarted = true;
+        if (terminalLifecycle === "failed") this.completionObserved(`terminal:${invocationId}`);
         if (this.pendingPrompt?.id === operationId) {
           this.pendingPrompt = undefined;
           this.pendingPromptMessage = undefined;
@@ -5739,6 +5829,7 @@ export class RuntimeSlot {
             operationId,
             message: "The agent runtime failed before creating canonical input",
           });
+          if (!isExactExtensionCommand && !this.shuttingDown) await this.notifyAgentTerminal(`terminal:${invocationId}`, "failed");
         }
         if (this.activeOperationId !== undefined || this.hasActiveAgentRun) return;
         this.phase = "idle";
@@ -5796,12 +5887,14 @@ export class RuntimeSlot {
         if (disposition === "failed") {
           this.lifecycle.resolvePreflight(operationId, true);
           admissionAccepted = true;
+          this.completionObserved(`terminal:${invocationId}`);
           await this.terminalizeInvocation(
             operationId,
             "failed",
             "runtime-prompt-failed",
             operationWork,
           );
+          if (!this.shuttingDown) await this.notifyAgentTerminal(`terminal:${invocationId}`, "failed");
           this.lifecycle.cancelPreflight(operationId);
           this.settleOperationWork(operationId);
           finalizeAdmission();
@@ -5822,6 +5915,7 @@ export class RuntimeSlot {
         const stopped = this.abortedOperations.has(operationId);
         const terminalLifecycle = stopped ? "interrupted" : "failed";
         const errorCode = stopped ? "user-abort" : "preflight-rejected";
+        this.completionObserved(`terminal:${invocationId}`);
         await this.persistInvocationReceipt(makeInvocationReceipt({
           version: 1,
           receiptId: `terminal:${invocationId}`,
@@ -5859,6 +5953,7 @@ export class RuntimeSlot {
         this.revision += 1;
         this.publishSnapshot();
         finalizeAdmission();
+        if (!isExactExtensionCommand && !this.shuttingDown) await this.notifyAgentTerminal(`terminal:${invocationId}`, stopped ? "stopped" : "failed");
         if (preflightFailure) throw preflightFailure;
         throw new GatewayError(stopped ? "cancelled" : "invalid_request", stopped
           ? "Prompt stopped before agent admission"
@@ -6976,6 +7071,10 @@ export class RuntimeSlot {
   private async performShutdown(): Promise<void> {
     const hadAdmittedWork = this.isBusy;
     const sessionID = this.id;
+    const interruptedOperationId = this.operation?.kind === "command" ? undefined : this.activeOperationId ?? this.pendingPrompt?.id;
+    const interruptedInvocation = this.invocationForOperation(interruptedOperationId);
+    const interruptedSource = interruptedInvocation ? `terminal:${interruptedInvocation.invocationId}` : interruptedOperationId;
+    if (interruptedSource) this.completionObserved(interruptedSource);
     this.shuttingDown = true;
     const cancellation = new GatewayError("cancelled", "Gateway shutdown cancelled queued compaction");
     const pending = this.pendingManualCompaction;
@@ -7007,6 +7106,10 @@ export class RuntimeSlot {
         latePending.reject(cancellation);
       }
       this.queuedManualCompactionInFlight = false;
+      if (interruptedSource) {
+        await this.terminalizeInvocation(interruptedOperationId, "outcomeUnknown", "runtime-disposed");
+        await this.notifyAgentTerminal(interruptedSource, "interrupted");
+      }
       await this.disposeRuntime();
       // Forced interruption intentionally leaves evidence for restart. Only a
       // verified clean, idle Pi shutdown removes its marker.
@@ -7042,6 +7145,7 @@ export class RuntimeSlot {
     this.progressFlushTimer = undefined;
     this.pendingProgressMessage = undefined;
     this.latestStreamingMessage = undefined;
+    this.notificationRun = undefined;
     this.streamIdentityMessage = undefined;
     this.streamAnchorId = undefined;
     this.streamPresentationId = undefined;

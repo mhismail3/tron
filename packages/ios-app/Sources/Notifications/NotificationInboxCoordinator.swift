@@ -9,7 +9,7 @@ enum NotificationInboxKind: String, Codable, CaseIterable, Sendable {
         switch self {
         case .explicit: "Agent alert"
         case .ask: "Input needed"
-        case .agentFinished: "Response complete"
+        case .agentFinished: "Agent finished"
         }
     }
 
@@ -17,7 +17,8 @@ enum NotificationInboxKind: String, Codable, CaseIterable, Sendable {
         switch self {
         case .explicit: "bell.fill"
         case .ask: "questionmark.bubble.fill"
-        case .agentFinished: "checkmark.circle.fill"
+        // This category includes errors and interruptions, not just success.
+        case .agentFinished: "stop.circle.fill"
         }
     }
 }
