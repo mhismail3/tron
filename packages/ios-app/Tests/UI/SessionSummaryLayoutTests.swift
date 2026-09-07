@@ -114,13 +114,13 @@ final class SessionSummaryLayoutTests: XCTestCase {
         return SessionModelSummaryCard(
             selection: .constant(selected.ref), catalog: [selected], automaticCompactionEnabled: true
         ) {
-            TronThinkingSelectionRow(selection: .constant("xhigh"), levels: ["off", "high", "xhigh"], accent: .tronEmerald)
-            TronSettingsDivider(accent: .tronEmerald)
+            TronThinkingSelectionRow(selection: .constant("xhigh"), levels: ["off", "high", "xhigh"], accent: .tronPurple)
+            TronSettingsDivider(accent: .tronPurple)
             ContextWindowSelectionRow(
                 selection: .constant(nil),
                 limits: ContextWindowLimits(minimum: 1_000, maximum: 1_048_576, default: 272_000, longContextThreshold: nil),
                 inheritedValue: 272_000, effectiveValue: 272_000,
-                resetLabel: "Use configured default", source: "model", accent: .tronEmerald
+                resetLabel: "Use configured default", source: "model", accent: .tronPurple
             )
         } compactAction: {
             Button {} label: {
@@ -170,7 +170,8 @@ final class SessionSummaryLayoutTests: XCTestCase {
         for scheme: ColorScheme in [.light, .dark] {
             let size = try await render(
                 modelSummary(name: "Example Model").environment(\.colorScheme, scheme),
-                width: 404, name: "model-summary-values-\(scheme)"
+                width: 404, name: "model-summary-values-\(scheme)",
+                inspectImage: { image in self.assertModelContainerIsPurple(image) }
             )
             XCTAssertEqual(size.width, 404, accuracy: 1)
             // Compact actions share the standard rows' insets rather than
@@ -209,6 +210,22 @@ final class SessionSummaryLayoutTests: XCTestCase {
         // Serif captions and semibold monospace values share the same point scale.
         XCTAssertEqual(SessionSummaryTypography.metric, TronTypography.code(size: TronTypography.sizeSecondary + 0.5, weight: .semibold))
         XCTAssertEqual(SessionSummaryTypography.headline, TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
+    }
+
+    private func assertModelContainerIsPurple(_ image: UIImage) {
+        // Sample clear interior padding, away from titles, controls, and borders.
+        guard let swatch = image.cgImage?.cropping(to: CGRect(
+            x: 5 * image.scale, y: 25 * image.scale,
+            width: 3 * image.scale, height: 20 * image.scale
+        )) else { return XCTFail("Model container must be rendered") }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        pixel.withUnsafeMutableBytes { buffer in
+            let context = CGContext(data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8,
+                bytesPerRow: 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(swatch, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+        XCTAssertGreaterThan(pixel[2], pixel[1], "Model container must match Agent purple, not usage-card green (RGBA: \(pixel))")
     }
 
     private func assertDiffCountColors(_ image: UIImage) {

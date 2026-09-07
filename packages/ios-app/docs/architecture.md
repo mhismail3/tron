@@ -1477,7 +1477,7 @@ receivers, and uses gateway WebSocket heartbeats to keep Tailscale/iOS idle path
 alive. Canonical settings determine the default model; catalog order is never a
 default-selection policy. Dashboard Settings explicitly exposes only global configuration; project scope,
 trust, and project package actions appear only when Settings is opened from a
-project session. Manage Session begins with two emerald summary cards: usage and model.
+project session. Manage Session begins with an emerald usage card and a purple model card matching Settings' Agent group.
 The model card replaces the Configuration section. Its selected model name uses the same
 large bold reading-family heading as remaining tokens, with a serif provider line beneath it; exact
 provider/model identity chooses the catalog display name. Switch Model opens the shared
@@ -1495,8 +1495,10 @@ below their full-width labels instead of forcing names into a narrow side column
 model card's final row. The leading native toolbar group contains only Rename Session and
 Terminal icons, mirroring the dashboard's grouped actions, while Done stays trailing.
 Rename keeps the dashboard's clearable native text-entry alert and trimmed nonempty admission.
-The model action opens the progressive searchable `ModelPicker` with emerald title, controls,
-and cards; an in-flight choice appears immediately without replacing canonical authority.
+The model action opens the progressive searchable `ModelPicker` with purple title, controls,
+and cards. Its sheet title is **Models**, also used by the picker within Settings → Models and Defaults;
+the parent settings destination retains its existing name. The model card scopes the same purple theme to
+its inline controls and nested sheets. An in-flight choice appears immediately without replacing canonical authority.
 Context-window model/revision guards, Thinking's available-level list, and compaction
 queue/export/active-operation admission stay owned by the existing session mutations.
 Context and Thinking selections update their capsules as their menu or custom-entry alert
@@ -1507,9 +1509,9 @@ and model/runtime replacement discards it. Reset-to-default remains distinct fro
 pending choice. Shared Thinking labels render `xhigh` and extra-high spelling/case variants
 as **Extra High** in settings, menus, transcript notices, and typed history previews without
 rewriting wire values, canonical content, or authored labels.
-The blue Session group orders Current Branch, Agent Instructions,
+The blue Session container orders Current Branch, Agent Instructions,
 Project Resources, Session History, and Subagent History, followed by any diagnostics.
-A separate neutral-gray Exports group below owns HTML Export, JSONL Export, and prepared-file sharing. The Session group's Current Branch row is a button in every state, places working-tree status beneath the row title and the branch name at the trailing edge, and is backed only by the
+Its Current Branch row is a button in every state and is backed only by the
 session-bound `workspace-inspector.v1` projection; it never reuses the path-based New Session
 Git probe or a locally remembered branch. The progressive Workspace sheet owns three
 mobile-native views over that projection: lazy Files navigation rooted at the runtime's
@@ -1545,7 +1547,7 @@ Directory is refreshed only while Files is visible or when the user returns to i
 parallel initial load and stops under coverage, background, or dismissal. Failed directory navigation keeps the prior
 path and rows as one atomic projection instead of labeling stale contents with the requested path. Git/file responses are point-in-time revisions; later workspace truth replaces
 lists atomically and never mutates an already-open diff beneath the reader.
-The model summary's controls and dividers use emerald; Session row icons—including all
+The model summary's controls and dividers use purple; Session row icons—including all
 Git states, resource/history destinations, and diagnostics—remain blue. The Workspace Changes tab's clean-state container also uses blue. The Current Branch row puts the branch name below its title in the reading family and the clean/uncommitted-change status on the right in monospace. The Session container has no section header or duplicate workspace path; Workspace itself retains the path. Export and sharing rows use a headerless neutral slate container, labeled **Export as HTML** and **Export as JSON**; the latter still exports the canonical newline-delimited `.jsonl` audit without changing the wire format.
 The usage summary combines counts and percentage as `162K/272K • 60% used` beside the
 remaining-token heading in primary monospaced text (black in light mode), moving that complete metadata line below the heading only when

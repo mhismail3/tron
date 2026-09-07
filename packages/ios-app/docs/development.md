@@ -793,9 +793,9 @@ between the simulator and physical hardware. Sheet checkpoints must fling-scroll
 Agent Instructions, Project Resources, Session History, Runtime Behavior, Providers,
 and model selection; dense rows must retain static tinted geometry without visible
 material churn. Open a large instructions/JSON document and verify immediate native
-scrolling. Manage Session checkpoints verify two compact emerald summary cards, then the
-blue Session order (Current Branch, Agent Instructions, Project Resources, Session
-History, Subagent History) and gray HTML/JSONL Exports. Usage counts and percentage share
+scrolling. Manage Session checkpoints verify a compact emerald usage card and purple model card matching
+Settings' Agent group, then the blue Session order (Current Branch, Agent Instructions, Project Resources,
+Session History, Subagent History) and headerless gray Export as HTML / Export as JSON actions. Usage counts and percentage share
 one metadata line above the progress-as-divider; automatic compaction appears only in the
 model card beside Compact Now. The model name matches the remaining-token headline scale;
 the serif provider line sits closely beneath it and the action reads Switch Model. Thinking,
@@ -806,12 +806,13 @@ maximum, and custom token choices plus Thinking changes update as the popup clos
 on failure, and cannot carry into another model/runtime. Extra-high labels read Extra High
 across defaults, session controls, transcript notices, and history while raw values remain
 unchanged. Statistic values match their captions' point size. Current Branch places the
-working-tree status beneath the title and the branch name at the trailing edge. Rename and
+branch name beneath the title and the working-tree status at the trailing edge. Rename and
 Terminal use a grouped leading icon-only toolbar with accessible labels, not content rows.
 Compact Now must retain idle, running-prompt queue, queued, in-progress, retry, and export
 admission behavior. Slim action/value capsules retain full touch height. Every small
-metadata face is half a point larger only within this sheet. The Session Model picker must
-inherit emerald across title, search, icons, and cards while keeping its ordinary type scale.
+metadata face is half a point larger only within this sheet. The model picker must
+inherit purple across title, search, icons, and cards while keeping its ordinary type scale.
+Its title reads Models both from Manage Session and from Settings → Models and Defaults.
 `SessionSummaryLayoutTests` measures the actual native cards/actions, retains light/dark and
 long-name/accessibility captures, and excludes screen safe areas from card-size assertions.
 Compact action rows must match equivalent ordinary Session row heights without adding row

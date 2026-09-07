@@ -106,7 +106,7 @@ struct AgentDefaultsSettingsView: View {
                             TronModelSelectionRow(
                                 selection: $draft.selectedModel,
                                 models: availableModels,
-                                navigationTitle: "Default Model"
+                                navigationTitle: "Models"
                             )
                             if model.gatewayInfo?.capabilities.contains("context-window.v1") == true,
                                let selectedModel, let limits = selectedContextWindowLimits {

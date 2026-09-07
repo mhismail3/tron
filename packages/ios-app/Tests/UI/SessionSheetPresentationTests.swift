@@ -24,6 +24,48 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testModelPickerMatchesPurpleDestinationTheme() async throws {
+        let selected = ModelSummary(
+            provider: "test-provider", id: "test-model", name: "Example Model", reasoning: true,
+            input: ["text"], contextWindow: 272_000, maxTokens: 8_192, available: true
+        )
+        for scheme: ColorScheme in [.light, .dark] {
+            try await withSheet(NavigationStack {
+                ModelPicker(selection: .constant(selected.ref), models: [selected])
+                    .tronNavigationTitle("Models", accent: .tronPurple)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button {} label: {
+                                Image(systemName: "checkmark").foregroundStyle(Color.tronPurple)
+                            }.accessibilityLabel("Done")
+                        }
+                    }
+            }.tronSettingsVisualTheme(accent: .tronPurple).tronTopBlur(.sheet)
+                .tronPresentation().preferredColorScheme(scheme)) { controller in
+                let bar = try XCTUnwrap(self.views(of: UINavigationBar.self, in: controller.view).first)
+                self.assertToolbarPaint(.tronPurple, bar: bar, leading: false, controller: controller)
+                let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                let region = scroll.convert(CGRect(x: 20, y: 30, width: 3, height: 15), to: controller.view)
+                let image = UIGraphicsImageRenderer(size: controller.view.bounds.size).image { _ in
+                    controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+                }
+                let crop = try XCTUnwrap(image.cgImage?.cropping(to: CGRect(
+                    x: region.minX * image.scale, y: region.minY * image.scale,
+                    width: region.width * image.scale, height: region.height * image.scale
+                )))
+                var pixel = [UInt8](repeating: 0, count: 4)
+                pixel.withUnsafeMutableBytes { buffer in
+                    let context = CGContext(data: buffer.baseAddress, width: 1, height: 1, bitsPerComponent: 8,
+                        bytesPerRow: 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                    context.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+                }
+                XCTAssertGreaterThan(pixel[2], pixel[1], "Selected model row must inherit purple rather than green (RGBA: \(pixel))")
+                self.capture(controller, name: "models-picker-purple-\(scheme)")
+            }
+        }
+    }
+
     func testEditDetailsAndExpandedChangesShowDiffCountMetadata() async throws {
         let tool = ChatToolPresentation(
             id: "diff-count-fixture", title: "edit", subtitle: "Completed",

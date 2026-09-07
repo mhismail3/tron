@@ -87,9 +87,9 @@ struct SessionModelSummaryCard<Controls: View, CompactAction: View>: View {
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                TronProgressiveSheetLink(accessibilityLabel: "Switch Model", accent: .tronEmerald) {
+                TronProgressiveSheetLink(accessibilityLabel: "Switch Model", accent: .tronPurple) {
                     ModelPicker(selection: $selection, models: catalog.filter(\.available))
-                        .tronNavigationTitle("Session Model", accent: .tronEmerald)
+                        .tronNavigationTitle("Models", accent: .tronPurple)
                         .environment(\.tronSettingsSecondaryTextSizeAdjustment, 0)
                         .controlSize(.regular)
                 } label: {
@@ -97,20 +97,21 @@ struct SessionModelSummaryCard<Controls: View, CompactAction: View>: View {
                 }
             }
             .padding(14)
-            TronSettingsDivider(accent: .tronEmerald)
+            TronSettingsDivider(accent: .tronPurple)
             controls()
-            TronSettingsDivider(accent: .tronEmerald)
+            TronSettingsDivider(accent: .tronPurple)
             TronSettingsRow(
                 icon: "rectangle.compress.vertical",
                 title: "Automatic Compaction",
                 subtitle: SessionCompactionControlPolicy.automaticStatus(automaticCompactionEnabled),
-                accent: .tronEmerald
+                accent: .tronPurple
             ) {
                 compactAction()
             }
         }
         .controlSize(.small)
-        .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.14)
+        .tronGlassSurface(accent: .tronPurple, tintOpacity: 0.14)
+        .tronSettingsVisualTheme(accent: .tronPurple)
         .accessibilityIdentifier("session-model-summary")
     }
 

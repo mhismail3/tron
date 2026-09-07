@@ -367,7 +367,7 @@ struct SessionContextSheet: View {
             : (compacting || snapshot.phase == .compacting) ? "In progress" : "")
     }
 
-    private var configurationRowAccent: Color { .tronEmerald }
+    private var configurationRowAccent: Color { .tronPurple }
     private var sessionRowAccent: Color { .tronBlue }
     private var exportRowAccent: Color { .tronSlate }
 
