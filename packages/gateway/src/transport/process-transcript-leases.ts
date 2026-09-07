@@ -138,6 +138,7 @@ export class ProcessTranscriptLeaseStore {
         total: page.total,
         ...(page.nextEntryId ? { nextEntryId: page.nextEntryId } : {}),
         ...(page.leafEntryId ? { leafEntryId: page.leafEntryId } : {}),
+        ...(page.forkBoundary ? { forkBoundary: page.forkBoundary } : {}),
       },
     };
   }
@@ -190,6 +191,7 @@ export class ProcessTranscriptLeaseStore {
         total: page.total,
         ...(page.nextEntryId ? { nextEntryId: page.nextEntryId } : {}),
         ...(page.leafEntryId ? { leafEntryId: page.leafEntryId } : {}),
+        ...(page.forkBoundary ? { forkBoundary: page.forkBoundary } : {}),
         revision: page.revision,
       };
     });

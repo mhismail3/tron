@@ -434,6 +434,12 @@ export interface SessionProcessHistoryPage {
   omissions?: { count: number; bytes: number; reason: "bytes" | "countAndBytes" };
 }
 
+export interface TranscriptForkBoundary {
+  kind: "sessionFork" | "subagentFork";
+  entryId: string;
+  displayEntryId: string;
+}
+
 export interface ProcessTranscriptLease {
   leaseId: string;
   processId: string;
@@ -447,6 +453,7 @@ export interface ProcessTranscriptLease {
     total: number;
     nextEntryId?: string;
     leafEntryId?: string;
+    forkBoundary?: TranscriptForkBoundary;
   };
 }
 
@@ -835,6 +842,8 @@ export interface SessionSnapshot {
   phase: SessionPhase;
   /** Exact live Pi capability; unlike phase, distinguishes nested compaction and settlement gaps. */
   acceptsQueuedPrompts: boolean;
+  /** Disposable Gateway projection of the inherited-to-child transition. */
+  forkBoundary?: TranscriptForkBoundary;
   name?: string;
   cwd: string;
   parentSessionId?: string;

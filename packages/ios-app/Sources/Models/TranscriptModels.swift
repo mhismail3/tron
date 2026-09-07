@@ -157,6 +157,35 @@ private protocol TranscriptPayload: Codable, Hashable, Sendable {
     var timestamp: String { get }
 }
 
+struct TranscriptForkBoundary: Codable, Hashable, Sendable {
+    enum Kind: String, Codable, Hashable, Sendable { case sessionFork, subagentFork }
+    let kind: Kind
+    let entryId: String
+    let displayEntryId: String
+
+    init(kind: Kind, entryId: String, displayEntryId: String) throws {
+        guard !entryId.isEmpty, entryId.utf8.count <= 512,
+              !displayEntryId.isEmpty, displayEntryId.utf8.count <= 512 else {
+            throw GatewayFailure(code: "invalid_response", message: "Invalid transcript fork boundary", retryable: true, details: nil)
+        }
+        self.kind = kind; self.entryId = entryId; self.displayEntryId = displayEntryId
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let kind = try values.decode(Kind.self, forKey: .kind)
+        let entryId = try values.decode(String.self, forKey: .entryId)
+        let displayEntryId = try values.decode(String.self, forKey: .displayEntryId)
+        guard !entryId.isEmpty, entryId.utf8.count <= 512,
+              !displayEntryId.isEmpty, displayEntryId.utf8.count <= 512 else {
+            throw DecodingError.dataCorruptedError(forKey: .entryId, in: values, debugDescription: "Invalid transcript fork boundary")
+        }
+        self.kind = kind; self.entryId = entryId; self.displayEntryId = displayEntryId
+    }
+
+    private enum CodingKeys: String, CodingKey { case kind, entryId, displayEntryId }
+}
+
 struct ExtensionToolOrigin: Codable, Hashable, Sendable {
     /// Legacy public source fallback. It is never a filesystem path or grouping
     /// key when more than one admitted owner claims it.

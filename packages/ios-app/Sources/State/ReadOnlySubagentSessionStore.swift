@@ -8,17 +8,18 @@ struct ProcessTranscriptPage: Codable, Hashable, Sendable {
     let total: Int
     let nextEntryId: String?
     let leafEntryId: String?
+    let forkBoundary: TranscriptForkBoundary?
 
     init(
         items: [TranscriptItem], start: Int, end: Int, total: Int,
-        nextEntryId: String?, leafEntryId: String?
+        nextEntryId: String?, leafEntryId: String?, forkBoundary: TranscriptForkBoundary? = nil
     ) throws {
         guard Self.valid(items: items, start: start, end: end, total: total,
                          nextEntryId: nextEntryId, leafEntryId: leafEntryId) else {
             throw GatewayFailure(code: "invalid_response", message: "Invalid read-only process transcript page", retryable: true, details: nil)
         }
         self.items = items; self.start = start; self.end = end; self.total = total
-        self.nextEntryId = nextEntryId; self.leafEntryId = leafEntryId
+        self.nextEntryId = nextEntryId; self.leafEntryId = leafEntryId; self.forkBoundary = forkBoundary
     }
 
     init(from decoder: Decoder) throws {
@@ -29,12 +30,13 @@ struct ProcessTranscriptPage: Codable, Hashable, Sendable {
         let total = try values.decode(Int.self, forKey: .total)
         let nextEntryId = try values.decodeIfPresent(String.self, forKey: .nextEntryId)
         let leafEntryId = try values.decodeIfPresent(String.self, forKey: .leafEntryId)
+        let forkBoundary = try values.decodeIfPresent(TranscriptForkBoundary.self, forKey: .forkBoundary)
         guard Self.valid(items: items, start: start, end: end, total: total,
                          nextEntryId: nextEntryId, leafEntryId: leafEntryId) else {
             throw DecodingError.dataCorruptedError(forKey: .items, in: values, debugDescription: "Invalid read-only process transcript page")
         }
         self.items = items; self.start = start; self.end = end; self.total = total
-        self.nextEntryId = nextEntryId; self.leafEntryId = leafEntryId
+        self.nextEntryId = nextEntryId; self.leafEntryId = leafEntryId; self.forkBoundary = forkBoundary
     }
 
     private static func valid(
@@ -47,7 +49,7 @@ struct ProcessTranscriptPage: Codable, Hashable, Sendable {
             && (leafEntryId.map { !$0.isEmpty && $0.utf8.count <= 512 } ?? true)
     }
 
-    private enum CodingKeys: String, CodingKey { case items, start, end, total, nextEntryId, leafEntryId }
+    private enum CodingKeys: String, CodingKey { case items, start, end, total, nextEntryId, leafEntryId, forkBoundary }
 }
 
 private struct ProcessTranscriptOpenResponse: Decodable, Sendable {
@@ -66,12 +68,13 @@ private struct ProcessTranscriptPageResponse: Decodable, Sendable {
     let total: Int
     let nextEntryId: String?
     let leafEntryId: String?
+    let forkBoundary: TranscriptForkBoundary?
     let revision: String
 
     var page: ProcessTranscriptPage? {
         try? ProcessTranscriptPage(
             items: items, start: start, end: end, total: total,
-            nextEntryId: nextEntryId, leafEntryId: leafEntryId
+            nextEntryId: nextEntryId, leafEntryId: leafEntryId, forkBoundary: forkBoundary
         )
     }
 }
@@ -176,6 +179,7 @@ final class ReadOnlySubagentSessionStore {
     private(set) var transcriptTotal = 0
     private(set) var nextEntryID: String?
     private(set) var leafEntryID: String?
+    private(set) var forkBoundary: TranscriptForkBoundary?
     private(set) var liveActivity: SessionProcessActivity?
 
     init(client: GatewayClient) { self.client = client }
@@ -332,6 +336,7 @@ final class ReadOnlySubagentSessionStore {
                     self.items = page.items + self.items
                     self.transcriptStart = page.start
                     self.nextEntryID = page.nextEntryId
+                    self.forkBoundary = page.forkBoundary
                     guard self.rebuildPresentation() else {
                         self.status = .failed("The canonical subagent transcript is inconsistent.")
                         return
@@ -410,6 +415,7 @@ final class ReadOnlySubagentSessionStore {
                     self.transcriptTotal = merged.total
                     self.nextEntryID = merged.nextEntryId
                     self.leafEntryID = merged.leafEntryId
+                    self.forkBoundary = page.forkBoundary
                     self.revision = response.revision
                     guard self.rebuildPresentation() else {
                         self.status = .failed("The canonical subagent transcript is inconsistent.")
@@ -579,14 +585,14 @@ final class ReadOnlySubagentSessionStore {
         leaseID = nil; childSessionRef = nil; canAbort = false; revision = nil
         items.removeAll(); presentation = .empty; preparedText = .empty
         transcriptStart = 0; transcriptTotal = 0
-        nextEntryID = nil; leafEntryID = nil; liveActivity = nil
+        nextEntryID = nil; leafEntryID = nil; forkBoundary = nil; liveActivity = nil
         status = .idle
         if sendClose, let oldLease { Self.closeDetached(client: client, leaseID: oldLease) }
     }
 
     private func install(_ page: ProcessTranscriptPage) -> Bool {
         items = page.items; transcriptStart = page.start; transcriptTotal = page.total
-        nextEntryID = page.nextEntryId; leafEntryID = page.leafEntryId
+        nextEntryID = page.nextEntryId; leafEntryID = page.leafEntryId; forkBoundary = page.forkBoundary
         guard rebuildPresentation() else { return false }
         prepareText()
         return true
@@ -598,7 +604,8 @@ final class ReadOnlySubagentSessionStore {
             items,
             transcriptStart: transcriptStart,
             transcriptTotal: transcriptTotal,
-            isActive: liveActivity?.lifecycle.state.isActive == true
+            isActive: liveActivity?.lifecycle.state.isActive == true,
+            forkBoundary: forkBoundary
         )
         guard next.isValid else {
             presentation = .empty

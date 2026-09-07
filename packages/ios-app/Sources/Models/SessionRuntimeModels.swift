@@ -460,6 +460,8 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     /// Exact Gateway/Pi admission capability. Older compatible snapshots omit
     /// it and use the conservative running-phase fallback at presentation.
     var acceptsQueuedPrompts: Bool? = nil
+    /// Disposable Gateway annotation for the inherited-to-child transition.
+    var forkBoundary: TranscriptForkBoundary? = nil
     var name: String?
     var cwd: String
     var parentSessionId: String?

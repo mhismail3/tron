@@ -8,8 +8,8 @@ import { ProcessTranscriptLeaseStore } from "./process-transcript-leases.js";
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
-function page(revision: string, total = 0, fileIdentity = "1:1") {
-  return { items: [], start: 0, end: 0, total, revision, fileIdentity };
+function page(revision: string, total = 0, fileIdentity = "1:1", forkBoundary?: { kind: "sessionFork" | "subagentFork"; entryId: string; displayEntryId: string }) {
+  return { items: [], start: 0, end: 0, total, revision, fileIdentity, ...(forkBoundary ? { forkBoundary } : {}) };
 }
 
 function admission(path: string) {
@@ -43,6 +43,25 @@ describe("ProcessTranscriptLeaseStore", () => {
     );
     expect(store.closeOwned("client-1", opened.leaseId)).toBe(true);
     await expect(store.page("client-1", opened.leaseId)).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("preserves fork-boundary annotations across open and page wire responses", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-process-boundary-"));
+    roots.push(root);
+    const path = join(root, "child.jsonl");
+    await writeFile(path, "{}\n");
+    const boundary = { kind: "subagentFork" as const, entryId: "hidden", displayEntryId: "child" };
+    let reads = 0;
+    const sessions = {
+      resolveReadOnlySubagentPath: vi.fn(async () => admission(path)),
+      readOnlySubagentTranscriptPage: vi.fn(async () => page(`revision-${++reads}`, 1, "1:1", boundary)),
+    } as unknown as RuntimeRegistry;
+    const store = new ProcessTranscriptLeaseStore(sessions);
+    const opened = await store.open("client-1", "parent-1", "process-1", "child-1", "run-1", undefined, vi.fn());
+    expect(opened.page.forkBoundary).toEqual(boundary);
+    await expect(store.page("client-1", opened.leaseId, undefined, undefined, "revision-1"))
+      .resolves.toMatchObject({ revision: "revision-2", forkBoundary: boundary });
+    store.releaseClient("client-1");
   });
 
   it("revalidates an owned lease before forwarding the ordinary child abort", async () => {

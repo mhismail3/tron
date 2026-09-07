@@ -259,7 +259,8 @@ enum ChatTranscriptProjectionKernel {
         _ transcript: [TranscriptItem],
         transcriptStart: Int,
         transcriptTotal: Int,
-        isActive: Bool
+        isActive: Bool,
+        forkBoundary: TranscriptForkBoundary? = nil
     ) -> ChatReadOnlyTranscriptProjection {
         let segmentAuthority = readOnlyToolSegmentAuthority(in: transcript)
         let assembly = assemble(
@@ -273,6 +274,7 @@ enum ChatTranscriptProjectionKernel {
             transcriptStart: transcriptStart,
             transcriptTotal: transcriptTotal,
             preservesRunningState: false,
+            forkBoundary: forkBoundary,
             fragments: transcript.map(fragment),
             streamingFragment: nil
         )
@@ -973,6 +975,7 @@ enum ChatTranscriptProjectionKernel {
             transcriptStart: snapshot.transcriptStart,
             transcriptTotal: snapshot.transcriptTotal,
             preservesRunningState: snapshot.isCachedProjection == true,
+            forkBoundary: snapshot.forkBoundary,
             fragments: fragments,
             streamingFragment: streamingFragment
         )
@@ -986,6 +989,7 @@ enum ChatTranscriptProjectionKernel {
         transcriptStart: Int?,
         transcriptTotal: Int?,
         preservesRunningState: Bool,
+        forkBoundary: TranscriptForkBoundary? = nil,
         fragments: [ChatTranscriptProjectionFragment],
         streamingFragment: ChatTranscriptProjectionFragment?
     ) -> Assembly {
@@ -1231,11 +1235,22 @@ enum ChatTranscriptProjectionKernel {
             }
         }
 
-        for fragment in visibleFragments(
+        let visibleIDs = Set(visibleFragments(
             from: fragments,
             transcriptStart: transcriptStart,
             additionalVisibleCallIDs: streamingFragment?.toolCallIDs ?? []
-        ) {
+        ).map { $0.source.id })
+        // A projected tool result can be folded into an earlier call's row.
+        // Insert the boundary before visibility filtering so that folding (or
+        // bootstrap-configuration suppression) cannot swallow the fork pill.
+        for fragment in fragments {
+            if let forkBoundary, fragment.source.id == forkBoundary.displayEntryId {
+                // A boundary is also a tool-group barrier: inherited tool-only
+                // rows must never merge with the child run across this pill.
+                flushTools()
+                appendRendered(.notification(ChatNotificationPresentation.forkBoundary(forkBoundary)), origin: .canonical)
+            }
+            guard visibleIDs.contains(fragment.source.id) else { continue }
             let tools = toolPresentations(in: fragment.source, results: results).map { canonical in
                 PreparedTool(
                     presentation: resolved(canonical, live: liveByID[canonical.id]),

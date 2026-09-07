@@ -35,7 +35,12 @@ frozen attachment DTOs. `ChatTranscriptProjectionTag.HandoffIdentity` contains o
 attachment preview identities, never preview bytes. Composer and authoritative snapshots are captured
 once before submission; handoff-only changes reuse the cached canonical timeline, and the prior complete
 commit remains installed until its replacement reaches the frame gate. Canonical JSONL remains the sole
-owner of transcript truth.
+owner of transcript truth. Gateway fork-boundary annotations are optional metadata, not transcript rows;
+the shared assembler inserts session/subagent fork pills at the exact projected descendant before row
+filtering and flushes tool runs across the boundary. This also preserves pills anchored at tool results
+folded into earlier call rows. Read-only process sheets use the same annotation; their Gateway page
+revision includes it, preserving canonical IDs, counts, and pagination anchors. Missing/ambiguous ancestry
+produces no guessed pill, and pruned inherited content remains above the boundary.
 
 ## State flow
 

@@ -3698,7 +3698,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "fork-run");
     await Promise.all([mkdir(forksDirectory, { recursive: true }), mkdir(asyncDir, { recursive: true })]);
     const fork = SessionManager.forkFrom(parentFile, fixture.cwd, forksDirectory);
-    fork.appendMessage(fauxAssistantMessage("fork transcript"));
+    const firstChildEntry = fork.appendMessage(fauxAssistantMessage("fork transcript"));
     const forkFile = fork.getSessionFile()!;
     const artifactChildId = "artifact-fork-child";
     const startedAt = new Date(Date.now() - 1_000).toISOString();
@@ -3729,9 +3729,13 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const admission = await fixture.registry.resolveReadOnlySubagentPath(
       fork.getSessionId(), await realpath(forkFile), slot.id, process!.processId, "fork-run",
     );
-    expect((await fixture.registry.readOnlySubagentTranscriptPage(
+    const projected = await fixture.registry.readOnlySubagentTranscriptPage(
       fork.getSessionId(), admission.path, slot.id, process!.processId, "fork-run",
-    )).total).toBeGreaterThan(0);
+    );
+    expect(projected.total).toBeGreaterThan(0);
+    expect(projected.forkBoundary).toEqual({
+      kind: "subagentFork", entryId: firstChildEntry, displayEntryId: firstChildEntry,
+    });
   });
 
   it("binds the canonical single-run fork step before and after terminal persistence", async () => {
@@ -8438,6 +8442,10 @@ export default function (pi) {
     await slot.prompt("continue here");
     await waitUntil(() => !slot.isBusy);
     expect(slot.persistedSessionFile).toBeDefined();
+    const boundary = slot.snapshot().forkBoundary;
+    const childInput = slot.snapshot().transcript.find((item) => item.role === "user" && item.id !== userEntry!.id)!;
+    expect(boundary).toMatchObject({ kind: "sessionFork", displayEntryId: childInput.id });
+    expect(slot.transcriptPage().forkBoundary).toEqual(boundary);
     expect(slot.snapshot().transcript.filter((item) => item.role === "user" || item.role === "assistant")).toEqual([
       expect.objectContaining({ role: "user", content: [expect.objectContaining({ text: "fork this" })] }),
       expect.objectContaining({ role: "user", content: [expect.objectContaining({ text: "continue here" })] }),
@@ -8456,6 +8464,14 @@ export default function (pi) {
       firstMessage: "fork this",
       messageCount: 3,
     });
+    const reopened = await registry.acquire(fork.sessionId);
+    expect(reopened.snapshot().forkBoundary).toEqual(boundary);
+    const transcriptBeforeParentRemoval = reopened.snapshot().transcript;
+    await reopened.dispose();
+    await rm(parentPath);
+    const withoutParent = await registry.acquire(fork.sessionId);
+    expect(withoutParent.snapshot().forkBoundary).toBeUndefined();
+    expect(withoutParent.snapshot().transcript).toEqual(transcriptBeforeParentRemoval);
   });
 
   it("rejects imports when live runtime capacity is full", async () => {

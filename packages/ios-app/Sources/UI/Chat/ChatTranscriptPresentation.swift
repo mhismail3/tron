@@ -1411,6 +1411,20 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
         )
     }
 
+    static func forkBoundary(_ boundary: TranscriptForkBoundary) -> ChatNotificationPresentation {
+        let subagent = boundary.kind == .subagentFork
+        return ChatNotificationPresentation(
+            id: "notification-fork-boundary-\(boundary.kind.rawValue)-\(boundary.entryId)",
+            semanticID: nil,
+            icon: "arrow.triangle.branch",
+            title: subagent ? "Subagent fork point" : "Session fork point",
+            detail: nil,
+            body: nil,
+            tone: subagent ? .purple : .accent,
+            material: .flat
+        )
+    }
+
     static func canonical(
         _ item: TranscriptItem,
         globalOrdinal: Int?

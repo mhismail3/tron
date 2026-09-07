@@ -70,7 +70,8 @@ import {
   type CatalogMetadataAccumulator,
   applyCatalogMetadataEntry,
 } from "./catalog-metadata-index.js";
-import { branchFromParsedSession, type ParsedSessionBranch } from "./session-branch.js";
+import { branchFromParsedSession } from "./session-branch.js";
+import { resolveForkBoundaryAnchor, type ForkBoundaryAnchor } from "./fork-boundary.js";
 
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 /** A read-only child observer may page only canonical sessions that fit this
@@ -149,10 +150,10 @@ async function readOpenedSessionHeader(
   }
 }
 
-async function readOpenedSession(
+async function readOpenedSessionEntries(
   handle: Awaited<ReturnType<typeof open>>,
   byteCount: number,
-): Promise<ParsedSessionBranch | undefined> {
+): Promise<import("@earendil-works/pi-coding-agent").FileEntry[] | undefined> {
   if (!Number.isSafeInteger(byteCount) || byteCount < 0) return undefined;
   if (byteCount > MAX_READ_ONLY_SUBAGENT_SESSION_BYTES) {
     throw new GatewayError(
@@ -167,11 +168,8 @@ async function readOpenedSession(
     if (read.bytesRead <= 0) return undefined;
     offset += read.bytesRead;
   }
-  try {
-    return branchFromParsedSession(parseSessionEntries(bytes.toString("utf8")));
-  } catch {
-    return undefined;
-  }
+  try { return parseSessionEntries(bytes.toString("utf8")); }
+  catch { return undefined; }
 }
 
 const DEFAULT_CATALOG_DISCOVERY_LIMITS = {
@@ -842,6 +840,60 @@ export class RuntimeRegistry {
     throw new GatewayError("busy", "Session catalog changed while updating attention", true);
   }
 
+  /** Resolve the inherited transition at runtime bind time. The result is a
+   * disposable projection, fenced by catalog admission and the parent inode;
+   * snapshots never perform parent I/O. */
+  private async resolveForkBoundary(manager: SessionManager): Promise<ForkBoundaryAnchor | undefined> {
+    const parentPath = manager.getHeader()?.parentSession;
+    if (!parentPath) return undefined;
+    try {
+      const acquisition = await this.catalogAcquisition();
+      const parentCanonical = await realpath(parentPath);
+      const parentCandidates = [...acquisition.entriesByID.values()].filter((entry) => resolve(entry.path) === parentCanonical);
+      if (parentCandidates.length !== 1 || acquisition.ambiguousIDs.has(parentCandidates[0]!.id)) return undefined;
+      const admittedParent = parentCandidates[0]!;
+      const parentID = admittedParent.id;
+      const admittedIdentity = admittedParent.fileIdentity;
+      if (!admittedIdentity) return undefined;
+      const parentSlot = this.slots.get(parentID);
+      let parentEntries;
+      if (parentSlot && !parentSlot.isDisposed && parentSlot.sessionFile) {
+        const livePath = await realpath(parentSlot.sessionFile);
+        const liveStat = await stat(livePath);
+        if (livePath !== parentCanonical || `${liveStat.dev}:${liveStat.ino}` !== admittedIdentity) return undefined;
+        parentEntries = parentSlot.canonicalSessionEntries();
+      } else {
+        const handle = await open(parentCanonical, "r");
+        try {
+          const metadata = await handle.stat();
+          if (!metadata.isFile() || `${metadata.dev}:${metadata.ino}` !== admittedIdentity) return undefined;
+          if (metadata.size > 0) {
+            const last = Buffer.alloc(1);
+            const { bytesRead } = await handle.read(last, 0, 1, metadata.size - 1);
+            if (bytesRead !== 1 || last[0] !== 0x0a) return undefined;
+          }
+          parentEntries = await readOpenedSessionEntries(handle, metadata.size);
+          const after = await handle.stat();
+          if (after.size < metadata.size
+            || after.size === metadata.size && after.mtimeMs !== metadata.mtimeMs) return undefined;
+        } finally { await handle.close(); }
+      }
+      const finalParent = await lstat(parentCanonical);
+      if (!finalParent.isFile() || finalParent.isSymbolicLink()
+        || `${finalParent.dev}:${finalParent.ino}` !== admittedIdentity) return undefined;
+      const childHeader = manager.getHeader();
+      if (childHeader?.parentSession !== parentPath) return undefined;
+      const childEntries = childHeader ? [childHeader, ...manager.getEntries()] : [];
+      if (!parentEntries || !childEntries.length || parentEntries[0]?.type !== "session"
+        || parentEntries[0].id !== parentID) return undefined;
+      return resolveForkBoundaryAnchor(childEntries, parentEntries, "sessionFork", manager.getLeafId());
+    } catch {
+      // A missing, replaced, oversized, malformed, or ambiguous parent cannot
+      // justify a marker; transcript projection remains fully available.
+      return undefined;
+    }
+  }
+
   private dependencies() {
     return {
       agentDir: this.options.agentDir,
@@ -866,6 +918,7 @@ export class RuntimeRegistry {
       ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
       ...(this.options.extensionArtifactWarning ? { extensionArtifactWarning: this.options.extensionArtifactWarning } : {}),
       ...(this.options.scheduleToolOperations ? { scheduleToolOperations: this.options.scheduleToolOperations } : {}),
+      resolveForkBoundary: (manager: SessionManager) => this.resolveForkBoundary(manager),
       ...(this.options.stageTiming ? {
         runtimeDisposalTimedOut: (graceMs: number) => this.options.stageTiming!("runtime.dispose-timeout", graceMs, "failure"),
       } : {}),
@@ -2486,10 +2539,16 @@ export class RuntimeRegistry {
       // Parse the already-open descriptor. Opening the path again here would
       // allow replace/read/swap-back to project a different inode while the
       // final path metadata appeared unchanged.
-      const parsed = await readOpenedSession(handle, metadata.size);
+      const childEntries = await readOpenedSessionEntries(handle, metadata.size);
+      const parsed = childEntries ? branchFromParsedSession(childEntries) : undefined;
       if (!parsed || parsed.sessionId !== childSessionRef) {
         throw new GatewayError("conflict", "Subagent session identity changed", true);
       }
+      const parentSlot = this.slots.get(expectedParentSessionId);
+      const parentEntries = parentSlot?.canonicalSessionEntries();
+      const forkAnchor = parentEntries
+        ? resolveForkBoundaryAnchor(childEntries!, parentEntries, "subagentFork")
+        : undefined;
       let page: TranscriptPage;
       try {
         const toolLabels = this.slots.get(expectedParentSessionId)?.toolPresentationLabels();
@@ -2502,6 +2561,8 @@ export class RuntimeRegistry {
           undefined,
           undefined,
           toolLabels,
+          undefined,
+          forkAnchor,
         );
       } catch (error) {
         if (error instanceof Error && error.message.includes("anchor changed")) {
@@ -2528,7 +2589,7 @@ export class RuntimeRegistry {
       // canonical append belongs to the next watcher revision and must not
       // invalidate this already-open snapshot.
       const revision = createHash("sha256")
-        .update(`${childSessionRef}\0${metadata.dev}\0${metadata.ino}\0${metadata.size}\0${metadata.mtimeMs}\0${leafEntryId ?? ""}`)
+        .update(`${childSessionRef}\0${metadata.dev}\0${metadata.ino}\0${metadata.size}\0${metadata.mtimeMs}\0${leafEntryId ?? ""}\0${JSON.stringify(page.forkBoundary ?? null)}`)
         .digest("hex").slice(0, 32);
       return { ...page, ...(leafEntryId ? { leafEntryId } : {}), revision, fileIdentity };
     } finally {

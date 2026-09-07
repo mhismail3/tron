@@ -70,6 +70,75 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(ChatTranscriptPresentation.timeline(in: snapshot) == candidate.timeline)
     }
 
+    @Test("fork boundary notification is a tool grouping barrier")
+    func forkBoundaryBarrier() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"inherited","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"old-call","ordinal":0,"type":"toolCall","toolCallId":"old-call","name":"read","arguments":{},"toolSegmentId":"shared-segment"}]},
+          {"id":"child","parentId":"inherited","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"new-call","ordinal":0,"type":"toolCall","toolCallId":"new-call","name":"write","arguments":{},"toolSegmentId":"shared-segment"}]}
+        ]
+        """)
+        let boundary = try TranscriptForkBoundary(kind: .sessionFork, entryId: "child", displayEntryId: "child")
+        let projection = ChatTranscriptProjectionKernel.readOnlyTranscript(
+            snapshot.transcript, transcriptStart: 0, transcriptTotal: snapshot.transcript.count,
+            isActive: false, forkBoundary: boundary
+        )
+        #expect(Array(projection.timeline.ids) == [
+            "tool-run-old-call", "notification-fork-boundary-sessionFork-child", "tool-run-new-call"
+        ])
+        #expect(projection.isValid)
+    }
+
+    @Test("fork pill survives folded results, paging and ordinary snapshot reconstruction")
+    func forkBoundaryAtFoldedResult() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"inherited","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call","ordinal":0,"type":"toolCall","toolCallId":"call","name":"read","arguments":{}}]},
+          {"id":"result","parentId":"inherited","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","toolCallId":"call","toolName":"read","content":[{"id":"output","ordinal":0,"type":"text","text":"result"}],"isError":false},
+          {"id":"child","parentId":"result","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","content":[{"id":"task","ordinal":0,"type":"text","text":"child task"}]}
+        ]
+        """)
+        let boundary = try TranscriptForkBoundary(kind: .subagentFork, entryId: "result", displayEntryId: "result")
+        snapshot.forkBoundary = boundary
+        snapshot.transcriptStart = 0
+        snapshot.transcriptTotal = 3
+        let cold = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        let readOnly = ChatTranscriptProjectionKernel.readOnlyTranscript(
+            snapshot.transcript, transcriptStart: 0, transcriptTotal: 3, isActive: false, forkBoundary: boundary
+        )
+        let markerID = "notification-fork-boundary-subagentFork-result"
+        #expect(cold.isValid && readOnly.isValid)
+        #expect(Array(cold.timeline.ids) == ["tool-run-call", markerID, "child"])
+        #expect(cold.timeline.ids == readOnly.timeline.ids)
+        guard case .notification(let notification) = cold.timeline.items[1] else {
+            Issue.record("Expected fork pill at the folded result boundary")
+            return
+        }
+        #expect(notification.title == "Subagent fork point")
+        #expect(!notification.showsProgress)
+        let tail = ChatTranscriptProjectionKernel.readOnlyTranscript(
+            Array(snapshot.transcript.suffix(1)), transcriptStart: 2, transcriptTotal: 3,
+            isActive: false, forkBoundary: boundary
+        )
+        #expect(!tail.timeline.ids.contains(markerID))
+        #expect(readOnly.timeline.ids.filter { $0 == markerID }.count == 1)
+        snapshot.forkBoundary = nil
+        #expect(!ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline.ids.contains(markerID))
+    }
+
+    @Test("fork boundary decoding rejects malformed identities and survives page round trips")
+    func forkBoundaryDecoding() throws {
+        let boundary = try TranscriptForkBoundary(kind: .sessionFork, entryId: "raw", displayEntryId: "display")
+        let page = try ProcessTranscriptPage(items: [], start: 0, end: 0, total: 0,
+            nextEntryId: nil, leafEntryId: nil, forkBoundary: boundary)
+        let data = try JSONEncoder().encode(page)
+        #expect(try JSONDecoder().decode(ProcessTranscriptPage.self, from: data).forkBoundary == boundary)
+        for value in ["", String(repeating: "x", count: 513)] {
+            let invalid = try JSONSerialization.data(withJSONObject: ["kind": "sessionFork", "entryId": value, "displayEntryId": "display"])
+            #expect(throws: DecodingError.self) { try JSONDecoder().decode(TranscriptForkBoundary.self, from: invalid) }
+        }
+    }
+
     @Test("display tools remain isolated from adjacent generic tool runs")
     func displayRunIsolation() throws {
         let snapshot = try fixture(transcript: """

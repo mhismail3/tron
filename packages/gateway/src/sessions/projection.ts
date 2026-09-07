@@ -25,7 +25,8 @@ import { trustedExtensionOriginKind } from "../extensions/owner-attribution.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { BlobStore } from "./blob-store.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
-import type { ChatOrigin, ChatSemanticMetadata, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
+import { projectForkBoundary, type ForkBoundaryAnchor } from "./fork-boundary.js";
+import type { ChatOrigin, ChatSemanticMetadata, CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, ContextDeliveryMetadata, SessionSnapshot, SessionTreeNode, TranscriptForkBoundary, TranscriptItem } from "../protocol/types.js";
 import { contextDeliveryMetadataByEntry } from "./context-delivery-receipts.js";
 import { INVOCATION_RECEIPT_TYPE, invocationProjection, invocationReceipts, parseInvocationReceipt, type InvocationProjection } from "./invocation-receipts.js";
 import { EXTENSION_NOTIFICATION_RECEIPT_TYPE, parseExtensionNotificationReceipt } from "./extension-notification-receipts.js";
@@ -1523,6 +1524,7 @@ function projectableTranscriptEntries(
   manager: TranscriptSessionReader,
   presentationIDs?: ReadonlyMap<string, string>,
 ): {
+  branch: SessionEntry[];
   entries: SessionEntry[];
   contextDelivery: ReadonlyMap<string, ContextDeliveryMetadata>;
   toolSegmentIDs: ReadonlyMap<string, string>;
@@ -1590,7 +1592,7 @@ function projectableTranscriptEntries(
     const lastBarrierIndex = content.findLastIndex((part) => part.type !== "toolCall");
     if (lastToolIndex < 0 || lastBarrierIndex > lastToolIndex) ownerId = undefined;
   }
-  return { entries, contextDelivery, toolSegmentIDs };
+  return { branch, entries, contextDelivery, toolSegmentIDs };
 }
 
 function durableInvocationLifecycle(lifecycle: InvocationProjection["lifecycle"]): InvocationProjection["lifecycle"] {
@@ -1678,6 +1680,7 @@ export interface TranscriptPage {
   nextEntryId?: string;
   runtimeGeneration?: string;
   leafEntryId?: string;
+  forkBoundary?: TranscriptForkBoundary;
 }
 
 export function projectTranscriptPage(
@@ -1690,8 +1693,9 @@ export function projectTranscriptPage(
   presentationIDs?: ReadonlyMap<string, string>,
   toolLabels?: ReadonlyMap<string, string>,
   bashMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
+  forkAnchor?: ForkBoundaryAnchor,
 ): TranscriptPage {
-  const { entries, contextDelivery, toolSegmentIDs } = projectableTranscriptEntries(
+  const { branch, entries, contextDelivery, toolSegmentIDs } = projectableTranscriptEntries(
     manager,
     presentationIDs,
   );
@@ -1703,6 +1707,7 @@ export function projectTranscriptPage(
   const invocationByCanonicalEntry = new Map(invocationValues
     .filter(value => value.canonicalEntryId !== undefined)
     .map(value => [value.canonicalEntryId!, value]));
+  const forkBoundary = projectForkBoundary(branch, entries, forkAnchor);
   const end = Math.max(0, Math.min(before ?? entries.length, entries.length));
   if (expectedNextEntryId !== undefined && entries[end]?.id !== expectedNextEntryId) {
     throw new Error("session transcript anchor changed");
@@ -1748,6 +1753,7 @@ export function projectTranscriptPage(
     end,
     total: entries.length,
     ...(entries[end]?.id ? { nextEntryId: entries[end].id } : {}),
+    ...(forkBoundary ? { forkBoundary } : {}),
   };
 }
 

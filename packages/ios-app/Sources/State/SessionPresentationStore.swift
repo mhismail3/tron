@@ -863,10 +863,11 @@ final class SessionPresentationStore {
             let nextEntryId: String?
             let runtimeGeneration: String?
             let leafEntryId: String?
+            let forkBoundary: TranscriptForkBoundary?
             let leafEntryIdPresent: Bool
 
             private enum CodingKeys: String, CodingKey {
-                case items, start, end, total, nextEntryId, runtimeGeneration, leafEntryId
+                case items, start, end, total, nextEntryId, runtimeGeneration, leafEntryId, forkBoundary
             }
 
             init(from decoder: Decoder) throws {
@@ -878,6 +879,7 @@ final class SessionPresentationStore {
                 nextEntryId = try values.decodeIfPresent(String.self, forKey: .nextEntryId)
                 runtimeGeneration = try values.decodeIfPresent(String.self, forKey: .runtimeGeneration)
                 leafEntryId = try values.decodeIfPresent(String.self, forKey: .leafEntryId)
+                forkBoundary = try values.decodeIfPresent(TranscriptForkBoundary.self, forKey: .forkBoundary)
                 leafEntryIdPresent = values.contains(.leafEntryId)
             }
         }
@@ -1034,6 +1036,7 @@ final class SessionPresentationStore {
                     coverage: coverage,
                     prefixItems: nextPrefix
                 )
+                self.snapshot?.forkBoundary = response.forkBoundary
                 advanceChatProjection(canonical: true)
                 updateTranscriptLoadState(.idle, for: loadTarget)
                 delegate?.sessionPresentationStoreCheckpointCache()

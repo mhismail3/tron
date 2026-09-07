@@ -18,6 +18,7 @@ import {
   type ModelRuntime,
   type ToolDefinition,
   SessionManager,
+  type FileEntry,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { abortAwareStream } from "../runtime/abort-aware-stream.js";
@@ -79,6 +80,7 @@ import {
   type ToolProjectionMetadata,
   type TranscriptPage,
 } from "./projection.js";
+import type { ForkBoundaryAnchor } from "./fork-boundary.js";
 import { RunMarkerCompletionConflictError, type RunMarkerEvidence, type RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, attributedCommandOwner, attributedToolOwner, currentExtensionOwner, currentInvocationContext, trustedExtensionOriginKind, withInvocationContext } from "../extensions/owner-attribution.js";
 import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, extensionRunChildProducerId, hasForegroundSubagentRunActivity, hasObservedPausedProcessTerminal, hasStructuredExtensionRunActivity, inspectExtensionLifecycleArtifact, normalizeExtensionArtifact, projectExtensionRunActivity, terminalLifecycleStates, usesForegroundSubagentChildIdentity, type ExtensionArtifactRejectionReason, type ExtensionRunChildIdentityStrategy } from "./extension-run-projection.js";
@@ -297,6 +299,8 @@ export interface RuntimeSlotDependencies {
   /** Extension cleanup is advisory once runtime disposal begins. A handler that
    * never settles must not strand the canonical session behind idle eviction. */
   runtimeDisposalTimedOut?: (graceMs: number) => void;
+  /** Resolves inherited history once at canonical bind/rebind, never per snapshot. */
+  resolveForkBoundary?: (manager: SessionManager) => Promise<ForkBoundaryAnchor | undefined>;
 }
 
 class CanonicalCustomEntryConflictError extends Error {}
@@ -334,6 +338,8 @@ export class RuntimeSlot {
   private readonly createdAt = new Date().toISOString();
   /** Canonical parent identity retained while a fresh fork has no JSONL yet. */
   private liveForkParentSessionId: string | undefined;
+  /** Disposable derived annotation; canonical JSONL remains the authority. */
+  private forkBoundary: ForkBoundaryAnchor | undefined;
   private revision = 0;
   private displayArtifactReferenceKey: string | undefined;
   private displayArtifactReferences: string[] = [];
@@ -732,6 +738,12 @@ export class RuntimeSlot {
 
   get id(): string {
     return this.sessionManager.getSessionId();
+  }
+
+  /** Read-only owner seam for bounded derived projections; callers never mutate. */
+  canonicalSessionEntries(): FileEntry[] {
+    const header = this.sessionManager.getHeader();
+    return header ? [header, ...this.sessionManager.getEntries()] : [];
   }
 
   get cwd(): string {
@@ -1255,9 +1267,11 @@ export class RuntimeSlot {
         this.assertAutomationMayNotReplaceSession();
         return this.withRebindAttentionDisposition("reset", () => this.runtime.fork(entryId, options));
       },
-      navigateTree: (targetId, options) => {
+      navigateTree: async (targetId, options) => {
         this.assertAutomationMayNotReplaceSession();
-        return this.runtime.session.navigateTree(targetId, options);
+        const result = await this.runtime.session.navigateTree(targetId, options);
+        if (!result.cancelled) this.forkBoundary = await this.dependencies.resolveForkBoundary?.(this.sessionManager);
+        return result;
       },
       switchSession: (sessionPath, options) => {
         this.assertAutomationMayNotReplaceSession();
@@ -1366,6 +1380,7 @@ export class RuntimeSlot {
     }
     previousUnsubscribe?.();
     this.unsubscribe = nextUnsubscribe;
+    this.forkBoundary = await this.dependencies.resolveForkBoundary?.(nextManager);
     this.hydrateCanonicalExtensionActivities();
     this.reconcileCanonicalDisplayArtifacts();
     this.revision += 1;
@@ -5185,6 +5200,7 @@ export class RuntimeSlot {
       ...(session.sessionManager.getLeafId() ? { leafEntryId: session.sessionManager.getLeafId()! } : {}),
       ...(this.operation ? { operation: this.operation } : {}),
       ...(this.retry ? { retry: this.retry } : {}),
+      ...(canonicalTranscriptPage.forkBoundary ? { forkBoundary: canonicalTranscriptPage.forkBoundary } : {}),
       ...(activeToolSegmentId ? { activeToolSegmentId } : {}),
       toolExecutions: [...this.toolExecutions.values()]
         .filter((tool) => !canonicalToolResultIDs.has(tool.toolCallId))
@@ -5250,6 +5266,7 @@ export class RuntimeSlot {
           this.presentationIDs,
           this.toolLabels(),
           this.bashMetadata,
+          this.forkBoundary,
         ),
         runtimeGeneration: this.runtimeGeneration,
         ...(leafEntryId ? { leafEntryId } : {}),
@@ -6673,6 +6690,7 @@ export class RuntimeSlot {
           ...(options.label ? { label: options.label } : {}),
         });
         if (result.cancelled) throw new GatewayError("cancelled", "Tree navigation was cancelled by an extension");
+        this.forkBoundary = await this.dependencies.resolveForkBoundary?.(this.sessionManager);
         this.summaryContentDirty = true;
         completed = true;
         this.revision += 1;
