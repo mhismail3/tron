@@ -1163,15 +1163,7 @@ for ordinary titles, controls, icons, dividers, fields, and containers, includin
 text cards mix the same hue toward slate. Settings action text resolves to white against dark Liquid Glass and to
 the button accent in light mode. Project Trust and Gateway actions opt into semantic container accents rather
 than inheriting the section tint, while warning, error, destructive, and log-level state colors remain semantic. Each row carries a concise secondary summary while retaining progressive destination construction
-and exact dashboard/project scope admission. Settings rows share one semantic value policy rather than sheet-local typography: stable
-explanations and identities use the selected reading family; live or user-selectable values use the
-code family. A row with a distinct trailing control places its value on the secondary line and gives
-the control a stable reading-family action label. Without a trailing control, the dynamic value is
-right aligned. Main Settings summaries, server addresses, and model/provider descriptions are stable
-copy; connection/provider state and editable selections are dynamic values. Both secondary roles share
-an 11.5-point scale. Deliberately prominent summary values—such as New Session card selections and
-Manage Session’s large remaining-token headline—remain bold reading-family exceptions rather than
-code-family secondary values. The same policy owns New Session, Manage Session, history, and their
+and exact dashboard/project scope admission. Settings rows use placement-based typography rather than separate stable/dynamic subtitle roles: all left-aligned secondary copy uses the selected reading family (serif with the default selection), including live state, branch names, and editable selections. Monospace is reserved for right-aligned values. The same subtitle rule applies to provider, Automation, and Session History rows. A row with a distinct trailing control places its value on the left secondary line in the reading family and gives the control a reading-family action label. Without a trailing control, the dynamic value is right aligned in the code family. Both placements share an 11.5-point scale. Deliberately prominent summary values—such as New Session card selections and Manage Session’s large remaining-token headline—remain bold reading-family text. The same policy owns New Session, Manage Session, history, and their
 progressively presented subsheets. Settings action rows, value rows, and information cards share one
 14-point leading inset, 22-point centered icon column, and common icon-to-text gap; multiline
 resource-editor explanations center their icon against the full text block. Section-owned rows do not
@@ -1542,14 +1534,12 @@ parallel initial load and stops under coverage, background, or dismissal. Failed
 path and rows as one atomic projection instead of labeling stale contents with the requested path. Git/file responses are point-in-time revisions; later workspace truth replaces
 lists atomically and never mutates an already-open diff beneath the reader.
 The model summary's controls and dividers use emerald; Session row icons—including all
-Git states, resource/history destinations, and diagnostics—remain blue. Export and sharing
-rows use their separate group's neutral slate palette.
+Git states, resource/history destinations, and diagnostics—remain blue. The Workspace Changes tab's clean-state container also uses blue. The Current Branch row puts the branch name below its title in the reading family and the clean/uncommitted-change status on the right in monospace. The Session container has no section header or duplicate workspace path; Workspace itself retains the path. Export and sharing rows use a headerless neutral slate container, labeled **Export as HTML** and **Export as JSON**; the latter still exports the canonical newline-delimited `.jsonl` audit without changing the wire format.
 The usage summary combines counts and percentage as `162K/272K • 60% used` beside the
-remaining-token heading, moving that complete metadata line below the heading only when
-width or Dynamic Type requires it. The progress line directly separates this header from
+remaining-token heading in primary monospaced text (black in light mode), moving that complete metadata line below the heading only when
+width or Dynamic Type requires it. That left-aligned fallback uses the reading family, consistent with other left subtitles. The progress line directly separates this header from
 the cache-hit/read-write/input/output/cost statistics; there is no second divider or
-compaction label in the usage card. Statistic values use the same point size as their
-captions, retaining their semibold code face. All Manage Session secondary text is one-half point
+compaction label in the usage card. Statistic captions use the reading family (serif by default), while values remain semibold monospace. Both share the same point size and secondary gray color. Labels scale within their single-line column at ordinary text sizes; accessibility sizes stack the statistics vertically. `SessionSummaryLayoutTests` covers subtitle-family consistency, summary layout, and branch/status placement in both appearances. All Manage Session secondary text is one-half point
 larger than its corresponding ordinary type scale, including metric values, labels,
 workspace status, and group details; headings are unchanged. A content-scoped adjustment
 keeps shared settings rows consistent without enlarging other sheets or model-picker text. When the runtime has reset its usage estimate, the card presents a

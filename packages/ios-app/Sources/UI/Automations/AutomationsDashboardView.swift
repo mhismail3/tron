@@ -386,9 +386,9 @@ struct AutomationsDashboardView: View {
                     if let match = model.automationCatalog.summaries.first(where: { $0.profile.id == item.profileID && $0.summary.id == occurrence.automationId }) {
                         Text(match.summary.name).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronTextPrimary).lineLimit(1)
                         Text("\(match.summary.typedActionKind?.label ?? "Action") · \(targetLabel(profileID: item.profileID, target: match.summary.target))").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary).lineLimit(1)
-                        Text(match.profile.label + (match.summary.trigger.kind == "calendar" ? " · \(match.summary.trigger.timezone ?? "")" : "")).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted).lineLimit(1)
+                        Text(match.profile.label + (match.summary.trigger.kind == "calendar" ? " · \(match.summary.trigger.timezone ?? "")" : "")).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted).lineLimit(1)
                     } else { Text("Automation \(occurrence.automationId)").foregroundStyle(Color.tronTextSecondary) }
-                    if occurrence.isSeries { Text("\(occurrence.count ?? 0) triggers · \(AutomationDateFormatting.date(occurrence.firstAt))–\(AutomationDateFormatting.date(occurrence.lastAt))").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted) }
+                    if occurrence.isSeries { Text("\(occurrence.count ?? 0) triggers · \(AutomationDateFormatting.date(occurrence.firstAt))–\(AutomationDateFormatting.date(occurrence.lastAt))").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted) }
                 }
                 Spacer(minLength: 0)
             }.padding(TronSpacing.lg)
@@ -403,15 +403,15 @@ struct AutomationsDashboardView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack { Text(summary.name).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronTextPrimary).lineLimit(1); Spacer(); AutomationStatusBadge(activation: summary.activation, run: summary.currentRun?.state) }
                     Text(summary.trigger.summary).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextSecondary)
-                    Text("\(summary.typedActionKind?.label ?? summary.actionKind) · \(targetLabel(profileID: profile.id, target: summary.target))").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronTextMuted).lineLimit(1)
+                    Text("\(summary.typedActionKind?.label ?? summary.actionKind) · \(targetLabel(profileID: profile.id, target: summary.target))").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronTextMuted).lineLimit(1)
                     if let next = summary.nextOccurrenceAt {
-                        Text("Next: \(AutomationDateFormatting.date(next))").font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronAutomation)
+                        Text("Next: \(AutomationDateFormatting.date(next))").font(TronTypography.secondaryDescription).foregroundStyle(Color.tronAutomation)
                     } else if let last = summary.lastRun {
                         Text("Last: \(last.state.label) · \(AutomationDateFormatting.date(last.terminalAt ?? last.scheduledFor))")
-                            .font(TronTypography.secondaryCodeDescription)
+                            .font(TronTypography.secondaryDescription)
                             .foregroundStyle(last.state == .failed || last.state == .outcomeUnknown ? Color.tronError : Color.tronTextMuted)
                     }
-                    if let reason = summary.blockedReason { Text(reason).font(TronTypography.secondaryCodeDescription).foregroundStyle(Color.tronError).lineLimit(2) }
+                    if let reason = summary.blockedReason { Text(reason).font(TronTypography.secondaryDescription).foregroundStyle(Color.tronError).lineLimit(2) }
                 }
                 Spacer(minLength: 0)
             }.padding(TronSpacing.lg)

@@ -456,7 +456,7 @@ struct WorkspaceInspectorSheet: View {
         if let repository = owner.inspection?.repository {
             LazyVStack(alignment: .leading, spacing: 16) {
                 if repository.changes.isEmpty {
-                    TronInfoCard(icon: "checkmark.circle", text: "Working tree clean", accent: .tronEmerald)
+                    TronInfoCard(icon: "checkmark.circle", text: "Working tree clean", accent: .tronBlue)
                 } else {
                     ForEach(owner.changeGroups) { group in
                         VStack(alignment: .leading, spacing: 8) {

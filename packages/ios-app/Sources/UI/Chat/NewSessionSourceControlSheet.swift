@@ -22,7 +22,6 @@ struct NewSessionSourceControlSheet: View {
                     TronSettingsGroup(
                         "Checkout Strategy",
                         detail: inspectionDetail,
-                        detailRole: .dynamicValue,
                         accent: .tronTeal
                     ) {
                         VStack(spacing: 0) {

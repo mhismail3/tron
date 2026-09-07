@@ -5,6 +5,25 @@ import XCTest
 
 @MainActor
 final class SessionSheetPresentationTests: XCTestCase {
+    func testManageSessionShowsHeaderlessSessionAndExportCards() async throws {
+        var snapshot = try SessionScenarioBuilder(seed: 7_820).openingTail(targetEncodedBytes: 4_096)
+        snapshot.contextUsage = ContextUsage(tokens: 157_000, contextWindow: 272_000, percent: 58)
+        try await withModel { model in
+            model.installHostedAuthoritativeSnapshot(snapshot)
+            for scheme: ColorScheme in [.light, .dark] {
+                try await self.withSheet(SessionContextSheet(sessionID: snapshot.sessionId, onForkCreated: { _ in })
+                    .environment(model).preferredColorScheme(scheme)) { controller in
+                    let scroll = try XCTUnwrap(self.views(of: UIScrollView.self, in: controller.view).first)
+                    XCTAssertGreaterThan(scroll.contentSize.height, scroll.bounds.height)
+                    self.capture(controller, name: "manage-session-top-\(scheme)")
+                    scroll.setContentOffset(CGPoint(x: 0, y: scroll.contentSize.height - scroll.bounds.height), animated: false)
+                    controller.view.layoutIfNeeded()
+                    self.capture(controller, name: "manage-session-containers-\(scheme)")
+                }
+            }
+        }
+    }
+
     func testInstructionsOpenAsALargeDocumentWithCustomBlurAndNoBottomToolbar() async throws {
         try await withModel { model in
             try await self.withSheet(AgentInstructionsSheet(sessionID: "document-fixture").environment(model)) { controller in
@@ -310,6 +329,6 @@ private struct SheetFixture<Content: View>: View {
     @State private var presented = true
 
     var body: some View {
-        Color.clear.sheet(isPresented: $presented) { content }
+        Color.tronBackground.sheet(isPresented: $presented) { content }
     }
 }

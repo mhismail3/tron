@@ -6,9 +6,60 @@ import SwiftUI
 enum SessionSummaryTypography {
     static let metadataSizeAdjustment: CGFloat = 0.5
     static var headline: Font { TronTypography.sans(size: TronTypography.sizeXL, weight: .bold) }
-    static var detail: Font { TronSettingsSecondaryRole.informational.font(sizeAdjustment: metadataSizeAdjustment) }
-    static var value: Font { TronSettingsSecondaryRole.dynamicValue.font(sizeAdjustment: metadataSizeAdjustment) }
+    static var detail: Font { TronTypography.sans(size: TronTypography.sizeSecondary + metadataSizeAdjustment) }
+    static var usageValue: Font { TronTypography.code(size: TronTypography.sizeSecondary + metadataSizeAdjustment) }
     static var metric: Font { TronTypography.code(size: TronTypography.sizeSecondary + metadataSizeAdjustment, weight: .semibold) }
+    static var metricLabel: Font { TronTypography.sans(size: TronTypography.sizeSecondary + metadataSizeAdjustment) }
+}
+
+/// Workspace inspection and navigation stay with the sheet; this row only
+/// lays out the current branch beneath its title and the status as a value.
+struct SessionWorkspaceSummaryRow: View {
+    let presentation: SessionWorkspaceRowPresentation
+    let accent: Color
+
+    var body: some View {
+        switch presentation {
+        case .loading:
+            TronSettingsRow(
+                icon: "arrow.triangle.branch", title: "Current Branch",
+                subtitle: "Checking workspace…", accent: accent
+            ) {
+                TronPulseLoadingIndicator(size: 18)
+            }
+        case .notRepository:
+            TronSettingsRow(icon: "folder", title: "Current Branch", subtitle: "Browse workspace files", accent: accent) {
+                Text("No Git")
+                    .font(TronTypography.code(size: TronTypography.sizeCaption + SessionSummaryTypography.metadataSizeAdjustment))
+                    .foregroundStyle(Color.tronTextSecondary)
+            }
+        case .loaded(let branch, let dirty, let changeCount):
+            let workingTreeStatus = dirty
+                ? "\(changeCount) uncommitted \(changeCount == 1 ? "change" : "changes")"
+                : "Working tree clean"
+            TronSettingsRow(
+                icon: "arrow.triangle.branch", title: "Current Branch",
+                subtitle: branch, subtitleLineLimit: 1, accent: accent
+            ) {
+                Text(workingTreeStatus)
+                    .font(TronTypography.code(size: TronTypography.sizeBody2 + SessionSummaryTypography.metadataSizeAdjustment))
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .layoutPriority(1)
+            }
+        case .failed:
+            TronSettingsRow(
+                icon: "exclamationmark.triangle", title: "Current Branch",
+                subtitle: "Tap to retry workspace inspection", accent: accent
+            ) {
+                Text("Unavailable")
+                    .font(TronTypography.code(size: TronTypography.sizeCaption + SessionSummaryTypography.metadataSizeAdjustment))
+                    .foregroundStyle(Color.tronTextSecondary)
+            }
+        }
+    }
 }
 
 /// Value-only composition. SessionContextSheet keeps mutation admission,
@@ -53,7 +104,6 @@ struct SessionModelSummaryCard<Controls: View, CompactAction: View>: View {
                 icon: "rectangle.compress.vertical",
                 title: "Automatic Compaction",
                 subtitle: SessionCompactionControlPolicy.automaticStatus(automaticCompactionEnabled),
-                subtitleRole: .dynamicValue,
                 accent: .tronEmerald
             ) {
                 compactAction()
@@ -97,13 +147,13 @@ struct SessionContextUsageCard: View {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text(headline).font(SessionSummaryTypography.headline).fixedSize()
                         Spacer(minLength: 0)
-                        Text(detail).font(SessionSummaryTypography.value).fixedSize()
-                            .foregroundStyle(Color.tronTextSecondary)
+                        Text(detail).font(SessionSummaryTypography.usageValue).fixedSize()
+                            .foregroundStyle(Color.tronTextPrimary)
                     }
                     VStack(alignment: .leading, spacing: 4) {
                         Text(headline).font(SessionSummaryTypography.headline)
-                        Text(detail).font(SessionSummaryTypography.value)
-                            .foregroundStyle(Color.tronTextSecondary)
+                        Text(detail).font(SessionSummaryTypography.detail)
+                            .foregroundStyle(Color.tronTextPrimary)
                     }
                     .fixedSize(horizontal: false, vertical: true)
                 }
@@ -158,9 +208,12 @@ struct SessionContextUsageCard: View {
                 .multilineTextAlignment(.center)
                 .minimumScaleFactor(0.75)
             Text(label)
-                .font(SessionSummaryTypography.detail)
-                .foregroundStyle(Color.tronTextSecondary)
+                .font(SessionSummaryTypography.metricLabel)
+                .lineLimit(1)
+                .multilineTextAlignment(.center)
+                .minimumScaleFactor(0.75)
         }
+        .foregroundStyle(Color.tronTextSecondary)
         .frame(maxWidth: .infinity, minHeight: 42)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(label): \(value)")

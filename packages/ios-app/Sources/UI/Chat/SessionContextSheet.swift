@@ -73,7 +73,7 @@ enum SessionExportPresentationPolicy {
     }
 
     static func title(for format: String) -> String {
-        format == "jsonl" ? "JSONL Export" : "HTML Export"
+        format == "jsonl" ? "Export as JSON" : "Export as HTML"
     }
 }
 
@@ -519,7 +519,7 @@ struct SessionContextSheet: View {
     }
 
     private func sessionSection(_ snapshot: SessionContextPresentation) -> some View {
-        TronSettingsGroup("Session", detail: snapshot.cwd, detailInline: true, accent: .tronCyan) {
+        TronGlassCard(accent: .tronCyan) {
             VStack(spacing: 0) {
                 gitRow
                 divider()
@@ -559,7 +559,7 @@ struct SessionContextSheet: View {
     }
 
     private var exportSection: some View {
-        TronSettingsGroup("Exports", accent: exportRowAccent) {
+        TronGlassCard(accent: exportRowAccent) {
             VStack(spacing: 0) {
                 exportRow(
                     format: "html",
@@ -584,51 +584,7 @@ struct SessionContextSheet: View {
 
     private var gitRow: some View {
         Button { destination = .workspace } label: {
-            Group {
-                switch workspacePresentation {
-                case .loading:
-                    TronSettingsRow(
-                        icon: "arrow.triangle.branch",
-                        title: "Current Branch",
-                        subtitle: "Checking workspace…",
-                        subtitleRole: .dynamicValue,
-                        accent: sessionRowAccent
-                    ) {
-                        TronPulseLoadingIndicator(size: 18)
-                    }
-                case .notRepository:
-                    TronSettingsRow(icon: "folder", title: "Current Branch", subtitle: "Browse workspace files", accent: sessionRowAccent) {
-                        Text("No Git").font(TronTypography.sans(size: TronTypography.sizeCaption + SessionSummaryTypography.metadataSizeAdjustment)).foregroundStyle(Color.tronTextSecondary)
-                    }
-                case .loaded(let branch, let dirty, let changeCount):
-                    let workingTreeStatus = dirty
-                        ? "\(changeCount) uncommitted \(changeCount == 1 ? "change" : "changes")"
-                        : "Working tree clean"
-                    TronSettingsRow(
-                        icon: "arrow.triangle.branch",
-                        title: "Current Branch",
-                        subtitle: workingTreeStatus,
-                        subtitleRole: .dynamicValue,
-                        subtitleLineLimit: 1,
-                        accent: sessionRowAccent
-                    ) {
-                        Text(branch)
-                            .font(TronTypography.code(size: TronTypography.sizeBody2 + SessionSummaryTypography.metadataSizeAdjustment))
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .lineLimit(1)
-                    }
-                case .failed:
-                    TronSettingsRow(
-                        icon: "exclamationmark.triangle",
-                        title: "Current Branch",
-                        subtitle: "Tap to retry workspace inspection",
-                        subtitleRole: .dynamicValue,
-                        accent: sessionRowAccent
-                    ) {
-                        Text("Unavailable").font(TronTypography.sans(size: TronTypography.sizeCaption + SessionSummaryTypography.metadataSizeAdjustment)).foregroundStyle(Color.tronTextSecondary)
-                    }
-                }
-            }
+            SessionWorkspaceSummaryRow(presentation: workspacePresentation, accent: sessionRowAccent)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Current Branch and Workspace")

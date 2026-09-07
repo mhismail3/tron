@@ -346,7 +346,7 @@ struct SessionTreeSheet: View {
 
     private func runtimeStatistics(_ snapshot: SessionSnapshot) -> some View {
         Text("\(snapshot.stats.totalMessages.formatted()) messages · \(snapshot.stats.toolCalls.formatted()) tool calls")
-            .font(TronTypography.secondaryCodeDescription)
+            .font(TronTypography.secondaryDescription)
             .foregroundStyle(Color.tronTextSecondary)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
@@ -560,7 +560,7 @@ private struct TreeNodeRow: View {
                             if node.childCount > 1 { Text("\(node.childCount) branches") }
                             Text(row.relativeTimestamp)
                         }
-                        .font(TronTypography.secondaryCodeDescription)
+                        .font(TronTypography.secondaryDescription)
                         .foregroundStyle(Color.tronTextMuted)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -144,8 +144,8 @@ struct ChatCompactPillTests {
         #expect(!SessionExportPresentationPolicy.canStart(activeFormat: "html"))
         #expect(SessionExportPresentationPolicy.showsProgress(rowFormat: "html", activeFormat: "html"))
         #expect(!SessionExportPresentationPolicy.showsProgress(rowFormat: "jsonl", activeFormat: "html"))
-        #expect(SessionExportPresentationPolicy.title(for: "html") == "HTML Export")
-        #expect(SessionExportPresentationPolicy.title(for: "jsonl") == "JSONL Export")
+        #expect(SessionExportPresentationPolicy.title(for: "html") == "Export as HTML")
+        #expect(SessionExportPresentationPolicy.title(for: "jsonl") == "Export as JSON")
     }
 
     @Test("Manage Session workspace row preserves branch, detached, and change evidence")

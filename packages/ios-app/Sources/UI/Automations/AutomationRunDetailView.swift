@@ -126,7 +126,7 @@ struct AutomationRunDetailView: View {
                         .font(TronTypography.headline)
                         .foregroundStyle(Color.tronTextPrimary)
                     Text("Run \(run.runId)")
-                        .font(TronTypography.secondaryCodeDescription)
+                        .font(TronTypography.secondaryDescription)
                         .foregroundStyle(Color.tronTextMuted)
                         .lineLimit(1)
                         .truncationMode(.middle)

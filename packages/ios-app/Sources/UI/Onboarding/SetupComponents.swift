@@ -87,7 +87,7 @@ struct ProviderSetupRow: View {
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(1)
                 Text(ProviderConfigurationPresentation.connectionDetail(for: provider))
-                    .font(TronTypography.secondaryCodeDescription)
+                    .font(TronTypography.secondaryDescription)
                     .foregroundStyle(Color.tronTextSecondary)
                     .lineLimit(1)
             }
@@ -222,7 +222,6 @@ private struct ProviderConfigurationSheet: View {
                         icon: provider.configured ? "checkmark.seal.fill" : "key",
                         title: provider.configured ? "Connected" : "Not Configured",
                         subtitle: ProviderConfigurationPresentation.configurationDetail(for: provider),
-                        subtitleRole: .dynamicValue,
                         accent: provider.configured ? .tronEmerald : .tronSlate
                     )
                 }

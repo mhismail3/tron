@@ -451,7 +451,6 @@ struct AutomationFormView: View {
                     icon: "timer",
                     title: "Deadline",
                     subtitle: "\(deadlineMinutes) minutes",
-                    subtitleRole: .dynamicValue,
                     accent: .tronAutomation
                 ) {
                     Stepper("Deadline", value: $deadlineMinutes, in: 5...1_440, step: 5)
@@ -626,7 +625,6 @@ struct AutomationFormView: View {
                 icon: "repeat",
                 title: "Interval",
                 subtitle: "Every \(intervalAmount) \(intervalUnit.rawValue.lowercased())",
-                subtitleRole: .dynamicValue,
                 accent: .tronAutomation
             ) {
                 Stepper(

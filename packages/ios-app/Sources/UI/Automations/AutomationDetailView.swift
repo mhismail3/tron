@@ -260,7 +260,7 @@ struct AutomationDetailView: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                 Text(AutomationDateFormatting.date(run.scheduledFor))
-                    .font(TronTypography.secondaryCodeDescription)
+                    .font(TronTypography.secondaryDescription)
                     .foregroundStyle(Color.tronTextMuted)
             }
             Spacer(minLength: TronSpacing.md)

@@ -38,10 +38,10 @@ enum TronTypography {
     static var subheadline: Font { sans(size: sizeBody) }
     static var body: Font { sans(size: sizeBody) }
     static var bodySM: Font { sans(size: sizeBodySM) }
-    /// Stable explanatory copy and labels use the selected reading family.
+    /// Left-aligned secondary copy uses the selected reading family, including
+    /// live state and selections. Monospace is reserved for trailing values.
     static var secondaryDescription: Font { sans(size: sizeSecondary) }
-    /// Live or user-selectable values use the selected code family so state is
-    /// visually distinct from stable explanatory copy.
+    /// Right-aligned values use the selected code family.
     static var secondaryCodeDescription: Font { code(size: sizeSecondary) }
     /// Shared section-label treatment used by every sheet and settings group.
     static var sheetSectionHeader: Font { sans(size: sizeBodySM, weight: .semibold) }
@@ -1186,8 +1186,6 @@ enum TronSettingsGroupSurfaceStyle: Equatable, Sendable {
 struct TronSettingsGroup<Content: View>: View {
     let title: String
     let detail: String?
-    let detailRole: TronSettingsSecondaryRole
-    let detailInline: Bool
     let accent: Color
     let surfaceStyle: TronSettingsGroupSurfaceStyle
     let content: Content
@@ -1197,16 +1195,12 @@ struct TronSettingsGroup<Content: View>: View {
     init(
         _ title: String,
         detail: String? = nil,
-        detailRole: TronSettingsSecondaryRole = .informational,
-        detailInline: Bool = false,
         accent: Color = .tronEmerald,
         surfaceStyle: TronSettingsGroupSurfaceStyle = .glass,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.detail = detail
-        self.detailRole = detailRole
-        self.detailInline = detailInline
         self.accent = accent
         self.surfaceStyle = surfaceStyle
         self.content = content()
@@ -1214,34 +1208,16 @@ struct TronSettingsGroup<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
-            if detailInline, let detail {
-                HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
-                    Text(title)
-                        .font(TronTypography.sheetSectionHeader)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .accessibilityAddTraits(.isHeader)
-                    Spacer(minLength: TronSpacing.sm)
+            VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                Text(title)
+                    .font(TronTypography.sheetSectionHeader)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .accessibilityAddTraits(.isHeader)
+                if let detail {
                     Text(detail)
-                        .font(detailRole.font(sizeAdjustment: secondaryTextSizeAdjustment))
+                        .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
                         .foregroundStyle(Color.tronTextMuted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .multilineTextAlignment(.trailing)
-                        .minimumScaleFactor(0.7)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                    Text(title)
-                        .font(TronTypography.sheetSectionHeader)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .accessibilityAddTraits(.isHeader)
-                    if let detail {
-                        Text(detail)
-                            .font(detailRole.font(sizeAdjustment: secondaryTextSizeAdjustment))
-                            .foregroundStyle(Color.tronTextMuted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             switch surfaceStyle {
@@ -1257,27 +1233,10 @@ struct TronSettingsGroup<Content: View>: View {
     }
 }
 
-enum TronSettingsSecondaryRole: Equatable, Sendable {
-    /// Stable explanation or identity that does not change relative to its row.
-    case informational
-    /// Live state or a user-selectable setting value.
-    case dynamicValue
-
-    @MainActor var font: Font { font(sizeAdjustment: 0) }
-
-    @MainActor func font(sizeAdjustment: CGFloat) -> Font {
-        switch self {
-        case .informational: TronTypography.sans(size: TronTypography.sizeSecondary + sizeAdjustment)
-        case .dynamicValue: TronTypography.code(size: TronTypography.sizeSecondary + sizeAdjustment)
-        }
-    }
-}
-
 struct TronSettingsRow<Trailing: View>: View {
     let icon: String
     let title: String
     let subtitle: String?
-    let subtitleRole: TronSettingsSecondaryRole
     let subtitleLineLimit: Int?
     let accent: Color
     let titleFont: Font
@@ -1293,7 +1252,6 @@ struct TronSettingsRow<Trailing: View>: View {
         icon: String,
         title: String,
         subtitle: String? = nil,
-        subtitleRole: TronSettingsSecondaryRole = .informational,
         subtitleLineLimit: Int? = nil,
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
@@ -1304,7 +1262,6 @@ struct TronSettingsRow<Trailing: View>: View {
         self.icon = icon
         self.title = title
         self.subtitle = subtitle
-        self.subtitleRole = subtitleRole
         self.subtitleLineLimit = subtitleLineLimit
         self.accent = accent
         self.titleFont = titleFont
@@ -1337,7 +1294,7 @@ struct TronSettingsRow<Trailing: View>: View {
                         .fixedSize(horizontal: false, vertical: true)
                     if let subtitle {
                         Text(subtitle)
-                            .font(subtitleRole.font(sizeAdjustment: secondaryTextSizeAdjustment))
+                            .font(TronTypography.sans(size: TronTypography.sizeSecondary + secondaryTextSizeAdjustment))
                             .foregroundStyle(subtitleColor)
                             .lineLimit(subtitleLineLimit)
                             .truncationMode(.tail)
@@ -1363,7 +1320,6 @@ extension TronSettingsRow where Trailing == EmptyView {
         icon: String,
         title: String,
         subtitle: String? = nil,
-        subtitleRole: TronSettingsSecondaryRole = .informational,
         subtitleLineLimit: Int? = nil,
         accent: Color = .tronEmerald,
         titleFont: Font = TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold),
@@ -1374,7 +1330,6 @@ extension TronSettingsRow where Trailing == EmptyView {
             icon: icon,
             title: title,
             subtitle: subtitle,
-            subtitleRole: subtitleRole,
             subtitleLineLimit: subtitleLineLimit,
             accent: accent,
             titleFont: titleFont,
@@ -1440,13 +1395,6 @@ enum TronSettingsValuePlacement: Equatable, Sendable {
 enum TronSettingsRowSemantics {
     static func valuePlacement(hasTrailingControl: Bool) -> TronSettingsValuePlacement {
         hasTrailingControl ? .secondaryLine : .trailing
-    }
-
-    static func secondaryRole(
-        value: String?,
-        placement: TronSettingsValuePlacement
-    ) -> TronSettingsSecondaryRole {
-        placement == .secondaryLine && value != nil ? .dynamicValue : .informational
     }
 }
 
@@ -1519,10 +1467,6 @@ struct TronValueRow<Trailing: View>: View {
         }
     }
 
-    private var secondaryRole: TronSettingsSecondaryRole {
-        TronSettingsRowSemantics.secondaryRole(value: value, placement: valuePlacement)
-    }
-
     var body: some View {
         HStack(alignment: .center, spacing: TronSpacing.xl) {
             Image(systemName: icon)
@@ -1537,7 +1481,7 @@ struct TronValueRow<Trailing: View>: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if let secondaryText, !secondaryText.isEmpty {
                     Text(secondaryText)
-                        .font(secondaryRole.font)
+                        .font(TronTypography.secondaryDescription)
                         .foregroundStyle(Color.tronTextPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
