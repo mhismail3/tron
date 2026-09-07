@@ -285,6 +285,7 @@ struct ToolDetailPresentationTests {
         ])
         let diff = try #require(ToolDiffPresentation.make(request: request, response: response))
         #expect(diff.sourceLabel == "Applied diff")
+        #expect(diff.lineCounts == ToolDiffLineCounts(additions: 1, removals: 1))
         #expect(diff.lines.contains { $0.kind == .removal && $0.text == "old" })
         #expect(diff.lines.contains { $0.kind == .addition && $0.text == "settled" })
         #expect(!diff.lines.contains { $0.kind == .addition && $0.text == "new" })
@@ -300,6 +301,67 @@ struct ToolDetailPresentationTests {
         #expect(diff.requestedChangeCount == nil)
         #expect(diff.lines.contains { $0.kind == .removal && $0.text == "old" })
         #expect(diff.lines.contains { $0.kind == .addition && $0.text == "new" })
+    }
+
+    @Test("diff counts exclude file metadata and unchanged lines", arguments: ["\n", "\r\n"])
+    func diffLineCounts(newline: String) throws {
+        let lines = [
+            "diff --git a/first b/first", "index 111..222 100644", "--- a/first", "+++ b/first",
+            "@@ -1,3 +1,4 @@", " context", "-old", "+new", "+extra", " +unchanged prefix",
+            "\\ No newline at end of file",
+            "diff --git a/second b/second", "--- a/second", "+++ /dev/null", "@@ -1 +0,0 @@", "-removed file",
+        ]
+        let diff = try #require(ToolDiffPresentation.make(unifiedPatch: lines.joined(separator: newline) + newline))
+        #expect(diff.lineCounts == ToolDiffLineCounts(additions: 2, removals: 2))
+        #expect(!diff.sourceIsTruncated)
+    }
+
+    @Test("diff totals include changes hidden by both preview densities")
+    func hiddenDiffLineCounts() throws {
+        let contextHead = (0..<260).map { " context \($0)" }
+        let removals = (0..<80).map { "-old \($0)" }
+        let additions = (0..<120).map { "+new \($0)" }
+        let contextTail = (0..<140).map { " context tail \($0)" }
+        let patch = (["@@ -1,480 +1,520 @@"] + contextHead + removals + additions + contextTail).joined(separator: "\n")
+        let diff = try #require(ToolDiffPresentation.make(unifiedPatch: patch))
+        #expect(diff.lineCounts == ToolDiffLineCounts(additions: 120, removals: 80))
+        for density: ToolDetailDisplayDensity in [.glance, .expanded] {
+            #expect(!diff.visibleLines(for: density).contains { $0.kind == .addition || $0.kind == .removal })
+        }
+        #expect(!diff.sourceIsTruncated, "Local row omission does not make full-source counts partial")
+    }
+
+    @Test("requested block counts preserve blank lines without inventing a line after the final newline", arguments: ["\n", "\r\n"])
+    func requestedBlockLineCounts(newline: String) throws {
+        let request: JSONValue = .object(["edits": .array([
+            .object(["oldText": .string("old" + newline), "newText": .string("one" + newline + newline + "three" + newline)]),
+            .object(["oldText": .string(newline), "newText": .string("")]),
+        ])])
+        let diff = try #require(ToolDiffPresentation.make(request: request, response: nil))
+        #expect(diff.lineCounts == ToolDiffLineCounts(additions: 3, removals: 2))
+        #expect(diff.lines.filter { $0.kind == .addition }.map(\.text) == ["one", "", "three"])
+        #expect(diff.lines.filter { $0.kind == .removal }.map(\.text) == ["old", ""])
+    }
+
+    @Test("partial counts follow the source actually used for the displayed diff")
+    func partialDiffCounts() throws {
+        let patch = "@@ -1 +1 @@\n-old\n+new"
+        let workspace = try #require(ToolDiffPresentation.make(unifiedPatch: patch, sourceIsTruncated: true))
+        #expect(workspace.sourceIsTruncated)
+        #expect(workspace.lineCounts == ToolDiffLineCounts(additions: 1, removals: 1))
+        let request: JSONValue = .object(["edits": .array([
+            .object(["oldText": .string("a\nb"), "newText": .string("c\nd\ne")]),
+        ])])
+        let applied = try #require(ToolDetailPresentation(tool: tool(
+            "edit", request: request, response: .object(["patch": .string(patch)]), outputTruncated: true
+        )).diff)
+        #expect(applied.sourceIsTruncated)
+        #expect(applied.lineCounts == ToolDiffLineCounts(additions: 1, removals: 1), "Returned diff wins over requested block sizes")
+        let requested = try #require(ToolDetailPresentation(tool: tool(
+            "edit", request: request, outputTruncated: true
+        )).diff)
+        #expect(!requested.sourceIsTruncated, "Truncated output does not truncate exact request blocks")
+        #expect(requested.lineCounts == ToolDiffLineCounts(additions: 3, removals: 2))
     }
 
     @Test("authoritative patch admission is exact and fails closed")
@@ -340,6 +402,7 @@ struct ToolDetailPresentationTests {
                 + "--- a/second\n+++ b/second\n@@ -1 +1 @@\n-before\n+after"
         )
         #expect(headerLightMultiFile.diffUnitCount == nil)
+        #expect(headerLightMultiFile.lineCounts == nil)
         #expect(!headerLightMultiFile.showsInline)
         #expect(headerLightMultiFile.lines.contains { $0.kind == .removal && $0.text == "-- a/second" })
         #expect(headerLightMultiFile.lines.contains { $0.kind == .addition && $0.text == "++ b/second" })
@@ -348,6 +411,7 @@ struct ToolDetailPresentationTests {
             "diff --cc file\nindex 111,222..333\n--- a/file\n+++ b/file\n@@@ -1,1 -1,1 +1,1 @@@\n-old\n+new"
         )
         #expect(combined.diffUnitCount == nil)
+        #expect(combined.lineCounts == nil)
         #expect(!combined.showsInline)
 
         for malformedHeader in ["@@ -x +1 @@", "@@ -1 +1"] {
@@ -355,12 +419,14 @@ struct ToolDetailPresentationTests {
                 "diff --git a/file b/file\n--- a/file\n+++ b/file\n\(malformedHeader)\n-old\n+new"
             )
             #expect(malformed.diffUnitCount == nil)
+            #expect(malformed.lineCounts == nil)
             #expect(!malformed.showsInline)
         }
 
         let headerOnly = try diff("diff --git a/file b/file\n--- a/file\n+++ b/file")
         #expect(headerOnly.diffUnitCount == 1)
         #expect(!headerOnly.hasChangeContent)
+        #expect(headerOnly.lineCounts == ToolDiffLineCounts(additions: 0, removals: 0))
         #expect(!headerOnly.showsInline)
 
         let multipleRequest: JSONValue = .object(["edits": .array([
@@ -428,6 +494,7 @@ struct ToolDetailPresentationTests {
             response: nil
         ))
         #expect(insertion.lines.filter { $0.kind == .removal }.isEmpty)
+        #expect(insertion.lineCounts == ToolDiffLineCounts(additions: 3, removals: 0))
         #expect(insertion.lines.filter { $0.kind == .addition }.map(\.text) == ["first", "", "third"])
 
         let deletion = try #require(ToolDiffPresentation.make(
@@ -438,6 +505,7 @@ struct ToolDetailPresentationTests {
             response: nil
         ))
         #expect(deletion.lines.filter { $0.kind == .addition }.isEmpty)
+        #expect(deletion.lineCounts == ToolDiffLineCounts(additions: 0, removals: 3))
         #expect(deletion.lines.filter { $0.kind == .removal }.map(\.text) == ["first", "", "third"])
     }
 
@@ -507,6 +575,7 @@ struct ToolDetailPresentationTests {
         ))
         #expect(diff.lines.count == ToolDiffPresentation.maximumVisibleLines)
         #expect(diff.totalLineCount == 20_000)
+        #expect(diff.lineCounts == ToolDiffLineCounts(additions: 20_000, removals: 0))
         let omitted = diff.lines.compactMap { line -> Int? in
             guard case .omitted(let count) = line.kind else { return nil }
             return count

@@ -10,6 +10,7 @@ struct ToolChangesSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     ToolChipFlowLayout(spacing: 7) {
+                        ToolDiffCountChip(diff: diff)
                         if let count = diff.requestedChangeCount {
                             ToolStaticChip(
                                 icon: "pencil",
@@ -51,6 +52,46 @@ struct ToolChangesSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tronPresentation()
+    }
+}
+
+/// One count pill for Git diffs, edit details, and their expanded Changes sheet.
+/// The presentation owns totals; this must not recount a shortened row array.
+struct ToolDiffCountChip: View {
+    let diff: ToolDiffPresentation
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let counts = diff.lineCounts {
+                Text("+\(counts.additions.formatted())")
+                    .foregroundStyle(Color.tronEmerald)
+                Text("−\(counts.removals.formatted())")
+                    .foregroundStyle(Color.tronError)
+                if diff.sourceIsTruncated {
+                    Text("Partial")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextMuted)
+                }
+            } else {
+                Text("Line counts unavailable")
+                    .font(TronTypography.caption)
+                    .foregroundStyle(Color.tronTextMuted)
+            }
+        }
+        .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold))
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .glassEffect(.regular.tint(Color.tronSlate.opacity(0.09)), in: Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
+    }
+
+    private var accessibilitySummary: String {
+        guard let counts = diff.lineCounts else { return "Line counts unavailable for this diff" }
+        let summary = "\(counts.additions.formatted()) lines added, \(counts.removals.formatted()) lines removed"
+        return "\(diff.sourceLabel): \(summary)" + (diff.sourceIsTruncated ? ". Partial diff; totals may be higher." : "")
     }
 }
 

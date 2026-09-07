@@ -24,6 +24,29 @@ final class SessionSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testEditDetailsAndExpandedChangesShowDiffCountMetadata() async throws {
+        let tool = ChatToolPresentation(
+            id: "diff-count-fixture", title: "edit", subtitle: "Completed",
+            request: .object(["path": .string("file.swift"), "edits": .array([
+                .object(["oldText": .string("old"), "newText": .string("new\nextra")]),
+            ])]),
+            response: .object(["patch": .string("--- a/file.swift\n+++ b/file.swift\n@@ -1 +1,2 @@\n-old\n+new\n+extra")]),
+            content: "Updated file.swift", fallbackContent: nil, error: false,
+            startedAt: nil, completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil
+        )
+        let diff = try XCTUnwrap(ToolDetailPresentation(tool: tool).diff)
+        for scheme: ColorScheme in [.light, .dark] {
+            try await withSheet(ToolChangesSheet(diff: diff, accent: .tronEmerald).preferredColorScheme(scheme)) { controller in
+                self.capture(controller, name: "changes-sheet-counts-\(scheme)")
+            }
+            try await withSheet(TronDocumentSheet(title: "Edit file") {
+                ToolDetailSheet(tool: tool, density: .glance)
+            }.preferredColorScheme(scheme)) { controller in
+                self.capture(controller, name: "edit-detail-counts-\(scheme)")
+            }
+        }
+    }
+
     func testInstructionsOpenAsALargeDocumentWithCustomBlurAndNoBottomToolbar() async throws {
         try await withModel { model in
             try await self.withSheet(AgentInstructionsSheet(sessionID: "document-fixture").environment(model)) { controller in

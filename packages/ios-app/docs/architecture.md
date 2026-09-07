@@ -1409,7 +1409,16 @@ appearing inline. Multiple or uncertain changes fail closed to a dedicated Chang
 crowding the primary sheet or claiming a false count. Its diff container keeps the existing scroll behavior but
 uses the static scroll-optimized tinted surface instead of Liquid Glass. Compact and expanded lines share bounded source-derived
 identities; their omission rows carry distinct range identities so a rolling tail never reuses an identity for
-different visible content. Diff preparation retains only bounded head/tail lines in circular tail storage,
+different visible content. Git working-tree and historical file diffs, edit-tool metadata, and the expanded Changes
+sheet share `ToolDiffCountChip`: green `+` additions and red `−` removals in one metadata capsule. Counts belong
+to the specific admitted diff, not the commit or workspace, and are accumulated before local head/tail omission;
+changing display density cannot change them. Returned patches win over requested old/new blocks, whose counts
+remain explicitly requested-source evidence rather than proof of applied changes. Headers/context are excluded,
+CRLF is recognized, and a terminating newline does not fabricate another changed line. Gateway-truncated sources
+show a Partial qualifier; malformed/combined hunks or ambiguous file headers show counts unavailable rather than
+inventing totals. Binary/absent diffs keep their existing non-text states. `ToolDetailPresentationTests` protects
+count scope and omission boundaries; native summary/sheet tests cover the shared pill's colors, fit, and placement.
+Diff preparation retains only bounded head/tail lines in circular tail storage,
 bounds individual rendered line width, and marks every omitted line or character while the untouched payload remains available under
 the final Technical details row. Empty edit sides represent pure insertions/deletions; blank rows are retained
 only when a nonempty source value actually contains them. The tool-run row owns an open detail route and its

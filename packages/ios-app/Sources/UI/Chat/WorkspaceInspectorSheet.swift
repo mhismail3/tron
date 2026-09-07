@@ -653,7 +653,7 @@ struct WorkspaceInspectorSheet: View {
             do {
                 let diff = try await model.workspaceInspection.diff(sessionID: sessionID, path: change.path, scope: scope)
                 let presentation = await Task.detached(priority: .userInitiated) {
-                    ToolDiffPresentation.make(unifiedPatch: diff.patch, sourceLabel: "Git diff")
+                    ToolDiffPresentation.make(unifiedPatch: diff.patch, sourceLabel: "Git diff", sourceIsTruncated: diff.truncated)
                 }.value
                 guard detailRequests.admits(generation) else { return }
                 diffRoute = WorkspaceDiffRoute(diff: diff, presentation: presentation)
@@ -753,6 +753,7 @@ private struct WorkspaceGitDiffSheet: View {
                 } else if let presentation = route.presentation {
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(alignment: .leading, spacing: 12) {
+                            ToolDiffCountChip(diff: presentation)
                             if route.diff.truncated {
                                 TronInfoCard(icon: "text.badge.ellipsis", text: "The diff exceeded the bounded preview and was truncated.", accent: .tronAmber)
                             }
@@ -887,7 +888,7 @@ private struct WorkspaceCommitDetailSheet: View {
                     path: change.path
                 )
                 let presentation = await Task.detached(priority: .userInitiated) {
-                    ToolDiffPresentation.make(unifiedPatch: diff.patch, sourceLabel: "Commit diff")
+                    ToolDiffPresentation.make(unifiedPatch: diff.patch, sourceLabel: "Commit diff", sourceIsTruncated: diff.truncated)
                 }.value
                 guard detailRequests.admits(generation) else { return }
                 diffRoute = WorkspaceDiffRoute(diff: diff, presentation: presentation)

@@ -189,6 +189,11 @@ struct ToolDiffLine: Hashable, Sendable, Identifiable {
     let text: String
 }
 
+struct ToolDiffLineCounts: Hashable, Sendable {
+    let additions: Int
+    let removals: Int
+}
+
 struct ToolDiffPresentation: Hashable, Sendable {
     static let maximumVisibleLines = 360
     static let retainedHeadLines = 240
@@ -202,6 +207,8 @@ struct ToolDiffPresentation: Hashable, Sendable {
     let compactLines: [ToolDiffLine]
     let sourceLabel: String
     let totalLineCount: Int
+    let lineCounts: ToolDiffLineCounts?
+    let sourceIsTruncated: Bool
     let requestedChangeCount: Int?
     let diffUnitCount: Int?
     let hasChangeContent: Bool
@@ -226,31 +233,36 @@ struct ToolDiffPresentation: Hashable, Sendable {
 
     static func make(
         unifiedPatch patch: String,
-        sourceLabel: String = "Current diff"
+        sourceLabel: String = "Current diff",
+        sourceIsTruncated: Bool = false
     ) -> ToolDiffPresentation? {
         guard !patch.isEmpty else { return nil }
         var accumulator = DiffAccumulator()
         var classifier = PatchLineClassifier()
-        BoundedLineScanner.scan(patch, maximumCharacters: maximumRenderedLineCharacters) { line in
+        BoundedLineScanner.scan(patch, maximumCharacters: maximumRenderedLineCharacters, preserveTrailingEmptyLine: false) { line in
             accumulator.append(classifier.classify(line.text))
         }
         return accumulator.presentation(
             sourceLabel: sourceLabel,
             requestedChangeCount: nil,
             diffUnitCount: classifier.exactDiffUnitCount,
-            hasChangeContent: classifier.hasChangeContent
+            hasChangeContent: classifier.hasChangeContent,
+            countsAvailable: classifier.hasReliableLineKinds,
+            sourceIsTruncated: sourceIsTruncated
         )
     }
 
-    static func make(request: JSONValue?, response: JSONValue?) -> ToolDiffPresentation? {
+    static func make(request: JSONValue?, response: JSONValue?, responseIsTruncated: Bool = false) -> ToolDiffPresentation? {
         let requestedCount = exactRequestedChangeCount(in: request)
         if let patch = authoritativePatch(in: response), !patch.isEmpty,
-           var presentation = make(unifiedPatch: patch, sourceLabel: "Applied diff") {
+           var presentation = make(unifiedPatch: patch, sourceLabel: "Applied diff", sourceIsTruncated: responseIsTruncated) {
             presentation = ToolDiffPresentation(
                 lines: presentation.lines,
                 compactLines: presentation.compactLines,
                 sourceLabel: presentation.sourceLabel,
                 totalLineCount: presentation.totalLineCount,
+                lineCounts: presentation.lineCounts,
+                sourceIsTruncated: presentation.sourceIsTruncated,
                 requestedChangeCount: requestedCount,
                 diffUnitCount: presentation.diffUnitCount,
                 hasChangeContent: presentation.hasChangeContent
@@ -267,12 +279,12 @@ struct ToolDiffPresentation: Hashable, Sendable {
                   let newText = object["newText"]?.stringValue else { return nil }
             accumulator.append((.hunk, "Change \(index + 1)"))
             if !oldText.isEmpty {
-                BoundedLineScanner.scan(oldText, maximumCharacters: maximumRenderedLineCharacters) { line in
+                BoundedLineScanner.scan(oldText, maximumCharacters: maximumRenderedLineCharacters, preserveTrailingEmptyLine: false) { line in
                     accumulator.append((.removal, line.text))
                 }
             }
             if !newText.isEmpty {
-                BoundedLineScanner.scan(newText, maximumCharacters: maximumRenderedLineCharacters) { line in
+                BoundedLineScanner.scan(newText, maximumCharacters: maximumRenderedLineCharacters, preserveTrailingEmptyLine: false) { line in
                     accumulator.append((.addition, line.text))
                 }
             }
@@ -313,6 +325,10 @@ struct ToolDiffPresentation: Hashable, Sendable {
         private var hunkCount = 0
         private var hasInvalidUnitEvidence = false
         private(set) var hasChangeContent = false
+
+        // Combined/malformed hunks and ambiguous file headers cannot provide
+        // trustworthy +/- totals even though their source remains readable.
+        var hasReliableLineKinds: Bool { !hasInvalidUnitEvidence }
 
         var exactDiffUnitCount: Int? {
             guard !hasInvalidUnitEvidence else { return nil }
@@ -426,10 +442,16 @@ struct ToolDiffPresentation: Hashable, Sendable {
         private var compactSemanticCount = 0
         private(set) var totalCount = 0
         private(set) var hasChangeContent = false
+        private var additions = 0
+        private var removals = 0
 
         mutating func append(_ line: (ToolDiffLineKind, String)) {
             let sourceLine = SourceLine(sourceIndex: totalCount, kind: line.0, text: line.1)
             totalCount += 1
+            // Count the admitted source before head/tail retention discards
+            // rows; expanding the sheet must never change the totals.
+            if line.0 == .addition { additions += 1 }
+            if line.0 == .removal { removals += 1 }
             if line.0 == .addition || line.0 == .removal { hasChangeContent = true }
             if case .metadata = line.0 {
                 // File headers remain available in the expanded/full diff but
@@ -453,7 +475,9 @@ struct ToolDiffPresentation: Hashable, Sendable {
             sourceLabel: String,
             requestedChangeCount: Int?,
             diffUnitCount: Int?,
-            hasChangeContent: Bool
+            hasChangeContent: Bool,
+            countsAvailable: Bool = true,
+            sourceIsTruncated: Bool = false
         ) -> ToolDiffPresentation {
             let orderedTail = tail.orderedElements
             let maximumUnomittedLines = ToolDiffPresentation.retainedHeadLines
@@ -478,6 +502,8 @@ struct ToolDiffPresentation: Hashable, Sendable {
                 compactLines: compactPresentation(),
                 sourceLabel: sourceLabel,
                 totalLineCount: totalCount,
+                lineCounts: countsAvailable ? ToolDiffLineCounts(additions: additions, removals: removals) : nil,
+                sourceIsTruncated: sourceIsTruncated,
                 requestedChangeCount: requestedChangeCount,
                 diffUnitCount: diffUnitCount,
                 hasChangeContent: hasChangeContent
@@ -534,6 +560,7 @@ private enum BoundedLineScanner {
     static func scan(
         _ source: String,
         maximumCharacters: Int,
+        preserveTrailingEmptyLine: Bool = true,
         consume: (BoundedLine) -> Void
     ) {
         var retained = ""
@@ -569,7 +596,7 @@ private enum BoundedLineScanner {
         }
 
         for character in source {
-            if character == "\n" {
+            if character == "\n" || character == "\r\n" {
                 emit()
                 retained.removeAll(keepingCapacity: true)
                 retainedCharacterCount = 0
@@ -582,7 +609,9 @@ private enum BoundedLineScanner {
                 }
             }
         }
-        emit()
+        // A final newline terminates a diff line, rather than adding a blank
+        // change. Plain text previews still preserve that terminal separator.
+        if characterCount > 0 || preserveTrailingEmptyLine { emit() }
     }
 }
 
@@ -621,7 +650,9 @@ struct ToolDetailPresentation: Hashable, Sendable {
         }
 
         metadata = Self.metadata(kind: kind, request: request)
-        diff = kind == .edit ? ToolDiffPresentation.make(request: tool.request, response: tool.response) : nil
+        diff = kind == .edit ? ToolDiffPresentation.make(
+            request: tool.request, response: tool.response, responseIsTruncated: tool.outputTruncated
+        ) : nil
         readableResult = Self.readableResult(tool: tool)
         readableResultPreview = readableResult.map(ToolTextPreview.make)
         structuredResult = Self.structuredResult(tool: tool, readableResult: readableResult)

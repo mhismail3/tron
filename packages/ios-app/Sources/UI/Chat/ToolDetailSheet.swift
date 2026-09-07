@@ -57,6 +57,9 @@ struct ToolDetailSheet: View {
             ForEach(presentation.metadata) { item in
                 ToolMetadataChip(item: item)
             }
+            if let diff = presentation.diff {
+                ToolDiffCountChip(diff: diff)
+            }
             if tool.outputTruncated {
                 ToolStaticChip(icon: "text.badge.minus", text: "Bounded output", accent: .tronAmber)
             }

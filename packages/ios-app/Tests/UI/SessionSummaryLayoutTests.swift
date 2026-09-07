@@ -29,6 +29,28 @@ final class SessionSummaryLayoutTests: XCTestCase {
         }
     }
 
+    func testDiffCountPillUsesGreenAndRedAndFitsNarrowMetadataFlow() async throws {
+        let patch = "@@ -1 +1,2 @@\n-old\n+new\n+extra"
+        let diff = try XCTUnwrap(ToolDiffPresentation.make(unifiedPatch: patch, sourceIsTruncated: true))
+        for scheme: ColorScheme in [.light, .dark] {
+            for typeSize: DynamicTypeSize in [.large, .accessibility3] {
+                let size = try await render(
+                    ToolChipFlowLayout(spacing: 7) {
+                        ToolDiffCountChip(diff: diff)
+                    }
+                    .environment(\.colorScheme, scheme)
+                    .environment(\.dynamicTypeSize, typeSize)
+                    .background(Color.tronBackground),
+                    width: 260, name: "diff-count-pill-\(scheme)-\(typeSize)",
+                    inspectImage: { image in self.assertDiffCountColors(image) }
+                )
+                XCTAssertGreaterThan(size.width, 0)
+                XCTAssertLessThanOrEqual(size.width, 260, "Intrinsic pills must fit, not fill, the available metadata width")
+                XCTAssertLessThan(size.height, 100, "The count pill must remain a compact metadata row")
+            }
+        }
+    }
+
     func testExtensionResourcePreviewDoesNotBecomeATallSourceContainer() async throws {
         let text = String(repeating: "Read the selected resource before continuing. ", count: 1_500)
         let preview = ComposerResourceContentPresentation.preview(text, source: .extension, sourceTruncated: true)
@@ -187,6 +209,26 @@ final class SessionSummaryLayoutTests: XCTestCase {
         // Serif captions and semibold monospace values share the same point scale.
         XCTAssertEqual(SessionSummaryTypography.metric, TronTypography.code(size: TronTypography.sizeSecondary + 0.5, weight: .semibold))
         XCTAssertEqual(SessionSummaryTypography.headline, TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
+    }
+
+    private func assertDiffCountColors(_ image: UIImage) {
+        guard let bitmap = image.cgImage else { return XCTFail("Diff counts must be rendered") }
+        var pixels = [UInt8](repeating: 0, count: bitmap.width * bitmap.height * 4)
+        pixels.withUnsafeMutableBytes { buffer in
+            let context = CGContext(data: buffer.baseAddress, width: bitmap.width, height: bitmap.height, bitsPerComponent: 8,
+                bytesPerRow: bitmap.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(bitmap, in: CGRect(x: 0, y: 0, width: bitmap.width, height: bitmap.height))
+        }
+        var greenPixels = 0
+        var redPixels = 0
+        for index in stride(from: 0, to: pixels.count, by: 4) where pixels[index + 3] > 230 {
+            let red = Int(pixels[index]), green = Int(pixels[index + 1]), blue = Int(pixels[index + 2])
+            if green > red + 25, green > blue + 15 { greenPixels += 1 }
+            if red > green + 25, red > blue + 25 { redPixels += 1 }
+        }
+        XCTAssertGreaterThan(greenPixels, 10, "Added-line text must be green")
+        XCTAssertGreaterThan(redPixels, 10, "Removed-line text must be red")
     }
 
     private func assertStatisticsUseSecondaryText(_ image: UIImage, scheme: ColorScheme) {
