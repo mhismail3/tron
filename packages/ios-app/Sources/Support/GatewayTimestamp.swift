@@ -29,6 +29,21 @@ enum GatewayTimestamp {
         date.formatted(wholeSeconds)
     }
 
+    static func preciseString(from date: Date) -> String {
+        date.formatted(fractional)
+    }
+
+    /// Compare parsed instants rather than ISO text. The textual tie-breaker
+    /// keeps retention deterministic for equal instants and malformed input.
+    static func isNewer(_ lhs: String, than rhs: String) -> Bool {
+        if let left = parse(lhs), let right = parse(rhs), left != right {
+            return left > right
+        }
+        if parse(lhs) != nil, parse(rhs) == nil { return true }
+        if parse(lhs) == nil, parse(rhs) != nil { return false }
+        return lhs > rhs
+    }
+
     static func relativeDescription(_ value: String, relativeTo reference: Date) -> String {
         guard let date = parse(value) else { return "" }
         return relative.string(for: date, relativeTo: reference)

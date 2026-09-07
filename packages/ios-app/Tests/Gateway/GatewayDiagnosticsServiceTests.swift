@@ -191,7 +191,7 @@ struct GatewayDiagnosticsServiceTests {
             timestamp: "2026-08-16T01:00:00Z"
         )
         #expect((buffer.records.first?.record.message.utf8.count ?? 0) <= 2_000)
-        #expect(buffer.records.first?.record.message.hasSuffix("…") == true)
+        #expect(buffer.records.first?.record.message == "code=invalid_response")
 
         buffer.record(
             invalid,
@@ -276,6 +276,75 @@ struct GatewayDiagnosticsServiceTests {
             await model.teardown()
             await client.close()
         }
+    }
+
+    @Test("incident retention is bounded and requires an injected owner")
+    func incidentRetentionIsBounded() async throws {
+        let suite = "GatewayDiagnosticsStore.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let store = IOSClientDiagnosticStore(defaults: defaults)
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let records = (0..<IOSClientDiagnosticStore.maximumRecords + 8).map { index in
+            GatewayProfileLogRecord(
+                profileID: "stable:ios-client",
+                profileLabel: "Stable · iOS client",
+                record: GatewayLogRecord(
+                    timestamp: Date.now.formatted(.iso8601),
+                    level: "warning",
+                    message: "bounded incident \(index)",
+                    event: "gateway.connection",
+                    source: "ios-client"
+                )
+            )
+        }
+        await store.save(records)
+        let loaded = await store.load()
+        #expect(loaded.count == IOSClientDiagnosticStore.maximumRecords)
+    }
+
+    @Test("persisted invalid-response incidents use typed-safe fields")
+    func persistedInvalidResponseIncidentsAreTypedSafe() async throws {
+        let suite = "GatewayDiagnosticsSafeStore.\(UUID().uuidString)"
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let store = IOSClientDiagnosticStore(defaults: defaults)
+        let record = GatewayProfileLogRecord(
+            profileID: "profile:ios-client",
+            profileLabel: "Secret customer at /Users/private",
+            record: GatewayLogRecord(
+                timestamp: Date.now.formatted(.iso8601),
+                level: "error",
+                message: "request failed https://secret.example/token=abc",
+                event: "gateway.response.invalid",
+                source: "ios-client"
+            )
+        )
+        await store.save([record])
+        let loaded = await store.load()
+        #expect(loaded.first?.profileLabel == "iOS client")
+        #expect(loaded.first?.record.message == "code=invalid_response")
+    }
+
+    @Test("Gateway queue evidence survives remote logs decoding into export rows")
+    func remoteQueueEvidenceSurvivesLogsDecode() async throws {
+        let recorder = DiagnosticsRequestRecorder(responses: [
+            .object(["records": .array([
+                .object([
+                    "timestamp": .string("2026-01-01T00:00:00Z"),
+                    "level": .string("warning"),
+                    "message": .string("lastInboundAgeMs=12 lastWriteProgressAgeMs=3 queuedFrames=2 queuedBytes=44 completedFrames=8"),
+                    "event": .string("connection.closed"),
+                    "source": .string("transport"),
+                ])
+            ])])
+        ])
+        let service = GatewayDiagnosticsService(request: { method, params in
+            try await recorder.request(method: method, params: params)
+        })
+        let logs = try await service.logs(limit: 10)
+        #expect(logs.count == 1)
+        #expect(logs[0].message.contains("queuedBytes=44"))
+        #expect(logs[0].event == "connection.closed")
     }
 
     @Test("non-repository and absent records retain empty presentation semantics")

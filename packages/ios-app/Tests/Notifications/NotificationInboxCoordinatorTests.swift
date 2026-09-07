@@ -139,6 +139,92 @@ struct NotificationInboxCoordinatorTests {
     }
 
     @MainActor
+    @Test("remove and re-add keeps an old refresh from publishing into the successor")
+    func removeReaddDoesNotPublishStaleRefresh() async throws {
+        let coordinator = NotificationInboxCoordinator()
+        let profile = GatewayProfile(id: "profile-a", label: "Studio", host: "studio.example", port: 9847, machineId: "machine-a")
+        let gate = TestReadGate()
+        let refresh = coordinator.scheduleRefresh(profile: profile) { profile, generation in
+            await gate.wait()
+            coordinator.install(profile: profile, snapshot: .init(
+                notifications: [self.item(id: "stale", createdAt: "2026-01-01T00:00:00Z")],
+                revision: "stale", unreadCount: 1
+            ), generation: generation)
+        }
+        var successor: Task<Void, Never>?
+        do {
+            try await gate.waitForEntry()
+            coordinator.retainProfiles([])
+            coordinator.retainProfiles([profile.id])
+            successor = coordinator.scheduleRefresh(profile: profile) { profile, generation in
+                coordinator.install(profile: profile, snapshot: .init(
+                    notifications: [self.item(id: "current", createdAt: "2026-01-01T00:00:01Z")],
+                    revision: "current", unreadCount: 1
+                ), generation: generation)
+            }
+            await successor?.value
+            await gate.release()
+            await refresh.value
+            #expect(coordinator.notifications.map(\.notification.id) == ["current"])
+            #expect(!coordinator.isLoading)
+        } catch {
+            coordinator.cancelRefreshes()
+            await gate.release()
+            await refresh.value
+            await successor?.value
+            throw error
+        }
+    }
+
+    @MainActor
+    @Test("coalesced callers await the pending pass and cancellation cannot strand the owner")
+    func pendingPassAndCancellation() async throws {
+        let coordinator = NotificationInboxCoordinator()
+        let profile = GatewayProfile(id: "profile-a", label: "Studio", host: "studio.example", port: 9847, machineId: "machine-a")
+        let first = TestReadGate()
+        let second = TestReadGate()
+        var calls = 0
+        let operation: @MainActor @Sendable (GatewayProfile, Int) async -> Void = { _, _ in
+            calls += 1
+            if calls == 1 { await first.wait() }
+            else { await second.wait() }
+        }
+        let task = coordinator.scheduleRefresh(profile: profile, operation: operation)
+        var waiter: Task<Void, Never>?
+        var settled = false
+        do {
+            try await first.waitForEntry()
+            var shared: Task<Void, Never> = task
+            for _ in 0..<20 { shared = coordinator.scheduleRefresh(profile: profile, operation: operation) }
+            waiter = Task { await shared.value; settled = true }
+            await first.release()
+            try await second.waitForEntry()
+            #expect(calls == 2)
+            #expect(!settled)
+            #expect(coordinator.isLoading)
+            await second.release()
+            await task.value
+            await waiter?.value
+            #expect(settled)
+            #expect(!coordinator.isLoading)
+            let cancelled = coordinator.scheduleRefresh(profile: profile, operation: operation)
+            cancelled.cancel()
+            await cancelled.value
+            #expect(!coordinator.isLoading)
+            let fresh = coordinator.scheduleRefresh(profile: profile, operation: operation)
+            await fresh.value
+            #expect(calls == 3)
+        } catch {
+            coordinator.cancelRefreshes()
+            await first.release()
+            await second.release()
+            await task.value
+            await waiter?.value
+            throw error
+        }
+    }
+
+    @MainActor
     @Test("session-read refresh removes only acknowledged alerts and persists newer and other-Gateway unread rows")
     func sessionReadRefresh() {
         let suite = "NotificationInboxSessionRead.\(UUID().uuidString)"

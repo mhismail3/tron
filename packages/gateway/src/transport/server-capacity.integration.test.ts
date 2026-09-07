@@ -357,8 +357,68 @@ describe("WebSocket connection and outbound capacity", () => {
     local.close();
   });
 
+  it("distinguishes no application write from inbound ping progress before hello", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-server-progress-"));
+    const sockets: WebSocket[] = [];
+    let gateway: GatewayServer | undefined;
+    const now = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    cleanups.push(async () => {
+      try {
+        for (const socket of sockets) if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
+        if (gateway) await bounded(gateway.close(), "progress fixture disposal");
+        await rm(root, { recursive: true, force: true });
+      } finally { now.mockRestore(); }
+    });
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const port = await unusedPort();
+    const logger = { log: vi.fn() };
+    gateway = new GatewayServer({
+      host: "127.0.0.1", port, devices, logger: logger as any,
+      uploads: {} as any,
+      sessions: { unsubscribeClient: vi.fn() } as any,
+      auth: { detachClient: vi.fn(), cancelOwner: vi.fn() } as any,
+      service: { releaseClient: vi.fn() } as any,
+    });
+    await gateway.listen();
+    const open = async () => {
+      const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+      sockets.push(socket);
+      await bounded(new Promise<void>((resolve, reject) => {
+        socket.once("open", resolve);
+        socket.once("error", reject);
+      }), "progress socket open");
+      return socket;
+    };
+    const close = async (socket: WebSocket) => {
+      const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
+      socket.close();
+      await bounded(closed, "progress socket close");
+    };
+    await close(await open());
+    await waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.closed"));
+    expect(logger.log.mock.calls.find((call) => call[2]?.event === "connection.closed")?.[1])
+      .toContain("lastInboundAgeMs=unknown lastWriteProgressAgeMs=unknown queuedFrames=0 queuedBytes=0 completedFrames=0");
+    const live = await open();
+    now.mockReturnValue(2_000);
+    const pong = new Promise<void>((resolve) => live.once("pong", () => resolve()));
+    live.ping();
+    await bounded(pong, "progress ping round trip");
+    now.mockReturnValue(2_600);
+    await close(live);
+    await waitUntil(() => logger.log.mock.calls.filter((call) => call[2]?.event === "connection.closed").length === 2);
+    expect(logger.log.mock.calls.filter((call) => call[2]?.event === "connection.closed")[1]?.[1])
+      .toContain("lastInboundAgeMs=600 lastWriteProgressAgeMs=unknown queuedFrames=0 queuedBytes=0 completedFrames=0");
+  });
+
   it("admits same-turn ordered bursts, rejects connection overflow, and closes byte-oversized output", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-server-capacity-"));
+    let gateway: GatewayServer | undefined;
+    cleanups.push(async () => {
+      if (gateway) await bounded(gateway.close(), "capacity fixture disposal");
+      await rm(root, { recursive: true, force: true });
+    });
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
     const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
@@ -370,7 +430,7 @@ describe("WebSocket connection and outbound capacity", () => {
       releaseClient: vi.fn(),
       invoke: vi.fn(),
     };
-    const gateway = new GatewayServer({
+    gateway = new GatewayServer({
       host: "127.0.0.1",
       port,
       maxFrameBytes: 16_384,
@@ -385,7 +445,6 @@ describe("WebSocket connection and outbound capacity", () => {
       logger: logger as any,
     });
     await gateway.listen();
-    cleanups.push(async () => { await gateway.close(); });
 
     const first = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
     const frames: any[] = [];
@@ -427,7 +486,8 @@ describe("WebSocket connection and outbound capacity", () => {
       expect.stringContaining(`Client ${correlation} connection closed`),
       { event: "connection.closed", source: "transport" },
     ]);
-    expect(logger.log.mock.calls.find((call) => call[2]?.event === "connection.closed")?.[1])
-      .toContain("WebSocket close 1013: client outbound capacity exceeded");
+    const closeMessage = logger.log.mock.calls.find((call) => call[2]?.event === "connection.closed")?.[1] as string;
+    expect(closeMessage).toContain("WebSocket close 1013: client outbound capacity exceeded");
+    expect(closeMessage).toMatch(/lastInboundAgeMs=\d+ lastWriteProgressAgeMs=\d+ queuedFrames=\d+ queuedBytes=\d+ completedFrames=\d+/u);
   });
 });

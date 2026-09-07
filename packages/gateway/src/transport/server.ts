@@ -25,6 +25,10 @@ export function shouldTerminateHeartbeat(unansweredHeartbeats: number): boolean 
   return unansweredHeartbeats >= MAXIMUM_UNANSWERED_HEARTBEATS;
 }
 
+function progressAge(at: number | null, now: number): string {
+  return at === null ? "unknown" : String(Math.max(0, Math.round(now - at)));
+}
+
 export function heartbeatTimerDelay(elapsedMs: number, intervalMs = 25_000): number {
   return Math.max(0, Math.round(elapsedMs - intervalMs));
 }
@@ -270,6 +274,9 @@ interface Connection {
   revokeResponseQueued: boolean;
   revokeCloseScheduled: boolean;
   admittedAt: number;
+  lastInboundAt: number | null;
+  // Successful ordered application-frame callbacks, not send start or pong traffic.
+  lastWriteProgressAt: number | null;
   helloTimer: NodeJS.Timeout;
 }
 
@@ -395,10 +402,12 @@ export class GatewayServer {
         // One delayed timer or transiently starved callback cannot destroy a
         // healthy epoch; the fourth tick observes and retires the three misses.
         if (shouldTerminateHeartbeat(connection.unansweredHeartbeats)) {
-          this.options.logger.log("warning", `Closing unresponsive client ${connection.id} after ${connection.unansweredHeartbeats} unanswered heartbeats`, {
-            event: "connection.heartbeat-timeout",
-            source: "transport",
-          });
+          const heartbeatQueue = connection.outbound.snapshot();
+          this.options.logger.log(
+            "warning",
+            `Closing unresponsive client ${connection.id} after ${connection.unansweredHeartbeats} unanswered heartbeats (lastInboundAgeMs=${progressAge(connection.lastInboundAt, heartbeatAt)} lastWriteProgressAgeMs=${progressAge(connection.lastWriteProgressAt, heartbeatAt)} queuedFrames=${heartbeatQueue.queuedFrames} queuedBytes=${heartbeatQueue.queuedBytes} completedFrames=${heartbeatQueue.completedFrames})`,
+            { event: "connection.heartbeat-timeout", source: "transport" },
+          );
           connection.socket.terminate();
           continue;
         }
@@ -781,7 +790,10 @@ export class GatewayServer {
     const maximumOutboundBytes = this.options.maximumOutboundBytes ?? 8 * 1_048_576;
     const outbound = new OrderedOutboundQueue(
       maximumOutboundBytes,
-      (encoded, completion) => socket.send(encoded, completion),
+      (encoded, completion) => socket.send(encoded, (error) => {
+        if (!error) connection.lastWriteProgressAt = performance.now();
+        completion(error);
+      }),
       (snapshot, nextBytes) => {
         if (connection.closeInitiated) return;
         connection.closeInitiated = true;
@@ -825,16 +837,25 @@ export class GatewayServer {
       revokeResponseQueued: false,
       revokeCloseScheduled: false,
       admittedAt: performance.now(),
+      lastInboundAt: null,
+      lastWriteProgressAt: null,
       helloTimer: setTimeout(() => socket.close(1008, "hello required"), 5_000),
     };
     this.clients.set(connection.id, connection);
     this.options.logger.log("info", `Client ${connection.id} connection admitted (${isLocal ? "local" : "paired"})`, { event: "connection.admitted", source: "transport" });
     socket.on("message", (data, binary) => {
       connection.unansweredHeartbeats = 0;
+      connection.lastInboundAt = performance.now();
       void this.onMessage(connection, binary ? data : data.toString());
     });
-    socket.on("ping", () => { connection.unansweredHeartbeats = 0; });
-    socket.on("pong", () => { connection.unansweredHeartbeats = 0; });
+    socket.on("ping", () => {
+      connection.unansweredHeartbeats = 0;
+      connection.lastInboundAt = performance.now();
+    });
+    socket.on("pong", () => {
+      connection.unansweredHeartbeats = 0;
+      connection.lastInboundAt = performance.now();
+    });
     socket.on("close", (code, reason) => {
       const suffix = reason.length > 0 ? `: ${reason.toString("utf8")}` : "";
       this.disconnect(connection, `WebSocket close ${code}${suffix}`);
@@ -1397,11 +1418,12 @@ export class GatewayServer {
 
   private disconnect(connection: Connection, detail = "WebSocket closed"): void {
     if (!this.clients.delete(connection.id)) return;
+    const closedAt = performance.now();
     const outbound = connection.outbound.snapshot();
     connection.outbound.retire();
     this.options.logger.log(
       "info",
-      `Client ${connection.id} connection closed after ${Math.max(0, Math.round(performance.now() - connection.admittedAt))}ms (${detail}; ${outbound.completedFrames}/${outbound.acceptedFrames} outbound frames completed, ${outbound.queuedBytes} queued bytes)`,
+      `Client ${connection.id} connection closed after ${Math.max(0, Math.round(closedAt - connection.admittedAt))}ms (${detail}; ${outbound.completedFrames}/${outbound.acceptedFrames} outbound frames completed, ${outbound.queuedBytes} queued bytes; lastInboundAgeMs=${progressAge(connection.lastInboundAt, closedAt)} lastWriteProgressAgeMs=${progressAge(connection.lastWriteProgressAt, closedAt)} queuedFrames=${outbound.queuedFrames} queuedBytes=${outbound.queuedBytes} completedFrames=${outbound.completedFrames})`,
       { event: "connection.closed", source: "transport" },
     );
     clearTimeout(connection.helloTimer);

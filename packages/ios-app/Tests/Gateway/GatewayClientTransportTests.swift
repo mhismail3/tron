@@ -348,6 +348,7 @@ struct GatewayClientTransportTests {
             }
             #expect(prepared.sessionId == snapshot.sessionId)
             #expect(prepared.transcript == snapshot.transcript)
+            #expect(delivery.event.admittedBytes > 0)
             #expect(counter.invocationCount() == 2)
             await client.close()
         }
@@ -761,36 +762,116 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("a frame suspended before hub admission cannot enter its replacement epoch")
+    func lateFrameAdmissionIsFenced() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let old = ScriptedGatewaySocket()
+            let replacement = ScriptedGatewaySocket()
+            let gate = TestReadGate()
+            let oldReports = AsyncStream<GatewayEventAdmission>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            let newReports = AsyncStream<GatewayEventAdmission>.makeStream(bufferingPolicy: .bufferingNewest(2))
+            defer {
+                oldReports.continuation.finish()
+                newReports.continuation.finish()
+            }
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(sockets: [old, replacement]).factory,
+                clock: clock.clock,
+                eventBufferPolicy: .init(maximumEvents: 2, maximumBytes: 4096)
+            )
+            do {
+                await old.enqueue(helloFrame())
+                _ = try await GatewayClient.$hostedEventAdmissionGate.withValue({
+                    await gate.wait()
+                    return { oldReports.continuation.yield($0) }
+                }) {
+                    try await client.connect(profile: profile, token: "token")
+                }
+                await old.enqueue(eventFrame(topic: "packages.progress", payload: .object(["value": .number(0)])))
+                try await gate.waitForEntry()
+                await replacement.enqueue(helloFrame())
+                _ = try await GatewayClient.$hostedEventAdmissionGate.withValue({
+                    { newReports.continuation.yield($0) }
+                }) {
+                    try await client.connect(profile: profile, token: "token")
+                }
+                let replacementID = try #require(await client.activeConnectionID())
+                var reports = newReports.stream.makeAsyncIterator()
+                let firstFrame = eventFrame(topic: "packages.progress", payload: .object(["value": .number(1)]))
+                await replacement.enqueue(firstFrame)
+                let first = try #require(await reports.next())
+                #expect(first.accepted)
+                #expect(first.admittedBytes == firstFrame.count)
+                await gate.release()
+                var retired = oldReports.stream.makeAsyncIterator()
+                let late = try #require(await retired.next())
+                #expect(!late.accepted)
+                #expect(late.reason == .retiredEpoch)
+                #expect(late.snapshot == first.snapshot)
+                await replacement.enqueue(eventFrame(topic: "packages.progress", payload: .object(["value": .number(2)])))
+                let second = try #require(await reports.next())
+                try #require(second.accepted)
+                #expect(second.snapshot.bufferedEventCount == 2)
+                #expect(second.snapshot.admittedCount == 2)
+                var events = client.events.makeAsyncIterator()
+                for expected in 1...2 {
+                    let event = try #require(await events.next())
+                    #expect(event.connectionID == replacementID)
+                    #expect(event.event.admittedBytes == firstFrame.count)
+                    #expect(event.event.payload.objectValue?["value"]?.intValue == expected)
+                }
+                #expect(await client.activeConnectionID() == replacementID)
+                await client.close()
+            } catch {
+                await gate.release()
+                await client.close()
+                throw error
+            }
+        }
+    }
+
     @Test("a missing pong closes the exact socket and emits one transport retirement")
     func missingPongRetiresExactEpoch() async throws {
         try await withTestWatchdog {
             let clock = ManualClock()
+            let predecessor = ScriptedGatewaySocket()
             let socket = ScriptedGatewaySocket(suspendsPing: true)
             let client = GatewayClient(
-                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                socketFactory: ScriptedGatewaySocketFactory(sockets: [predecessor, socket]).factory,
                 clock: clock.clock
             )
-            await socket.enqueue(helloFrame())
-            _ = try await client.connect(profile: profile, token: "token")
-            try await clock.waitUntilSleeping(count: 1)
-            var events = client.events.makeAsyncIterator()
-            clock.advance(by: .seconds(10))
-            try await socket.waitUntilPingInvoked(count: 1)
-            try await clock.waitUntilSleeping(count: 1)
-            clock.advance(by: .seconds(8))
-            for _ in 0..<10 { await Task.yield() }
-            try await socket.waitUntilClosed()
-            let event = await events.next()
-            #expect(event?.event.topic == "transport.disconnected")
-            #expect(event?.event.payload.objectValue?["reason"] == .string("pong_timeout"))
-            let diagnostics = await client.diagnostics()
-            let probe = try #require(diagnostics.first { $0.stage == .liveness })
-            #expect(probe.reason == .pingTimeout)
-            #expect(probe.durationMilliseconds == 8_000)
-            #expect(probe.platformCode == nil)
-            #expect(diagnostics.first { $0.stage == .transport }?.durationMilliseconds == 18_000)
-            #expect(await client.info == nil)
-            await client.close()
+            do {
+                await predecessor.enqueue(helloFrame())
+                _ = try await client.connectForLifecycle(profile: profile, token: "token")
+                await socket.enqueue(helloFrame())
+                let connection = try await client.reconnectForLifecycle(activateEvents: true, attemptID: "fixture-attempt")
+                try await clock.waitUntilSleeping(count: 1, duration: .seconds(10))
+                var events = client.events.makeAsyncIterator()
+                clock.advance(by: .seconds(10))
+                try await socket.waitUntilPingInvoked(count: 1)
+                try await clock.waitUntilSleeping(count: 1, duration: .seconds(8))
+                clock.advance(by: .seconds(8))
+                try await socket.waitUntilClosed()
+                let event = await events.next()
+                #expect(event?.connectionID == connection.id)
+                #expect(event?.event.topic == "transport.disconnected")
+                #expect(event?.event.payload.objectValue?["reason"] == .string("pong_timeout"))
+                let diagnostics = await client.diagnostics()
+                let probe = try #require(diagnostics.first { $0.stage == .liveness })
+                #expect(probe.reason == .pingTimeout)
+                #expect(probe.durationMilliseconds == 8_000)
+                #expect(probe.platformCode == nil)
+                let retirement = try #require(diagnostics.first { $0.stage == .transport && $0.connectionID == connection.id })
+                #expect(retirement.durationMilliseconds == 18_000)
+                #expect(probe.attemptID == "fixture-attempt")
+                #expect(retirement.attemptID == probe.attemptID)
+                #expect(await client.info == nil)
+                await client.close()
+            } catch {
+                await client.close()
+                throw error
+            }
         }
     }
 
@@ -1140,7 +1221,12 @@ struct GatewayClientTransportTests {
             #expect(await socket.closeTransitionCount() == 0)
             let diagnostics = await client.diagnostics()
             #expect(diagnostics.contains {
-                $0.reason == .eventOverflow && $0.overflowCount == 1_024
+                $0.reason == .eventOverflow
+                    && $0.overflowCount == 1_024
+                    && $0.overflowReason == .countLimit
+                    && ($0.queueCountHighWaterMark ?? 0) == 1_024
+                    && ($0.admittedEventCount ?? 0) == 1_024
+                    && ($0.pressureCrossings ?? 0) <= 4
             })
 
             let (bufferDrained, bufferDrainedContinuation) = AsyncStream<Void>.makeStream(
@@ -1173,6 +1259,139 @@ struct GatewayClientTransportTests {
             #expect(events.filter { $0.topic == "transport.disconnected" }.count == 1)
             #expect(await socket.closeInvocationCount() == 1)
             #expect(await socket.closeTransitionCount() == 1)
+        }
+    }
+
+    @Test("notification pagination cannot join pages across a replacement connection")
+    func notificationPagesStayOnExactEpoch() async throws {
+        try await withTestWatchdog {
+            let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: sockets).factory)
+            let gate = TestReadGate()
+            var read: Task<NotificationInboxGatewayClient.Snapshot, Error>?
+            var responder: Task<Void, Error>?
+            do {
+                await sockets[0].enqueue(helloFrame())
+                _ = try await client.connect(profile: profile, token: "synthetic-token")
+                read = Task {
+                    try await NotificationInboxGatewayClient.$hostedAfterPage.withValue({ await gate.wait() }) {
+                        try await NotificationInboxGatewayClient.list(client: client)
+                    }
+                }
+                try await sockets[0].waitUntilSent(count: 2)
+                let request = try await decodedValue(in: sockets[0], index: 1)
+                let id = try #require(request.objectValue?["id"]?.stringValue)
+                await sockets[0].enqueue(responseFrame(id: id, result: inboxPage(id: "notification-old", nextCursor: "next-page")))
+                try await gate.waitForEntry()
+                await sockets[1].enqueue(helloFrame())
+                _ = try await client.connect(profile: profile, token: "synthetic-token")
+                responder = Task {
+                    try await sockets[1].waitUntilSent(count: 2)
+                    let request = try await decodedValue(in: sockets[1], index: 1)
+                    let id = try #require(request.objectValue?["id"]?.stringValue)
+                    await sockets[1].enqueue(responseFrame(id: id, result: inboxPage(id: "notification-new", nextCursor: nil)))
+                }
+                await gate.release()
+                do {
+                    let mixed = try await valueOfOwnedTask(try #require(read))
+                    Issue.record("A retired read returned \(mixed.notifications.count) rows from replacement pagination")
+                } catch is CancellationError { }
+                #expect(await sockets[1].sentFrames().count == 1)
+                responder?.cancel()
+                if let responder {
+                    do { try await responder.value }
+                    catch is CancellationError { }
+                }
+                await client.close()
+            } catch {
+                read?.cancel()
+                responder?.cancel()
+                await gate.release()
+                if let read { _ = await read.result }
+                if let responder {
+                    if case .failure(let cleanupError) = await responder.result, !(cleanupError is CancellationError) {
+                        Issue.record(cleanupError)
+                    }
+                }
+                await client.close()
+                throw error
+            }
+        }
+    }
+
+    private func inboxPage(id: String, nextCursor: String?) -> JSONValue {
+        var page: [String: JSONValue] = [
+            "revision": .string("same-revision"), "unreadCount": .number(2),
+            "notifications": .array([.object([
+                "version": .number(1), "id": .string(id), "kind": .string("explicit"),
+                "createdAt": .string("2026-01-01T00:00:00Z"), "updatedAt": .string("2026-01-01T00:00:00Z"),
+                "title": .string("Fixture"), "message": .string("Synthetic inbox row"),
+                "sessionId": .string("session-fixture"), "isUnread": .bool(true), "outcome": .string("queued")
+            ])])
+        ]
+        if let nextCursor { page["nextCursor"] = .string(nextCursor) }
+        return .object(page)
+    }
+
+    @Test("successful pong advances progress without an application request")
+    func successfulPongRefreshesProgress() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory, clock: clock.clock)
+            do {
+                await socket.enqueue(helloFrame())
+                _ = try await client.connect(profile: profile, token: "synthetic-token")
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayLivenessPolicy.probeInterval)
+                clock.advance(by: GatewayLivenessPolicy.probeInterval)
+                try await socket.waitUntilPingInvoked(count: 1)
+                // This next registration happens after the completed pong has
+                // crossed back to the connection owner.
+                try await clock.waitUntilSleeping(count: 1, duration: GatewayLivenessPolicy.probeInterval)
+                clock.advance(by: .seconds(3))
+                try await client.ensureResponsive(maximumSilence: .seconds(4))
+                #expect(await socket.sentFrames().count == 1)
+                await client.close()
+            } catch {
+                await client.close()
+                throw error
+            }
+        }
+    }
+
+    @Test("transport pressure is retained without an event consumer or Logs read")
+    func transportPersistsWithoutConsumer() async throws {
+        try await withTestWatchdog {
+            let suite = "TronTransportIncident.\(UUID())"
+            defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+            let store = IOSClientDiagnosticStore(defaults: try #require(UserDefaults(suiteName: suite)))
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                uuidSource: SequenceUUIDSource([UUID(uuidString: "00000000-0000-0000-0000-000000000049")!]).source,
+                eventBufferPolicy: .init(maximumEvents: 2, maximumBytes: 4_096),
+                diagnosticStore: store
+            )
+            do {
+                await socket.enqueue(helloFrame())
+                _ = try await client.connect(profile: profile, token: "synthetic-token")
+                for index in 0..<3 {
+                    await socket.enqueue(eventFrame(topic: "session.progress", payload: .number(Double(index))))
+                }
+                try await socket.waitUntilClosed()
+                await store.flush()
+                let retained = await store.load()
+                #expect(retained.contains { $0.record.message.contains("stage=queue-pressure") })
+                #expect(retained.contains { $0.record.message.contains("reason=event_overflow") })
+                #expect(retained.contains { $0.record.message.contains("clientID=\(client.diagnosticOwnerID)") })
+                #expect(retained.allSatisfy { !$0.record.message.contains("synthetic-token") })
+                await client.close()
+                await store.flush()
+            } catch {
+                await client.close()
+                await store.flush()
+                throw error
+            }
         }
     }
 

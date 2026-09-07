@@ -164,7 +164,9 @@ final class AppModel {
     let extensionInteractionDrafts: ExtensionInteractionDraftStore
     let gatewayDiagnostics: GatewayDiagnosticsService
     let workspaceInspection: WorkspaceInspectionService
-    private var iosClientDiagnostics = IOSClientDiagnosticBuffer()
+    @ObservationIgnored private var iosClientDiagnostics = IOSClientDiagnosticBuffer()
+    private let diagnosticStore: IOSClientDiagnosticStore?
+    @ObservationIgnored private var eventConsumerDiagnostics: [String: GatewayEventConsumerDiagnostic] = [:]
     /// Bounded, content-free causal trace for intermittent chat viewport and
     /// opening failures. It is merged into Logs on demand and never persisted.
     let chatInteractionTrace = ChatInteractionTrace()
@@ -197,7 +199,7 @@ final class AppModel {
     var customModelInvalidationGeneration: Int { customModelConfiguration.invalidationGeneration }
     var trustRevision: Int { settingsTrust.trustRevision }
     var pairedDevices: [PairedDevice] = []
-    let notificationInbox = NotificationInboxCoordinator()
+    let notificationInbox: NotificationInboxCoordinator
     var pushNotificationReadiness: PushReadiness = .unavailable
     var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
     private(set) var pushNavigationRequest: PushNavigationRequest?
@@ -259,6 +261,9 @@ final class AppModel {
     }
 
     private var eventTask: Task<Void, Never>?
+    // Notification invalidations are optional projection work. Keep one pass and
+    // one pending bit per profile so an inbox read cannot hold the serial event
+    // consumer or fan out one task per burst.
     private var extensionEditorSyncTasks: [SessionPresentationIdentity: Task<Void, Never>] = [:]
     private var extensionEditorPendingText: [SessionPresentationIdentity: String] = [:]
     private var extensionEditorPendingRevisions: [SessionPresentationIdentity: Int] = [:]
@@ -299,8 +304,11 @@ final class AppModel {
         composerAttachmentFileAccess: ComposerAttachmentFileAccess = .live,
         composerDraftStore: ComposerDraftStore = ComposerDraftStore(),
         extensionInteractionDrafts: ExtensionInteractionDraftStore = ExtensionInteractionDraftStore(),
-        exportArtifacts: SessionExportArtifactStore = SessionExportArtifactStore()
+        exportArtifacts: SessionExportArtifactStore = SessionExportArtifactStore(),
+        diagnosticStore: IOSClientDiagnosticStore? = nil,
+        notificationInbox: NotificationInboxCoordinator = NotificationInboxCoordinator()
     ) {
+        self.notificationInbox = notificationInbox
         let resolvedPairingCommit = pairingCommit ?? { profile, token in
             try profiles.save(profile, token: token, selecting: true)
         }
@@ -311,7 +319,9 @@ final class AppModel {
             profiles.token(for: profile)
         }
         let noticeCenter = InAppNoticeCenter(clock: clock)
-        let dashboardConnections = DashboardGatewayConnectionPool()
+        let dashboardConnections = DashboardGatewayConnectionPool(clientFactory: {
+            GatewayClient(diagnosticStore: diagnosticStore)
+        })
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
             profiles: profiles,
@@ -497,7 +507,15 @@ final class AppModel {
         self.uuidSource = uuidSource
         self.performanceSignposts = performanceSignposts
         self.exportArtifacts = exportArtifacts
+        self.diagnosticStore = diagnosticStore
         dashboardConnections.delegate = self
+        if let diagnosticStore {
+            Task { @MainActor [weak self, diagnosticStore] in
+                let records = await diagnosticStore.load()
+                guard let self else { return }
+                self.iosClientDiagnostics.mergePersisted(records)
+            }
+        }
         Task { try? await exportArtifacts.prune() }
         #if HOSTED_TEST
         if ProcessInfo.processInfo.arguments.contains("--tron-reset-ui-test-state") {
@@ -969,6 +987,7 @@ final class AppModel {
         )
         if let failure = error as? GatewayFailure, diagnostic {
             iosClientDiagnostics.record(failure, profileID: profiles.selected?.id, profileLabel: profiles.selected?.label)
+            scheduleDiagnosticPersistence()
         }
     }
 
@@ -1166,6 +1185,8 @@ final class AppModel {
     func teardown() async {
         await composerDrafts.checkpointDrafts().value
         await lifecycle.teardown()
+        scheduleDiagnosticPersistence()
+        await diagnosticStore?.flush()
     }
 
     func restoreMountedPresentationAfterReconnect() async -> Bool {
@@ -1648,18 +1669,26 @@ final class AppModel {
         return try await diagnostics.logs(limit: limit)
     }
 
-    func loadGatewayLogsResult(limit: Int = 1_000) async -> GatewayLogsLoadResult {
+    func loadGatewayLogsResult(limit: Int = 1_000, includeRemote: Bool = true) async -> GatewayLogsLoadResult {
+        let limit = min(1_000, max(0, limit))
         let profileSnapshot = profiles.profiles
+        var sourceStatuses = Dictionary(uniqueKeysWithValues: profileSnapshot.map { ($0.id, "pending") })
+        sourceStatuses["ios-client"] = "current-and-retained-local"
         var loaded = Array(iosClientDiagnostics.records.prefix(limit))
         loaded.append(contentsOf: (await client.diagnostics()).map(IOSClientDiagnosticBuffer.logRecord))
+        loaded.append(contentsOf: eventConsumerDiagnostics.values.map {
+            IOSClientDiagnosticBuffer.logRecord($0)
+        })
         loaded.append(contentsOf: chatInteractionTrace.diagnosticRecords(limit: limit))
         // Local evidence must remain available during a stalled handshake.
         // Never send diagnostic RPCs into an epoch that is still connecting;
         // mark remote buckets unavailable so the view retains their last rows.
-        guard diagnosticsAreReady else {
+        guard includeRemote, diagnosticsAreReady else {
+            for profile in profileSnapshot { sourceStatuses[profile.id] = "not-requested-retained" }
             return GatewayLogsLoadResult(
-                records: Array(loaded.sorted { $0.record.timestamp > $1.record.timestamp }.prefix(limit)),
-                failedProfileIDs: Set(profileSnapshot.map(\.id))
+                records: Array(loaded.sorted { gatewayLogRecordIsNewer($0, than: $1) }.prefix(limit)),
+                failedProfileIDs: Set(profileSnapshot.map(\.id)),
+                metadata: logCaptureMetadata(records: loaded, sourceStatuses: sourceStatuses)
             )
         }
         var failedProfileIDs: Set<String> = []
@@ -1669,18 +1698,46 @@ final class AppModel {
                 loaded.append(contentsOf: records.map {
                     GatewayProfileLogRecord(profileID: profile.id, profileLabel: profile.label, record: $0)
                 })
+                sourceStatuses[profile.id] = "fresh-remote"
             } catch is CancellationError {
                 return GatewayLogsLoadResult(
-                    records: Array(loaded.sorted { $0.record.timestamp > $1.record.timestamp }.prefix(limit)),
-                    failedProfileIDs: failedProfileIDs
+                    records: Array(loaded.sorted { gatewayLogRecordIsNewer($0, than: $1) }.prefix(limit)),
+                    failedProfileIDs: failedProfileIDs,
+                    metadata: logCaptureMetadata(records: loaded, sourceStatuses: sourceStatuses)
                 )
             } catch {
                 failedProfileIDs.insert(profile.id)
+                sourceStatuses[profile.id] = "failed-retained"
             }
         }
         return GatewayLogsLoadResult(
-            records: Array(loaded.sorted { $0.record.timestamp > $1.record.timestamp }.prefix(limit)),
-            failedProfileIDs: failedProfileIDs
+            records: Array(loaded.sorted { gatewayLogRecordIsNewer($0, than: $1) }.prefix(limit)),
+            failedProfileIDs: failedProfileIDs,
+            metadata: logCaptureMetadata(records: loaded, sourceStatuses: sourceStatuses)
+        )
+    }
+
+    private func logCaptureMetadata(
+        records: [GatewayProfileLogRecord],
+        sourceStatuses: [String: String]
+    ) -> GatewayLogCaptureMetadata {
+        let timestamps = records.compactMap { GatewayTimestamp.parse($0.record.timestamp) }.sorted()
+        let build = [
+            Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+            Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+        ].compactMap { $0 }.joined(separator: "+")
+        return GatewayLogCaptureMetadata(
+            capturedAt: GatewayTimestamp.preciseString(from: .now),
+            representedFrom: timestamps.first.map(GatewayTimestamp.preciseString(from:)),
+            representedThrough: timestamps.last.map(GatewayTimestamp.preciseString(from:)),
+            appBuildIdentity: build.isEmpty ? "unknown" : build,
+            gatewayIdentities: Dictionary(uniqueKeysWithValues: profiles.profiles.map { profile in
+                let info = profile.id == profiles.selected?.id ? gatewayInfo : dashboardConnections.infoSnapshot(for: profile.id)
+                return (profile.id, info.map {
+                    "version=\($0.gatewayVersion) channel=\($0.gatewayChannel) runtime=\($0.runtimeEpoch ?? "unknown") sourceRevision=\($0.sourceRevision ?? "unknown")"
+                } ?? "unknown")
+            }),
+            sourceStatuses: sourceStatuses
         )
     }
 
@@ -1908,7 +1965,7 @@ final class AppModel {
     func refreshNotificationInbox() async {
         let enabled = notificationInboxProfiles()
         notificationInbox.retainProfiles(Set(enabled.map(\.id)))
-        for profile in enabled { await refreshNotificationInbox(profile: profile) }
+        for profile in enabled { await scheduleNotificationInboxRefresh(profile: profile).value }
     }
 
     func markNotificationRead(_ item: NotificationInboxItem) async {
@@ -1917,11 +1974,11 @@ final class AppModel {
         do {
             try await sendNotificationRead(profileID: item.profileID, id: item.notification.id)
             if let profile = profiles.profiles.first(where: { $0.id == item.profileID }) {
-                await refreshNotificationInbox(profile: profile)
+                await scheduleNotificationInboxRefresh(profile: profile).value
             }
         } catch {
             if let profile = profiles.profiles.first(where: { $0.id == item.profileID }) {
-                await refreshNotificationInbox(profile: profile)
+                await scheduleNotificationInboxRefresh(profile: profile).value
             }
             presentError((error as? GatewayFailure)?.message ?? "Unable to mark the notification read.")
         }
@@ -1963,7 +2020,7 @@ final class AppModel {
                     commandID: commandID
                 )
             }
-            await refreshNotificationInbox(profile: profile)
+            await scheduleNotificationInboxRefresh(profile: profile).value
         } catch {
             // Push navigation remains useful even if read-state reconciliation is temporarily offline.
         }
@@ -1979,20 +2036,51 @@ final class AppModel {
             .filter { groups.insert($0.machineGroupID).inserted }
     }
 
-    private func refreshNotificationInbox(profile: GatewayProfile) async {
-        let generation = notificationInbox.begin(profileID: profile.id)
+    @discardableResult
+    private func scheduleNotificationInboxRefresh(profile: GatewayProfile) -> Task<Void, Never> {
+        notificationInbox.scheduleRefresh(profile: profile) { [weak self] profile, generation in
+            guard let self else { return }
+            await self.refreshNotificationInbox(profile: profile, generation: generation)
+        }
+    }
+
+    private func refreshNotificationInbox(profile: GatewayProfile, generation: Int) async {
+        let selectedProfileID = profiles.selected?.id
+        let usesSelectedClient = selectedProfileID == profile.id
+        func connectionID() async -> Int? {
+            usesSelectedClient ? await client.activeConnectionID() : await dashboardConnections.connectionID(for: profile.id)
+        }
+        let initialConnectionID = await connectionID()
+        guard profiles.selected?.id == selectedProfileID,
+              profiles.profiles.first(where: { $0.id == profile.id }) == profile else { return }
         do {
-            let snapshot = profile.id == profiles.selected?.id
+            let snapshot = usesSelectedClient
                 ? try await NotificationInboxGatewayClient.list(client: client)
                 : try await dashboardConnections.notificationInbox(for: profile.id)
+            let currentConnectionID = await connectionID()
+            guard profiles.selected?.id == selectedProfileID,
+                  profiles.profiles.first(where: { $0.id == profile.id }) == profile,
+                  currentConnectionID == initialConnectionID,
+                  snapshot.connectionID == initialConnectionID else { return }
             notificationInbox.install(profile: profile, snapshot: snapshot, generation: generation)
         } catch let failure as GatewayFailure where failure.code == "unsupported" {
+            let currentConnectionID = await connectionID()
+            guard currentConnectionID == initialConnectionID,
+                  profiles.selected?.id == selectedProfileID,
+                  profiles.profiles.first(where: { $0.id == profile.id }) == profile else { return }
             notificationInbox.fail(
                 profileID: profile.id,
                 generation: generation,
                 message: "Update the Gateway to view notifications."
             )
+        } catch is CancellationError {
+            // Retirement invalidates the coordinator generation; cancellation is
+            // not a failed remote read and cannot publish into a successor.
         } catch {
+            let currentConnectionID = await connectionID()
+            guard currentConnectionID == initialConnectionID,
+                  profiles.selected?.id == selectedProfileID,
+                  profiles.profiles.first(where: { $0.id == profile.id }) == profile else { return }
             notificationInbox.fail(
                 profileID: profile.id,
                 generation: generation,
@@ -3130,6 +3218,11 @@ final class AppModel {
 
     private func handle(_ event: GatewayEvent, connectionID: Int?) async {
         guard lifecycle.admitsEvent(connectionID: connectionID) else { return }
+        let category = GatewayDiagnosticTopicAdmission.admit(event.topic)
+        let wholeStarted = clock.now()
+        defer {
+            recordEventConsumer(category: category, phase: .wholeHandler, duration: wholeStarted.duration(to: clock.now()))
+        }
         if event.topic.hasPrefix("session."),
            event.topic != "session.listChanged",
            event.topic != "session.summary",
@@ -3138,6 +3231,55 @@ final class AppModel {
             return
         }
         await handleDeliveredEvent(event, connectionID: connectionID)
+    }
+
+    func sessionPresentationStoreMeasuredEventWork(_ phase: GatewayEventConsumerPhase, duration: Duration) {
+        recordEventConsumer(category: "session", phase: phase, duration: duration)
+    }
+
+    private func scheduleDiagnosticPersistence() {
+        guard let diagnosticStore else { return }
+        diagnosticStore.record(iosClientDiagnostics.records + eventConsumerDiagnostics.values.map(IOSClientDiagnosticBuffer.logRecord))
+    }
+
+    private func recordEventConsumer(
+        category: String,
+        phase: GatewayEventConsumerPhase,
+        duration: Duration
+    ) {
+        let key = "\(category):\(phase.rawValue)"
+        guard eventConsumerDiagnostics[key] != nil || eventConsumerDiagnostics.count < 128 else { return }
+        let observedAt = Date.now
+        let prior: GatewayEventConsumerDiagnostic
+        if let current = eventConsumerDiagnostics[key],
+           (0..<60).contains(observedAt.timeIntervalSince(current.firstObservedAt)) {
+            prior = current
+        } else {
+            if let completedWindow = eventConsumerDiagnostics[key] {
+                diagnosticStore?.record(IOSClientDiagnosticBuffer.logRecord(completedWindow))
+            }
+            prior = GatewayEventConsumerDiagnostic(
+                category: category, phase: phase, count: 0, slowCount: 0,
+                maximumDuration: .zero, totalDuration: .zero,
+                firstObservedAt: observedAt, lastObservedAt: observedAt
+            )
+        }
+        let duration = max(.zero, duration)
+        let slow = duration >= .milliseconds(100)
+        let updated = GatewayEventConsumerDiagnostic(
+            category: prior.category,
+            phase: prior.phase,
+            count: prior.count == Int.max ? Int.max : prior.count + 1,
+            slowCount: prior.slowCount == Int.max ? Int.max : prior.slowCount + (slow ? 1 : 0),
+            maximumDuration: max(prior.maximumDuration, duration),
+            totalDuration: prior.totalDuration + duration,
+            firstObservedAt: prior.firstObservedAt,
+            lastObservedAt: observedAt
+        )
+        eventConsumerDiagnostics[key] = updated
+        // First slow completion per window plus rotations/retirement preserve a
+        // useful prelude without turning normal event handling into log I/O.
+        if slow, prior.slowCount == 0 { diagnosticStore?.record(IOSClientDiagnosticBuffer.logRecord(updated)) }
     }
 
     private func handleDeliveredEvent(_ event: GatewayEvent, connectionID: Int?) async {
@@ -3155,6 +3297,7 @@ final class AppModel {
             // failure signal. Retry once immediately; the reconnect loop keeps
             // its bounded jittered backoff if the Gateway is genuinely down.
             lifecycle.requestReconnect(immediate: true, replaceExisting: event.topic == "system.stopping")
+            scheduleDiagnosticPersistence()
         case "transport.resyncRequired":
             await sessionPresentation.handleResyncRequired(sessionID: event.sessionId)
         case "session.summary":
@@ -3178,7 +3321,7 @@ final class AppModel {
         case "models.customChanged":
             customModelConfiguration.noteCustomModelsChanged()
         case "notification.inbox.changed":
-            if let profile = profiles.selected { await refreshNotificationInbox(profile: profile) }
+            if let profile = profiles.selected { scheduleNotificationInboxRefresh(profile: profile) }
         case "automation.changed":
             guard case .automationChanged = event.preparation else { return }
             automationCatalog.invalidate()
@@ -3406,7 +3549,7 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
 
     func dashboardPoolNotificationInboxChanged(profileID: String) {
         guard let profile = profiles.profiles.first(where: { $0.id == profileID }) else { return }
-        Task { @MainActor [weak self] in await self?.refreshNotificationInbox(profile: profile) }
+        scheduleNotificationInboxRefresh(profile: profile)
     }
 
     func dashboardPoolDidUpdate(
@@ -3586,6 +3729,17 @@ extension AppModel: CustomModelConfigurationCoordinatorDelegate {
 }
 
 extension AppModel: GatewayLifecycleProjectionDelegate {
+    func lifecycleRecordDiagnostic(event: String, message: String) {
+        guard ["scene.foreground", "scene.background", "reconnect.scheduled", "reconnect.attempt", "reconnect.failure", "reconnect.delay", "reconnect.connected", "path.changed", "detail.tap", "detail.preparation"].contains(event) else { return }
+        iosClientDiagnostics.recordLifecycle(
+            event: "gateway.lifecycle",
+            message: "kind=\(event) clientID=\(client.diagnosticOwnerID) \(message)",
+            profileID: profiles.selected?.id,
+            profileLabel: profiles.selected?.label
+        )
+        if let record = iosClientDiagnostics.records.first { diagnosticStore?.record(record) }
+    }
+
     func lifecycleLoadCache(
         profileID: String,
         admission: GatewayLifecycleCoordinator.Admission
@@ -3633,6 +3787,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
         reconcileDashboardConnections()
         removeNotice(.gatewayRestart)
+        if let profile = profiles.selected, profile.isEnabled {
+            scheduleNotificationInboxRefresh(profile: profile)
+        }
         diagnosticsReadinessGeneration &+= 1
         diagnosticsAreReady = true
     }
@@ -3703,6 +3860,11 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
         reconcileDashboardConnections()
         try requireLifecycle(admission)
+        // The inbox coordinator owns this optional read. Reconnect needs fresh
+        // demand without an invalidation, but readiness must not await its RPC.
+        if let profile = profiles.selected, profile.isEnabled {
+            scheduleNotificationInboxRefresh(profile: profile)
+        }
         // Mounted restoration and catalog refresh jointly publish the next
         // entrance-suppression generation.
         completed = true
@@ -3725,6 +3887,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
         invalidateProfileScopedLoads()
         dashboardConnections.retire()
+        notificationInbox.cancelRefreshes()
         await dashboardConnections.waitForRetirement()
         invalidateSessionConnectionOwnership()
         chatMedia.removeAll()

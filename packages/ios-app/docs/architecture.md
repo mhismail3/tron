@@ -701,7 +701,12 @@ pressure clear both worker and installed prepared values, and generation admissi
 from restoring them. This checkpoint adds no prefix parser. A future incremental path must prove exact
 cold equality and fall back to a full parse for open or closed fences, table promotion, lists, quotes,
 and incomplete inline syntax because appended text can reclassify prior source across each boundary.
-Any streaming fragment carrying a tool-call ID—including malformed text or extension content—is
+Mounted notification details use the separate `ChatDetailDocumentPreparation` owner: it keeps one
+immutable source document and one cancellation-drained parser for the active detail sheet, retains the
+last complete document during replacement, and publishes only when the exact route, activity, and
+preparation generation remain current. Its mounted callback is diagnostic evidence of attachment, not
+proof of a rendered frame; native sheet chrome, detents, selection, and Markdown layout remain owned
+by the existing detail view. Any streaming fragment carrying a tool-call ID—including malformed text or extension content—is
 returned to global assembly so canonical result suppression and placement remain exact.
 Assembler-emitted unique tool sites retain canonical presentation bases, call classification, group
 order, and placement facts. Runtime-only patching requires unchanged canonical source, exact streaming,
@@ -1719,7 +1724,7 @@ dismissal lease retains the exact retiring generation until SwiftUI's dismissal
 callback, so cancellation and rapid re-presentation cannot retire a replacement.
 All app-owned sheets and binding-owned system picker
 and alert boundaries use the managed presentation modifiers; direct sheet
-ownership outside that boundary is rejected by `scripts/test-source-policy.sh`.
+ownership outside that boundary is rejected by `packages/ios-app/scripts/test-source-policy.sh`.
 The lexical guard rejects raw native sheet calls outside that owner, including
 whitespace variants; it is not a proof of arbitrary system-picker/alert binding
 semantics. Those bindings retain behavioral lifecycle tests.

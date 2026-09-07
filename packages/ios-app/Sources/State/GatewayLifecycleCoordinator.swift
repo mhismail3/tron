@@ -27,6 +27,11 @@ protocol GatewayLifecycleProjectionDelegate: AnyObject, Sendable {
     func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws
     func lifecycleRetireProjection(final: Bool) async
     func lifecycleSurface(_ error: Error)
+    func lifecycleRecordDiagnostic(event: String, message: String)
+}
+
+extension GatewayLifecycleProjectionDelegate {
+    func lifecycleRecordDiagnostic(event: String, message: String) {}
 }
 
 @MainActor
@@ -194,6 +199,7 @@ final class GatewayLifecycleCoordinator {
     @discardableResult
     func becameActive() -> Task<Void, Never>? {
         guard phase.admitsWork else { return nil }
+        delegate?.lifecycleRecordDiagnostic(event: "scene.foreground", message: "scene=foreground")
         sceneIsBackgrounded = false
         if let backgroundRetirementTask {
             let generation = phase.generation
@@ -248,6 +254,7 @@ final class GatewayLifecycleCoordinator {
     /// the transport epoch before suspension, discard its queued deliveries, and
     /// let the next active scene perform one authoritative reconnect.
     func enteredBackground() {
+        delegate?.lifecycleRecordDiagnostic(event: "scene.background", message: "scene=background")
         foregroundReconciliationGeneration &+= 1
         let task = foregroundReconciliationTask
         foregroundReconciliationTask = nil
@@ -768,6 +775,10 @@ final class GatewayLifecycleCoordinator {
                 }
             } else {
                 connectionState = .offline(error.localizedDescription)
+                delegate?.lifecycleRecordDiagnostic(
+                    event: "reconnect.failure",
+                    message: "code=\(GatewayDiagnosticFailure.code(error))"
+                )
                 scheduleReconnect()
             }
         }
@@ -831,10 +842,19 @@ final class GatewayLifecycleCoordinator {
         let clock = self.clock
         let delayPolicy = reconnectDelayPolicy
         reconnectCanBeAccelerated = !immediate
+        let loopID = UUID().uuidString
+        let initialDelay: Duration = immediate ? .zero : delayPolicy.delay(nominalSeconds: delayPolicy.initialSeconds)
+        let scheduledAt = clock.now()
+        delegate?.lifecycleRecordDiagnostic(
+            event: "reconnect.scheduled",
+            message: "immediate=\(immediate) attempt=\(attemptGeneration) lifecycle=\(lifecycleGeneration) loop=\(loopID) scheduledDelayMs=\(diagnosticMilliseconds(initialDelay)) cause=\(restartRequested ? "restart" : "connection-unavailable")"
+        )
         reconnectTask = Task { [weak self] in
+            var retry = 0
+            var delayStartedAt = scheduledAt
             do {
                 if !immediate {
-                    try await clock.sleep(delayPolicy.delay(nominalSeconds: delayPolicy.initialSeconds))
+                    try await clock.sleep(initialDelay)
                     guard let self, self.admitsReconnect(
                         lifecycleGeneration: lifecycleGeneration,
                         attemptGeneration: attemptGeneration
@@ -848,10 +868,16 @@ final class GatewayLifecycleCoordinator {
                         attemptGeneration: attemptGeneration
                     ) else { return }
                     self.connectionState = self.restartRequested ? .restarting : .reconnecting
+                    retry += 1
+                    let startedAt = clock.now()
+                    self.delegate?.lifecycleRecordDiagnostic(
+                        event: "reconnect.attempt",
+                        message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) actualDelayMs=\(diagnosticMilliseconds(delayStartedAt.duration(to: startedAt))) state=\(self.restartRequested ? "restarting" : "reconnecting")"
+                    )
                     var establishedConnectionID: Int?
                     var reconciliationAggregateAdmission: Admission?
                     do {
-                        let connection = try await self.client.reconnectForLifecycle()
+                        let connection = try await self.client.reconnectForLifecycle(attemptID: loopID)
                         establishedConnectionID = connection.id
                         try self.requireReconnect(
                             lifecycleGeneration: lifecycleGeneration,
@@ -886,6 +912,8 @@ final class GatewayLifecycleCoordinator {
                         self.restartWatchdogTask = nil
                         self.restartRequested = false
                         self.connectionState = .connected
+                        self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.connected",
+                            message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) connectionID=\(connection.id) handshakeMs=\(diagnosticMilliseconds(startedAt.duration(to: clock.now())))")
                         reconciliationAggregateAdmission = admission
                         self.delegate?.lifecycleBeginReconciliationAggregate(admission: admission)
                         self.delegate?.lifecycleInvalidateSessionConnectionOwnership()
@@ -992,6 +1020,8 @@ final class GatewayLifecycleCoordinator {
                         self.restartWatchdogTask = nil
                         self.restartRequested = false
                         self.connectionState = .unauthorized
+                        self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.failure",
+                            message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) code=unauthenticated durationMs=\(diagnosticMilliseconds(startedAt.duration(to: clock.now())))")
                         self.delegate?.lifecycleSurface(failure)
                         self.finishReconnect(
                             lifecycleGeneration: lifecycleGeneration,
@@ -1029,7 +1059,13 @@ final class GatewayLifecycleCoordinator {
                         ) else { return }
                         self.connectionState = self.restartRequested ? .restarting : .offline(error.localizedDescription)
                         self.reconnectCanBeAccelerated = true
-                        try await clock.sleep(delayPolicy.delay(nominalSeconds: nominalDelay))
+                        self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.failure",
+                            message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry) code=\(GatewayDiagnosticFailure.code(error)) durationMs=\(diagnosticMilliseconds(startedAt.duration(to: clock.now())))")
+                        let delay = delayPolicy.delay(nominalSeconds: nominalDelay)
+                        delayStartedAt = clock.now()
+                        self.delegate?.lifecycleRecordDiagnostic(event: "reconnect.delay",
+                            message: "attempt=\(attemptGeneration) loop=\(loopID) retry=\(retry + 1) scheduledDelayMs=\(diagnosticMilliseconds(delay))")
+                        try await clock.sleep(delay)
                         guard self.admitsReconnect(
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration

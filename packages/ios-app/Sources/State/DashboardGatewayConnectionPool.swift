@@ -118,6 +118,11 @@ final class DashboardGatewayConnectionPool {
         entries[profileID]?.gatewayInfo
     }
 
+    func connectionID(for profileID: String) async -> Int? {
+        guard let entry = entries[profileID] else { return nil }
+        return await entry.client.activeConnectionID()
+    }
+
     func request(
         profileID: String,
         method: String,

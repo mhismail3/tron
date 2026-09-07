@@ -129,6 +129,7 @@ protocol SessionPresentationStoreDelegate: AnyObject {
     func sessionPresentationStoreRetireNoticeScope(_ scope: InAppNoticeScope)
     func sessionPresentationStoreSurface(_ error: Error)
     func sessionPresentationStoreCheckpointCache()
+    func sessionPresentationStoreMeasuredEventWork(_ phase: GatewayEventConsumerPhase, duration: Duration)
 }
 
 extension SessionPresentationStoreDelegate {
@@ -1505,6 +1506,8 @@ final class SessionPresentationStore {
         presentationGeneration: Int? = nil,
         operation: PerformanceOperation = .sessionSync
     ) async -> Bool {
+        let measuredAt = clock.now()
+        defer { delegate?.sessionPresentationStoreMeasuredEventWork(.synchronizationReadWait, duration: measuredAt.duration(to: clock.now())) }
         let intent: SessionSynchronizationCoordinator.Intent
         let initialConnectionGeneration = connectionGeneration
         if replacingVisibleTranscript {
@@ -2333,6 +2336,8 @@ final class SessionPresentationStore {
     }
 
     private func reduce(_ event: GatewayEvent) -> String? {
+        let measuredAt = clock.now()
+        defer { delegate?.sessionPresentationStoreMeasuredEventWork(.reduction, duration: measuredAt.duration(to: clock.now())) }
         if event.topic == "session.snapshot",
            case .sessionSnapshot(let incoming) = event.preparation {
             return reduceSnapshotEvent(event, incoming: incoming)

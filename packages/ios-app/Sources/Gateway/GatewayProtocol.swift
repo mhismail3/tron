@@ -116,6 +116,37 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
         preparation = Self.prepare(topic: topic, adapter: JSONValuePayloadAdapter(payload: payload))
     }
 
+    /// Stamps transport admission metadata without reparsing the payload. The
+    /// network decoder has already prepared typed session data from the original
+    /// Decoder; rebuilding through JSONValue here would repeat expensive work and
+    /// can lose decoder-specific numeric/date representation.
+    func withAdmittedBytes(_ bytes: Int) -> Self {
+        Self(
+            type: type,
+            topic: topic,
+            sessionId: sessionId,
+            payload: payload,
+            admittedBytes: bytes,
+            preparation: preparation
+        )
+    }
+
+    private init(
+        type: String,
+        topic: String,
+        sessionId: String?,
+        payload: JSONValue,
+        admittedBytes: Int,
+        preparation: GatewayEventPreparation
+    ) {
+        self.type = type
+        self.topic = topic
+        self.sessionId = sessionId
+        self.payload = payload
+        self.admittedBytes = max(0, admittedBytes)
+        self.preparation = preparation
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         type = try container.decode(String.self, forKey: .type)

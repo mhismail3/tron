@@ -1,12 +1,21 @@
 import Foundation
 
+func diagnosticMilliseconds(_ duration: Duration) -> Int {
+    let parts = duration.components
+    guard parts.seconds >= 0 else { return 0 }
+    let (whole, overflow) = parts.seconds.multipliedReportingOverflow(by: 1_000)
+    guard !overflow else { return Int.max }
+    let (value, additionOverflow) = whole.addingReportingOverflow(parts.attoseconds / 1_000_000_000_000_000)
+    return additionOverflow ? Int.max : Int(clamping: max(0, value))
+}
+
 struct GitInspection: Equatable, Sendable {
     let isRepository: Bool
     let branch: String?
     let isDirty: Bool
 }
 
-struct GatewayLogRecord: Identifiable, Hashable, Sendable {
+struct GatewayLogRecord: Identifiable, Hashable, Codable, Sendable {
     let timestamp: String
     let level: String
     let message: String
@@ -24,7 +33,7 @@ struct GatewayLogRecord: Identifiable, Hashable, Sendable {
     var id: String { "\(timestamp)-\(level)-\(event ?? "")-\(message)" }
 }
 
-struct GatewayProfileLogRecord: Hashable, Identifiable, Sendable {
+struct GatewayProfileLogRecord: Hashable, Identifiable, Codable, Sendable {
     let profileID: String
     let profileLabel: String
     let record: GatewayLogRecord
@@ -32,16 +41,76 @@ struct GatewayProfileLogRecord: Hashable, Identifiable, Sendable {
     var id: String { "\(profileID):\(record.id)" }
 }
 
+func gatewayLogRecordIsNewer(_ lhs: GatewayProfileLogRecord, than rhs: GatewayProfileLogRecord) -> Bool {
+    if GatewayTimestamp.isNewer(lhs.record.timestamp, than: rhs.record.timestamp) { return true }
+    if GatewayTimestamp.isNewer(rhs.record.timestamp, than: lhs.record.timestamp) { return false }
+    return lhs.id > rhs.id
+}
+
+struct GatewayLogCaptureMetadata: Equatable, Sendable {
+    let capturedAt: String
+    let representedFrom: String?
+    let representedThrough: String?
+    let appBuildIdentity: String
+    let gatewayIdentities: [String: String]
+    let sourceStatuses: [String: String]
+
+    static let empty = Self(
+        capturedAt: GatewayTimestamp.preciseString(from: .now),
+        representedFrom: nil,
+        representedThrough: nil,
+        appBuildIdentity: "unknown",
+        gatewayIdentities: [:],
+        sourceStatuses: [:]
+    )
+
+    func withBounds(records: [GatewayProfileLogRecord]) -> Self {
+        let dates = records.compactMap { GatewayTimestamp.parse($0.record.timestamp) }.sorted()
+        return Self(
+            capturedAt: capturedAt,
+            representedFrom: dates.first.map(GatewayTimestamp.preciseString(from:)),
+            representedThrough: dates.last.map(GatewayTimestamp.preciseString(from:)),
+            appBuildIdentity: appBuildIdentity,
+            gatewayIdentities: gatewayIdentities,
+            sourceStatuses: sourceStatuses
+        )
+    }
+}
+
 struct GatewayLogsLoadResult: Equatable, Sendable {
     let records: [GatewayProfileLogRecord]
     let failedProfileIDs: Set<String>
+    let metadata: GatewayLogCaptureMetadata
+
+    init(
+        records: [GatewayProfileLogRecord],
+        failedProfileIDs: Set<String>,
+        metadata: GatewayLogCaptureMetadata = .empty
+    ) {
+        self.records = records
+        self.failedProfileIDs = failedProfileIDs
+        self.metadata = metadata
+    }
 }
 
 enum GatewayConnectionDiagnosticStage: String, Sendable {
+    case queuePressure = "queue-pressure"
     case helloSend = "hello-send"
     case helloReceive = "hello-receive"
     case liveness
     case transport
+}
+
+enum GatewayDiagnosticFailure {
+    static func code(_ error: Error) -> String {
+        if error is CancellationError { return "cancelled" }
+        guard let failure = error as? GatewayFailure else { return "transport" }
+        switch failure.code {
+        case "timeout", "unauthenticated", "disconnected", "event_overflow", "invalid_response",
+             "protocol_mismatch", "identity_mismatch", "cancelled", "possibly_sent": return failure.code
+        default: return "transport"
+        }
+    }
 }
 
 enum GatewayConnectionDiagnosticOutcome: String, Sendable {
@@ -67,6 +136,9 @@ enum GatewayConnectionDiagnosticReason: String, Sendable {
 
 struct GatewayConnectionDiagnostic: Sendable {
     let sequence: Int
+    let clientID: String?
+    let attemptID: String?
+    let connectionID: Int?
     let timestamp: String
     let profileID: String?
     let profileLabel: String?
@@ -76,17 +148,152 @@ struct GatewayConnectionDiagnostic: Sendable {
     let reason: GatewayConnectionDiagnosticReason?
     let platformCode: Int?
     let overflowCount: Int?
+    let overflowReason: GatewayEventAdmissionReason?
+    let rejectedTopic: String?
+    let overflowBytes: Int?
+    let queueBytes: Int?
+    let queueMaximumEvents: Int?
+    let queueMaximumBytes: Int?
+    let queueOldestAgeMilliseconds: Int?
+    let queueTimeSinceLastDequeueMilliseconds: Int?
+    let queueCountHighWaterMark: Int?
+    let queueByteHighWaterMark: Int?
+    let admittedEventCount: Int?
+    let dequeuedEventCount: Int?
+    let pressureCrossings: Int?
+    let pressureLevels: [Int]?
+    let dequeueWaitAgeMilliseconds: Int?
+    let dequeueWaitTopic: String?
+    let dequeueWaitConnectionID: Int?
+    let lastInboundAgeMilliseconds: Int?
+    let lastWriteProgressAgeMilliseconds: Int?
+
+    init(
+        sequence: Int,
+        clientID: String? = nil,
+        attemptID: String? = nil,
+        connectionID: Int? = nil,
+        timestamp: String,
+        profileID: String?,
+        profileLabel: String?,
+        stage: GatewayConnectionDiagnosticStage,
+        outcome: GatewayConnectionDiagnosticOutcome,
+        durationMilliseconds: Int,
+        reason: GatewayConnectionDiagnosticReason?,
+        platformCode: Int?,
+        overflowCount: Int?,
+        overflowReason: GatewayEventAdmissionReason? = nil,
+        rejectedTopic: String? = nil,
+        overflowBytes: Int? = nil,
+        queueBytes: Int? = nil,
+        queueMaximumEvents: Int? = nil,
+        queueMaximumBytes: Int? = nil,
+        queueOldestAgeMilliseconds: Int? = nil,
+        queueTimeSinceLastDequeueMilliseconds: Int? = nil,
+        queueCountHighWaterMark: Int? = nil,
+        queueByteHighWaterMark: Int? = nil,
+        admittedEventCount: Int? = nil,
+        dequeuedEventCount: Int? = nil,
+        pressureCrossings: Int? = nil,
+        pressureLevels: [Int]? = nil,
+        dequeueWaitAgeMilliseconds: Int? = nil,
+        dequeueWaitTopic: String? = nil,
+        dequeueWaitConnectionID: Int? = nil,
+        lastInboundAgeMilliseconds: Int? = nil,
+        lastWriteProgressAgeMilliseconds: Int? = nil
+    ) {
+        self.sequence = sequence
+        self.clientID = clientID
+        self.attemptID = attemptID
+        self.connectionID = connectionID
+        self.timestamp = timestamp
+        self.profileID = profileID
+        self.profileLabel = profileLabel
+        self.stage = stage
+        self.outcome = outcome
+        self.durationMilliseconds = durationMilliseconds
+        self.reason = reason
+        self.platformCode = platformCode
+        self.overflowCount = overflowCount
+        self.overflowReason = overflowReason
+        self.rejectedTopic = rejectedTopic
+        self.overflowBytes = overflowBytes
+        self.queueBytes = queueBytes
+        self.queueMaximumEvents = queueMaximumEvents
+        self.queueMaximumBytes = queueMaximumBytes
+        self.queueOldestAgeMilliseconds = queueOldestAgeMilliseconds
+        self.queueTimeSinceLastDequeueMilliseconds = queueTimeSinceLastDequeueMilliseconds
+        self.queueCountHighWaterMark = queueCountHighWaterMark
+        self.queueByteHighWaterMark = queueByteHighWaterMark
+        self.admittedEventCount = admittedEventCount
+        self.dequeuedEventCount = dequeuedEventCount
+        self.pressureCrossings = pressureCrossings
+        self.pressureLevels = pressureLevels
+        self.dequeueWaitAgeMilliseconds = dequeueWaitAgeMilliseconds
+        self.dequeueWaitTopic = dequeueWaitTopic
+        self.dequeueWaitConnectionID = dequeueWaitConnectionID
+        self.lastInboundAgeMilliseconds = lastInboundAgeMilliseconds
+        self.lastWriteProgressAgeMilliseconds = lastWriteProgressAgeMilliseconds
+    }
+}
+
+enum GatewayEventConsumerPhase: String, Sendable {
+    case wholeHandler = "whole-handler"
+    case reduction
+    case synchronizationReadWait = "synchronization"
+}
+
+struct GatewayEventConsumerDiagnostic: Sendable, Equatable {
+    let category: String
+    let phase: GatewayEventConsumerPhase
+    let count: Int
+    let slowCount: Int
+    let maximumDuration: Duration
+    let totalDuration: Duration
+    let firstObservedAt: Date
+    let lastObservedAt: Date
 }
 
 struct IOSClientDiagnosticBuffer: Sendable {
     static let maximumRecords = 200
     private(set) var records: [GatewayProfileLogRecord] = []
 
+    mutating func mergePersisted(_ values: [GatewayProfileLogRecord]) {
+        let retained = values.map { value in
+            GatewayProfileLogRecord(profileID: value.profileID, profileLabel: "iOS client · Retained",
+                record: GatewayLogRecord(timestamp: value.record.timestamp, level: value.record.level,
+                    message: value.record.message, event: value.record.event, source: "ios-client-retained"))
+        }
+        records = Array((records + retained).sorted { gatewayLogRecordIsNewer($0, than: $1) }.prefix(Self.maximumRecords))
+    }
+
+    mutating func recordLifecycle(
+        event: String,
+        message: String,
+        profileID: String?,
+        profileLabel: String?,
+        timestamp: String = GatewayTimestamp.preciseString(from: .now)
+    ) {
+        let ownerID = Self.boundedUTF8(profileID ?? "ios-client", maximumBytes: 256)
+        records.insert(GatewayProfileLogRecord(
+            profileID: "\(ownerID):ios-client",
+            profileLabel: Self.boundedUTF8(profileLabel ?? "iOS client", maximumBytes: 512),
+            record: GatewayLogRecord(
+                timestamp: Self.boundedUTF8(timestamp, maximumBytes: 128),
+                level: "info",
+                message: Self.boundedUTF8(Self.redactedMessage(message), maximumBytes: 2_000),
+                event: event,
+                source: "ios-client"
+            )
+        ), at: 0)
+        if records.count > Self.maximumRecords { records.removeLast(records.count - Self.maximumRecords) }
+    }
+
     mutating func record(
         _ failure: GatewayFailure,
         profileID: String?,
         profileLabel: String?,
-        timestamp: String = Date.now.formatted(.iso8601)
+        timestamp: String = GatewayTimestamp.preciseString(from: .now)
     ) {
         guard failure.code == "invalid_response" else { return }
         let ownerID = Self.boundedUTF8(profileID ?? "ios-client", maximumBytes: 256)
@@ -100,7 +307,7 @@ struct IOSClientDiagnosticBuffer: Sendable {
             record: GatewayLogRecord(
                 timestamp: Self.boundedUTF8(timestamp, maximumBytes: 128),
                 level: "error",
-                message: Self.boundedUTF8(failure.message, maximumBytes: 2_000),
+                message: "code=invalid_response",
                 event: "gateway.response.invalid",
                 source: "ios-client"
             )
@@ -120,13 +327,36 @@ struct IOSClientDiagnosticBuffer: Sendable {
             "stage=\(diagnostic.stage.rawValue)",
             "outcome=\(diagnostic.outcome.rawValue)",
             "sequence=\(max(0, diagnostic.sequence))",
+            "clientID=\(diagnostic.clientID ?? "unknown")",
+            "attemptID=\(diagnostic.attemptID ?? "unknown")",
+            "connectionID=\(diagnostic.connectionID.map(String.init) ?? "unknown")",
             "durationMs=\(max(0, diagnostic.durationMilliseconds))",
+            "recordKind=\(diagnostic.overflowReason != nil ? "admission-rejection" : diagnostic.reason == .eventOverflow ? "transport-retirement" : "connection")",
         ]
         if let reason = diagnostic.reason { fields.append("reason=\(reason.rawValue)") }
         if let platformCode = diagnostic.platformCode { fields.append("platformCode=\(platformCode)") }
         if let overflowCount = diagnostic.overflowCount {
             fields.append("overflowCount=\(max(0, overflowCount))")
         }
+        if let overflowReason = diagnostic.overflowReason { fields.append("overflowReason=\(overflowReason.rawValue)") }
+        if let rejectedTopic = diagnostic.rejectedTopic { fields.append("rejectedTopic=\(boundedUTF8(rejectedTopic, maximumBytes: 64))") }
+        if let overflowBytes = diagnostic.overflowBytes { fields.append("overflowBytes=\(max(0, overflowBytes))") }
+        if let queueBytes = diagnostic.queueBytes { fields.append("queueBytes=\(max(0, queueBytes))") }
+        if let limit = diagnostic.queueMaximumEvents { fields.append("queueMaximumEvents=\(max(0, limit))") }
+        if let limit = diagnostic.queueMaximumBytes { fields.append("queueMaximumBytes=\(max(0, limit))") }
+        if let age = diagnostic.queueOldestAgeMilliseconds { fields.append("queueOldestAgeMs=\(max(0, age))") }
+        if let age = diagnostic.queueTimeSinceLastDequeueMilliseconds { fields.append("queueIdleAgeMs=\(max(0, age))") }
+        if let highWater = diagnostic.queueCountHighWaterMark { fields.append("queueCountHighWater=\(max(0, highWater))") }
+        if let highWater = diagnostic.queueByteHighWaterMark { fields.append("queueByteHighWater=\(max(0, highWater))") }
+        if let count = diagnostic.admittedEventCount { fields.append("admittedEvents=\(max(0, count))") }
+        if let count = diagnostic.dequeuedEventCount { fields.append("dequeuedEvents=\(max(0, count))") }
+        if let crossings = diagnostic.pressureCrossings { fields.append("pressureCrossings=\(max(0, crossings))") }
+        if let levels = diagnostic.pressureLevels { fields.append("pressureLevels=\(levels.map(String.init).joined(separator: ","))") }
+        if let age = diagnostic.dequeueWaitAgeMilliseconds { fields.append("dequeueIntervalAgeMs=\(max(0, age))") }
+        if let topic = diagnostic.dequeueWaitTopic { fields.append("dequeueTopic=\(boundedUTF8(topic, maximumBytes: 64))") }
+        if let id = diagnostic.dequeueWaitConnectionID { fields.append("dequeueConnectionID=\(id)") }
+        if let age = diagnostic.lastInboundAgeMilliseconds { fields.append("lastInboundAgeMs=\(max(0, age))") }
+        if let age = diagnostic.lastWriteProgressAgeMilliseconds { fields.append("lastWriteProgressAgeMs=\(max(0, age))") }
         return GatewayProfileLogRecord(
             profileID: "\(ownerID):ios-client",
             profileLabel: ownerLabel,
@@ -140,6 +370,42 @@ struct IOSClientDiagnosticBuffer: Sendable {
         )
     }
 
+    static func logRecord(_ diagnostic: GatewayEventConsumerDiagnostic) -> GatewayProfileLogRecord {
+        let message = [
+            "category=\(boundedUTF8(diagnostic.category, maximumBytes: 64))",
+            "phase=\(diagnostic.phase.rawValue)",
+            "count=\(max(0, diagnostic.count))",
+            "slowCount=\(max(0, diagnostic.slowCount))",
+            "maxDurationMs=\(diagnosticMilliseconds(diagnostic.maximumDuration))",
+            "totalDurationMs=\(diagnosticMilliseconds(diagnostic.totalDuration))",
+            "windowStartedAt=\(GatewayTimestamp.preciseString(from: diagnostic.firstObservedAt))",
+        ].joined(separator: " ")
+        return GatewayProfileLogRecord(
+            profileID: "client-work:ios-client",
+            profileLabel: "iOS client · Client work",
+            record: GatewayLogRecord(
+                timestamp: GatewayTimestamp.preciseString(from: diagnostic.lastObservedAt),
+                level: diagnostic.slowCount > 0 ? "warning" : "info",
+                message: message,
+                event: "gateway.client-work",
+                source: "ios-client"
+            )
+        )
+    }
+
+    static func redactedMessage(_ value: String) -> String {
+        var result = boundedUTF8(value, maximumBytes: 4_096)
+        for pattern in [
+            #"(?i)\bBearer\h+[A-Za-z0-9._~+/=-]+"#,
+            #"(?i)\b(?:authorization|token|api[_-]?key|password|secret)\h*[:=]\h*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"#,
+            #"[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'<>]+"#,
+            #"(?<![A-Za-z0-9])(?:~/|/)[^\s\"'<>]+"#
+        ] {
+            result = result.replacingOccurrences(of: pattern, with: "[REDACTED]", options: .regularExpression)
+        }
+        return boundedUTF8(result, maximumBytes: 2_000)
+    }
+
     private static func boundedUTF8(_ value: String, maximumBytes: Int) -> String {
         let bytes = Array(value.utf8)
         guard bytes.count > maximumBytes else { return value }
@@ -148,6 +414,92 @@ struct IOSClientDiagnosticBuffer: Sendable {
         while end > 0, String(bytes: bytes[..<end], encoding: .utf8) == nil { end -= 1 }
         let prefix = String(bytes: bytes[..<end], encoding: .utf8) ?? ""
         return prefix + "…"
+    }
+}
+
+actor IOSClientDiagnosticStore {
+    static let maximumRecords = 96
+    static let maximumBytes = 96 * 1_024
+    static let maximumAge: TimeInterval = 7 * 24 * 60 * 60
+    private let defaults: UserDefaults
+    private let key = "tron.diagnostics.incidents.v1"
+    private nonisolated let mailbox = IOSDiagnosticMailbox()
+
+    nonisolated func record(_ value: GatewayProfileLogRecord) {
+        guard let safe = Self.sanitize(value, now: .now) else { return }
+        mailbox.enqueue([safe]) { await self.drainPending() }
+    }
+
+    nonisolated func record(_ values: [GatewayProfileLogRecord]) {
+        let now = Date.now
+        let safe = values.compactMap { Self.sanitize($0, now: now) }
+            .sorted { gatewayLogRecordIsNewer($0, than: $1) }
+        mailbox.enqueue(safe) { await self.drainPending() }
+    }
+
+    private func drainPending() {
+        while let records = mailbox.take() { save(records) }
+    }
+
+    nonisolated func flush() async {
+        await mailbox.currentWriter()?.value
+    }
+
+    init(defaults: UserDefaults) { self.defaults = defaults }
+
+    func load(now: Date = .now) -> [GatewayProfileLogRecord] {
+        guard let data = defaults.data(forKey: key), data.count <= Self.maximumBytes,
+              let values = try? JSONDecoder.gateway.decode([GatewayProfileLogRecord].self, from: data) else { return [] }
+        return Array(values.compactMap { Self.sanitize($0, now: now) }
+            .sorted { gatewayLogRecordIsNewer($0, than: $1) }
+            .prefix(Self.maximumRecords))
+    }
+
+    func save(_ values: [GatewayProfileLogRecord], now: Date = .now) {
+        // One store serializes both direct transport incidents and UI context.
+        // A late UI snapshot cannot erase a newer handshake/pressure incident.
+        var seen = Set<String>()
+        var retained = Array((values + load(now: now)).compactMap { Self.sanitize($0, now: now) }
+            .sorted { gatewayLogRecordIsNewer($0, than: $1) }
+            .filter { seen.insert($0.id).inserted }
+            .prefix(Self.maximumRecords))
+        while !retained.isEmpty,
+              let data = try? JSONEncoder.gateway.encode(retained), data.count > Self.maximumBytes {
+            retained.removeLast()
+        }
+        guard let data = try? JSONEncoder.gateway.encode(retained), data.count <= Self.maximumBytes else { return }
+        defaults.set(data, forKey: key)
+    }
+
+    private static func sanitize(_ value: GatewayProfileLogRecord, now: Date) -> GatewayProfileLogRecord? {
+        guard value.profileID.hasSuffix(":ios-client"), value.profileID.utf8.count <= 267,
+              value.profileID.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) || $0 == ":" || $0 == "_" || $0 == "-" }),
+              value.profileLabel.utf8.count <= 512,
+              ["gateway.response.invalid", "gateway.connection", "gateway.client-work", "gateway.lifecycle"].contains(value.record.event),
+              value.record.source == "ios-client",
+              ["info", "warning", "error"].contains(value.record.level),
+              value.record.message.utf8.count <= 2_000,
+              let date = GatewayTimestamp.parse(value.record.timestamp) else { return nil }
+        let age = now.timeIntervalSince(date)
+        guard age >= 0 && age <= maximumAge else { return nil }
+        // Only the typed event code crosses this boundary. Character/path
+        // sanitization cannot establish that arbitrary response text is private.
+        let safeLabel = "iOS client"
+        let safeMessage = value.record.event == "gateway.response.invalid"
+            ? "code=invalid_response"
+            : IOSClientDiagnosticBuffer.redactedMessage(value.record.message)
+        guard safeMessage.utf8.count <= 2_000 else { return nil }
+        return GatewayProfileLogRecord(
+            profileID: value.profileID,
+            profileLabel: safeLabel,
+            record: GatewayLogRecord(
+                timestamp: value.record.timestamp,
+                level: value.record.level,
+                message: safeMessage,
+                event: value.record.event,
+                source: value.record.source
+            )
+        )
     }
 }
 

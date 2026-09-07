@@ -1,4 +1,56 @@
+import Network
 import SwiftUI
+
+@MainActor
+private final class GatewayPathDiagnosticsObserver {
+    private let monitor = NWPathMonitor()
+    private let delivery = GatewayPathDiagnosticCoalescer()
+    private let record: @MainActor @Sendable (String) -> Void
+
+    init(model: AppModel) {
+        record = { [weak model] in model?.lifecycleRecordDiagnostic(event: "path.changed", message: $0) }
+        monitor.pathUpdateHandler = { [delivery, record] path in
+            Self.offer(Self.facts(path), delivery: delivery, record: record)
+        }
+        monitor.start(queue: DispatchQueue(label: "tron.gateway.path-monitor"))
+    }
+
+    func setSceneActive(_ active: Bool) {
+        delivery.setActive(active)
+        if active { Self.offer(Self.facts(monitor.currentPath), delivery: delivery, record: record) }
+    }
+
+    private nonisolated static func offer(
+        _ facts: String, delivery: GatewayPathDiagnosticCoalescer,
+        record: @escaping @MainActor @Sendable (String) -> Void
+    ) {
+        guard delivery.offer(facts) else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(250))
+            if let message = delivery.take(), !Task.isCancelled { record(message) }
+        }
+    }
+
+    private nonisolated static func facts(_ path: NWPath) -> String {
+        let status: String
+        switch path.status {
+        case .satisfied: status = "satisfied"
+        case .unsatisfied: status = "unsatisfied"
+        case .requiresConnection: status = "requires-connection"
+        @unknown default: status = "unknown"
+        }
+        let interfaces: [(NWInterface.InterfaceType, String)] = [
+            (.wifi, "wifi"), (.cellular, "cellular"), (.wiredEthernet, "wired"), (.loopback, "loopback"), (.other, "other")
+        ]
+        let used = interfaces.filter { path.usesInterfaceType($0.0) }.map(\.1).joined(separator: ",")
+        return "status=\(status) interfaces=\(used.isEmpty ? "unknown" : used) expensive=\(path.isExpensive) constrained=\(path.isConstrained)"
+    }
+
+    deinit {
+        delivery.setActive(false)
+        monitor.cancel()
+    }
+}
 
 @main
 struct TronMobileApp: App {
@@ -10,12 +62,23 @@ struct TronMobileApp: App {
     }
     #else
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var model = AppModel()
+    // Incident retention is explicitly composed by the production app owner;
+    // tests and scripted clients remain memory-only unless they inject a sink.
+    @State private var model: AppModel
+    @State private var pathDiagnostics: GatewayPathDiagnosticsObserver
     @State private var appearance = AppearanceSettings.shared
     @State private var backgroundCheckpoints = AppBackgroundCheckpointCoordinator()
     @State private var pushNotifications = PushNotificationCoordinator()
     @Environment(\.scenePhase) private var scenePhase
     private let pendingShares = UserDefaultsPendingShareStore()
+
+    init() {
+        let store = IOSClientDiagnosticStore(defaults: .standard)
+        let model = AppModel(client: GatewayClient(diagnosticStore: store), diagnosticStore: store,
+                             notificationInbox: NotificationInboxCoordinator(defaults: .standard))
+        _model = State(initialValue: model)
+        _pathDiagnostics = State(initialValue: GatewayPathDiagnosticsObserver(model: model))
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -28,6 +91,7 @@ struct TronMobileApp: App {
                 .tronPresentation()
                 .preferredColorScheme(appearance.mode.colorScheme)
                 .task {
+                    pathDiagnostics.setSceneActive(scenePhase == .active)
                     configurePushNotifications()
                     await RetiredNotificationBadge.clear()
                     await model.start(sceneIsActive: scenePhase == .active)
@@ -70,14 +134,17 @@ struct TronMobileApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
+                        pathDiagnostics.setSceneActive(true)
                         Task {
                             await RetiredNotificationBadge.clear()
                             await reconcilePushNotifications()
                         }
                         model.becameActive()
                     } else if phase == .inactive {
+                        pathDiagnostics.setSceneActive(false)
                         model.becameInactive()
                     } else if phase == .background {
+                        pathDiagnostics.setSceneActive(false)
                         backgroundCheckpoints.retain(model.enteredBackground())
                     }
                 }

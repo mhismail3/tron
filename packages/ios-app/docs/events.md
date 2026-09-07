@@ -37,9 +37,24 @@ retired profile cannot mutate its replacement. Backgrounding is an explicit tran
 `GatewayLifecycleCoordinator` retires the socket epoch and clears queued deliveries while retaining
 last-good session projections; foreground creates a new epoch and authoritative session baseline.
 `GatewayClient` decodes every inbound response/event frame through one discriminator and prepares large session DTOs on its
-actor before crossing into `AppModel`. `GatewayEvent` uses one topic dispatcher for network `Decoder` payloads and local
+actor before crossing into `AppModel`. Transport admission is atomic: count, byte-budget, and individually oversized
+rejections carry bounded queue age/progress/high-water evidence, with fixed pressure-threshold accounting and no payload
+logging. Coalescing is scoped to one connection epoch and rejected replacements leave the prior byte accounting intact.
+A monotonic retirement fence rejects late predecessor frames before touching capacity or evidence. New-epoch admission
+removes only superseded queued projections before checking capacity; the exact retirement owner atomically publishes
+its final control notification without reopening ordinary frame admission. Accepted Gateway work is unaffected.
+The event consumer retains bounded category/phase aggregates rather than per-event traces; optional notification inbox
+refreshes are one in-flight pass plus one pending invalidation per profile, so a stalled read cannot hold the serial event
+drain. Successful connection refresh and foreground reconciliation schedule a bounded selected-profile inbox refresh
+even without `notification.inbox.changed`; the inbox coordinator owns that optional work, and foreground readiness never
+awaits its RPC. Exact profile, generation, and connection checks still reject stale pages.
+Diagnostic timestamps are parsed as instants (including fractional seconds and offsets); local occurrence times and copied
+range endpoints retain millisecond precision. Reconnect lifecycle loop IDs
+are carried into handshake, liveness, and retirement records so chronology and incident identity do not depend on wall-clock text. `GatewayEvent` uses one topic dispatcher for network `Decoder` payloads and local
 `JSONValue` fixtures; the adapters share identical topic admission and malformed-event behavior, while the network adapter
-continues decoding directly from the original decoder without JSON reserialization. The raw event remains beside that typed preparation:
+continues decoding directly from the original decoder without JSON reserialization. The raw event remains beside that typed preparation; transport admission only stamps frame size and never reparses the
+already prepared payload. Local incident records are an explicitly production-composed, bounded projection retained for
+ordinary relaunch only; test clients remain memory-only, and persistence failures cannot affect transport or presentation. The production app composes this sink explicitly; it retains only structurally admitted iOS incident records for at most 96 rows/96 KiB and seven days, while test-created `AppModel` instances have no sink by default. Offline Logs publish local rows before any remote profile fetch and preserve failed-source status; the Logs surface also fences publication and cleanup to its captured presentation activity and request generation. Exports prepend capture time, represented log bounds, app build identity, and per-source freshness/status; these are provenance metadata rather than canonical Gateway state. Persisted invalid-response incidents retain only the typed event code at the storage boundary. Gateway heartbeat/close diagnostics include bounded inbound/write-progress ages and outbound queue counters without payloads. Reconnect scheduling/attempt/failure, foreground/background transitions, and coarse Network.framework path changes are recorded as bounded lifecycle incidents independently of event-consumer delivery; successful ping/pong and socket writes update progress evidence, while unknown-before-success remains distinct.
 unknown frame discriminators are ignored, valid unknown sequenced session topics still
 advance their cursor, and malformed known session payloads fail closed to authoritative
 catch-up instead of disconnecting the transport or consuming their cursor. A quarantined event that cannot

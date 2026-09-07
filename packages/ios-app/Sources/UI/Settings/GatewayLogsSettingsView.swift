@@ -32,6 +32,7 @@ struct GatewayLogsSettingsView: View {
     @State private var hasLoaded = false
     @State private var loadGeneration = 0
     @State private var copySucceeded = false
+    @State private var captureMetadata = GatewayLogCaptureMetadata.empty
 
     private let levels = ["all", "info", "warning", "error"]
 
@@ -164,31 +165,45 @@ struct GatewayLogsSettingsView: View {
     }
 
     private func loadLogs(preserveExistingOnEmpty: Bool) async {
+        let activity = presentationActivity
+        guard activity.allowsPresentationPublication else { return }
         loadGeneration &+= 1
         let generation = loadGeneration
         loading = true
         defer {
-            if generation == loadGeneration { loading = false }
+            // A dismissed/replaced Logs surface must not clear the successor's
+            // loading state after its remote/local export settles.
+            if generation == loadGeneration, presentationActivity == activity { loading = false }
         }
+        // Publish local evidence first even when a ready socket's remote log
+        // read is stalled. Copy remains useful throughout the remote wait.
+        let local = await model.loadGatewayLogsResult(limit: 1_000, includeRemote: false)
+        guard generation == loadGeneration, presentationActivity == activity,
+              activity.allowsPresentationPublication, !Task.isCancelled else { return }
+        recordIndex = GatewayLogRecordIndex(records: GatewayLogsLoadPolicy.mergedRecords(
+            current: recordIndex.records, loaded: local, preserveExistingOnEmpty: true, limit: 1_000
+        ))
+        captureMetadata = local.metadata
+        hasLoaded = true
         let loaded = await model.loadGatewayLogsResult(limit: 1_000)
-        guard generation == loadGeneration, !Task.isCancelled else { return }
+        guard generation == loadGeneration,
+              presentationActivity == activity,
+              activity.allowsPresentationPublication,
+              !Task.isCancelled else { return }
         recordIndex = GatewayLogRecordIndex(records: GatewayLogsLoadPolicy.mergedRecords(
             current: recordIndex.records,
             loaded: loaded,
             preserveExistingOnEmpty: preserveExistingOnEmpty,
             limit: 1_000
         ))
+        captureMetadata = loaded.metadata.withBounds(records: recordIndex.records)
         hasLoaded = true
     }
 
     private func copyVisibleLogs() {
-        UIPasteboard.general.string = visibleItems.map { item in
-            let record = item.record
-            let timestamp = record.record.timestamp
-            let source = record.record.source.map { " [\($0)]" } ?? ""
-            let event = record.record.event.map { " [\($0)]" } ?? ""
-            return "\(timestamp) [\(record.profileLabel)] [\(record.record.level.uppercased())]\(source)\(event) \(record.record.message)"
-        }.joined(separator: "\n")
+        UIPasteboard.general.string = GatewayLogExport.text(
+            records: visibleItems.map(\.record), metadata: captureMetadata
+        )
         copySucceeded = true
         Task {
             try? await Task.sleep(for: .milliseconds(600))
@@ -225,7 +240,7 @@ enum GatewayLogsLoadPolicy {
         if preserveExistingOnEmpty, merged.isEmpty, !current.isEmpty {
             return current
         }
-        return Array(merged.sorted { $0.record.timestamp > $1.record.timestamp }.prefix(limit))
+        return Array(merged.sorted { gatewayLogRecordIsNewer($0, than: $1) }.prefix(limit))
     }
 }
 

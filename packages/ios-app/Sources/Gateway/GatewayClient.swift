@@ -71,27 +71,101 @@ struct GatewayEventBufferPolicy: Sendable {
     static let `default` = Self(maximumEvents: 1_024, maximumBytes: 2 * 1_024 * 1_024)
 }
 
-private actor GatewayEventHub {
+enum GatewayEventAdmissionReason: String, Sendable, Equatable {
+    case countLimit = "count_limit"
+    case byteLimit = "byte_limit"
+    case oversizedEvent = "oversized_event"
+    case retiredEpoch = "retired_epoch"
+}
+
+enum GatewayDiagnosticTopicAdmission {
+    static let recognizedTopics: Set<String> = [
+        "session.snapshot", "session.rebaseline", "session.summary", "session.listChanged",
+        "session.message", "session.progress", "session.toolProgress", "session.extensionActivity",
+        "session.extensionPresentation", "session.compaction", "session.processActivity",
+        "session.closed", "session.operationFailed", "session.extensionError",
+        "session.structureChanged", "session.contextChanged", "session.resourcesChanged",
+        "session.processTranscript.changed", "transport.disconnected", "transport.resyncRequired",
+        "system.stopping", "notification.inbox.changed", "auth.prompt", "auth.event",
+        "auth.completed", "automation.changed", "settings.changed", "trust.changed",
+        "providers.changed", "packages.changed", "packages.progress", "packages.completed",
+        "models.customChanged", "terminal.output", "terminal.exit"
+    ]
+
+    static func admit(_ topic: String) -> String {
+        recognizedTopics.contains(topic) ? topic : "other"
+    }
+}
+
+struct GatewayEventHubSnapshot: Sendable, Equatable {
+    let bufferedEventCount: Int
+    let bufferedBytes: Int
+    let maximumEvents: Int
+    let maximumBytes: Int
+    let oldestQueuedAgeMilliseconds: Int
+    let timeSinceLastDequeueMilliseconds: Int?
+    let countHighWaterMark: Int
+    let byteHighWaterMark: Int
+    let admittedCount: Int
+    let dequeuedCount: Int
+    let pressureCrossings: Int
+    let pressureLevels: [Int]
+    let dequeueWaitAgeMilliseconds: Int?
+    let dequeueWaitTopic: String?
+    let dequeueWaitConnectionID: Int?
+}
+
+struct GatewayEventAdmission: Sendable, Equatable {
+    let accepted: Bool
+    let reason: GatewayEventAdmissionReason?
+    let topic: String
+    let admittedBytes: Int
+    let snapshot: GatewayEventHubSnapshot
+    let pressureChanged: Bool
+}
+
+actor GatewayEventHub {
     private struct BufferedDelivery {
         let delivery: GatewayEventDelivery
         let bytes: Int
         let key: String?
+        let queuedAt: ContinuousClock.Instant
     }
 
     private let policy: GatewayEventBufferPolicy
+    private let clock: MonotonicClock
     private var buffered: [BufferedDelivery] = []
     private var bufferedBytes = 0
     private var waiters: [(UUID, CheckedContinuation<GatewayEventDelivery?, Never>)] = []
     private var finished = false
+    private var lastDequeuedAt: ContinuousClock.Instant?
+    private var countHighWaterMark = 0
+    private var byteHighWaterMark = 0
+    private var admittedCount = 0
+    private var dequeuedCount = 0
+    private var pressureLevels: Set<Int> = []
+    // Evidence follows the newest admitted epoch. During a suspended close,
+    // successor admission can overlap removal of the predecessor's buffer;
+    // stale deliveries must not reset successor counters or threshold state.
+    private var evidenceConnectionID: Int?
+    private var retiredThrough = Int.min
+    private var dequeuedAt: ContinuousClock.Instant?
+    private var dequeuedTopic: String?
+    private var dequeuedConnectionID: Int?
 
-    init(policy: GatewayEventBufferPolicy = .default) {
+    init(
+        policy: GatewayEventBufferPolicy = .default,
+        clock: MonotonicClock = .continuous
+    ) {
         self.policy = policy
+        self.clock = clock
     }
 
     func next() async -> GatewayEventDelivery? {
+        clearDequeued()
         if let first = buffered.first {
-            buffered.removeFirst()
-            bufferedBytes -= first.bytes
+            dequeue(first)
+            markDequeued(first.delivery)
             return first.delivery
         }
         if finished || Task.isCancelled { return nil }
@@ -99,8 +173,8 @@ private actor GatewayEventHub {
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 if let first = buffered.first {
-                    buffered.removeFirst()
-                    bufferedBytes -= first.bytes
+                    dequeue(first)
+                    markDequeued(first.delivery)
                     continuation.resume(returning: first.delivery)
                 } else if finished || Task.isCancelled {
                     continuation.resume(returning: nil)
@@ -113,47 +187,198 @@ private actor GatewayEventHub {
         }
     }
 
-    /// Returns true when preserving the ordered event would exceed a hard
-    /// bound. The caller must retire the epoch and rebaseline; it never drops a
-    /// sequenced event silently.
-    func yield(_ delivery: GatewayEventDelivery, bytes: Int) -> Bool {
-        guard !finished else { return false }
-        if !waiters.isEmpty {
-            let (_, waiter) = waiters.removeFirst()
-            waiter.resume(returning: delivery)
-            return false
+    /// Admission and its evidence are one actor operation. In particular, a
+    /// coalesced replacement is preflighted before changing byte accounting, so
+    /// a rejected replacement cannot leave the hub over its configured bound.
+    func admit(_ delivery: GatewayEventDelivery, bytes: Int) -> GatewayEventAdmission {
+        guard !finished, delivery.connectionID > retiredThrough,
+              evidenceConnectionID.map({ delivery.connectionID >= $0 }) ?? true else {
+            return outcome(false, reason: .retiredEpoch, delivery: delivery, bytes: bytes)
         }
+        return enqueue(delivery, bytes: bytes)
+    }
+
+    private func enqueue(_ delivery: GatewayEventDelivery, bytes: Int) -> GatewayEventAdmission {
+        beginEvidence(for: delivery.connectionID)
         let byteCount = max(0, bytes)
         let key = coalescingKey(for: delivery)
-        if let key, let index = buffered.lastIndex(where: { $0.key == key }) {
-            bufferedBytes += byteCount - buffered[index].bytes
-            buffered[index] = BufferedDelivery(delivery: delivery, bytes: byteCount, key: key)
-            return bufferedBytes > policy.maximumBytes
+        if byteCount > policy.maximumBytes {
+            return outcome(false, reason: .oversizedEvent, delivery: delivery, bytes: byteCount)
         }
-        guard buffered.count < policy.maximumEvents,
-              byteCount <= policy.maximumBytes,
-              bufferedBytes <= policy.maximumBytes - byteCount else { return true }
-        buffered.append(BufferedDelivery(delivery: delivery, bytes: byteCount, key: key))
+        if !waiters.isEmpty {
+            let (_, waiter) = waiters.removeFirst()
+            markDequeued(delivery)
+            waiter.resume(returning: delivery)
+            lastDequeuedAt = clock.now()
+            admittedCount = admittedCount.saturatingIncremented()
+            dequeuedCount = dequeuedCount.saturatingIncremented()
+            return outcome(true, reason: nil, delivery: delivery, bytes: byteCount)
+        }
+        if let key, let index = buffered.lastIndex(where: { $0.key == key }) {
+            let replacementBytes = bufferedBytes - buffered[index].bytes + byteCount
+            guard replacementBytes <= policy.maximumBytes else {
+                return outcome(false, reason: .byteLimit, delivery: delivery, bytes: byteCount)
+            }
+            bufferedBytes = replacementBytes
+            buffered[index] = BufferedDelivery(
+                delivery: delivery, bytes: byteCount, key: key,
+                queuedAt: min(buffered[index].queuedAt, clock.now())
+            )
+            admittedCount = admittedCount.saturatingIncremented()
+            updateHighWaterMarks()
+            let pressureChanged = notePressure()
+            return outcome(true, reason: nil, delivery: delivery, bytes: byteCount, pressureChanged: pressureChanged)
+        }
+        if buffered.count >= policy.maximumEvents {
+            return outcome(false, reason: .countLimit, delivery: delivery, bytes: byteCount)
+        }
+        guard bufferedBytes <= policy.maximumBytes - byteCount else {
+            return outcome(false, reason: .byteLimit, delivery: delivery, bytes: byteCount)
+        }
+        buffered.append(BufferedDelivery(
+            delivery: delivery, bytes: byteCount, key: key, queuedAt: clock.now()
+        ))
         bufferedBytes += byteCount
-        return false
+        admittedCount = admittedCount.saturatingIncremented()
+        updateHighWaterMarks()
+        let pressureChanged = notePressure()
+        return outcome(true, reason: nil, delivery: delivery, bytes: byteCount, pressureChanged: pressureChanged)
+    }
+
+    func snapshot() -> GatewayEventHubSnapshot { makeSnapshot(now: clock.now()) }
+
+    private func dequeue(_ value: BufferedDelivery) {
+        buffered.removeFirst()
+        bufferedBytes -= value.bytes
+        lastDequeuedAt = clock.now()
+        if value.delivery.connectionID == evidenceConnectionID {
+            dequeuedCount = dequeuedCount.saturatingIncremented()
+        }
+    }
+
+    private func outcome(
+        _ accepted: Bool,
+        reason: GatewayEventAdmissionReason?,
+        delivery: GatewayEventDelivery,
+        bytes: Int,
+        pressureChanged: Bool = false
+    ) -> GatewayEventAdmission {
+        GatewayEventAdmission(
+            accepted: accepted,
+            reason: reason,
+            topic: admittedTopic(delivery.event.topic),
+            admittedBytes: max(0, bytes),
+            snapshot: makeSnapshot(now: clock.now()),
+            pressureChanged: pressureChanged
+        )
+    }
+
+    private func makeSnapshot(now: ContinuousClock.Instant) -> GatewayEventHubSnapshot {
+        GatewayEventHubSnapshot(
+            bufferedEventCount: buffered.count,
+            bufferedBytes: max(0, bufferedBytes),
+            maximumEvents: policy.maximumEvents,
+            maximumBytes: policy.maximumBytes,
+            oldestQueuedAgeMilliseconds: buffered.first.map { milliseconds($0.queuedAt.duration(to: now)) } ?? 0,
+            timeSinceLastDequeueMilliseconds: lastDequeuedAt.map { milliseconds($0.duration(to: now)) },
+            countHighWaterMark: countHighWaterMark,
+            byteHighWaterMark: byteHighWaterMark,
+            admittedCount: admittedCount,
+            dequeuedCount: dequeuedCount,
+            pressureCrossings: pressureLevels.count,
+            pressureLevels: pressureLevels.sorted(),
+            dequeueWaitAgeMilliseconds: dequeuedAt.map { milliseconds($0.duration(to: now)) },
+            dequeueWaitTopic: dequeuedTopic,
+            dequeueWaitConnectionID: dequeuedConnectionID
+        )
+    }
+
+    private func updateHighWaterMarks() {
+        countHighWaterMark = max(countHighWaterMark, buffered.count)
+        byteHighWaterMark = max(byteHighWaterMark, bufferedBytes)
+    }
+
+    private func notePressure() -> Bool {
+        guard policy.maximumEvents > 0, policy.maximumBytes > 0 else { return false }
+        let previousCount = pressureLevels.count
+        let ratio = max(Double(buffered.count) / Double(policy.maximumEvents), Double(bufferedBytes) / Double(policy.maximumBytes))
+        for level in [50, 75, 90, 100] where ratio >= Double(level) / 100 {
+            pressureLevels.insert(level)
+        }
+        return pressureLevels.count > previousCount
+    }
+
+    private func milliseconds(_ duration: Duration) -> Int {
+        let components = duration.components
+        let value = components.seconds * 1_000
+            + components.attoseconds / 1_000_000_000_000_000
+        return Int(max(0, min(Int64(Int.max), value)))
+    }
+
+    private func admittedTopic(_ topic: String) -> String {
+        GatewayDiagnosticTopicAdmission.admit(topic)
+    }
+
+    private func markDequeued(_ delivery: GatewayEventDelivery) {
+        dequeuedAt = clock.now()
+        dequeuedTopic = admittedTopic(delivery.event.topic)
+        dequeuedConnectionID = delivery.connectionID
+    }
+
+    private func clearDequeued() {
+        dequeuedAt = nil
+        dequeuedTopic = nil
+        dequeuedConnectionID = nil
+    }
+
+    private func beginEvidence(for connectionID: Int) {
+        guard evidenceConnectionID != connectionID else { return }
+        // A replacement epoch supersedes queued predecessor projections. This
+        // runs before capacity checks; stale backlog cannot retire its successor.
+        buffered.removeAll { $0.delivery.connectionID < connectionID }
+        bufferedBytes = buffered.reduce(0) { $0 + $1.bytes }
+        evidenceConnectionID = connectionID
+        admittedCount = 0
+        dequeuedCount = 0
+        countHighWaterMark = 0
+        byteHighWaterMark = 0
+        pressureLevels.removeAll()
+        lastDequeuedAt = nil
+        clearDequeued()
     }
 
     private func coalescingKey(for delivery: GatewayEventDelivery) -> String? {
+        let prefix = "connection:\(delivery.connectionID):"
         switch delivery.event.preparation {
-        case .sessionSummary(let update): return "summary:\(update.sessionId)"
-        case .none where delivery.event.topic == "session.listChanged": return "listChanged"
-        case .none where delivery.event.topic == "notification.inbox.changed": return "notificationInboxChanged"
-        case .automationChanged: return "automationChanged"
+        case .sessionSummary(let update): return "\(prefix)summary:\(update.sessionId)"
+        case .none where delivery.event.topic == "session.listChanged": return "\(prefix)listChanged"
+        case .none where delivery.event.topic == "notification.inbox.changed": return "\(prefix)notificationInboxChanged"
+        case .automationChanged: return "\(prefix)automationChanged"
         default: return nil
         }
     }
 
-    func bufferedEventCount() -> Int { buffered.count }
-
-    func reset(connectionID: Int) {
-        let retained = buffered.filter { $0.delivery.connectionID != connectionID }
-        bufferedBytes = retained.reduce(0) { $0 + $1.bytes }
-        buffered = retained
+    func reset(connectionID: Int, notification: GatewayEvent? = nil) {
+        let mayNotify = !finished && connectionID > retiredThrough
+            && (evidenceConnectionID.map { connectionID >= $0 } ?? true)
+        retiredThrough = max(retiredThrough, connectionID)
+        buffered.removeAll { $0.delivery.connectionID <= retiredThrough }
+        bufferedBytes = buffered.reduce(0) { $0 + $1.bytes }
+        if let owner = evidenceConnectionID, owner <= retiredThrough {
+            evidenceConnectionID = nil
+            admittedCount = 0
+            dequeuedCount = 0
+            countHighWaterMark = buffered.count
+            byteHighWaterMark = bufferedBytes
+            pressureLevels.removeAll()
+            lastDequeuedAt = nil
+        }
+        if let owner = dequeuedConnectionID, owner <= retiredThrough { clearDequeued() }
+        // Only the retirement owner may enqueue its final control notification.
+        // Ordinary frames remain fenced, including after the buffer is empty.
+        if mayNotify, let notification {
+            _ = enqueue(GatewayEventDelivery(connectionID: connectionID, event: notification), bytes: notification.admittedBytes)
+        }
     }
 
     func finish() {
@@ -172,6 +397,10 @@ private actor GatewayEventHub {
     }
 }
 
+private extension Int {
+    func saturatingIncremented() -> Int { self == Int.max ? self : self + 1 }
+}
+
 struct GatewayEventStream: AsyncSequence, Sendable {
     typealias Element = GatewayEventDelivery
 
@@ -188,6 +417,7 @@ struct GatewayEventStream: AsyncSequence, Sendable {
     func makeAsyncIterator() -> AsyncIterator {
         AsyncIterator(hub: hub)
     }
+
 }
 
 enum GatewayResponseDecoding {
@@ -260,6 +490,11 @@ enum GatewayResponseDecoding {
 }
 
 actor GatewayClient {
+    #if HOSTED_TEST
+    // A run-local gate exercises the real actor-hop race without production hooks.
+    @TaskLocal static var hostedEventAdmissionGate: (@Sendable () async -> (@Sendable (GatewayEventAdmission) -> Void))?
+    #endif
+
     private struct PendingRequest {
         let continuation: CheckedContinuation<JSONValue, Error>
         let timeout: Task<Void, Never>
@@ -271,6 +506,7 @@ actor GatewayClient {
         let id: Int
         let socket: any GatewaySocketConnection
         let startedAt: ContinuousClock.Instant
+        let attemptID: String?
         let profileID: String
         let profileLabel: String
         var receiveTask: Task<Void, Never>?
@@ -278,6 +514,7 @@ actor GatewayClient {
         var eventsActivated = false
         var pending: [String: PendingRequest] = [:]
         var lastInboundAt: ContinuousClock.Instant?
+        var lastWriteProgressAt: ContinuousClock.Instant?
         var overflowResyncSignaled = false
         var info: GatewayInfo?
     }
@@ -295,6 +532,8 @@ actor GatewayClient {
     private var connection: ConnectionEpoch?
     private var connectionDiagnostics: [GatewayConnectionDiagnostic] = []
     private var diagnosticSequence = 0
+    private let diagnosticStore: IOSClientDiagnosticStore?
+    nonisolated let diagnosticOwnerID = UUID().uuidString
     private var generation = 0
     private var profile: GatewayProfile?
     private var token: String?
@@ -311,9 +550,17 @@ actor GatewayClient {
         startedAt: ContinuousClock.Instant,
         reason: GatewayConnectionDiagnosticReason? = nil,
         error: Error? = nil,
+        connectionID: Int? = nil,
         overflowCount: Int? = nil,
+        overflowReason: GatewayEventAdmissionReason? = nil,
+        rejectedTopic: String? = nil,
+        overflowBytes: Int? = nil,
+        queueSnapshot: GatewayEventHubSnapshot? = nil,
+        lastInboundAgeMilliseconds: Int? = nil,
+        lastWriteProgressAgeMilliseconds: Int? = nil,
         profileID: String? = nil,
-        profileLabel: String? = nil
+        profileLabel: String? = nil,
+        attemptID: String? = nil
     ) {
         let components = startedAt.duration(to: clock.now()).components
         let elapsed = max(
@@ -323,9 +570,12 @@ actor GatewayClient {
         )
         let platformCode = error.flatMap(Self.platformErrorCode)
         diagnosticSequence &+= 1
-        connectionDiagnostics.insert(GatewayConnectionDiagnostic(
+        let diagnostic = GatewayConnectionDiagnostic(
             sequence: diagnosticSequence,
-            timestamp: Date.now.formatted(.iso8601),
+            clientID: diagnosticOwnerID,
+            attemptID: attemptID ?? (connectionID == connection?.id ? connection?.attemptID : nil),
+            connectionID: connectionID,
+            timestamp: GatewayTimestamp.preciseString(from: .now),
             profileID: profileID ?? self.profile?.id,
             profileLabel: profileLabel ?? self.profile?.label,
             stage: stage,
@@ -333,8 +583,29 @@ actor GatewayClient {
             durationMilliseconds: Int(elapsed),
             reason: reason,
             platformCode: platformCode,
-            overflowCount: overflowCount
-        ), at: 0)
+            overflowCount: overflowCount,
+            overflowReason: overflowReason,
+            rejectedTopic: rejectedTopic,
+            overflowBytes: overflowBytes,
+            queueBytes: queueSnapshot?.bufferedBytes,
+            queueMaximumEvents: queueSnapshot?.maximumEvents,
+            queueMaximumBytes: queueSnapshot?.maximumBytes,
+            queueOldestAgeMilliseconds: queueSnapshot?.oldestQueuedAgeMilliseconds,
+            queueTimeSinceLastDequeueMilliseconds: queueSnapshot?.timeSinceLastDequeueMilliseconds,
+            queueCountHighWaterMark: queueSnapshot?.countHighWaterMark,
+            queueByteHighWaterMark: queueSnapshot?.byteHighWaterMark,
+            admittedEventCount: queueSnapshot?.admittedCount,
+            dequeuedEventCount: queueSnapshot?.dequeuedCount,
+            pressureCrossings: queueSnapshot?.pressureCrossings,
+            pressureLevels: queueSnapshot?.pressureLevels,
+            dequeueWaitAgeMilliseconds: queueSnapshot?.dequeueWaitAgeMilliseconds,
+            dequeueWaitTopic: queueSnapshot?.dequeueWaitTopic,
+            dequeueWaitConnectionID: queueSnapshot?.dequeueWaitConnectionID,
+            lastInboundAgeMilliseconds: lastInboundAgeMilliseconds,
+            lastWriteProgressAgeMilliseconds: lastWriteProgressAgeMilliseconds
+        )
+        connectionDiagnostics.insert(diagnostic, at: 0)
+        diagnosticStore?.record(IOSClientDiagnosticBuffer.logRecord(diagnostic))
         if connectionDiagnostics.count > 200 {
             connectionDiagnostics.removeLast(connectionDiagnostics.count - 200)
         }
@@ -349,8 +620,10 @@ actor GatewayClient {
         boundedHTTPUploadTransport: BoundedHTTPUploadTransport = .urlSession,
         boundedHTTPFileTransport: BoundedHTTPFileTransport = .urlSession,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
-        eventBufferPolicy: GatewayEventBufferPolicy = .default
+        eventBufferPolicy: GatewayEventBufferPolicy = .default,
+        diagnosticStore: IOSClientDiagnosticStore? = nil
     ) {
+        self.diagnosticStore = diagnosticStore
         self.socketFactory = socketFactory
         self.clock = clock
         self.uuidSource = uuidSource
@@ -359,7 +632,7 @@ actor GatewayClient {
         self.boundedHTTPUploadTransport = boundedHTTPUploadTransport
         self.boundedHTTPFileTransport = boundedHTTPFileTransport
         self.performanceSignposts = performanceSignposts
-        let eventHub = GatewayEventHub(policy: eventBufferPolicy)
+        let eventHub = GatewayEventHub(policy: eventBufferPolicy, clock: clock)
         self.eventHub = eventHub
         events = GatewayEventStream(hub: eventHub)
     }
@@ -386,7 +659,8 @@ actor GatewayClient {
         profile: GatewayProfile,
         token: String,
         activateEvents: Bool,
-        isReconnect: Bool = false
+        isReconnect: Bool = false,
+        attemptID: String? = nil
     ) async throws -> GatewayConnectionIdentity {
         let interval = performanceSignposts.begin(.gatewayConnect)
         do {
@@ -394,7 +668,8 @@ actor GatewayClient {
                 profile: profile,
                 token: token,
                 activateEvents: activateEvents,
-                isReconnect: isReconnect
+                isReconnect: isReconnect,
+                attemptID: attemptID
             )
             performanceSignposts.end(interval, result: .success, metrics: .none)
             return identity
@@ -409,13 +684,20 @@ actor GatewayClient {
         profile: GatewayProfile,
         token: String,
         activateEvents: Bool,
-        isReconnect: Bool
+        isReconnect: Bool,
+        attemptID: String? = nil
     ) async throws -> GatewayConnectionIdentity {
         generation &+= 1
         let epochID = generation
+        let retiredConnectionID = connection?.id
         await detachConnection(
             reason: GatewayFailure(code: "replaced", message: "Connection replaced", retryable: true, details: nil)
         )
+        if let retiredConnectionID {
+            // Remove predecessor deliveries even when a successor connected
+            // while its close was suspended; reset preserves successor evidence.
+            await eventHub.reset(connectionID: retiredConnectionID)
+        }
         try Task.checkCancellation()
         guard generation == epochID else { throw CancellationError() }
 
@@ -433,7 +715,7 @@ actor GatewayClient {
         let socket = socketFactory.makeConnection(request)
         connection = ConnectionEpoch(
             id: epochID, socket: socket, startedAt: attemptStartedAt,
-            profileID: profile.id, profileLabel: profile.label
+            attemptID: attemptID, profileID: profile.id, profileLabel: profile.label
         )
 
         do {
@@ -447,6 +729,7 @@ actor GatewayClient {
             let data = try await Self.withTimeout(clock: clock, duration: handshakeTimeout, onTimeout: { await socket.close() }) {
                 handshakeStage.set(.helloSend)
                 try await socket.send(helloData)
+                await self.markWriteProgress(epochID: epochID)
                 try await self.requireEpoch(epochID)
                 handshakeStage.set(.helloReceive)
                 return try await socket.receive()
@@ -478,8 +761,10 @@ actor GatewayClient {
                 stage: .helloReceive,
                 outcome: .success,
                 startedAt: attemptStartedAt,
+                connectionID: epochID,
                 profileID: profile.id,
-                profileLabel: profile.label
+                profileLabel: profile.label,
+                attemptID: attemptID
             )
             return GatewayConnectionIdentity(id: epochID, info: decoded.info)
         } catch {
@@ -490,8 +775,10 @@ actor GatewayClient {
                 startedAt: attemptStartedAt,
                 reason: Self.diagnosticReason(for: failure.code),
                 error: error,
+                connectionID: epochID,
                 profileID: profile.id,
-                profileLabel: profile.label
+                profileLabel: profile.label,
+                attemptID: attemptID
             )
             await detachConnection(epochID: epochID, reason: failure)
             throw error
@@ -502,11 +789,20 @@ actor GatewayClient {
         try await reconnectForLifecycle(activateEvents: true).info
     }
 
-    func reconnectForLifecycle(activateEvents: Bool = false) async throws -> GatewayConnectionIdentity {
+    func reconnectForLifecycle(
+        activateEvents: Bool = false,
+        attemptID: String? = nil
+    ) async throws -> GatewayConnectionIdentity {
         guard let profile, let token else {
             throw GatewayFailure(code: "not_paired", message: "No paired gateway is selected.", retryable: false, details: nil)
         }
-        return try await establish(profile: profile, token: token, activateEvents: activateEvents, isReconnect: true)
+        return try await establish(
+            profile: profile,
+            token: token,
+            activateEvents: activateEvents,
+            isReconnect: true,
+            attemptID: attemptID
+        )
     }
 
     func activateEvents(connectionID: Int) throws {
@@ -590,11 +886,11 @@ actor GatewayClient {
         try await requestValue(method, params, timeout: timeout, expectedEpochID: nil)
     }
 
-    private func request<P: Encodable, R: Decodable>(
+    func request<P: Encodable, R: Decodable>(
         _ method: String,
         _ params: P,
         as responseType: R.Type = R.self,
-        timeout: Duration,
+        timeout: Duration = .seconds(30),
         expectedEpochID: Int
     ) async throws -> R {
         let value = try await requestValue(
@@ -669,6 +965,12 @@ actor GatewayClient {
         }
     }
 
+    private func markWriteProgress(epochID: Int) {
+        guard var epoch = connection, epoch.id == epochID else { return }
+        epoch.lastWriteProgressAt = clock.now()
+        connection = epoch
+    }
+
     private func claimSend(id: String, epochID: Int) -> Bool {
         guard var epoch = connection, epoch.id == epochID,
               var request = epoch.pending[id], request.transmission == .queued else { return false }
@@ -688,6 +990,7 @@ actor GatewayClient {
         switch result {
         case .success:
             request.transmission = .sent
+            epoch.lastWriteProgressAt = clock.now()
             epoch.pending[id] = request
             connection = epoch
         case .failure(let error):
@@ -1060,6 +1363,7 @@ actor GatewayClient {
                     ) {
                         try await socket.ping()
                     }
+                    await self?.notePong(epochID: epochID)
                 } catch {
                     guard !Task.isCancelled else { return }
                     await self?.livenessFailed(error, epochID: epochID, startedAt: startedAt)
@@ -1070,6 +1374,12 @@ actor GatewayClient {
         connection = epoch
     }
 
+    private func notePong(epochID: Int) {
+        guard var epoch = connection, epoch.id == epochID else { return }
+        epoch.lastInboundAt = clock.now()
+        connection = epoch
+    }
+
     private func livenessFailed(_ error: Error, epochID: Int, startedAt: ContinuousClock.Instant) async {
         guard ownsEpoch(epochID) else { return }
         recordDiagnostic(
@@ -1077,17 +1387,20 @@ actor GatewayClient {
             outcome: .failure,
             startedAt: startedAt,
             reason: Self.diagnosticReason(for: Self.transportFailure(error).code),
-            error: error
+            error: error,
+            connectionID: epochID
         )
         await disconnectEpoch(epochID: epochID, failure: Self.transportFailure(error))
     }
 
     private func disconnectEpoch(epochID: Int, failure: GatewayFailure) async {
-        guard await detachConnection(epochID: epochID, reason: failure) else { return }
-        await eventHub.reset(connectionID: epochID)
-        _ = await eventHub.yield(GatewayEventDelivery(
-            connectionID: epochID,
-            event: GatewayEvent(
+        let queueSnapshot = await eventHub.snapshot()
+        guard await detachConnection(
+            epochID: epochID,
+            reason: failure,
+            queueSnapshot: queueSnapshot
+        ) else { return }
+        await eventHub.reset(connectionID: epochID, notification: GatewayEvent(
                 type: "event",
                 topic: "transport.disconnected",
                 sessionId: nil,
@@ -1095,8 +1408,7 @@ actor GatewayClient {
                 // transport errors may contain URLs or other private text.
                 payload: .object(["reason": .string(failure.code)]),
                 admittedBytes: 256
-            )
-        ), bytes: 256)
+            ))
     }
 
     private func handle(_ data: Data, epochID: Int) async throws {
@@ -1117,42 +1429,56 @@ actor GatewayClient {
                 ))
             }
         case .event(let event):
-            let admittedEvent = GatewayEvent(
-                type: event.type,
-                topic: event.topic,
-                sessionId: event.sessionId,
-                payload: event.payload,
-                admittedBytes: data.count
-            )
-            if await eventHub.yield(GatewayEventDelivery(
+            // GatewayEvent was prepared directly from the frame decoder's
+            // original Decoder. Stamp trusted transport size without rebuilding
+            // the typed payload through JSONValue.
+            let admittedEvent = event.withAdmittedBytes(data.count)
+            #if HOSTED_TEST
+            let didAdmit = await Self.hostedEventAdmissionGate?()
+            #endif
+            let admission = await eventHub.admit(GatewayEventDelivery(
                 connectionID: epochID,
                 event: admittedEvent
-            ), bytes: data.count) {
-                let overflowCount = await eventHub.bufferedEventCount()
-                guard var current = connection,
-                      current.id == epochID,
-                      !current.overflowResyncSignaled else { return }
-                current.overflowResyncSignaled = true
-                connection = current
-                recordDiagnostic(
-                    stage: .transport,
-                    outcome: .failure,
-                    startedAt: current.startedAt,
-                    reason: .eventOverflow,
-                    overflowCount: overflowCount,
-                    profileID: current.profileID,
-                    profileLabel: current.profileLabel
-                )
-                await disconnectEpoch(
-                    epochID: epochID,
-                    failure: GatewayFailure(
-                        code: "event_overflow",
-                        message: "Live event buffer overflow",
-                        retryable: true,
-                        details: nil
-                    )
-                )
+            ), bytes: data.count)
+            #if HOSTED_TEST
+            didAdmit?(admission)
+            #endif
+            if admission.accepted {
+                if admission.pressureChanged, let current = connection, current.id == epochID {
+                    recordDiagnostic(stage: .queuePressure, outcome: .success, startedAt: current.startedAt,
+                                     connectionID: epochID, queueSnapshot: admission.snapshot)
+                }
+                return
             }
+            guard admission.reason != .retiredEpoch,
+                  var current = connection,
+                  current.id == epochID,
+                  !current.overflowResyncSignaled else { return }
+            current.overflowResyncSignaled = true
+            connection = current
+            recordDiagnostic(
+                stage: .transport,
+                outcome: .failure,
+                startedAt: current.startedAt,
+                reason: .eventOverflow,
+                connectionID: epochID,
+                overflowCount: admission.snapshot.bufferedEventCount,
+                overflowReason: admission.reason,
+                rejectedTopic: admission.topic,
+                overflowBytes: admission.admittedBytes,
+                queueSnapshot: admission.snapshot,
+                profileID: current.profileID,
+                profileLabel: current.profileLabel
+            )
+            await disconnectEpoch(
+                epochID: epochID,
+                failure: GatewayFailure(
+                    code: "event_overflow",
+                    message: "Live event buffer overflow",
+                    retryable: true,
+                    details: nil
+                )
+            )
         case .unsupported:
             break
         }
@@ -1191,19 +1517,34 @@ actor GatewayClient {
     }
 
     @discardableResult
-    private func detachConnection(epochID: Int? = nil, reason: Error) async -> Bool {
+    private func detachConnection(
+        epochID: Int? = nil,
+        reason: Error,
+        queueSnapshot: GatewayEventHubSnapshot? = nil
+    ) async -> Bool {
         guard let epoch = connection,
               epochID == nil || epoch.id == epochID else { return false }
         connection = nil
         let failure = Self.transportFailure(reason)
+        let now = clock.now()
+        let ageMilliseconds: (ContinuousClock.Instant?) -> Int? = { instant in
+            guard let instant else { return nil }
+            let components = instant.duration(to: now).components
+            return Int(max(0, min(Int64(Int.max), components.seconds * 1_000 + components.attoseconds / 1_000_000_000_000_000)))
+        }
         recordDiagnostic(
             stage: .transport,
             outcome: .failure,
             startedAt: epoch.startedAt,
             reason: Self.diagnosticReason(for: failure.code),
             error: reason,
+            connectionID: epoch.id,
+            queueSnapshot: queueSnapshot,
+            lastInboundAgeMilliseconds: ageMilliseconds(epoch.lastInboundAt),
+            lastWriteProgressAgeMilliseconds: ageMilliseconds(epoch.lastWriteProgressAt),
             profileID: epoch.profileID,
-            profileLabel: epoch.profileLabel
+            profileLabel: epoch.profileLabel,
+            attemptID: epoch.attemptID
         )
         epoch.receiveTask?.cancel()
         epoch.livenessTask?.cancel()

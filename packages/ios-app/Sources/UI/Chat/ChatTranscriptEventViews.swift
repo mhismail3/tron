@@ -28,7 +28,9 @@ extension View {
 /// multiline diagnostics do not read like an oversized capsule.
 struct ChatNotificationView: View {
     let presentation: ChatNotificationPresentation
+    @Environment(AppModel.self) private var model
     @State private var showingDetail = false
+    @State private var detailID = UUID()
 
     var body: some View {
         Group {
@@ -36,7 +38,11 @@ struct ChatNotificationView: View {
                 pill
                     .chatCompactPillInteraction(
                         accessibilityLabel: accessibilityLabel,
-                        action: { showingDetail = true }
+                        action: {
+                            detailID = UUID()
+                            model.lifecycleRecordDiagnostic(event: "detail.tap", message: "detailID=\(detailID) sourceBytes=\(presentation.body?.utf8.count ?? 0)")
+                            showingDetail = true
+                        }
                     )
                     // Preserve the 44-point semantic row target without making
                     // its empty corners compete with the glass surface gesture.
@@ -86,7 +92,7 @@ struct ChatNotificationView: View {
                             .foregroundStyle(Color.tronTextSecondary)
                     }
                     if let body = presentation.body {
-                        TronMarkdownView(text: body, streaming: false)
+                        ChatPreparedMarkdownDetail(text: body, detailID: detailID)
                             .padding(14)
                             .tronGlassSurface(accent: presentation.tone.surfaceColor, tintOpacity: 0.08)
                     }
@@ -114,6 +120,45 @@ struct ChatNotificationView: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+    }
+}
+
+private struct ChatPreparedMarkdownDetail: View {
+    let text: String
+    let detailID: UUID
+    @Environment(\.tronPresentationActivity) private var presentationActivity
+    @Environment(AppModel.self) private var model
+    @State private var preparation = ChatDetailDocumentPreparation()
+
+    var body: some View {
+        Group {
+            if let document = preparation.document, document.source == text {
+                TronMarkdownView(document: document, streaming: false)
+                    .onChange(of: preparation.revision, initial: true) { _, _ in
+                        preparation.mounted(record: record)
+                    }
+            } else {
+                Text("Preparing details…")
+                    .font(TronTypography.secondaryDescription)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .frame(maxWidth: .infinity, minHeight: 72, alignment: .center)
+                    .accessibilityLabel("Preparing details")
+            }
+        }
+        .task(id: PresentationActivityTaskID(
+            source: text,
+            presentationActive: presentationActivity.allowsDataPublication
+        )) {
+            let activity = presentationActivity
+            await preparation.load(source: text, isCurrent: {
+                presentationActivity == activity && activity.allowsDataPublication
+            }, record: record)
+        }
+        .onDisappear { preparation.retire(record: record) }
+    }
+
+    private func record(_ message: String) {
+        model.lifecycleRecordDiagnostic(event: "detail.preparation", message: "detailID=\(detailID) \(message)")
     }
 }
 

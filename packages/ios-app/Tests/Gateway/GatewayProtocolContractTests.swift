@@ -413,6 +413,24 @@ struct GatewayProtocolContractTests {
         #expect(exit.isConsumableSessionReplay)
     }
 
+    @Test("transport admission stamps bytes without replacing decoder preparation")
+    func admittedBytesPreservePreparation() throws {
+        let event = try JSONDecoder.gateway.decode(
+            GatewayEvent.self,
+            from: Data(#"{"type":"event","topic":"terminal.output","sessionId":null,"payload":{"terminalId":"terminal-1","sequence":9007199254740993,"data":"hello"}}"#.utf8)
+        )
+        guard case .terminalEvent(.output(let output)) = event.preparation else {
+            Issue.record("terminal payload was not prepared")
+            return
+        }
+        #expect(output.sequence == 9007199254740993)
+        let stamped = event.withAdmittedBytes(321)
+        #expect(stamped.admittedBytes == 321)
+        #expect(stamped.payload == event.payload)
+        #expect(stamped.preparation == event.preparation)
+        #expect(stamped.preparation != .none)
+    }
+
     @Test("malformed known terminal payload remains an inert event")
     func malformedTerminalEventPreparation() throws {
         let event = try JSONDecoder.gateway.decode(GatewayEvent.self, from: Data(#"{"type":"event","topic":"terminal.output","sessionId":null,"payload":{"terminalId":"terminal-1","sequence":"bad"}}"#.utf8))
